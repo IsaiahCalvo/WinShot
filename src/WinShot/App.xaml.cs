@@ -1,7 +1,14 @@
 using System.Windows;
 using WinShot.Capture;
 using WinShot.Core;
+using WinShot.Editor;
+using WinShot.History;
+using WinShot.Ocr;
 using WinShot.Overlay;
+using WinShot.Pin;
+using WinShot.Recording;
+using WinShot.Scrolling;
+using WinShot.SettingsUi;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -15,6 +22,7 @@ public partial class App : Application
     private HotkeyManager? _hotkeys;
     private readonly SettingsService _settings = new();
     private HistoryService _history = null!;
+    private RecordingController? _recording;
     private bool _captureInProgress;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -40,6 +48,7 @@ public partial class App : Application
 
         _settings.Load();
         _history = new HistoryService(_settings);
+        _recording = new RecordingController(_settings, _history);
         _settings.Changed += RegisterHotkeys;
 
         SetupTray();
@@ -173,26 +182,155 @@ public partial class App : Application
         overlay.Show();
     }
 
-    // ---- Feature entry points (filled in by later phases) ----
+    // ---- Feature entry points ----
 
-    private void RecordFlow() => ShowBalloon("Recording", "Coming soon — not built yet.");
+    private void RecordFlow() => _recording?.ToggleFlow();
 
-    private void OcrFlow() => ShowBalloon("OCR", "Coming soon — not built yet.");
+    private async void OcrFlow()
+    {
+        if (_captureInProgress) return;
+        _captureInProgress = true;
+        try
+        {
+            SD.Bitmap? crop = null;
+            using (var shot = CaptureService.CaptureVirtualDesktop())
+            {
+                var selector = new RegionSelectorWindow(shot, WindowEnumerator.GetTopLevelWindows());
+                if (selector.ShowDialog() == true && selector.SelectedRegionPx is SD.Rectangle region)
+                    crop = CaptureService.Crop(shot, region);
+            }
+            if (crop is null) return;
+            using (crop)
+                await RunOcrToClipboard(crop);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("OCR capture failed", ex);
+            ShowBalloon("OCR failed", ex.Message);
+        }
+        finally
+        {
+            _captureInProgress = false;
+        }
+    }
 
-    private void ScrollingFlow() => ShowBalloon("Scrolling capture", "Coming soon — not built yet.");
+    private async Task RunOcrToClipboard(SD.Bitmap bmp)
+    {
+        try
+        {
+            string text = await OcrService.ExtractTextAsync(bmp);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                ShowBalloon("OCR", "No text found in the selection.");
+                return;
+            }
+            Clipboard.SetText(text);
+            string preview = text.Length > 80 ? text[..80] + "…" : text;
+            ShowBalloon("Text copied to clipboard", preview);
+        }
+        catch (InvalidOperationException ex)
+        {
+            ShowBalloon("OCR unavailable", ex.Message);
+        }
+    }
 
-    private void OpenHistory() => ShowBalloon("History", "Coming soon — not built yet.");
+    private async void ScrollingFlow()
+    {
+        if (_captureInProgress) return;
+        _captureInProgress = true;
+        try
+        {
+            SD.Rectangle? picked = null;
+            using (var shot = CaptureService.CaptureVirtualDesktop())
+            {
+                var selector = new RegionSelectorWindow(shot, WindowEnumerator.GetTopLevelWindows());
+                if (selector.ShowDialog() == true && selector.SelectedRegionPx is SD.Rectangle r)
+                    picked = r;
+            }
+            if (picked is not SD.Rectangle region) return;
 
-    private void OpenSettings() => ShowBalloon("Settings", "Coming soon — not built yet.");
+            region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
+            var stitched = await ScrollingStatusWindow.Run(region);
+            if (stitched is not null)
+                HandleCapture(stitched);
+            else
+                ShowBalloon("Scrolling capture", "Nothing captured.");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Scrolling capture failed", ex);
+            ShowBalloon("Scrolling capture failed", ex.Message);
+        }
+        finally
+        {
+            _captureInProgress = false;
+        }
+    }
 
-    private void OpenEditorFromOverlay(QuickActionsWindow overlay) =>
-        ShowBalloon("Editor", "Coming soon — not built yet.");
+    private void OpenHistory()
+    {
+        var win = HistoryWindow.Show(_history, _settings);
+        win.EditRequested -= EditFromHistory;
+        win.EditRequested += EditFromHistory;
+        win.PinRequested -= PinFromHistory;
+        win.PinRequested += PinFromHistory;
+    }
 
-    private void PinFromOverlay(QuickActionsWindow overlay) =>
-        ShowBalloon("Pin", "Coming soon — not built yet.");
+    private void OpenSettings() => SettingsWindow.Show(_settings);
 
-    private void OcrFromOverlay(QuickActionsWindow overlay) =>
-        ShowBalloon("OCR", "Coming soon — not built yet.");
+    private void OpenEditorFromOverlay(QuickActionsWindow overlay)
+    {
+        new EditorWindow(overlay.CloneImage(), _settings, _history).Show();
+        overlay.Close();
+    }
+
+    private void PinFromOverlay(QuickActionsWindow overlay)
+    {
+        new PinWindow(overlay.CloneImage()).Show();
+        overlay.Close();
+    }
+
+    private async void OcrFromOverlay(QuickActionsWindow overlay)
+    {
+        try
+        {
+            using var image = overlay.CloneImage();
+            await RunOcrToClipboard(image);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("OCR from overlay failed", ex);
+            ShowBalloon("OCR failed", ex.Message);
+        }
+    }
+
+    private void EditFromHistory(string path)
+    {
+        if (LoadBitmapCopy(path) is SD.Bitmap bmp)
+            new EditorWindow(bmp, _settings, _history).Show();
+    }
+
+    private void PinFromHistory(string path)
+    {
+        if (LoadBitmapCopy(path) is SD.Bitmap bmp)
+            new PinWindow(bmp).Show();
+    }
+
+    /// <summary>Loads an image as a detached copy so the file on disk stays unlocked.</summary>
+    private SD.Bitmap? LoadBitmapCopy(string path)
+    {
+        try
+        {
+            using var fromDisk = new SD.Bitmap(path);
+            return new SD.Bitmap(fromDisk);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to load image {path}", ex);
+            ShowBalloon("WinShot", "Could not open that file as an image.");
+            return null;
+        }
+    }
 
     internal void ShowBalloon(string title, string message) =>
         _tray?.ShowBalloonTip(3000, title, message, WF.ToolTipIcon.Info);

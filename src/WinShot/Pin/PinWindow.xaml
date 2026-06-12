@@ -1,0 +1,63 @@
+<Window x:Class="WinShot.Pin.PinWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="" WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" Topmost="True" ShowInTaskbar="False"
+        WindowStartupLocation="Manual" UseLayoutRounding="True">
+    <Window.Resources>
+        <Style x:Key="PinMenu" TargetType="ContextMenu">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="#F22B2B2B" BorderBrush="#33FFFFFF" BorderThickness="1"
+                                CornerRadius="8" Padding="4">
+                            <StackPanel IsItemsHost="True"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PinMenuItem" TargetType="MenuItem">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Bd" CornerRadius="5" Padding="14,6" Background="Transparent">
+                            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2D7DFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="Frame" BorderThickness="1">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="BorderBrush" Value="Transparent"/>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="BorderBrush" Value="#4DA3FF"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
+        <Border.ContextMenu>
+            <ContextMenu Style="{StaticResource PinMenu}">
+                <MenuItem Header="Copy" Style="{StaticResource PinMenuItem}" Click="OnCopy"/>
+                <MenuItem Header="Save…" Style="{StaticResource PinMenuItem}" Click="OnSave"/>
+                <Rectangle Height="1" Fill="#33FFFFFF" Margin="6,4"/>
+                <MenuItem Header="Close" Style="{StaticResource PinMenuItem}" Click="OnCloseItem"/>
+            </ContextMenu>
+        </Border.ContextMenu>
+        <Image x:Name="Img" Stretch="Fill"/>
+    </Border>
+</Window>

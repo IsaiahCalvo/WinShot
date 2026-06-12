@@ -11,6 +11,11 @@
     <AssemblyName>WinShot</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <!-- ScreenRecorderLib ships native per-arch binaries and refuses AnyCPU. -->
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- DPI awareness is declared in app.manifest (PerMonitorV2); the WinForms analyzer hint doesn't apply to a WPF host. -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
@@ -19,6 +24,10 @@
     <!-- UseWindowsForms injects a global 'using System.Windows.Forms;' which collides with WPF types. -->
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
   </ItemGroup>
 
 </Project>
