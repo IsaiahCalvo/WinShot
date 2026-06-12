@@ -43,10 +43,10 @@ public static class BitmapEffects
 
     /// <summary>
     /// Renders a visual at an explicit pixel size and converts the result to a
-    /// GDI bitmap. A VisualBrush is used so the visual's layout offset inside
-    /// its parent (e.g. a centered child of a ScrollViewer) does not leak into
-    /// the output, and rendering at the bitmap's pixel size keeps the export
-    /// resolution identical to the source regardless of monitor DPI.
+    /// GDI bitmap. A VisualBrush is used so the visual's layout offset and any
+    /// ancestor transforms (e.g. the editor's zoom/pan view transform) do not
+    /// leak into the output, and rendering at the bitmap's pixel size keeps the
+    /// export resolution identical to the source regardless of monitor DPI.
     /// </summary>
     public static SD.Bitmap RenderVisual(Visual visual, int pixelWidth, int pixelHeight)
     {

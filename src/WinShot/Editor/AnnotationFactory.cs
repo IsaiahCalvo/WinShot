@@ -36,20 +36,22 @@ internal static class AnnotationFactory
 
     public static double FontSizeFor(double thickness) => 10 + thickness * 4;
 
-    public static TextBox CreateTextEditor(Color color, double thickness) =>
+    /// <summary>Takes the foreground brush and font size directly so re-editing a committed label can reproduce its look.</summary>
+    public static TextBox CreateTextEditor(Brush foreground, double fontSize) =>
         new()
         {
             MinWidth = 48,
-            FontSize = FontSizeFor(thickness),
+            FontSize = fontSize,
             FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(color),
-            CaretBrush = new SolidColorBrush(color),
+            Foreground = foreground,
+            CaretBrush = foreground,
             Background = new SolidColorBrush(Color.FromArgb(0x40, 0x00, 0x00, 0x00)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(0xAA, 0x4D, 0xA3, 0xFF)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(2),
         };
 
+    /// <summary>Transparent background keeps the whole text box clickable for the Select tool without rendering anything.</summary>
     public static TextBlock CreateTextLabel(string text, Brush foreground, double fontSize) =>
         new()
         {
@@ -57,7 +59,7 @@ internal static class AnnotationFactory
             FontSize = fontSize,
             FontWeight = FontWeights.SemiBold,
             Foreground = foreground,
-            IsHitTestVisible = false,
+            Background = Brushes.Transparent,
         };
 
     /// <summary>Numbered circle badge; ring and digit color flip to black on light fills.</summary>
@@ -67,7 +69,7 @@ internal static class AnnotationFactory
         bool lightFill = 0.299 * color.R + 0.587 * color.G + 0.114 * color.B > 160;
         Color contrast = lightFill ? Colors.Black : Colors.White;
 
-        var badge = new Grid { Width = diameter, Height = diameter, IsHitTestVisible = false };
+        var badge = new Grid { Width = diameter, Height = diameter };
         badge.Children.Add(new Ellipse
         {
             Fill = new SolidColorBrush(color),

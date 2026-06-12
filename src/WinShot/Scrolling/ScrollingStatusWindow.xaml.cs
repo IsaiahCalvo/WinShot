@@ -21,19 +21,25 @@ public partial class ScrollingStatusWindow : Window
     }
 
     /// <summary>
-    /// Shows the pill, runs the scrolling capture for <paramref name="screenRegion"/>
-    /// (physical screen coordinates) and closes itself when done. Must be called on
-    /// the UI thread. Returns the stitched bitmap (caller owns disposal), or null if
-    /// nothing was captured.
+    /// Asks the user whether WinShot should auto-scroll or they will scroll
+    /// themselves, then shows the pill, runs the scrolling capture for
+    /// <paramref name="screenRegion"/> (physical screen coordinates) and closes
+    /// itself when done. Must be called on the UI thread. Returns the stitched
+    /// bitmap (caller owns disposal), or null if nothing was captured or the
+    /// chooser was cancelled.
     /// </summary>
     public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion)
     {
+        if (ScrollingModeDialog.Choose() is not ScrollCaptureMode mode)
+            return null; // cancelled
+
         var window = new ScrollingStatusWindow();
         window.Show();
         try
         {
             return await ScrollingCaptureService.RunAsync(
                 screenRegion,
+                mode,
                 text => window.Dispatcher.Invoke(() => window.StatusText.Text = text),
                 window._cts.Token);
         }
