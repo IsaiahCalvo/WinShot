@@ -1239,8 +1239,12 @@ public partial class EditorWindow : Window
             },
             redo: () =>
             {
-                BitmapEffects.Pixelate(_source, r);
+                BitmapEffects.Blur(_source, r);
                 RefreshImage();
+            },
+            onDiscard: () =>
+            {
+                if (_owned.Remove(backup)) backup.Dispose();
             }));
     }
 
@@ -1268,6 +1272,10 @@ public partial class EditorWindow : Window
             {
                 BitmapEffects.PixelateRandomized(_source, r, seed);
                 RefreshImage();
+            },
+            onDiscard: () =>
+            {
+                if (_owned.Remove(backup)) backup.Dispose();
             }));
     }
 
@@ -1446,8 +1454,16 @@ public partial class EditorWindow : Window
     {
         if (apply) action.Redo();
         _undoStack.Push(action);
-        _redoStack.Clear();
+        DiscardRedoStack();
         UpdateUndoRedoButtons();
+    }
+
+    /// <summary>Clears the redo stack, letting each dropped action release any
+    /// resources it can no longer replay (e.g. blur/pixelate backup bitmaps).</summary>
+    private void DiscardRedoStack()
+    {
+        while (_redoStack.Count > 0)
+            _redoStack.Pop().Discard();
     }
 
     private void PushAddElement(UIElement element)

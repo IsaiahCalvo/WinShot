@@ -401,13 +401,18 @@ public partial class App : Application
                 SaveSilently(bmp); // takes ownership
                 break;
             case "edit":
-                new EditorWindow(bmp, _settings, _history).Show(); // editor owns bmp
+                // The window takes ownership and disposes on close — but its ctor
+                // touches GDI before wiring that up, so dispose here if it throws.
+                try { new EditorWindow(bmp, _settings, _history).Show(); }
+                catch { bmp.Dispose(); throw; }
                 break;
             case "pin":
-                new PinWindow(bmp, _settings).Show(); // pin owns bmp
+                try { new PinWindow(bmp, _settings).Show(); }
+                catch { bmp.Dispose(); throw; }
                 break;
             default:
-                ShowOverlay(bmp, historyPath); // overlay owns bmp
+                try { ShowOverlay(bmp, historyPath); }
+                catch { bmp.Dispose(); throw; }
                 break;
         }
     }
