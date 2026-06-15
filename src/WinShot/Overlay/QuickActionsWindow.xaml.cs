@@ -177,9 +177,10 @@ public partial class QuickActionsWindow : Window
         try
         {
             CaptureService.CopyToClipboard(_image);
-            BtnCopy.Content = "Copied ✓";
+            // Glyph button: flash a checkmark (), then restore the copy glyph ().
+            BtnCopy.Content = "";
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
-            timer.Tick += (_, _) => { timer.Stop(); BtnCopy.Content = "Copy"; };
+            timer.Tick += (_, _) => { timer.Stop(); BtnCopy.Content = ""; };
             timer.Start();
         }
         catch (Exception ex)

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
@@ -43,6 +44,7 @@ public partial class BackgroundComposerWindow : Window
     private int _canvasH;
     private bool _ready;
     private bool _suppressBg;
+    private string _anchor = "CC";  // 3x3 alignment of the shot within the canvas
 
     public BackgroundComposerWindow(SD.Bitmap source, SettingsService settings, HistoryService history)
     {
@@ -69,24 +71,29 @@ public partial class BackgroundComposerWindow : Window
     // ------------------------------------------------------------ composition
 
     /// <summary>
-    /// Recomputes canvas size and restyles the floating screenshot. The image
-    /// is always centered ("auto balance"): in Auto the canvas hugs image +
-    /// padding; fixed ratios grow the canvas along one axis only, so padding
-    /// stays the guaranteed minimum margin.
+    /// Recomputes canvas size and restyles the floating screenshot. The shot is
+    /// anchored within the canvas by the 3x3 alignment picker (center default);
+    /// in Auto the canvas hugs image + padding, fixed ratios grow the canvas
+    /// along one axis only so padding stays the guaranteed minimum margin.
+    /// "Inset" adds an extra symmetric inner margin around the shot.
     /// </summary>
     private void UpdateComposition()
     {
         if (!_ready) return;
 
         int pad = (int)Math.Round(PaddingSlider.Value);
+        int inset = (int)Math.Round(InsetSlider.Value);
         int radius = (int)Math.Round(RadiusSlider.Value);
         int blurValue = (int)Math.Round(BlurSlider.Value);
         PadValueLabel.Text = $"{pad} px";
+        InsetValueLabel.Text = $"{inset} px";
         RadiusValueLabel.Text = $"{radius} px";
         BlurValueLabel.Text = blurValue.ToString();
 
-        int contentW = _srcW + 2 * pad;
-        int contentH = _srcH + 2 * pad;
+        // Effective margin around the shot = padding + inset.
+        int margin = pad + inset;
+        int contentW = _srcW + 2 * margin;
+        int contentH = _srcH + 2 * margin;
 
         _canvasW = contentW;
         _canvasH = contentH;
@@ -103,6 +110,11 @@ public partial class BackgroundComposerWindow : Window
         ShotBorder.Width = _srcW;
         ShotBorder.Height = _srcH;
         ShotBorder.CornerRadius = new CornerRadius(radius);
+
+        // Anchor the shot inside the (possibly oversized) canvas. The minimum
+        // gutter is the effective margin; extra space from a fixed ratio is
+        // distributed per the alignment picker.
+        ApplyAnchor(margin);
 
         if (ShadowCheck.IsChecked == true)
         {
@@ -125,26 +137,145 @@ public partial class BackgroundComposerWindow : Window
         SizeLabel.Text = $"{_canvasW} × {_canvasH} px";
     }
 
+    /// <summary>
+    /// Positions <see cref="ShotBorder"/> within <see cref="ComposeRoot"/> using
+    /// the selected 3x3 anchor. The shot keeps at least <paramref name="margin"/>
+    /// gutter on every side; the picker decides where any extra canvas space
+    /// (from a fixed ratio) collects.
+    /// </summary>
+    private void ApplyAnchor(int margin)
+    {
+        char v = _anchor.Length > 0 ? _anchor[0] : 'C';   // T / C / B
+        char h = _anchor.Length > 1 ? _anchor[1] : 'C';   // L / C / R
+
+        ShotBorder.HorizontalAlignment = h switch
+        {
+            'L' => HorizontalAlignment.Left,
+            'R' => HorizontalAlignment.Right,
+            _ => HorizontalAlignment.Center,
+        };
+        ShotBorder.VerticalAlignment = v switch
+        {
+            'T' => VerticalAlignment.Top,
+            'B' => VerticalAlignment.Bottom,
+            _ => VerticalAlignment.Center,
+        };
+
+        // Guarantee the margin gutter on the anchored edges.
+        double left = h == 'L' ? margin : 0;
+        double right = h == 'R' ? margin : 0;
+        double top = v == 'T' ? margin : 0;
+        double bottom = v == 'B' ? margin : 0;
+        ShotBorder.Margin = new Thickness(left, top, right, bottom);
+    }
+
     private void SetBackground(Brush brush) => ComposeRoot.Background = brush;
+
+    /// <summary>
+    /// Builds the gradient thumb used in the Gradients and Blurred sections.
+    /// Replaces the former local <c>PresetSwatch</c> style: a rounded ring that
+    /// turns white when checked, wrapping a 38x26 brush rectangle.
+    /// </summary>
+    private static RadioButton MakeGradientThumb(Brush brush, string tooltip)
+    {
+        var rb = new RadioButton
+        {
+            Template = BuildThumbTemplate(showContent: false),
+            Background = brush,
+            ToolTip = tooltip,
+            Margin = new Thickness(0, 0, 6, 6),
+            Cursor = Cursors.Hand,
+        };
+        return rb;
+    }
+
+    /// <summary>
+    /// Builds the rounded-ring thumbnail template shared by gradient, blurred
+    /// and wallpaper swatches. When <paramref name="showContent"/> is true the
+    /// inner tile hosts a centered ContentPresenter (used for the "+" tile);
+    /// otherwise it is a plain brush rectangle bound to Background.
+    /// </summary>
+    private static ControlTemplate BuildThumbTemplate(bool showContent)
+    {
+        var ring = new FrameworkElementFactory(typeof(Border));
+        ring.Name = "Ring";
+        ring.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+        ring.SetValue(Border.BorderThicknessProperty, new Thickness(2));
+        ring.SetValue(Border.PaddingProperty, new Thickness(1));
+
+        var inner = new FrameworkElementFactory(typeof(Border));
+        inner.SetValue(FrameworkElement.WidthProperty, 38.0);
+        inner.SetValue(FrameworkElement.HeightProperty, 26.0);
+        inner.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+        inner.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+        ring.AppendChild(inner);
+
+        if (showContent)
+        {
+            var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+            cp.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            cp.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            cp.SetValue(System.Windows.Documents.TextElement.ForegroundProperty,
+                new SolidColorBrush(Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF)));
+            cp.SetValue(System.Windows.Documents.TextElement.FontSizeProperty, 18.0);
+            inner.AppendChild(cp);
+        }
+
+        var template = new ControlTemplate(typeof(RadioButton)) { VisualTree = ring };
+        var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+        hover.Setters.Add(new Setter(Border.BorderBrushProperty,
+            new SolidColorBrush(Color.FromArgb(0x88, 0xFF, 0xFF, 0xFF)), "Ring"));
+        var checkedTrig = new Trigger { Property = ToggleButton.IsCheckedProperty, Value = true };
+        checkedTrig.Setters.Add(new Setter(Border.BorderBrushProperty, Brushes.White, "Ring"));
+        template.Triggers.Add(hover);
+        template.Triggers.Add(checkedTrig);
+        return template;
+    }
 
     private void BuildBackgroundPickers()
     {
-        var presetStyle = (Style)FindResource("PresetSwatch");
-        foreach (var (name, brush) in BackgroundPresets.All)
+        // --- Gradients (and Blurred, which reuses the same gradient thumbs) ---
+        var presets = BackgroundPresets.All;
+        int splitAt = Math.Max(0, presets.Count - 3); // last 3 feed the Blurred row
+        for (int i = 0; i < presets.Count; i++)
         {
-            var rb = new RadioButton
-            {
-                Style = presetStyle,
-                Background = brush,
-                GroupName = "Bg",
-                ToolTip = name,
-            };
-            rb.Checked += (_, _) => SetBackground(brush);
+            var (name, brush) = presets[i];
+            var rb = MakeGradientThumb(brush, name);
+            rb.GroupName = "Bg";
+            rb.ToolTip = name;
+            string label = name;
+            rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
             _bgSwatches.Add(rb);
-            PresetPanel.Children.Add(rb);
+
+            if (i < splitAt)
+                PresetPanel.Children.Add(rb);
+            else
+                BlurredPanel.Children.Add(rb);
         }
 
-        var solidStyle = (Style)FindResource("SolidSwatch");
+        // --- Wallpapers: a custom-image thumb + a "+" browse tile ---
+        var browseTile = new RadioButton
+        {
+            Template = BuildThumbTemplate(showContent: true),
+            Background = new SolidColorBrush(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)),
+            GroupName = "Bg",
+            Margin = new Thickness(0, 0, 6, 6),
+            Cursor = Cursors.Hand,
+            Content = "+",
+            ToolTip = "Choose image…",
+        };
+        browseTile.Checked += (_, _) =>
+        {
+            // Re-arm so the tile can be clicked again next time, then browse.
+            _suppressBg = true;
+            browseTile.IsChecked = false;
+            _suppressBg = false;
+            OnBrowseImage(browseTile, new RoutedEventArgs());
+        };
+        WallpaperPanel.Children.Add(browseTile);
+
+        // --- Plain color: dot grid (theme ColorSwatch) + hex box ---
+        var solidStyle = (Style)FindResource("ColorSwatch");
         foreach (string hex in SolidSwatchHexes)
         {
             var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
@@ -156,12 +287,14 @@ public partial class BackgroundComposerWindow : Window
                 GroupName = "Bg",
                 ToolTip = hex,
             };
+            string hexLabel = hex;
             rb.Checked += (_, _) =>
             {
                 _suppressBg = true;
-                HexBox.Text = hex;
+                HexBox.Text = hexLabel;
                 _suppressBg = false;
                 SetBackground(brush);
+                PresetNameHeader.Text = hexLabel;
             };
             _bgSwatches.Add(rb);
             SolidPanel.Children.Add(rb);
@@ -176,14 +309,51 @@ public partial class BackgroundComposerWindow : Window
 
     // --------------------------------------------------------------- handlers
 
-    private void OnSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
+    private void OnSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        // Auto-balance mirrors padding into inset so the inner/outer margins
+        // stay symmetric while the user drags either slider.
+        if (_ready && AutoBalanceCheck?.IsChecked == true && ReferenceEquals(sender, PaddingSlider))
+        {
+            double v = PaddingSlider.Value * 0.5;
+            if (Math.Abs(InsetSlider.Value - v) > 0.5)
+            {
+                InsetSlider.Value = Math.Min(InsetSlider.Maximum, v);
+                return; // the InsetSlider change re-enters and composes once
+            }
+        }
         UpdateComposition();
+    }
 
     private void OnShadowToggled(object sender, RoutedEventArgs e) => UpdateComposition();
 
-    private void OnAspectChecked(object sender, RoutedEventArgs e)
+    private void OnAutoBalanceToggled(object sender, RoutedEventArgs e)
     {
-        if (sender is not RadioButton rb || rb.Tag is not string tag) return;
+        if (!_ready) return;
+        if (AutoBalanceCheck.IsChecked == true)
+            InsetSlider.Value = Math.Min(InsetSlider.Maximum, PaddingSlider.Value * 0.5);
+        UpdateComposition();
+    }
+
+    private void OnAlignChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton tb || tb.Tag is not string tag) return;
+
+        // ToggleButton has no GroupName, so enforce single-selection manually.
+        foreach (var other in new[]
+                 { AlignTL, AlignTC, AlignTR, AlignCL, AlignCC, AlignCR, AlignBL, AlignBC, AlignBR })
+        {
+            if (!ReferenceEquals(other, tb))
+                other.IsChecked = false;
+        }
+
+        _anchor = tag;
+        UpdateComposition();
+    }
+
+    private void OnRatioChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RatioBox.SelectedItem is not ComboBoxItem item || item.Tag is not string tag) return;
         _aspect = tag switch
         {
             "1:1" => 1.0,
@@ -211,6 +381,7 @@ public partial class BackgroundComposerWindow : Window
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         SetBackground(brush);
+        PresetNameHeader.Text = text;
     }
 
     private void OnBrowseImage(object sender, RoutedEventArgs e)
@@ -235,7 +406,12 @@ public partial class BackgroundComposerWindow : Window
             RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.HighQuality);
             UncheckBgSwatches();
             SetBackground(brush);
-            ImageNameText.Text = Path.GetFileName(dialog.FileName);
+
+            string fileName = Path.GetFileName(dialog.FileName);
+            PresetNameHeader.Text = fileName;
+
+            // Reflect the chosen wallpaper as a live thumb in the Wallpapers row.
+            ShowWallpaperThumb(brush, fileName);
         }
         catch (Exception ex)
         {
@@ -243,6 +419,23 @@ public partial class BackgroundComposerWindow : Window
             MessageBox.Show(this, "Couldn't load that image.", "WinShot",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    /// <summary>
+    /// Inserts (or refreshes) a selectable thumbnail for the currently chosen
+    /// wallpaper image, before the "+" browse tile.
+    /// </summary>
+    private void ShowWallpaperThumb(ImageBrush brush, string tooltip)
+    {
+        var thumb = MakeGradientThumb(brush, tooltip);
+        thumb.GroupName = "Bg";
+        thumb.ToolTip = tooltip;
+        thumb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = tooltip; };
+        _bgSwatches.Add(thumb);
+        WallpaperPanel.Children.Insert(Math.Max(0, WallpaperPanel.Children.Count - 1), thumb);
+        _suppressBg = true;
+        thumb.IsChecked = true;
+        _suppressBg = false;
     }
 
     // ----------------------------------------------------------------- output
@@ -264,7 +457,7 @@ public partial class BackgroundComposerWindow : Window
         {
             using var flat = Flatten();
             CaptureService.CopyToClipboard(flat);
-            FlashButton(BtnCopy, "Copied ✓", "Copy");
+            FlashButton(BtnCopy, "Copied ✓", "Save as…");
         }
         catch (Exception ex)
         {
@@ -290,7 +483,7 @@ public partial class BackgroundComposerWindow : Window
             using var flat = Flatten();
             ImageSaver.Save(flat, dialog.FileName);
             _history.Add(flat);
-            FlashButton(BtnSave, "Saved ✓", "Save…");
+            FlashButton(BtnSave, "Saved ✓", "Done");
         }
         catch (Exception ex)
         {

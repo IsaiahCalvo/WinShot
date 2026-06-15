@@ -1695,14 +1695,65 @@ public partial class EditorWindow : Window
         {
             using var flat = Flatten();
             CaptureService.CopyToClipboard(flat);
-            BtnCopy.Content = "Copied ✓";
+            // BtnCopy is a round glyph button — flash a checkmark, then restore the copy glyph.
+            BtnCopy.Content = "";
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
-            timer.Tick += (_, _) => { timer.Stop(); BtnCopy.Content = "Copy"; };
+            timer.Tick += (_, _) => { timer.Stop(); BtnCopy.Content = ""; };
             timer.Start();
         }
         catch (Exception ex)
         {
             Log.Error("Editor copy failed", ex);
+        }
+    }
+
+    /// <summary>Bottom-bar zoom preset dropdown: Fit / 50% / 100% / 150% / 200%.</summary>
+    private void OnZoomPresetChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ZoomBox.SelectedItem is not ComboBoxItem item) return;
+        string choice = (item.Content as string) ?? "Fit";
+        if (choice == "Fit")
+        {
+            FitToView();
+            return;
+        }
+        if (double.TryParse(choice.TrimEnd('%'), NumberStyles.Number, CultureInfo.InvariantCulture, out double pct)
+            && Viewport.ActualWidth > 1 && Viewport.ActualHeight > 1)
+        {
+            ZoomAt(new Point(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2), pct / 100.0);
+        }
+    }
+
+    /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>
+    private void OnPin(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // PinWindow takes ownership of the bitmap and disposes it on close.
+            new WinShot.Pin.PinWindow(Flatten(), _settings).Show();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor pin failed", ex);
+        }
+    }
+
+    /// <summary>"Drag me" handle: start a file drag-out of the flattened image.</summary>
+    private void OnDragMeDown(object sender, MouseButtonEventArgs e)
+    {
+        try
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "WinShot");
+            System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, FileNamer.Next(_settings, "png"));
+            using (var flat = Flatten())
+                ImageSaver.Save(flat, path);
+            var data = new DataObject(DataFormats.FileDrop, new[] { path });
+            DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor drag-out failed", ex);
         }
     }
 
