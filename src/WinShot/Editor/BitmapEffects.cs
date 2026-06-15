@@ -33,6 +33,66 @@ public static class BitmapEffects
         g.DrawImage(small, region, new SD.Rectangle(0, 0, sw, sh), SD.GraphicsUnit.Pixel);
     }
 
+    /// <summary>
+    /// Like <see cref="Pixelate"/>, but every mosaic cell additionally gets random
+    /// brightness/channel jitter so the original text cannot be reconstructed by
+    /// averaging attacks. The jitter sequence is derived from <paramref name="seed"/>,
+    /// which makes one apply deterministic so undo/redo replays the exact same pixels;
+    /// callers draw the seed from a per-application random source.
+    /// </summary>
+    public static void PixelateRandomized(SD.Bitmap bmp, SD.Rectangle region, int seed, int cellSize = 12)
+    {
+        region.Intersect(new SD.Rectangle(0, 0, bmp.Width, bmp.Height));
+        if (region.Width < 2 || region.Height < 2) return;
+
+        int sw = Math.Max(1, (int)Math.Round(region.Width / (double)cellSize));
+        int sh = Math.Max(1, (int)Math.Round(region.Height / (double)cellSize));
+
+        using var small = new SD.Bitmap(sw, sh, SD.Imaging.PixelFormat.Format32bppArgb);
+        using (var gs = SD.Graphics.FromImage(small))
+        {
+            gs.InterpolationMode = D2.InterpolationMode.HighQualityBilinear;
+            gs.PixelOffsetMode = D2.PixelOffsetMode.Half;
+            gs.DrawImage(bmp, new SD.Rectangle(0, 0, sw, sh), region, SD.GraphicsUnit.Pixel);
+        }
+
+        var rng = new Random(seed);
+        for (int y = 0; y < sh; y++)
+        {
+            for (int x = 0; x < sw; x++)
+            {
+                var c = small.GetPixel(x, y);
+                int shift = rng.Next(-26, 27); // shared luminance jitter per cell
+                int r = Math.Clamp(c.R + shift + rng.Next(-12, 13), 0, 255);
+                int g = Math.Clamp(c.G + shift + rng.Next(-12, 13), 0, 255);
+                int b = Math.Clamp(c.B + shift + rng.Next(-12, 13), 0, 255);
+                small.SetPixel(x, y, SD.Color.FromArgb(c.A, r, g, b));
+            }
+        }
+
+        using var gd = SD.Graphics.FromImage(bmp);
+        gd.InterpolationMode = D2.InterpolationMode.NearestNeighbor;
+        gd.PixelOffsetMode = D2.PixelOffsetMode.Half;
+        gd.CompositingMode = D2.CompositingMode.SourceCopy;
+        gd.DrawImage(small, region, new SD.Rectangle(0, 0, sw, sh), SD.GraphicsUnit.Pixel);
+    }
+
+    /// <summary>Returns a new bitmap resampled to the given pixel size (high-quality bicubic).</summary>
+    public static SD.Bitmap Resize(SD.Bitmap source, int width, int height)
+    {
+        var dst = new SD.Bitmap(width, height, SD.Imaging.PixelFormat.Format32bppArgb);
+        using var g = SD.Graphics.FromImage(dst);
+        g.InterpolationMode = D2.InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = D2.PixelOffsetMode.Half;
+        g.SmoothingMode = D2.SmoothingMode.HighQuality;
+        g.CompositingMode = D2.CompositingMode.SourceCopy;
+        g.DrawImage(source,
+            new SD.Rectangle(0, 0, width, height),
+            new SD.Rectangle(0, 0, source.Width, source.Height),
+            SD.GraphicsUnit.Pixel);
+        return dst;
+    }
+
     /// <summary>Copies a previously cloned region back into the bitmap (blur undo).</summary>
     public static void RestoreRegion(SD.Bitmap bmp, SD.Bitmap backup, SD.Rectangle region)
     {

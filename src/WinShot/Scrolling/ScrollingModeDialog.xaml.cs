@@ -5,7 +5,8 @@ namespace WinShot.Scrolling;
 
 /// <summary>
 /// Small dark chooser shown before a scrolling capture: auto-scroll (WinShot
-/// drives the wheel) or manual (the user scrolls themselves), plus Cancel.
+/// drives the wheel) or manual (the user scrolls themselves), a vertical or
+/// horizontal direction, plus Cancel.
 /// </summary>
 public partial class ScrollingModeDialog : Window
 {
@@ -15,15 +16,20 @@ public partial class ScrollingModeDialog : Window
     }
 
     /// <summary>
-    /// Shows the chooser modally and returns the selected mode, or null if the
-    /// user cancelled (Cancel button or Esc). Must be called on the UI thread.
+    /// Shows the chooser modally and returns the selected mode and direction,
+    /// or null if the user cancelled (Cancel button or Esc). Must be called on
+    /// the UI thread.
     /// </summary>
-    public static ScrollCaptureMode? Choose()
+    public static ScrollCaptureChoice? Choose()
     {
         var dialog = new ScrollingModeDialog();
         if (dialog.ShowDialog() != true)
             return null;
-        return dialog.ManualRadio.IsChecked == true ? ScrollCaptureMode.Manual : ScrollCaptureMode.Auto;
+        var mode = dialog.ManualRadio.IsChecked == true ? ScrollCaptureMode.Manual : ScrollCaptureMode.Auto;
+        var direction = dialog.HorizontalRadio.IsChecked == true
+            ? ScrollDirection.Horizontal
+            : ScrollDirection.Vertical;
+        return new ScrollCaptureChoice(mode, direction);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

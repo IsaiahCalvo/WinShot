@@ -23,6 +23,33 @@ public class Settings
     public int GifFps { get; set; } = 12;
     public bool RecordAudio { get; set; } = false;
     public bool LaunchAtStartup { get; set; } = false;
+
+    // Naming & output
+    public string FileNameTemplate { get; set; } = "WinShot {date} at {time}";
+    public int NextCounter { get; set; } = 1;          // consumed by the {n} token
+    public bool DownscaleHiDpi { get; set; } = false;  // halve captures taken on >100% DPI displays
+
+    // Capture behavior
+    public string PostCaptureAction { get; set; } = "overlay"; // overlay | copy | save | edit | pin
+    public int SelfTimerSeconds { get; set; } = 3;
+    public string LastCaptureRegion { get; set; } = "";        // "x,y,w,h" physical screen px
+    public bool HideDesktopIconsDuringCapture { get; set; } = false;
+    public string HotkeyCapturePrevious { get; set; } = "Ctrl+Shift+6";
+    public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
+
+    // Recording extras
+    public bool RecordSystemAudio { get; set; } = false;
+    public bool ShowClickHighlights { get; set; } = false;
+    public bool ShowKeystrokes { get; set; } = false;
+    public int RecordingCountdownSeconds { get; set; } = 0;
+    public bool CaptureCursor { get; set; } = true;
+    public string WebcamOverlayPosition { get; set; } = "off"; // off | top-left | top-right | bottom-left | bottom-right
+
+    // OCR
+    public bool OcrJoinLines { get; set; } = false;
+
+    // History
+    public int HistoryRetentionDays { get; set; } = 0; // 0 = count-based pruning only
 }
 
 public class SettingsService

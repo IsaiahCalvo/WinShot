@@ -54,10 +54,41 @@
             <ContextMenu Style="{StaticResource PinMenu}">
                 <MenuItem Header="Copy" Style="{StaticResource PinMenuItem}" Click="OnCopy"/>
                 <MenuItem Header="Save…" Style="{StaticResource PinMenuItem}" Click="OnSave"/>
+                <MenuItem x:Name="LockMenuItem" Header="Lock (Ctrl+L)" Style="{StaticResource PinMenuItem}" Click="OnToggleLock"/>
                 <Rectangle Height="1" Fill="#33FFFFFF" Margin="6,4"/>
                 <MenuItem Header="Close" Style="{StaticResource PinMenuItem}" Click="OnCloseItem"/>
             </ContextMenu>
         </Border.ContextMenu>
-        <Image x:Name="Img" Stretch="Fill"/>
+        <Grid>
+            <Image x:Name="Img" Stretch="Fill"/>
+            <Border x:Name="DragHandle" HorizontalAlignment="Center" VerticalAlignment="Top"
+                    Margin="0,6,0,0" Background="#D91E1E1E" BorderBrush="#33FFFFFF" BorderThickness="1"
+                    CornerRadius="9" Padding="10,2" Cursor="SizeAll">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Opacity" Value="0"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                <DataTrigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </DataTrigger.EnterActions>
+                                <DataTrigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.25"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </DataTrigger.ExitActions>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="⠿ drag" Foreground="White" FontSize="11"/>
+            </Border>
+        </Grid>
     </Border>
 </Window>

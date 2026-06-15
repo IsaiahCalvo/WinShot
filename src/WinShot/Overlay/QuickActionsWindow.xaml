@@ -33,7 +33,9 @@
             Padding="10" MouseLeftButtonDown="OnDragMove">
         <StackPanel>
             <Border CornerRadius="6" ClipToBounds="True" HorizontalAlignment="Center">
-                <Image x:Name="Thumb" Stretch="Uniform" MaxWidth="320" MaxHeight="180"/>
+                <Image x:Name="Thumb" Stretch="Uniform" MaxWidth="320" MaxHeight="180" Cursor="Hand"
+                       MouseLeftButtonDown="OnThumbMouseDown" MouseMove="OnThumbMouseMove"
+                       MouseLeftButtonUp="OnThumbMouseUp"/>
             </Border>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">
                 <Button x:Name="BtnCopy" Style="{StaticResource ActionButton}" Content="Copy" Click="OnCopy"/>
@@ -41,6 +43,7 @@
                 <Button x:Name="BtnEdit" Style="{StaticResource ActionButton}" Content="Edit" Click="OnEdit"/>
                 <Button x:Name="BtnPin" Style="{StaticResource ActionButton}" Content="Pin" Click="OnPin"/>
                 <Button x:Name="BtnOcr" Style="{StaticResource ActionButton}" Content="OCR" Click="OnOcr"/>
+                <Button x:Name="BtnBg" Style="{StaticResource ActionButton}" Content="Bg" Click="OnBackground"/>
                 <Button x:Name="BtnClose" Style="{StaticResource ActionButton}" Content="✕" Click="OnClose"/>
             </StackPanel>
         </StackPanel>

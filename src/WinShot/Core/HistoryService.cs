@@ -50,6 +50,26 @@ public class HistoryService
         catch (Exception ex) { Log.Error($"Failed to delete history item {path}", ex); }
     }
 
+    /// <summary>Deletes history files older than <paramref name="days"/> days.
+    /// 0 (or negative) is a no-op so "keep forever" stays the default.</summary>
+    public void PruneByAge(int days)
+    {
+        if (days <= 0) return;
+        DateTime cutoff = DateTime.Now.AddDays(-days);
+        foreach (string file in GetItems())
+        {
+            try
+            {
+                if (File.GetLastWriteTime(file) < cutoff)
+                    Delete(file);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Age prune failed for {file}", ex);
+            }
+        }
+    }
+
     private void Prune()
     {
         var items = GetItems();

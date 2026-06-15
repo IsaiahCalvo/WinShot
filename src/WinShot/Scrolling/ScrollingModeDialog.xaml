@@ -71,6 +71,13 @@
                          Content="I'll scroll myself"/>
             <TextBlock Style="{StaticResource RadioHint}"
                        Text="Scroll at your own pace; click Stop when done."/>
+            <TextBlock Text="Direction" Foreground="#9B9B9B" FontSize="11" Margin="0,6,0,4"/>
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="VerticalRadio" Style="{StaticResource DarkRadio}" GroupName="ScrollDirection"
+                             Content="Vertical" IsChecked="True" Margin="0,0,16,2"/>
+                <RadioButton x:Name="HorizontalRadio" Style="{StaticResource DarkRadio}" GroupName="ScrollDirection"
+                             Content="Horizontal"/>
+            </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
                 <Button Style="{StaticResource ActionButton}" Content="Cancel" Click="OnCancel"/>
                 <Button Style="{StaticResource AccentButton}" Content="Start" Click="OnStart" IsDefault="True"/>

@@ -6,8 +6,9 @@ namespace WinShot.Scrolling;
 
 /// <summary>
 /// Repeatedly captures a fixed screen region and stitches the frames into one
-/// tall image. In <see cref="ScrollCaptureMode.Auto"/> it also sends wheel-scroll
-/// input to the content under the region; in <see cref="ScrollCaptureMode.Manual"/>
+/// tall image (or one wide image for <see cref="ScrollDirection.Horizontal"/>).
+/// In <see cref="ScrollCaptureMode.Auto"/> it also sends wheel-scroll input to
+/// the content under the region; in <see cref="ScrollCaptureMode.Manual"/>
 /// it only watches while the user scrolls themselves. The whole loop runs on the
 /// thread pool; the status callback fires on a thread-pool thread, so UI consumers
 /// must marshal via their Dispatcher.
@@ -16,9 +17,11 @@ public static class ScrollingCaptureService
 {
     private const int MaxIterations = 60;
     private const int MaxStitchedHeight = 32000;
+    private const int MaxStitchedWidth = 32000;
     private const int ScrollSettleMs = 400;
     private const int WheelDelta = 120;
     private const int ScrollNotchesPerStep = -3; // negative = scroll down (content moves up)
+    private const int HorizontalScrollNotchesPerStep = 3; // positive = scroll right (content moves left)
 
     /// <summary>Manual mode: how often the region is re-captured and checked for movement.</summary>
     private const int ManualPollMs = 300;
@@ -29,22 +32,25 @@ public static class ScrollingCaptureService
     /// <summary>
     /// Runs a scrolling capture for <paramref name="screenRegion"/> (physical screen
     /// coordinates) and returns whatever was stitched so far (null only if nothing
-    /// was captured).
-    /// Auto mode: sends wheel-scroll input and stops at page bottom (no movement
-    /// detected twice in a row), on cancellation, on Esc, after 60 iterations, or at
-    /// 32000px stitched height.
+    /// was captured). <paramref name="direction"/> picks the axis: vertical grows the
+    /// stitch downward, horizontal grows it rightward (capped at 32000px width).
+    /// Auto mode: sends wheel-scroll input (vertical wheel, or horizontal wheel for
+    /// horizontal captures) and stops at the content end (no movement detected twice
+    /// in a row), on cancellation, on Esc, after 60 iterations, or at the 32000px
+    /// stitched height/width cap.
     /// Manual mode: never scrolls or moves the cursor — it just re-captures every
-    /// ~300 ms and appends whenever downward movement is detected. Pauses are fine
-    /// (zero offset never ends the capture); upward scrolls are ignored. Ends only on
-    /// cancellation, Esc, the 32000px height cap, or a 10-minute timeout.
+    /// ~300 ms and appends whenever forward (down/right) movement is detected. Pauses
+    /// are fine (zero offset never ends the capture); backward scrolls are ignored.
+    /// Ends only on cancellation, Esc, the 32000px cap, or a 10-minute timeout.
     /// </summary>
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion, ScrollCaptureMode mode,
-        Action<string> status, CancellationToken ct)
+        ScrollDirection direction, Action<string> status, CancellationToken ct)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
 
         bool manual = mode == ScrollCaptureMode.Manual;
+        bool horizontal = direction == ScrollDirection.Horizontal;
 
         return await Task.Run(async () =>
         {
@@ -73,17 +79,20 @@ public static class ScrollingCaptureService
                     }
                     else
                     {
-                        int offset = ImageStitcher.FindScrollOffset(previous!, frame);
+                        int offset = horizontal
+                            ? ImageStitcher.FindScrollOffsetHorizontal(previous!, frame)
+                            : ImageStitcher.FindScrollOffset(previous!, frame);
                         if (offset == 0)
                         {
                             zeroOffsetStreak++;
                             if (manual)
                             {
-                                // Keep `previous` anchored to the frame whose bottom row matches
-                                // the stitch's bottom row. This makes upward scrolls (which the
-                                // downward-only offset search reports as 0) harmless: once the
-                                // user scrolls back below the stitched bottom, the next offset
-                                // is computed against the anchor and appends only truly new rows.
+                                // Keep `previous` anchored to the frame whose bottom row (or
+                                // rightmost column) matches the stitch's edge. This makes
+                                // backward scrolls (which the forward-only offset search
+                                // reports as 0) harmless: once the user scrolls back past the
+                                // stitched edge, the next offset is computed against the
+                                // anchor and appends only truly new content.
                                 frame.Dispose();
                             }
                             else
@@ -95,8 +104,17 @@ public static class ScrollingCaptureService
                         else
                         {
                             zeroOffsetStreak = 0;
-                            int rows = Math.Min(offset, MaxStitchedHeight - stitched.Height);
-                            var grown = ImageStitcher.AppendBelow(stitched, frame, rows);
+                            SD.Bitmap grown;
+                            if (horizontal)
+                            {
+                                int cols = Math.Min(offset, MaxStitchedWidth - stitched.Width);
+                                grown = ImageStitcher.AppendRight(stitched, frame, cols);
+                            }
+                            else
+                            {
+                                int rows = Math.Min(offset, MaxStitchedHeight - stitched.Height);
+                                grown = ImageStitcher.AppendBelow(stitched, frame, rows);
+                            }
                             stitched.Dispose();
                             stitched = grown;
                             stitchedFrames++;
@@ -105,20 +123,26 @@ public static class ScrollingCaptureService
                         }
 
                         if (!manual && zeroOffsetStreak >= 2)
-                            break; // page bottom reached
-                        if (stitched.Height >= MaxStitchedHeight)
+                            break; // content end reached
+                        if (horizontal ? stitched.Width >= MaxStitchedWidth : stitched.Height >= MaxStitchedHeight)
                             break;
                     }
 
+                    string extent = horizontal ? $"{stitched.Width}px wide" : $"{stitched.Height}px";
                     status(manual
-                        ? $"Scroll the content yourself — click Stop when done. {stitchedFrames} frames – {stitched.Height}px"
-                        : $"Captured {frames} frames - {stitched.Height}px");
+                        ? $"Scroll the content yourself — click Stop when done. {stitchedFrames} frames – {extent}"
+                        : $"Captured {frames} frames - {extent}");
 
                     if (ShouldStop(ct))
                         break;
 
                     if (!manual)
-                        ScrollDown(screenRegion);
+                    {
+                        if (horizontal)
+                            ScrollRight(screenRegion);
+                        else
+                            ScrollDown(screenRegion);
+                    }
                     try
                     {
                         await Task.Delay(manual ? ManualPollMs : ScrollSettleMs, ct).ConfigureAwait(false);
@@ -160,9 +184,26 @@ public static class ScrollingCaptureService
         SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
+    /// <summary>Moves the cursor to the region center and sends one horizontal wheel-right step.</summary>
+    private static void ScrollRight(SD.Rectangle region)
+    {
+        SetCursorPos(region.X + region.Width / 2, region.Y + region.Height / 2);
+        var input = new INPUT
+        {
+            type = InputMouse,
+            mi = new MOUSEINPUT
+            {
+                mouseData = (uint)(WheelDelta * HorizontalScrollNotchesPerStep),
+                dwFlags = MouseEventFHWheel,
+            },
+        };
+        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+    }
+
     private const int VkEscape = 0x1B;
     private const uint InputMouse = 0;
     private const uint MouseEventFWheel = 0x0800;
+    private const uint MouseEventFHWheel = 0x1000;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MOUSEINPUT

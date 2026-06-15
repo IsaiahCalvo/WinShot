@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -26,6 +28,9 @@ public partial class EditorWindow : Window
     private const double MinZoom = 0.05;
     private const double MaxZoom = 16.0;
 
+    private const string SaveDialogFilter =
+        "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp|WinShot project|*.winshot";
+
     private readonly SettingsService _settings;
     private readonly HistoryService _history;
 
@@ -36,10 +41,32 @@ public partial class EditorWindow : Window
     private readonly Stack<EditorAction> _undoStack = new();
     private readonly Stack<EditorAction> _redoStack = new();
 
+    /// <summary>Per-application random source used to seed irreversible pixelation jitter.</summary>
+    private static readonly Random ToolRandom = new();
+
+    private const double CropSnapPx = 8; // content px within which crop edges snap to image edges
+
     private EditorTool _tool = EditorTool.Select;
     private Color _color = Color.FromRgb(0xFF, 0x3B, 0x30);
     private double _thickness = 4;
     private int _nextStep = 1;
+    private ShapeFillMode _fillMode = ShapeFillMode.None;
+    private TextStyle _textStyle = TextStyle.Plain;
+    private double? _cropRatio; // null = free
+    private EditorTool _toolBeforeEyedropper = EditorTool.Select;
+    private string _pendingEmoji = "😀";
+
+    /// <summary>Path of the .winshot project this session was opened from / saved to, if any.</summary>
+    private string? _projectPath;
+
+    // Curved-arrow tool: after release the arrow stays "pending" with a draggable
+    // control-point handle until the user clicks elsewhere or switches tools.
+    private Path? _pendingCurve;
+    private Point _curveFrom;
+    private Point _curveTo;
+    private Point _curveControl;
+    private double _curveThickness;
+    private bool _draggingCurveHandle;
 
     // View state (zoom/pan). _zoom mirrors ViewScale so math never reads the transform.
     private double _zoom = 1.0;
@@ -83,6 +110,7 @@ public partial class EditorWindow : Window
             AbortDrag();
             AbortPan();
             AbortMove();
+            AbortCurveHandle();
         };
         Loaded += (_, _) => FitToView();
         Deactivated += (_, _) =>
@@ -155,6 +183,7 @@ public partial class EditorWindow : Window
         DragRect.StrokeThickness = t;
         SelectionRect.StrokeThickness = t;
         UpdateSelectionVisual();
+        UpdateCurveHandleVisual();
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();
@@ -219,24 +248,108 @@ public partial class EditorWindow : Window
         if (IsLoaded)
         {
             CommitText();
+            CommitPendingCurve();
             Select(null);
             if (_tool == EditorTool.Crop && tool != EditorTool.Crop)
                 ClearCropPreview();
+            if (tool == EditorTool.Eyedropper && _tool != EditorTool.Eyedropper)
+                _toolBeforeEyedropper = _tool; // so a sample can return to the prior tool
+            if (tool != EditorTool.Eyedropper)
+                EyedropSwatch.Visibility = Visibility.Collapsed;
         }
         _tool = tool;
-        if (IsLoaded) UpdateCursor();
+        if (IsLoaded)
+        {
+            UpdateCursor();
+            UpdateContextPanels();
+        }
+    }
+
+    /// <summary>Shows the crop-ratio and text-style dropdowns only while their tool is active.</summary>
+    private void UpdateContextPanels()
+    {
+        CropRatioPanel.Visibility = _tool == EditorTool.Crop ? Visibility.Visible : Visibility.Collapsed;
+        TextStylePanel.Visibility = _tool == EditorTool.Text ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
+    private void CheckToolButton(EditorTool tool)
+    {
+        foreach (var child in ToolPanel.Children)
+        {
+            if (child is RadioButton rb && rb.Tag is string tag &&
+                string.Equals(tag, tool.ToString(), StringComparison.Ordinal))
+            {
+                rb.IsChecked = true; // Checked → OnToolChecked updates _tool
+                return;
+            }
+        }
+        _tool = tool;
+        UpdateCursor();
+        UpdateContextPanels();
     }
 
     private void OnColorChecked(object sender, RoutedEventArgs e)
     {
         if (sender is RadioButton rb && rb.Background is SolidColorBrush brush)
-            _color = brush.Color;
+            SetCurrentColor(brush.Color);
+    }
+
+    private void SetCurrentColor(Color color)
+    {
+        _color = color;
+        // Fires during XAML parse for the default swatch, before the indicator exists.
+        if (CurrentColorIndicator is not null)
+            CurrentColorIndicator.Fill = new SolidColorBrush(color);
     }
 
     private void OnThicknessChecked(object sender, RoutedEventArgs e)
     {
         if (sender is RadioButton rb && rb.Tag is string s && double.TryParse(s, out double t))
             _thickness = t;
+    }
+
+    private void OnFillChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton rb && rb.Tag is string tag && Enum.TryParse(tag, out ShapeFillMode mode))
+            _fillMode = mode;
+    }
+
+    private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item &&
+            item.Tag is string tag && Enum.TryParse(tag, out TextStyle style))
+            _textStyle = style;
+    }
+
+    private void OnCropRatioChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item)
+            return;
+        if (item.Tag is not string tag || string.IsNullOrEmpty(tag))
+        {
+            _cropRatio = null;
+            return;
+        }
+        string[] parts = tag.Split(':');
+        if (parts.Length == 2 &&
+            double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double w) &&
+            double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double h) &&
+            w > 0 && h > 0)
+        {
+            _cropRatio = w / h;
+        }
+    }
+
+    private void OnEmojiButtonClick(object sender, RoutedEventArgs e) => EmojiPopup.IsOpen = true;
+
+    private void OnEmojiPicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button b && b.Content is string emoji)
+            _pendingEmoji = emoji;
+        EmojiPopup.IsOpen = false;
+        if (EmojiToolBtn.IsChecked != true)
+            EmojiToolBtn.IsChecked = true;
     }
 
     // ------------------------------------------------------------ mouse input
@@ -259,6 +372,21 @@ public partial class EditorWindow : Window
         // GetPosition against the content element inverts the view transform,
         // so every tool works in content (source-pixel) coordinates.
         var pos = e.GetPosition(AnnotationCanvas);
+
+        // A pending curved arrow eats this click: on its handle → start bending,
+        // anywhere else → commit it (and fall through, e.g. to start a new curve).
+        if (_pendingCurve is not null)
+        {
+            if ((pos - _curveControl).Length <= 9 / _zoom)
+            {
+                _draggingCurveHandle = true;
+                Viewport.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+            CommitPendingCurve();
+        }
+
         if (_tool == EditorTool.Select)
         {
             SelectMouseDown(pos, e);
@@ -277,6 +405,14 @@ public partial class EditorWindow : Window
             _panLast = p;
             return;
         }
+        if (_draggingCurveHandle && _pendingCurve is not null)
+        {
+            _curveControl = e.GetPosition(AnnotationCanvas);
+            _pendingCurve.Data = AnnotationFactory.CurvedArrowGeometry(
+                _curveFrom, _curveControl, _curveTo, _curveThickness);
+            UpdateCurveHandleVisual();
+            return;
+        }
         if (_movingSelection && _selected is not null)
         {
             var posMove = e.GetPosition(AnnotationCanvas);
@@ -290,6 +426,11 @@ public partial class EditorWindow : Window
             }
             return;
         }
+        if (_tool == EditorTool.Eyedropper && !_dragging)
+        {
+            UpdateEyedropperSwatch(e.GetPosition(AnnotationCanvas));
+            return;
+        }
         if (!_dragging) return;
         var pos = e.GetPosition(AnnotationCanvas);
 
@@ -297,6 +438,10 @@ public partial class EditorWindow : Window
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
                 arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness);
+                break;
+            case EditorTool.CurvedArrow when _activeShape is Path curve:
+                curve.Data = AnnotationFactory.CurvedArrowGeometry(
+                    _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, pos), pos, _thickness);
                 break;
             case EditorTool.Line when _activeShape is Line line:
                 line.X2 = pos.X;
@@ -314,10 +459,14 @@ public partial class EditorWindow : Window
                     stroke.Points.Add(pos);
                 break;
             case EditorTool.Blur:
+            case EditorTool.Pixelate:
                 ShowDragRect(new Rect(_dragStart, ClampToSurface(pos)), dim: false);
                 break;
-            case EditorTool.Crop:
+            case EditorTool.Spotlight:
                 ShowDragRect(new Rect(_dragStart, ClampToSurface(pos)), dim: true);
+                break;
+            case EditorTool.Crop:
+                ShowDragRect(CropSelectionRect(pos), dim: true);
                 break;
         }
     }
@@ -330,6 +479,13 @@ public partial class EditorWindow : Window
             return;
         }
         if (e.ChangedButton != MouseButton.Left) return;
+        if (_draggingCurveHandle)
+        {
+            // The handle stays live (and re-draggable) until a click elsewhere commits.
+            _draggingCurveHandle = false;
+            Viewport.ReleaseMouseCapture();
+            return;
+        }
         if (_movingSelection)
         {
             EndMove();
@@ -346,25 +502,77 @@ public partial class EditorWindow : Window
         {
             case EditorTool.Arrow or EditorTool.Line:
                 if (shape is null) return;
-                if ((pos - _dragStart).Length < 3) AnnotationCanvas.Children.Remove(shape);
-                else PushAddElement(shape);
+                if ((pos - _dragStart).Length < 3)
+                {
+                    AnnotationCanvas.Children.Remove(shape);
+                }
+                else
+                {
+                    shape.Tag = AnnotationData.ForStroke(
+                        _tool == EditorTool.Arrow ? AnnotationData.TypeArrow : AnnotationData.TypeLine,
+                        new[] { _dragStart, pos }, StrokeColorOf(shape), shape.StrokeThickness);
+                    PushAddElement(shape);
+                }
+                return;
+            case EditorTool.CurvedArrow:
+                if (shape is not Path curve) return;
+                if ((pos - _dragStart).Length < 3) AnnotationCanvas.Children.Remove(curve);
+                else BeginCurveEdit(curve, _dragStart, pos);
                 return;
             case EditorTool.Rectangle or EditorTool.Ellipse:
                 if (shape is null) return;
                 var r = new Rect(_dragStart, pos);
-                if (r.Width < 3 && r.Height < 3) AnnotationCanvas.Children.Remove(shape);
-                else PushAddElement(shape);
+                if (r.Width < 3 && r.Height < 3)
+                {
+                    AnnotationCanvas.Children.Remove(shape);
+                }
+                else
+                {
+                    // Prefer the element's own placement (set during the drag); the
+                    // mouse-up rect is only a fallback for a release without a move.
+                    double bx = Canvas.GetLeft(shape), by = Canvas.GetTop(shape);
+                    var bounds = double.IsNaN(bx) || double.IsNaN(by) ||
+                                 double.IsNaN(shape.Width) || double.IsNaN(shape.Height)
+                        ? r
+                        : new Rect(bx, by, shape.Width, shape.Height);
+                    shape.Tag = AnnotationData.ForShape(
+                        _tool == EditorTool.Rectangle ? AnnotationData.TypeRectangle : AnnotationData.TypeEllipse,
+                        bounds, StrokeColorOf(shape), shape.StrokeThickness, _fillMode);
+                    PushAddElement(shape);
+                }
                 return;
             case EditorTool.Freehand or EditorTool.Highlighter:
-                if (shape is Polyline stroke && stroke.Points.Count >= 2) PushAddElement(shape);
+                if (shape is Polyline stroke && stroke.Points.Count >= 2)
+                {
+                    stroke.Tag = AnnotationData.ForStroke(
+                        _tool == EditorTool.Freehand ? AnnotationData.TypeFreehand : AnnotationData.TypeHighlighter,
+                        stroke.Points, StrokeColorOf(stroke), stroke.StrokeThickness);
+                    PushAddElement(shape);
+                }
                 else if (shape is not null) AnnotationCanvas.Children.Remove(shape);
                 return;
             case EditorTool.Blur:
                 HideDragRect();
                 ApplyBlur(ToPixelRect(new Rect(_dragStart, ClampToSurface(pos))));
                 return;
+            case EditorTool.Pixelate:
+                HideDragRect();
+                ApplyPixelate(ToPixelRect(new Rect(_dragStart, ClampToSurface(pos))));
+                return;
+            case EditorTool.Spotlight:
+                HideDragRect();
+                var hole = new Rect(_dragStart, ClampToSurface(pos));
+                if (hole.Width >= 2 && hole.Height >= 2)
+                {
+                    var spot = AnnotationFactory.CreateSpotlight(
+                        new Size(_source.Width, _source.Height), hole);
+                    spot.Tag = AnnotationData.ForSpotlight(new Size(_source.Width, _source.Height), hole);
+                    AnnotationCanvas.Children.Add(spot);
+                    PushAddElement(spot);
+                }
+                return;
             case EditorTool.Crop:
-                var sel = new Rect(_dragStart, ClampToSurface(pos));
+                var sel = CropSelectionRect(pos);
                 var px = ToPixelRect(sel);
                 if (px.Width < 2 || px.Height < 2)
                 {
@@ -398,8 +606,21 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
+        if (_tool == EditorTool.Emoji)
+        {
+            if (inImage) PlaceEmoji(pos);
+            e.Handled = true;
+            return;
+        }
+        if (_tool == EditorTool.Eyedropper)
+        {
+            if (inImage) SampleEyedropper(pos);
+            e.Handled = true;
+            return;
+        }
 
-        _dragStart = _tool is EditorTool.Blur or EditorTool.Crop ? ClampToSurface(pos) : pos;
+        _dragStart = _tool is EditorTool.Blur or EditorTool.Crop or EditorTool.Pixelate or EditorTool.Spotlight
+            ? ClampToSurface(pos) : pos;
         _dragging = true;
         Viewport.CaptureMouse();
 
@@ -418,6 +639,18 @@ public partial class EditorWindow : Window
                     Data = AnnotationFactory.ArrowGeometry(_dragStart, _dragStart, _thickness),
                 };
                 break;
+            case EditorTool.CurvedArrow:
+                _activeShape = new Path
+                {
+                    Stroke = brush,
+                    Fill = brush,
+                    StrokeThickness = _thickness,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round,
+                    Data = AnnotationFactory.CurvedArrowGeometry(_dragStart, _dragStart, _dragStart, _thickness),
+                };
+                break;
             case EditorTool.Line:
                 _activeShape = new Line
                 {
@@ -434,6 +667,7 @@ public partial class EditorWindow : Window
                     Stroke = brush,
                     StrokeThickness = _thickness,
                     RadiusX = 2, RadiusY = 2,
+                    Fill = ShapeFill(),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -443,6 +677,7 @@ public partial class EditorWindow : Window
                 {
                     Stroke = brush,
                     StrokeThickness = _thickness,
+                    Fill = ShapeFill(),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -472,7 +707,11 @@ public partial class EditorWindow : Window
                 };
                 break;
             case EditorTool.Blur:
+            case EditorTool.Pixelate:
                 ShowDragRect(new Rect(_dragStart, _dragStart), dim: false);
+                break;
+            case EditorTool.Spotlight:
+                ShowDragRect(new Rect(_dragStart, _dragStart), dim: true);
                 break;
             case EditorTool.Crop:
                 ClearCropPreview();
@@ -483,6 +722,18 @@ public partial class EditorWindow : Window
         if (_activeShape is not null)
             AnnotationCanvas.Children.Add(_activeShape);
     }
+
+    /// <summary>Fill brush for new rectangles/ellipses per the toolbar fill toggle.</summary>
+    private Brush? ShapeFill() => _fillMode switch
+    {
+        ShapeFillMode.Quarter => new SolidColorBrush(Color.FromArgb(0x40, _color.R, _color.G, _color.B)),
+        ShapeFillMode.Solid => new SolidColorBrush(_color),
+        _ => null,
+    };
+
+    /// <summary>Stroke color of a committed shape — the project metadata's source of truth.</summary>
+    private static Color StrokeColorOf(Shape shape) =>
+        shape.Stroke is SolidColorBrush brush ? brush.Color : Colors.White;
 
     private void AbortDrag()
     {
@@ -506,6 +757,166 @@ public partial class EditorWindow : Window
             (int)Math.Round(r.Width), (int)Math.Round(r.Height));
         px.Intersect(new SD.Rectangle(0, 0, _source.Width, _source.Height));
         return px;
+    }
+
+    // ------------------------------------------------------- crop constraints
+
+    /// <summary>
+    /// Crop selection from the drag anchor to <paramref name="pos"/>: constrained to
+    /// the preset ratio when one is active, and with edges snapped to the image
+    /// edges within <see cref="CropSnapPx"/> content px.
+    /// </summary>
+    private Rect CropSelectionRect(Point pos)
+    {
+        Point p = ClampToSurface(pos);
+
+        if (_cropRatio is not double ratio || ratio <= 0)
+            return SnapRectEdges(new Rect(_dragStart, p));
+
+        double dx = p.X - _dragStart.X, dy = p.Y - _dragStart.Y;
+        double sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
+        double w = Math.Abs(dx), h = Math.Abs(dy);
+
+        // Follow the dominant drag axis, then shrink to stay inside the image.
+        if (w < h * ratio) w = h * ratio;
+        else h = w / ratio;
+        double maxW = sx > 0 ? _source.Width - _dragStart.X : _dragStart.X;
+        double maxH = sy > 0 ? _source.Height - _dragStart.Y : _dragStart.Y;
+        if (w > maxW) { w = maxW; h = w / ratio; }
+        if (h > maxH) { h = maxH; w = h * ratio; }
+
+        var r = new Rect(_dragStart, new Point(_dragStart.X + sx * w, _dragStart.Y + sy * h));
+        return SnapRectTranslate(r);
+    }
+
+    /// <summary>Free-ratio snap: each edge near an image edge is pulled onto it.</summary>
+    private Rect SnapRectEdges(Rect r)
+    {
+        double left = r.Left, top = r.Top, right = r.Right, bottom = r.Bottom;
+        if (Math.Abs(left) <= CropSnapPx) left = 0;
+        if (Math.Abs(top) <= CropSnapPx) top = 0;
+        if (Math.Abs(right - _source.Width) <= CropSnapPx) right = _source.Width;
+        if (Math.Abs(bottom - _source.Height) <= CropSnapPx) bottom = _source.Height;
+        return new Rect(new Point(left, top), new Point(right, bottom));
+    }
+
+    /// <summary>Fixed-ratio snap: translate (never resize) so the aspect ratio is preserved.</summary>
+    private Rect SnapRectTranslate(Rect r)
+    {
+        double x = r.X, y = r.Y;
+        if (Math.Abs(r.Left) <= CropSnapPx) x = 0;
+        else if (Math.Abs(r.Right - _source.Width) <= CropSnapPx) x = _source.Width - r.Width;
+        if (Math.Abs(r.Top) <= CropSnapPx) y = 0;
+        else if (Math.Abs(r.Bottom - _source.Height) <= CropSnapPx) y = _source.Height - r.Height;
+        x = Math.Clamp(x, 0, Math.Max(0, _source.Width - r.Width));
+        y = Math.Clamp(y, 0, Math.Max(0, _source.Height - r.Height));
+        return new Rect(x, y, r.Width, r.Height);
+    }
+
+    // ------------------------------------------------------ curved arrow tool
+
+    /// <summary>Enters the pending state: the released arrow shows a draggable control-point handle.</summary>
+    private void BeginCurveEdit(Path curve, Point from, Point to)
+    {
+        _pendingCurve = curve;
+        _curveFrom = from;
+        _curveTo = to;
+        _curveControl = AnnotationFactory.DefaultCurveControl(from, to);
+        _curveThickness = _thickness;
+        UpdateCurveHandleVisual();
+    }
+
+    /// <summary>Commits the pending curved arrow as a normal selectable annotation (one undo entry).</summary>
+    private void CommitPendingCurve()
+    {
+        var curve = _pendingCurve;
+        if (curve is null) return;
+        _pendingCurve = null;
+        _draggingCurveHandle = false;
+        CurveHandle.Visibility = Visibility.Collapsed;
+        curve.Tag = AnnotationData.ForStroke(AnnotationData.TypeCurvedArrow,
+            new[] { _curveFrom, _curveControl, _curveTo }, StrokeColorOf(curve), curve.StrokeThickness);
+        PushAddElement(curve); // already on the canvas; records add for undo/redo
+    }
+
+    private void CancelPendingCurve()
+    {
+        var curve = _pendingCurve;
+        if (curve is null) return;
+        _pendingCurve = null;
+        _draggingCurveHandle = false;
+        CurveHandle.Visibility = Visibility.Collapsed;
+        AnnotationCanvas.Children.Remove(curve);
+    }
+
+    private void AbortCurveHandle() => _draggingCurveHandle = false;
+
+    /// <summary>Positions the control-point handle; sized in screen px regardless of zoom.</summary>
+    private void UpdateCurveHandleVisual()
+    {
+        if (_pendingCurve is null)
+        {
+            CurveHandle.Visibility = Visibility.Collapsed;
+            return;
+        }
+        double d = 10 / _zoom;
+        CurveHandle.Width = d;
+        CurveHandle.Height = d;
+        CurveHandle.StrokeThickness = 1.5 / _zoom;
+        Canvas.SetLeft(CurveHandle, _curveControl.X - d / 2);
+        Canvas.SetTop(CurveHandle, _curveControl.Y - d / 2);
+        CurveHandle.Visibility = Visibility.Visible;
+    }
+
+    // -------------------------------------------------------- eyedropper tool
+
+    /// <summary>
+    /// Samples the SOURCE bitmap (annotations are vector overlays, so the source is
+    /// the correct ground truth), makes it the stroke color, and returns to the tool
+    /// that was active before the eyedropper.
+    /// </summary>
+    private void SampleEyedropper(Point pos)
+    {
+        int x = Math.Clamp((int)Math.Floor(pos.X), 0, _source.Width - 1);
+        int y = Math.Clamp((int)Math.Floor(pos.Y), 0, _source.Height - 1);
+        var px = _source.GetPixel(x, y);
+        SetCurrentColor(Color.FromRgb(px.R, px.G, px.B));
+        ClearSwatchSelection(); // a sampled color rarely matches a preset swatch
+        EyedropSwatch.Visibility = Visibility.Collapsed;
+        CheckToolButton(_toolBeforeEyedropper);
+    }
+
+    /// <summary>Hover preview: a small swatch + hex readout near the cursor while the eyedropper is active.</summary>
+    private void UpdateEyedropperSwatch(Point pos)
+    {
+        int x = (int)Math.Floor(pos.X), y = (int)Math.Floor(pos.Y);
+        if (x < 0 || y < 0 || x >= _source.Width || y >= _source.Height)
+        {
+            EyedropSwatch.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var px = _source.GetPixel(x, y);
+        EyedropColorRect.Fill = new SolidColorBrush(Color.FromRgb(px.R, px.G, px.B));
+        EyedropHexText.Text = $"#{px.R:X2}{px.G:X2}{px.B:X2}";
+
+        // Counter-scale so the swatch stays a constant screen size at any zoom,
+        // and flip to the other side of the cursor near the right/bottom edges.
+        double s = 1 / _zoom;
+        EyedropSwatch.RenderTransform = new ScaleTransform(s, s);
+        double left = pos.X + 16 * s;
+        double top = pos.Y + 16 * s;
+        if (pos.X > _source.Width - 110 * s) left = pos.X - 16 * s - 96 * s;
+        if (pos.Y > _source.Height - 44 * s) top = pos.Y - 16 * s - 28 * s;
+        Canvas.SetLeft(EyedropSwatch, left);
+        Canvas.SetTop(EyedropSwatch, top);
+        EyedropSwatch.Visibility = Visibility.Visible;
+    }
+
+    private void ClearSwatchSelection()
+    {
+        foreach (var child in ColorPanel.Children)
+            if (child is RadioButton rb)
+                rb.IsChecked = false;
     }
 
     // ------------------------------------------------------------ select tool
@@ -669,8 +1080,11 @@ public partial class EditorWindow : Window
 
     private void PlaceText(Point pos)
     {
-        var tb = AnnotationFactory.CreateTextEditor(
-            new SolidColorBrush(_color), AnnotationFactory.FontSizeFor(_thickness));
+        var style = _textStyle;
+        double fontSize = AnnotationFactory.FontSizeFor(_thickness);
+        if (style == TextStyle.Huge) fontSize *= 2.2;
+        var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(_color), fontSize);
+        tb.Tag = style; // CommitText reads the style back when building the label
         // Offset by the editor chrome (1px border + 2px padding) so committed
         // text lands exactly where the user clicked.
         Canvas.SetLeft(tb, pos.X - 3);
@@ -703,6 +1117,9 @@ public partial class EditorWindow : Window
             redo: () => AnnotationCanvas.Children.Remove(label)));
 
         var tb = AnnotationFactory.CreateTextEditor(label.Foreground, label.FontSize);
+        // Only TextBlock-backed styles reach re-edit; weight identifies Bold, the
+        // (possibly enlarged) font size already carries the Huge look.
+        tb.Tag = label.FontWeight == FontWeights.Bold ? TextStyle.Bold : TextStyle.Plain;
         tb.Text = label.Text;
         Canvas.SetLeft(tb, x - 3);
         Canvas.SetTop(tb, y - 3);
@@ -737,9 +1154,12 @@ public partial class EditorWindow : Window
         AnnotationCanvas.Children.Remove(tb);
         if (string.IsNullOrWhiteSpace(text)) return;
 
-        var label = AnnotationFactory.CreateTextLabel(text, tb.Foreground, tb.FontSize);
+        var style = tb.Tag is TextStyle s ? s : TextStyle.Plain;
+        var label = AnnotationFactory.CreateStyledTextLabel(text, tb.Foreground, tb.FontSize, style);
         Canvas.SetLeft(label, x + 3);
         Canvas.SetTop(label, y + 3);
+        label.Tag = AnnotationData.ForText(new Point(x + 3, y + 3), text, style, tb.FontSize,
+            tb.Foreground is SolidColorBrush fg ? fg.Color : Colors.White);
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(label),
             redo: () =>
@@ -763,8 +1183,10 @@ public partial class EditorWindow : Window
     {
         int number = _nextStep;
         var badge = AnnotationFactory.CreateStepBadge(number, _color, _thickness);
-        Canvas.SetLeft(badge, pos.X - badge.Width / 2);
-        Canvas.SetTop(badge, pos.Y - badge.Height / 2);
+        double left = pos.X - badge.Width / 2, top = pos.Y - badge.Height / 2;
+        Canvas.SetLeft(badge, left);
+        Canvas.SetTop(badge, top);
+        badge.Tag = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
         Push(new EditorAction(
             undo: () =>
             {
@@ -776,6 +1198,26 @@ public partial class EditorWindow : Window
                 if (!AnnotationCanvas.Children.Contains(badge))
                     AnnotationCanvas.Children.Add(badge);
                 _nextStep = number + 1;
+            }));
+    }
+
+    // ------------------------------------------------------------ emoji tool
+
+    /// <summary>Drops the picked emoji as a 32px text annotation centered on the click.</summary>
+    private void PlaceEmoji(Point pos)
+    {
+        var label = AnnotationFactory.CreateEmojiLabel(_pendingEmoji);
+        label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double left = pos.X - label.DesiredSize.Width / 2, top = pos.Y - label.DesiredSize.Height / 2;
+        Canvas.SetLeft(label, left);
+        Canvas.SetTop(label, top);
+        label.Tag = AnnotationData.ForEmoji(new Point(left, top), _pendingEmoji);
+        Push(new EditorAction(
+            undo: () => AnnotationCanvas.Children.Remove(label),
+            redo: () =>
+            {
+                if (!AnnotationCanvas.Children.Contains(label))
+                    AnnotationCanvas.Children.Add(label);
             }));
     }
 
@@ -798,6 +1240,33 @@ public partial class EditorWindow : Window
             redo: () =>
             {
                 BitmapEffects.Pixelate(_source, r);
+                RefreshImage();
+            }));
+    }
+
+    /// <summary>
+    /// Same interaction and undo pattern as blur, but the mosaic gets per-cell random
+    /// jitter so the censored text cannot be reconstructed. The seed is captured per
+    /// action, which keeps undo → redo byte-identical.
+    /// </summary>
+    private void ApplyPixelate(SD.Rectangle region)
+    {
+        region.Intersect(new SD.Rectangle(0, 0, _source.Width, _source.Height));
+        if (region.Width < 2 || region.Height < 2) return;
+
+        var backup = _source.Clone(region, _source.PixelFormat);
+        _owned.Add(backup);
+        var r = region;
+        int seed = ToolRandom.Next();
+        Push(new EditorAction(
+            undo: () =>
+            {
+                BitmapEffects.RestoreRegion(_source, backup, r);
+                RefreshImage();
+            },
+            redo: () =>
+            {
+                BitmapEffects.PixelateRandomized(_source, r, seed);
                 RefreshImage();
             }));
     }
@@ -857,6 +1326,91 @@ public partial class EditorWindow : Window
             MoveElement(el, dx, dy);
     }
 
+    // ------------------------------------------------- rotate / flip / resize
+
+    private void OnRotateCw(object sender, RoutedEventArgs e) =>
+        ApplySourceTransform(SD.RotateFlipType.Rotate90FlipNone);
+
+    private void OnRotateCcw(object sender, RoutedEventArgs e) =>
+        ApplySourceTransform(SD.RotateFlipType.Rotate270FlipNone);
+
+    private void OnFlipHorizontal(object sender, RoutedEventArgs e) =>
+        ApplySourceTransform(SD.RotateFlipType.RotateNoneFlipX);
+
+    private void OnFlipVertical(object sender, RoutedEventArgs e) =>
+        ApplySourceTransform(SD.RotateFlipType.RotateNoneFlipY);
+
+    private void OnResizeImage(object sender, RoutedEventArgs e)
+    {
+        CommitText();
+        CommitPendingCurve();
+        var dialog = new ResizeDialog(_source.Width, _source.Height) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        int w = dialog.ResultWidth, h = dialog.ResultHeight;
+        if (w == _source.Width && h == _source.Height) return;
+        ApplySourceTransform(src => BitmapEffects.Resize(src, w, h));
+    }
+
+    private void ApplySourceTransform(SD.RotateFlipType type) =>
+        ApplySourceTransform(src =>
+        {
+            var copy = new SD.Bitmap(src);
+            copy.RotateFlip(type);
+            return copy;
+        });
+
+    /// <summary>
+    /// Replaces the source bitmap with a transformed copy (rotate/flip/resize) as a
+    /// SINGLE compound undo entry. If vector annotations exist, the user confirms and
+    /// they are flattened into the image first; undo restores both the previous bitmap
+    /// and the live annotations in one step.
+    /// </summary>
+    private void ApplySourceTransform(Func<SD.Bitmap, SD.Bitmap> transform)
+    {
+        CommitText();
+        CommitPendingCurve();
+        ClearCropPreview();
+
+        var annotations = AnnotationCanvas.Children.Cast<UIElement>().ToList();
+        if (annotations.Count > 0 &&
+            MessageBox.Show(this,
+                "Your annotations will be flattened into the image before this operation. " +
+                "They will no longer be editable as separate objects. Continue?",
+                "WinShot", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            return;
+
+        Select(null);
+        SD.Bitmap before = _source;
+        SD.Bitmap flat = annotations.Count > 0 ? Flatten() : before;
+        SD.Bitmap after;
+        try
+        {
+            after = transform(flat);
+        }
+        finally
+        {
+            if (!ReferenceEquals(flat, before)) flat.Dispose(); // temp flatten only
+        }
+        _owned.Add(after);
+
+        Push(new EditorAction(
+            undo: () =>
+            {
+                _source = before;
+                foreach (var el in annotations)
+                    if (!AnnotationCanvas.Children.Contains(el))
+                        AnnotationCanvas.Children.Add(el);
+                OnSourceReplaced();
+            },
+            redo: () =>
+            {
+                foreach (var el in annotations)
+                    AnnotationCanvas.Children.Remove(el);
+                _source = after;
+                OnSourceReplaced();
+            }));
+    }
+
     private void ShowDragRect(Rect r, bool dim)
     {
         Canvas.SetLeft(DragRect, r.X);
@@ -912,8 +1466,9 @@ public partial class EditorWindow : Window
 
     private void Undo()
     {
-        if (_dragging || _movingSelection) return;
+        if (_dragging || _movingSelection || _draggingCurveHandle) return;
         CommitText();
+        CommitPendingCurve();
         ClearCropPreview();
         Select(null); // the undone action may remove or reshape the selected element
         if (_undoStack.Count == 0) return;
@@ -925,7 +1480,9 @@ public partial class EditorWindow : Window
 
     private void Redo()
     {
-        if (_dragging || _movingSelection || _redoStack.Count == 0) return;
+        if (_dragging || _movingSelection || _draggingCurveHandle) return;
+        CommitPendingCurve(); // a pending curve is a new edit: it clears redo, like any other
+        if (_redoStack.Count == 0) return;
         Select(null);
         var action = _redoStack.Pop();
         action.Redo();
@@ -973,6 +1530,18 @@ public partial class EditorWindow : Window
                 Viewport.ReleaseMouseCapture();
                 e.Handled = true;
             }
+            else if (_draggingCurveHandle)
+            {
+                _draggingCurveHandle = false;
+                Viewport.ReleaseMouseCapture();
+                CancelPendingCurve();
+                e.Handled = true;
+            }
+            else if (_pendingCurve is not null)
+            {
+                CancelPendingCurve();
+                e.Handled = true;
+            }
             else if (_selected is not null)
             {
                 Select(null);
@@ -998,6 +1567,96 @@ public partial class EditorWindow : Window
         }
     }
 
+    // ------------------------------------------------------ image annotations
+
+    /// <summary>"Add image…" toolbar button: inserts picked files at the viewport center.</summary>
+    private void OnAddImage(object sender, RoutedEventArgs e)
+    {
+        CommitText();
+        CommitPendingCurve();
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp;*.tif;*.tiff|All files|*.*",
+            Multiselect = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        InsertImageFiles(dialog.FileNames, ViewportCenterInContent());
+    }
+
+    private void OnEditorDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnEditorDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0)
+            return;
+        CommitText();
+        CommitPendingCurve();
+        InsertImageFiles(files, e.GetPosition(AnnotationCanvas));
+        e.Handled = true;
+    }
+
+    /// <summary>Content-space point currently at the middle of the viewport.</summary>
+    private Point ViewportCenterInContent() => new(
+        (Viewport.ActualWidth / 2 - ViewTranslate.X) / _zoom,
+        (Viewport.ActualHeight / 2 - ViewTranslate.Y) / _zoom);
+
+    /// <summary>
+    /// Inserts each decodable file as an image annotation centered at
+    /// <paramref name="dropPoint"/> (cascaded slightly for multiple files),
+    /// then switches to Select with the last one selected so it can be moved.
+    /// </summary>
+    private void InsertImageFiles(IEnumerable<string> files, Point dropPoint)
+    {
+        Image? last = null;
+        int placed = 0;
+        foreach (string file in files)
+        {
+            var src = ProjectSerializer.LoadImageFile(file);
+            if (src is null) continue; // not an image; already logged
+            last = InsertImageAnnotation(src, new Point(dropPoint.X + placed * 24, dropPoint.Y + placed * 24));
+            placed++;
+        }
+        if (last is null) return;
+        CheckToolButton(EditorTool.Select);
+        Select(last);
+    }
+
+    /// <summary>
+    /// Adds one image as a movable/selectable/deletable annotation, centered on a
+    /// content point, at natural size capped to 50% of the source image's smaller
+    /// dimension. Undo-aware like every other annotation.
+    /// </summary>
+    private Image InsertImageAnnotation(BitmapSource src, Point center)
+    {
+        center = ClampToSurface(center);
+        double cap = Math.Min(_source.Width, _source.Height) * 0.5;
+        double scale = Math.Min(1.0, cap / Math.Max(src.PixelWidth, (double)src.PixelHeight));
+        double w = Math.Max(1, src.PixelWidth * scale);
+        double h = Math.Max(1, src.PixelHeight * scale);
+
+        var img = new Image { Source = src, Width = w, Height = h, Stretch = Stretch.Fill };
+        RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+        double left = center.X - w / 2, top = center.Y - h / 2;
+        Canvas.SetLeft(img, left);
+        Canvas.SetTop(img, top);
+        img.Tag = AnnotationData.ForImage(new Rect(left, top, w, h));
+
+        Push(new EditorAction(
+            undo: () => AnnotationCanvas.Children.Remove(img),
+            redo: () =>
+            {
+                if (!AnnotationCanvas.Children.Contains(img))
+                    AnnotationCanvas.Children.Add(img);
+            }));
+        return img;
+    }
+
     // ------------------------------------------------------- copy/save/close
 
     /// <summary>
@@ -1009,6 +1668,7 @@ public partial class EditorWindow : Window
     private SD.Bitmap Flatten()
     {
         CommitText();
+        CommitPendingCurve();
         CanvasHost.UpdateLayout();
         return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
     }
@@ -1035,22 +1695,139 @@ public partial class EditorWindow : Window
         try
         {
             System.IO.Directory.CreateDirectory(_settings.Current.SaveFolder);
-            var dialog = new SaveFileDialog
+            SaveFileDialog dialog;
+            if (_projectPath is string proj)
             {
-                FileName = CaptureService.DefaultFileName(_settings.Current.ImageFormat),
-                InitialDirectory = _settings.Current.SaveFolder,
-                Filter = "PNG image|*.png|JPEG image|*.jpg",
-                FilterIndex = _settings.Current.ImageFormat == "jpg" ? 2 : 1,
-            };
+                // A session opened from (or saved as) a project defaults back to that file.
+                dialog = new SaveFileDialog
+                {
+                    FileName = System.IO.Path.GetFileName(proj),
+                    InitialDirectory = System.IO.Path.GetDirectoryName(proj) is { Length: > 0 } dir
+                        ? dir : _settings.Current.SaveFolder,
+                    Filter = SaveDialogFilter,
+                    FilterIndex = 4,
+                };
+            }
+            else
+            {
+                dialog = new SaveFileDialog
+                {
+                    FileName = FileNamer.Next(_settings, _settings.Current.ImageFormat),
+                    InitialDirectory = _settings.Current.SaveFolder,
+                    Filter = SaveDialogFilter,
+                    FilterIndex = _settings.Current.ImageFormat switch
+                    {
+                        "jpg" => 2,
+                        "webp" => 3,
+                        _ => 1,
+                    },
+                };
+            }
             if (dialog.ShowDialog(this) != true) return;
 
+            if (string.Equals(System.IO.Path.GetExtension(dialog.FileName), ".winshot",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                SaveProject(dialog.FileName);
+                return;
+            }
+
             using var flat = Flatten();
-            CaptureService.Save(flat, dialog.FileName);
+            ImageSaver.Save(flat, dialog.FileName);
             _history.Add(flat);
         }
         catch (Exception ex)
         {
             Log.Error("Editor save failed", ex);
+        }
+    }
+
+    // ------------------------------------------------------ project (.winshot)
+
+    /// <summary>
+    /// Writes the current session to a .winshot project: a ZIP with the source bitmap
+    /// (including any baked blur/pixelate/crop), annotations.json describing every
+    /// live annotation, and the embedded bitmaps of image annotations. FileMode.Create
+    /// inside the serializer means re-saving overwrites the previous file cleanly.
+    /// </summary>
+    private void SaveProject(string path)
+    {
+        CommitText();
+        CommitPendingCurve();
+
+        var doc = new ProjectDocument();
+        var images = new List<BitmapSource>();
+        int z = 0;
+        foreach (UIElement el in AnnotationCanvas.Children)
+        {
+            if (el is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+                continue; // transient editor visuals are not part of the project
+            var data = meta.Clone();
+            data.Z = z++;
+            if (el.RenderTransform is TranslateTransform t)
+            {
+                data.Tx = t.X;
+                data.Ty = t.Y;
+            }
+            else
+            {
+                data.Tx = 0;
+                data.Ty = 0;
+            }
+            if (data.Type == AnnotationData.TypeImage && el is Image img && img.Source is BitmapSource bs)
+            {
+                data.ImageIndex = images.Count;
+                images.Add(bs);
+                data.Rect = new[] { Canvas.GetLeft(img), Canvas.GetTop(img), img.Width, img.Height };
+            }
+            doc.Annotations.Add(data);
+        }
+
+        ProjectSerializer.Save(path, _source, doc, images);
+        _projectPath = path;
+        Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+    }
+
+    /// <summary>
+    /// Reopens a .winshot project file and reconstructs the editing session: the
+    /// source bitmap plus every annotation as a live, editable canvas element.
+    /// Returns null (after Log.Error) when the file cannot be parsed.
+    /// </summary>
+    public static EditorWindow? OpenProject(string path, SettingsService settings, HistoryService history)
+    {
+        SD.Bitmap? source = null;
+        try
+        {
+            var (bitmap, doc, images) = ProjectSerializer.Load(path);
+            source = bitmap;
+
+            // Build (and validate) every element before constructing the window so a
+            // malformed entry can never leak a half-initialized editor.
+            var built = doc.Annotations
+                .OrderBy(a => a.Z)
+                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images)))
+                .ToList();
+
+            var win = new EditorWindow(bitmap, settings, history);
+            source = null; // the window owns the bitmap now (disposed on close)
+            foreach (var (data, element) in built)
+            {
+                if (element is FrameworkElement fe) fe.Tag = data;
+                if (data.Tx != 0 || data.Ty != 0)
+                    element.RenderTransform = new TranslateTransform(data.Tx, data.Ty);
+                win.AnnotationCanvas.Children.Add(element);
+                if (data.Type == AnnotationData.TypeStep && data.Number is int n && n >= win._nextStep)
+                    win._nextStep = n + 1;
+            }
+            win._projectPath = path;
+            win.Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+            return win;
+        }
+        catch (Exception ex)
+        {
+            source?.Dispose();
+            Log.Error($"Failed to open WinShot project: {path}", ex);
+            return null;
         }
     }
 

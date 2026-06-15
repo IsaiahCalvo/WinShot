@@ -1,4 +1,4 @@
-<Window x:Class="WinShot.Recording.RecordingControlBar"
+<Window x:Class="WinShot.Recording.RecordingToastWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="" SizeToContent="WidthAndHeight" WindowStyle="None" ResizeMode="NoResize"
@@ -23,15 +23,12 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#4F4F4F"/>
                             </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
-                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style x:Key="StopButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
+        <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
             <Setter Property="Background" Value="#2D7DFF"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -44,35 +41,28 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#4DA3FF"/>
                             </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
-                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
     </Window.Resources>
-    <Border CornerRadius="18" Background="#F22B2B2B" BorderBrush="#33FFFFFF" BorderThickness="1"
-            Padding="14,8" MouseLeftButtonDown="OnDragMove">
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <Ellipse x:Name="RecDot" Width="10" Height="10" Fill="#FF5252" VerticalAlignment="Center" Margin="2,0,8,0">
-                <Ellipse.Triggers>
-                    <EventTrigger RoutedEvent="Loaded">
-                        <BeginStoryboard>
-                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
-                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                 From="1" To="0.25" Duration="0:0:0.7"/>
-                            </Storyboard>
-                        </BeginStoryboard>
-                    </EventTrigger>
-                </Ellipse.Triggers>
-            </Ellipse>
-            <TextBlock x:Name="ElapsedText" Text="00:00" Foreground="White" FontSize="13"
-                       FontFamily="Consolas" VerticalAlignment="Center" Margin="0,0,12,0"/>
-            <Button x:Name="BtnPause" Style="{StaticResource ActionButton}" Content="Pause" Click="OnPauseToggle"/>
-            <Button x:Name="BtnStop" Style="{StaticResource StopButton}" Content="Stop" Click="OnStop"/>
-            <Button x:Name="BtnCancel" Style="{StaticResource ActionButton}" Content="Cancel" Click="OnCancel"/>
+    <Border CornerRadius="10" Background="#F22B2B2B" BorderBrush="#33FFFFFF" BorderThickness="1"
+            Padding="14" MouseEnter="OnMouseEnter" MouseLeave="OnMouseLeave">
+        <StackPanel Width="300">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource ActionButton}" Content="✕"
+                        Padding="6,2" Margin="6,0,0,0" Click="OnClose"/>
+                <TextBlock Text="Recording saved" Foreground="#4DA3FF" FontSize="12" FontWeight="SemiBold"
+                           VerticalAlignment="Center"/>
+            </DockPanel>
+            <TextBlock x:Name="FileNameText" Foreground="White" FontSize="13" Margin="0,6,0,12"
+                       TextTrimming="CharacterEllipsis"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource ActionButton}" Content="Open" Click="OnOpen"/>
+                <Button Style="{StaticResource ActionButton}" Content="Reveal" Click="OnReveal"/>
+                <Button x:Name="BtnEdit" Style="{StaticResource AccentButton}" Content="Edit…" Click="OnEdit"/>
+            </StackPanel>
         </StackPanel>
     </Border>
 </Window>

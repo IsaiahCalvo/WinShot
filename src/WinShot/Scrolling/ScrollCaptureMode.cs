@@ -13,3 +13,19 @@ public enum ScrollCaptureMode
     /// </summary>
     Manual,
 }
+
+/// <summary>Which axis a scrolling capture advances along.</summary>
+public enum ScrollDirection
+{
+    /// <summary>Content scrolls down; the stitch grows taller.</summary>
+    Vertical,
+
+    /// <summary>Content scrolls right; the stitch grows wider.</summary>
+    Horizontal,
+}
+
+/// <summary>
+/// Result of the scrolling-capture chooser: how the capture advances
+/// (auto vs. manual) and along which axis.
+/// </summary>
+public readonly record struct ScrollCaptureChoice(ScrollCaptureMode Mode, ScrollDirection Direction);

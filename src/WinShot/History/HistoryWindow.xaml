@@ -27,8 +27,45 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="FilterChip" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="#3A3A3A" CornerRadius="12" Padding="12,4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4F4F4F"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2D7DFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#242424" BorderBrush="#33FFFFFF"
+                BorderThickness="0,0,0,1" Padding="12,8">
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="ChipAll" Content="All" IsChecked="True"
+                             Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+                <RadioButton x:Name="ChipImages" Content="Images"
+                             Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+                <RadioButton x:Name="ChipVideo" Content="Video"
+                             Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+                <RadioButton x:Name="ChipGif" Content="GIF"
+                             Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+            </StackPanel>
+        </Border>
         <Border DockPanel.Dock="Bottom" Background="#242424" BorderBrush="#33FFFFFF"
                 BorderThickness="0,1,0,0" Padding="12,8">
             <DockPanel>
@@ -59,7 +96,7 @@
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Border Width="180" Background="#333333" CornerRadius="8" Margin="6" Padding="8"
-                            MouseLeftButtonDown="OnTileMouseDown">
+                            MouseLeftButtonDown="OnTileMouseDown" MouseEnter="OnTileMouseEnter">
                         <Border.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Copy" Click="OnCopy" Visibility="{Binding ImageOnlyVisibility}"/>

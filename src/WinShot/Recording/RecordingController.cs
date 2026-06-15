@@ -1,6 +1,5 @@
-using System.Diagnostics;
-using System.IO;
 using System.Windows.Threading;
+using System.IO;
 using ScreenRecorderLib;
 using WinShot.Capture;
 using WinShot.Core;
@@ -10,9 +9,10 @@ using WF = System.Windows.Forms;
 namespace WinShot.Recording;
 
 /// <summary>
-/// Drives the screen-recording flow: format chooser → region pick → MP4
-/// (ScreenRecorderLib) or GIF (timer + streaming encoder) → save folder,
-/// history, and an Explorer window with the file selected.
+/// Drives the screen-recording flow: options chooser → region pick → optional
+/// countdown → MP4 (ScreenRecorderLib) or GIF (timer + streaming encoder),
+/// with optional click-highlight and keystroke overlays, pause/resume, then
+/// save folder, history, and a completion toast with Open/Reveal/Edit.
 /// Construct and call on the UI thread.
 /// </summary>
 public sealed class RecordingController
@@ -24,10 +24,13 @@ public sealed class RecordingController
     private bool _flowActive;   // chooser/selector currently open
     private bool _stopping;     // stop requested, finalization in flight
     private bool _discard;      // cancel pressed: throw the file away
+    private bool _paused;
     private bool _isGif;
     private Recorder? _recorder;
     private GifRecorder? _gifRecorder;
     private RecordingControlBar? _bar;
+    private ClickHighlightOverlayWindow? _clickOverlay;
+    private KeystrokeOverlayWindow? _keyOverlay;
     private string? _tempPath;
 
     public RecordingController(SettingsService settings, HistoryService history)
@@ -66,8 +69,19 @@ public sealed class RecordingController
 
     private void StartFlow()
     {
-        var dialog = new RecordingOptionsDialog(_settings.Current.RecordAudio);
+        var dialog = new RecordingOptionsDialog(_settings.Current);
         if (dialog.ShowDialog() != true) return;
+
+        // Remember the choices as new defaults. Deliberately no Save() here —
+        // the orchestrating app persists settings (Save re-registers hotkeys).
+        var s = _settings.Current;
+        s.RecordAudio = dialog.RecordMicrophone;
+        s.RecordSystemAudio = dialog.RecordSystemAudio;
+        s.CaptureCursor = dialog.CaptureCursor;
+        s.ShowClickHighlights = dialog.ShowClickHighlights;
+        s.ShowKeystrokes = dialog.ShowKeystrokes;
+        s.RecordingCountdownSeconds = dialog.CountdownSeconds;
+        s.WebcamOverlayPosition = dialog.WebcamPosition;
 
         SD.Rectangle screenRect;
         using (var shot = CaptureService.CaptureVirtualDesktop())
@@ -88,34 +102,57 @@ public sealed class RecordingController
             return;
         }
 
+        if (dialog.CountdownSeconds > 0)
+        {
+            var countdown = new RecordingCountdownWindow(dialog.CountdownSeconds, screenRect);
+            if (countdown.ShowDialog() != true) return;
+        }
+
         _isGif = dialog.IsGif;
         _discard = false;
         _stopping = false;
+        _paused = false;
         string tempDir = Path.Combine(Path.GetTempPath(), "WinShot");
         Directory.CreateDirectory(tempDir);
         _tempPath = Path.Combine(tempDir, $"recording-{Guid.NewGuid():N}.{(_isGif ? "gif" : "mp4")}");
 
+        // Overlays go up before capture starts so the first frames already
+        // have them. Both are click-through and intentionally visible to the
+        // capture (rings/pills belong in the output).
+        if (dialog.ShowClickHighlights)
+        {
+            _clickOverlay = new ClickHighlightOverlayWindow(screenRect);
+            _clickOverlay.Show();
+        }
+        if (dialog.ShowKeystrokes)
+        {
+            _keyOverlay = new KeystrokeOverlayWindow(screenRect);
+            _keyOverlay.Show();
+        }
+
         if (_isGif)
-            StartGif(screenRect);
+            StartGif(screenRect, dialog.CaptureCursor);
         else
-            StartMp4(screenRect, dialog.RecordAudio);
+            StartMp4(screenRect, dialog.RecordMicrophone, dialog.RecordSystemAudio, dialog.CaptureCursor, dialog.WebcamPosition);
 
         _bar = new RecordingControlBar();
         _bar.StopRequested += () => StopRecording(discard: false);
         _bar.CancelRequested += () => StopRecording(discard: true);
+        _bar.PauseRequested += PauseRecording;
+        _bar.ResumeRequested += ResumeRecording;
         _bar.Show();
 
         IsRecording = true;
         Log.Info($"Recording started ({(_isGif ? "GIF" : "MP4")}) {screenRect}");
     }
 
-    private void StartGif(SD.Rectangle screenRect)
+    private void StartGif(SD.Rectangle screenRect, bool captureCursor)
     {
-        _gifRecorder = new GifRecorder(screenRect, _settings.Current.GifFps, _tempPath!);
+        _gifRecorder = new GifRecorder(screenRect, _settings.Current.GifFps, _tempPath!, captureCursor);
         _gifRecorder.Start();
     }
 
-    private void StartMp4(SD.Rectangle screenRect, bool recordAudio)
+    private void StartMp4(SD.Rectangle screenRect, bool micAudio, bool systemAudio, bool captureCursor, string webcamPosition)
     {
         // ScreenRecorderLib records one display source; clamp the region to the
         // display it overlaps the most. The output crop rect is relative to
@@ -153,17 +190,102 @@ public sealed class RecordingController
             },
             AudioOptions = new AudioOptions
             {
-                IsAudioEnabled = recordAudio,
-                IsInputDeviceEnabled = recordAudio,
-                IsOutputDeviceEnabled = false,
+                IsAudioEnabled = micAudio || systemAudio,
+                IsInputDeviceEnabled = micAudio,
+                IsOutputDeviceEnabled = systemAudio,
             },
-            MouseOptions = new MouseOptions { IsMousePointerEnabled = true },
+            // Click feedback comes from our own overlay window (shared with the
+            // GIF path); ScreenRecorderLib's built-in click detection stays off.
+            MouseOptions = new MouseOptions { IsMousePointerEnabled = captureCursor },
         };
+
+        ApplyWebcamOverlay(options, webcamPosition, rect);
 
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnMp4Complete;
         _recorder.OnRecordingFailed += OnMp4Failed;
         _recorder.Record(_tempPath!);
+    }
+
+    /// <summary>
+    /// Adds a webcam picture-in-picture overlay (~22 % of the region width)
+    /// anchored at the chosen corner. Skipped quietly when no camera exists.
+    /// </summary>
+    private static void ApplyWebcamOverlay(RecorderOptions options, string webcamPosition, SD.Rectangle rect)
+    {
+        if (webcamPosition == "off") return;
+        try
+        {
+            var cameras = Recorder.GetSystemVideoCaptureDevices();
+            if (cameras is null || cameras.Count == 0)
+            {
+                Log.Info("Webcam overlay requested but no video capture device was found");
+                return;
+            }
+
+            double width = Math.Round(rect.Width * 0.22);
+            var overlay = new VideoCaptureOverlay(cameras[0].DeviceName)
+            {
+                AnchorPoint = webcamPosition switch
+                {
+                    "top-left" => Anchor.TopLeft,
+                    "top-right" => Anchor.TopRight,
+                    "bottom-left" => Anchor.BottomLeft,
+                    _ => Anchor.BottomRight,
+                },
+                Offset = new ScreenSize(16, 16),
+                Size = new ScreenSize(width, Math.Round(width * 3 / 4)),
+                Stretch = StretchMode.Uniform,
+            };
+            options.OverlayOptions = new OverLayOptions
+            {
+                Overlays = new List<RecordingOverlayBase> { overlay },
+            };
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to set up webcam overlay; recording without it", ex);
+        }
+    }
+
+    private void PauseRecording()
+    {
+        if (!IsRecording || _stopping || _paused) return;
+        _paused = true;
+        try
+        {
+            if (_isGif)
+                _gifRecorder?.Pause();
+            else
+                _recorder?.Pause();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to pause recording", ex);
+        }
+        _clickOverlay?.SetPaused(true);
+        _keyOverlay?.SetPaused(true);
+        Log.Info("Recording paused");
+    }
+
+    private void ResumeRecording()
+    {
+        if (!IsRecording || _stopping || !_paused) return;
+        _paused = false;
+        try
+        {
+            if (_isGif)
+                _gifRecorder?.Resume();
+            else
+                _recorder?.Resume();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to resume recording", ex);
+        }
+        _clickOverlay?.SetPaused(false);
+        _keyOverlay?.SetPaused(false);
+        Log.Info("Recording resumed");
     }
 
     private void StopRecording(bool discard)
@@ -172,6 +294,7 @@ public sealed class RecordingController
         _stopping = true;
         _discard = discard;
         CloseBar();
+        CloseOverlays(); // also releases the mouse/keyboard hooks
         try
         {
             if (_isGif)
@@ -241,18 +364,22 @@ public sealed class RecordingController
             DisposeRecorder();
             TryDelete(_tempPath);
             CloseBar(); // failure can happen without the user pressing Stop
+            CloseOverlays();
             EndSession();
         });
     }
 
-    /// <summary>Moves the finished file into the save folder, adds it to history, and reveals it in Explorer.</summary>
+    /// <summary>
+    /// Moves the finished file into the save folder, adds it to history, and
+    /// shows the completion toast (Open / Reveal / Edit… for MP4).
+    /// </summary>
     private void FinalizeFile(string tempPath, string extension)
     {
         try
         {
             string folder = _settings.Current.SaveFolder;
             Directory.CreateDirectory(folder);
-            string name = CaptureService.DefaultFileName(extension);
+            string name = FileNamer.Next(_settings, extension);
             string finalPath = Path.Combine(folder, name);
             for (int n = 2; File.Exists(finalPath); n++)
                 finalPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(name)} ({n}){Path.GetExtension(name)}");
@@ -261,8 +388,19 @@ public sealed class RecordingController
             try { _history.AddFile(finalPath); }
             catch (Exception ex) { Log.Error("Failed to add recording to history", ex); }
 
-            try { Process.Start("explorer.exe", $"/select,\"{finalPath}\""); }
-            catch (Exception ex) { Log.Error("Failed to open Explorer for recording", ex); }
+            try
+            {
+                string savedPath = finalPath;
+                bool isGif = extension.Equals("gif", StringComparison.OrdinalIgnoreCase);
+                Action? onEdit = isGif
+                    ? null
+                    : () => new VideoEditorWindow(savedPath, _settings, _history).Show();
+                new RecordingToastWindow(savedPath, onEdit).Show();
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Failed to show recording toast", ex);
+            }
 
             Log.Info($"Recording saved to {finalPath}");
         }
@@ -277,6 +415,7 @@ public sealed class RecordingController
         IsRecording = false;
         _stopping = false;
         _discard = false;
+        _paused = false;
         _tempPath = null;
     }
 
@@ -300,6 +439,7 @@ public sealed class RecordingController
             TryDelete(temp);
         }
         CloseBar();
+        CloseOverlays();
         EndSession();
     }
 
@@ -325,6 +465,22 @@ public sealed class RecordingController
         try { _bar.Close(); }
         catch (Exception ex) { Log.Error("Failed to close recording bar", ex); }
         _bar = null;
+    }
+
+    private void CloseOverlays()
+    {
+        if (_clickOverlay is not null)
+        {
+            try { _clickOverlay.Close(); }
+            catch (Exception ex) { Log.Error("Failed to close click-highlight overlay", ex); }
+            _clickOverlay = null;
+        }
+        if (_keyOverlay is not null)
+        {
+            try { _keyOverlay.Close(); }
+            catch (Exception ex) { Log.Error("Failed to close keystroke overlay", ex); }
+            _keyOverlay = null;
+        }
     }
 
     private static void TryDelete(string? path)

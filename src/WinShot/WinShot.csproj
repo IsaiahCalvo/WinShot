@@ -28,6 +28,8 @@
 
   <ItemGroup>
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
 
 </Project>

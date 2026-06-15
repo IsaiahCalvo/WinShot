@@ -3,23 +3,31 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using WinShot.Core;
 
 namespace WinShot.Recording;
 
 /// <summary>
-/// Floating pill shown while recording: pulsing red dot, elapsed time, Stop
-/// and Cancel. Excluded from screen capture so it never appears in the output.
+/// Floating pill shown while recording: pulsing red dot, elapsed time,
+/// Pause/Resume, Stop, and Cancel. Excluded from screen capture so it never
+/// appears in the output. The elapsed timer freezes while paused.
 /// </summary>
 public partial class RecordingControlBar : Window
 {
+    private static readonly Brush RecordingDotBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x52, 0x52));
+    private static readonly Brush PausedDotBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xB0, 0x20));
+
     private readonly Stopwatch _elapsed = new();
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private bool _actionTaken;
+    private bool _paused;
 
     public event Action? StopRequested;
     public event Action? CancelRequested;
+    public event Action? PauseRequested;
+    public event Action? ResumeRequested;
 
     public RecordingControlBar()
     {
@@ -76,10 +84,31 @@ public partial class RecordingControlBar : Window
 
     private void OnCancel(object sender, RoutedEventArgs e) => RaiseOnce(CancelRequested);
 
+    private void OnPauseToggle(object sender, RoutedEventArgs e)
+    {
+        if (_actionTaken) return;
+        _paused = !_paused;
+        if (_paused)
+        {
+            _elapsed.Stop();
+            BtnPause.Content = "Resume";
+            RecDot.Fill = PausedDotBrush;
+            PauseRequested?.Invoke();
+        }
+        else
+        {
+            _elapsed.Start();
+            BtnPause.Content = "Pause";
+            RecDot.Fill = RecordingDotBrush;
+            ResumeRequested?.Invoke();
+        }
+    }
+
     private void RaiseOnce(Action? action)
     {
         if (_actionTaken) return;
         _actionTaken = true;
+        BtnPause.IsEnabled = false;
         BtnStop.IsEnabled = false;
         BtnCancel.IsEnabled = false;
         action?.Invoke();
