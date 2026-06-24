@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -11,8 +12,9 @@ using SD = System.Drawing;
 namespace WinShot.Capture;
 
 /// <summary>
-/// Full-virtual-desktop overlay showing a frozen screenshot. Drag selects a
-/// region; hovering snaps to a window, and a click (no drag) selects it.
+/// Full-virtual-desktop overlay used to select a screen region. It can either
+/// show a frozen screenshot or a live transparent overlay; hovering snaps to a
+/// window, and a click (no drag) selects it.
 /// All visuals are in WPF DIPs; results are mapped proportionally back to
 /// bitmap pixels, which keeps the math exact regardless of monitor DPI.
 /// A magnifier loupe follows the cursor for pixel-precise selection.
@@ -27,11 +29,14 @@ public partial class RegionSelectorWindow : Window
     private const double LoupeZoom = 8;       // magnification factor
     private const double DragThresholdDip = 4;
 
-    private readonly SD.Bitmap _shot;
-    private readonly List<WindowInfo> _windows;
+    private readonly SD.Bitmap? _shot;
+    private List<WindowInfo> _windows;
     private readonly SD.Rectangle _vs;
     private readonly SettingsService? _settings;
     private readonly bool _allInOne;
+    private readonly BitmapSource? _previewSource;
+    private readonly int _bitmapWidth;
+    private readonly int _bitmapHeight;
     private readonly double _imageUnitX;  // image DIUs per bitmap pixel (horizontal)
     private readonly double _imageUnitY;
 
@@ -48,12 +53,60 @@ public partial class RegionSelectorWindow : Window
     /// <summary>What the caller should do with the region; only changes from Capture in all-in-one mode.</summary>
     public AllInOneAction SelectedAction { get; private set; } = AllInOneAction.Capture;
 
+    public static void Prewarm()
+    {
+        var window = new RegionSelectorWindow(
+            Task.FromResult(new List<WindowInfo>()),
+            settings: null,
+            allInOne: true)
+        {
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Opacity = 0,
+        };
+        window.Show();
+        window.Close();
+    }
+
     public RegionSelectorWindow(SD.Bitmap shot, List<WindowInfo> windows)
         : this(shot, windows, null, allInOne: false)
     {
     }
 
+    public RegionSelectorWindow(Task<List<WindowInfo>> windowsTask, SettingsService? settings, bool allInOne)
+        : this(
+            shot: null,
+            source: null,
+            windows: new List<WindowInfo>(),
+            settings,
+            allInOne,
+            liveOverlay: true)
+    {
+        _ = LoadWindowsAsync(windowsTask);
+    }
+
     public RegionSelectorWindow(SD.Bitmap shot, List<WindowInfo> windows, SettingsService? settings, bool allInOne)
+        : this(shot, CaptureService.ToBitmapSource(shot), windows, settings, allInOne)
+    {
+    }
+
+    public RegionSelectorWindow(
+        SD.Bitmap shot,
+        BitmapSource source,
+        List<WindowInfo> windows,
+        SettingsService? settings,
+        bool allInOne)
+        : this(shot, source, windows, settings, allInOne, liveOverlay: false)
+    {
+    }
+
+    private RegionSelectorWindow(
+        SD.Bitmap? shot,
+        BitmapSource? source,
+        List<WindowInfo> windows,
+        SettingsService? settings,
+        bool allInOne,
+        bool liveOverlay = true)
     {
         InitializeComponent();
         _shot = shot;
@@ -61,12 +114,14 @@ public partial class RegionSelectorWindow : Window
         _settings = settings;
         _allInOne = allInOne;
         _vs = CaptureService.VirtualScreen;
+        _bitmapWidth = shot?.Width ?? _vs.Width;
+        _bitmapHeight = shot?.Height ?? _vs.Height;
 
-        var source = CaptureService.ToBitmapSource(shot);
         ScreenshotImage.Source = source;
-        LoupeBrush.ImageSource = source;
-        _imageUnitX = source.Width / source.PixelWidth;
-        _imageUnitY = source.Height / source.PixelHeight;
+        ScreenshotImage.Visibility = liveOverlay ? Visibility.Collapsed : Visibility.Visible;
+        _previewSource = source;
+        _imageUnitX = source is null ? 1 : source.Width / _bitmapWidth;
+        _imageUnitY = source is null ? 1 : source.Height / _bitmapHeight;
 
         if (allInOne)
             Toolbar.Visibility = Visibility.Visible;
@@ -84,6 +139,40 @@ public partial class RegionSelectorWindow : Window
             if (_allInOne && _settings is not null)
                 Dispatcher.InvokeAsync(TryRestoreLastRegion, DispatcherPriority.Loaded);
         };
+        Closed += (_, _) =>
+        {
+            ScreenshotImage.Source = null;
+            LoupeBrush.ImageSource = null;
+            DimPath.Data = null;
+            Root.Children.Clear();
+            Content = null;
+            _windows = new List<WindowInfo>();
+            MemoryCleanup.Request();
+        };
+    }
+
+    public RegionSelectorWindow(
+        SD.Bitmap shot,
+        BitmapSource source,
+        Task<List<WindowInfo>> windowsTask,
+        SettingsService? settings,
+        bool allInOne)
+        : this(shot, source, new List<WindowInfo>(), settings, allInOne)
+    {
+        _ = LoadWindowsAsync(windowsTask);
+    }
+
+    private async Task LoadWindowsAsync(Task<List<WindowInfo>> windowsTask)
+    {
+        try
+        {
+            var windows = await windowsTask.ConfigureAwait(false);
+            await Dispatcher.InvokeAsync(() => _windows = windows);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to load selector window list", ex);
+        }
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -213,20 +302,8 @@ public partial class RegionSelectorWindow : Window
     }
 
     /// <summary>Builds the drag rectangle, constrained to the locked aspect ratio when active.</summary>
-    private Rect MakeDragRect(Point pos)
-    {
-        if (_dragRatio is double ratio && ratio > 0)
-        {
-            double dx = pos.X - _dragStart.X;
-            double dy = pos.Y - _dragStart.Y;
-            double w = Math.Max(Math.Abs(dx), Math.Abs(dy) * ratio);
-            double h = w / ratio;
-            pos = new Point(
-                _dragStart.X + (dx < 0 ? -w : w),
-                _dragStart.Y + (dy < 0 ? -h : h));
-        }
-        return new Rect(_dragStart, pos);
-    }
+    private Rect MakeDragRect(Point pos) =>
+        AllInOneDragLayout.CreateDipRect(_dragStart, pos, _dragRatio);
 
     private void ShowSelection(Rect rect)
     {
@@ -245,8 +322,8 @@ public partial class RegionSelectorWindow : Window
 
     private void HitTestWindow(Point posDip)
     {
-        int sx = (int)(posDip.X / Root.ActualWidth * _shot.Width) + _vs.X;
-        int sy = (int)(posDip.Y / Root.ActualHeight * _shot.Height) + _vs.Y;
+        int sx = (int)(posDip.X / Root.ActualWidth * _bitmapWidth) + _vs.X;
+        int sy = (int)(posDip.Y / Root.ActualHeight * _bitmapHeight) + _vs.Y;
         _hoverWindow = _windows.FirstOrDefault(w => w.Bounds.Contains(sx, sy));
 
         if (_hoverWindow is null)
@@ -276,20 +353,22 @@ public partial class RegionSelectorWindow : Window
     /// </summary>
     private void UpdateLoupe(Point pos, bool hide)
     {
-        if (hide || Root.ActualWidth < 1 || Root.ActualHeight < 1 ||
+        if (_shot is null || _previewSource is null || hide ||
+            Root.ActualWidth < 1 || Root.ActualHeight < 1 ||
             pos.X < 0 || pos.Y < 0 || pos.X >= Root.ActualWidth || pos.Y >= Root.ActualHeight)
         {
             Loupe.Visibility = Visibility.Collapsed;
             return;
         }
 
-        int px = Math.Clamp((int)(pos.X / Root.ActualWidth * _shot.Width), 0, _shot.Width - 1);
-        int py = Math.Clamp((int)(pos.Y / Root.ActualHeight * _shot.Height), 0, _shot.Height - 1);
+        int px = Math.Clamp((int)(pos.X / Root.ActualWidth * _bitmapWidth), 0, _bitmapWidth - 1);
+        int py = Math.Clamp((int)(pos.Y / Root.ActualHeight * _bitmapHeight), 0, _bitmapHeight - 1);
 
         double vbW = LoupeSizeDip / LoupeZoom * _imageUnitX;
         double vbH = LoupeSizeDip / LoupeZoom * _imageUnitY;
         double cx = (px + 0.5) * _imageUnitX;
         double cy = (py + 0.5) * _imageUnitY;
+        LoupeBrush.ImageSource ??= _previewSource;
         LoupeBrush.Viewbox = new Rect(cx - vbW / 2, cy - vbH / 2, vbW, vbH);
         LoupeCoords.Text = $"{px + _vs.X}, {py + _vs.Y}";
 
@@ -315,7 +394,7 @@ public partial class RegionSelectorWindow : Window
     }
 
     private void OnFullscreen(object sender, RoutedEventArgs e)
-        => Confirm(new SD.Rectangle(0, 0, _shot.Width, _shot.Height), AllInOneAction.Capture);
+        => Confirm(new SD.Rectangle(0, 0, _bitmapWidth, _bitmapHeight), AllInOneAction.Capture);
 
     private void OnSizeBoxKeyDown(object sender, KeyEventArgs e)
     {
@@ -326,10 +405,10 @@ public partial class RegionSelectorWindow : Window
 
         // Resize anchored at the current selection's top-left; center when there is none.
         SD.Point anchor = _pendingPx?.Location ?? new SD.Point(
-            Math.Max(0, (_shot.Width - w) / 2),
-            Math.Max(0, (_shot.Height - h) / 2));
+            Math.Max(0, (_bitmapWidth - w) / 2),
+            Math.Max(0, (_bitmapHeight - h) / 2));
         var px = new SD.Rectangle(anchor.X, anchor.Y, w, h);
-        px.Intersect(new SD.Rectangle(0, 0, _shot.Width, _shot.Height));
+        px.Intersect(new SD.Rectangle(0, 0, _bitmapWidth, _bitmapHeight));
         if (px.Width < 1 || px.Height < 1) return;
 
         _pendingPx = px;
@@ -342,25 +421,11 @@ public partial class RegionSelectorWindow : Window
     private void TryRestoreLastRegion()
     {
         if (_settings is null) return;
-        if (!TryParseRegion(_settings.Current.LastCaptureRegion, out SD.Rectangle screenRect)) return;
+        if (!PreviousRegion.TryParse(_settings.Current.LastCaptureRegion, out SD.Rectangle screenRect)) return;
         var px = ScreenToBitmap(screenRect);
         if (px.Width < 1 || px.Height < 1) return;
         _pendingPx = px;
         ShowPending();
-    }
-
-    private static bool TryParseRegion(string text, out SD.Rectangle rect)
-    {
-        rect = default;
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        string[] parts = text.Split(',');
-        if (parts.Length != 4) return false;
-        if (!int.TryParse(parts[0].Trim(), out int x) || !int.TryParse(parts[1].Trim(), out int y) ||
-            !int.TryParse(parts[2].Trim(), out int w) || !int.TryParse(parts[3].Trim(), out int h))
-            return false;
-        if (w < 1 || h < 1) return false;
-        rect = new SD.Rectangle(x, y, w, h);
-        return true;
     }
 
     private void ShowPending()
@@ -399,8 +464,8 @@ public partial class RegionSelectorWindow : Window
         SelectedRegionPx = px;
         SelectedAction = action;
         if (_settings is not null)
-            _settings.Current.LastCaptureRegion =
-                $"{px.X + _vs.X},{px.Y + _vs.Y},{px.Width},{px.Height}";
+            _settings.Current.LastCaptureRegion = PreviousRegion.Format(
+                new SD.Rectangle(px.X + _vs.X, px.Y + _vs.Y, px.Width, px.Height));
         DialogResult = true;
     }
 
@@ -425,27 +490,27 @@ public partial class RegionSelectorWindow : Window
     private SD.Rectangle ScreenToBitmap(SD.Rectangle screenRect)
     {
         var r = new SD.Rectangle(screenRect.X - _vs.X, screenRect.Y - _vs.Y, screenRect.Width, screenRect.Height);
-        r.Intersect(new SD.Rectangle(0, 0, _shot.Width, _shot.Height));
+        r.Intersect(new SD.Rectangle(0, 0, _bitmapWidth, _bitmapHeight));
         return r;
     }
 
     private SD.Rectangle DipToBitmap(Rect dip)
     {
-        double sx = _shot.Width / Root.ActualWidth;
-        double sy = _shot.Height / Root.ActualHeight;
+        double sx = _bitmapWidth / Root.ActualWidth;
+        double sy = _bitmapHeight / Root.ActualHeight;
         var r = new SD.Rectangle(
             (int)Math.Round(dip.X * sx),
             (int)Math.Round(dip.Y * sy),
             (int)Math.Round(dip.Width * sx),
             (int)Math.Round(dip.Height * sy));
-        r.Intersect(new SD.Rectangle(0, 0, _shot.Width, _shot.Height));
+        r.Intersect(new SD.Rectangle(0, 0, _bitmapWidth, _bitmapHeight));
         return r;
     }
 
     private Rect BitmapToDip(SD.Rectangle px)
     {
-        double sx = Root.ActualWidth / _shot.Width;
-        double sy = Root.ActualHeight / _shot.Height;
+        double sx = Root.ActualWidth / _bitmapWidth;
+        double sy = Root.ActualHeight / _bitmapHeight;
         return new Rect(px.X * sx, px.Y * sy, px.Width * sx, px.Height * sy);
     }
 

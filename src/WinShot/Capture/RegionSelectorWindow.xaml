@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="" Width="100" Height="100"
         WindowStyle="None" ResizeMode="NoResize" WindowStartupLocation="Manual"
-        ShowInTaskbar="False" Topmost="True" Background="Black" Cursor="Cross"
+        ShowInTaskbar="False" Topmost="True" AllowsTransparency="True"
+        Background="Transparent" Cursor="Cross"
         Focusable="True" ShowActivated="True">
     <Window.Resources>
         <Style x:Key="ModeRadio" TargetType="RadioButton">
@@ -87,9 +88,10 @@
             <Setter Property="FontFamily" Value="Consolas"/>
         </Style>
     </Window.Resources>
-    <Grid x:Name="Root">
-        <Image x:Name="ScreenshotImage" Stretch="Fill"/>
-        <Canvas x:Name="OverlayCanvas">
+    <Grid x:Name="Root" Background="Transparent" SnapsToDevicePixels="True">
+        <Image x:Name="ScreenshotImage" Stretch="Fill" IsHitTestVisible="False"
+               RenderOptions.BitmapScalingMode="LowQuality"/>
+        <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False">
             <Path x:Name="DimPath" Fill="#59000000"/>
             <Rectangle x:Name="WindowHighlight" Stroke="#FF4DA3FF" StrokeThickness="2"
                        Fill="#1A4DA3FF" Visibility="Collapsed"/>

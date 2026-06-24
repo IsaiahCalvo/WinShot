@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -17,10 +18,6 @@ namespace WinShot.Pin;
 /// </summary>
 public partial class PinWindow : Window
 {
-    private const double MinScale = 0.2;
-    private const double MaxScale = 3.0;
-    private const double LockedOpacityFactor = 0.85;
-
     private const int GwlExStyle = -20;
     private const long WsExTransparent = 0x00000020;
 
@@ -37,6 +34,7 @@ public partial class PinWindow : Window
     private readonly double _naturalHeight;
     private double _scale;
     private bool _locked;
+    private bool _closed;
     private double _opacityBeforeLock = 1.0;
 
     public PinWindow(SD.Bitmap image, SettingsService? settings = null)
@@ -46,7 +44,7 @@ public partial class PinWindow : Window
         _settings = settings;
         _naturalWidth = image.Width;
         _naturalHeight = image.Height;
-        Img.Source = CaptureService.ToBitmapSource(image);
+        ContentRendered += OnInitialContentRendered;
 
         var wa = SystemParameters.WorkArea;
         _scale = Math.Min(1.0, Math.Min(wa.Width * 0.6 / _naturalWidth, wa.Height * 0.6 / _naturalHeight));
@@ -59,13 +57,81 @@ public partial class PinWindow : Window
         OpenPins.Add(this);
         Closed += (_, _) =>
         {
+            _closed = true;
             OpenPins.Remove(this);
             _image.Dispose();
         };
     }
 
+    private void OnInitialContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= OnInitialContentRendered;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                if (!_closed)
+                    _ = LoadImageAsync(_image);
+            }));
+    }
+
+    public static void Prewarm(SettingsService? settings = null)
+    {
+        try
+        {
+            var bitmap = new SD.Bitmap(1, 1);
+            var window = new PinWindow(bitmap, settings)
+            {
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                Opacity = 0,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+            };
+            var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            fallback.Tick += (_, _) =>
+            {
+                fallback.Stop();
+                if (window.IsVisible)
+                    window.Close();
+            };
+            window.ContentRendered += (_, _) =>
+            {
+                fallback.Stop();
+                window.Close();
+            };
+            window.Show();
+            fallback.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Pin prewarm failed", ex);
+        }
+    }
+
     /// <summary>True while the pin is click-through (WS_EX_TRANSPARENT).</summary>
     public bool IsLocked => _locked;
+
+    private async Task LoadImageAsync(SD.Bitmap image)
+    {
+        if (_closed)
+            return;
+
+        try
+        {
+            var source = await CaptureService.ToBitmapSourceSnapshotAsync(image);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!_closed)
+                    Img.Source = source;
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to load pinned image", ex);
+        }
+    }
 
     /// <summary>
     /// Toggles click-through. A locked pin ignores all mouse input and dims by
@@ -82,7 +148,7 @@ public partial class PinWindow : Window
         {
             _opacityBeforeLock = Opacity;
             SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(style | WsExTransparent));
-            Opacity = Math.Max(0.1, _opacityBeforeLock * LockedOpacityFactor);
+            Opacity = PinInteraction.LockedOpacity(_opacityBeforeLock);
         }
         else
         {
@@ -126,11 +192,11 @@ public partial class PinWindow : Window
 
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
-            Opacity = Math.Clamp(Opacity + (e.Delta > 0 ? 0.1 : -0.1), 0.3, 1.0);
+            Opacity = PinInteraction.AdjustOpacity(Opacity, e.Delta);
             return;
         }
 
-        double newScale = Math.Clamp(_scale * (e.Delta > 0 ? 1.1 : 1 / 1.1), MinScale, MaxScale);
+        double newScale = PinInteraction.AdjustScale(_scale, e.Delta);
         if (Math.Abs(newScale - _scale) < 0.0001) return;
 
         // Keep the image point under the cursor stationary while resizing.
@@ -160,7 +226,7 @@ public partial class PinWindow : Window
             return;
         }
 
-        double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
+        double step = PinInteraction.NudgeStep(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
         switch (e.Key)
         {
             case Key.Left: Left -= step; e.Handled = true; break;
@@ -172,11 +238,11 @@ public partial class PinWindow : Window
 
     private void OnToggleLock(object sender, RoutedEventArgs e) => SetLocked(!_locked);
 
-    private void OnCopy(object sender, RoutedEventArgs e)
+    private async void OnCopy(object sender, RoutedEventArgs e)
     {
         try
         {
-            CaptureService.CopyToClipboard(_image);
+            await CaptureService.CopyToClipboardAsync(_image);
         }
         catch (Exception ex)
         {
@@ -184,7 +250,7 @@ public partial class PinWindow : Window
         }
     }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    private async void OnSave(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -200,7 +266,14 @@ public partial class PinWindow : Window
                 Filter = "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp",
             };
             if (dialog.ShowDialog(this) == true)
-                ImageSaver.Save(_image, dialog.FileName);
+            {
+                var copy = CaptureService.CloneBitmap(_image);
+                await Task.Run(() =>
+                {
+                    using (copy)
+                        ImageSaver.Save(copy, dialog.FileName);
+                });
+            }
         }
         catch (Exception ex)
         {

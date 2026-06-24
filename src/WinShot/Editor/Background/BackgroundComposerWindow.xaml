@@ -1,7 +1,7 @@
 <Window x:Class="WinShot.Editor.Background.BackgroundComposerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WinShot — Background" Background="{StaticResource WindowBgBrush}"
+        Title="WinShot - Background" Background="{StaticResource WindowBgBrush}"
         Width="1060" Height="680" MinWidth="880" MinHeight="540"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True">
 
@@ -16,16 +16,16 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                             <Button x:Name="BtnCopy" Style="{StaticResource PillButtonSecondary}"
-                                    Content="Save as…" Click="OnCopy"/>
+                                    Content="Copy" Click="OnCopy"/>
                             <Button x:Name="BtnSave" Style="{StaticResource PillButtonPrimary}"
-                                    Content="Done" Click="OnSave"/>
+                                    Content="Save as..." Click="OnSave"/>
                         </StackPanel>
                         <TextBlock x:Name="SizeLabel" Style="{StaticResource ValueLabel}"
                                    ToolTip="Output size in pixels"/>
                     </DockPanel>
                 </Border>
 
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer x:Name="ComposerControls" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                     <StackPanel Margin="14,12,14,16">
                         <!-- Current preset name header -->
                         <TextBlock x:Name="PresetNameHeader" Style="{StaticResource SectionHeader}"
@@ -147,7 +147,8 @@
              Viewbox only scales the view, and its scale lives on an ancestor
              visual so the flatten (RenderVisual of ComposeRoot) is unaffected. -->
         <Grid Background="{StaticResource WindowBgBrush}">
-            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="24">
+            <Viewbox x:Name="PreviewBox" Stretch="Uniform" StretchDirection="DownOnly" Margin="24"
+                     Visibility="Collapsed">
                 <Grid x:Name="ComposeRoot">
                     <Border x:Name="ShotBorder" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>

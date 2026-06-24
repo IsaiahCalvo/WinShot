@@ -42,6 +42,8 @@ public static class ImageStitcher
 
         ulong[] prevHashes = ComputeRowHashes(previous);
         ulong[] currHashes = ComputeRowHashes(current);
+        if (HashesMatchAtSamePosition(prevHashes, currHashes))
+            return 0;
 
         int bestOffset = 0;
         int bestMatches = 0;
@@ -88,6 +90,8 @@ public static class ImageStitcher
 
         ulong[] prevHashes = ComputeColumnHashes(previous);
         ulong[] currHashes = ComputeColumnHashes(current);
+        if (HashesMatchAtSamePosition(prevHashes, currHashes))
+            return 0;
 
         int bestOffset = 0;
         int bestMatches = 0;
@@ -146,6 +150,19 @@ public static class ImageStitcher
         CopyColumns(stitched, 0, stitched.Width, result, 0);
         CopyColumns(current, current.Width - newCols, newCols, result, stitched.Width);
         return result;
+    }
+
+    private static bool HashesMatchAtSamePosition(ulong[] previous, ulong[] current)
+    {
+        if (previous.Length != current.Length)
+            return false;
+
+        for (int i = 0; i < previous.Length; i++)
+        {
+            if (previous[i] != current[i])
+                return false;
+        }
+        return true;
     }
 
     /// <summary>One FNV-1a hash per row over the middle 90% of its pixels.</summary>

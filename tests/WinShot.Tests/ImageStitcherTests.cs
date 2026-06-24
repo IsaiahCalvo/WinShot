@@ -83,6 +83,15 @@ public class ImageStitcherTests
     }
 
     [Fact]
+    public void FindScrollOffset_RepeatedStaticRows_ReturnsZero()
+    {
+        using var frame1 = MakeSolidFrame(SD.Color.White);
+        using var frame2 = MakeSolidFrame(SD.Color.White);
+
+        Assert.Equal(0, ImageStitcher.FindScrollOffset(frame1, frame2));
+    }
+
+    [Fact]
     public void FindScrollOffset_MismatchedSizes_ReturnsZero()
     {
         using var frame1 = MakeFrame(0);
@@ -212,6 +221,15 @@ public class ImageStitcherTests
     }
 
     [Fact]
+    public void FindScrollOffsetHorizontal_RepeatedStaticColumns_ReturnsZero()
+    {
+        using var frame1 = MakeSolidFrame(SD.Color.White, HWidth, HHeight);
+        using var frame2 = MakeSolidFrame(SD.Color.White, HWidth, HHeight);
+
+        Assert.Equal(0, ImageStitcher.FindScrollOffsetHorizontal(frame1, frame2));
+    }
+
+    [Fact]
     public void FindScrollOffsetHorizontal_MismatchedSizes_ReturnsZero()
     {
         using var frame1 = MakeFrameHorizontal(0);
@@ -266,5 +284,13 @@ public class ImageStitcherTests
         Assert.Equal(HWidth * 2, result.Width); // clamped to all of current
         Assert.Equal(ColColor(400).ToArgb(), result.GetPixel(400, 10).ToArgb());
         Assert.Equal(ColColor(799).ToArgb(), result.GetPixel(799, 10).ToArgb());
+    }
+
+    private static SD.Bitmap MakeSolidFrame(SD.Color color, int width = Width, int height = Height)
+    {
+        var bmp = new SD.Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using var g = SD.Graphics.FromImage(bmp);
+        g.Clear(color);
+        return bmp;
     }
 }

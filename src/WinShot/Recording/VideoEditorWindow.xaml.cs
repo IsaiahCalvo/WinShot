@@ -11,8 +11,8 @@ namespace WinShot.Recording;
 
 /// <summary>
 /// Lightweight MP4 editor: preview with play/pause and a position slider,
-/// trim start/end, resolution (100/75/50 %), quality (High/Medium/Low), and
-/// mute/volume. Export renders through Windows.Media.Editing.MediaComposition
+/// trim start/end, resolution (100/75/50 %), quality (High/Medium/Low), FPS,
+/// mute/mono/volume. Export renders through Windows.Media.Editing.MediaComposition
 /// to "&lt;original&gt; (edited).mp4" next to the source file, adds it to
 /// history, and shows a completion toast.
 /// </summary>
@@ -28,6 +28,7 @@ public partial class VideoEditorWindow : Window
     private bool _playing;
     private bool _syncingPosition; // true while the timer drives the position slider
     private bool _exporting;
+    private bool _closed;
 
     public VideoEditorWindow(string mp4Path, SettingsService settings, HistoryService history)
     {
@@ -40,12 +41,17 @@ public partial class VideoEditorWindow : Window
         _positionTimer.Tick += OnPositionTimer;
         Closed += (_, _) =>
         {
+            _closed = true;
             _positionTimer.Stop();
             try { Media.Close(); }
             catch (Exception ex) { Log.Error("Failed to close media preview", ex); }
+            MemoryCleanup.Request();
         };
 
-        OpenPreview();
+        StatusText.Text = "Loading preview...";
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(OpenPreviewSafely));
     }
 
     /// <summary>Loads (or reloads) the source into the preview and shows the first frame.</summary>
@@ -62,12 +68,26 @@ public partial class VideoEditorWindow : Window
         _positionTimer.Stop();
     }
 
+    private void OpenPreviewSafely()
+    {
+        if (_closed)
+            return;
+
+        try { OpenPreview(); }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to open media preview", ex);
+            StatusText.Text = "Preview failed - the file can still be exported.";
+        }
+    }
+
     // ---- preview ----
 
     private void OnMediaOpened(object sender, RoutedEventArgs e)
     {
         if (Media.NaturalDuration.HasTimeSpan)
             _durationSec = Media.NaturalDuration.TimeSpan.TotalSeconds;
+        StatusText.Text = "";
         PositionSlider.Maximum = Math.Max(0.1, _durationSec);
         if (!_trimInitialized)
         {
@@ -144,16 +164,22 @@ public partial class VideoEditorWindow : Window
     private void OnTrimStartChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (TrimStartLabel is null || TrimEndSlider is null) return; // XAML init order
-        if (TrimStartSlider.Value > TrimEndSlider.Value - 0.1)
-            TrimStartSlider.Value = Math.Max(0, TrimEndSlider.Value - 0.1);
+        var range = VideoTrimRange.FromStart(TrimStartSlider.Value, TrimEndSlider.Value, _durationSec);
+        if (Math.Abs(TrimStartSlider.Value - range.StartSeconds) > 0.001)
+            TrimStartSlider.Value = range.StartSeconds;
+        if (Math.Abs(TrimEndSlider.Value - range.EndSeconds) > 0.001)
+            TrimEndSlider.Value = range.EndSeconds;
         TrimStartLabel.Text = FormatTime(TrimStartSlider.Value);
     }
 
     private void OnTrimEndChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (TrimEndLabel is null || TrimStartSlider is null) return; // XAML init order
-        if (TrimEndSlider.Value < TrimStartSlider.Value + 0.1)
-            TrimEndSlider.Value = Math.Min(TrimEndSlider.Maximum, TrimStartSlider.Value + 0.1);
+        var range = VideoTrimRange.FromEnd(TrimStartSlider.Value, TrimEndSlider.Value, _durationSec);
+        if (Math.Abs(TrimStartSlider.Value - range.StartSeconds) > 0.001)
+            TrimStartSlider.Value = range.StartSeconds;
+        if (Math.Abs(TrimEndSlider.Value - range.EndSeconds) > 0.001)
+            TrimEndSlider.Value = range.EndSeconds;
         TrimEndLabel.Text = FormatTime(TrimEndSlider.Value);
     }
 
@@ -179,13 +205,14 @@ public partial class VideoEditorWindow : Window
             StatusText.Text = "Video is still loading — try again in a moment.";
             return;
         }
-        double startSec = TrimStartSlider.Value;
-        double endSec = TrimEndSlider.Value;
-        if (endSec - startSec < 0.1)
+        var trimRange = VideoTrimRange.Normalize(TrimStartSlider.Value, TrimEndSlider.Value, _durationSec);
+        if (!trimRange.IsExportable)
         {
             StatusText.Text = "Trim range is empty — nothing to export.";
             return;
         }
+
+        double startSec = trimRange.StartSeconds;
 
         _exporting = true;
         BtnExport.IsEnabled = false;
@@ -208,8 +235,12 @@ public partial class VideoEditorWindow : Window
             var srcFile = await StorageFile.GetFileFromPathAsync(_mp4Path);
             var clip = await MediaClip.CreateFromFileAsync(srcFile);
             clip.TrimTimeFromStart = TimeSpan.FromSeconds(startSec);
-            clip.TrimTimeFromEnd = TimeSpan.FromSeconds(Math.Max(0, _durationSec - endSec));
-            clip.Volume = MuteCheck.IsChecked == true ? 0 : VolumeSlider.Value;
+            clip.TrimTimeFromEnd = TimeSpan.FromSeconds(trimRange.TrimFromEndSeconds(_durationSec));
+            var audioSettings = VideoExportAudioSettings.FromControls(
+                MuteCheck.IsChecked == true,
+                VolumeSlider.Value,
+                MonoCheck.IsChecked == true);
+            clip.Volume = audioSettings.ClipVolume;
 
             var composition = new MediaComposition();
             composition.Clips.Add(clip);
@@ -222,21 +253,25 @@ public partial class VideoEditorWindow : Window
                 srcW = 1920;
                 srcH = 1080;
             }
-            double scale = ResolutionCombo.SelectedIndex switch { 1 => 0.75, 2 => 0.5, _ => 1.0 };
-            // H.264 wants even dimensions.
-            uint w = (uint)Math.Max(2, (int)Math.Round(srcW * scale) & ~1);
-            uint h = (uint)Math.Max(2, (int)Math.Round(srcH * scale) & ~1);
-            double fps = props.FrameRate is { Denominator: > 0 } rate
+            double sourceFps = props.FrameRate is { Denominator: > 0 } rate
                 ? (double)rate.Numerator / rate.Denominator
                 : 30;
-            if (fps <= 0 || fps > 120) fps = 30;
-            double bitsPerPixel = QualityCombo.SelectedIndex switch { 1 => 0.08, 2 => 0.045, _ => 0.13 };
-            uint bitrate = (uint)Math.Clamp(w * h * fps * bitsPerPixel, 500_000, 60_000_000);
+            var videoSettings = VideoExportVideoSettings.FromControls(
+                srcW,
+                srcH,
+                sourceFps,
+                ResolutionCombo.SelectedIndex,
+                QualityCombo.SelectedIndex,
+                FrameRateCombo.SelectedIndex);
 
             var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
-            profile.Video.Width = w;
-            profile.Video.Height = h;
-            profile.Video.Bitrate = bitrate;
+            profile.Video.Width = videoSettings.Width;
+            profile.Video.Height = videoSettings.Height;
+            profile.Video.Bitrate = videoSettings.Bitrate;
+            profile.Video.FrameRate.Numerator = (uint)Math.Round(videoSettings.FrameRate);
+            profile.Video.FrameRate.Denominator = 1;
+            if (audioSettings.OutputChannelCount is uint channelCount && profile.Audio is not null)
+                profile.Audio.ChannelCount = channelCount;
 
             string dir = Path.GetDirectoryName(_mp4Path)!;
             string baseName = Path.GetFileNameWithoutExtension(_mp4Path);
@@ -250,13 +285,19 @@ public partial class VideoEditorWindow : Window
                 throw new InvalidOperationException($"Render failed: {result}");
 
             string savedPath = outFile.Path;
-            try { _history.AddFile(savedPath); }
-            catch (Exception ex) { Log.Error("Failed to add edited video to history", ex); }
+            _ = Task.Run(() =>
+            {
+                try { _history.AddFile(savedPath); }
+                catch (Exception ex) { Log.Error("Failed to add edited video to history", ex); }
+            });
 
             StatusText.Text = $"Saved {outFile.Name}";
             Log.Info($"Edited video exported to {savedPath}");
-            new RecordingToastWindow(savedPath,
-                onEdit: () => new VideoEditorWindow(savedPath, _settings, _history).Show()).Show();
+            var toast = new FastRecordingToastWindow(
+                savedPath,
+                onEdit: () => new VideoEditorWindow(savedPath, _settings, _history).Show());
+            FastRecordingToastWindow.TrackFirstShown(toast, "edited video toast");
+            toast.Show();
         }
         catch (Exception ex)
         {
@@ -269,8 +310,7 @@ public partial class VideoEditorWindow : Window
             _exporting = false;
             BtnExport.IsEnabled = true;
             ExportProgress.Visibility = Visibility.Collapsed;
-            try { OpenPreview(); }
-            catch (Exception ex) { Log.Error("Failed to reopen preview after export", ex); }
+            OpenPreviewSafely();
         }
     }
 }

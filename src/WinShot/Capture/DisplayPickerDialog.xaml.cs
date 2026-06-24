@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -47,7 +49,21 @@ public partial class DisplayPickerDialog : Window
             return screens[0].Bounds;
 
         var dialog = new DisplayPickerDialog();
+        TrackFirstRender(dialog, "display picker");
         return dialog.ShowDialog() == true ? dialog._selected : null;
+    }
+
+    private static void TrackFirstRender(Window window, string metricName)
+    {
+        var sw = Stopwatch.StartNew();
+        EventHandler? handler = null;
+        handler = (_, _) =>
+        {
+            if (handler is not null)
+                window.ContentRendered -= handler;
+            Log.Info($"Perf {metricName} first render: {sw.ElapsedMilliseconds} ms");
+        };
+        window.ContentRendered += handler;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

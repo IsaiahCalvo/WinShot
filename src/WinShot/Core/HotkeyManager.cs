@@ -11,7 +11,7 @@ namespace WinShot.Core;
 public sealed class HotkeyManager : IDisposable
 {
     private const int WmHotkey = 0x0312;
-    private const uint ModAlt = 0x1, ModControl = 0x2, ModShift = 0x4, ModWin = 0x8, ModNoRepeat = 0x4000;
+    internal const uint ModAlt = 0x1, ModControl = 0x2, ModShift = 0x4, ModWin = 0x8, ModNoRepeat = 0x4000;
 
     private readonly HwndSource _source;
     private readonly Dictionary<int, Action> _handlers = new();
@@ -40,11 +40,7 @@ public sealed class HotkeyManager : IDisposable
             return false;
         }
 
-        uint fsMods = ModNoRepeat;
-        if (mods.HasFlag(ModifierKeys.Alt)) fsMods |= ModAlt;
-        if (mods.HasFlag(ModifierKeys.Control)) fsMods |= ModControl;
-        if (mods.HasFlag(ModifierKeys.Shift)) fsMods |= ModShift;
-        if (mods.HasFlag(ModifierKeys.Windows)) fsMods |= ModWin;
+        uint fsMods = ToRegisterHotKeyModifiers(mods);
 
         int id = _nextId++;
         uint vk = (uint)KeyInterop.VirtualKeyFromKey(key);
@@ -90,12 +86,62 @@ public sealed class HotkeyManager : IDisposable
         return key != Key.None;
     }
 
+    public static bool TryNormalizeGesture(string text, out string? normalized)
+    {
+        normalized = null;
+        if (!TryParseGesture(text, out var mods, out var key))
+            return false;
+
+        var parts = new List<string>(5);
+        if (mods.HasFlag(ModifierKeys.Windows)) parts.Add("Win");
+        if (mods.HasFlag(ModifierKeys.Control)) parts.Add("Ctrl");
+        if (mods.HasFlag(ModifierKeys.Alt)) parts.Add("Alt");
+        if (mods.HasFlag(ModifierKeys.Shift)) parts.Add("Shift");
+        parts.Add(KeyToDisplayName(key));
+        normalized = string.Join("+", parts);
+        return true;
+    }
+
+    internal static bool TryGetRegistrationParts(string gesture, out uint modifiers, out uint virtualKey)
+    {
+        modifiers = 0;
+        virtualKey = 0;
+        if (!TryParseGesture(gesture, out var mods, out var key))
+            return false;
+
+        modifiers = ToRegisterHotKeyModifiers(mods);
+        virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
+        return virtualKey != 0;
+    }
+
+    private static uint ToRegisterHotKeyModifiers(ModifierKeys mods)
+    {
+        uint fsMods = ModNoRepeat;
+        if (mods.HasFlag(ModifierKeys.Alt)) fsMods |= ModAlt;
+        if (mods.HasFlag(ModifierKeys.Control)) fsMods |= ModControl;
+        if (mods.HasFlag(ModifierKeys.Shift)) fsMods |= ModShift;
+        if (mods.HasFlag(ModifierKeys.Windows)) fsMods |= ModWin;
+        return fsMods;
+    }
+
+    private static string KeyToDisplayName(Key key)
+    {
+        if (key >= Key.D0 && key <= Key.D9)
+            return ((int)key - (int)Key.D0).ToString();
+        if (key >= Key.NumPad0 && key <= Key.NumPad9)
+            return "Num" + ((int)key - (int)Key.NumPad0);
+
+        string name = key.ToString();
+        return name.Length == 1 ? name.ToUpperInvariant() : name;
+    }
+
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == WmHotkey && _handlers.TryGetValue(wParam.ToInt32(), out var handler))
         {
             handled = true;
-            handler();
+            if (!HotkeyInputCapture.IsActive)
+                handler();
         }
         return IntPtr.Zero;
     }

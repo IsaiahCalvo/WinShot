@@ -236,8 +236,16 @@
                 <ComboBoxItem Content="Medium"/>
                 <ComboBoxItem Content="Low"/>
             </ComboBox>
+            <TextBlock Style="{StaticResource FieldLabel}" Text="FPS" Margin="18,0,0,0"/>
+            <ComboBox x:Name="FrameRateCombo" Width="86" Margin="8,0,0,0" Style="{StaticResource DarkCombo}" SelectedIndex="0">
+                <ComboBoxItem Content="Source"/>
+                <ComboBoxItem Content="60"/>
+                <ComboBoxItem Content="30"/>
+                <ComboBoxItem Content="15"/>
+            </ComboBox>
             <CheckBox x:Name="MuteCheck" Content="Mute" Margin="18,0,0,0"
                       Checked="OnMuteChanged" Unchecked="OnMuteChanged"/>
+            <CheckBox x:Name="MonoCheck" Content="Mono" Margin="12,0,0,0"/>
             <TextBlock Style="{StaticResource FieldLabel}" Text="Volume" Margin="18,0,8,0"/>
             <Slider x:Name="VolumeSlider" Width="110" Style="{StaticResource DarkSlider}" VerticalAlignment="Center"
                     Minimum="0" Maximum="1" Value="1" ValueChanged="OnVolumeChanged"/>

@@ -12,6 +12,12 @@ namespace WinShot.Recording;
 /// </summary>
 public partial class RecordingOptionsDialog : Window
 {
+    public static void Prewarm(Settings settings)
+    {
+        var dialog = new RecordingOptionsDialog(settings);
+        dialog.Close();
+    }
+
     public RecordingOptionsDialog(Settings settings)
     {
         InitializeComponent();
@@ -20,13 +26,15 @@ public partial class RecordingOptionsDialog : Window
         CursorCheck.IsChecked = settings.CaptureCursor;
         ClickHighlightCheck.IsChecked = settings.ShowClickHighlights;
         KeystrokeCheck.IsChecked = settings.ShowKeystrokes;
-        CountdownBox.Text = Math.Clamp(settings.RecordingCountdownSeconds, 0, 60).ToString();
-        WebcamCombo.SelectedIndex = settings.WebcamOverlayPosition switch
+        CountdownBox.Text = RecordingOptions.ClampCountdownSeconds(settings.RecordingCountdownSeconds).ToString();
+        WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(settings.WebcamOverlaySizePercent).ToString();
+        WebcamCombo.SelectedIndex = RecordingOptions.NormalizeWebcamPosition(settings.WebcamOverlayPosition) switch
         {
             "top-left" => 1,
             "top-right" => 2,
             "bottom-left" => 3,
             "bottom-right" => 4,
+            "fullscreen" => 5,
             _ => 0,
         };
     }
@@ -47,7 +55,9 @@ public partial class RecordingOptionsDialog : Window
 
     /// <summary>Pre-roll countdown in seconds; 0 = off.</summary>
     public int CountdownSeconds =>
-        int.TryParse(CountdownBox.Text.Trim(), out int s) ? Math.Clamp(s, 0, 60) : 0;
+        int.TryParse(CountdownBox.Text.Trim(), out int s)
+            ? RecordingOptions.ClampCountdownSeconds(s)
+            : RecordingOptions.MinCountdownSeconds;
 
     /// <summary>"off" or one of "top-left" / "top-right" / "bottom-left" / "bottom-right".</summary>
     public string WebcamPosition => WebcamCombo.SelectedIndex switch
@@ -56,8 +66,14 @@ public partial class RecordingOptionsDialog : Window
         2 => "top-right",
         3 => "bottom-left",
         4 => "bottom-right",
+        5 => "fullscreen",
         _ => "off",
     };
+
+    public int WebcamSizePercent =>
+        int.TryParse(WebcamSizeBox.Text.Trim(), out int percent)
+            ? RecordingOptions.ClampWebcamSizePercent(percent)
+            : RecordingOptions.DefaultWebcamSizePercent;
 
     protected override void OnKeyDown(KeyEventArgs e)
     {

@@ -2,10 +2,13 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Interop;
+using System.Windows.Threading;
 using WinShot.Core;
 using SD = System.Drawing;
 
@@ -28,7 +31,11 @@ public partial class HistoryWindow : Window
     private CancellationTokenSource? _loadCts;
     private string _filter = "all";
     private HistoryItem? _previewItem;
-    private QuickPreviewWindow? _preview;
+    private FastQuickPreviewWindow? _preview;
+    private bool _loadedOnce;
+    private bool _renderPrewarmed;
+    private bool _suppressRefreshOnLoad;
+    private bool _parkedVisible;
 
     public event Action<string>? EditRequested;
     public event Action<string>? PinRequested;
@@ -39,45 +46,208 @@ public partial class HistoryWindow : Window
         _history = history;
         _settings = settings;
         ItemsList.ItemsSource = _items;
-        Loaded += async (_, _) =>
+        Loaded += (_, _) =>
         {
-            int retentionDays = _settings.Current.HistoryRetentionDays;
-            if (retentionDays > 0)
-            {
-                try { await Task.Run(() => _history.PruneByAge(retentionDays)); }
-                catch (Exception ex) { Log.Error("History age prune failed", ex); }
-            }
-            await ReloadAsync();
+            _loadedOnce = true;
+            if (_suppressRefreshOnLoad) return;
+            Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                new Action(() => _ = RefreshOnShowAsync()));
         };
         Closed += (_, _) =>
         {
             _loadCts?.Cancel();
             _preview?.Close();
+            ClearLoadedItems();
+            MemoryCleanup.Request();
         };
     }
 
     /// <summary>Opens the history window, or activates the instance that is already open.</summary>
     public static HistoryWindow Show(HistoryService history, SettingsService settings)
     {
+        var total = Stopwatch.StartNew();
+        long createMs = 0;
+        long centerMs = 0;
+        long showMs = 0;
+        long activateMs = 0;
+        bool wasVisible = false;
+
         if (_instance is null)
         {
-            _instance = new HistoryWindow(history, settings);
-            _instance.Closed += (_, _) => _instance = null;
-            _instance.Show();
+            var create = Stopwatch.StartNew();
+            CreateInstance(history, settings);
+            createMs = create.ElapsedMilliseconds;
+        }
+
+        var instance = _instance ?? throw new InvalidOperationException("History window was not created.");
+        bool deferActivate = false;
+        wasVisible = instance.IsVisible;
+
+        if (instance._parkedVisible)
+        {
+            var center = Stopwatch.StartNew();
+            instance.RestoreParkedWindow();
+            centerMs = center.ElapsedMilliseconds;
+            if (instance._loadedOnce)
+                instance.Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() => _ = instance.RefreshOnShowAsync()));
+            deferActivate = true;
+        }
+        else if (!instance.IsVisible)
+        {
+            var center = Stopwatch.StartNew();
+            instance.ShowInTaskbar = true;
+            instance.CenterOnWorkArea();
+            centerMs = center.ElapsedMilliseconds;
+            var show = Stopwatch.StartNew();
+            instance.Show();
+            showMs = show.ElapsedMilliseconds;
+            if (instance._loadedOnce)
+                instance.Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() => _ = instance.RefreshOnShowAsync()));
+            deferActivate = true;
+        }
+        else if (instance.WindowState == WindowState.Minimized)
+        {
+            instance.WindowState = WindowState.Normal;
+        }
+
+        if (instance.Left < -10000 || instance.Top < -10000)
+            instance.CenterOnWorkArea();
+
+        if (deferActivate)
+        {
+            instance.Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                new Action(() => instance.Activate()));
         }
         else
         {
-            if (_instance.WindowState == WindowState.Minimized)
-                _instance.WindowState = WindowState.Normal;
-            _instance.Activate();
+            var activate = Stopwatch.StartNew();
+            instance.Activate();
+            activateMs = activate.ElapsedMilliseconds;
         }
-        return _instance;
+        if (total.ElapsedMilliseconds > 50)
+        {
+            Log.Info(
+                "Perf history window breakdown: " +
+                $"create={createMs} center={centerMs} show={showMs} " +
+                $"activate={activateMs} visible={wasVisible} total={total.ElapsedMilliseconds} ms");
+        }
+        return instance;
+    }
+
+    public static void Prewarm(HistoryService history, SettingsService settings)
+    {
+        if (_instance is null)
+            CreateInstance(history, settings);
+        _instance?.PrewarmRender();
+    }
+
+    private static void CreateInstance(HistoryService history, SettingsService settings)
+    {
+        _instance = new HistoryWindow(history, settings);
+        _instance.Closed += (_, _) => _instance = null;
+    }
+
+    private void PrewarmRender()
+    {
+        if (_renderPrewarmed || IsVisible) return;
+        _renderPrewarmed = true;
+
+        _suppressRefreshOnLoad = true;
+        ShowInTaskbar = false;
+        ShowActivated = false;
+        Opacity = 0;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        CenterOnWorkArea();
+
+        Show();
+        FlushPrewarmRender();
+        ParkWindow();
+        _suppressRefreshOnLoad = false;
+    }
+
+    private void CenterOnWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        Left = area.Left + (area.Width - Width) / 2;
+        Top = area.Top + (area.Height - Height) / 2;
+    }
+
+    private bool IsMostlyWithinWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        return Left < area.Right - 120 &&
+               Left + Width > area.Left + 120 &&
+               Top < area.Bottom - 80 &&
+               Top + Height > area.Top + 80;
+    }
+
+    private void RestoreParkedWindow()
+    {
+        if (!IsMostlyWithinWorkArea())
+            CenterOnWorkArea();
+        ShowInTaskbar = true;
+        Opacity = 1;
+        ApplyParkedWindowStyle(parked: false);
+        _parkedVisible = false;
+    }
+
+    private void ParkWindow()
+    {
+        Opacity = 0;
+        ApplyParkedWindowStyle(parked: true);
+        _parkedVisible = true;
+    }
+
+    private void ApplyParkedWindowStyle(bool parked)
+    {
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        int style = GetWindowLong(hwnd, GwlExStyle);
+        int parkedFlags = WsExTransparent;
+        int updated = parked ? style | parkedFlags : style & ~parkedFlags;
+        if (updated == style)
+            return;
+
+        SetWindowLong(hwnd, GwlExStyle, updated);
+    }
+
+    private void FlushPrewarmRender()
+    {
+        var frame = new DispatcherFrame();
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.ApplicationIdle,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Escape) Close();
         base.OnKeyDown(e);
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _parkedVisible = false;
+        ApplyParkedWindowStyle(parked: false);
+        base.OnClosing(e);
+    }
+
+    private void ClearLoadedItems()
+    {
+        foreach (var item in _allItems)
+            item.Thumbnail = null;
+        _allItems.Clear();
+        _items.Clear();
+        UpdateCount();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -98,28 +268,47 @@ public partial class HistoryWindow : Window
         var cts = _loadCts = new CancellationTokenSource();
         try
         {
-            var files = await Task.Run(_history.GetItems);
+            var files = await Task.Run(_history.GetItems).ConfigureAwait(false);
             if (cts.IsCancellationRequested) return;
 
-            _allItems.Clear();
-            foreach (string file in files)
-                _allItems.Add(new HistoryItem(file));
-            ApplyFilter();
+            var newItems = files.Select(file => new HistoryItem(file)).ToList();
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (cts.IsCancellationRequested) return;
+                _allItems.Clear();
+                _allItems.AddRange(newItems);
+                ApplyFilter();
+            });
 
             // Decode thumbnails one at a time on the pool; assignment happens back
             // on the UI thread after each await.
-            foreach (var item in _allItems.Where(i => i.IsImage).ToList())
+            foreach (var item in newItems.Where(i => i.IsImage))
             {
                 if (cts.IsCancellationRequested) return;
-                var thumbnail = await Task.Run(() => TryLoadThumbnail(item.FilePath));
+                var thumbnail = await Task.Run(() => TryLoadThumbnail(item.FilePath)).ConfigureAwait(false);
                 if (cts.IsCancellationRequested) return;
-                item.Thumbnail = thumbnail;
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (!cts.IsCancellationRequested)
+                        item.Thumbnail = thumbnail;
+                });
             }
         }
         catch (Exception ex)
         {
             Log.Error("Failed to load history", ex);
         }
+    }
+
+    private async Task RefreshOnShowAsync()
+    {
+        int retentionDays = _settings.Current.HistoryRetentionDays;
+        if (retentionDays > 0)
+        {
+            try { await Task.Run(() => _history.PruneByAge(retentionDays)).ConfigureAwait(false); }
+            catch (Exception ex) { Log.Error("History age prune failed", ex); }
+        }
+        await ReloadAsync().ConfigureAwait(false);
     }
 
     private static BitmapImage? TryLoadThumbnail(string path)
@@ -129,7 +318,7 @@ public partial class HistoryWindow : Window
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.UriSource = new Uri(path);
-            bmp.DecodePixelWidth = 360;
+            bmp.DecodePixelWidth = 180;
             bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
             bmp.EndInit();
@@ -186,7 +375,8 @@ public partial class HistoryWindow : Window
         if (target is null || !File.Exists(target.FilePath)) return;
 
         _preview?.Close();
-        var preview = new QuickPreviewWindow(target.FilePath) { Owner = this };
+        var preview = new FastQuickPreviewWindow(target.FilePath);
+        FastQuickPreviewWindow.TrackFirstShown(preview, "history quick preview");
         _preview = preview;
         preview.Closed += (_, _) =>
         {
@@ -213,14 +403,17 @@ public partial class HistoryWindow : Window
             OpenItem(item);
     }
 
-    private void OnCopy(object sender, RoutedEventArgs e)
+    private async void OnCopy(object sender, RoutedEventArgs e)
     {
         if (GetItem(sender) is not { IsImage: true } item) return;
         try
         {
-            using var stream = File.OpenRead(item.FilePath);
-            using var bmp = new SD.Bitmap(stream);
-            CaptureService.CopyToClipboard(bmp);
+            var bmp = await Task.Run(() =>
+            {
+                using var stream = File.OpenRead(item.FilePath);
+                return new SD.Bitmap(stream);
+            });
+            await CaptureService.CopyToClipboardAsync(bmp, takeOwnership: true);
         }
         catch (Exception ex)
         {
@@ -259,10 +452,18 @@ public partial class HistoryWindow : Window
         }
     }
 
-    private void OnDelete(object sender, RoutedEventArgs e)
+    private async void OnDelete(object sender, RoutedEventArgs e)
     {
         if (GetItem(sender) is not { } item) return;
-        _history.Delete(item.FilePath);
+        try
+        {
+            await Task.Run(() => _history.Delete(item.FilePath));
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to delete history item {item.FilePath}", ex);
+            return;
+        }
         _allItems.Remove(item);
         _items.Remove(item);
         if (ReferenceEquals(_previewItem, item)) _previewItem = null;
@@ -283,6 +484,15 @@ public partial class HistoryWindow : Window
 
     private static HistoryItem? GetItem(object sender) =>
         (sender as FrameworkElement)?.DataContext as HistoryItem;
+
+    private const int GwlExStyle = -20;
+    private const int WsExTransparent = 0x00000020;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 }
 
 /// <summary>One history file shown as a tile. GIFs deliberately count as media,

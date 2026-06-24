@@ -12,8 +12,6 @@ namespace WinShot.Editor;
 /// </summary>
 public partial class ResizeDialog : Window
 {
-    private const int MaxDimension = 20000;
-
     private readonly int _originalWidth;
     private readonly int _originalHeight;
     private bool _updating;
@@ -52,10 +50,15 @@ public partial class ResizeDialog : Window
             return;
         }
         _updating = true;
-        if (LockRatio.IsChecked == true)
-            HeightBox.Text = Math.Max(1,
-                (int)Math.Round(w * _originalHeight / (double)_originalWidth)).ToString();
-        PercentBox.Text = Math.Round(w * 100.0 / _originalWidth).ToString();
+        var layout = ResizeLayout.FromWidth(
+            _originalWidth,
+            _originalHeight,
+            CurrentOrOriginalHeight(),
+            w,
+            LockRatio.IsChecked == true);
+        WidthBox.Text = layout.Width.ToString();
+        HeightBox.Text = layout.Height.ToString();
+        PercentBox.Text = layout.Percent.ToString();
         _updating = false;
         UpdateInfo();
     }
@@ -69,12 +72,15 @@ public partial class ResizeDialog : Window
             return;
         }
         _updating = true;
-        if (LockRatio.IsChecked == true)
-        {
-            WidthBox.Text = Math.Max(1,
-                (int)Math.Round(h * _originalWidth / (double)_originalHeight)).ToString();
-            PercentBox.Text = Math.Round(h * 100.0 / _originalHeight).ToString();
-        }
+        var layout = ResizeLayout.FromHeight(
+            _originalWidth,
+            _originalHeight,
+            CurrentOrOriginalWidth(),
+            h,
+            LockRatio.IsChecked == true);
+        WidthBox.Text = layout.Width.ToString();
+        HeightBox.Text = layout.Height.ToString();
+        PercentBox.Text = layout.Percent.ToString();
         _updating = false;
         UpdateInfo();
     }
@@ -88,8 +94,10 @@ public partial class ResizeDialog : Window
             return;
         }
         _updating = true;
-        WidthBox.Text = Math.Max(1, (int)Math.Round(_originalWidth * pct / 100.0)).ToString();
-        HeightBox.Text = Math.Max(1, (int)Math.Round(_originalHeight * pct / 100.0)).ToString();
+        var layout = ResizeLayout.FromPercent(_originalWidth, _originalHeight, pct);
+        WidthBox.Text = layout.Width.ToString();
+        HeightBox.Text = layout.Height.ToString();
+        PercentBox.Text = layout.Percent.ToString();
         _updating = false;
         UpdateInfo();
     }
@@ -104,7 +112,7 @@ public partial class ResizeDialog : Window
     {
         if (!int.TryParse(WidthBox.Text, out int w) || !int.TryParse(HeightBox.Text, out int h))
             return null;
-        if (w < 1 || h < 1 || w > MaxDimension || h > MaxDimension)
+        if (!ResizeLayout.IsValid(w, h))
             return null;
         return (w, h);
     }
@@ -113,7 +121,7 @@ public partial class ResizeDialog : Window
     {
         InfoText.Text = Validate() is { } size
             ? $"{_originalWidth} × {_originalHeight} px  →  {size.Width} × {size.Height} px"
-            : $"Enter a size between 1 and {MaxDimension} px.";
+            : $"Enter a size between 1 and {ResizeLayout.MaxDimension} px.";
     }
 
     private void OnOk(object sender, RoutedEventArgs e)
@@ -127,4 +135,10 @@ public partial class ResizeDialog : Window
         ResultHeight = size.Height;
         DialogResult = true;
     }
+
+    private int CurrentOrOriginalWidth() =>
+        int.TryParse(WidthBox.Text, out int width) && width > 0 ? width : _originalWidth;
+
+    private int CurrentOrOriginalHeight() =>
+        int.TryParse(HeightBox.Text, out int height) && height > 0 ? height : _originalHeight;
 }

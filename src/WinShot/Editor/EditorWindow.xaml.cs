@@ -31,6 +31,8 @@ public partial class EditorWindow : Window
     private const string SaveDialogFilter =
         "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp|WinShot project|*.winshot";
 
+    private static EditorWindow? _prewarmInstance;
+
     private readonly SettingsService _settings;
     private readonly HistoryService _history;
 
@@ -55,6 +57,7 @@ public partial class EditorWindow : Window
     private double? _cropRatio; // null = free
     private EditorTool _toolBeforeEyedropper = EditorTool.Select;
     private string _pendingEmoji = "😀";
+    private bool _emojiPaletteBuilt;
 
     /// <summary>Path of the .winshot project this session was opened from / saved to, if any.</summary>
     private string? _projectPath;
@@ -76,6 +79,7 @@ public partial class EditorWindow : Window
 
     // Drawing state.
     private bool _dragging;
+    private bool _sourceOperationActive;
     private Point _dragStart;
     private Shape? _activeShape;
     private TextBox? _activeText;
@@ -86,17 +90,34 @@ public partial class EditorWindow : Window
     private bool _movingSelection;
     private Point _moveLast;   // content coords
     private Vector _moveTotal; // accumulated drag delta for the undo record
+    private bool _replenishPrewarmOnClose;
 
     public EditorWindow(SD.Bitmap source, SettingsService settings, HistoryService history)
+        : this(source, settings, history, loadSourceImage: true)
     {
+    }
+
+    private EditorWindow(SD.Bitmap source, SettingsService settings, HistoryService history, bool loadSourceImage)
+    {
+        ThemeResources.EnsureLoaded();
         InitializeComponent();
         _source = source;
         _owned.Add(source);
         _settings = settings;
         _history = history;
 
-        RefreshImage();
         SetSurfaceSize(source.Width, source.Height);
+        if (loadSourceImage)
+        {
+            _sourceOperationActive = true;
+            Cursor = Cursors.Wait;
+            ContentRendered += OnInitialContentRendered;
+        }
+        else
+        {
+            _sourceOperationActive = false;
+        }
+        ContentRendered += OnChromeContentRendered;
 
         // The viewport zooms/pans instead of the window sizing itself to the
         // image, so a sensible default footprint is enough; the image is
@@ -122,11 +143,169 @@ public partial class EditorWindow : Window
         {
             foreach (var bmp in _owned) bmp.Dispose();
             _owned.Clear();
+            MemoryCleanup.Request();
+            if (_replenishPrewarmOnClose)
+                Dispatcher.BeginInvoke(
+                    DispatcherPriority.ApplicationIdle,
+                    new Action(() => Prewarm(_settings, _history)));
         };
         UpdateCursor();
     }
 
-    private void RefreshImage() => BaseImage.Source = CaptureService.ToBitmapSource(_source);
+    private void OnInitialContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= OnInitialContentRendered;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => _ = LoadInitialSourceImageAsync()));
+    }
+
+    private void OnChromeContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= OnChromeContentRendered;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                EditorStyleBar.Visibility = Visibility.Visible;
+                EditorBottomBar.Visibility = Visibility.Visible;
+            }));
+    }
+
+    public static void Prewarm(SettingsService settings, HistoryService history)
+    {
+        try
+        {
+            if (_prewarmInstance is not null)
+                return;
+
+            var bitmap = new SD.Bitmap(1, 1);
+            var window = new EditorWindow(bitmap, settings, history, loadSourceImage: false)
+            {
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                Opacity = 0,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+            };
+            window.Closed += (_, _) => _prewarmInstance = null;
+            _prewarmInstance = window;
+            window.Show();
+            FlushPrewarmRender(window.Dispatcher);
+            window.Hide();
+        }
+        catch (Exception ex)
+        {
+            _prewarmInstance = null;
+            Log.Error("Editor prewarm failed", ex);
+        }
+    }
+
+    public static EditorWindow CreateForCapture(SD.Bitmap source, SettingsService settings, HistoryService history)
+    {
+        if (_prewarmInstance is { } window && ReferenceEquals(window._settings, settings) && ReferenceEquals(window._history, history))
+        {
+            _prewarmInstance = null;
+            window.ResetForSource(source);
+            window._replenishPrewarmOnClose = false;
+            return window;
+        }
+
+        return new EditorWindow(source, settings, history);
+    }
+
+    private void ResetForSource(SD.Bitmap source)
+    {
+        foreach (var bmp in _owned) bmp.Dispose();
+        _owned.Clear();
+        _source = source;
+        _owned.Add(source);
+
+        _undoStack.Clear();
+        _redoStack.Clear();
+        _projectPath = null;
+        _selected = null;
+        _activeShape = null;
+        _activeText = null;
+        _pendingCurve = null;
+        _pendingCrop = null;
+        _dragging = false;
+        _panning = false;
+        _movingSelection = false;
+        _sourceOperationActive = true;
+
+        BaseImage.Source = null;
+        AnnotationCanvas.Children.Clear();
+        InteractionCanvas.Children.Clear();
+        InteractionCanvas.Children.Add(CropDim);
+        InteractionCanvas.Children.Add(DragRect);
+        InteractionCanvas.Children.Add(SelectionRect);
+        InteractionCanvas.Children.Add(CurveHandle);
+        InteractionCanvas.Children.Add(EyedropSwatch);
+        CropDim.Visibility = Visibility.Collapsed;
+        DragRect.Visibility = Visibility.Collapsed;
+        SelectionRect.Visibility = Visibility.Collapsed;
+        CurveHandle.Visibility = Visibility.Collapsed;
+        EyedropSwatch.Visibility = Visibility.Collapsed;
+        CropPanel.Visibility = Visibility.Collapsed;
+        TextStylePanel.Visibility = Visibility.Collapsed;
+        CropRatioPanel.Visibility = Visibility.Collapsed;
+
+        Width = Math.Min(1240, SystemParameters.WorkArea.Width * 0.9);
+        Height = Math.Min(800, SystemParameters.WorkArea.Height * 0.9);
+        CenterOnWorkArea();
+        Opacity = 1;
+        ShowInTaskbar = true;
+        ShowActivated = true;
+        WindowState = WindowState.Normal;
+        Cursor = Cursors.Wait;
+        SetSurfaceSize(source.Width, source.Height);
+        FitToView();
+        UpdateUndoRedoButtons();
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => _ = LoadInitialSourceImageAsync()));
+    }
+
+    private void CenterOnWorkArea()
+    {
+        var wa = SystemParameters.WorkArea;
+        Left = Math.Round(wa.Left + Math.Max(0, (wa.Width - Width) / 2));
+        Top = Math.Round(wa.Top + Math.Max(0, (wa.Height - Height) / 2));
+    }
+
+    private static void FlushPrewarmRender(Dispatcher dispatcher)
+    {
+        var frame = new DispatcherFrame();
+        dispatcher.BeginInvoke(
+            DispatcherPriority.ApplicationIdle,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+    }
+
+    private async Task LoadInitialSourceImageAsync()
+    {
+        try
+        {
+            await RefreshImageAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to load editor image", ex);
+        }
+        finally
+        {
+            _sourceOperationActive = false;
+            UpdateCursor();
+        }
+    }
+
+    private async Task RefreshImageAsync()
+    {
+        var source = await CaptureService.ToBitmapSourceSnapshotAsync(_source);
+        await Dispatcher.InvokeAsync(() => BaseImage.Source = source);
+    }
 
     private void SetSurfaceSize(double w, double h)
     {
@@ -341,7 +520,38 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void OnEmojiButtonClick(object sender, RoutedEventArgs e) => EmojiPopup.IsOpen = true;
+    private void OnEmojiButtonClick(object sender, RoutedEventArgs e)
+    {
+        BuildEmojiPalette();
+        EmojiPopup.IsOpen = true;
+    }
+
+    private void BuildEmojiPalette()
+    {
+        if (_emojiPaletteBuilt)
+            return;
+
+        _emojiPaletteBuilt = true;
+        var style = (Style)FindResource("EmojiButton");
+        string[] emojis =
+        [
+            "\U0001F600", "\U0001F605", "\U0001F602", "\U0001F60D", "\U0001F914", "\U0001F60E",
+            "\U0001F622", "\U0001F621", "\U0001F44D", "\U0001F44E", "\U0001F44F", "\U0001F64F",
+            "\U0001F440", "\U0001F4AA", "\u2764\uFE0F", "\U0001F525", "\u2B50", "\U0001F389",
+            "\u2705", "\u274C", "\u26A0\uFE0F", "\u2757", "\U0001F4A1", "\U0001F680",
+        ];
+
+        foreach (string emoji in emojis)
+        {
+            var button = new Button
+            {
+                Style = style,
+                Content = emoji,
+            };
+            button.Click += OnEmojiPicked;
+            EmojiGrid.Children.Add(button);
+        }
+    }
 
     private void OnEmojiPicked(object sender, RoutedEventArgs e)
     {
@@ -356,6 +566,7 @@ public partial class EditorWindow : Window
 
     private void OnViewportMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (_sourceOperationActive) return;
         bool panGesture = e.ChangedButton == MouseButton.Middle ||
             (e.ChangedButton == MouseButton.Left && (_spaceDown || _tool == EditorTool.Pan));
         if (panGesture)
@@ -397,6 +608,7 @@ public partial class EditorWindow : Window
 
     private void OnViewportMouseMove(object sender, MouseEventArgs e)
     {
+        if (_sourceOperationActive) return;
         if (_panning)
         {
             var p = e.GetPosition(Viewport);
@@ -473,6 +685,7 @@ public partial class EditorWindow : Window
 
     private void OnViewportMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_sourceOperationActive) return;
         if (_panning && e.ChangedButton is MouseButton.Middle or MouseButton.Left)
         {
             EndPan();
@@ -667,7 +880,7 @@ public partial class EditorWindow : Window
                     Stroke = brush,
                     StrokeThickness = _thickness,
                     RadiusX = 2, RadiusY = 2,
-                    Fill = ShapeFill(),
+                    Fill = ShapeFillBrush.Create(_fillMode, _color),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -677,7 +890,7 @@ public partial class EditorWindow : Window
                 {
                     Stroke = brush,
                     StrokeThickness = _thickness,
-                    Fill = ShapeFill(),
+                    Fill = ShapeFillBrush.Create(_fillMode, _color),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -723,14 +936,6 @@ public partial class EditorWindow : Window
             AnnotationCanvas.Children.Add(_activeShape);
     }
 
-    /// <summary>Fill brush for new rectangles/ellipses per the toolbar fill toggle.</summary>
-    private Brush? ShapeFill() => _fillMode switch
-    {
-        ShapeFillMode.Quarter => new SolidColorBrush(Color.FromArgb(0x40, _color.R, _color.G, _color.B)),
-        ShapeFillMode.Solid => new SolidColorBrush(_color),
-        _ => null,
-    };
-
     /// <summary>Stroke color of a committed shape — the project metadata's source of truth.</summary>
     private static Color StrokeColorOf(Shape shape) =>
         shape.Stroke is SolidColorBrush brush ? brush.Color : Colors.White;
@@ -763,55 +968,15 @@ public partial class EditorWindow : Window
 
     /// <summary>
     /// Crop selection from the drag anchor to <paramref name="pos"/>: constrained to
-    /// the preset ratio when one is active, and with edges snapped to the image
-    /// edges within <see cref="CropSnapPx"/> content px.
+    /// the preset ratio when one is active, and with edges snapped to the image.
     /// </summary>
-    private Rect CropSelectionRect(Point pos)
-    {
-        Point p = ClampToSurface(pos);
-
-        if (_cropRatio is not double ratio || ratio <= 0)
-            return SnapRectEdges(new Rect(_dragStart, p));
-
-        double dx = p.X - _dragStart.X, dy = p.Y - _dragStart.Y;
-        double sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
-        double w = Math.Abs(dx), h = Math.Abs(dy);
-
-        // Follow the dominant drag axis, then shrink to stay inside the image.
-        if (w < h * ratio) w = h * ratio;
-        else h = w / ratio;
-        double maxW = sx > 0 ? _source.Width - _dragStart.X : _dragStart.X;
-        double maxH = sy > 0 ? _source.Height - _dragStart.Y : _dragStart.Y;
-        if (w > maxW) { w = maxW; h = w / ratio; }
-        if (h > maxH) { h = maxH; w = h * ratio; }
-
-        var r = new Rect(_dragStart, new Point(_dragStart.X + sx * w, _dragStart.Y + sy * h));
-        return SnapRectTranslate(r);
-    }
-
-    /// <summary>Free-ratio snap: each edge near an image edge is pulled onto it.</summary>
-    private Rect SnapRectEdges(Rect r)
-    {
-        double left = r.Left, top = r.Top, right = r.Right, bottom = r.Bottom;
-        if (Math.Abs(left) <= CropSnapPx) left = 0;
-        if (Math.Abs(top) <= CropSnapPx) top = 0;
-        if (Math.Abs(right - _source.Width) <= CropSnapPx) right = _source.Width;
-        if (Math.Abs(bottom - _source.Height) <= CropSnapPx) bottom = _source.Height;
-        return new Rect(new Point(left, top), new Point(right, bottom));
-    }
-
-    /// <summary>Fixed-ratio snap: translate (never resize) so the aspect ratio is preserved.</summary>
-    private Rect SnapRectTranslate(Rect r)
-    {
-        double x = r.X, y = r.Y;
-        if (Math.Abs(r.Left) <= CropSnapPx) x = 0;
-        else if (Math.Abs(r.Right - _source.Width) <= CropSnapPx) x = _source.Width - r.Width;
-        if (Math.Abs(r.Top) <= CropSnapPx) y = 0;
-        else if (Math.Abs(r.Bottom - _source.Height) <= CropSnapPx) y = _source.Height - r.Height;
-        x = Math.Clamp(x, 0, Math.Max(0, _source.Width - r.Width));
-        y = Math.Clamp(y, 0, Math.Max(0, _source.Height - r.Height));
-        return new Rect(x, y, r.Width, r.Height);
-    }
+    private Rect CropSelectionRect(Point pos) =>
+        CropSelectionLayout.Calculate(
+            new Size(_source.Width, _source.Height),
+            _dragStart,
+            pos,
+            _cropRatio,
+            CropSnapPx);
 
     // ------------------------------------------------------ curved arrow tool
 
@@ -877,10 +1042,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void SampleEyedropper(Point pos)
     {
-        int x = Math.Clamp((int)Math.Floor(pos.X), 0, _source.Width - 1);
-        int y = Math.Clamp((int)Math.Floor(pos.Y), 0, _source.Height - 1);
-        var px = _source.GetPixel(x, y);
-        SetCurrentColor(Color.FromRgb(px.R, px.G, px.B));
+        SetCurrentColor(EyedropperSampler.SampleClamped(_source, pos));
         ClearSwatchSelection(); // a sampled color rarely matches a preset swatch
         EyedropSwatch.Visibility = Visibility.Collapsed;
         CheckToolButton(_toolBeforeEyedropper);
@@ -889,26 +1051,18 @@ public partial class EditorWindow : Window
     /// <summary>Hover preview: a small swatch + hex readout near the cursor while the eyedropper is active.</summary>
     private void UpdateEyedropperSwatch(Point pos)
     {
-        int x = (int)Math.Floor(pos.X), y = (int)Math.Floor(pos.Y);
-        if (x < 0 || y < 0 || x >= _source.Width || y >= _source.Height)
+        EyedropperPreview preview = EyedropperSampler.Preview(_source, pos, _zoom);
+        if (!preview.Visible)
         {
             EyedropSwatch.Visibility = Visibility.Collapsed;
             return;
         }
-        var px = _source.GetPixel(x, y);
-        EyedropColorRect.Fill = new SolidColorBrush(Color.FromRgb(px.R, px.G, px.B));
-        EyedropHexText.Text = $"#{px.R:X2}{px.G:X2}{px.B:X2}";
 
-        // Counter-scale so the swatch stays a constant screen size at any zoom,
-        // and flip to the other side of the cursor near the right/bottom edges.
-        double s = 1 / _zoom;
-        EyedropSwatch.RenderTransform = new ScaleTransform(s, s);
-        double left = pos.X + 16 * s;
-        double top = pos.Y + 16 * s;
-        if (pos.X > _source.Width - 110 * s) left = pos.X - 16 * s - 96 * s;
-        if (pos.Y > _source.Height - 44 * s) top = pos.Y - 16 * s - 28 * s;
-        Canvas.SetLeft(EyedropSwatch, left);
-        Canvas.SetTop(EyedropSwatch, top);
+        EyedropColorRect.Fill = new SolidColorBrush(preview.Color);
+        EyedropHexText.Text = preview.Hex;
+        EyedropSwatch.RenderTransform = new ScaleTransform(preview.Scale, preview.Scale);
+        Canvas.SetLeft(EyedropSwatch, preview.Left);
+        Canvas.SetTop(EyedropSwatch, preview.Top);
         EyedropSwatch.Visibility = Visibility.Visible;
     }
 
@@ -1223,29 +1377,40 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------------------------------ blur
 
-    private void ApplyBlur(SD.Rectangle region)
+    private async void ApplyBlur(SD.Rectangle region)
     {
+        if (_sourceOperationActive) return;
         region.Intersect(new SD.Rectangle(0, 0, _source.Width, _source.Height));
         if (region.Width < 2 || region.Height < 2) return;
 
         var backup = _source.Clone(region, _source.PixelFormat);
         _owned.Add(backup);
         var r = region;
+        if (!await ApplySourceRegionEffectAsync(
+                () => BitmapEffects.Blur(_source, r),
+                "Blur failed"))
+        {
+            if (_owned.Remove(backup)) backup.Dispose();
+            return;
+        }
+
         Push(new EditorAction(
-            undo: () =>
+            undo: async () =>
             {
-                BitmapEffects.RestoreRegion(_source, backup, r);
-                RefreshImage();
+                await ApplySourceRegionEffectAsync(
+                    () => BitmapEffects.RestoreRegion(_source, backup, r),
+                    "Blur undo failed");
             },
-            redo: () =>
+            redo: async () =>
             {
-                BitmapEffects.Blur(_source, r);
-                RefreshImage();
+                await ApplySourceRegionEffectAsync(
+                    () => BitmapEffects.Blur(_source, r),
+                    "Blur redo failed");
             },
             onDiscard: () =>
             {
                 if (_owned.Remove(backup)) backup.Dispose();
-            }));
+            }), apply: false);
     }
 
     /// <summary>
@@ -1253,8 +1418,9 @@ public partial class EditorWindow : Window
     /// jitter so the censored text cannot be reconstructed. The seed is captured per
     /// action, which keeps undo → redo byte-identical.
     /// </summary>
-    private void ApplyPixelate(SD.Rectangle region)
+    private async void ApplyPixelate(SD.Rectangle region)
     {
+        if (_sourceOperationActive) return;
         region.Intersect(new SD.Rectangle(0, 0, _source.Width, _source.Height));
         if (region.Width < 2 || region.Height < 2) return;
 
@@ -1262,27 +1428,60 @@ public partial class EditorWindow : Window
         _owned.Add(backup);
         var r = region;
         int seed = ToolRandom.Next();
+        if (!await ApplySourceRegionEffectAsync(
+                () => BitmapEffects.PixelateRandomized(_source, r, seed),
+                "Pixelate failed"))
+        {
+            if (_owned.Remove(backup)) backup.Dispose();
+            return;
+        }
+
         Push(new EditorAction(
-            undo: () =>
+            undo: async () =>
             {
-                BitmapEffects.RestoreRegion(_source, backup, r);
-                RefreshImage();
+                await ApplySourceRegionEffectAsync(
+                    () => BitmapEffects.RestoreRegion(_source, backup, r),
+                    "Pixelate undo failed");
             },
-            redo: () =>
+            redo: async () =>
             {
-                BitmapEffects.PixelateRandomized(_source, r, seed);
-                RefreshImage();
+                await ApplySourceRegionEffectAsync(
+                    () => BitmapEffects.PixelateRandomized(_source, r, seed),
+                    "Pixelate redo failed");
             },
             onDiscard: () =>
             {
                 if (_owned.Remove(backup)) backup.Dispose();
-            }));
+            }), apply: false);
+    }
+
+    private async Task<bool> ApplySourceRegionEffectAsync(Action effect, string logContext)
+    {
+        _sourceOperationActive = true;
+        Cursor = Cursors.Wait;
+        try
+        {
+            await Task.Run(effect);
+            await RefreshImageAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(logContext, ex);
+            return false;
+        }
+        finally
+        {
+            _sourceOperationActive = false;
+            UpdateCursor();
+        }
     }
 
     // ------------------------------------------------------------------ crop
 
     private void OnApplyCrop(object sender, RoutedEventArgs e)
     {
+        if (_sourceOperationActive) return;
         if (_pendingCrop is not SD.Rectangle region)
         {
             ClearCropPreview();
@@ -1303,25 +1502,35 @@ public partial class EditorWindow : Window
         _owned.Add(after);
 
         Push(new EditorAction(
-            undo: () =>
+            undo: async () =>
             {
                 _source = before;
-                OnSourceReplaced();
+                await OnSourceReplacedAsync();
                 ShiftAnnotations(region.X, region.Y);
             },
-            redo: () =>
+            redo: async () =>
             {
                 _source = after;
-                OnSourceReplaced();
+                await OnSourceReplacedAsync();
                 ShiftAnnotations(-region.X, -region.Y);
             }));
     }
 
     private void OnCancelCrop(object sender, RoutedEventArgs e) => ClearCropPreview();
 
-    private void OnSourceReplaced()
+    private async Task OnSourceReplacedAsync()
     {
-        RefreshImage();
+        _sourceOperationActive = true;
+        Cursor = Cursors.Wait;
+        try
+        {
+            await RefreshImageAsync();
+        }
+        finally
+        {
+            _sourceOperationActive = false;
+            UpdateCursor();
+        }
         SetSurfaceSize(_source.Width, _source.Height);
         Select(null);
         FitToView();
@@ -1336,20 +1545,33 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------------- rotate / flip / resize
 
-    private void OnRotateCw(object sender, RoutedEventArgs e) =>
+    private void OnRotateCw(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
         ApplySourceTransform(SD.RotateFlipType.Rotate90FlipNone);
+    }
 
-    private void OnRotateCcw(object sender, RoutedEventArgs e) =>
+    private void OnRotateCcw(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
         ApplySourceTransform(SD.RotateFlipType.Rotate270FlipNone);
+    }
 
-    private void OnFlipHorizontal(object sender, RoutedEventArgs e) =>
+    private void OnFlipHorizontal(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
         ApplySourceTransform(SD.RotateFlipType.RotateNoneFlipX);
+    }
 
-    private void OnFlipVertical(object sender, RoutedEventArgs e) =>
+    private void OnFlipVertical(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
         ApplySourceTransform(SD.RotateFlipType.RotateNoneFlipY);
+    }
 
     private void OnResizeImage(object sender, RoutedEventArgs e)
     {
+        if (_sourceOperationActive) return;
         CommitText();
         CommitPendingCurve();
         var dialog = new ResizeDialog(_source.Width, _source.Height) { Owner = this };
@@ -1360,12 +1582,7 @@ public partial class EditorWindow : Window
     }
 
     private void ApplySourceTransform(SD.RotateFlipType type) =>
-        ApplySourceTransform(src =>
-        {
-            var copy = new SD.Bitmap(src);
-            copy.RotateFlip(type);
-            return copy;
-        });
+        ApplySourceTransform(src => SourceImageTransform.RotateFlip(src, type));
 
     /// <summary>
     /// Replaces the source bitmap with a transformed copy (rotate/flip/resize) as a
@@ -1373,8 +1590,9 @@ public partial class EditorWindow : Window
     /// they are flattened into the image first; undo restores both the previous bitmap
     /// and the live annotations in one step.
     /// </summary>
-    private void ApplySourceTransform(Func<SD.Bitmap, SD.Bitmap> transform)
+    private async void ApplySourceTransform(Func<SD.Bitmap, SD.Bitmap> transform)
     {
+        if (_sourceOperationActive) return;
         CommitText();
         CommitPendingCurve();
         ClearCropPreview();
@@ -1391,32 +1609,46 @@ public partial class EditorWindow : Window
         SD.Bitmap before = _source;
         SD.Bitmap flat = annotations.Count > 0 ? Flatten() : before;
         SD.Bitmap after;
+        _sourceOperationActive = true;
+        Cursor = Cursors.Wait;
         try
         {
-            after = transform(flat);
+            after = await Task.Run(() => transform(flat));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Source transform failed", ex);
+            return;
         }
         finally
         {
+            _sourceOperationActive = false;
+            UpdateCursor();
             if (!ReferenceEquals(flat, before)) flat.Dispose(); // temp flatten only
         }
         _owned.Add(after);
 
+        foreach (var el in annotations)
+            AnnotationCanvas.Children.Remove(el);
+        _source = after;
+        await OnSourceReplacedAsync();
+
         Push(new EditorAction(
-            undo: () =>
+            undo: async () =>
             {
                 _source = before;
                 foreach (var el in annotations)
                     if (!AnnotationCanvas.Children.Contains(el))
                         AnnotationCanvas.Children.Add(el);
-                OnSourceReplaced();
+                await OnSourceReplacedAsync();
             },
-            redo: () =>
+            redo: async () =>
             {
                 foreach (var el in annotations)
                     AnnotationCanvas.Children.Remove(el);
                 _source = after;
-                OnSourceReplaced();
-            }));
+                await OnSourceReplacedAsync();
+            }), apply: false);
     }
 
     private void ShowDragRect(Rect r, bool dim)
@@ -1477,31 +1709,31 @@ public partial class EditorWindow : Window
             }), apply: false);
     }
 
-    private void OnUndo(object sender, RoutedEventArgs e) => Undo();
-    private void OnRedo(object sender, RoutedEventArgs e) => Redo();
+    private async void OnUndo(object sender, RoutedEventArgs e) => await UndoAsync();
+    private async void OnRedo(object sender, RoutedEventArgs e) => await RedoAsync();
 
-    private void Undo()
+    private async Task UndoAsync()
     {
-        if (_dragging || _movingSelection || _draggingCurveHandle) return;
+        if (_sourceOperationActive || _dragging || _movingSelection || _draggingCurveHandle) return;
         CommitText();
         CommitPendingCurve();
         ClearCropPreview();
         Select(null); // the undone action may remove or reshape the selected element
         if (_undoStack.Count == 0) return;
         var action = _undoStack.Pop();
-        action.Undo();
+        await action.UndoAsync();
         _redoStack.Push(action);
         UpdateUndoRedoButtons();
     }
 
-    private void Redo()
+    private async Task RedoAsync()
     {
-        if (_dragging || _movingSelection || _draggingCurveHandle) return;
+        if (_sourceOperationActive || _dragging || _movingSelection || _draggingCurveHandle) return;
         CommitPendingCurve(); // a pending curve is a new edit: it clears redo, like any other
         if (_redoStack.Count == 0) return;
         Select(null);
         var action = _redoStack.Pop();
-        action.Redo();
+        await action.RedoAsync();
         _undoStack.Push(action);
         UpdateUndoRedoButtons();
     }
@@ -1530,8 +1762,8 @@ public partial class EditorWindow : Window
         }
         if (Keyboard.Modifiers == ModifierKeys.Control)
         {
-            if (e.Key == Key.Z) { Undo(); e.Handled = true; }
-            else if (e.Key == Key.Y) { Redo(); e.Handled = true; }
+            if (e.Key == Key.Z) { _ = UndoAsync(); e.Handled = true; }
+            else if (e.Key == Key.Y) { _ = RedoAsync(); e.Handled = true; }
             else if (e.Key is Key.D0 or Key.NumPad0) { FitToView(); e.Handled = true; }
         }
         else if (e.Key == Key.Delete)
@@ -1586,8 +1818,9 @@ public partial class EditorWindow : Window
     // ------------------------------------------------------ image annotations
 
     /// <summary>"Add image…" toolbar button: inserts picked files at the viewport center.</summary>
-    private void OnAddImage(object sender, RoutedEventArgs e)
+    private async void OnAddImage(object sender, RoutedEventArgs e)
     {
+        if (_sourceOperationActive) return;
         CommitText();
         CommitPendingCurve();
         var dialog = new OpenFileDialog
@@ -1596,7 +1829,7 @@ public partial class EditorWindow : Window
             Multiselect = true,
         };
         if (dialog.ShowDialog(this) != true) return;
-        InsertImageFiles(dialog.FileNames, ViewportCenterInContent());
+        await InsertImageFilesAsync(dialog.FileNames, ViewportCenterInContent());
     }
 
     private void OnEditorDragOver(object sender, DragEventArgs e)
@@ -1607,13 +1840,14 @@ public partial class EditorWindow : Window
         e.Handled = true;
     }
 
-    private void OnEditorDrop(object sender, DragEventArgs e)
+    private async void OnEditorDrop(object sender, DragEventArgs e)
     {
+        if (_sourceOperationActive) return;
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0)
             return;
         CommitText();
         CommitPendingCurve();
-        InsertImageFiles(files, e.GetPosition(AnnotationCanvas));
+        await InsertImageFilesAsync(files, e.GetPosition(AnnotationCanvas));
         e.Handled = true;
     }
 
@@ -1627,14 +1861,15 @@ public partial class EditorWindow : Window
     /// <paramref name="dropPoint"/> (cascaded slightly for multiple files),
     /// then switches to Select with the last one selected so it can be moved.
     /// </summary>
-    private void InsertImageFiles(IEnumerable<string> files, Point dropPoint)
+    private async Task InsertImageFilesAsync(IEnumerable<string> files, Point dropPoint)
     {
         Image? last = null;
         int placed = 0;
-        foreach (string file in files)
+        foreach (string file in files.ToList())
         {
-            var src = ProjectSerializer.LoadImageFile(file);
+            var src = await Task.Run(() => ProjectSerializer.LoadImageFile(file));
             if (src is null) continue; // not an image; already logged
+            if (!IsVisible) return;
             last = InsertImageAnnotation(src, new Point(dropPoint.X + placed * 24, dropPoint.Y + placed * 24));
             placed++;
         }
@@ -1689,12 +1924,14 @@ public partial class EditorWindow : Window
         return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
     }
 
-    private void OnCopy(object sender, RoutedEventArgs e)
+    private async void OnCopy(object sender, RoutedEventArgs e)
     {
+        if (_sourceOperationActive) return;
         try
         {
-            using var flat = Flatten();
-            CaptureService.CopyToClipboard(flat);
+            var flat = Flatten();
+            await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
+            if (!IsVisible) return;
             // BtnCopy is a round glyph button — flash a checkmark, then restore the copy glyph.
             BtnCopy.Content = "";
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
@@ -1727,10 +1964,13 @@ public partial class EditorWindow : Window
     /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>
     private void OnPin(object sender, RoutedEventArgs e)
     {
+        if (_sourceOperationActive) return;
         try
         {
-            // PinWindow takes ownership of the bitmap and disposes it on close.
-            new WinShot.Pin.PinWindow(Flatten(), _settings).Show();
+            // FastPinWindow takes ownership of the bitmap and disposes it on close.
+            var pin = new WinShot.Pin.FastPinWindow(Flatten(), _settings);
+            WinShot.Pin.FastPinWindow.TrackFirstShown(pin, "editor pin window");
+            pin.Show();
         }
         catch (Exception ex)
         {
@@ -1739,15 +1979,24 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>"Drag me" handle: start a file drag-out of the flattened image.</summary>
-    private void OnDragMeDown(object sender, MouseButtonEventArgs e)
+    private async void OnDragMeDown(object sender, MouseButtonEventArgs e)
     {
+        if (_sourceOperationActive) return;
         try
         {
-            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "WinShot");
-            System.IO.Directory.CreateDirectory(dir);
-            string path = System.IO.Path.Combine(dir, FileNamer.Next(_settings, "png"));
-            using (var flat = Flatten())
-                ImageSaver.Save(flat, path);
+            string dir = TempFileJanitor.WinShotTempDirectory;
+            string path = FileNamer.NextUniquePath(_settings, dir, "png");
+            var flat = Flatten();
+            await Task.Run(() =>
+            {
+                using (flat)
+                {
+                    System.IO.Directory.CreateDirectory(dir);
+                    TempFileJanitor.DeleteOldFiles(dir, DateTimeOffset.UtcNow, TimeSpan.FromDays(1), maxFilesToDelete: 50);
+                    ImageSaver.Save(flat, path);
+                }
+            });
+            if (!IsVisible) return;
             var data = new DataObject(DataFormats.FileDrop, new[] { path });
             DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Copy);
         }
@@ -1757,8 +2006,9 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    private async void OnSave(object sender, RoutedEventArgs e)
     {
+        if (_sourceOperationActive) return;
         try
         {
             System.IO.Directory.CreateDirectory(_settings.Current.SaveFolder);
@@ -1795,13 +2045,19 @@ public partial class EditorWindow : Window
             if (string.Equals(System.IO.Path.GetExtension(dialog.FileName), ".winshot",
                     StringComparison.OrdinalIgnoreCase))
             {
-                SaveProject(dialog.FileName);
+                await SaveProjectAsync(dialog.FileName);
                 return;
             }
 
-            using var flat = Flatten();
-            ImageSaver.Save(flat, dialog.FileName);
-            _history.Add(flat);
+            var flat = Flatten();
+            await Task.Run(() =>
+            {
+                using (flat)
+                {
+                    ImageSaver.Save(flat, dialog.FileName);
+                    _history.Add(flat);
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -1817,7 +2073,31 @@ public partial class EditorWindow : Window
     /// live annotation, and the embedded bitmaps of image annotations. FileMode.Create
     /// inside the serializer means re-saving overwrites the previous file cleanly.
     /// </summary>
-    private void SaveProject(string path)
+    private async Task SaveProjectAsync(string path)
+    {
+        ProjectSnapshot snapshot = CreateProjectSnapshot();
+        try
+        {
+            await Task.Run(() =>
+            {
+                using (snapshot.Source)
+                    ProjectSerializer.Save(path, snapshot.Source, snapshot.Document, snapshot.Images);
+            });
+        }
+        catch
+        {
+            snapshot.Source.Dispose();
+            throw;
+        }
+
+        await Dispatcher.InvokeAsync(() =>
+        {
+            _projectPath = path;
+            Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+        });
+    }
+
+    private ProjectSnapshot CreateProjectSnapshot()
     {
         CommitText();
         CommitPendingCurve();
@@ -1844,16 +2124,21 @@ public partial class EditorWindow : Window
             if (data.Type == AnnotationData.TypeImage && el is Image img && img.Source is BitmapSource bs)
             {
                 data.ImageIndex = images.Count;
+                if (bs.CanFreeze && !bs.IsFrozen)
+                    bs.Freeze();
                 images.Add(bs);
                 data.Rect = new[] { Canvas.GetLeft(img), Canvas.GetTop(img), img.Width, img.Height };
             }
             doc.Annotations.Add(data);
         }
 
-        ProjectSerializer.Save(path, _source, doc, images);
-        _projectPath = path;
-        Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+        return new ProjectSnapshot((SD.Bitmap)_source.Clone(), doc, images);
     }
+
+    private sealed record ProjectSnapshot(
+        SD.Bitmap Source,
+        ProjectDocument Document,
+        IReadOnlyList<BitmapSource> Images);
 
     /// <summary>
     /// Reopens a .winshot project file and reconstructs the editing session: the

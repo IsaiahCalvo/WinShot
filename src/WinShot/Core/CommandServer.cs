@@ -18,15 +18,20 @@ public sealed class CommandServer : IDisposable
     {
         "capture-area",
         "capture-fullscreen",
+        "capture-display",
         "capture-previous",
+        "capture-window-background",
         "all-in-one",
         "record",
+        "record-display",
         "ocr",
         "scrolling",
+        "scroll-horizontal",
         "history",
         "settings",
         "self-timer",
         "restore-last",
+        "exit",
     };
 
     private CancellationTokenSource? _cts;
@@ -59,14 +64,14 @@ public sealed class CommandServer : IDisposable
 
     /// <summary>
     /// Tries to hand a command to an already-running WinShot instance.
-    /// Returns false when no instance is listening (500 ms connect timeout).
+    /// Returns false when no instance is listening (2.5 s connect timeout).
     /// </summary>
     public static bool TrySendToRunningInstance(string command)
     {
         try
         {
             using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
-            client.Connect(500);
+            client.Connect(2500);
             using var writer = new StreamWriter(client) { AutoFlush = true };
             writer.WriteLine(command);
             client.WaitForPipeDrain();
@@ -84,8 +89,9 @@ public sealed class CommandServer : IDisposable
     }
 
     /// <summary>
-    /// Maps "winshot://capture-area", "winshot://capture-area/" or bare "capture-area"
-    /// to the canonical command name; unknown input returns null.
+    /// Maps "winshot://capture-area", "winshot://capture-area?copy=1",
+    /// "--capture-area", or bare "capture-area" to the canonical command name;
+    /// unknown input returns null.
     /// </summary>
     public static string? ParseCommand(string arg)
     {
@@ -96,6 +102,12 @@ public sealed class CommandServer : IDisposable
             s = s["winshot://".Length..];
         else if (s.StartsWith("winshot:", StringComparison.OrdinalIgnoreCase))
             s = s["winshot:".Length..];
+
+        int queryStart = s.IndexOfAny(['?', '#']);
+        if (queryStart >= 0)
+            s = s[..queryStart];
+
+        s = s.TrimStart('-');
         s = s.Trim('/');
 
         return ValidCommands.TryGetValue(s, out string? command) ? command : null;

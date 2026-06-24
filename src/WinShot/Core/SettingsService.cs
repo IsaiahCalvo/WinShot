@@ -30,7 +30,7 @@ public class Settings
     public bool DownscaleHiDpi { get; set; } = false;  // halve captures taken on >100% DPI displays
 
     // Capture behavior
-    public string PostCaptureAction { get; set; } = "overlay"; // overlay | copy | save | edit | pin
+    public string PostCaptureAction { get; set; } = "overlay"; // overlay | copy | save | edit | pin | background
     public int SelfTimerSeconds { get; set; } = 3;
     public string LastCaptureRegion { get; set; } = "";        // "x,y,w,h" physical screen px
     public bool HideDesktopIconsDuringCapture { get; set; } = false;
@@ -43,7 +43,8 @@ public class Settings
     public bool ShowKeystrokes { get; set; } = false;
     public int RecordingCountdownSeconds { get; set; } = 0;
     public bool CaptureCursor { get; set; } = true;
-    public string WebcamOverlayPosition { get; set; } = "off"; // off | top-left | top-right | bottom-left | bottom-right
+    public string WebcamOverlayPosition { get; set; } = "off"; // off | top-left | top-right | bottom-left | bottom-right | fullscreen
+    public int WebcamOverlaySizePercent { get; set; } = RecordingOptions.DefaultWebcamSizePercent;
 
     // OCR
     public bool OcrJoinLines { get; set; } = false;
@@ -86,6 +87,24 @@ public class SettingsService
         {
             Directory.CreateDirectory(Dir);
             File.WriteAllText(FilePath, JsonSerializer.Serialize(Current, JsonOptions));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to save settings", ex);
+        }
+        Changed?.Invoke();
+    }
+
+    public async Task SaveAsync()
+    {
+        string json = JsonSerializer.Serialize(Current, JsonOptions);
+        try
+        {
+            await Task.Run(() =>
+            {
+                Directory.CreateDirectory(Dir);
+                File.WriteAllText(FilePath, json);
+            });
         }
         catch (Exception ex)
         {

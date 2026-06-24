@@ -28,9 +28,14 @@ public partial class ScrollingStatusWindow : Window
     /// thread. Returns the stitched bitmap (caller owns disposal), or null if
     /// nothing was captured or the chooser was cancelled.
     /// </summary>
-    public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion)
+    public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollCaptureChoice? presetChoice = null)
     {
-        if (ScrollingModeDialog.Choose() is not ScrollCaptureChoice choice)
+        ScrollCaptureChoice choice;
+        if (presetChoice is ScrollCaptureChoice preset)
+            choice = preset;
+        else if (ScrollingModeDialog.Choose() is ScrollCaptureChoice picked)
+            choice = picked;
+        else
             return null; // cancelled
 
         var window = new ScrollingStatusWindow();

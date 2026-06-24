@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -25,9 +26,17 @@ public partial class QuickActionsWindow : Window
 
     private readonly SD.Bitmap _image;
     private readonly SettingsService _settings;
-    private readonly string? _historyPath;
+    private readonly Task? _releaseAfterTask;
+    private readonly bool _requestMemoryCleanupOnClose;
+    private readonly bool _loadThumbnail;
+    private Task? _thumbnailTask;
     private string? _tempDragPath;
+    private string? _historyPath;
+    private Task<string>? _dragFileTask;
+    private Task? _copyTask;
     private bool _dragArmed;
+    private bool _closed;
+    private bool _thumbnailStarted;
     private Point _dragStart;
 
     public event Action<QuickActionsWindow>? EditRequested;
@@ -35,26 +44,49 @@ public partial class QuickActionsWindow : Window
     public event Action<QuickActionsWindow>? OcrRequested;
     public event Action<QuickActionsWindow>? BackgroundRequested;
 
-    public QuickActionsWindow(SD.Bitmap image, SettingsService settings, string? historyPath = null)
+    public QuickActionsWindow(
+        SD.Bitmap image,
+        SettingsService settings,
+        string? historyPath = null,
+        Task<string?>? historyPathTask = null)
+        : this(image, settings, historyPath, historyPathTask, loadThumbnail: true)
     {
+    }
+
+    private QuickActionsWindow(
+        SD.Bitmap image,
+        SettingsService settings,
+        string? historyPath,
+        Task<string?>? historyPathTask,
+        bool loadThumbnail,
+        Task? releaseAfterTask = null,
+        bool requestMemoryCleanupOnClose = true)
+    {
+        ThemeResources.EnsureLoaded();
         InitializeComponent();
         _image = image;
         _settings = settings;
+        _releaseAfterTask = releaseAfterTask;
+        _requestMemoryCleanupOnClose = requestMemoryCleanupOnClose;
+        _loadThumbnail = loadThumbnail;
         _historyPath = historyPath;
-        Thumb.Source = CaptureService.ToBitmapSource(image);
+        SetThumbnailPlaceholder(image);
 
         OpenWindows.Add(this);
         Loaded += (_, _) => PositionBottomRight();
+        ContentRendered += (_, _) => StartThumbnailLoad();
         Closed += (_, _) =>
         {
             OpenWindows.Remove(this);
+            _closed = true;
+            Thumb.Source = null;
             if (_historyPath is not null)
-            {
-                lock (RecentlyClosed)
-                    RecentlyClosed.Push(_historyPath);
-            }
-            _image.Dispose();
+                PushRecentlyClosed(_historyPath);
+            DisposeImageWhenUnused();
         };
+
+        if (historyPathTask is not null)
+            _ = WatchHistoryPathAsync(historyPathTask);
 
         int seconds = settings.Current.OverlayAutoCloseSeconds;
         if (seconds > 0)
@@ -65,7 +97,151 @@ public partial class QuickActionsWindow : Window
         }
     }
 
-    public SD.Bitmap CloneImage() => (SD.Bitmap)_image.Clone();
+    private void StartThumbnailLoad()
+    {
+        if (!_loadThumbnail || _thumbnailStarted || _closed)
+            return;
+
+        _thumbnailStarted = true;
+        _thumbnailTask = LoadThumbnailAsync(_image);
+    }
+
+    public static void Prewarm(SettingsService settings)
+    {
+        var bitmap = new SD.Bitmap(1, 1);
+        var window = new QuickActionsWindow(
+            bitmap,
+            settings,
+            historyPath: null,
+            historyPathTask: null,
+            loadThumbnail: false,
+            requestMemoryCleanupOnClose: false);
+        window.ShowInTaskbar = false;
+        window.ShowActivated = false;
+        window.Opacity = 0;
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Left = -32000;
+        window.Top = -32000;
+        var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+        fallback.Tick += (_, _) =>
+        {
+            fallback.Stop();
+            if (window.IsVisible)
+                window.Close();
+        };
+        window.ContentRendered += (_, _) =>
+        {
+            fallback.Stop();
+            window.Close();
+        };
+        window.Show();
+        fallback.Start();
+    }
+
+    public static QuickActionsWindow CreateWithDeferredImageRelease(
+        SD.Bitmap image,
+        SettingsService settings,
+        Task<string?> historyPathTask,
+        Task releaseAfterTask)
+        => new(
+            image,
+            settings,
+            historyPath: null,
+            historyPathTask,
+            loadThumbnail: true,
+            releaseAfterTask);
+
+    public SD.Bitmap CloneImage() => CaptureService.CloneBitmap(_image);
+
+    private void DisposeImageWhenUnused()
+    {
+        Task? pending = PendingImageUseTask();
+        if (pending is null || pending.IsCompleted)
+        {
+            _image.Dispose();
+            if (_requestMemoryCleanupOnClose)
+                MemoryCleanup.Request();
+            return;
+        }
+
+        _ = DisposeImageAfterAsync(pending, _image);
+    }
+
+    private Task? PendingImageUseTask()
+    {
+        var tasks = new List<Task>(3);
+        if (_thumbnailTask is not null) tasks.Add(_thumbnailTask);
+        if (_releaseAfterTask is not null) tasks.Add(_releaseAfterTask);
+        if (_copyTask is { IsCompleted: false } copyTask) tasks.Add(copyTask);
+
+        return tasks.Count switch
+        {
+            0 => null,
+            1 => tasks[0],
+            _ => Task.WhenAll(tasks),
+        };
+    }
+
+    private static async Task DisposeImageAfterAsync(Task pending, SD.Bitmap image)
+    {
+        try { await pending.ConfigureAwait(false); }
+        catch { }
+        image.Dispose();
+        MemoryCleanup.Request();
+    }
+
+    private void SetThumbnailPlaceholder(SD.Bitmap image)
+    {
+        var size = CaptureService.GetBitmapSize(image);
+        double scale = Math.Min(1.0, Math.Min(320.0 / size.Width, 180.0 / size.Height));
+        Thumb.Width = Math.Max(1, Math.Round(size.Width * scale));
+        Thumb.Height = Math.Max(1, Math.Round(size.Height * scale));
+    }
+
+    private async Task LoadThumbnailAsync(SD.Bitmap image)
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var source = await CaptureService.ToBitmapSourceSnapshotAsync(image, 320, 180);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!_closed)
+                    Thumb.Source = source;
+            });
+            Log.Info($"Perf quick actions thumbnail ready: {sw.ElapsedMilliseconds} ms");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to load overlay thumbnail", ex);
+        }
+    }
+
+    private async Task WatchHistoryPathAsync(Task<string?> task)
+    {
+        try
+        {
+            string? path = await task.ConfigureAwait(false);
+            if (path is null) return;
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                _historyPath = path;
+                if (_closed)
+                    PushRecentlyClosed(path);
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to attach history path to overlay", ex);
+        }
+    }
+
+    private static void PushRecentlyClosed(string path)
+    {
+        lock (RecentlyClosed)
+            RecentlyClosed.Push(path);
+    }
 
     /// <summary>Most recent history path of a closed overlay whose file still
     /// exists on disk, or null when there is none.</summary>
@@ -118,7 +294,7 @@ public partial class QuickActionsWindow : Window
         e.Handled = true; // keep the panel-chrome DragMove from hijacking the gesture
     }
 
-    private void OnThumbMouseMove(object sender, MouseEventArgs e)
+    private async void OnThumbMouseMove(object sender, MouseEventArgs e)
     {
         if (!_dragArmed || e.LeftButton != MouseButtonState.Pressed) return;
         Point pos = e.GetPosition(this);
@@ -130,12 +306,15 @@ public partial class QuickActionsWindow : Window
         Thumb.ReleaseMouseCapture(); // DoDragDrop manages its own capture
         try
         {
-            string path = EnsureDragFile();
+            string path = await EnsureDragFileAsync();
+            if (_closed || !IsVisible) return;
+
             var data = new DataObject(DataFormats.FileDrop, new[] { path });
             DragDrop.DoDragDrop(Thumb, data, DragDropEffects.Copy);
         }
         catch (Exception ex)
         {
+            _dragFileTask = null;
             Log.Error("Thumbnail drag-out failed", ex);
         }
     }
@@ -148,15 +327,30 @@ public partial class QuickActionsWindow : Window
 
     /// <summary>Returns a file on disk representing this capture: the history
     /// file when available, otherwise a temp PNG written once and reused.</summary>
-    private string EnsureDragFile()
+    private Task<string> EnsureDragFileAsync()
     {
-        if (_historyPath is not null && File.Exists(_historyPath)) return _historyPath;
-        if (_tempDragPath is not null && File.Exists(_tempDragPath)) return _tempDragPath;
+        if (_historyPath is not null && File.Exists(_historyPath))
+            return Task.FromResult(_historyPath);
+        if (_tempDragPath is not null && File.Exists(_tempDragPath))
+            return Task.FromResult(_tempDragPath);
 
         string dir = Path.Combine(Path.GetTempPath(), "WinShot");
-        Directory.CreateDirectory(dir);
-        string path = Path.Combine(dir, FileNamer.Next(_settings, "png"));
-        ImageSaver.Save(_image, path);
+        string path = FileNamer.NextUniquePath(_settings, dir, "png");
+        _dragFileTask ??= CreateDragFileAsync(dir, path);
+        return _dragFileTask;
+    }
+
+    private async Task<string> CreateDragFileAsync(string dir, string path)
+    {
+        var copy = CaptureService.CloneBitmap(_image);
+        await Task.Run(() =>
+        {
+            using (copy)
+            {
+                Directory.CreateDirectory(dir);
+                ImageSaver.Save(copy, path);
+            }
+        });
         _tempDragPath = path;
         return path;
     }
@@ -172,11 +366,13 @@ public partial class QuickActionsWindow : Window
         }
     }
 
-    private void OnCopy(object sender, RoutedEventArgs e)
+    private async void OnCopy(object sender, RoutedEventArgs e)
     {
         try
         {
-            CaptureService.CopyToClipboard(_image);
+            _copyTask = CaptureService.CopyToClipboardAsync(_image);
+            await _copyTask;
+            if (!IsVisible) return;
             // Glyph button: flash a checkmark (), then restore the copy glyph ().
             BtnCopy.Content = "";
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
@@ -189,7 +385,7 @@ public partial class QuickActionsWindow : Window
         }
     }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    private async void OnSave(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -208,7 +404,12 @@ public partial class QuickActionsWindow : Window
             };
             if (dialog.ShowDialog() == true)
             {
-                ImageSaver.Save(_image, dialog.FileName);
+                var copy = CaptureService.CloneBitmap(_image);
+                await Task.Run(() =>
+                {
+                    using (copy)
+                        ImageSaver.Save(copy, dialog.FileName);
+                });
                 Close();
             }
         }

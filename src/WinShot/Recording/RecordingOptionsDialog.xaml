@@ -154,7 +154,14 @@
                     <ComboBoxItem Content="Top right"/>
                     <ComboBoxItem Content="Bottom left"/>
                     <ComboBoxItem Content="Bottom right"/>
+                    <ComboBoxItem Content="Fullscreen"/>
                 </ComboBox>
+            </DockPanel>
+            <DockPanel Margin="0,8,0,0" IsEnabled="{Binding IsChecked, ElementName=Mp4Radio}">
+                <TextBlock Text="Webcam size" Foreground="#DDDDDD" FontSize="12" VerticalAlignment="Center" Width="92"/>
+                <TextBlock Text="10-45%" Foreground="#888888" FontSize="11" VerticalAlignment="Center"
+                           DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                <TextBox x:Name="WebcamSizeBox" Width="44" HorizontalAlignment="Left"/>
             </DockPanel>
 
             <CheckBox x:Name="CursorCheck" Style="{StaticResource DarkCheck}" Content="Capture cursor" Margin="0,10,0,0"/>

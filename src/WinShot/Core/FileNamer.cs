@@ -37,6 +37,25 @@ public static class FileNamer
         return $"{name}.{ext}";
     }
 
+    public static string NextUniquePath(SettingsService settings, string directory, string extension)
+    {
+        string fileName = Next(settings, extension);
+        string path = Path.Combine(directory, fileName);
+        if (!File.Exists(path))
+            return path;
+
+        string name = Path.GetFileNameWithoutExtension(fileName);
+        string ext = Path.GetExtension(fileName);
+        for (int suffix = 2; suffix < 10_000; suffix++)
+        {
+            path = Path.Combine(directory, $"{name} {suffix}{ext}");
+            if (!File.Exists(path))
+                return path;
+        }
+
+        return Path.Combine(directory, $"{name} {Guid.NewGuid():N}{ext}");
+    }
+
     private static string Expand(string template, DateTime now, SettingsService settings)
     {
         string result = template;

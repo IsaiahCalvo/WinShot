@@ -1,6 +1,6 @@
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows;
 using WinShot.Capture;
 using WinShot.Core;
@@ -20,6 +20,9 @@ namespace WinShot;
 
 public partial class App : Application
 {
+    private const int OverlayDismissDelayMs = 80;
+    private const int AutoCopyFailureCooldownMs = 8_000;
+
     private Mutex? _mutex;
     private bool _ownsMutex;
     private WF.NotifyIcon? _tray;
@@ -29,6 +32,9 @@ public partial class App : Application
     private HistoryService _history = null!;
     private RecordingController? _recording;
     private bool _captureInProgress;
+    private string? _pendingCaptureCommand;
+    private bool _pendingCaptureDrainActive;
+    private long _autoCopySuppressedUntilTick;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -59,10 +65,9 @@ public partial class App : Application
 
         _settings.Load();
         _history = new HistoryService(_settings);
-        _recording = new RecordingController(_settings, _history);
         _settings.Changed += RegisterHotkeys;
 
-        ProtocolRegistrar.EnsureRegistered();
+        _ = Task.Run(ProtocolRegistrar.EnsureRegistered);
         _commandServer = new CommandServer();
         _commandServer.CommandReceived += OnCommandReceived;
         _commandServer.Start();
@@ -70,6 +75,7 @@ public partial class App : Application
         SetupTray();
         _hotkeys = new HotkeyManager();
         RegisterHotkeys();
+        ScheduleIdleWarmups();
         Log.Info("WinShot started");
 
         if (incomingCommand is not null)
@@ -82,6 +88,8 @@ public partial class App : Application
         _settings.Changed -= RegisterHotkeys;
         try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to persist settings on exit", ex); }
 
+        try { _recording?.Shutdown(); } catch (Exception ex) { Log.Error("Failed to stop recording on exit", ex); }
+        try { CaptureService.ReleaseCaptureResources(); } catch (Exception ex) { Log.Error("Failed to release capture resources on exit", ex); }
         _commandServer?.Dispose();
         _hotkeys?.Dispose();
         if (_tray is not null)
@@ -108,24 +116,27 @@ public partial class App : Application
 
         var s = _settings.Current;
         var menu = new WF.ContextMenuStrip();
-        menu.Items.Add(MenuItem("Capture region / window", s.HotkeyCaptureRegion, CaptureRegionFlow));
-        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, CaptureFullscreenFlow));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, CaptureFullscreenTimerFlow));
-        menu.Items.Add(MenuItem("Capture display…", null, CaptureDisplayFlow));
-        menu.Items.Add(MenuItem("Capture previous area", s.HotkeyCapturePrevious, CapturePreviousFlow));
-        menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, AllInOneFlow));
+        menu.Items.Add(MenuItem("Capture region / window", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
+        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
+        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen")));
+        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, () => QueueCaptureCommand("self-timer")));
+        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
+        menu.Items.Add(MenuItem("Capture previous area", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
+        menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow));
-        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, OcrFlow));
-        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, ScrollingFlow));
+        menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow));
+        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr")));
+        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling")));
+        menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal")));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("History…", null, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
-        menu.Items.Add(MenuItem("Unlock pinned windows", null, PinWindow.UnlockAllPins));
+        menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("Exit", null, Shutdown));
         _tray.ContextMenuStrip = menu;
-        _tray.DoubleClick += (_, _) => CaptureRegionFlow();
+        _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
     }
 
     private static WF.ToolStripMenuItem MenuItem(string text, string? shortcut, Action onClick)
@@ -141,15 +152,60 @@ public partial class App : Application
         _hotkeys.UnregisterAll();
         var s = _settings.Current;
         var failed = new List<string>();
-        if (!_hotkeys.Register(s.HotkeyCaptureRegion, CaptureRegionFlow)) failed.Add(s.HotkeyCaptureRegion);
-        if (!_hotkeys.Register(s.HotkeyCaptureFullscreen, CaptureFullscreenFlow)) failed.Add(s.HotkeyCaptureFullscreen);
+        if (!_hotkeys.Register(s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"))) failed.Add(s.HotkeyCaptureRegion);
+        if (!_hotkeys.Register(s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"))) failed.Add(s.HotkeyCaptureFullscreen);
         if (!_hotkeys.Register(s.HotkeyRecord, RecordFlow)) failed.Add(s.HotkeyRecord);
-        if (!_hotkeys.Register(s.HotkeyOcr, OcrFlow)) failed.Add(s.HotkeyOcr);
-        if (!_hotkeys.Register(s.HotkeyScrolling, ScrollingFlow)) failed.Add(s.HotkeyScrolling);
-        if (!_hotkeys.Register(s.HotkeyCapturePrevious, CapturePreviousFlow)) failed.Add(s.HotkeyCapturePrevious);
-        if (!_hotkeys.Register(s.HotkeyAllInOne, AllInOneFlow)) failed.Add(s.HotkeyAllInOne);
+        if (!_hotkeys.Register(s.HotkeyOcr, () => QueueCaptureCommand("ocr"))) failed.Add(s.HotkeyOcr);
+        if (!_hotkeys.Register(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"))) failed.Add(s.HotkeyScrolling);
+        if (!_hotkeys.Register(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"))) failed.Add(s.HotkeyCapturePrevious);
+        if (!_hotkeys.Register(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"))) failed.Add(s.HotkeyAllInOne);
         if (failed.Count > 0)
             ShowBalloon("Some hotkeys unavailable", string.Join(", ", failed));
+    }
+
+    private void ScheduleIdleWarmups()
+    {
+        Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(() =>
+            {
+                foreach (var stage in StartupWarmupPlan.LightweightStartupStages())
+                    ScheduleWarmup(stage.DelayMs, stage.Name, () => RunStartupWarmup(stage.Kind));
+            }));
+    }
+
+    private void RunStartupWarmup(StartupWarmupKind kind)
+    {
+        switch (kind)
+        {
+            case StartupWarmupKind.CaptureSelectors:
+                FastRegionSelectorDialog.Prewarm();
+                FastDisplayPickerDialog.Prewarm();
+                FastAllInOneSelectorDialog.Prewarm();
+                break;
+        }
+    }
+
+    private void ScheduleWarmup(int delayMs, string name, Action action)
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer(
+            System.Windows.Threading.DispatcherPriority.ContextIdle)
+        {
+            Interval = TimeSpan.FromMilliseconds(delayMs),
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Warmup failed: {name}", ex);
+            }
+        };
+        timer.Start();
     }
 
     // ---- winshot:// command routing ----
@@ -163,34 +219,112 @@ public partial class App : Application
 
     private void RunCommand(string cmd)
     {
+        if (IsCaptureCommand(cmd))
+        {
+            QueueCaptureCommand(cmd);
+            return;
+        }
+
+        switch (cmd)
+        {
+            case "record": RecordFlow(); break;
+            case "record-display": RecordDisplayFlow(); break;
+            case "history": OpenHistory(); break;
+            case "settings": OpenSettings(); break;
+            case "restore-last": RestoreLastFlow(); break;
+            case "exit": Shutdown(); break;
+        }
+    }
+
+    private static bool IsCaptureCommand(string cmd) => cmd is
+        "capture-area" or "capture-fullscreen" or "capture-display" or "capture-previous" or
+        "capture-window-background" or
+        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer";
+
+    private void QueueCaptureCommand(string cmd)
+    {
+        _pendingCaptureCommand = cmd;
+        SchedulePendingCaptureDrain();
+    }
+
+    private void ExecuteCaptureCommand(string cmd)
+    {
         switch (cmd)
         {
             case "capture-area": CaptureRegionFlow(); break;
             case "capture-fullscreen": CaptureFullscreenFlow(); break;
+            case "capture-display": CaptureDisplayFlow(); break;
             case "capture-previous": CapturePreviousFlow(); break;
+            case "capture-window-background": CaptureRegionFlow(PostCaptureAction.Background); break;
             case "all-in-one": AllInOneFlow(); break;
-            case "record": RecordFlow(); break;
             case "ocr": OcrFlow(); break;
             case "scrolling": ScrollingFlow(); break;
-            case "history": OpenHistory(); break;
-            case "settings": OpenSettings(); break;
+            case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.ChoiceForCommand(cmd)); break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
-            case "restore-last": RestoreLastFlow(); break;
+        }
+    }
+
+    private void FinishCaptureFlow()
+    {
+        _captureInProgress = false;
+        MemoryCleanup.Request();
+        SchedulePendingCaptureDrain();
+    }
+
+    private void SchedulePendingCaptureDrain()
+    {
+        if (_pendingCaptureDrainActive) return;
+        _pendingCaptureDrainActive = true;
+        _ = DrainPendingCaptureCommandAsync();
+    }
+
+    private async Task DrainPendingCaptureCommandAsync()
+    {
+        try
+        {
+            while (_pendingCaptureCommand is not null)
+            {
+                if (_captureInProgress)
+                {
+                    await Task.Delay(50);
+                    continue;
+                }
+
+                string cmd = _pendingCaptureCommand;
+                _pendingCaptureCommand = null;
+                await Dispatcher.InvokeAsync(() => ExecuteCaptureCommand(cmd));
+            }
+        }
+        finally
+        {
+            _pendingCaptureDrainActive = false;
+            if (_pendingCaptureCommand is not null && !_captureInProgress)
+                SchedulePendingCaptureDrain();
         }
     }
 
     // ---- Capture flows ----
 
-    private void CaptureRegionFlow()
+    private async void CaptureRegionFlow(string? postCaptureActionOverride = null)
     {
         if (_captureInProgress) return;
         _captureInProgress = true;
         try
         {
-            using var shot = CaptureDesktopRespectingSettings();
-            var selector = new RegionSelectorWindow(shot, WindowEnumerator.GetTopLevelWindows(), _settings, allInOne: false);
-            if (selector.ShowDialog() == true && selector.SelectedRegionPx is SD.Rectangle region)
-                HandleCapture(CaptureService.Crop(shot, region));
+            var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+            TrackFirstShown(selector, "capture-area selector");
+            try
+            {
+                if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
+                {
+                    await WaitForOverlayDismissAsync();
+                    HandleCapture(await CaptureSelectedRegionAsync(region, "capture-area"), postCaptureActionOverride);
+                }
+            }
+            finally
+            {
+                FastRegionSelectorDialog.Return(selector);
+            }
         }
         catch (Exception ex)
         {
@@ -199,17 +333,20 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
-    private void CaptureFullscreenFlow()
+    private async void CaptureFullscreenFlow()
     {
         if (_captureInProgress) return;
         _captureInProgress = true;
         try
         {
-            HandleCapture(CaptureDesktopRespectingSettings());
+            var sw = Stopwatch.StartNew();
+            var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
+            LogPerf("capture-fullscreen screen grab", sw);
+            HandleCapture(capture);
         }
         catch (Exception ex)
         {
@@ -218,7 +355,7 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
@@ -228,8 +365,11 @@ public partial class App : Application
         _captureInProgress = true;
         try
         {
-            await SelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
-            HandleCapture(CaptureDesktopRespectingSettings());
+            await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
+            var sw = Stopwatch.StartNew();
+            var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
+            LogPerf("self-timer screen grab", sw);
+            HandleCapture(capture);
         }
         catch (Exception ex)
         {
@@ -238,18 +378,23 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
-    private void CaptureDisplayFlow()
+    private async void CaptureDisplayFlow()
     {
         if (_captureInProgress) return;
         _captureInProgress = true;
         try
         {
-            if (DisplayPickerDialog.ChooseDisplay() is SD.Rectangle r)
-                HandleCapture(CaptureService.CaptureScreenRegion(r));
+            if (FastDisplayPickerDialog.ChooseDisplay() is SD.Rectangle r)
+            {
+                var sw = Stopwatch.StartNew();
+                var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
+                LogPerf("capture-display screen grab", sw);
+                HandleCapture(capture);
+            }
         }
         catch (Exception ex)
         {
@@ -258,18 +403,23 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
-    private void CapturePreviousFlow()
+    private async void CapturePreviousFlow()
     {
         if (_captureInProgress) return;
         _captureInProgress = true;
         try
         {
-            if (TryParseRegion(_settings.Current.LastCaptureRegion, out SD.Rectangle r))
-                HandleCapture(CaptureService.CaptureScreenRegion(r));
+            if (PreviousRegion.TryParse(_settings.Current.LastCaptureRegion, out SD.Rectangle r))
+            {
+                var sw = Stopwatch.StartNew();
+                var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
+                LogPerf("capture-previous screen grab", sw);
+                HandleCapture(capture);
+            }
             else
                 ShowBalloon("Capture previous area", "No previous region yet — capture an area first.");
         }
@@ -280,7 +430,7 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
@@ -294,23 +444,26 @@ public partial class App : Application
             SD.Rectangle regionPx;
             SD.Bitmap? captured = null;
 
-            var shot = CaptureDesktopRespectingSettings();
+            var selector = FastAllInOneSelectorDialog.Rent(CreateWindowListTask, _settings);
             try
             {
-                var selector = new RegionSelectorWindow(shot, WindowEnumerator.GetTopLevelWindows(), _settings, allInOne: true);
-                if (selector.ShowDialog() != true || selector.SelectedRegionPx is not SD.Rectangle rp)
+                TrackFirstShown(selector, "all-in-one selector");
+                if (await selector.ShowAsync() != WF.DialogResult.OK || selector.SelectedRegionPx is not SD.Rectangle rp)
                     return;
+
                 action = selector.SelectedAction;
                 regionPx = rp;
-
-                // Crop while the frozen shot is alive (only the image actions need it).
-                if (action is AllInOneAction.Capture or AllInOneAction.Ocr)
-                    captured = CaptureService.Crop(shot, regionPx);
             }
             finally
             {
-                shot.Dispose();
+                FastAllInOneSelectorDialog.Return(selector);
             }
+
+            if (action is AllInOneAction.Capture or AllInOneAction.Ocr or AllInOneAction.Scroll)
+                await WaitForOverlayDismissAsync();
+
+            if (action is AllInOneAction.Capture or AllInOneAction.Ocr)
+                captured = await CaptureSelectedRegionAsync(regionPx, $"all-in-one {action.ToString().ToLowerInvariant()}");
 
             switch (action)
             {
@@ -321,7 +474,7 @@ public partial class App : Application
                     using (captured) await RunOcrToClipboard(captured!);
                     break;
                 case AllInOneAction.Record:
-                    _recording?.ToggleFlow();
+                    Recording.ToggleFlow();
                     break;
                 case AllInOneAction.Scroll:
                     var region = regionPx;
@@ -341,34 +494,116 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
     /// <summary>Captures the virtual desktop, optionally hiding desktop icons first per settings.</summary>
-    private SD.Bitmap CaptureDesktopRespectingSettings()
+    private SD.Bitmap CaptureDesktopRespectingSettings() =>
+        DesktopIconCaptureGuard.Run(
+            _settings.Current.HideDesktopIconsDuringCapture,
+            () => DesktopIcons.Visible,
+            DesktopIcons.Hide,
+            DesktopIcons.Show,
+            Thread.Sleep,
+            CaptureService.CaptureVirtualDesktop);
+
+    private SD.Bitmap CaptureScreenRegionRespectingSettings(SD.Rectangle screenRect) =>
+        DesktopIconCaptureGuard.Run(
+            _settings.Current.HideDesktopIconsDuringCapture,
+            () => DesktopIcons.Visible,
+            DesktopIcons.Hide,
+            DesktopIcons.Show,
+            Thread.Sleep,
+            () => CaptureService.CaptureScreenRegion(screenRect));
+
+    private async Task<SD.Bitmap> CaptureSelectedRegionAsync(SD.Rectangle virtualRegion, string metricName)
     {
-        bool hid = false;
-        if (_settings.Current.HideDesktopIconsDuringCapture && DesktopIcons.Visible)
+        var screenRegion = virtualRegion;
+        screenRegion.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
+        var sw = Stopwatch.StartNew();
+        try
         {
-            DesktopIcons.Hide();
-            hid = true;
-            Thread.Sleep(120); // let the shell repaint before grabbing the frame
+            return await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(screenRegion));
         }
-        try { return CaptureService.CaptureVirtualDesktop(); }
-        finally { if (hid) DesktopIcons.Show(); }
+        finally
+        {
+            LogPerf($"{metricName} screen grab", sw);
+        }
     }
 
+    private static Task WaitForOverlayDismissAsync() => Task.Delay(OverlayDismissDelayMs);
+
+    private static Task<List<WindowInfo>> CreateWindowListTask() =>
+        Task.Run(() => WindowEnumerator.GetTopLevelWindows());
+
+    private static void TrackFirstRender(Window window, string metricName)
+    {
+        var sw = Stopwatch.StartNew();
+        bool logged = false;
+        EventHandler? handler = null;
+        void LogOnce()
+        {
+            if (logged) return;
+            logged = true;
+            if (handler is not null)
+                window.ContentRendered -= handler;
+            LogPerf($"{metricName} first render", sw);
+        }
+        handler = (_, _) => LogOnce();
+        window.ContentRendered += handler;
+        window.Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(LogOnce));
+    }
+
+    private static void TrackFirstShown(WF.Form form, string metricName)
+    {
+        var sw = Stopwatch.StartNew();
+        bool logged = false;
+        EventHandler? shownHandler = null;
+        EventHandler? visibleHandler = null;
+
+        void LogOnce()
+        {
+            if (logged) return;
+            logged = true;
+            if (shownHandler is not null)
+                form.Shown -= shownHandler;
+            if (visibleHandler is not null)
+                form.VisibleChanged -= visibleHandler;
+            LogPerf($"{metricName} first show", sw);
+        }
+
+        shownHandler = (_, _) => LogOnce();
+        visibleHandler = (_, _) =>
+        {
+            if (form.Visible)
+                LogOnce();
+        };
+        form.Shown += shownHandler;
+        form.VisibleChanged += visibleHandler;
+        if (form.Visible)
+            LogOnce();
+    }
+
+    private static void LogPerf(string metricName, Stopwatch sw) =>
+        Log.Info($"Perf {metricName}: {sw.ElapsedMilliseconds} ms");
+
+    private static Task<T> RunCaptureWorkAsync<T>(Func<T> work) =>
+        Task.Factory.StartNew(
+            work,
+            CancellationToken.None,
+            TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+
     /// <summary>Every captured bitmap funnels through here: optional downscale, history, then the post-capture action.</summary>
-    private void HandleCapture(SD.Bitmap bmp)
+    private void HandleCapture(SD.Bitmap bmp, string? postCaptureActionOverride = null)
     {
         if (_settings.Current.DownscaleHiDpi)
         {
-            double scale = SystemDpiScale;
-            if (scale > 1.01)
+            if (HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, SystemDpiScale, out int w, out int h))
             {
-                int w = Math.Max(1, (int)Math.Round(bmp.Width / scale));
-                int h = Math.Max(1, (int)Math.Round(bmp.Height / scale));
                 try
                 {
                     var scaled = BitmapEffects.Resize(bmp, w, h);
@@ -379,77 +614,309 @@ public partial class App : Application
             }
         }
 
-        string? historyPath = null;
-        try { historyPath = _history.Add(bmp); }
-        catch (Exception ex) { Log.Error("Failed to add capture to history", ex); }
-
-        string action = _settings.Current.PostCaptureAction;
-        if (_settings.Current.AutoCopyToClipboard && action != "copy")
+        string action = PostCaptureAction.Normalize(postCaptureActionOverride ?? _settings.Current.PostCaptureAction);
+        if (!PostCaptureAction.IsDirectAction(action))
         {
-            try { CaptureService.CopyToClipboard(bmp); }
-            catch (Exception ex) { Log.Error("Auto-copy to clipboard failed", ex); }
+            try { ShowOverlayWithDeferredCaptureWork(bmp, autoCopy: _settings.Current.AutoCopyToClipboard); }
+            catch { bmp.Dispose(); throw; }
+            return;
         }
+
+        Task<string?> historyPathTask = AddHistoryAsync(
+            bmp,
+            cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action));
+        if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
+            QueueAutoClipboardCopy(bmp);
 
         switch (action)
         {
-            case "copy":
-                try { CaptureService.CopyToClipboard(bmp); ShowBalloon("WinShot", "Copied to clipboard."); }
-                catch (Exception ex) { Log.Error("Copy failed", ex); }
-                bmp.Dispose();
+            case PostCaptureAction.Copy:
+                QueueClipboardCopy(bmp, takeOwnership: true, showSuccess: true, showFailure: true, includePng: true, failureContext: "Copy failed");
                 break;
-            case "save":
+            case PostCaptureAction.Save:
                 SaveSilently(bmp); // takes ownership
                 break;
-            case "edit":
+            case PostCaptureAction.Edit:
                 // The window takes ownership and disposes on close — but its ctor
                 // touches GDI before wiring that up, so dispose here if it throws.
-                try { new EditorWindow(bmp, _settings, _history).Show(); }
+                try
+                {
+                    var win = EditorWindow.CreateForCapture(bmp, _settings, _history);
+                    TrackFirstRender(win, "editor window");
+                    win.Show();
+                }
                 catch { bmp.Dispose(); throw; }
                 break;
-            case "pin":
-                try { new PinWindow(bmp, _settings).Show(); }
+            case PostCaptureAction.Pin:
+                try
+                {
+                    var win = new FastPinWindow(bmp, _settings);
+                    FastPinWindow.TrackFirstShown(win, "pin window");
+                    win.Show();
+                }
                 catch { bmp.Dispose(); throw; }
                 break;
-            default:
-                try { ShowOverlay(bmp, historyPath); }
+            case PostCaptureAction.Background:
+                try
+                {
+                    var win = new BackgroundComposerWindow(bmp, _settings, _history);
+                    TrackFirstRender(win, "background window");
+                    win.Show();
+                }
                 catch { bmp.Dispose(); throw; }
                 break;
+        }
+    }
+
+    private Task<string?> AddHistoryAsync(SD.Bitmap bmp, bool cloneOnCallerThread)
+    {
+        if (cloneOnCallerThread)
+        {
+            try
+            {
+                return AddHistoryCopyAsync(CaptureService.CloneBitmap(bmp));
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Failed to clone capture for history", ex);
+                return Task.FromResult<string?>(null);
+            }
+        }
+
+        return Task.Run(() =>
+        {
+            try
+            {
+                using var copy = CaptureService.CloneBitmap(bmp);
+                return _history.Add(copy);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Failed to add capture to history", ex);
+                return null;
+            }
+        });
+    }
+
+    private Task<string?> AddHistoryCopyAsync(SD.Bitmap copy)
+    {
+        return Task.Run(() =>
+        {
+            using (copy)
+            {
+                try { return _history.Add(copy); }
+                catch (Exception ex)
+                {
+                    Log.Error("Failed to add capture to history", ex);
+                    return null;
+                }
+            }
+        });
+    }
+
+    private RecordingController Recording => _recording ??= new RecordingController(_settings, _history);
+
+    private void QueueClipboardCopy(SD.Bitmap bmp, bool takeOwnership, bool showSuccess, bool showFailure, bool includePng, string failureContext)
+    {
+        _ = CopyToClipboardAndNotifyAsync(bmp, takeOwnership, showSuccess, showFailure, includePng, failureContext);
+    }
+
+    private void QueueAutoClipboardCopy(SD.Bitmap bmp)
+    {
+        if (Environment.TickCount64 < Interlocked.Read(ref _autoCopySuppressedUntilTick))
+        {
+            Log.Info("Auto-copy to clipboard skipped: clipboard temporarily unavailable.");
+            return;
+        }
+
+        _ = CopyToClipboardAndNotifyAsync(
+            bmp,
+            takeOwnership: false,
+            showSuccess: false,
+            showFailure: false,
+            includePng: false,
+            failureContext: "Auto-copy to clipboard skipped",
+            isAutoCopy: true);
+    }
+
+    private async Task CopyToClipboardAndNotifyAsync(
+        SD.Bitmap bmp,
+        bool takeOwnership,
+        bool showSuccess,
+        bool showFailure,
+        bool includePng,
+        string failureContext,
+        bool isAutoCopy = false)
+    {
+        try
+        {
+            await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
+            if (showSuccess)
+                await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Copied to clipboard."));
+        }
+        catch (Exception ex)
+        {
+            if (showFailure)
+            {
+                Log.Error(failureContext, ex);
+                await Dispatcher.InvokeAsync(() => ShowBalloon("Copy failed", ex.Message));
+            }
+            else
+            {
+                if (isAutoCopy)
+                    Interlocked.Exchange(
+                        ref _autoCopySuppressedUntilTick,
+                        Environment.TickCount64 + AutoCopyFailureCooldownMs);
+                Log.Info($"{failureContext}: {ex.Message}");
+            }
+        }
+    }
+
+    private void ShowOverlay(SD.Bitmap bmp, Task<string?>? historyPathTask)
+    {
+        var sw = Stopwatch.StartNew();
+        var overlay = new FastQuickActionsWindow(bmp, _settings, historyPathTask: historyPathTask);
+        long createMs = sw.ElapsedMilliseconds;
+        FastQuickActionsWindow.TrackFirstShown(overlay, "quick actions overlay");
+        WireOverlay(overlay);
+        long wireMs = sw.ElapsedMilliseconds - createMs;
+        overlay.Show();
+        long showMs = sw.ElapsedMilliseconds - createMs - wireMs;
+        if (sw.ElapsedMilliseconds > 50)
+            Log.Info($"Perf quick actions overlay breakdown: create={createMs} wire={wireMs} show={showMs} total={sw.ElapsedMilliseconds} ms");
+    }
+
+    private void ShowOverlayWithDeferredCaptureWork(SD.Bitmap bmp, bool autoCopy)
+    {
+        var sw = Stopwatch.StartNew();
+        var historyPathSource = new TaskCompletionSource<string?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var captureWorkComplete = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var overlay = FastQuickActionsWindow.CreateWithDeferredImageRelease(
+            bmp,
+            _settings,
+            historyPathSource.Task,
+            captureWorkComplete.Task);
+        long createMs = sw.ElapsedMilliseconds;
+        bool started = false;
+        FastQuickActionsWindow.TrackFirstShown(overlay, "quick actions overlay");
+        overlay.Shown += (_, _) =>
+        {
+            if (started) return;
+            started = true;
+            overlay.BeginInvoke(new Action(() =>
+                _ = RunDeferredOverlayCaptureWorkAsync(bmp, historyPathSource, captureWorkComplete, autoCopy)));
+        };
+        WireOverlay(overlay);
+        long wireMs = sw.ElapsedMilliseconds - createMs;
+        overlay.Show();
+        long showMs = sw.ElapsedMilliseconds - createMs - wireMs;
+        if (sw.ElapsedMilliseconds > 50)
+            Log.Info($"Perf quick actions overlay breakdown: create={createMs} wire={wireMs} show={showMs} total={sw.ElapsedMilliseconds} ms");
+    }
+
+    private async Task RunDeferredOverlayCaptureWorkAsync(
+        SD.Bitmap bmp,
+        TaskCompletionSource<string?> historyPathCompletion,
+        TaskCompletionSource<object?> captureWorkCompletion,
+        bool autoCopy)
+    {
+        try
+        {
+            string? historyPath = await Task.Run(() =>
+            {
+                try
+                {
+                    using var copy = CaptureService.CloneBitmap(bmp);
+                    return _history.Add(copy);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Failed to add capture to history", ex);
+                    return null;
+                }
+            }).ConfigureAwait(false);
+            historyPathCompletion.TrySetResult(historyPath);
+
+            if (autoCopy)
+                QueueAutoClipboardCopy(bmp);
+
+            captureWorkCompletion.TrySetResult(null);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Deferred overlay capture work failed", ex);
+            historyPathCompletion.TrySetResult(null);
+            captureWorkCompletion.TrySetResult(null);
+        }
+        finally
+        {
+            captureWorkCompletion.TrySetResult(null);
+            MemoryCleanup.Request();
         }
     }
 
     private void ShowOverlay(SD.Bitmap bmp, string? historyPath)
     {
-        var overlay = new QuickActionsWindow(bmp, _settings, historyPath);
+        var sw = Stopwatch.StartNew();
+        var overlay = new FastQuickActionsWindow(bmp, _settings, historyPath);
+        long createMs = sw.ElapsedMilliseconds;
+        FastQuickActionsWindow.TrackFirstShown(overlay, "quick actions overlay");
+        WireOverlay(overlay);
+        long wireMs = sw.ElapsedMilliseconds - createMs;
+        overlay.Show();
+        long showMs = sw.ElapsedMilliseconds - createMs - wireMs;
+        if (sw.ElapsedMilliseconds > 50)
+            Log.Info($"Perf quick actions overlay breakdown: create={createMs} wire={wireMs} show={showMs} total={sw.ElapsedMilliseconds} ms");
+    }
+
+    private void WireOverlay(FastQuickActionsWindow overlay)
+    {
         overlay.EditRequested += OpenEditorFromOverlay;
         overlay.PinRequested += PinFromOverlay;
         overlay.OcrRequested += OcrFromOverlay;
         overlay.BackgroundRequested += BackgroundFromOverlay;
-        overlay.Show();
     }
 
     private void SaveSilently(SD.Bitmap bmp)
     {
+        string path;
         try
         {
             Directory.CreateDirectory(_settings.Current.SaveFolder);
-            string path = Path.Combine(_settings.Current.SaveFolder, FileNamer.Next(_settings, _settings.Current.ImageFormat));
-            ImageSaver.Save(bmp, path);
-            ShowBalloon("Saved", Path.GetFileName(path));
+            path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, _settings.Current.ImageFormat);
         }
         catch (Exception ex)
         {
-            Log.Error("Silent save failed", ex);
-            ShowBalloon("Save failed", ex.Message);
-        }
-        finally
-        {
             bmp.Dispose();
+            ShowBalloon("Save failed", ex.Message);
+            return;
         }
+
+        _ = Task.Run(() =>
+        {
+            using (bmp)
+            {
+                try
+                {
+                    ImageSaver.Save(bmp, path);
+                    Dispatcher.InvokeAsync(() => ShowBalloon("Saved", Path.GetFileName(path)));
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Silent save failed", ex);
+                    Dispatcher.InvokeAsync(() => ShowBalloon("Save failed", ex.Message));
+                }
+            }
+        });
     }
 
     // ---- Feature entry points ----
 
-    private void RecordFlow() => _recording?.ToggleFlow();
+    private void RecordFlow() => Recording.ToggleFlow();
+
+    private void RecordDisplayFlow() => Recording.ToggleDisplayFlow();
 
     private async void OcrFlow()
     {
@@ -458,11 +925,19 @@ public partial class App : Application
         try
         {
             SD.Bitmap? crop = null;
-            using (var shot = CaptureDesktopRespectingSettings())
+            var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+            TrackFirstShown(selector, "ocr selector");
+            try
             {
-                var selector = new RegionSelectorWindow(shot, WindowEnumerator.GetTopLevelWindows(), _settings, allInOne: false);
-                if (selector.ShowDialog() == true && selector.SelectedRegionPx is SD.Rectangle region)
-                    crop = CaptureService.Crop(shot, region);
+                if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
+                {
+                    await WaitForOverlayDismissAsync();
+                    crop = await CaptureSelectedRegionAsync(region, "ocr");
+                }
+            }
+            finally
+            {
+                FastRegionSelectorDialog.Return(selector);
             }
             if (crop is null) return;
             using (crop)
@@ -475,7 +950,7 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
@@ -483,52 +958,54 @@ public partial class App : Application
     {
         try
         {
+            var sw = Stopwatch.StartNew();
             var result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
+            LogPerf("ocr extract", sw);
 
-            var sb = new StringBuilder();
-            if (!string.IsNullOrWhiteSpace(result.Text))
-                sb.Append(result.Text);
-            if (result.QrCodes.Count > 0)
-            {
-                if (sb.Length > 0) sb.AppendLine().AppendLine();
-                sb.Append(string.Join(Environment.NewLine, result.QrCodes));
-            }
-
-            string text = sb.ToString();
-            if (string.IsNullOrWhiteSpace(text))
+            OcrClipboardPayload? payload = OcrClipboardFormatter.Build(result);
+            if (payload is null)
             {
                 ShowBalloon("OCR", "No text or codes found in the selection.");
                 return;
             }
 
-            Clipboard.SetText(text);
-            string title = result.QrCodes.Count > 0 ? "Text + QR code copied" : "Text copied to clipboard";
-            string preview = text.Length > 80 ? text[..80] + "…" : text;
-            ShowBalloon(title, preview);
+            await CaptureService.SetTextToClipboardAsync(payload.ClipboardText);
+            ShowBalloon(payload.BalloonTitle, payload.Preview);
         }
         catch (InvalidOperationException ex)
         {
             ShowBalloon("OCR unavailable", ex.Message);
         }
+        catch (COMException ex)
+        {
+            Log.Info($"OCR clipboard copy skipped: {ex.Message}");
+            ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.");
+        }
     }
 
-    private async void ScrollingFlow()
+    private async void ScrollingFlow(ScrollCaptureChoice? choice = null)
     {
         if (_captureInProgress) return;
         _captureInProgress = true;
         try
         {
             SD.Rectangle? picked = null;
-            using (var shot = CaptureDesktopRespectingSettings())
+            var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+            TrackFirstShown(selector, "scrolling selector");
+            try
             {
-                var selector = new RegionSelectorWindow(shot, WindowEnumerator.GetTopLevelWindows(), _settings, allInOne: false);
-                if (selector.ShowDialog() == true && selector.SelectedRegionPx is SD.Rectangle r)
+                if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle r)
                     picked = r;
+            }
+            finally
+            {
+                FastRegionSelectorDialog.Return(selector);
             }
             if (picked is not SD.Rectangle region) return;
 
+            await WaitForOverlayDismissAsync();
             region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
-            var stitched = await ScrollingStatusWindow.Run(region);
+            var stitched = await ScrollingStatusWindow.Run(region, choice);
             if (stitched is not null)
                 HandleCapture(stitched);
             else
@@ -541,46 +1018,57 @@ public partial class App : Application
         }
         finally
         {
-            _captureInProgress = false;
+            FinishCaptureFlow();
         }
     }
 
-    private void RestoreLastFlow()
+    private async void RestoreLastFlow()
     {
-        string? path = QuickActionsWindow.PopRecentlyClosed();
+        string? path = FastQuickActionsWindow.PopRecentlyClosed();
         if (path is null)
         {
             ShowBalloon("Restore", "No recently closed capture to restore.");
             return;
         }
-        if (LoadBitmapCopy(path) is SD.Bitmap bmp)
+        if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
             ShowOverlay(bmp, path);
     }
 
     private void OpenHistory()
     {
+        var sw = Stopwatch.StartNew();
         var win = HistoryWindow.Show(_history, _settings);
+        LogPerf("history window show", sw);
         win.EditRequested -= EditFromHistory;
         win.EditRequested += EditFromHistory;
         win.PinRequested -= PinFromHistory;
         win.PinRequested += PinFromHistory;
     }
 
-    private void OpenSettings() => SettingsWindow.Show(_settings);
-
-    private void OpenEditorFromOverlay(QuickActionsWindow overlay)
+    private void OpenSettings()
     {
-        new EditorWindow(overlay.CloneImage(), _settings, _history).Show();
+        var sw = Stopwatch.StartNew();
+        SettingsWindow.Show(_settings);
+        LogPerf("settings window show", sw);
+    }
+
+    private void OpenEditorFromOverlay(FastQuickActionsWindow overlay)
+    {
+        var win = EditorWindow.CreateForCapture(overlay.CloneImage(), _settings, _history);
+        TrackFirstRender(win, "editor window");
+        win.Show();
         overlay.Close();
     }
 
-    private void PinFromOverlay(QuickActionsWindow overlay)
+    private void PinFromOverlay(FastQuickActionsWindow overlay)
     {
-        new PinWindow(overlay.CloneImage(), _settings).Show();
+        var win = new FastPinWindow(overlay.CloneImage(), _settings);
+        FastPinWindow.TrackFirstShown(win, "pin window");
+        win.Show();
         overlay.Close();
     }
 
-    private async void OcrFromOverlay(QuickActionsWindow overlay)
+    private async void OcrFromOverlay(FastQuickActionsWindow overlay)
     {
         try
         {
@@ -594,31 +1082,44 @@ public partial class App : Application
         }
     }
 
-    private void BackgroundFromOverlay(QuickActionsWindow overlay)
+    private void BackgroundFromOverlay(FastQuickActionsWindow overlay)
     {
-        new BackgroundComposerWindow(overlay.CloneImage(), _settings, _history).Show();
+        var win = new BackgroundComposerWindow(overlay.CloneImage(), _settings, _history);
+        TrackFirstRender(win, "background window");
+        win.Show();
         overlay.Close();
     }
 
-    private void EditFromHistory(string path)
+    private async void EditFromHistory(string path)
     {
-        if (LoadBitmapCopy(path) is SD.Bitmap bmp)
-            new EditorWindow(bmp, _settings, _history).Show();
+        if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
+        {
+            var win = EditorWindow.CreateForCapture(bmp, _settings, _history);
+            TrackFirstRender(win, "editor window");
+            win.Show();
+        }
     }
 
-    private void PinFromHistory(string path)
+    private async void PinFromHistory(string path)
     {
-        if (LoadBitmapCopy(path) is SD.Bitmap bmp)
-            new PinWindow(bmp, _settings).Show();
+        if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
+        {
+            var win = new FastPinWindow(bmp, _settings);
+            FastPinWindow.TrackFirstShown(win, "pin window");
+            win.Show();
+        }
     }
 
     /// <summary>Loads an image as a detached copy so the file on disk stays unlocked.</summary>
-    private SD.Bitmap? LoadBitmapCopy(string path)
+    private async Task<SD.Bitmap?> LoadBitmapCopyAsync(string path)
     {
         try
         {
-            using var fromDisk = new SD.Bitmap(path);
-            return new SD.Bitmap(fromDisk);
+            return await Task.Run(() =>
+            {
+                using var fromDisk = new SD.Bitmap(path);
+                return new SD.Bitmap(fromDisk);
+            });
         }
         catch (Exception ex)
         {
@@ -626,20 +1127,6 @@ public partial class App : Application
             ShowBalloon("WinShot", "Could not open that file as an image.");
             return null;
         }
-    }
-
-    private static bool TryParseRegion(string value, out SD.Rectangle rect)
-    {
-        rect = default;
-        var parts = value.Split(',');
-        if (parts.Length != 4) return false;
-        if (int.TryParse(parts[0], out int x) && int.TryParse(parts[1], out int y) &&
-            int.TryParse(parts[2], out int w) && int.TryParse(parts[3], out int h) && w > 0 && h > 0)
-        {
-            rect = new SD.Rectangle(x, y, w, h);
-            return true;
-        }
-        return false;
     }
 
     private static double SystemDpiScale

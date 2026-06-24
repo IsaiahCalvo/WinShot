@@ -1,9 +1,15 @@
 using System.IO;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Interop;
+using System.Windows.Threading;
 using Microsoft.Win32;
+using WinShot.Capture;
 using WinShot.Core;
 using WF = System.Windows.Forms;
 
@@ -26,6 +32,9 @@ public partial class SettingsWindow : Window
     }
 
     private readonly SettingsService _settings;
+    private bool _renderPrewarmed;
+    private bool _prewarmVisible;
+    private bool _saving;
 
     public SettingsWindow(SettingsService settings)
     {
@@ -37,25 +46,205 @@ public partial class SettingsWindow : Window
     /// <summary>Opens the settings window, or activates the instance that is already open.</summary>
     public static SettingsWindow Show(SettingsService settings)
     {
+        var total = Stopwatch.StartNew();
+        long createMs = 0;
+        long resetMs = 0;
+        long loadMs = 0;
+        long centerMs = 0;
+        long showMs = 0;
+        long activateMs = 0;
+        bool deferActivate = false;
+
         if (_instance is null)
         {
-            _instance = new SettingsWindow(settings);
-            _instance.Closed += (_, _) => _instance = null;
-            _instance.Show();
+            var step = Stopwatch.StartNew();
+            CreateInstance(settings);
+            createMs = step.ElapsedMilliseconds;
+        }
+
+        var instance = _instance ?? throw new InvalidOperationException("Settings window was not created.");
+
+        if (instance._prewarmVisible)
+        {
+            var step = Stopwatch.StartNew();
+            instance.ResetValidation();
+            resetMs = step.ElapsedMilliseconds;
+            step.Restart();
+            instance.LoadFromSettings();
+            loadMs = step.ElapsedMilliseconds;
+            if (!instance.IsMostlyWithinWorkArea())
+            {
+                step.Restart();
+                instance.CenterOnWorkArea();
+                centerMs = step.ElapsedMilliseconds;
+            }
+            step.Restart();
+            instance.RestorePrewarmedWindow();
+            showMs = step.ElapsedMilliseconds;
+            deferActivate = true;
+        }
+        else if (!instance.IsVisible)
+        {
+            var step = Stopwatch.StartNew();
+            instance.ShowInTaskbar = true;
+            instance.ResetValidation();
+            resetMs = step.ElapsedMilliseconds;
+            step.Restart();
+            instance.LoadFromSettings();
+            loadMs = step.ElapsedMilliseconds;
+            step.Restart();
+            instance.CenterOnWorkArea();
+            centerMs = step.ElapsedMilliseconds;
+            step.Restart();
+            instance.Show();
+            showMs = step.ElapsedMilliseconds;
+        }
+        else if (instance.WindowState == WindowState.Minimized)
+        {
+            instance.WindowState = WindowState.Normal;
+        }
+
+        if (deferActivate)
+        {
+            instance.Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() => instance.Activate()));
         }
         else
         {
-            if (_instance.WindowState == WindowState.Minimized)
-                _instance.WindowState = WindowState.Normal;
-            _instance.Activate();
+            var activate = Stopwatch.StartNew();
+            instance.Activate();
+            activateMs = activate.ElapsedMilliseconds;
         }
-        return _instance;
+        if (total.ElapsedMilliseconds > 50)
+        {
+            Log.Info(
+                "Perf settings window breakdown: " +
+                $"create={createMs} reset={resetMs} load={loadMs} center={centerMs} " +
+                $"show={showMs} activate={activateMs} total={total.ElapsedMilliseconds} ms");
+        }
+        return instance;
+    }
+
+    public static void Prewarm(SettingsService settings)
+    {
+        if (_instance is null)
+            CreateInstance(settings);
+        _instance?.PrewarmRender();
+    }
+
+    private static void CreateInstance(SettingsService settings)
+    {
+        _instance = new SettingsWindow(settings);
+        _instance.Closed += (_, _) =>
+        {
+            _instance = null;
+            MemoryCleanup.Request();
+        };
+    }
+
+    private void PrewarmRender()
+    {
+        if (_renderPrewarmed || IsVisible) return;
+        _renderPrewarmed = true;
+
+        ShowInTaskbar = false;
+        ShowActivated = false;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Opacity = 0;
+        CenterOnWorkArea();
+
+        Show();
+        FlushPrewarmRender();
+        ApplyParkedWindowStyle(parked: true);
+        _prewarmVisible = true;
+    }
+
+    private void RestorePrewarmedWindow()
+    {
+        if (!IsMostlyWithinWorkArea())
+            CenterOnWorkArea();
+        ShowInTaskbar = true;
+        Opacity = 1;
+        ApplyParkedWindowStyle(parked: false);
+        _prewarmVisible = false;
+    }
+
+    private void FlushPrewarmRender()
+    {
+        var frame = new DispatcherFrame();
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.ApplicationIdle,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+    }
+
+    private void CenterOnWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        double left = area.Left + (area.Width - Width) / 2;
+        double top = area.Top + (area.Height - Height) / 2;
+
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        if (IsVisible && hwnd != IntPtr.Zero &&
+            SetWindowPos(
+                hwnd,
+                IntPtr.Zero,
+                (int)Math.Round(left),
+                (int)Math.Round(top),
+                0,
+                0,
+                SetWindowPosNoSize | SetWindowPosNoZOrder | SetWindowPosNoActivate))
+        {
+            return;
+        }
+
+        Left = left;
+        Top = top;
+    }
+
+    private bool IsMostlyWithinWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        return Left < area.Right - 120 &&
+               Left + Width > area.Left + 120 &&
+               Top < area.Bottom - 80 &&
+               Top + Height > area.Top + 80;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Escape) Close();
         base.OnKeyDown(e);
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _prewarmVisible = false;
+        ApplyParkedWindowStyle(parked: false);
+        base.OnClosing(e);
+    }
+
+    private void ParkPrewarmedWindow()
+    {
+        if (_prewarmVisible)
+            return;
+
+        Opacity = 0;
+        ApplyParkedWindowStyle(parked: true);
+        _prewarmVisible = true;
+    }
+
+    private void ApplyParkedWindowStyle(bool parked)
+    {
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        int style = GetWindowLong(hwnd, GwlExStyle);
+        int updated = parked ? style | WsExTransparent : style & ~WsExTransparent;
+        if (updated != style)
+            SetWindowLong(hwnd, GwlExStyle, updated);
     }
 
     private void LoadFromSettings()
@@ -87,6 +276,7 @@ public partial class SettingsWindow : Window
         RecordAudioCheck.IsChecked = s.RecordAudio;
         SystemAudioCheck.IsChecked = s.RecordSystemAudio;
         SelectByTag(WebcamCombo, s.WebcamOverlayPosition, fallbackIndex: 0);
+        WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(s.WebcamOverlaySizePercent).ToString();
         ClickHighlightsCheck.IsChecked = s.ShowClickHighlights;
         KeystrokesCheck.IsChecked = s.ShowKeystrokes;
         CountdownBox.Text = s.RecordingCountdownSeconds.ToString();
@@ -140,88 +330,115 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    private async void OnSave(object sender, RoutedEventArgs e)
     {
+        if (_saving) return;
+        _saving = true;
+        SaveButton.IsEnabled = false;
         ResetValidation();
         bool valid = true;
 
-        if (string.IsNullOrWhiteSpace(SaveFolderBox.Text))
+        try
         {
-            MarkInvalid(SaveFolderBox, "Choose a folder to save captures into.");
-            valid = false;
-        }
+            if (string.IsNullOrWhiteSpace(SaveFolderBox.Text))
+            {
+                MarkInvalid(SaveFolderBox, "Choose a folder to save captures into.");
+                valid = false;
+            }
 
-        if (string.IsNullOrWhiteSpace(TemplateBox.Text))
+            if (string.IsNullOrWhiteSpace(TemplateBox.Text))
+            {
+                MarkInvalid(TemplateBox, "Enter a file name template, e.g. WinShot {date} at {time}.");
+                valid = false;
+            }
+
+            int overlaySeconds = ReadInt(OverlayCloseBox, 0, 3600, ref valid);
+            int historyLimit = ReadInt(HistoryLimitBox, 1, 5000, ref valid);
+            int retentionDays = ReadInt(RetentionDaysBox, 0, 3650, ref valid);
+            int selfTimer = ReadInt(
+                SelfTimerBox,
+                SelfTimerOptions.MinDelaySeconds,
+                SelfTimerOptions.MaxDelaySeconds,
+                ref valid);
+            int recordingFps = ReadInt(RecordingFpsBox, 10, 60, ref valid);
+            int gifFps = ReadInt(GifFpsBox, 5, 20, ref valid);
+            int webcamSizePercent = ReadInt(
+                WebcamSizeBox,
+                RecordingOptions.MinWebcamSizePercent,
+                RecordingOptions.MaxWebcamSizePercent,
+                ref valid);
+            int countdown = ReadInt(
+                CountdownBox,
+                RecordingOptions.MinCountdownSeconds,
+                RecordingOptions.MaxCountdownSeconds,
+                ref valid);
+
+            var hotkeyResult = HotkeyAssignmentValidator.Validate(CreateHotkeyFields(), HotkeyAvailability.Check);
+            valid &= MarkHotkeyEntryIssues(hotkeyResult);
+
+            if (!valid)
+            {
+                FocusFirstInvalid();
+                return;
+            }
+
+            if (!ResolveHotkeyConflicts(hotkeyResult))
+            {
+                FocusFirstInvalid();
+                return;
+            }
+
+            var s = _settings.Current;
+
+            // General
+            s.SaveFolder = SaveFolderBox.Text.Trim();
+            s.ImageFormat = SelectedTag(FormatCombo, "png");
+            s.AutoCopyToClipboard = AutoCopyCheck.IsChecked == true;
+            s.PostCaptureAction = SelectedTag(PostActionCombo, "overlay");
+            s.OverlayAutoCloseSeconds = overlaySeconds;
+            s.LaunchAtStartup = StartupCheck.IsChecked == true;
+            s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
+            s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
+
+            // Hotkeys
+            s.HotkeyCaptureRegion = HotkeyValue(HotkeyRegionBox);
+            s.HotkeyCaptureFullscreen = HotkeyValue(HotkeyFullscreenBox);
+            s.HotkeyRecord = HotkeyValue(HotkeyRecordBox);
+            s.HotkeyOcr = HotkeyValue(HotkeyOcrBox);
+            s.HotkeyScrolling = HotkeyValue(HotkeyScrollingBox);
+            s.HotkeyCapturePrevious = HotkeyValue(HotkeyPreviousBox);
+            s.HotkeyAllInOne = HotkeyValue(HotkeyAllInOneBox);
+
+            // Recording
+            s.RecordingFps = recordingFps;
+            s.GifFps = gifFps;
+            s.RecordAudio = RecordAudioCheck.IsChecked == true;
+            s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
+            s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
+            s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
+            s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
+            s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
+            s.RecordingCountdownSeconds = countdown;
+            s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
+
+            // Naming
+            s.FileNameTemplate = TemplateBox.Text.Trim();
+
+            // History
+            s.HistoryLimit = historyLimit;
+            s.HistoryRetentionDays = retentionDays;
+            s.SelfTimerSeconds = selfTimer;
+
+            await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
+            await _settings.SaveAsync();
+            Close();
+        }
+        finally
         {
-            MarkInvalid(TemplateBox, "Enter a file name template, e.g. WinShot {date} at {time}.");
-            valid = false;
+            _saving = false;
+            if (IsVisible)
+                SaveButton.IsEnabled = true;
         }
-
-        int overlaySeconds = ReadInt(OverlayCloseBox, 0, 3600, ref valid);
-        int historyLimit = ReadInt(HistoryLimitBox, 1, 5000, ref valid);
-        int retentionDays = ReadInt(RetentionDaysBox, 0, 3650, ref valid);
-        int selfTimer = ReadInt(SelfTimerBox, 1, 60, ref valid);
-        int recordingFps = ReadInt(RecordingFpsBox, 10, 60, ref valid);
-        int gifFps = ReadInt(GifFpsBox, 5, 20, ref valid);
-        int countdown = ReadInt(CountdownBox, 0, 10, ref valid);
-
-        valid &= ValidateHotkey(HotkeyRegionBox);
-        valid &= ValidateHotkey(HotkeyFullscreenBox);
-        valid &= ValidateHotkey(HotkeyRecordBox);
-        valid &= ValidateHotkey(HotkeyOcrBox);
-        valid &= ValidateHotkey(HotkeyScrollingBox);
-        valid &= ValidateHotkey(HotkeyPreviousBox);
-        valid &= ValidateHotkey(HotkeyAllInOneBox);
-
-        if (!valid)
-        {
-            FocusFirstInvalid();
-            return;
-        }
-
-        var s = _settings.Current;
-
-        // General
-        s.SaveFolder = SaveFolderBox.Text.Trim();
-        s.ImageFormat = SelectedTag(FormatCombo, "png");
-        s.AutoCopyToClipboard = AutoCopyCheck.IsChecked == true;
-        s.PostCaptureAction = SelectedTag(PostActionCombo, "overlay");
-        s.OverlayAutoCloseSeconds = overlaySeconds;
-        s.LaunchAtStartup = StartupCheck.IsChecked == true;
-        s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
-        s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
-
-        // Hotkeys
-        s.HotkeyCaptureRegion = HotkeyRegionBox.Text.Trim();
-        s.HotkeyCaptureFullscreen = HotkeyFullscreenBox.Text.Trim();
-        s.HotkeyRecord = HotkeyRecordBox.Text.Trim();
-        s.HotkeyOcr = HotkeyOcrBox.Text.Trim();
-        s.HotkeyScrolling = HotkeyScrollingBox.Text.Trim();
-        s.HotkeyCapturePrevious = HotkeyPreviousBox.Text.Trim();
-        s.HotkeyAllInOne = HotkeyAllInOneBox.Text.Trim();
-
-        // Recording
-        s.RecordingFps = recordingFps;
-        s.GifFps = gifFps;
-        s.RecordAudio = RecordAudioCheck.IsChecked == true;
-        s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
-        s.WebcamOverlayPosition = SelectedTag(WebcamCombo, "off");
-        s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
-        s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
-        s.RecordingCountdownSeconds = countdown;
-        s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
-
-        // Naming
-        s.FileNameTemplate = TemplateBox.Text.Trim();
-
-        // History
-        s.HistoryLimit = historyLimit;
-        s.HistoryRetentionDays = retentionDays;
-        s.SelfTimerSeconds = selfTimer;
-
-        ApplyStartupRegistration(s.LaunchAtStartup);
-        _settings.Save();
-        Close();
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
@@ -230,7 +447,7 @@ public partial class SettingsWindow : Window
         new[]
         {
             SaveFolderBox, OverlayCloseBox, HistoryLimitBox, RetentionDaysBox, SelfTimerBox,
-            RecordingFpsBox, GifFpsBox, CountdownBox, TemplateBox,
+            RecordingFpsBox, GifFpsBox, WebcamSizeBox, CountdownBox, TemplateBox,
             HotkeyRegionBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
             HotkeyScrollingBox, HotkeyPreviousBox, HotkeyAllInOneBox,
         };
@@ -287,12 +504,97 @@ public partial class SettingsWindow : Window
         return clamped;
     }
 
-    private static bool ValidateHotkey(TextBox box)
+    private HotkeyAssignmentValidator.Field[] CreateHotkeyFields()
     {
-        if (HotkeyManager.TryParseGesture(box.Text, out _, out _)) return true;
-        MarkInvalid(box, "Use a gesture like Ctrl+Shift+1.");
+        var s = _settings.Current;
+        return
+        [
+            new("Capture region / window", HotkeyRegionBox, s.HotkeyCaptureRegion),
+            new("Capture fullscreen", HotkeyFullscreenBox, s.HotkeyCaptureFullscreen),
+            new("Record screen", HotkeyRecordBox, s.HotkeyRecord),
+            new("Capture text (OCR)", HotkeyOcrBox, s.HotkeyOcr),
+            new("Scrolling capture", HotkeyScrollingBox, s.HotkeyScrolling),
+            new("Repeat previous region", HotkeyPreviousBox, s.HotkeyCapturePrevious),
+            new("All-in-one capture", HotkeyAllInOneBox, s.HotkeyAllInOne),
+        ];
+    }
+
+    private static bool MarkHotkeyEntryIssues(HotkeyAssignmentValidator.Result result)
+    {
+        bool valid = true;
+        foreach (var issue in result.Issues.Where(issue => issue.Kind != HotkeyAssignmentIssueKind.UsedByAnotherApp))
+        {
+            foreach (var box in issue.Boxes)
+                MarkInvalid(box, issue.Message);
+            valid = false;
+        }
+        return valid;
+    }
+
+    private bool ResolveHotkeyConflicts(HotkeyAssignmentValidator.Result result)
+    {
+        var issue = result.Issues.FirstOrDefault(issue => issue.Kind == HotkeyAssignmentIssueKind.UsedByAnotherApp);
+        if (issue is null)
+            return true;
+
+        var source = HotkeyConflictInspector.DescribeConflict(issue.Gesture);
+        string actionLabel = issue.Labels.FirstOrDefault() ?? "This action";
+        HotkeyConflictChoice choice = HotkeyConflictDialog.Show(this, actionLabel, issue.Gesture, source);
+
+        if (choice == HotkeyConflictChoice.FindApp)
+        {
+            var probe = HotkeyOwnerProbeDialog.Show(this, issue.Gesture);
+            string message = probe.Found
+                ? $"{probe.Source.DisplayName} appears to catch {issue.Gesture}. Choose a different WinShot hotkey or change it there."
+                : "WinShot could not identify the app. Choose a different WinShot hotkey or close likely hotkey apps and try again.";
+            foreach (var box in issue.Boxes)
+                MarkInvalid(box, message);
+        }
+        else if (choice == HotkeyConflictChoice.Change)
+        {
+            OpenConflictSource(source);
+            foreach (var box in issue.Boxes)
+                MarkInvalid(box, $"{issue.Gesture} is still assigned in {source.DisplayName}. Change it there, then save again.");
+        }
+        else
+        {
+            foreach (var box in issue.Boxes)
+                MarkInvalid(box, $"{source.DisplayName} keeps {issue.Gesture}. Choose a different WinShot hotkey.");
+        }
+
         return false;
     }
+
+    private static void OpenConflictSource(HotkeyConflictSource source)
+    {
+        string target = string.IsNullOrWhiteSpace(source.LaunchTarget)
+            ? "ms-settings:keyboard"
+            : source.LaunchTarget;
+
+        if (TryStart(target))
+            return;
+
+        TryStart("ms-settings:keyboard");
+    }
+
+    private static bool TryStart(string target)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to open '{target}' for hotkey conflict", ex);
+            return false;
+        }
+    }
+
+    private static string HotkeyValue(TextBox box) =>
+        HotkeyManager.TryNormalizeGesture(box.Text, out string? normalized)
+            ? normalized!
+            : box.Text.Trim();
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)
     {
@@ -327,4 +629,26 @@ public partial class SettingsWindow : Window
             Log.Error("Failed to update launch-at-startup registry value", ex);
         }
     }
+
+    private const uint SetWindowPosNoSize = 0x0001;
+    private const uint SetWindowPosNoZOrder = 0x0004;
+    private const uint SetWindowPosNoActivate = 0x0010;
+    private const int GwlExStyle = -20;
+    private const int WsExTransparent = 0x00000020;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hwnd,
+        IntPtr hwndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 }

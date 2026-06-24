@@ -19,8 +19,8 @@ public partial class SelfTimerWindow : Window
     private SelfTimerWindow(int seconds)
     {
         InitializeComponent();
-        _remaining = seconds;
-        CountText.Text = seconds.ToString();
+        _remaining = SelfTimerOptions.ClampDelaySeconds(seconds);
+        CountText.Text = _remaining.ToString();
 
         SourceInitialized += (_, _) =>
         {
@@ -54,11 +54,11 @@ public partial class SelfTimerWindow : Window
     /// </summary>
     public static Task RunAsync(int seconds)
     {
-        if (seconds <= 0)
+        if (!SelfTimerOptions.ShouldRunDelay(seconds))
             return Task.CompletedTask;
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var win = new SelfTimerWindow(seconds);
+        var win = new SelfTimerWindow(SelfTimerOptions.ClampDelaySeconds(seconds));
         win.Closed += async (_, _) =>
         {
             await Task.Delay(120); // let the bubble actually leave the screen first

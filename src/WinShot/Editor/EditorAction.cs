@@ -7,8 +7,8 @@ namespace WinShot.Editor;
 /// </summary>
 public sealed class EditorAction
 {
-    private readonly Action _undo;
-    private readonly Action _redo;
+    private readonly Func<Task> _undo;
+    private readonly Func<Task> _redo;
     private readonly Action? _onDiscard;
 
     /// <param name="onDiscard">
@@ -17,13 +17,28 @@ public sealed class EditorAction
     /// bitmap) that can never be replayed again.
     /// </param>
     public EditorAction(Action undo, Action redo, Action? onDiscard = null)
+        : this(() =>
+        {
+            undo();
+            return Task.CompletedTask;
+        }, () =>
+        {
+            redo();
+            return Task.CompletedTask;
+        }, onDiscard)
+    {
+    }
+
+    public EditorAction(Func<Task> undo, Func<Task> redo, Action? onDiscard = null)
     {
         _undo = undo;
         _redo = redo;
         _onDiscard = onDiscard;
     }
 
-    public void Undo() => _undo();
-    public void Redo() => _redo();
+    public void Undo() => _undo().GetAwaiter().GetResult();
+    public void Redo() => _redo().GetAwaiter().GetResult();
+    public Task UndoAsync() => _undo();
+    public Task RedoAsync() => _redo();
     public void Discard() => _onDiscard?.Invoke();
 }

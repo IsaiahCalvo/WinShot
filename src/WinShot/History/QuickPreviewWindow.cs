@@ -1,4 +1,5 @@
 using System.IO;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -44,20 +45,20 @@ public sealed class QuickPreviewWindow : Window
 
         string ext = Path.GetExtension(filePath).ToLowerInvariant();
         bool looksLikeImage = PreviewableExtensions.Contains(ext);
-        BitmapImage? image = looksLikeImage ? TryLoad(filePath) : null;
+        var wa = SystemParameters.WorkArea;
+        BitmapImage? image = looksLikeImage ? TryLoad(filePath, (int)Math.Ceiling(wa.Width * 0.8)) : null;
 
         if (image is not null)
         {
-            var wa = SystemParameters.WorkArea;
-            double scale = Math.Min(1.0, Math.Min(
-                wa.Width * 0.8 / image.PixelWidth,
-                wa.Height * 0.8 / image.PixelHeight));
+            var size = HistoryPreviewLayout.CalculateImageSize(
+                new System.Drawing.Size(image.PixelWidth, image.PixelHeight),
+                new System.Drawing.Size((int)Math.Round(wa.Width), (int)Math.Round(wa.Height)));
             border.Child = new Image
             {
                 Source = image,
                 Stretch = Stretch.Uniform,
-                Width = Math.Max(48, image.PixelWidth * scale),
-                Height = Math.Max(48, image.PixelHeight * scale),
+                Width = Math.Max(1, size.Width - HistoryPreviewLayout.TotalPadding),
+                Height = Math.Max(1, size.Height - HistoryPreviewLayout.TotalPadding),
             };
         }
         else
@@ -104,6 +105,12 @@ public sealed class QuickPreviewWindow : Window
         CloseOnce();
     }
 
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _closing = true;
+        base.OnClosing(e);
+    }
+
     /// <summary>Close() can re-enter while the window is already tearing down
     /// (Esc → Close → Deactivated → Close); this collapses those into one call.</summary>
     private void CloseOnce()
@@ -113,13 +120,14 @@ public sealed class QuickPreviewWindow : Window
         Close();
     }
 
-    private static BitmapImage? TryLoad(string path)
+    private static BitmapImage? TryLoad(string path, int decodePixelWidth)
     {
         try
         {
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.UriSource = new Uri(path);
+            bmp.DecodePixelWidth = Math.Max(1, decodePixelWidth);
             bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
             bmp.EndInit();

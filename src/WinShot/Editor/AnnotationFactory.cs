@@ -83,9 +83,10 @@ internal static class AnnotationFactory
     /// </summary>
     public static Path CreateSpotlight(Size imageSize, Rect hole)
     {
+        var layout = SpotlightLayout.Calculate(imageSize, hole);
         var group = new GeometryGroup { FillRule = FillRule.EvenOdd };
-        group.Children.Add(new RectangleGeometry(new Rect(0, 0, imageSize.Width, imageSize.Height)));
-        group.Children.Add(new RectangleGeometry(hole));
+        group.Children.Add(new RectangleGeometry(new Rect(0, 0, layout.Outer.Width, layout.Outer.Height)));
+        group.Children.Add(new RectangleGeometry(layout.Hole));
         return new Path
         {
             Data = group,

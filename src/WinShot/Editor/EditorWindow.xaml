@@ -92,32 +92,7 @@
                             <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
                                     BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
                                     Effect="{StaticResource FloatingShadow}">
-                                <UniformGrid Columns="6">
-                                    <Button Style="{StaticResource EmojiButton}" Content="😀" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="😅" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="😂" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="😍" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="🤔" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="😎" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="😢" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="😡" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="👍" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="👎" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="👏" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="🙏" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="👀" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="💪" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="❤️" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="🔥" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="⭐" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="🎉" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="✅" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="❌" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="⚠️" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="❗" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="💡" Click="OnEmojiPicked"/>
-                                    <Button Style="{StaticResource EmojiButton}" Content="🚀" Click="OnEmojiPicked"/>
-                                </UniformGrid>
+                                <UniformGrid x:Name="EmojiGrid" Columns="6"/>
                             </Border>
                         </Popup>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
@@ -139,7 +114,7 @@
                 </DockPanel>
 
                 <!-- Row 2: contextual style controls (left) + image utilities (right) -->
-                <DockPanel Margin="0,8,0,0">
+                <DockPanel x:Name="EditorStyleBar" Margin="0,8,0,0" Visibility="Collapsed">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="CropPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"/>
@@ -269,7 +244,8 @@
         </Grid>
 
         <!-- ===================== BOTTOM UTILITY BAR ===================== -->
-        <Border Grid.Row="2" Style="{StaticResource BottomUtilityBar}" Margin="12,6,12,12">
+        <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"
+                Margin="12,6,12,12" Visibility="Collapsed">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>

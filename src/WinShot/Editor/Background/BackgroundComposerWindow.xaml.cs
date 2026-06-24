@@ -37,6 +37,7 @@ public partial class BackgroundComposerWindow : Window
     private readonly HistoryService _history;
     private readonly int _srcW;
     private readonly int _srcH;
+    private readonly System.Diagnostics.Stopwatch _startup = System.Diagnostics.Stopwatch.StartNew();
     private readonly List<RadioButton> _bgSwatches = new();
 
     private double? _aspect;  // null = Auto (canvas hugs image + padding)
@@ -44,28 +45,114 @@ public partial class BackgroundComposerWindow : Window
     private int _canvasH;
     private bool _ready;
     private bool _suppressBg;
+    private bool _allowPreviewShadow;
+    private bool _compositionInitialized;
     private string _anchor = "CC";  // 3x3 alignment of the shot within the canvas
 
     public BackgroundComposerWindow(SD.Bitmap source, SettingsService settings, HistoryService history)
+        : this(source, settings, history, loadSourceImage: true)
     {
+    }
+
+    private BackgroundComposerWindow(SD.Bitmap source, SettingsService settings, HistoryService history, bool loadSourceImage)
+    {
+        ThemeResources.EnsureLoaded();
         InitializeComponent();
         _source = source;
         _settings = settings;
         _history = history;
         _srcW = source.Width;
         _srcH = source.Height;
+        BtnCopy.Content = "Copy";
+        BtnSave.Content = "Save as...";
 
-        var shot = new ImageBrush(CaptureService.ToBitmapSource(source)) { Stretch = Stretch.Fill };
-        RenderOptions.SetBitmapScalingMode(shot, BitmapScalingMode.HighQuality);
-        ShotBorder.Background = shot;
-
-        BuildBackgroundPickers();
-        Closed += (_, _) => _source.Dispose();
+        Closed += (_, _) =>
+        {
+            _source.Dispose();
+            MemoryCleanup.Request();
+        };
+        SourceInitialized += (_, _) => Log.Info($"Perf background composer source initialized: {_startup.ElapsedMilliseconds} ms");
+        Loaded += (_, _) => Log.Info($"Perf background composer loaded: {_startup.ElapsedMilliseconds} ms");
 
         _ready = true;
-        if (_bgSwatches.Count > 0)
-            _bgSwatches[0].IsChecked = true; // applies the first preset
-        UpdateComposition();
+        ContentRendered += (_, _) =>
+        {
+            Log.Info($"Perf background composer content rendered internal: {_startup.ElapsedMilliseconds} ms");
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    _allowPreviewShadow = true;
+                    EnsureCompositionInitialized();
+                    UpdateComposition();
+                    PreviewBox.Visibility = Visibility.Visible;
+                    ComposerControls.Visibility = Visibility.Visible;
+                    if (_bgSwatches.Count == 0)
+                    {
+                        BuildBackgroundPickers();
+                        if (_bgSwatches.Count > 0)
+                            _bgSwatches[0].IsChecked = true; // applies the first preset
+                    }
+
+                    if (loadSourceImage)
+                        _ = LoadShotBrushAsync(source);
+
+                    Log.Info($"Perf background composer deferred init: {_startup.ElapsedMilliseconds} ms");
+                }));
+        };
+    }
+
+    public static void Prewarm(SettingsService settings, HistoryService history)
+    {
+        try
+        {
+            var bitmap = new SD.Bitmap(1, 1);
+            var window = new BackgroundComposerWindow(bitmap, settings, history, loadSourceImage: false)
+            {
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                Opacity = 0,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+            };
+            var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            fallback.Tick += (_, _) =>
+            {
+                fallback.Stop();
+                if (window.IsVisible)
+                    window.Close();
+            };
+            window.ContentRendered += (_, _) =>
+            {
+                fallback.Stop();
+                window.Close();
+            };
+            window.Show();
+            fallback.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Background composer prewarm failed", ex);
+        }
+    }
+
+    private async Task LoadShotBrushAsync(SD.Bitmap source)
+    {
+        try
+        {
+            var image = await CaptureService.ToBitmapSourceSnapshotAsync(source);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                var shot = new ImageBrush(image) { Stretch = Stretch.Fill };
+                RenderOptions.SetBitmapScalingMode(shot, BitmapScalingMode.HighQuality);
+                ShotBorder.Background = shot;
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to load background composer screenshot", ex);
+        }
     }
 
     // ------------------------------------------------------------ composition
@@ -90,20 +177,9 @@ public partial class BackgroundComposerWindow : Window
         RadiusValueLabel.Text = $"{radius} px";
         BlurValueLabel.Text = blurValue.ToString();
 
-        // Effective margin around the shot = padding + inset.
-        int margin = pad + inset;
-        int contentW = _srcW + 2 * margin;
-        int contentH = _srcH + 2 * margin;
-
-        _canvasW = contentW;
-        _canvasH = contentH;
-        if (_aspect is double ratio)
-        {
-            if (contentW / (double)contentH >= ratio)
-                _canvasH = (int)Math.Ceiling(contentW / ratio);
-            else
-                _canvasW = (int)Math.Ceiling(contentH * ratio);
-        }
+        var layout = BackgroundLayout.Calculate(new SD.Size(_srcW, _srcH), pad, inset, _aspect);
+        _canvasW = layout.CanvasSize.Width;
+        _canvasH = layout.CanvasSize.Height;
 
         ComposeRoot.Width = _canvasW;
         ComposeRoot.Height = _canvasH;
@@ -114,27 +190,43 @@ public partial class BackgroundComposerWindow : Window
         // Anchor the shot inside the (possibly oversized) canvas. The minimum
         // gutter is the effective margin; extra space from a fixed ratio is
         // distributed per the alignment picker.
-        ApplyAnchor(margin);
+        ApplyAnchor(layout.Margin);
 
         if (ShadowCheck.IsChecked == true)
         {
-            double blur = BlurSlider.Value;
-            ShotBorder.Effect = new DropShadowEffect
-            {
-                BlurRadius = blur,
-                ShadowDepth = blur * 0.25,
-                Direction = 270,
-                Color = Colors.Black,
-                Opacity = 0.55,
-                RenderingBias = RenderingBias.Quality,
-            };
+            ShotBorder.Effect = _allowPreviewShadow
+                ? CreateShadowEffect(RenderingBias.Performance)
+                : null;
         }
         else
         {
             ShotBorder.Effect = null;
         }
 
-        SizeLabel.Text = $"{_canvasW} × {_canvasH} px";
+        SizeLabel.Text = $"{_canvasW} x {_canvasH} px";
+    }
+
+    private void EnsureCompositionInitialized()
+    {
+        if (_compositionInitialized)
+            return;
+
+        _compositionInitialized = true;
+        UpdateComposition();
+    }
+
+    private DropShadowEffect CreateShadowEffect(RenderingBias renderingBias)
+    {
+        double blur = BlurSlider.Value;
+        return new DropShadowEffect
+        {
+            BlurRadius = blur,
+            ShadowDepth = blur * 0.25,
+            Direction = 270,
+            Color = Colors.Black,
+            Opacity = 0.55,
+            RenderingBias = renderingBias,
+        };
     }
 
     /// <summary>
@@ -262,7 +354,7 @@ public partial class BackgroundComposerWindow : Window
             Margin = new Thickness(0, 0, 6, 6),
             Cursor = Cursors.Hand,
             Content = "+",
-            ToolTip = "Choose image…",
+            ToolTip = "Choose image...",
         };
         browseTile.Checked += (_, _) =>
         {
@@ -338,6 +430,11 @@ public partial class BackgroundComposerWindow : Window
     private void OnAlignChecked(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton tb || tb.Tag is not string tag) return;
+        if (!_ready)
+        {
+            _anchor = tag;
+            return;
+        }
 
         // ToggleButton has no GroupName, so enforce single-selection manually.
         foreach (var other in new[]
@@ -398,6 +495,7 @@ public partial class BackgroundComposerWindow : Window
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = Math.Max(_canvasW, _canvasH) * 2;
             image.UriSource = new Uri(dialog.FileName);
             image.EndInit();
             image.Freeze();
@@ -447,17 +545,30 @@ public partial class BackgroundComposerWindow : Window
     /// </summary>
     private SD.Bitmap Flatten()
     {
-        ComposeRoot.UpdateLayout();
-        return BitmapEffects.RenderVisual(ComposeRoot, _canvasW, _canvasH);
+        EnsureCompositionInitialized();
+        Effect? previousEffect = ShotBorder.Effect;
+        if (ShadowCheck.IsChecked == true)
+            ShotBorder.Effect = CreateShadowEffect(RenderingBias.Quality);
+
+        try
+        {
+            ComposeRoot.UpdateLayout();
+            return BitmapEffects.RenderVisual(ComposeRoot, _canvasW, _canvasH);
+        }
+        finally
+        {
+            ShotBorder.Effect = previousEffect;
+        }
     }
 
-    private void OnCopy(object sender, RoutedEventArgs e)
+    private async void OnCopy(object sender, RoutedEventArgs e)
     {
         try
         {
-            using var flat = Flatten();
-            CaptureService.CopyToClipboard(flat);
-            FlashButton(BtnCopy, "Copied ✓", "Save as…");
+            var flat = Flatten();
+            await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
+            if (!IsVisible) return;
+            FlashButton(BtnCopy, "Copied", "Copy");
         }
         catch (Exception ex)
         {
@@ -465,7 +576,7 @@ public partial class BackgroundComposerWindow : Window
         }
     }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    private async void OnSave(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -480,10 +591,17 @@ public partial class BackgroundComposerWindow : Window
             };
             if (dialog.ShowDialog(this) != true) return;
 
-            using var flat = Flatten();
-            ImageSaver.Save(flat, dialog.FileName);
-            _history.Add(flat);
-            FlashButton(BtnSave, "Saved ✓", "Done");
+            var flat = Flatten();
+            await Task.Run(() =>
+            {
+                using (flat)
+                {
+                    ImageSaver.Save(flat, dialog.FileName);
+                    _history.Add(flat);
+                }
+            });
+            if (!IsVisible) return;
+            FlashButton(BtnSave, "Saved", "Save as...");
         }
         catch (Exception ex)
         {

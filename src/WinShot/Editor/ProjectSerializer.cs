@@ -126,12 +126,16 @@ internal sealed class AnnotationData
         Thickness = thickness,
     };
 
-    public static AnnotationData ForSpotlight(Size outer, Rect hole) => new()
+    public static AnnotationData ForSpotlight(Size outer, Rect hole)
     {
-        Type = TypeSpotlight,
-        Outer = new[] { outer.Width, outer.Height },
-        Rect = new[] { hole.X, hole.Y, hole.Width, hole.Height },
-    };
+        var layout = SpotlightLayout.Calculate(outer, hole);
+        return new AnnotationData
+        {
+            Type = TypeSpotlight,
+            Outer = new[] { layout.Outer.Width, layout.Outer.Height },
+            Rect = new[] { layout.Hole.X, layout.Hole.Y, layout.Hole.Width, layout.Hole.Height },
+        };
+    }
 
     public static AnnotationData ForImage(Rect bounds) => new()
     {
@@ -311,7 +315,7 @@ internal static class ProjectSerializer
                     : new Shapes.Ellipse();
                 shape.Stroke = new SolidColorBrush(color);
                 shape.StrokeThickness = RequireThickness(a);
-                shape.Fill = FillBrush(a.Fill, color);
+                shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
                 shape.Width = bounds.Width;
                 shape.Height = bounds.Height;
                 SetPos(shape, bounds.TopLeft);
@@ -478,14 +482,4 @@ internal static class ProjectSerializer
             ? t
             : throw new InvalidDataException($"Annotation '{a.Type}' is missing its thickness.");
 
-    /// <summary>Mirrors the editor's ShapeFill logic for reconstructed rectangles/ellipses.</summary>
-    private static Brush? FillBrush(string? mode, Color color) =>
-        Enum.TryParse(mode, out ShapeFillMode fill)
-            ? fill switch
-            {
-                ShapeFillMode.Quarter => new SolidColorBrush(Color.FromArgb(0x40, color.R, color.G, color.B)),
-                ShapeFillMode.Solid => new SolidColorBrush(color),
-                _ => null,
-            }
-            : null;
 }

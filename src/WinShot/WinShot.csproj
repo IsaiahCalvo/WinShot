@@ -28,7 +28,11 @@
 
   <ItemGroup>
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.2.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="System.Text.Json" Version="9.0.1" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
 

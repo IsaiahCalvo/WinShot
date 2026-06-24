@@ -97,8 +97,9 @@
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!-- Shared drop shadow for floating surfaces -->
-    <DropShadowEffect x:Key="FloatingShadow" BlurRadius="28" ShadowDepth="8"
-                      Direction="270" Opacity="0.45" Color="#FF000000"/>
+    <DropShadowEffect x:Key="FloatingShadow" BlurRadius="12" ShadowDepth="4"
+                      Direction="270" Opacity="0.30" RenderingBias="Performance"
+                      Color="#FF000000"/>
 
     <!-- ====================================================================
          TOOL BUTTON  — round 36px icon button.
