@@ -161,6 +161,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         Bounds = _vs;
         Capture = false;
         Opacity = prewarm ? 0.01 : 0.45;
+        // Seed at the real cursor so the first paint draws the crosshair/loupe at the
+        // pointer instead of the top-left corner until the first mouse-move arrives.
+        _currentScreen = WF.Cursor.Position;
         _completion = null;
     }
 
@@ -362,10 +365,29 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     private void HitTestWindow(SD.Point screenPoint)
     {
-        var hover = _windows.FirstOrDefault(w => w.Bounds.Contains(screenPoint));
+        var hover = ResolveWindow(screenPoint);
         if (ReferenceEquals(hover, _hoverWindow)) return;
         _hoverWindow = hover;
         RefreshOverlay();
+    }
+
+    /// <summary>
+    /// Resolves the window under the cursor by real z-order (WindowFromPoint) so a
+    /// small foreground window wins over a larger background one. Falls back to the
+    /// first bounds-containing window when the topmost hwnd isn't in the cached list
+    /// (e.g. it's the selector overlay itself, or an excluded/untitled window).
+    /// </summary>
+    private WindowInfo? ResolveWindow(SD.Point screenPoint)
+    {
+        IntPtr top = WindowEnumerator.TopLevelWindowFromPoint(screenPoint);
+        if (top != IntPtr.Zero && top != Handle)
+        {
+            var match = _windows.FirstOrDefault(w => w.Handle == top);
+            if (match is not null)
+                return match;
+        }
+
+        return _windows.FirstOrDefault(w => w.Bounds.Contains(screenPoint));
     }
 
     private void Confirm(SD.Rectangle virtualRect)

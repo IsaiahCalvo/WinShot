@@ -15,12 +15,15 @@ public sealed class FastRecordingControlBar : WF.Form
     private static readonly SD.Color StopHot = ThemePalette.AccentHover;
     private static readonly SD.Color RecordingRed = SD.Color.FromArgb(255, 82, 82);
     private static readonly SD.Color PausedAmber = SD.Color.FromArgb(255, 176, 32);
+    // Same translucent light hairline FastRecordingToastWindow uses for the CleanShot panel look.
+    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
 
     private readonly Stopwatch _elapsed = new();
     private readonly WF.Timer _timer = new() { Interval = 250 };
     private readonly DotControl _dot;
     private readonly WF.Label _elapsedText;
     private readonly WF.Button _pause;
+    private readonly WF.Button _restart;
     private readonly WF.Button _stop;
     private readonly WF.Button _cancel;
     private bool _actionTaken;
@@ -40,6 +43,13 @@ public sealed class FastRecordingControlBar : WF.Form
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
+
+        SetStyle(
+            WF.ControlStyles.AllPaintingInWmPaint |
+            WF.ControlStyles.OptimizedDoubleBuffer |
+            WF.ControlStyles.ResizeRedraw |
+            WF.ControlStyles.UserPaint,
+            true);
 
         var row = new WF.FlowLayoutPanel
         {
@@ -66,7 +76,7 @@ public sealed class FastRecordingControlBar : WF.Form
             Font = new SD.Font("Consolas", 10f, SD.FontStyle.Regular),
             ForeColor = SD.Color.White,
             Margin = new WF.Padding(0, 4, 12, 0),
-            Size = new SD.Size(48, 22),
+            Size = new SD.Size(66, 22),
             Text = "00:00",
             TextAlign = SD.ContentAlignment.MiddleLeft,
         };
@@ -75,6 +85,10 @@ public sealed class FastRecordingControlBar : WF.Form
         _pause = Button("Pause", ButtonBack, ButtonHot);
         _pause.Click += (_, _) => TogglePause();
         row.Controls.Add(_pause);
+
+        _restart = Button("Restart", ButtonBack, ButtonHot);
+        _restart.Click += (_, _) => RaiseOnce(RestartRequested);
+        row.Controls.Add(_restart);
 
         _stop = Button("Stop", StopBack, StopHot);
         _stop.Click += (_, _) => RaiseOnce(StopRequested);
@@ -107,6 +121,7 @@ public sealed class FastRecordingControlBar : WF.Form
     public event Action? CancelRequested;
     public event Action? PauseRequested;
     public event Action? ResumeRequested;
+    public event Action? RestartRequested;
 
     protected override bool ShowWithoutActivation => true;
 
@@ -126,6 +141,13 @@ public sealed class FastRecordingControlBar : WF.Form
         UpdateWindowRegion();
     }
 
+    protected override void OnPaint(WF.PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using var pen = new SD.Pen(Border, 1);
+        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         _timer.Stop();
@@ -133,7 +155,10 @@ public sealed class FastRecordingControlBar : WF.Form
         base.OnClosed(e);
     }
 
-    private static string FormatElapsed(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
+    private static string FormatElapsed(TimeSpan t) =>
+        t.TotalHours >= 1
+            ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
+            : $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
 
     private void PositionBottomCenter()
     {
@@ -172,6 +197,7 @@ public sealed class FastRecordingControlBar : WF.Form
 
         _actionTaken = true;
         _pause.Enabled = false;
+        _restart.Enabled = false;
         _stop.Enabled = false;
         _cancel.Enabled = false;
         action?.Invoke();

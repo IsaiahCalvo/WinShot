@@ -59,18 +59,6 @@
                                 Minimum="0" Maximum="200" Value="64"
                                 ValueChanged="OnSliderChanged" Margin="0,2,0,8"/>
 
-                        <DockPanel>
-                            <TextBlock x:Name="InsetValueLabel" DockPanel.Dock="Right"
-                                       Style="{StaticResource ValueLabel}"/>
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Inset"/>
-                        </DockPanel>
-                        <Slider x:Name="InsetSlider" Style="{StaticResource DarkSlider}"
-                                Minimum="0" Maximum="120" Value="0"
-                                ValueChanged="OnSliderChanged" Margin="0,2,0,4"/>
-                        <CheckBox x:Name="AutoBalanceCheck" Style="{StaticResource DarkCheckBox}"
-                                  Content="Auto-balance" Margin="0,0,0,8"
-                                  Checked="OnAutoBalanceToggled" Unchecked="OnAutoBalanceToggled"/>
-
                         <CheckBox x:Name="ShadowCheck" Style="{StaticResource DarkCheckBox}"
                                   Content="Drop shadow" IsChecked="True"
                                   Checked="OnShadowToggled" Unchecked="OnShadowToggled" Margin="0,4,0,2"/>
@@ -97,34 +85,36 @@
                         <!-- ============ ALIGNMENT ============ -->
                         <TextBlock Style="{StaticResource SectionHeader}" Text="Alignment"/>
                         <!-- ToggleButton has no GroupName; mutual exclusivity is
-                             enforced in OnAlignChecked (un-checks the siblings). -->
+                             enforced in OnAlignChecked (un-checks the siblings).
+                             Each cell renders a small directional dot (built in
+                             code-behind from the Tag) so the anchor is readable. -->
                         <UniformGrid Rows="3" Columns="3" HorizontalAlignment="Left" Width="126">
                             <ToggleButton x:Name="AlignTL" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="TL"
+                                          Tag="TL"
                                           Checked="OnAlignChecked" ToolTip="Top left"/>
                             <ToggleButton x:Name="AlignTC" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="TC"
+                                          Tag="TC"
                                           Checked="OnAlignChecked" ToolTip="Top center"/>
                             <ToggleButton x:Name="AlignTR" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="TR"
+                                          Tag="TR"
                                           Checked="OnAlignChecked" ToolTip="Top right"/>
                             <ToggleButton x:Name="AlignCL" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="CL"
+                                          Tag="CL"
                                           Checked="OnAlignChecked" ToolTip="Center left"/>
                             <ToggleButton x:Name="AlignCC" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="CC"
+                                          Tag="CC"
                                           IsChecked="True" Checked="OnAlignChecked" ToolTip="Center"/>
                             <ToggleButton x:Name="AlignCR" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="CR"
+                                          Tag="CR"
                                           Checked="OnAlignChecked" ToolTip="Center right"/>
                             <ToggleButton x:Name="AlignBL" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="BL"
+                                          Tag="BL"
                                           Checked="OnAlignChecked" ToolTip="Bottom left"/>
                             <ToggleButton x:Name="AlignBC" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="BC"
+                                          Tag="BC"
                                           Checked="OnAlignChecked" ToolTip="Bottom center"/>
                             <ToggleButton x:Name="AlignBR" Style="{StaticResource ToolButton}"
-                                          Content="&#xE91F;" Tag="BR"
+                                          Tag="BR"
                                           Checked="OnAlignChecked" ToolTip="Bottom right"/>
                         </UniformGrid>
 
@@ -133,10 +123,11 @@
                         <ComboBox x:Name="RatioBox" Style="{StaticResource DarkComboBox}"
                                   SelectedIndex="0" SelectionChanged="OnRatioChanged">
                             <ComboBoxItem Content="Auto" Tag="auto"/>
-                            <ComboBoxItem Content="16:9" Tag="16:9"/>
-                            <ComboBoxItem Content="4:3" Tag="4:3"/>
-                            <ComboBoxItem Content="1:1" Tag="1:1"/>
-                            <ComboBoxItem Content="9:16" Tag="9:16"/>
+                            <ComboBoxItem Content="16:9 (X / Twitter)" Tag="16:9"/>
+                            <ComboBoxItem Content="1.91:1 (Link preview)" Tag="1.91:1"/>
+                            <ComboBoxItem Content="4:3 (Slides)" Tag="4:3"/>
+                            <ComboBoxItem Content="1:1 (Instagram)" Tag="1:1"/>
+                            <ComboBoxItem Content="9:16 (Story)" Tag="9:16"/>
                         </ComboBox>
                     </StackPanel>
                 </ScrollViewer>

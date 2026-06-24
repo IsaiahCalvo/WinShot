@@ -56,32 +56,32 @@
                     </StackPanel>
                     <WrapPanel x:Name="ToolPanel" VerticalAlignment="Center">
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Select" Content="&#xE8B0;"
-                                     ToolTip="Select — click an annotation to select, drag to move, Del deletes, double-click text to edit"
+                                     ToolTip="Select (V) — click an annotation to select, drag to move, arrow keys nudge, Del deletes, double-click text to edit"
                                      Checked="OnToolChecked" IsChecked="True"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Pan" Content="&#xE7C2;"
                                      ToolTip="Pan — drag to move the view (middle-drag or hold Space works with any tool)"
                                      Checked="OnToolChecked"/>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Arrow" Content="&#xE72A;"
-                                     ToolTip="Arrow" Checked="OnToolChecked"/>
+                                     ToolTip="Arrow (A)" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="CurvedArrow" Content="&#xF0AD;"
                                      ToolTip="Curved arrow — drag start to end, then drag the blue handle to bend it"
                                      Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Line" Content="&#xE738;"
-                                     ToolTip="Line" Checked="OnToolChecked"/>
+                                     ToolTip="Line (L)" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Rectangle" Content="&#xE739;"
-                                     ToolTip="Rectangle" Checked="OnToolChecked"/>
+                                     ToolTip="Rectangle (R)" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Ellipse" Content="&#xEA3A;"
-                                     ToolTip="Ellipse" Checked="OnToolChecked"/>
+                                     ToolTip="Ellipse (E)" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Freehand" Content="&#xE70F;"
-                                     ToolTip="Draw — freehand pen" Checked="OnToolChecked"/>
+                                     ToolTip="Draw (P) — freehand pen" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Highlighter" Content="&#xE891;"
-                                     ToolTip="Highlighter" Checked="OnToolChecked"/>
+                                     ToolTip="Highlighter (H)" Checked="OnToolChecked"/>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Text" Content="&#xE8D2;"
-                                     ToolTip="Text" Checked="OnToolChecked"/>
+                                     ToolTip="Text (T)" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Step" Content="&#xE8EF;"
-                                     ToolTip="Step counter — numbered badges" Checked="OnToolChecked"/>
+                                     ToolTip="Step counter (S) — numbered or lettered badges" Checked="OnToolChecked"/>
                         <RadioButton x:Name="EmojiToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Emoji"
                                      FontFamily="Segoe UI Emoji" Content="😀"
                                      ToolTip="Emoji — pick an emoji, then click the image to place it"
@@ -97,7 +97,7 @@
                         </Popup>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Blur" Content="&#xE7E6;"
-                                     ToolTip="Blur — smooth blur over a region" Checked="OnToolChecked"/>
+                                     ToolTip="Blur (B) — smooth blur over a region" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Pixelate" Content="&#xE80A;"
                                      ToolTip="Pixelate — irreversible randomized mosaic for sensitive text"
                                      Checked="OnToolChecked"/>
@@ -106,7 +106,7 @@
                                      Checked="OnToolChecked"/>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Crop" Content="&#xE7A8;"
-                                     ToolTip="Crop" Checked="OnToolChecked"/>
+                                     ToolTip="Crop (C)" Checked="OnToolChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Eyedropper" Content="&#xEF3C;"
                                      ToolTip="Eyedropper — click the image to pick that pixel's color"
                                      Checked="OnToolChecked"/>
@@ -195,6 +195,18 @@
                                 <ComboBoxItem Content="16:9" Tag="16:9"/>
                                 <ComboBoxItem Content="9:16" Tag="9:16"/>
                             </ComboBox>
+                        </StackPanel>
+                        <StackPanel x:Name="StepModePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                            <TextBlock Text="Count" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <RadioButton x:Name="StepNumberBtn" Style="{StaticResource ToolButton}" GroupName="StepMode"
+                                         Tag="Number" Content="1" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Number the badges (1, 2, 3…)" Checked="OnStepModeChecked" IsChecked="True"/>
+                            <RadioButton x:Name="StepLetterBtn" Style="{StaticResource ToolButton}" GroupName="StepMode"
+                                         Tag="Letter" Content="A" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Letter the badges (A, B, C…)" Checked="OnStepModeChecked"/>
+                            <Button Style="{StaticResource PillButtonSecondary}" Content="Reset to 1"
+                                    ToolTip="Next badge restarts the sequence" Click="OnResetStepCounter"/>
                         </StackPanel>
                     </WrapPanel>
                 </DockPanel>

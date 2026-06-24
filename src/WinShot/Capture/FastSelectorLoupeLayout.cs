@@ -7,7 +7,9 @@ public readonly record struct FastSelectorLoupe(
     SD.Rectangle SourceScreen,
     SD.Rectangle Bounds,
     SD.Point CrosshairCenter,
-    string Coordinates);
+    string Coordinates,
+    int Zoom,
+    SD.Point TargetSample);
 
 public static class FastSelectorLoupeLayout
 {
@@ -59,12 +61,20 @@ public static class FastSelectorLoupeLayout
             Clamp(crosshairX, bounds.Left, bounds.Right - 1),
             Clamp(crosshairY, bounds.Top, bounds.Bottom - 1));
 
+        // Offset of the hovered pixel inside the captured sample bitmap. Used to
+        // read its hex color and to highlight the exact target cell in the zoom.
+        var targetSample = new SD.Point(
+            Clamp(cursorScreen.X - source.Left, 0, sampleSize - 1),
+            Clamp(cursorScreen.Y - source.Top, 0, sampleSize - 1));
+
         return new FastSelectorLoupe(
             true,
             source,
             bounds,
             crosshair,
-            $"{cursorScreen.X}, {cursorScreen.Y}");
+            $"{cursorScreen.X}, {cursorScreen.Y}",
+            zoom,
+            targetSample);
     }
 
     private static int Clamp(int value, int min, int max)

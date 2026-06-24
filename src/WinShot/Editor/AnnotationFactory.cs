@@ -77,6 +77,98 @@ internal static class AnnotationFactory
     }
 
     /// <summary>
+    /// Smooths a raw freehand point stream into a polished pen stroke. The points are
+    /// first lightly de-noised with a small moving average, then a Catmull-Rom spline is
+    /// resampled into a denser, rounded point list so the committed Polyline reads like
+    /// CleanShot's Pencil instead of a jagged trace. Storing points (not a path geometry)
+    /// keeps the freehand annotation identical to what the project serializer rebuilds.
+    /// Fewer than 3 points are returned as-is so dots/short flicks still draw.
+    /// </summary>
+    public static PointCollection SmoothFreehandPoints(IList<Point> raw)
+    {
+        var pts = MovingAverage(raw, window: 2);
+        var result = new PointCollection();
+        if (pts.Count < 3)
+        {
+            foreach (var p in pts) result.Add(p);
+            return result;
+        }
+
+        // Sample each Catmull-Rom segment a few times for a smooth, continuous curve.
+        const int steps = 6;
+        result.Add(pts[0]);
+        for (int i = 0; i < pts.Count - 1; i++)
+        {
+            Point p0 = pts[i == 0 ? 0 : i - 1];
+            Point p1 = pts[i];
+            Point p2 = pts[i + 1];
+            Point p3 = pts[i + 2 < pts.Count ? i + 2 : pts.Count - 1];
+
+            for (int s = 1; s <= steps; s++)
+            {
+                double tt = (double)s / steps;
+                result.Add(CatmullRom(p0, p1, p2, p3, tt));
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Catmull-Rom interpolation (tension 0.5) between p1 and p2 at parameter t∈[0,1].</summary>
+    private static Point CatmullRom(Point p0, Point p1, Point p2, Point p3, double t)
+    {
+        double t2 = t * t, t3 = t2 * t;
+        double x = 0.5 * ((2 * p1.X) + (-p0.X + p2.X) * t +
+                          (2 * p0.X - 5 * p1.X + 4 * p2.X - p3.X) * t2 +
+                          (-p0.X + 3 * p1.X - 3 * p2.X + p3.X) * t3);
+        double y = 0.5 * ((2 * p1.Y) + (-p0.Y + p2.Y) * t +
+                          (2 * p0.Y - 5 * p1.Y + 4 * p2.Y - p3.Y) * t2 +
+                          (-p0.Y + 3 * p1.Y - 3 * p2.Y + p3.Y) * t3);
+        return new Point(x, y);
+    }
+
+    /// <summary>Collapses near-duplicate points and applies a tiny centered moving average.</summary>
+    private static List<Point> MovingAverage(IList<Point> raw, int window)
+    {
+        var dedup = new List<Point>();
+        foreach (var p in raw)
+            if (dedup.Count == 0 || (p - dedup[^1]).Length > 0.5)
+                dedup.Add(p);
+        if (dedup.Count <= 2) return dedup.Count == 0 ? new List<Point> { new(0, 0) } : dedup;
+
+        var smoothed = new List<Point>(dedup.Count);
+        for (int i = 0; i < dedup.Count; i++)
+        {
+            int lo = Math.Max(0, i - window), hi = Math.Min(dedup.Count - 1, i + window);
+            double sx = 0, sy = 0;
+            for (int j = lo; j <= hi; j++) { sx += dedup[j].X; sy += dedup[j].Y; }
+            int n = hi - lo + 1;
+            smoothed.Add(new Point(sx / n, sy / n));
+        }
+        // Preserve the true endpoints so the stroke still starts/ends where drawn.
+        smoothed[0] = dedup[0];
+        smoothed[^1] = dedup[^1];
+        return smoothed;
+    }
+
+    /// <summary>
+    /// Formats a 1-based step index as a spreadsheet-style letter sequence
+    /// (1→A, 26→Z, 27→AA, …). Values &lt; 1 fall back to "A".
+    /// </summary>
+    public static string StepLetterLabel(int number)
+    {
+        if (number < 1) return "A";
+        var sb = new System.Text.StringBuilder();
+        int n = number;
+        while (n > 0)
+        {
+            n--;
+            sb.Insert(0, (char)('A' + n % 26));
+            n /= 26;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// A selectable vector spotlight: a path covering the whole image with an
     /// even-odd hole at <paramref name="hole"/>, filled #99000000. Lives on the
     /// annotation canvas, so Select can move/delete it like any other annotation.
@@ -176,11 +268,21 @@ internal static class AnnotationFactory
         };
 
     /// <summary>Numbered circle badge; ring and digit color flip to black on light fills.</summary>
-    public static Grid CreateStepBadge(int number, Color color, double thickness)
+    public static Grid CreateStepBadge(int number, Color color, double thickness) =>
+        CreateStepBadge(number, color, thickness, letters: false);
+
+    /// <summary>
+    /// Circle badge whose caption is either the number (1, 2, …) or a letter sequence
+    /// (A, B, …, Z, AA) when <paramref name="letters"/> is set. Ring and caption color
+    /// flip to black on light fills; the font shrinks for longer captions.
+    /// </summary>
+    public static Grid CreateStepBadge(int number, Color color, double thickness, bool letters)
     {
         double diameter = 22 + thickness * 3;
         bool lightFill = 0.299 * color.R + 0.587 * color.G + 0.114 * color.B > 160;
         Color contrast = lightFill ? Colors.Black : Colors.White;
+
+        string caption = letters ? StepLetterLabel(number) : number.ToString();
 
         var badge = new Grid { Width = diameter, Height = diameter };
         badge.Children.Add(new Ellipse
@@ -191,10 +293,10 @@ internal static class AnnotationFactory
         });
         badge.Children.Add(new TextBlock
         {
-            Text = number.ToString(),
+            Text = caption,
             Foreground = new SolidColorBrush(contrast),
             FontWeight = FontWeights.Bold,
-            FontSize = diameter * (number < 10 ? 0.5 : 0.4),
+            FontSize = diameter * (caption.Length < 2 ? 0.5 : 0.4),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         });

@@ -28,14 +28,34 @@ public sealed class RecordingController
     private bool _flowActive;   // chooser/selector currently open
     private bool _stopping;     // stop requested, finalization in flight
     private bool _discard;      // cancel pressed: throw the file away
+    private bool _restarting;   // stop requested as part of a restart
     private bool _paused;
     private bool _isGif;
+    private bool _desktopIconsHidden; // we hid the desktop icons; restore them on teardown
     private Recorder? _recorder;
     private GifRecorder? _gifRecorder;
     private FastRecordingControlBar? _bar;
     private IRecordingOverlay? _clickOverlay;
     private IRecordingOverlay? _keyOverlay;
     private string? _tempPath;
+
+    // Cached region + chosen options so Restart can re-run capture without
+    // re-showing the options/region/countdown dialogs.
+    private CaptureParameters? _lastCapture;
+
+    private sealed record CaptureParameters(
+        SD.Rectangle ScreenRect,
+        bool IsGif,
+        bool RecordMicrophone,
+        bool RecordSystemAudio,
+        bool CaptureCursor,
+        bool ShowClickHighlights,
+        bool ShowKeystrokes,
+        string WebcamPosition,
+        int WebcamSizePercent,
+        int RecordingFps,
+        int VideoQuality,
+        int GifFps);
 
     public RecordingController(SettingsService settings, HistoryService history)
     {
@@ -48,6 +68,7 @@ public sealed class RecordingController
 
     public void Shutdown()
     {
+        _restarting = false; // never spin up a fresh recording while tearing down
         try
         {
             if (_isGif)
@@ -116,6 +137,9 @@ public sealed class RecordingController
         int countdownSeconds;
         string webcamPosition;
         int webcamSizePercent;
+        int recordingFps;
+        int videoQuality;
+        int gifFps;
         try
         {
             if (await dialog.ShowAsync() != WF.DialogResult.OK) return;
@@ -129,6 +153,9 @@ public sealed class RecordingController
             countdownSeconds = dialog.CountdownSeconds;
             webcamPosition = dialog.WebcamPosition;
             webcamSizePercent = dialog.WebcamSizePercent;
+            recordingFps = dialog.RecordingFps;
+            videoQuality = dialog.VideoQuality;
+            gifFps = dialog.GifFps;
         }
         finally
         {
@@ -146,6 +173,8 @@ public sealed class RecordingController
         s.RecordingCountdownSeconds = countdownSeconds;
         s.WebcamOverlayPosition = webcamPosition;
         s.WebcamOverlaySizePercent = webcamSizePercent;
+        s.RecordingFps = recordingFps;
+        s.GifFps = gifFps;
 
         RecordingRegionSelection selection;
         if (pickDisplay)
@@ -194,37 +223,91 @@ public sealed class RecordingController
             if (countdown.ShowDialog() != WF.DialogResult.OK) return;
         }
 
-        _isGif = isGif;
+        var parameters = new CaptureParameters(
+            screenRect,
+            isGif,
+            recordMicrophone,
+            recordSystemAudio,
+            captureCursor,
+            showClickHighlights,
+            showKeystrokes,
+            webcamPosition,
+            webcamSizePercent,
+            recordingFps,
+            videoQuality,
+            gifFps);
+
+        StartCapture(parameters, trackBarPerf: true);
+    }
+
+    /// <summary>
+    /// Brings up the overlays, recorder, and control bar for the given parameters.
+    /// Shared by the initial flow and Restart, so it must not show any dialogs.
+    /// </summary>
+    private void StartCapture(CaptureParameters p, bool trackBarPerf)
+    {
+        _lastCapture = p;
+        _isGif = p.IsGif;
         _discard = false;
         _stopping = false;
+        _restarting = false;
         _paused = false;
+        SD.Rectangle screenRect = p.ScreenRect;
         string tempDir = Path.Combine(Path.GetTempPath(), "WinShot");
         Directory.CreateDirectory(tempDir);
         _tempPath = Path.Combine(tempDir, $"recording-{Guid.NewGuid():N}.{(_isGif ? "gif" : "mp4")}");
+
+        // Honor the "hide desktop icons during capture" preference. Restored on
+        // stop/cancel/restart/failure via RestoreDesktopIcons().
+        if (_settings.Current.HideDesktopIconsDuringCapture && DesktopIcons.Visible)
+        {
+            try
+            {
+                DesktopIcons.Hide();
+                _desktopIconsHidden = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Failed to hide desktop icons for recording", ex);
+                _desktopIconsHidden = false;
+            }
+        }
 
         // Overlays go up before capture starts so the first frames already
         // have them. Both are click-through and intentionally visible to the
         // capture (rings/pills belong in the output).
         var overlays = RecordingOverlayStartup.Start(
-            showClickHighlights,
-            showKeystrokes,
+            p.ShowClickHighlights,
+            p.ShowKeystrokes,
             () => new FastClickHighlightOverlayWindow(screenRect),
             () => new FastKeystrokeOverlayWindow(screenRect),
             Log.Error);
         _clickOverlay = overlays.ClickOverlay;
         _keyOverlay = overlays.KeyOverlay;
 
-        if (_isGif)
-            StartGif(screenRect, captureCursor);
-        else
-            StartMp4(screenRect, recordMicrophone, recordSystemAudio, captureCursor, webcamPosition, webcamSizePercent);
+        try
+        {
+            if (_isGif)
+                StartGif(screenRect, p.CaptureCursor, p.GifFps);
+            else
+                StartMp4(screenRect, p.RecordMicrophone, p.RecordSystemAudio, p.CaptureCursor, p.WebcamPosition, p.WebcamSizePercent, p.RecordingFps, p.VideoQuality);
+        }
+        catch
+        {
+            // Make sure icons come back even if the recorder failed to start.
+            RestoreDesktopIcons();
+            CloseOverlays();
+            throw;
+        }
 
         _bar = new FastRecordingControlBar();
         _bar.StopRequested += () => StopRecording(discard: false);
         _bar.CancelRequested += () => StopRecording(discard: true);
         _bar.PauseRequested += PauseRecording;
         _bar.ResumeRequested += ResumeRecording;
-        TrackFirstShown(_bar, "record control bar");
+        _bar.RestartRequested += RestartRecording;
+        if (trackBarPerf)
+            TrackFirstShown(_bar, "record control bar");
         _bar.Show();
 
         IsRecording = true;
@@ -277,9 +360,9 @@ public sealed class RecordingController
         window.ContentRendered += handler;
     }
 
-    private void StartGif(SD.Rectangle screenRect, bool captureCursor)
+    private void StartGif(SD.Rectangle screenRect, bool captureCursor, int gifFps)
     {
-        _gifRecorder = new GifRecorder(screenRect, _settings.Current.GifFps, _tempPath!, captureCursor);
+        _gifRecorder = new GifRecorder(screenRect, gifFps, _tempPath!, captureCursor);
         _gifRecorder.Start();
     }
 
@@ -289,7 +372,9 @@ public sealed class RecordingController
         bool systemAudio,
         bool captureCursor,
         string webcamPosition,
-        int webcamSizePercent)
+        int webcamSizePercent,
+        int recordingFps,
+        int videoQuality)
     {
         // ScreenRecorderLib records one display source; clamp the region to the
         // display it overlaps the most. The output crop rect is relative to
@@ -322,8 +407,8 @@ public sealed class RecordingController
             VideoEncoderOptions = new VideoEncoderOptions
             {
                 Encoder = new H264VideoEncoder { BitrateMode = H264BitrateControlMode.Quality },
-                Quality = 70,
-                Framerate = Math.Clamp(_settings.Current.RecordingFps, 1, 120),
+                Quality = Math.Clamp(videoQuality, 1, 100),
+                Framerate = Math.Clamp(recordingFps, 1, 120),
                 IsHardwareEncodingEnabled = true,
             },
             AudioOptions = new AudioOptions
@@ -581,6 +666,46 @@ public sealed class RecordingController
         _discard = false;
         _paused = false;
         _tempPath = null;
+        RestoreDesktopIcons();
+
+        if (_restarting && _lastCapture is { } capture)
+        {
+            _restarting = false;
+            // Re-enter on a fresh dispatcher turn so the stop chain fully unwinds
+            // (recorder disposed, file deleted) before the new recorder starts.
+            _dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    StartCapture(capture, trackBarPerf: false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Failed to restart recording", ex);
+                    CleanupAfterFailure();
+                }
+            });
+        }
+    }
+
+    /// <summary>
+    /// Discards the in-progress recording and starts a fresh one over the same
+    /// region with the same options — no options/region/countdown dialogs.
+    /// </summary>
+    private void RestartRecording()
+    {
+        if (!IsRecording || _stopping || _lastCapture is null) return;
+        _restarting = true;
+        Log.Info("Recording restart requested");
+        StopRecording(discard: true);
+    }
+
+    private void RestoreDesktopIcons()
+    {
+        if (!_desktopIconsHidden) return;
+        _desktopIconsHidden = false;
+        try { DesktopIcons.Show(); }
+        catch (Exception ex) { Log.Error("Failed to restore desktop icons after recording", ex); }
     }
 
     private void CleanupAfterFailure()

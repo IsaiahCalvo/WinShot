@@ -65,6 +65,7 @@ public partial class BackgroundComposerWindow : Window
         _srcH = source.Height;
         BtnCopy.Content = "Copy";
         BtnSave.Content = "Save as...";
+        BuildAlignmentGlyphs();
 
         Closed += (_, _) =>
         {
@@ -163,22 +164,21 @@ public partial class BackgroundComposerWindow : Window
     /// anchored within the canvas by the 3x3 alignment picker (center default);
     /// in Auto the canvas hugs image + padding, fixed ratios grow the canvas
     /// along one axis only so padding stays the guaranteed minimum margin.
-    /// "Inset" adds an extra symmetric inner margin around the shot.
     /// </summary>
     private void UpdateComposition()
     {
         if (!_ready) return;
 
         int pad = (int)Math.Round(PaddingSlider.Value);
-        int inset = (int)Math.Round(InsetSlider.Value);
         int radius = (int)Math.Round(RadiusSlider.Value);
         int blurValue = (int)Math.Round(BlurSlider.Value);
         PadValueLabel.Text = $"{pad} px";
-        InsetValueLabel.Text = $"{inset} px";
         RadiusValueLabel.Text = $"{radius} px";
         BlurValueLabel.Text = blurValue.ToString();
 
-        var layout = BackgroundLayout.Calculate(new SD.Size(_srcW, _srcH), pad, inset, _aspect);
+        // Padding is the single margin control; inset is retired (it collapsed
+        // into padding and only duplicated the gutter), so always pass 0.
+        var layout = BackgroundLayout.Calculate(new SD.Size(_srcW, _srcH), pad, inset: 0, _aspect);
         _canvasW = layout.CanvasSize.Width;
         _canvasH = layout.CanvasSize.Height;
 
@@ -265,7 +265,8 @@ public partial class BackgroundComposerWindow : Window
     private void SetBackground(Brush brush) => ComposeRoot.Background = brush;
 
     /// <summary>
-    /// Builds the gradient thumb used in the Gradients and Blurred sections.
+    /// Builds the rounded-ring thumb used by the Gradients, Blurred and
+    /// Wallpapers sections.
     /// Replaces the former local <c>PresetSwatch</c> style: a rounded ring that
     /// turns white when checked, wrapping a 38x26 brush rectangle.
     /// </summary>
@@ -327,9 +328,8 @@ public partial class BackgroundComposerWindow : Window
 
     private void BuildBackgroundPickers()
     {
-        // --- Gradients (and Blurred, which reuses the same gradient thumbs) ---
+        // --- Gradients (all presets; Blurred is now its own frosted-self row) ---
         var presets = BackgroundPresets.All;
-        int splitAt = Math.Max(0, presets.Count - 3); // last 3 feed the Blurred row
         for (int i = 0; i < presets.Count; i++)
         {
             var (name, brush) = presets[i];
@@ -339,14 +339,15 @@ public partial class BackgroundComposerWindow : Window
             string label = name;
             rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
             _bgSwatches.Add(rb);
-
-            if (i < splitAt)
-                PresetPanel.Children.Add(rb);
-            else
-                BlurredPanel.Children.Add(rb);
+            PresetPanel.Children.Add(rb);
         }
 
-        // --- Wallpapers: a custom-image thumb + a "+" browse tile ---
+        // --- Blurred: frosted variants of the user's own screenshot ---
+        BuildBlurredBackdrops();
+
+        // --- Wallpapers: the current desktop wallpaper (if any) then "+" tile ---
+        BuildDesktopWallpaperThumb();
+
         var browseTile = new RadioButton
         {
             Template = BuildThumbTemplate(showContent: true),
@@ -394,6 +395,201 @@ public partial class BackgroundComposerWindow : Window
         }
     }
 
+    /// <summary>
+    /// Populates the "Blurred" row with real frosted variants of the user's own
+    /// screenshot: a heavy gaussian blur of the shot itself, plus light- and
+    /// dark-tinted versions. Picking one sets a frosted backdrop of their own
+    /// capture (not a gradient). Skipped when there is no real source (prewarm).
+    /// </summary>
+    private void BuildBlurredBackdrops()
+    {
+        if (_srcW <= 1 || _srcH <= 1)
+            return;
+
+        BitmapSource baseImage;
+        try
+        {
+            baseImage = CaptureService.ToBitmapSource(_source, 640, 640);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Background composer blurred backdrop source conversion failed", ex);
+            return;
+        }
+
+        (string Name, Color? Tint)[] variants =
+        {
+            ("Blurred", null),
+            ("Blurred · light", Color.FromArgb(0x4D, 0xFF, 0xFF, 0xFF)),
+            ("Blurred · dark", Color.FromArgb(0x66, 0x00, 0x00, 0x00)),
+        };
+
+        foreach (var (name, tint) in variants)
+        {
+            ImageBrush? brush = TryMakeFrostedBrush(baseImage, tint);
+            if (brush == null)
+                continue;
+
+            var rb = MakeGradientThumb(brush, name);
+            rb.GroupName = "Bg";
+            rb.ToolTip = name;
+            string label = name;
+            rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
+            _bgSwatches.Add(rb);
+            BlurredPanel.Children.Add(rb);
+        }
+    }
+
+    /// <summary>
+    /// Renders <paramref name="image"/> through a heavy gaussian <see cref="BlurEffect"/>
+    /// (optionally over a tint overlay) into a frozen bitmap and wraps it in a
+    /// UniformToFill ImageBrush so it scales to fill the canvas behind the shot.
+    /// </summary>
+    private static ImageBrush? TryMakeFrostedBrush(BitmapSource image, Color? tint)
+    {
+        try
+        {
+            int w = Math.Max(1, image.PixelWidth);
+            int h = Math.Max(1, image.PixelHeight);
+
+            // Overscan: lay the image out larger than the render target and offset
+            // it so the blur's soft edge fringe falls outside the captured crop
+            // (otherwise UniformToFill would surface faded/transparent borders).
+            const double overscan = 90.0;
+            var visual = new System.Windows.Controls.Image
+            {
+                Source = image,
+                Stretch = Stretch.Fill,
+                Effect = new BlurEffect
+                {
+                    Radius = 60,
+                    KernelType = KernelType.Gaussian,
+                    RenderingBias = RenderingBias.Quality,
+                },
+            };
+            var bounds = new Rect(-overscan, -overscan, w + 2 * overscan, h + 2 * overscan);
+            visual.Measure(new Size(bounds.Width, bounds.Height));
+            visual.Arrange(bounds);
+            visual.UpdateLayout();
+
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(visual);
+
+            if (tint is Color overlay)
+            {
+                var dv = new DrawingVisual();
+                using (var dc = dv.RenderOpen())
+                {
+                    dc.DrawImage(rtb, new Rect(0, 0, w, h));
+                    dc.DrawRectangle(new SolidColorBrush(overlay), null, new Rect(0, 0, w, h));
+                }
+                var tinted = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+                tinted.Render(dv);
+                tinted.Freeze();
+                return MakeFillBrush(tinted);
+            }
+
+            rtb.Freeze();
+            return MakeFillBrush(rtb);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Background composer frosted backdrop render failed", ex);
+            return null;
+        }
+    }
+
+    private static ImageBrush MakeFillBrush(BitmapSource image)
+    {
+        var brush = new ImageBrush(image) { Stretch = Stretch.UniformToFill };
+        RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.HighQuality);
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>
+    /// Reads the current Windows desktop wallpaper and inserts it as the first
+    /// selectable Wallpapers thumbnail (before the "+" browse tile). Best-effort:
+    /// any failure (no wallpaper, unsupported format) is logged and skipped.
+    /// </summary>
+    private void BuildDesktopWallpaperThumb()
+    {
+        string? path = TryGetDesktopWallpaperPath();
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            return;
+
+        try
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = 720;
+            image.UriSource = new Uri(path);
+            image.EndInit();
+            image.Freeze();
+
+            var brush = new ImageBrush(image) { Stretch = Stretch.UniformToFill };
+            RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.HighQuality);
+            brush.Freeze();
+
+            const string label = "Desktop wallpaper";
+            var rb = MakeGradientThumb(brush, label);
+            rb.GroupName = "Bg";
+            rb.ToolTip = label;
+            rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
+            _bgSwatches.Add(rb);
+            WallpaperPanel.Children.Add(rb);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Background composer desktop wallpaper load failed: {path}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the current desktop wallpaper file. Tries the live
+    /// SystemParametersInfo(SPI_GETDESKWALLPAPER) path first, then falls back to
+    /// the cached TranscodedWallpaper under %AppData%.
+    /// </summary>
+    private static string? TryGetDesktopWallpaperPath()
+    {
+        try
+        {
+            const int SPI_GETDESKWALLPAPER = 0x0073;
+            var sb = new System.Text.StringBuilder(520);
+            if (NativeGetWallpaper(SPI_GETDESKWALLPAPER, sb.Capacity, sb, 0))
+            {
+                string p = sb.ToString();
+                if (!string.IsNullOrWhiteSpace(p) && File.Exists(p))
+                    return p;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("SystemParametersInfo SPI_GETDESKWALLPAPER failed", ex);
+        }
+
+        try
+        {
+            string fallback = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
+            if (File.Exists(fallback))
+                return fallback;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("TranscodedWallpaper fallback lookup failed", ex);
+        }
+
+        return null;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto,
+        SetLastError = true, EntryPoint = "SystemParametersInfo")]
+    private static extern bool NativeGetWallpaper(int uAction, int uParam,
+        System.Text.StringBuilder lpvParam, int fuWinIni);
+
     private void UncheckBgSwatches()
     {
         foreach (var rb in _bgSwatches)
@@ -403,29 +599,55 @@ public partial class BackgroundComposerWindow : Window
     // --------------------------------------------------------------- handlers
 
     private void OnSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        // Auto-balance mirrors padding into inset so the inner/outer margins
-        // stay symmetric while the user drags either slider.
-        if (_ready && AutoBalanceCheck?.IsChecked == true && ReferenceEquals(sender, PaddingSlider))
-        {
-            double v = PaddingSlider.Value * 0.5;
-            if (Math.Abs(InsetSlider.Value - v) > 0.5)
-            {
-                InsetSlider.Value = Math.Min(InsetSlider.Maximum, v);
-                return; // the InsetSlider change re-enters and composes once
-            }
-        }
-        UpdateComposition();
-    }
+        => UpdateComposition();
 
     private void OnShadowToggled(object sender, RoutedEventArgs e) => UpdateComposition();
 
-    private void OnAutoBalanceToggled(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Gives each of the nine alignment ToggleButtons a distinct directional
+    /// indicator: a small dot positioned within an 18x18 frame per the button's
+    /// Tag (top-left dot for TL, etc.) so the checked anchor is obvious. The dot
+    /// binds to the button Foreground, which the ToolButton style flips to white
+    /// when checked (over the solid blue fill) and a light gray at rest.
+    /// </summary>
+    private void BuildAlignmentGlyphs()
     {
-        if (!_ready) return;
-        if (AutoBalanceCheck.IsChecked == true)
-            InsetSlider.Value = Math.Min(InsetSlider.Maximum, PaddingSlider.Value * 0.5);
-        UpdateComposition();
+        foreach (var tb in new[]
+                 { AlignTL, AlignTC, AlignTR, AlignCL, AlignCC, AlignCR, AlignBL, AlignBC, AlignBR })
+        {
+            if (tb.Tag is not string tag) continue;
+            tb.Content = MakeAlignmentDot(tb, tag);
+        }
+    }
+
+    private static FrameworkElement MakeAlignmentDot(ToggleButton owner, string tag)
+    {
+        char v = tag.Length > 0 ? tag[0] : 'C';   // T / C / B
+        char h = tag.Length > 1 ? tag[1] : 'C';   // L / C / R
+
+        var grid = new Grid { Width = 18, Height = 18 };
+        var dot = new System.Windows.Shapes.Ellipse
+        {
+            Width = 6,
+            Height = 6,
+            HorizontalAlignment = h switch
+            {
+                'L' => HorizontalAlignment.Left,
+                'R' => HorizontalAlignment.Right,
+                _ => HorizontalAlignment.Center,
+            },
+            VerticalAlignment = v switch
+            {
+                'T' => VerticalAlignment.Top,
+                'B' => VerticalAlignment.Bottom,
+                _ => VerticalAlignment.Center,
+            },
+        };
+        // Track the host button's Foreground (white when checked, light at rest).
+        dot.SetBinding(System.Windows.Shapes.Shape.FillProperty,
+            new System.Windows.Data.Binding(nameof(Control.Foreground)) { Source = owner });
+        grid.Children.Add(dot);
+        return grid;
     }
 
     private void OnAlignChecked(object sender, RoutedEventArgs e)
@@ -457,6 +679,7 @@ public partial class BackgroundComposerWindow : Window
             "1:1" => 1.0,
             "4:3" => 4.0 / 3.0,
             "16:9" => 16.0 / 9.0,
+            "1.91:1" => 1.91,
             "9:16" => 9.0 / 16.0,
             _ => null,
         };

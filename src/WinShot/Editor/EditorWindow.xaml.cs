@@ -52,6 +52,7 @@ public partial class EditorWindow : Window
     private Color _color = Color.FromRgb(0xFF, 0x3B, 0x30);
     private double _thickness = 4;
     private int _nextStep = 1;
+    private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
     private TextStyle _textStyle = TextStyle.Plain;
     private double? _cropRatio; // null = free
@@ -252,6 +253,7 @@ public partial class EditorWindow : Window
         CropPanel.Visibility = Visibility.Collapsed;
         TextStylePanel.Visibility = Visibility.Collapsed;
         CropRatioPanel.Visibility = Visibility.Collapsed;
+        StepModePanel.Visibility = Visibility.Collapsed;
 
         Width = Math.Min(1240, SystemParameters.WorkArea.Width * 0.9);
         Height = Math.Min(800, SystemParameters.WorkArea.Height * 0.9);
@@ -445,11 +447,12 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Shows the crop-ratio and text-style dropdowns only while their tool is active.</summary>
+    /// <summary>Shows the crop-ratio, text-style and step-mode controls only while their tool is active.</summary>
     private void UpdateContextPanels()
     {
         CropRatioPanel.Visibility = _tool == EditorTool.Crop ? Visibility.Visible : Visibility.Collapsed;
         TextStylePanel.Visibility = _tool == EditorTool.Text ? Visibility.Visible : Visibility.Collapsed;
+        StepModePanel.Visibility = _tool == EditorTool.Step ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
@@ -481,19 +484,228 @@ public partial class EditorWindow : Window
         // Fires during XAML parse for the default swatch, before the indicator exists.
         if (CurrentColorIndicator is not null)
             CurrentColorIndicator.Fill = new SolidColorBrush(color);
+        if (IsLoaded)
+            RestyleSelected(color: color, thickness: null, fill: null);
     }
 
     private void OnThicknessChecked(object sender, RoutedEventArgs e)
     {
         if (sender is RadioButton rb && rb.Tag is string s && double.TryParse(s, out double t))
+        {
             _thickness = t;
+            if (IsLoaded)
+                RestyleSelected(color: null, thickness: t, fill: null);
+        }
     }
 
     private void OnFillChecked(object sender, RoutedEventArgs e)
     {
         if (sender is RadioButton rb && rb.Tag is string tag && Enum.TryParse(tag, out ShapeFillMode mode))
+        {
             _fillMode = mode;
+            if (IsLoaded)
+                RestyleSelected(color: null, thickness: null, fill: mode);
+        }
     }
+
+    // ----------------------------------------------------- live restyle (Gap 1)
+
+    /// <summary>
+    /// Re-styles the currently selected annotation in place when the user changes color,
+    /// thickness, or fill, and records one undoable <see cref="EditorAction"/>. Only the
+    /// non-null arguments are applied; the rest keep the element's current look. Captures a
+    /// before/after snapshot of the affected visual properties and the stored
+    /// <see cref="AnnotationData"/> so undo/redo simply replay the appropriate snapshot.
+    /// </summary>
+    private void RestyleSelected(Color? color, double? thickness, ShapeFillMode? fill)
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+            return;
+        // Color is irrelevant to a few annotation kinds (spotlight/emoji/image); thickness
+        // and fill only make sense for the shapes that carry them. Skip no-op restyles so
+        // those annotations don't push empty undo entries.
+        if (!CanRestyle(_selected, color, thickness, fill))
+            return;
+
+        // Highlighter strokes bake a translucent alpha into their color; keep it when the
+        // user picks a new (opaque) swatch so the stroke stays a highlight, not a solid line.
+        if (color is Color picked && meta.Type == AnnotationData.TypeHighlighter)
+        {
+            byte alpha = meta.Color is string hex0 && TryParseColor(hex0, out var cur) ? cur.A : (byte)0x59;
+            color = Color.FromArgb(alpha, picked.R, picked.G, picked.B);
+        }
+
+        var before = SnapshotStyle(_selected, meta);
+        var after = before.With(color, thickness, fill);
+        ApplyStyleSnapshot(_selected, after);
+
+        UIElement el = _selected;
+        Push(new EditorAction(
+            undo: () => ApplyStyleSnapshot(el, before),
+            redo: () => ApplyStyleSnapshot(el, after)), apply: false);
+        UpdateSelectionVisual();
+    }
+
+    private static bool CanRestyle(UIElement element, Color? color, double? thickness, ShapeFillMode? fill)
+    {
+        if (element is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+            return false;
+        return meta.Type switch
+        {
+            AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow or AnnotationData.TypeLine
+                or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter =>
+                color is not null || thickness is not null,
+            AnnotationData.TypeRectangle or AnnotationData.TypeEllipse => true,
+            AnnotationData.TypeText => color is not null,
+            AnnotationData.TypeStep => color is not null || thickness is not null,
+            _ => false, // emoji / spotlight / image carry no editable stroke style
+        };
+    }
+
+    /// <summary>
+    /// Immutable snapshot of every property a restyle can touch, plus a fresh
+    /// <see cref="AnnotationData"/> for the element's Tag, so save round-trips stay correct.
+    /// </summary>
+    private sealed record StyleSnapshot(
+        Color StrokeColor,
+        double Thickness,
+        ShapeFillMode Fill,
+        AnnotationData Meta)
+    {
+        public StyleSnapshot With(Color? color, double? thickness, ShapeFillMode? fill)
+        {
+            Color c = color ?? StrokeColor;
+            double t = thickness ?? Thickness;
+            ShapeFillMode f = fill ?? Fill;
+
+            var meta = Meta.Clone();
+            meta.Color = ToHex(c);
+            if (thickness is not null) meta.Thickness = t;
+            if (fill is not null) meta.Fill = f.ToString();
+            return new StyleSnapshot(c, t, f, meta);
+        }
+    }
+
+    private static StyleSnapshot SnapshotStyle(UIElement element, AnnotationData meta)
+    {
+        Color stroke = meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White;
+        double thickness = meta.Thickness ?? 4;
+        ShapeFillMode fill = Enum.TryParse(meta.Fill, out ShapeFillMode f) ? f : ShapeFillMode.None;
+        return new StyleSnapshot(stroke, thickness, fill, meta);
+    }
+
+    /// <summary>Applies a snapshot to the live element and refreshes its stored AnnotationData.</summary>
+    private void ApplyStyleSnapshot(UIElement element, StyleSnapshot snap)
+    {
+        if (element is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+            return;
+        var stroke = new SolidColorBrush(snap.StrokeColor);
+
+        switch (meta.Type)
+        {
+            case AnnotationData.TypeArrow:
+            case AnnotationData.TypeCurvedArrow:
+                if (element is Path arrow)
+                {
+                    arrow.Stroke = stroke;
+                    arrow.Fill = stroke;
+                    arrow.StrokeThickness = snap.Thickness;
+                    // The triangular head scales with thickness, so rebuild geometry.
+                    if (snap.Meta.Points is { } pts && pts.Length >= 2)
+                    {
+                        var p = pts.Select(q => new Point(q[0], q[1])).ToArray();
+                        arrow.Data = meta.Type == AnnotationData.TypeCurvedArrow && p.Length >= 3
+                            ? AnnotationFactory.CurvedArrowGeometry(p[0], p[1], p[2], snap.Thickness)
+                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness);
+                    }
+                }
+                break;
+            case AnnotationData.TypeLine:
+            case AnnotationData.TypeFreehand:
+            case AnnotationData.TypeHighlighter:
+                if (element is Shape lineLike)
+                {
+                    // Highlighter keeps its baked-in translucent alpha; honor it from the snapshot.
+                    lineLike.Stroke = stroke;
+                    lineLike.StrokeThickness = snap.Thickness;
+                }
+                break;
+            case AnnotationData.TypeRectangle:
+            case AnnotationData.TypeEllipse:
+                if (element is Shape boxLike)
+                {
+                    boxLike.Stroke = stroke;
+                    boxLike.StrokeThickness = snap.Thickness;
+                    boxLike.Fill = ShapeFillBrush.Create(snap.Fill, snap.StrokeColor);
+                }
+                break;
+            case AnnotationData.TypeText:
+                ApplyTextColor(element, stroke);
+                break;
+            case AnnotationData.TypeStep:
+                if (element is Grid badge)
+                {
+                    bool lightFill = 0.299 * snap.StrokeColor.R + 0.587 * snap.StrokeColor.G +
+                                     0.114 * snap.StrokeColor.B > 160;
+                    var contrast = lightFill ? Colors.Black : Colors.White;
+                    foreach (var child in badge.Children)
+                    {
+                        if (child is Ellipse ring)
+                        {
+                            ring.Fill = stroke;
+                            ring.Stroke = new SolidColorBrush(contrast) { Opacity = 0.85 };
+                        }
+                        else if (child is TextBlock digit)
+                        {
+                            digit.Foreground = new SolidColorBrush(contrast);
+                        }
+                    }
+                }
+                break;
+        }
+
+        fe.Tag = snap.Meta;
+    }
+
+    /// <summary>Sets the foreground of a styled text label, walking into the Pill border's child.</summary>
+    private static void ApplyTextColor(UIElement element, Brush foreground)
+    {
+        switch (element)
+        {
+            case TextBlock tb:
+                tb.Foreground = foreground;
+                break;
+            case Path glyph: // Outline style
+                glyph.Fill = foreground;
+                break;
+            case Border pill when pill.Child is TextBlock inner:
+                inner.Foreground = foreground;
+                break;
+        }
+    }
+
+    private static string ToHex(Color c) => $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+
+    private static bool TryParseColor(string hex, out Color color)
+    {
+        if (ColorConverter.ConvertFromString(hex) is Color c)
+        {
+            color = c;
+            return true;
+        }
+        color = Colors.White;
+        return false;
+    }
+
+    // ----------------------------------------------------------- step mode (Gap 5)
+
+    private void OnStepModeChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton rb && rb.Tag is string tag)
+            _stepLetters = string.Equals(tag, "Letter", StringComparison.Ordinal);
+    }
+
+    private void OnResetStepCounter(object sender, RoutedEventArgs e) => _nextStep = 1;
 
     private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -758,6 +970,10 @@ public partial class EditorWindow : Window
             case EditorTool.Freehand or EditorTool.Highlighter:
                 if (shape is Polyline stroke && stroke.Points.Count >= 2)
                 {
+                    // The pencil captures raw points during the drag for responsiveness;
+                    // on release, smooth them so the committed stroke looks polished.
+                    if (_tool == EditorTool.Freehand)
+                        stroke.Points = AnnotationFactory.SmoothFreehandPoints(stroke.Points);
                     stroke.Tag = AnnotationData.ForStroke(
                         _tool == EditorTool.Freehand ? AnnotationData.TypeFreehand : AnnotationData.TypeHighlighter,
                         stroke.Points, StrokeColorOf(stroke), stroke.StrokeThickness);
@@ -1085,9 +1301,12 @@ public partial class EditorWindow : Window
             Select(null); // clicking empty space (or the backdrop) deselects
             return;
         }
-        if (e.ClickCount == 2 && hit is TextBlock label)
+        // Double-click any text annotation (Plain/Bold/Huge TextBlock, Outline Path, or
+        // Pill Border) to reopen it for editing; the owning element carries its style.
+        if (e.ClickCount == 2 && hit is FrameworkElement fe &&
+            fe.Tag is AnnotationData tm && tm.Type == AnnotationData.TypeText)
         {
-            BeginTextReEdit(label);
+            BeginTextReEdit(fe);
             e.Handled = true;
             return;
         }
@@ -1217,6 +1436,42 @@ public partial class EditorWindow : Window
             redo: () => AnnotationCanvas.Children.Remove(el)));
     }
 
+    /// <summary>Nudges the selected annotation by a keyboard delta as one undoable move.</summary>
+    private void NudgeSelected(double dx, double dy)
+    {
+        if (_selected is null || _movingSelection || _draggingCurveHandle) return;
+        UIElement el = _selected;
+        MoveElement(el, dx, dy);
+        UpdateSelectionVisual();
+        Push(new EditorAction(
+            undo: () => { MoveElement(el, -dx, -dy); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
+            redo: () => { MoveElement(el, dx, dy); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); }),
+            apply: false);
+    }
+
+    /// <summary>Maps a single-letter shortcut to a tool, mirroring the toolbar toggle. Returns false if unmapped.</summary>
+    private bool TrySelectToolByKey(Key key)
+    {
+        EditorTool? tool = key switch
+        {
+            Key.V => EditorTool.Select,
+            Key.A => EditorTool.Arrow,
+            Key.R => EditorTool.Rectangle,
+            Key.E => EditorTool.Ellipse,
+            Key.L => EditorTool.Line,
+            Key.T => EditorTool.Text,
+            Key.P => EditorTool.Freehand, // Pen / Draw
+            Key.H => EditorTool.Highlighter,
+            Key.B => EditorTool.Blur,
+            Key.S => EditorTool.Step,
+            Key.C => EditorTool.Crop,
+            _ => null,
+        };
+        if (tool is not EditorTool t) return false;
+        CheckToolButton(t);
+        return true;
+    }
+
     /// <summary>Moves an annotation by composing into its TranslateTransform (same channel crop shifting uses).</summary>
     private static void MoveElement(UIElement element, double dx, double dy)
     {
@@ -1250,9 +1505,18 @@ public partial class EditorWindow : Window
         Dispatcher.InvokeAsync(() => tb.Focus());
     }
 
-    /// <summary>Reopens a committed text label for editing (Select tool double-click).</summary>
-    private void BeginTextReEdit(TextBlock label)
+    /// <summary>
+    /// Reopens a committed text annotation for editing (Select tool double-click). Reads the
+    /// original style, font size, text and color from the element's stored
+    /// <see cref="AnnotationData"/> rather than inferring them from the visual, so
+    /// Outline/Pill/Huge survive a round-trip instead of downgrading to Plain/Bold.
+    /// Works for any text element kind: TextBlock (Plain/Bold/Huge), Path (Outline),
+    /// or Border (Pill).
+    /// </summary>
+    private void BeginTextReEdit(FrameworkElement label)
     {
+        if (label.Tag is not AnnotationData meta || meta.Type != AnnotationData.TypeText)
+            return;
         Select(null);
         double x = Canvas.GetLeft(label), y = Canvas.GetTop(label);
         if (label.RenderTransform is TranslateTransform t)
@@ -1271,11 +1535,14 @@ public partial class EditorWindow : Window
             },
             redo: () => AnnotationCanvas.Children.Remove(label)));
 
-        var tb = AnnotationFactory.CreateTextEditor(label.Foreground, label.FontSize);
-        // Only TextBlock-backed styles reach re-edit; weight identifies Bold, the
-        // (possibly enlarged) font size already carries the Huge look.
-        tb.Tag = label.FontWeight == FontWeights.Bold ? TextStyle.Bold : TextStyle.Plain;
-        tb.Text = label.Text;
+        var style = Enum.TryParse(meta.Style, out TextStyle s) ? s : TextStyle.Plain;
+        double fontSize = meta.FontSize is double fs && fs > 0 ? fs : AnnotationFactory.FontSizeFor(_thickness);
+        var foreground = new SolidColorBrush(
+            meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White);
+
+        var tb = AnnotationFactory.CreateTextEditor(foreground, fontSize);
+        tb.Tag = style; // CommitText reads the style back when building the replacement label
+        tb.Text = meta.Text ?? string.Empty;
         Canvas.SetLeft(tb, x - 3);
         Canvas.SetTop(tb, y - 3);
         AnnotationCanvas.Children.Add(tb);
@@ -1337,11 +1604,16 @@ public partial class EditorWindow : Window
     private void PlaceStep(Point pos)
     {
         int number = _nextStep;
-        var badge = AnnotationFactory.CreateStepBadge(number, _color, _thickness);
+        bool letters = _stepLetters;
+        var badge = AnnotationFactory.CreateStepBadge(number, _color, _thickness, letters);
         double left = pos.X - badge.Width / 2, top = pos.Y - badge.Height / 2;
         Canvas.SetLeft(badge, left);
         Canvas.SetTop(badge, top);
-        badge.Tag = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
+        var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
+        // Record the caption mode so a future serializer can round-trip letter badges;
+        // the current project schema still rebuilds steps as numbers on reload.
+        if (letters) data.Style = "Letter";
+        badge.Tag = data;
         Push(new EditorAction(
             undo: () =>
             {
@@ -1774,8 +2046,37 @@ public partial class EditorWindow : Window
             if (e.Key == Key.Z) { _ = UndoAsync(); e.Handled = true; }
             else if (e.Key == Key.Y) { _ = RedoAsync(); e.Handled = true; }
             else if (e.Key is Key.D0 or Key.NumPad0) { FitToView(); e.Handled = true; }
+            return;
         }
-        else if (e.Key == Key.Delete)
+
+        // Arrow keys nudge the selection by 1px (10px with Shift). Allowed with a bare
+        // Shift modifier only; any other modifier falls through.
+        bool onlyShiftOrNone = (Keyboard.Modifiers & ~ModifierKeys.Shift) == ModifierKeys.None;
+        if (onlyShiftOrNone && _selected is not null &&
+            e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
+        {
+            double step = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 10 : 1;
+            (double dx, double dy) = e.Key switch
+            {
+                Key.Left => (-step, 0.0),
+                Key.Right => (step, 0.0),
+                Key.Up => (0.0, -step),
+                _ => (0.0, step),
+            };
+            NudgeSelected(dx, dy);
+            e.Handled = true;
+            return;
+        }
+
+        // Single-letter tool shortcuts (no modifiers). Ignored while a curved arrow is
+        // mid-edit so Escape/commit stays the only way out of that transient mode.
+        if (Keyboard.Modifiers == ModifierKeys.None && _pendingCurve is null && TrySelectToolByKey(e.Key))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Delete)
         {
             if (_selected is not null) { DeleteSelected(); e.Handled = true; }
         }

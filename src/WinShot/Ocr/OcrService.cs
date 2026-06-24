@@ -67,9 +67,20 @@ public static class OcrService
             if (bmp.Width > maxDim || bmp.Height > maxDim)
             {
                 double factor = Math.Min((double)maxDim / bmp.Width, (double)maxDim / bmp.Height);
-                scaled = new SD.Bitmap(bmp,
-                    Math.Max(1, (int)(bmp.Width * factor)),
-                    Math.Max(1, (int)(bmp.Height * factor)));
+                int targetW = Math.Max(1, (int)(bmp.Width * factor));
+                int targetH = Math.Max(1, (int)(bmp.Height * factor));
+                // High-quality bicubic downscale so dense/small text survives the
+                // resize; the default Bitmap(bmp, w, h) ctor uses low-quality
+                // interpolation that smears glyph edges and hurts OCR accuracy on 4K.
+                scaled = new SD.Bitmap(targetW, targetH, SDI.PixelFormat.Format32bppArgb);
+                using (var g = SD.Graphics.FromImage(scaled))
+                {
+                    g.CompositingQuality = SD.Drawing2D.CompositingQuality.HighQuality;
+                    g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighQuality;
+                    g.SmoothingMode = SD.Drawing2D.SmoothingMode.HighQuality;
+                    g.DrawImage(bmp, new SD.Rectangle(0, 0, targetW, targetH));
+                }
                 source = scaled;
             }
 

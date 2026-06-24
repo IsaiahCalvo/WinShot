@@ -32,6 +32,9 @@ public partial class HistoryWindow : Window
     private string _filter = "all";
     private HistoryItem? _previewItem;
     private FastQuickPreviewWindow? _preview;
+    private Point _dragStart;
+    private HistoryItem? _dragItem;
+    private bool _dragging;
     private bool _loadedOnce;
     private bool _renderPrewarmed;
     private bool _suppressRefreshOnLoad;
@@ -249,6 +252,7 @@ public partial class HistoryWindow : Window
         _allItems.Clear();
         _items.Clear();
         UpdateCount();
+        UpdateEmptyState();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -355,7 +359,11 @@ public partial class HistoryWindow : Window
         foreach (var item in _allItems.Where(MatchesFilter))
             _items.Add(item);
         UpdateCount();
+        UpdateEmptyState();
     }
+
+    private void UpdateEmptyState() =>
+        EmptyState.Visibility = _items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
     private bool MatchesFilter(HistoryItem item) => _filter switch
     {
@@ -401,7 +409,49 @@ public partial class HistoryWindow : Window
         if (GetItem(sender) is not { } item) return;
         _previewItem = item;
         if (e.ClickCount == 2)
+        {
+            _dragItem = null;
             OpenItem(item);
+            return;
+        }
+        // Arm a potential drag-out; the actual drag begins once the mouse moves
+        // past the system threshold while the left button stays down.
+        _dragStart = e.GetPosition(null);
+        _dragItem = item;
+    }
+
+    private void OnTileMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_dragging || _dragItem is null || e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        Point pos = e.GetPosition(null);
+        if (Math.Abs(pos.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(pos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        var item = _dragItem;
+        if (!File.Exists(item.FilePath))
+        {
+            _dragItem = null;
+            return;
+        }
+
+        _dragging = true;
+        try
+        {
+            var data = new DataObject(DataFormats.FileDrop, new[] { item.FilePath });
+            DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Drag-out failed for {item.FilePath}", ex);
+        }
+        finally
+        {
+            _dragging = false;
+            _dragItem = null;
+        }
     }
 
     private async void OnCopy(object sender, RoutedEventArgs e)
@@ -469,6 +519,7 @@ public partial class HistoryWindow : Window
         _items.Remove(item);
         if (ReferenceEquals(_previewItem, item)) _previewItem = null;
         UpdateCount();
+        UpdateEmptyState();
     }
 
     private static void OpenItem(HistoryItem item)
@@ -514,6 +565,9 @@ public sealed class HistoryItem : INotifyPropertyChanged
         IsVideo = VideoExtensions.Contains(ext);
         IsGif = ext == ".gif";
         ExtensionLabel = ext.TrimStart('.').ToUpperInvariant();
+        CapturedAt = ParseCapturedAt(filePath);
+        FileSize = TryGetFileSize(filePath);
+        Caption = BuildCaption(CapturedAt, FileSize);
     }
 
     public string FilePath { get; }
@@ -522,6 +576,59 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public bool IsVideo { get; }
     public bool IsGif { get; }
     public string ExtensionLabel { get; }
+
+    /// <summary>Capture time parsed from the file name ("yyyyMMdd-HHmmss-fff"),
+    /// the same format HistoryService writes. Falls back to last-write time.</summary>
+    public DateTime CapturedAt { get; }
+    public long FileSize { get; }
+    /// <summary>Friendly caption shown under the thumbnail, e.g. "Today 2:14 PM · 1.2 MB".</summary>
+    public string Caption { get; }
+
+    private static DateTime ParseCapturedAt(string filePath)
+    {
+        string name = Path.GetFileNameWithoutExtension(filePath);
+        if (name.Length >= 19 &&
+            DateTime.TryParseExact(name[..19], "yyyyMMdd-HHmmss-fff",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out DateTime ts))
+        {
+            return ts;
+        }
+
+        try { return File.GetLastWriteTime(filePath); }
+        catch { return DateTime.Now; }
+    }
+
+    private static long TryGetFileSize(string filePath)
+    {
+        try { return new FileInfo(filePath).Length; }
+        catch { return 0; }
+    }
+
+    private static string BuildCaption(DateTime captured, long bytes)
+    {
+        string when;
+        DateTime today = DateTime.Today;
+        if (captured.Date == today)
+            when = $"Today {captured:h:mm tt}";
+        else if (captured.Date == today.AddDays(-1))
+            when = "Yesterday";
+        else
+            when = captured.ToString("MMM d");
+
+        string size = FormatSize(bytes);
+        return size.Length == 0 ? when : $"{when} · {size}";
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes <= 0) return string.Empty;
+        if (bytes < 1024) return $"{bytes} B";
+        double kb = bytes / 1024d;
+        if (kb < 1024) return $"{kb:0.#} KB";
+        double mb = kb / 1024d;
+        return $"{mb:0.#} MB";
+    }
 
     public Visibility ImageOnlyVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MediaOnlyVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
