@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 
 namespace WinShot.Core;
@@ -87,7 +88,7 @@ public class HistoryService
         {
             try
             {
-                if (File.GetLastWriteTime(file) < cutoff)
+                if (FileTimestamp(file) < cutoff)
                     File.Delete(file);
             }
             catch (Exception ex)
@@ -95,6 +96,26 @@ public class HistoryService
                 Log.Error($"Age prune failed for {file}", ex);
             }
         }
+    }
+
+    /// <summary>
+    /// Age decisions use the capture time encoded in the file NAME (what the UI sorts by),
+    /// not the file's last-write time. Copied recordings or externally touched files can have
+    /// a write time that diverges from the capture time, which would otherwise prune by a
+    /// different clock than the user sees. Falls back to write time when unparseable.
+    /// </summary>
+    private static DateTime FileTimestamp(string file)
+    {
+        string name = Path.GetFileNameWithoutExtension(file);
+        if (name.Length >= 19 &&
+            DateTime.TryParseExact(name[..19], "yyyyMMdd-HHmmss-fff",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime ts))
+        {
+            return ts;
+        }
+
+        try { return File.GetLastWriteTime(file); }
+        catch { return DateTime.Now; }
     }
 
     private List<string> GetItemsCore()

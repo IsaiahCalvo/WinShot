@@ -11,7 +11,7 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
     private const int MaxConcurrentRings = 24;
     private const int RingLifetimeMs = 450;
     private static readonly SD.Color TransparentKey = SD.Color.Magenta;
-    private static readonly SD.Color RingColor = SD.Color.FromArgb(77, 163, 255);
+    private static readonly SD.Color RingColor = ThemePalette.Accent;
 
     private readonly SD.Rectangle _regionPx;
     private readonly HookProc _hookProc;

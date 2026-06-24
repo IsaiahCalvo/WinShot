@@ -89,6 +89,25 @@ public sealed class CommandServer : IDisposable
     }
 
     /// <summary>
+    /// Probes whether a primary instance is actually listening on the pipe, independent of
+    /// the single-instance mutex. Used so a stale/abandoned mutex (e.g. left by a crashed
+    /// instance) doesn't leave WinShot permanently unlaunchable.
+    /// </summary>
+    public static bool IsInstanceRunning()
+    {
+        try
+        {
+            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+            client.Connect(400);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Maps "winshot://capture-area", "winshot://capture-area?copy=1",
     /// "--capture-area", or bare "capture-area" to the canonical command name;
     /// unknown input returns null.

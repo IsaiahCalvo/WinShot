@@ -12,11 +12,11 @@ public sealed class FastRecordingToastWindow : WF.Form
     private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
     private static readonly SD.Color ButtonBack = SD.Color.FromArgb(58, 58, 58);
     private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
-    private static readonly SD.Color Accent = SD.Color.FromArgb(45, 125, 255);
-    private static readonly SD.Color AccentHot = SD.Color.FromArgb(77, 163, 255);
+    private static readonly SD.Color Accent = ThemePalette.Accent;
+    private static readonly SD.Color AccentHot = ThemePalette.AccentHover;
     private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
     private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Color AccentText = SD.Color.FromArgb(77, 163, 255);
+    private static readonly SD.Color AccentText = ThemePalette.AccentHover;
 
     private readonly string _filePath;
     private readonly Action? _onEdit;

@@ -137,7 +137,7 @@ public sealed class FastPinWindow : WF.Form
 
         if (_mouseInside && !_locked)
         {
-            using var pen = new SD.Pen(SD.Color.FromArgb(77, 163, 255), 1);
+            using var pen = new SD.Pen(ThemePalette.Accent, 1);
             e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
 
             string label = "drag";

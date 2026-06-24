@@ -100,6 +100,7 @@ public partial class BackgroundComposerWindow : Window
                     Log.Info($"Perf background composer deferred init: {_startup.ElapsedMilliseconds} ms");
                 }));
         };
+        DarkTitleBar.Apply(this);
     }
 
     public static void Prewarm(SettingsService settings, HistoryService history)

@@ -10,7 +10,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private static readonly SD.Color FieldBack = SD.Color.FromArgb(58, 58, 58);
     private static readonly SD.Color TextColor = SD.Color.White;
     private static readonly SD.Color MutedText = SD.Color.FromArgb(220, 220, 220);
-    private static readonly SD.Color Accent = SD.Color.FromArgb(45, 125, 255);
+    private static readonly SD.Color Accent = ThemePalette.Accent;
 
     private readonly WF.RadioButton _mp4Radio;
     private readonly WF.RadioButton _gifRadio;

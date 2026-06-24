@@ -17,9 +17,12 @@ internal static class DesktopDuplicationCapture
     private const int AccessDeniedCooldownMs = 10 * 60 * 1000;
     private const uint DxgiErrorWaitTimeout = 0x887A0027;
     private const uint HResultAccessDenied = 0x80070005;
+    private const int IdleEvictMs = 30_000;
     private static readonly object Gate = new();
     private static readonly Dictionary<string, DisplayCapture> Displays = new(StringComparer.OrdinalIgnoreCase);
     private static long _disabledUntilTick;
+    private static long _lastUseTick;
+    private static int _evictionScheduled;
 
     public static bool TryCaptureRegion(Rectangle screenRect, out Bitmap? bitmap)
     {
@@ -32,6 +35,8 @@ internal static class DesktopDuplicationCapture
             try
             {
                 bitmap = CaptureRegionCore(screenRect);
+                Interlocked.Exchange(ref _lastUseTick, Environment.TickCount64);
+                ScheduleIdleEviction();
                 return true;
             }
             catch (Exception ex)
@@ -168,6 +173,31 @@ internal static class DesktopDuplicationCapture
         foreach (var display in Displays.Values)
             display.Dispose();
         Displays.Clear();
+    }
+
+    /// <summary>
+    /// Disposes the cached D3D device + duplication interface ~30s after the last capture so a
+    /// tray-resident WinShot doesn't hold tens of MB of GPU/driver memory open forever (it
+    /// previously freed these only on app exit). One-shot delay, not a polling timer, so it
+    /// adds zero idle CPU; the next capture simply recreates the display via GetDisplay.
+    /// </summary>
+    private static void ScheduleIdleEviction()
+    {
+        if (Interlocked.Exchange(ref _evictionScheduled, 1) == 1)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(IdleEvictMs).ConfigureAwait(false);
+            lock (Gate)
+            {
+                Interlocked.Exchange(ref _evictionScheduled, 0);
+                if (Environment.TickCount64 - Interlocked.Read(ref _lastUseTick) >= IdleEvictMs)
+                    Reset();
+                else if (Displays.Count > 0)
+                    ScheduleIdleEviction();
+            }
+        });
     }
 
     private sealed class DisplayCapture : IDisposable

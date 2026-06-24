@@ -6,7 +6,7 @@
         ShowInTaskbar="False" ShowActivated="False" WindowStartupLocation="Manual">
     <Window.Resources>
         <Style x:Key="StopButton" TargetType="Button">
-            <Setter Property="Background" Value="#2D7DFF"/>
+            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="Padding" Value="12,4"/>
             <Setter Property="FontSize" Value="12"/>
@@ -20,7 +20,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#4DA3FF"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="Bd" Property="Background" Value="#3A3A3A"/>
@@ -33,7 +33,7 @@
     </Window.Resources>
     <Border CornerRadius="10" Background="#F22B2B2B" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="14,8">
         <StackPanel Orientation="Horizontal">
-            <Ellipse Width="8" Height="8" Fill="#4DA3FF" VerticalAlignment="Center"/>
+            <Ellipse Width="8" Height="8" Fill="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
             <TextBlock x:Name="StatusText" Foreground="White" FontSize="12" Margin="8,0,14,0"
                        VerticalAlignment="Center" Text="Scrolling capture - starting…"/>
             <Button x:Name="BtnStop" Style="{StaticResource StopButton}" Content="Stop" Click="OnStop"/>

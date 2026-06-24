@@ -41,6 +41,7 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         _settings = settings;
         LoadFromSettings();
+        DarkTitleBar.Apply(this);
     }
 
     /// <summary>Opens the settings window, or activates the instance that is already open.</summary>
@@ -613,22 +614,10 @@ public partial class SettingsWindow : Window
     private static string SelectedTag(ComboBox combo, string fallback) =>
         (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? fallback;
 
+    // Delegates to the shared helper so Settings and the boot-time self-heal write the
+    // identical Run-key value (see WinShot.Core.StartupRegistration).
     private static void ApplyStartupRegistration(bool enabled)
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
-            string? exe = Environment.ProcessPath;
-            if (enabled && exe is not null)
-                key.SetValue(RunValueName, $"\"{exe}\"");
-            else
-                key.DeleteValue(RunValueName, throwOnMissingValue: false);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Failed to update launch-at-startup registry value", ex);
-        }
-    }
+        => StartupRegistration.Apply(enabled);
 
     private const uint SetWindowPosNoSize = 0x0001;
     private const uint SetWindowPosNoZOrder = 0x0004;

@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using WinShot.Core;
 
 namespace WinShot.Editor;
 
@@ -39,6 +40,7 @@ public partial class ResizeDialog : Window
             WidthBox.Focus();
             WidthBox.SelectAll();
         };
+        DarkTitleBar.Apply(this);
     }
 
     private void OnWidthChanged(object sender, TextChangedEventArgs e)

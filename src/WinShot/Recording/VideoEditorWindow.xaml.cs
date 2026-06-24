@@ -52,6 +52,7 @@ public partial class VideoEditorWindow : Window
         Dispatcher.BeginInvoke(
             DispatcherPriority.ContextIdle,
             new Action(OpenPreviewSafely));
+        DarkTitleBar.Apply(this);
     }
 
     /// <summary>Loads (or reloads) the source into the preview and shows the first frame.</summary>

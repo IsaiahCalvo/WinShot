@@ -19,13 +19,17 @@ public sealed class FastQuickActionsWindow : WF.Form
     private const int WmNclbuttondown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
 
-    private static readonly SD.Color Surface = SD.Color.FromArgb(34, 34, 38);
-    private static readonly SD.Color SurfaceAlt = SD.Color.FromArgb(50, 50, 56);
-    private static readonly SD.Color SurfaceHover = SD.Color.FromArgb(70, 70, 78);
-    private static readonly SD.Color Border = SD.Color.FromArgb(76, 255, 255, 255);
-    private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Font GlyphFont = new("Segoe MDL2 Assets", 11f, SD.FontStyle.Regular, SD.GraphicsUnit.Point);
-    private static readonly SD.Font CloseGlyphFont = new("Segoe MDL2 Assets", 9f, SD.FontStyle.Regular, SD.GraphicsUnit.Point);
+    // All colors flow from the one shared palette (mirrors Theme.xaml) so the overlay
+    // matches the rest of the app instead of hardcoding its own grays.
+    private static readonly SD.Color Surface = ThemePalette.ToolbarBg;
+    private static readonly SD.Color SurfaceAlt = ThemePalette.Surface;
+    private static readonly SD.Color SurfaceHover = ThemePalette.SurfaceHover;
+    private static readonly SD.Color Border = ThemePalette.Border;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
+    private static readonly SD.Color TextDim = ThemePalette.TextSecondary;
+    private static readonly SD.Color Accent = ThemePalette.Accent;
+    private static readonly SD.Font GlyphFont = ThemePalette.IconFont(11f);
+    private static readonly SD.Font CloseGlyphFont = ThemePalette.IconFont(9f);
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
 
@@ -44,6 +48,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private string? _tempDragPath;
     private string? _historyPath;
     private int _hoverButton = -1;
+    private int _pressedButton = -1;
     private bool _dragArmed;
     private bool _closed;
     private bool _useRegionCorners;
@@ -101,7 +106,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         MouseDown += OnOverlayMouseDown;
         MouseMove += OnOverlayMouseMove;
         MouseUp += OnOverlayMouseUp;
-        MouseLeave += (_, _) => SetHover(-1);
+        MouseLeave += (_, _) => { SetHover(-1); SetPressed(-1); };
         KeyDown += OnOverlayKeyDown;
         Shown += (_, _) => QueuePreviewLoad();
         FormClosed += (_, _) =>
@@ -247,8 +252,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         e.Graphics.Clear(Surface);
 
         DrawThumbnail(e.Graphics);
-        foreach (var button in _buttons)
-            DrawButton(e.Graphics, button, _buttons.IndexOf(button) == _hoverButton);
+        for (int i = 0; i < _buttons.Count; i++)
+            DrawButton(e.Graphics, _buttons[i], i == _hoverButton, i == _pressedButton);
 
         using var path = RoundedRect(new SD.Rectangle(0, 0, Width - 1, Height - 1), CornerRadius);
         using var pen = new SD.Pen(Border, 1);
@@ -319,25 +324,48 @@ public sealed class FastQuickActionsWindow : WF.Form
         g.DrawRectangle(pen, _thumbRect.X, _thumbRect.Y, Math.Max(0, _thumbRect.Width - 1), Math.Max(0, _thumbRect.Height - 1));
     }
 
-    private static void DrawButton(SD.Graphics g, ActionButton button, bool hot)
+    private static void DrawButton(SD.Graphics g, ActionButton button, bool hot, bool pressed)
     {
-        using var brush = new SD.SolidBrush(hot ? SurfaceHover : SurfaceAlt);
-        g.FillEllipse(brush, button.Bounds);
-        TextRendererDrawGlyph(g, button.Glyph, button.Font, button.Bounds);
+        // Rest: glyph only (dim white). Hover: subtle white circle + bright glyph.
+        // Pressed: solid accent-blue circle + white glyph — the one accent identity.
+        if (pressed)
+        {
+            using var accent = new SD.SolidBrush(Accent);
+            g.FillEllipse(accent, button.Bounds);
+        }
+        else if (hot)
+        {
+            using var hover = new SD.SolidBrush(ThemePalette.HoverFill);
+            g.FillEllipse(hover, button.Bounds);
+        }
+
+        SD.Color glyphColor = pressed ? SD.Color.White : hot ? TextColor : TextDim;
+        TextRendererDrawGlyph(g, button.Glyph, button.Font, button.Bounds, glyphColor);
     }
 
-    private static void TextRendererDrawGlyph(SD.Graphics g, string glyph, SD.Font font, SD.Rectangle bounds)
+    private static void TextRendererDrawGlyph(SD.Graphics g, string glyph, SD.Font font, SD.Rectangle bounds, SD.Color color)
     {
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
                     WF.TextFormatFlags.SingleLine |
                     WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(g, glyph, font, bounds, TextColor, flags);
+        WF.TextRenderer.DrawText(g, glyph, font, bounds, color, flags);
+    }
+
+    private void SetPressed(int index)
+    {
+        if (_pressedButton == index) return;
+        int old = _pressedButton;
+        _pressedButton = index;
+        if (old >= 0) Invalidate(_buttons[old].Bounds);
+        if (index >= 0) Invalidate(_buttons[index].Bounds);
     }
 
     private void PositionBottomRight()
     {
-        var area = WF.Screen.PrimaryScreen?.WorkingArea ?? WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        // Pop on the monitor the user just acted on (under the cursor), not always the
+        // primary one — matches where the capture happened, like the pin window does.
+        var area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
         int offset = OpenWindows
             .Where(w => !ReferenceEquals(w, this) && w.Visible)
             .Sum(w => w.Height + 12);
@@ -502,7 +530,10 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         int buttonIndex = HitTestButton(e.Location);
         if (buttonIndex >= 0)
+        {
+            SetPressed(buttonIndex);
             return;
+        }
 
         if (_thumbRect.Contains(e.Location))
         {
@@ -545,6 +576,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         if (e.Button != WF.MouseButtons.Left) return;
         _dragArmed = false;
+        SetPressed(-1);
 
         int buttonIndex = HitTestButton(e.Location);
         if (buttonIndex >= 0)

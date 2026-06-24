@@ -61,6 +61,7 @@ public partial class HistoryWindow : Window
             ClearLoadedItems();
             MemoryCleanup.Request();
         };
+        DarkTitleBar.Apply(this);
     }
 
     /// <summary>Opens the history window, or activates the instance that is already open.</summary>

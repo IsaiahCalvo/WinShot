@@ -12,7 +12,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
 {
     private const int DragThresholdPx = 4;
     private const int CrosshairGapPx = 10;
-    private static readonly SD.Color Blue = SD.Color.FromArgb(255, 0x4D, 0xA3, 0xFF);
+    // Single accent identity (was #4DA3FF). The selection rectangle is filled with
+    // HoleKey, which the form's TransparencyKey turns into a full-brightness hole so the
+    // chosen region is NOT dimmed like the rest of the screen (CleanShot's punch-out).
+    private static readonly SD.Color Accent = ThemePalette.Accent;
+    private static readonly SD.Color HoleKey = SD.Color.Magenta;
     private static FastRegionSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
@@ -47,6 +51,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = SD.Color.Black;
+        // Pixels painted in HoleKey become fully transparent (full-brightness hole),
+        // while everything else stays dimmed by Opacity below.
+        TransparencyKey = HoleKey;
         Bounds = _vs;
         Cursor = WF.Cursors.Cross;
         DoubleBuffered = true;
@@ -321,20 +328,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DrawCrosshair(g, PointToClient(_currentScreen));
 
         if (_hoverWindow is not null && !_dragging && _pendingPx is null)
-            DrawRect(g, ClientFromScreen(_hoverWindow.Bounds), Blue);
+            DrawRect(g, ClientFromScreen(_hoverWindow.Bounds), Accent);
 
         if (_dragging && _dragMoved)
         {
             var screenRect = Normalize(_dragStartScreen, _currentScreen);
             var clientRect = ClientFromScreen(screenRect);
-            DrawRect(g, clientRect, SD.Color.White);
-            DrawLabel(g, $"{screenRect.Width} x {screenRect.Height}", clientRect.Right + 8, clientRect.Bottom + 8);
+            DrawSelection(g, clientRect);
+            DrawLabel(g, $"{screenRect.Width} × {screenRect.Height}", clientRect.Right + 8, clientRect.Bottom + 8);
         }
         else if (_pendingPx is SD.Rectangle pending)
         {
             var clientRect = ClientFromScreen(ScreenFromVirtual(pending));
-            DrawRect(g, clientRect, SD.Color.White);
-            DrawLabel(g, $"{pending.Width} x {pending.Height}", clientRect.Right + 8, clientRect.Bottom + 8);
+            DrawSelection(g, clientRect);
+            DrawLabel(g, $"{pending.Width} × {pending.Height}", clientRect.Right + 8, clientRect.Bottom + 8);
         }
         else if (_hoverWindow is not null)
         {
@@ -400,6 +407,34 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.DrawRectangle(pen, rect);
     }
 
+    /// <summary>Fills the selection with the transparency-key color (so it shows the live
+    /// screen at full brightness, undimmed) and strokes it with the accent border.</summary>
+    private void DrawSelection(SD.Graphics g, SD.Rectangle rect)
+    {
+        if (rect.Width < 1 || rect.Height < 1)
+            return;
+
+        using (var hole = new SD.SolidBrush(HoleKey))
+            g.FillRectangle(hole, rect);
+
+        using var pen = new SD.Pen(Accent, 2);
+        g.DrawRectangle(pen, rect);
+    }
+
+    private static SD.Drawing2D.GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
+    {
+        int d = radius * 2;
+        var path = new SD.Drawing2D.GraphicsPath();
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            return path;
+        path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
+        path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
+        path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+        path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
     private void DrawCrosshair(SD.Graphics g, SD.Point cursor)
     {
         var guides = FastSelectorGuideLayout.Calculate(ClientSize, cursor, CrosshairGapPx);
@@ -422,14 +457,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     private void DrawLabel(SD.Graphics g, string text, int x, int y)
     {
-        using var font = new SD.Font("Consolas", 9f);
+        using var font = ThemePalette.UiFont(9f, SD.FontStyle.Bold);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int left = Math.Clamp(x, 0, Math.Max(0, ClientRectangle.Width - size.Width - 12));
-        int top = Math.Clamp(y, 0, Math.Max(0, ClientRectangle.Height - size.Height - 8));
-        var bg = new SD.Rectangle(left, top, size.Width + 12, size.Height + 6);
-        using var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(30, 30, 30));
-        g.FillRectangle(bgBrush, bg);
-        WF.TextRenderer.DrawText(g, text, font, new SD.Point(left + 6, top + 3), SD.Color.White);
+        int w = size.Width + 16;
+        int h = size.Height + 8;
+        int left = Math.Clamp(x, 0, Math.Max(0, ClientRectangle.Width - w));
+        int top = Math.Clamp(y, 0, Math.Max(0, ClientRectangle.Height - h));
+        var bg = new SD.Rectangle(left, top, w, h);
+
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = RoundedRect(bg, 6))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
+            g.FillPath(bgBrush, path);
+        g.SmoothingMode = prev;
+
+        WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,
+            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
     }
 
     private SD.Rectangle VirtualFromScreen(SD.Rectangle screenRect)

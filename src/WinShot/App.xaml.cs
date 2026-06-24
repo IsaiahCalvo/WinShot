@@ -45,13 +45,25 @@ public partial class App : Application
         _mutex = new Mutex(true, "WinShot-SingleInstance", out _ownsMutex);
         if (!_ownsMutex)
         {
-            // A second launch: forward any command to the running instance, otherwise just say hello.
-            if (incomingCommand is not null)
-                CommandServer.TrySendToRunningInstance(incomingCommand);
-            else
-                MessageBox.Show("WinShot is already running — look for it in the system tray.", "WinShot");
-            Shutdown();
-            return;
+            // The mutex says another instance may exist — but verify one is actually serving
+            // the command pipe before bowing out. A crashed instance can leave the named mutex
+            // behind; without this probe WinShot would refuse to launch (no tray icon, no way
+            // to recover short of a reboot).
+            bool handledByRunningInstance = incomingCommand is not null
+                ? CommandServer.TrySendToRunningInstance(incomingCommand)
+                : CommandServer.IsInstanceRunning();
+
+            if (handledByRunningInstance)
+            {
+                if (incomingCommand is null)
+                    MessageBox.Show("WinShot is already running — look for it in the system tray.", "WinShot");
+                Shutdown();
+                return;
+            }
+
+            // Stale mutex with no live instance — continue as the primary so WinShot stays
+            // launchable. We never acquired ownership, so OnExit won't try to release it.
+            Log.Info("Single-instance mutex present but no live instance responded; starting as primary.");
         }
 
         DispatcherUnhandledException += (_, args) =>
@@ -68,6 +80,9 @@ public partial class App : Application
         _settings.Changed += RegisterHotkeys;
 
         _ = Task.Run(ProtocolRegistrar.EnsureRegistered);
+        // Self-heal the launch-at-startup entry against the current exe path, so a moved or
+        // updated WinShot.exe still launches at login (Settings only writes it on save).
+        _ = Task.Run(() => StartupRegistration.Reconcile(_settings.Current.LaunchAtStartup));
         _commandServer = new CommandServer();
         _commandServer.CommandReceived += OnCommandReceived;
         _commandServer.Start();

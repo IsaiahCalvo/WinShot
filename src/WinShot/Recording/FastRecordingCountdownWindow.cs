@@ -9,7 +9,7 @@ namespace WinShot.Recording;
 public sealed class FastRecordingCountdownWindow : WF.Form
 {
     private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color Ring = SD.Color.FromArgb(45, 125, 255);
+    private static readonly SD.Color Ring = ThemePalette.Accent;
     private static readonly SD.Color TextColor = SD.Color.White;
     private static readonly SD.Color MutedText = SD.Color.FromArgb(136, 136, 136);
 

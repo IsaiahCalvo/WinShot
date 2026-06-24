@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinShot.SettingsUi"
         Title="WinShot - Settings" Width="580" Height="520"
-        Background="#2B2B2B" ResizeMode="CanMinimize" ShowInTaskbar="True"
+        Background="{StaticResource WindowBgBrush}" ResizeMode="CanMinimize" ShowInTaskbar="True"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <Style x:Key="FieldLabel" TargetType="TextBlock">
@@ -26,7 +26,7 @@
             <Setter Property="Padding" Value="6,3"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="CaretBrush" Value="White"/>
-            <Setter Property="SelectionBrush" Value="#2D7DFF"/>
+            <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
         <Style TargetType="{x:Type local:HotkeyBox}" BasedOn="{StaticResource {x:Type TextBox}}"/>
@@ -59,7 +59,7 @@
             </Setter>
         </Style>
         <Style x:Key="AccentButton" TargetType="Button">
-            <Setter Property="Background" Value="#2D7DFF"/>
+            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="Padding" Value="12,5"/>
             <Setter Property="Margin" Value="6,0,0,0"/>
@@ -74,7 +74,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#4DA3FF"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHoverBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -137,7 +137,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2D7DFF"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -359,10 +359,10 @@
                     </DockPanel>
                     <DockPanel Margin="0,4">
                         <TextBlock Style="{StaticResource FieldLabel}" Text="Preview"/>
-                        <TextBlock x:Name="TemplatePreviewText" Foreground="#4DA3FF" FontSize="12"
+                        <TextBlock x:Name="TemplatePreviewText" Foreground="{StaticResource AccentBrush}" FontSize="12"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     </DockPanel>
-                    <TextBlock Foreground="#4DA3FF" FontSize="13" FontWeight="SemiBold"
+                    <TextBlock Foreground="{StaticResource AccentBrush}" FontSize="13" FontWeight="SemiBold"
                                Margin="0,14,0,6" Text="Tokens"/>
                     <TextBlock FontSize="11" Foreground="#999999" LineHeight="19">
                         <Run Foreground="#DDDDDD" Text="{}{date}"/><Run Text="  - current date"/><LineBreak/>

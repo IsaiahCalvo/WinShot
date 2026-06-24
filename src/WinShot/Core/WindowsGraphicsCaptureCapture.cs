@@ -21,15 +21,17 @@ internal static class WindowsGraphicsCaptureCapture
 {
     private const int FirstFrameTimeoutMs = 1000;
     private const int FailureCooldownMs = 30_000;
-    private const int IdleDisplayCaptureMs = 60_000;
     private const uint HResultAccessDenied = 0x80070005;
     private const uint HResultNoInterface = 0x80004002;
     private const uint MonitorDefaultToNearest = 2;
     private static readonly object Gate = new();
+    // Serializes all ID3D11DeviceContext (immediate context) access. Frame pools are
+    // free-threaded, so FrameArrived can fire on arbitrary threads for several displays
+    // that share one device/context; the immediate context is NOT thread-safe.
+    private static readonly object ContextLock = new();
     private static readonly Dictionary<string, GraphicsCaptureItem> ItemCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, DisplayCapture> Displays = new(StringComparer.OrdinalIgnoreCase);
     private static DeviceResources? _deviceResources;
-    private static int _idleCleanupScheduled;
     private static long _disabledUntilTick;
 
     public static bool TryCaptureRegion(Rectangle screenRect, out Bitmap? bitmap)
@@ -64,10 +66,12 @@ internal static class WindowsGraphicsCaptureCapture
                 DisableTemporarily();
                 return false;
             }
+            // Single-shot by design: never keep a WGC session alive between captures.
+            // A live session shows a yellow capture border and does idle GPU work, so we
+            // fully tear down device + sessions after every capture (see Prewarm comment).
             finally
             {
                 ResetDeviceResources();
-                Interlocked.Exchange(ref _idleCleanupScheduled, 0);
             }
         }
     }
@@ -83,7 +87,6 @@ internal static class WindowsGraphicsCaptureCapture
         lock (Gate)
         {
             ResetDeviceResources();
-            Interlocked.Exchange(ref _idleCleanupScheduled, 0);
         }
     }
 
@@ -129,9 +132,12 @@ internal static class WindowsGraphicsCaptureCapture
         foreach (var display in Displays.Values)
             display.Dispose();
         Displays.Clear();
+        // GraphicsCaptureItem is a WinRT object (not IDisposable); dropping the references
+        // lets GC release the underlying COM handles. Cleared every capture so items never
+        // accumulate across captures.
+        ItemCache.Clear();
         _deviceResources?.Dispose();
         _deviceResources = null;
-        ItemCache.Clear();
     }
 
     private static Bitmap CaptureRegionCore(Rectangle screenRect)
@@ -212,33 +218,6 @@ internal static class WindowsGraphicsCaptureCapture
     private static string GetScreenKey(WF.Screen screen) =>
         $"{screen.DeviceName}|{screen.Bounds.X},{screen.Bounds.Y},{screen.Bounds.Width},{screen.Bounds.Height}";
 
-    private static void ScheduleIdleCleanup()
-    {
-        if (Interlocked.Exchange(ref _idleCleanupScheduled, 1) == 1)
-            return;
-
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(IdleDisplayCaptureMs).ConfigureAwait(false);
-            lock (Gate)
-            {
-                long now = Environment.TickCount64;
-                foreach (var pair in Displays.ToArray())
-                {
-                    if (!pair.Value.IsIdle(now))
-                        continue;
-
-                    pair.Value.Dispose();
-                    Displays.Remove(pair.Key);
-                }
-
-                Interlocked.Exchange(ref _idleCleanupScheduled, 0);
-                if (Displays.Count > 0)
-                    ScheduleIdleCleanup();
-            }
-        });
-    }
-
     private sealed class DisplayCapture : IDisposable
     {
         private readonly DeviceResources _resources;
@@ -248,7 +227,6 @@ internal static class WindowsGraphicsCaptureCapture
         private readonly GraphicsCaptureItem _item;
         private ID3D11Texture2D? _staging;
         private Bitmap? _latestBitmap;
-        private long _lastUsedTick;
         private bool _disposed;
 
         public DisplayCapture(WF.Screen screen)
@@ -264,7 +242,6 @@ internal static class WindowsGraphicsCaptureCapture
             _session = _framePool.CreateCaptureSession(_item);
             TryConfigureSession(_session);
             _session.StartCapture();
-            MarkUsed();
         }
 
         public void CopyInto(
@@ -291,17 +268,6 @@ internal static class WindowsGraphicsCaptureCapture
                 CopyBitmapIntoTarget(latest, target, targetRegion, screenBounds, intersection);
                 copyMs = copyWatch.ElapsedMilliseconds;
             }
-
-            MarkUsed();
-        }
-
-        public bool IsIdle(long now) =>
-            now - Interlocked.Read(ref _lastUsedTick) >= IdleDisplayCaptureMs;
-
-        private void MarkUsed()
-        {
-            Interlocked.Exchange(ref _lastUsedTick, Environment.TickCount64);
-            ScheduleIdleCleanup();
         }
 
         private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
@@ -345,53 +311,58 @@ internal static class WindowsGraphicsCaptureCapture
         {
             using ID3D11Texture2D texture = GetTextureFromSurface(frame.Surface);
             Texture2DDescription desc = texture.Description;
+            // CreateTexture2D on the device is free-threaded; only the immediate context
+            // (CopyResource/Map/Unmap below) needs serializing across displays.
             ID3D11Texture2D staging = GetOrCreateStaging(desc);
 
-            _resources.Context.CopyResource(staging, texture);
-            _resources.Context.Map(
-                staging,
-                0,
-                MapMode.Read,
-                Vortice.Direct3D11.MapFlags.None,
-                out MappedSubresource mapped).CheckError();
-            try
+            lock (ContextLock)
             {
-                var bitmap = new Bitmap((int)desc.Width, (int)desc.Height, PixelFormat.Format32bppRgb);
-                bool disposeBitmap = false;
-                BitmapData? data = null;
+                _resources.Context.CopyResource(staging, texture);
+                _resources.Context.Map(
+                    staging,
+                    0,
+                    MapMode.Read,
+                    Vortice.Direct3D11.MapFlags.None,
+                    out MappedSubresource mapped).CheckError();
                 try
                 {
-                    data = bitmap.LockBits(
-                        new Rectangle(0, 0, bitmap.Width, bitmap.Height),
-                        ImageLockMode.WriteOnly,
-                        PixelFormat.Format32bppRgb);
-                    nuint rowBytes = (nuint)(bitmap.Width * 4);
-                    for (int y = 0; y < bitmap.Height; y++)
+                    var bitmap = new Bitmap((int)desc.Width, (int)desc.Height, PixelFormat.Format32bppRgb);
+                    bool disposeBitmap = false;
+                    BitmapData? data = null;
+                    try
                     {
-                        CopyMemory(
-                            IntPtr.Add(data.Scan0, y * data.Stride),
-                            IntPtr.Add(mapped.DataPointer, y * (int)mapped.RowPitch),
-                            rowBytes);
-                    }
+                        data = bitmap.LockBits(
+                            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+                            ImageLockMode.WriteOnly,
+                            PixelFormat.Format32bppRgb);
+                        nuint rowBytes = (nuint)(bitmap.Width * 4);
+                        for (int y = 0; y < bitmap.Height; y++)
+                        {
+                            CopyMemory(
+                                IntPtr.Add(data.Scan0, y * data.Stride),
+                                IntPtr.Add(mapped.DataPointer, y * (int)mapped.RowPitch),
+                                rowBytes);
+                        }
 
-                    return bitmap;
-                }
-                catch
-                {
-                    disposeBitmap = true;
-                    throw;
+                        return bitmap;
+                    }
+                    catch
+                    {
+                        disposeBitmap = true;
+                        throw;
+                    }
+                    finally
+                    {
+                        if (data is not null)
+                            bitmap.UnlockBits(data);
+                        if (disposeBitmap)
+                            bitmap.Dispose();
+                    }
                 }
                 finally
                 {
-                    if (data is not null)
-                        bitmap.UnlockBits(data);
-                    if (disposeBitmap)
-                        bitmap.Dispose();
+                    _resources.Context.Unmap(staging, 0);
                 }
-            }
-            finally
-            {
-                _resources.Context.Unmap(staging, 0);
             }
         }
 

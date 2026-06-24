@@ -150,6 +150,7 @@ public partial class EditorWindow : Window
                     new Action(() => Prewarm(_settings, _history)));
         };
         UpdateCursor();
+        DarkTitleBar.Apply(this);
     }
 
     private void OnInitialContentRendered(object? sender, EventArgs e)
@@ -1479,7 +1480,7 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------------------------------ crop
 
-    private void OnApplyCrop(object sender, RoutedEventArgs e)
+    private async void OnApplyCrop(object sender, RoutedEventArgs e)
     {
         if (_sourceOperationActive) return;
         if (_pendingCrop is not SD.Rectangle region)
@@ -1501,6 +1502,14 @@ public partial class EditorWindow : Window
         }
         _owned.Add(after);
 
+        // Apply the crop now, then record the undo entry WITHOUT re-applying (apply:false),
+        // exactly like rotate/flip. Pushing with apply:true would run Redo synchronously via
+        // GetAwaiter().GetResult() on the UI thread, which awaits Dispatcher.InvokeAsync inside
+        // RefreshImageAsync -> the UI thread blocks waiting on itself -> deadlock.
+        _source = after;
+        await OnSourceReplacedAsync();
+        ShiftAnnotations(-region.X, -region.Y);
+
         Push(new EditorAction(
             undo: async () =>
             {
@@ -1513,7 +1522,7 @@ public partial class EditorWindow : Window
                 _source = after;
                 await OnSourceReplacedAsync();
                 ShiftAnnotations(-region.X, -region.Y);
-            }));
+            }), apply: false);
     }
 
     private void OnCancelCrop(object sender, RoutedEventArgs e) => ClearCropPreview();

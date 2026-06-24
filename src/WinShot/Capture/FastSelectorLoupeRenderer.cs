@@ -60,7 +60,7 @@ internal static class FastSelectorLoupeRenderer
     {
         using var border = new SD.Pen(SD.Color.FromArgb(220, 255, 255, 255), 2);
         using var shadow = new SD.Pen(SD.Color.FromArgb(150, 0, 0, 0), 4);
-        using var guide = new SD.Pen(SD.Color.FromArgb(220, 0x4D, 0xA3, 0xFF), 1);
+        using var guide = new SD.Pen(SD.Color.FromArgb(220, ThemePalette.Accent), 1);
         g.DrawEllipse(shadow, loupe.Bounds);
         g.DrawEllipse(border, loupe.Bounds);
         g.DrawLine(guide, loupe.CrosshairCenter.X, loupe.Bounds.Top + 4, loupe.CrosshairCenter.X, loupe.Bounds.Bottom - 4);

@@ -11,10 +11,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 {
     private const int DragThresholdPx = 4;
     private const int CrosshairGapPx = 10;
-    private static readonly SD.Color Blue = SD.Color.FromArgb(255, 0x4D, 0xA3, 0xFF);
+    private static readonly SD.Color Blue = ThemePalette.Accent;
     private static readonly SD.Color ToolbarBack = SD.Color.FromArgb(43, 43, 43);
     private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
-    private static readonly SD.Color ButtonSelected = SD.Color.FromArgb(45, 125, 255);
+    private static readonly SD.Color ButtonSelected = ThemePalette.Accent;
     private static FastAllInOneSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
