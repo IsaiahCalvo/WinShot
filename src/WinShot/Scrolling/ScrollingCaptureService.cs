@@ -23,6 +23,17 @@ public static class ScrollingCaptureService
     private const int ScrollNotchesPerStep = -3; // negative = scroll down (content moves up)
     private const int HorizontalScrollNotchesPerStep = 3; // positive = scroll right (content moves left)
 
+    /// <summary>Auto mode: how many times to re-capture, waiting for the frame to settle
+    /// (two consecutive identical captures) before measuring a scroll offset. Guards against
+    /// reading mid-animation / mid-lazy-load and mistaking the transient for end-of-content.</summary>
+    private const int StabilizeAttempts = 3;
+
+    /// <summary>Auto mode: pause between stabilization re-captures.</summary>
+    private const int StabilizePollMs = 120;
+
+    /// <summary>Longest live-preview thumbnail edge (px); the snapshot is downscaled to fit.</summary>
+    private const int PreviewMaxEdge = 220;
+
     /// <summary>Manual mode: how often the region is re-captured and checked for movement.</summary>
     private const int ManualPollMs = 300;
 
@@ -44,7 +55,8 @@ public static class ScrollingCaptureService
     /// Ends only on cancellation, Esc, the 32000px cap, or a 10-minute timeout.
     /// </summary>
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion, ScrollCaptureMode mode,
-        ScrollDirection direction, Action<string> status, CancellationToken ct)
+        ScrollDirection direction, Action<string> status, CancellationToken ct,
+        Action<SD.Bitmap>? preview = null)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -56,11 +68,18 @@ public static class ScrollingCaptureService
         {
             SD.Bitmap? stitched = null;
             SD.Bitmap? previous = null;
+            SD.Bitmap? footerStrip = null; // sticky footer lifted off the body, re-applied once at the end
             try
             {
                 int frames = 0;
                 int stitchedFrames = 0;
                 int zeroOffsetStreak = 0;
+                // Sticky header/footer heights, persisted (grown to the max seen) across the run
+                // so a partially-sticky chrome is masked from offset/append once detected.
+                int topBand = 0, bottomBand = 0;
+                bool hitIterationCap = false;   // ran out of iterations while still moving
+                bool reachedContentEnd = false; // genuine no-movement bottom (auto only)
+                bool alignmentLost = false;     // scrolled but frames couldn't align (overlap too small)
                 var elapsed = System.Diagnostics.Stopwatch.StartNew();
 
                 for (int i = 0; manual ? elapsed.ElapsedMilliseconds < ManualTimeoutMs : i < MaxIterations; i++)
@@ -68,7 +87,12 @@ public static class ScrollingCaptureService
                     if (ShouldStop(ct))
                         break;
 
-                    var frame = CaptureService.CaptureScreenRegion(screenRegion);
+                    // Auto mode: wait for the freshly-scrolled region to stabilize (two
+                    // consecutive identical captures) before measuring, so animations and
+                    // lazy-loaded content settle and aren't mistaken for end-of-content.
+                    var frame = manual
+                        ? CaptureService.CaptureScreenRegion(screenRegion)
+                        : await CaptureStableFrameAsync(screenRegion, ct).ConfigureAwait(false);
                     frames++;
 
                     if (stitched is null)
@@ -79,9 +103,34 @@ public static class ScrollingCaptureService
                     }
                     else
                     {
+                        // Detect sticky bands between consecutive frames and keep the largest
+                        // seen so they stay masked even on frames that happen to match fully.
+                        if (!horizontal)
+                        {
+                            topBand = Math.Max(topBand, ImageStitcher.DetectConstantTopBand(previous!, frame));
+                            bottomBand = Math.Max(bottomBand, ImageStitcher.DetectConstantBottomBand(previous!, frame));
+
+                            // First time a sticky footer is seen, lift it off the running body
+                            // (which still carries frame 0's footer) so it isn't buried mid-stitch.
+                            // It's re-applied exactly once at the very bottom when the run ends.
+                            if (bottomBand > 0 && footerStrip is null && stitched!.Height > bottomBand)
+                            {
+                                footerStrip = ImageStitcher.CropBottomRows(stitched, bottomBand);
+                                var trimmed = ImageStitcher.RemoveBottomRows(stitched, bottomBand);
+                                stitched.Dispose();
+                                stitched = trimmed;
+                            }
+                        }
+
                         int offset = horizontal
                             ? ImageStitcher.FindScrollOffsetHorizontal(previous!, frame)
-                            : ImageStitcher.FindScrollOffset(previous!, frame);
+                            : ImageStitcher.FindScrollOffset(previous!, frame, topBand, bottomBand);
+
+                        // In auto mode, did the page actually move? Compare against the prior
+                        // frame ignoring sticky bands: equal => truly at the bottom; different
+                        // but offset==0 => it moved but we couldn't align (overlap too small).
+                        bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
+
                         if (offset == 0)
                         {
                             zeroOffsetStreak++;
@@ -97,6 +146,8 @@ public static class ScrollingCaptureService
                             }
                             else
                             {
+                                if (framesDiffer)
+                                    alignmentLost = true; // it scrolled, just couldn't be stitched
                                 previous!.Dispose();
                                 previous = frame;
                             }
@@ -104,6 +155,7 @@ public static class ScrollingCaptureService
                         else
                         {
                             zeroOffsetStreak = 0;
+                            alignmentLost = false;
                             SD.Bitmap grown;
                             if (horizontal)
                             {
@@ -113,7 +165,9 @@ public static class ScrollingCaptureService
                             else
                             {
                                 int rows = Math.Min(offset, MaxStitchedHeight - stitched.Height);
-                                grown = ImageStitcher.AppendBelow(stitched, frame, rows);
+                                // Append only genuinely-new content above the sticky footer, so
+                                // a pinned footer is stitched exactly once (at the very bottom).
+                                grown = ImageStitcher.AppendBelowExcludingFooter(stitched, frame, rows, bottomBand);
                             }
                             stitched.Dispose();
                             stitched = grown;
@@ -123,11 +177,15 @@ public static class ScrollingCaptureService
                         }
 
                         if (!manual && zeroOffsetStreak >= 2)
-                            break; // content end reached
+                        {
+                            reachedContentEnd = !alignmentLost;
+                            break; // content end reached (or overlap too small to continue)
+                        }
                         if (horizontal ? stitched.Width >= MaxStitchedWidth : stitched.Height >= MaxStitchedHeight)
                             break;
                     }
 
+                    PushPreview(preview, stitched);
                     string extent = horizontal ? $"{stitched.Width}px wide" : $"{stitched.Height}px";
                     status(manual
                         ? $"Scroll the content yourself — click Stop when done. {stitchedFrames} frames – {extent}"
@@ -142,6 +200,11 @@ public static class ScrollingCaptureService
                             ScrollRight(screenRegion);
                         else
                             ScrollDown(screenRegion);
+
+                        // Last allowed iteration but we were still making progress: we stopped
+                        // at the cap, not at the content's end. Surface that distinction.
+                        if (i == MaxIterations - 1 && zeroOffsetStreak == 0)
+                            hitIterationCap = true;
                     }
                     try
                     {
@@ -152,6 +215,28 @@ public static class ScrollingCaptureService
                         break;
                     }
                 }
+
+                // Re-apply the sticky footer exactly once, at the very bottom of the finished stitch.
+                if (footerStrip is not null && stitched is not null
+                    && stitched.Width == footerStrip.Width
+                    && stitched.Height + footerStrip.Height <= MaxStitchedHeight)
+                {
+                    var withFooter = ImageStitcher.AppendBelow(stitched, footerStrip, footerStrip.Height);
+                    stitched.Dispose();
+                    stitched = withFooter;
+                }
+
+                // Final status reflects WHY auto capture stopped, so a truncated page is obvious.
+                if (!manual && stitched is not null)
+                {
+                    string extent = horizontal ? $"{stitched.Width}px wide" : $"{stitched.Height}px";
+                    if (hitIterationCap)
+                        status($"Stopped at limit — page may be longer. {extent}");
+                    else if (alignmentLost && !reachedContentEnd)
+                        status($"Stopped — couldn't align frames (overlap too small). {extent}");
+                    else if (reachedContentEnd)
+                        status($"Reached the bottom. {extent}");
+                }
             }
             catch (Exception ex)
             {
@@ -160,9 +245,70 @@ public static class ScrollingCaptureService
             finally
             {
                 previous?.Dispose();
+                footerStrip?.Dispose();
             }
             return stitched;
         }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Captures the region, then re-captures up to <see cref="StabilizeAttempts"/> times until
+    /// two consecutive captures are identical (the frame has settled). Returns the last (stable)
+    /// capture; intermediate captures are disposed. On cancellation it returns whatever it has.
+    /// </summary>
+    private static async Task<SD.Bitmap> CaptureStableFrameAsync(SD.Rectangle region, CancellationToken ct)
+    {
+        var current = CaptureService.CaptureScreenRegion(region);
+        for (int attempt = 1; attempt < StabilizeAttempts; attempt++)
+        {
+            if (ShouldStop(ct))
+                break;
+            try
+            {
+                await Task.Delay(StabilizePollMs, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            var next = CaptureService.CaptureScreenRegion(region);
+            bool settled = ImageStitcher.FramesIdentical(current, next);
+            current.Dispose();
+            current = next;
+            if (settled)
+                break;
+        }
+        return current;
+    }
+
+    /// <summary>Hands a downscaled snapshot of the growing stitch to the live-preview callback.</summary>
+    private static void PushPreview(Action<SD.Bitmap>? preview, SD.Bitmap? stitched)
+    {
+        if (preview is null || stitched is null)
+            return;
+        try
+        {
+            using var thumb = Downscale(stitched, PreviewMaxEdge);
+            preview(thumb);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Scrolling capture: live preview snapshot failed (non-fatal)", ex);
+        }
+    }
+
+    /// <summary>Returns a new bitmap scaled so its longest edge is at most <paramref name="maxEdge"/>.</summary>
+    private static SD.Bitmap Downscale(SD.Bitmap source, int maxEdge)
+    {
+        double scale = Math.Min(1.0, maxEdge / (double)Math.Max(source.Width, source.Height));
+        int w = Math.Max(1, (int)Math.Round(source.Width * scale));
+        int h = Math.Max(1, (int)Math.Round(source.Height * scale));
+        var thumb = new SD.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = SD.Graphics.FromImage(thumb);
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
+        g.DrawImage(source, 0, 0, w, h);
+        return thumb;
     }
 
     private static bool ShouldStop(CancellationToken ct) =>

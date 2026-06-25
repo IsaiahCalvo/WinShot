@@ -159,6 +159,48 @@
                             <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#AF52DE" ToolTip="Purple" Checked="OnColorChecked"/>
                             <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#000000" ToolTip="Black" Checked="OnColorChecked"/>
                             <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFFFFF" ToolTip="White" Checked="OnColorChecked"/>
+                            <!-- Persistent custom swatch: holds the last custom / eyedropper color.
+                                 The rainbow ring marks it as the "pick a custom color" entry until set. -->
+                            <RadioButton x:Name="CustomSwatch" Style="{StaticResource ColorSwatch}" GroupName="Color"
+                                         ToolTip="Custom color — click to open the color picker"
+                                         Checked="OnColorChecked" Click="OnCustomSwatchClick">
+                                <RadioButton.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#FF3B30" Offset="0.0"/>
+                                        <GradientStop Color="#FFCC00" Offset="0.25"/>
+                                        <GradientStop Color="#34C759" Offset="0.5"/>
+                                        <GradientStop Color="#0A84FF" Offset="0.75"/>
+                                        <GradientStop Color="#AF52DE" Offset="1.0"/>
+                                    </LinearGradientBrush>
+                                </RadioButton.Background>
+                            </RadioButton>
+                            <Popup x:Name="ColorPickerPopup" PlacementTarget="{Binding ElementName=CustomSwatch}"
+                                   Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
+                                        Effect="{StaticResource FloatingShadow}">
+                                    <StackPanel Width="232">
+                                        <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
+                                        <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22"
+                                                       RadiusX="4" RadiusY="4" Stroke="{StaticResource BorderStrongBrush}"
+                                                       StrokeThickness="1" VerticalAlignment="Center"/>
+                                            <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}"
+                                                     Margin="8,0" VerticalAlignment="Center" Text="#FF3B30"
+                                                     KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
+                                                     ToolTip="Type a hex color (e.g. #FF3B30)"/>
+                                            <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource PillButtonPrimary}"
+                                                    Content="Use" Click="OnColorPickerApply"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
                         </StackPanel>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13" ToolTip="Thin stroke" Checked="OnThicknessChecked"/>
@@ -242,6 +284,8 @@
                                StrokeDashArray="4 3" Visibility="Collapsed"/>
                     <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
                              Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
+                    <!-- Resize/endpoint handle thumbs (created in code-behind, sized in screen px). -->
+                    <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
                     <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
                             CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
                         <StackPanel Orientation="Horizontal">

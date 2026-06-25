@@ -293,4 +293,246 @@ public class ImageStitcherTests
         g.Clear(color);
         return bmp;
     }
+
+    // ====================================================================
+    // Sticky header/footer band detection + masking
+    // ====================================================================
+
+    /// <summary>Distinctive, body-disjoint per-row color for a sticky band (header/footer).</summary>
+    private static SD.Color BandColor(int bandRow) => RowColor(1_000_000 + bandRow);
+
+    private static void FillRow(SD.Bitmap bmp, int y, SD.Color c)
+    {
+        var data = bmp.LockBits(new SD.Rectangle(0, y, bmp.Width, 1),
+            ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var row = new byte[bmp.Width * 4];
+            for (int x = 0; x < bmp.Width; x++)
+            {
+                int i = x * 4;
+                row[i] = c.B; row[i + 1] = c.G; row[i + 2] = c.R; row[i + 3] = 255;
+            }
+            Marshal.Copy(row, 0, data.Scan0, row.Length);
+        }
+        finally { bmp.UnlockBits(data); }
+    }
+
+    /// <summary>
+    /// Builds a frame with an optional constant top band, a scrolling content body, and an
+    /// optional constant bottom band. The body row at viewport-y shows document row
+    /// <paramref name="topGlobalRow"/> + (y - topBand). Bands carry body-disjoint colors that
+    /// never change between frames, so they look exactly like sticky chrome.
+    /// </summary>
+    private static SD.Bitmap MakeBandedFrame(int topGlobalRow, int topBand, int bottomBand)
+    {
+        var bmp = new SD.Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+        // Body fills the whole frame first…
+        var data = bmp.LockBits(new SD.Rectangle(0, 0, Width, Height),
+            ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var row = new byte[Width * 4];
+            for (int y = 0; y < Height; y++)
+            {
+                var c = RowColor(topGlobalRow + (y - topBand));
+                for (int x = 0; x < Width; x++)
+                {
+                    int i = x * 4;
+                    row[i] = c.B; row[i + 1] = c.G; row[i + 2] = c.R; row[i + 3] = 255;
+                }
+                Marshal.Copy(row, 0, data.Scan0 + y * data.Stride, row.Length);
+            }
+        }
+        finally { bmp.UnlockBits(data); }
+
+        // …then stamp the constant bands on top.
+        for (int j = 0; j < topBand; j++)
+            FillRow(bmp, j, BandColor(j));
+        for (int j = 0; j < bottomBand; j++)
+            FillRow(bmp, Height - 1 - j, BandColor(10_000 + j));
+        return bmp;
+    }
+
+    [Fact]
+    public void DetectConstantBottomBand_FindsStickyFooterHeight()
+    {
+        const int footer = 40, k = 37;
+        using var frame1 = MakeBandedFrame(0, topBand: 0, bottomBand: footer);
+        using var frame2 = MakeBandedFrame(k, topBand: 0, bottomBand: footer);
+
+        Assert.Equal(footer, ImageStitcher.DetectConstantBottomBand(frame1, frame2));
+        Assert.Equal(0, ImageStitcher.DetectConstantTopBand(frame1, frame2));
+    }
+
+    [Fact]
+    public void DetectConstantTopBand_FindsStickyHeaderHeight()
+    {
+        const int header = 32, k = 50;
+        using var frame1 = MakeBandedFrame(0, topBand: header, bottomBand: 0);
+        using var frame2 = MakeBandedFrame(k, topBand: header, bottomBand: 0);
+
+        Assert.Equal(header, ImageStitcher.DetectConstantTopBand(frame1, frame2));
+        Assert.Equal(0, ImageStitcher.DetectConstantBottomBand(frame1, frame2));
+    }
+
+    [Fact]
+    public void FindScrollOffset_WithStickyFooter_DetectsBodyScrollAmount()
+    {
+        const int footer = 40, k = 60;
+        using var frame1 = MakeBandedFrame(0, topBand: 0, bottomBand: footer);
+        using var frame2 = MakeBandedFrame(k, topBand: 0, bottomBand: footer);
+
+        // Excluding the footer band from the comparison window yields the true body offset.
+        Assert.Equal(k, ImageStitcher.FindScrollOffset(frame1, frame2, 0, footer));
+    }
+
+    [Fact]
+    public void FindScrollOffset_WithStickyHeaderAndFooter_DetectsBodyScrollAmount()
+    {
+        const int header = 28, footer = 36, k = 45;
+        using var frame1 = MakeBandedFrame(0, topBand: header, bottomBand: footer);
+        using var frame2 = MakeBandedFrame(k, topBand: header, bottomBand: footer);
+
+        Assert.Equal(header, ImageStitcher.DetectConstantTopBand(frame1, frame2));
+        Assert.Equal(footer, ImageStitcher.DetectConstantBottomBand(frame1, frame2));
+        Assert.Equal(k, ImageStitcher.FindScrollOffset(frame1, frame2, header, footer));
+    }
+
+    [Fact]
+    public void AppendBelowExcludingFooter_AppendsContentRowsNotFooter()
+    {
+        const int footer = 40, k = 30;
+        using var stitched = MakeBandedFrame(0, topBand: 0, bottomBand: footer);   // body rows 0..(Height-footer-1), then footer
+        using var current = MakeBandedFrame(k, topBand: 0, bottomBand: footer);    // body scrolled by k, same footer
+        using var result = ImageStitcher.AppendBelowExcludingFooter(stitched, current, k, footer);
+
+        Assert.Equal(Height + k, result.Height);
+        // The appended rows are the k newly-revealed CONTENT rows sitting just above the
+        // footer in `current` — document rows (Height-footer)..(Height-footer+k-1) — NOT the footer.
+        int contentBottom = Height - footer; // first document row of `current`'s footer
+        Assert.Equal(RowColor(contentBottom).ToArgb(), result.GetPixel(10, Height).ToArgb());
+        Assert.Equal(RowColor(contentBottom + k - 1).ToArgb(), result.GetPixel(10, Height + k - 1).ToArgb());
+        // None of the appended rows is the footer's first row.
+        Assert.NotEqual(BandColor(10_000).ToArgb(), result.GetPixel(10, Height + k - 1).ToArgb());
+    }
+
+    [Fact]
+    public void AppendBelowExcludingFooter_ZeroFooter_MatchesPlainAppendBelow()
+    {
+        using var stitched = MakeFrame(0);
+        using var current = MakeFrame(150);
+        using var a = ImageStitcher.AppendBelowExcludingFooter(stitched, current, 150, 0);
+        using var b = ImageStitcher.AppendBelow(stitched, current, 150);
+
+        Assert.Equal(b.Height, a.Height);
+        Assert.Equal(b.GetPixel(10, 400).ToArgb(), a.GetPixel(10, 400).ToArgb());
+        Assert.Equal(b.GetPixel(10, 549).ToArgb(), a.GetPixel(10, 549).ToArgb());
+    }
+
+    // ====================================================================
+    // Whitespace-robust offset
+    // ====================================================================
+
+    /// <summary>
+    /// Builds a frame with a tall band of identical blank rows in the MIDDLE, flanked by
+    /// distinct content. Row y shows: distinct content for the top/bottom thirds, a constant
+    /// blank color for the middle third. The blank band shares one hash, so an offset that
+    /// aligns only blank rows must be rejected; the real offset aligns the distinct content.
+    /// </summary>
+    private static SD.Bitmap MakeWhitespaceBandFrame(int topGlobalRow)
+    {
+        var bmp = new SD.Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+        var data = bmp.LockBits(new SD.Rectangle(0, 0, Width, Height),
+            ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            int blankStart = Height / 3, blankEnd = 2 * Height / 3;
+            var row = new byte[Width * 4];
+            for (int y = 0; y < Height; y++)
+            {
+                int doc = topGlobalRow + y;
+                bool blank = y >= blankStart && y < blankEnd;
+                var c = blank ? SD.Color.FromArgb(255, 250, 250, 250) : RowColor(doc);
+                for (int x = 0; x < Width; x++)
+                {
+                    int i = x * 4;
+                    row[i] = c.B; row[i + 1] = c.G; row[i + 2] = c.R; row[i + 3] = 255;
+                }
+                Marshal.Copy(row, 0, data.Scan0 + y * data.Stride, row.Length);
+            }
+        }
+        finally { bmp.UnlockBits(data); }
+        return bmp;
+    }
+
+    [Fact]
+    public void FindScrollOffset_WhitespaceBandBetweenContent_DetectsRealOffset()
+    {
+        const int k = 24;
+        using var frame1 = MakeWhitespaceBandFrame(0);
+        using var frame2 = MakeWhitespaceBandFrame(k);
+
+        // The blank middle band shares a hash across many rows, but the distinct content above
+        // and below anchors the true offset — the search must not lock onto a blank-only match.
+        Assert.Equal(k, ImageStitcher.FindScrollOffset(frame1, frame2));
+    }
+
+    [Fact]
+    public void FindScrollOffset_AllWhitespace_ReturnsZero()
+    {
+        // A frame that is blank everywhere (no distinctive content) must not produce a bogus
+        // offset from coincidental blank-row alignment.
+        using var frame1 = MakeSolidFrame(SD.Color.FromArgb(255, 250, 250, 250));
+        using var frame2 = MakeSolidFrame(SD.Color.FromArgb(255, 250, 250, 250));
+
+        Assert.Equal(0, ImageStitcher.FindScrollOffset(frame1, frame2));
+    }
+
+    [Fact]
+    public void FramesIdentical_TrueForSamePixels_FalseWhenContentDiffers()
+    {
+        using var a = MakeFrame(0);
+        using var b = MakeFrame(0);
+        using var c = MakeFrame(5);
+
+        Assert.True(ImageStitcher.FramesIdentical(a, b));
+        Assert.False(ImageStitcher.FramesIdentical(a, c));
+    }
+
+    [Fact]
+    public void CropBottomRows_ReturnsExactBottomBand()
+    {
+        using var frame = MakeFrame(0); // document rows 0..399
+        using var strip = ImageStitcher.CropBottomRows(frame, 40);
+
+        Assert.Equal(40, strip.Height);
+        Assert.Equal(Width, strip.Width);
+        Assert.Equal(RowColor(360).ToArgb(), strip.GetPixel(10, 0).ToArgb());   // first stripped row
+        Assert.Equal(RowColor(399).ToArgb(), strip.GetPixel(10, 39).ToArgb());  // last stripped row
+    }
+
+    [Fact]
+    public void RemoveBottomRows_DropsBottomBand_KeepsRest()
+    {
+        using var frame = MakeFrame(0); // document rows 0..399
+        using var trimmed = ImageStitcher.RemoveBottomRows(frame, 40);
+
+        Assert.Equal(Height - 40, trimmed.Height);
+        Assert.Equal(RowColor(0).ToArgb(), trimmed.GetPixel(10, 0).ToArgb());
+        Assert.Equal(RowColor(359).ToArgb(), trimmed.GetPixel(10, Height - 41).ToArgb()); // last kept row
+    }
+
+    [Fact]
+    public void CropThenRemoveBottom_ReassemblesOriginalHeight()
+    {
+        using var frame = MakeFrame(0);
+        using var strip = ImageStitcher.CropBottomRows(frame, 40);
+        using var trimmed = ImageStitcher.RemoveBottomRows(frame, 40);
+        using var reassembled = ImageStitcher.AppendBelow(trimmed, strip, strip.Height);
+
+        Assert.Equal(Height, reassembled.Height);
+        Assert.Equal(RowColor(0).ToArgb(), reassembled.GetPixel(10, 0).ToArgb());
+        Assert.Equal(RowColor(399).ToArgb(), reassembled.GetPixel(10, Height - 1).ToArgb());
+    }
 }

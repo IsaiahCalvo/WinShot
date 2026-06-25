@@ -24,6 +24,13 @@ public static class ImageStitcher
     private const double MinMatchedFraction = 0.3;
 
     /// <summary>
+    /// Minimum number of DISTINCTIVE (non-repeated) matched rows/columns required to accept
+    /// an offset. Guards against locking onto a wrong alignment dominated by identical blank
+    /// rows that all share one hash (e.g. a tall whitespace band).
+    /// </summary>
+    private const int MinDistinctiveMatchedRows = 8;
+
+    /// <summary>
     /// Returns how many pixels the content moved UP between <paramref name="previous"/> and
     /// <paramref name="current"/> (0 = no movement detected). Rows are compared via 64-bit
     /// hashes; the offset maximizing matched rows wins, but only if at least 30% of the
@@ -32,6 +39,16 @@ public static class ImageStitcher
     /// (which move differently from content) live.
     /// </summary>
     public static int FindScrollOffset(SD.Bitmap previous, SD.Bitmap current)
+        => FindScrollOffset(previous, current, 0, 0);
+
+    /// <summary>
+    /// Band-aware overload of <see cref="FindScrollOffset(SD.Bitmap, SD.Bitmap)"/>. The top
+    /// <paramref name="topBand"/> rows and bottom <paramref name="bottomBand"/> rows are
+    /// EXCLUDED from the comparison window so a sticky header/footer (which never moves
+    /// between frames) cannot inflate the match count for a wrong offset. Pass 0/0 for the
+    /// classic behavior.
+    /// </summary>
+    public static int FindScrollOffset(SD.Bitmap previous, SD.Bitmap current, int topBand, int bottomBand)
     {
         if (previous.Width != current.Width || previous.Height != current.Height)
             return 0;
@@ -40,27 +57,62 @@ public static class ImageStitcher
         if (height < 2 || previous.Width < 1)
             return 0;
 
+        // The scrollable content lives between the sticky bands. Clamp defensively.
+        int top = Math.Clamp(topBand, 0, height);
+        int bottom = Math.Clamp(bottomBand, 0, height - top);
+        int contentStart = top;
+        int contentEnd = height - bottom; // exclusive
+        if (contentEnd - contentStart < 2)
+            return 0;
+
         ulong[] prevHashes = ComputeRowHashes(previous);
         ulong[] currHashes = ComputeRowHashes(current);
-        if (HashesMatchAtSamePosition(prevHashes, currHashes))
+
+        // Rows whose hash appears only once within the (banded) content window are
+        // "distinctive"; rows whose hash repeats (blank/whitespace runs) are not. We
+        // require enough distinctive matches so a whitespace band can't carry an offset.
+        bool[] currDistinctive = MarkDistinctiveRows(currHashes, contentStart, contentEnd);
+
+        if (HashesMatchAtSamePosition(prevHashes, currHashes, contentStart, contentEnd))
             return 0;
 
         int bestOffset = 0;
         int bestMatches = 0;
-        for (int offset = 1; offset < height; offset++)
+        for (int offset = 1; offset < contentEnd - contentStart; offset++)
         {
-            int compared = height - offset;
+            // Compare current row y against previous row y+offset, both restricted to the
+            // content window (and y+offset must also stay inside it).
+            int compared = 0, matches = 0, distinctiveMatches = 0, runBest = 0, run = 0;
+            for (int y = contentStart; y < contentEnd; y++)
+            {
+                int py = y + offset;
+                if (py >= contentEnd)
+                    break;
+                compared++;
+                if (prevHashes[py] == currHashes[y])
+                {
+                    matches++;
+                    if (currDistinctive[y])
+                        distinctiveMatches++;
+                    run++;
+                    if (run > runBest) runBest = run;
+                }
+                else
+                {
+                    run = 0;
+                }
+            }
+
             if (compared < MinMatchedRows)
                 break; // even a perfect match cannot reach the row floor
 
-            int matches = 0;
-            for (int y = 0; y < compared; y++)
-            {
-                if (prevHashes[y + offset] == currHashes[y])
-                    matches++;
-            }
-
-            if (matches >= MinMatchedRows && matches >= compared * MinMatchedFraction && matches > bestMatches)
+            // Accept only if the match is both substantial AND anchored to real content:
+            // enough distinctive matched rows OR a long contiguous matched run (which also
+            // rules out scattered blank-row coincidences).
+            bool distinctiveEnough = distinctiveMatches >= MinDistinctiveMatchedRows
+                                     || runBest >= MinMatchedRows;
+            if (matches >= MinMatchedRows && matches >= compared * MinMatchedFraction
+                && distinctiveEnough && matches > bestMatches)
             {
                 bestMatches = matches;
                 bestOffset = offset;
@@ -68,6 +120,80 @@ public static class ImageStitcher
         }
 
         return bestOffset;
+    }
+
+    /// <summary>
+    /// True when two same-size frames are byte-identical across the hashed (middle-90%) region
+    /// of every row — used to decide a captured frame has STABILIZED (no animation / lazy-load
+    /// still settling) before measuring a scroll offset. Differently-sized frames are never
+    /// considered identical.
+    /// </summary>
+    public static bool FramesIdentical(SD.Bitmap a, SD.Bitmap b)
+    {
+        if (a.Width != b.Width || a.Height != b.Height)
+            return false;
+
+        ulong[] ha = ComputeRowHashes(a);
+        ulong[] hb = ComputeRowHashes(b);
+        return HashesMatchAtSamePosition(ha, hb);
+    }
+
+    /// <summary>
+    /// Height (in rows) of the constant TOP band shared by <paramref name="previous"/> and
+    /// <paramref name="current"/>: rows that are byte-identical from y=0 down to the first
+    /// divergence. This is a sticky header (or any pinned top chrome) that does not scroll.
+    /// Returns 0 when the very first row already differs.
+    /// </summary>
+    public static int DetectConstantTopBand(SD.Bitmap previous, SD.Bitmap current)
+    {
+        if (previous.Width != current.Width || previous.Height != current.Height)
+            return 0;
+
+        ulong[] prev = ComputeRowHashes(previous);
+        ulong[] curr = ComputeRowHashes(current);
+        int height = prev.Length;
+        int band = 0;
+        while (band < height && prev[band] == curr[band])
+            band++;
+        // A frame that is identical top-to-bottom is "no scroll", not "all-sticky".
+        return band >= height ? 0 : band;
+    }
+
+    /// <summary>
+    /// Height (in rows) of the constant BOTTOM band shared by <paramref name="previous"/> and
+    /// <paramref name="current"/>: rows that are byte-identical from the bottom up to the
+    /// first divergence. This is a sticky footer (or any pinned bottom chrome). Returns 0
+    /// when the bottom-most row already differs.
+    /// </summary>
+    public static int DetectConstantBottomBand(SD.Bitmap previous, SD.Bitmap current)
+    {
+        if (previous.Width != current.Width || previous.Height != current.Height)
+            return 0;
+
+        ulong[] prev = ComputeRowHashes(previous);
+        ulong[] curr = ComputeRowHashes(current);
+        int height = prev.Length;
+        int band = 0;
+        while (band < height && prev[height - 1 - band] == curr[height - 1 - band])
+            band++;
+        return band >= height ? 0 : band;
+    }
+
+    /// <summary>
+    /// Marks each row in [start,end) as distinctive (true) when its hash occurs exactly once
+    /// in that window, or non-distinctive (false) when it repeats. Rows outside the window
+    /// are false. Used to weight the offset search toward real content over blank runs.
+    /// </summary>
+    private static bool[] MarkDistinctiveRows(ulong[] hashes, int start, int end)
+    {
+        var counts = new Dictionary<ulong, int>(end - start);
+        for (int y = start; y < end; y++)
+            counts[hashes[y]] = counts.TryGetValue(hashes[y], out int c) ? c + 1 : 1;
+
+        var distinctive = new bool[hashes.Length];
+        for (int y = start; y < end; y++)
+            distinctive[y] = counts[hashes[y]] == 1;
+        return distinctive;
     }
 
     /// <summary>
@@ -136,6 +262,59 @@ public static class ImageStitcher
     }
 
     /// <summary>
+    /// Footer-aware variant of <see cref="AppendBelow(SD.Bitmap, SD.Bitmap, int)"/>. When the
+    /// current frame carries a sticky footer of height <paramref name="footerBand"/>, the
+    /// bottom <paramref name="footerBand"/> rows are NOT content — they are the same pinned
+    /// footer that already sits once at the bottom of <paramref name="stitched"/>. This appends
+    /// only the <paramref name="newRows"/> genuinely-new CONTENT rows that sit directly ABOVE
+    /// the footer band, so the footer is never re-stitched into the body. With
+    /// <paramref name="footerBand"/> == 0 this is identical to <see cref="AppendBelow(SD.Bitmap, SD.Bitmap, int)"/>.
+    /// </summary>
+    public static SD.Bitmap AppendBelowExcludingFooter(SD.Bitmap stitched, SD.Bitmap current, int newRows, int footerBand)
+    {
+        if (stitched.Width != current.Width)
+            throw new ArgumentException("Bitmaps must have the same width.", nameof(current));
+
+        footerBand = Math.Clamp(footerBand, 0, current.Height);
+        int contentBottom = current.Height - footerBand; // first row of the footer (exclusive end of content)
+        newRows = Math.Clamp(newRows, 0, contentBottom);
+
+        var result = new SD.Bitmap(stitched.Width, stitched.Height + newRows, PixelFormat.Format32bppArgb);
+        CopyRows(stitched, 0, stitched.Height, result, 0);
+        // The newly revealed content rows are the last `newRows` rows of the content area,
+        // i.e. the rows directly above the sticky footer: [contentBottom - newRows, contentBottom).
+        CopyRows(current, contentBottom - newRows, newRows, result, stitched.Height);
+        return result;
+    }
+
+    /// <summary>
+    /// Returns a NEW bitmap containing the bottom <paramref name="rowCount"/> rows of
+    /// <paramref name="source"/> (a sticky-footer strip lifted off the running stitch so it
+    /// can be re-applied exactly once at the very end). <paramref name="source"/> is not disposed.
+    /// </summary>
+    public static SD.Bitmap CropBottomRows(SD.Bitmap source, int rowCount)
+    {
+        rowCount = Math.Clamp(rowCount, 1, source.Height);
+        var result = new SD.Bitmap(source.Width, rowCount, PixelFormat.Format32bppArgb);
+        CopyRows(source, source.Height - rowCount, rowCount, result, 0);
+        return result;
+    }
+
+    /// <summary>
+    /// Returns a NEW bitmap that is <paramref name="source"/> with its bottom
+    /// <paramref name="rowCount"/> rows removed (used to lift an interior sticky footer off the
+    /// running stitch). <paramref name="source"/> is not disposed.
+    /// </summary>
+    public static SD.Bitmap RemoveBottomRows(SD.Bitmap source, int rowCount)
+    {
+        rowCount = Math.Clamp(rowCount, 0, source.Height - 1);
+        int kept = source.Height - rowCount;
+        var result = new SD.Bitmap(source.Width, kept, PixelFormat.Format32bppArgb);
+        CopyRows(source, 0, kept, result, 0);
+        return result;
+    }
+
+    /// <summary>
     /// Returns a NEW bitmap consisting of <paramref name="stitched"/> with the rightmost
     /// <paramref name="newCols"/> columns of <paramref name="current"/> appended to its right.
     /// Neither input is disposed — that is the caller's responsibility.
@@ -157,7 +336,16 @@ public static class ImageStitcher
         if (previous.Length != current.Length)
             return false;
 
-        for (int i = 0; i < previous.Length; i++)
+        return HashesMatchAtSamePosition(previous, current, 0, previous.Length);
+    }
+
+    /// <summary>True when previous and current are identical across [start,end).</summary>
+    private static bool HashesMatchAtSamePosition(ulong[] previous, ulong[] current, int start, int end)
+    {
+        if (previous.Length != current.Length)
+            return false;
+
+        for (int i = start; i < end; i++)
         {
             if (previous[i] != current[i])
                 return false;

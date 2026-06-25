@@ -940,6 +940,7 @@ public partial class App : Application
         try
         {
             SD.Bitmap? crop = null;
+            SD.Point? anchor = null;
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
             TrackFirstShown(selector, "ocr selector");
             try
@@ -947,6 +948,9 @@ public partial class App : Application
                 if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
                 {
                     await WaitForOverlayDismissAsync();
+                    // Screen center of the selection, so the confirmation HUD pops over it.
+                    var vs = CaptureService.VirtualScreen;
+                    anchor = new SD.Point(vs.X + region.X + region.Width / 2, vs.Y + region.Y + region.Height / 2);
                     crop = await CaptureSelectedRegionAsync(region, "ocr");
                 }
             }
@@ -956,7 +960,7 @@ public partial class App : Application
             }
             if (crop is null) return;
             using (crop)
-                await RunOcrToClipboard(crop);
+                await RunOcrToClipboard(crop, anchor);
         }
         catch (Exception ex)
         {
@@ -969,7 +973,7 @@ public partial class App : Application
         }
     }
 
-    private async Task RunOcrToClipboard(SD.Bitmap bmp)
+    private async Task RunOcrToClipboard(SD.Bitmap bmp, SD.Point? anchor = null)
     {
         try
         {
@@ -980,12 +984,12 @@ public partial class App : Application
             OcrClipboardPayload? payload = OcrClipboardFormatter.Build(result);
             if (payload is null)
             {
-                ShowBalloon("OCR", "No text or codes found in the selection.");
+                ShowOcrToast("Nothing found", "No text or codes in the selection.", anchor, onOpen: null);
                 return;
             }
 
             await CaptureService.SetTextToClipboardAsync(payload.ClipboardText);
-            ShowBalloon(payload.BalloonTitle, payload.Preview);
+            ShowOcrToast(payload.BalloonTitle, payload.Preview, anchor, BuildOpenAction(payload.ClipboardText));
         }
         catch (InvalidOperationException ex)
         {
@@ -995,6 +999,33 @@ public partial class App : Application
         {
             Log.Info($"OCR clipboard copy skipped: {ex.Message}");
             ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.");
+        }
+    }
+
+    /// <summary>Returns an Open action when the copied text is a single http(s) URL
+    /// (e.g. a decoded QR code), else null.</summary>
+    private static Action? BuildOpenAction(string? clipboardText)
+    {
+        string text = clipboardText?.Trim() ?? string.Empty;
+        if (Uri.TryCreate(text, UriKind.Absolute, out Uri? uri) &&
+            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            return () => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        }
+        return null;
+    }
+
+    private void ShowOcrToast(string title, string preview, SD.Point? anchor, Action? onOpen)
+    {
+        try
+        {
+            var toast = new OcrToastWindow(title, preview, anchor, onOpen);
+            toast.Show();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("OCR toast failed; falling back to balloon", ex);
+            ShowBalloon(title, preview);
         }
     }
 

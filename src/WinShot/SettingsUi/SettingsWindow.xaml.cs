@@ -41,7 +41,51 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         _settings = settings;
         LoadFromSettings();
+        WireInlineHotkeyConflictChecks();
         DarkTitleBar.Apply(this);
+    }
+
+    /// <summary>The section panels in sidebar order; index matches SectionList.SelectedIndex.</summary>
+    private ScrollViewer[] Sections() =>
+        new[]
+        {
+            SectionGeneral, SectionShortcuts, SectionCapture, SectionRecording,
+            SectionOcr, SectionNaming, SectionHistory, SectionAdvanced,
+        };
+
+    private void OnSectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Fired once during InitializeComponent (initial SelectedIndex) and on every click.
+        if (SectionList is null) return;
+        var sections = Sections();
+        if (sections.Any(s => s is null)) return; // tree still building
+
+        int index = SectionList.SelectedIndex;
+        if (index < 0) index = 0;
+        for (int i = 0; i < sections.Length; i++)
+            sections[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Maps each input box to the index of the section that contains it.</summary>
+    private int SectionIndexOf(TextBox box)
+    {
+        var sections = Sections();
+        for (int i = 0; i < sections.Length; i++)
+        {
+            if (IsDescendantOf(box, sections[i]))
+                return i;
+        }
+        return 0;
+    }
+
+    private static bool IsDescendantOf(DependencyObject? node, DependencyObject ancestor)
+    {
+        while (node is not null)
+        {
+            if (ReferenceEquals(node, ancestor)) return true;
+            node = LogicalTreeHelper.GetParent(node) ?? VisualTreeHelper.GetParent(node);
+        }
+        return false;
     }
 
     /// <summary>Opens the settings window, or activates the instance that is already open.</summary>
@@ -283,12 +327,17 @@ public partial class SettingsWindow : Window
         CountdownBox.Text = s.RecordingCountdownSeconds.ToString();
         CaptureCursorCheck.IsChecked = s.CaptureCursor;
 
+        // OCR & Scrolling
+        OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
+
         // Naming
         TemplateBox.Text = s.FileNameTemplate;
 
         // History
         HistoryLimitBox.Text = s.HistoryLimit.ToString();
         RetentionDaysBox.Text = s.HistoryRetentionDays.ToString();
+
+        // Capture & after-capture
         SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
 
         UpdateTemplatePreview();
@@ -422,12 +471,17 @@ public partial class SettingsWindow : Window
             s.RecordingCountdownSeconds = countdown;
             s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
 
+            // OCR & Scrolling
+            s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
+
             // Naming
             s.FileNameTemplate = TemplateBox.Text.Trim();
 
             // History
             s.HistoryLimit = historyLimit;
             s.HistoryRetentionDays = retentionDays;
+
+            // Capture & after-capture
             s.SelfTimerSeconds = selfTimer;
 
             await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
@@ -443,6 +497,66 @@ public partial class SettingsWindow : Window
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
+
+    private HotkeyBox[] AllHotkeyBoxes() =>
+        new[]
+        {
+            HotkeyRegionBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
+            HotkeyScrollingBox, HotkeyPreviousBox, HotkeyAllInOneBox,
+        };
+
+    /// <summary>
+    /// Lightweight in-app feedback: after a hotkey field loses focus, flag any field that
+    /// now duplicates another field's gesture. Purely cosmetic — the authoritative
+    /// validation (including app-ownership probing) still runs in OnSave and is untouched.
+    /// </summary>
+    private void WireInlineHotkeyConflictChecks()
+    {
+        foreach (var box in AllHotkeyBoxes())
+            box.LostKeyboardFocus += (_, _) => RefreshInlineHotkeyConflicts();
+    }
+
+    private void RefreshInlineHotkeyConflicts()
+    {
+        var boxes = AllHotkeyBoxes();
+
+        // Group boxes by their normalized gesture; any group with >1 non-empty member conflicts.
+        var byGesture = new Dictionary<string, List<HotkeyBox>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var box in boxes)
+        {
+            string gesture = NormalizeForCompare(box.Text);
+            if (gesture.Length == 0) continue;
+            if (!byGesture.TryGetValue(gesture, out var list))
+                byGesture[gesture] = list = new List<HotkeyBox>();
+            list.Add(box);
+        }
+
+        foreach (var box in boxes)
+        {
+            // Don't disturb a field that OnSave already flagged with a tooltip/error this pass,
+            // and don't fight the focus visual on the box currently being edited.
+            string gesture = NormalizeForCompare(box.Text);
+            bool conflict = gesture.Length > 0 &&
+                            byGesture.TryGetValue(gesture, out var list) && list.Count > 1;
+
+            if (conflict)
+            {
+                box.BorderBrush = ErrorBrush;
+                box.ToolTip = $"{box.Text} is already assigned to another action.";
+            }
+            else if (ReferenceEquals(box.BorderBrush, ErrorBrush))
+            {
+                // Only clear marks we own (an error border with our conflict tooltip).
+                box.BorderBrush = NormalBorderBrush;
+                box.ToolTip = null;
+            }
+        }
+    }
+
+    private static string NormalizeForCompare(string text) =>
+        HotkeyManager.TryNormalizeGesture(text, out string? normalized)
+            ? normalized!
+            : text.Trim();
 
     private TextBox[] AllInputBoxes() =>
         new[]
@@ -462,26 +576,17 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>Selects the tab containing the first invalid box so the error is visible.</summary>
+    /// <summary>Switches to the section containing the first invalid box so the error is visible.</summary>
     private void FocusFirstInvalid()
     {
         foreach (var box in AllInputBoxes())
         {
             if (!ReferenceEquals(box.BorderBrush, ErrorBrush)) continue;
-            if (FindContainingTab(box) is { } tab) tab.IsSelected = true;
+            if (SectionList is not null)
+                SectionList.SelectedIndex = SectionIndexOf(box);
             box.Focus();
             return;
         }
-    }
-
-    private static TabItem? FindContainingTab(DependencyObject? node)
-    {
-        while (node is not null)
-        {
-            if (node is TabItem tab) return tab;
-            node = LogicalTreeHelper.GetParent(node) ?? VisualTreeHelper.GetParent(node);
-        }
-        return null;
     }
 
     private static void MarkInvalid(TextBox box, string message)
