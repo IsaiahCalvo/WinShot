@@ -290,7 +290,14 @@ public partial class EditorWindow : Window
         WindowState = WindowState.Normal;
         Cursor = Cursors.Wait;
         SetSurfaceSize(source.Width, source.Height);
+        // Best-effort immediate fit, then a deferred fit once the (re)shown window actually
+        // has a current viewport size. The prewarmed window was laid out at -32000 and then
+        // hidden, so its viewport may be stale/zero here; the caller Shows it right after, so
+        // FitToView would no-op now and leave the image at 1:1 top-left (= a "cropped" view of
+        // any image larger than the viewport). Re-fitting at Loaded priority mirrors the fresh
+        // constructor path (Loaded += FitToView) and is idempotent.
         FitToView();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(FitToView));
         UpdateUndoRedoButtons();
         Dispatcher.BeginInvoke(
             DispatcherPriority.Background,

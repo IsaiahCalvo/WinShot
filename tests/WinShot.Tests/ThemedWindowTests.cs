@@ -79,6 +79,8 @@ public class ThemedWindowTests
                 composer.Show();
                 composer.Close();
 
+                EditorFitsTallImageSmoke(settings, history);
+
                 app.Shutdown();
             }
             catch (Exception ex)
@@ -195,6 +197,38 @@ public class ThemedWindowTests
             try { System.IO.File.Delete(path); }
             catch { }
         }
+    }
+
+    /// <summary>
+    /// Reproduction guard for "the editor shows a cropped image": a tall capture (e.g. a
+    /// scrolling capture, or any shot larger than the editor viewport) must be fully fitted
+    /// into the viewport on open, not shown 1:1 anchored top-left. Exercises the PREWARM
+    /// reuse path (CreateForCapture -> ResetForSource), which is the default at runtime.
+    /// </summary>
+    private static void EditorFitsTallImageSmoke(SettingsService settings, HistoryService history)
+    {
+        EditorWindow.Prewarm(settings, history);
+        for (int i = 0; i < 4; i++) PumpDispatcherOnce();
+
+        const int imgH = 4000;
+        var tall = new SD.Bitmap(1000, imgH);
+        using (var g = SD.Graphics.FromImage(tall)) g.Clear(SD.Color.CornflowerBlue);
+
+        var editor = EditorWindow.CreateForCapture(tall, settings, history);
+        editor.Show();
+        for (int i = 0; i < 6; i++) PumpDispatcherOnce();
+
+        var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
+        double vh = viewport.ActualHeight;
+        double zoom = (double)typeof(EditorWindow)
+            .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(editor)!;
+
+        editor.Close();
+
+        Assert.True(vh > 1, $"viewport not laid out (height={vh})");
+        Assert.True(zoom * imgH <= vh + 1,
+            $"tall image not fitted on open: zoom={zoom}, scaledHeight={zoom * imgH}, viewportHeight={vh}");
     }
 
     private static void PinSmoke(EditorWindow editor)
