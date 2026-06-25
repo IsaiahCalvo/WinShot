@@ -49,9 +49,32 @@ public class Settings
 
     // OCR
     public bool OcrJoinLines { get; set; } = false;
+    public bool OcrDetectLinks { get; set; } = true;   // TODO: wire behavior — detect URLs in recognized text
 
     // History
     public int HistoryRetentionDays { get; set; } = 0; // 0 = count-based pruning only
+
+    // Quick Access overlay (post-capture)
+    public bool OverlayAutoClose { get; set; } = false; // CleanShot "Auto-close: Enable"; gates OverlayAutoCloseSeconds
+
+    // General / app behavior (UI-only persisted toggles; behavior wired later)
+    public bool PlaySounds { get; set; } = true;        // TODO: wire behavior — capture/record sound effects
+    public bool ShowTrayIcon { get; set; } = true;      // TODO: wire behavior — show the menu/tray icon
+
+    // Screenshots
+    public bool AddPixelBorder { get; set; } = false;   // TODO: wire behavior — add 1px border to screenshots
+    public bool FreezeScreen { get; set; } = true;      // TODO: wire behavior — freeze the screen while selecting
+    public bool ShowCrosshair { get; set; } = true;     // TODO: wire behavior — crosshair guides during region select
+    public bool ShowMagnifier { get; set; } = true;     // TODO: wire behavior — pixel magnifier during region select
+
+    // Pinned screenshots (CleanShot "Pin to screen")
+    public bool PinnedRoundedCorners { get; set; } = true;  // TODO: wire behavior
+    public bool PinnedShadow { get; set; } = true;          // TODO: wire behavior
+    public bool PinnedBorder { get; set; } = false;         // TODO: wire behavior
+
+    // Advanced
+    public bool AskForNameAfterCapture { get; set; } = false; // TODO: wire behavior — prompt for a file name after each capture
+    public bool AllInOneRememberLast { get; set; } = true;    // TODO: wire behavior — All-in-One remembers last selection
 }
 
 public class SettingsService

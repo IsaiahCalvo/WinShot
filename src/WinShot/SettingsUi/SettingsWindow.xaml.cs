@@ -48,12 +48,12 @@ public partial class SettingsWindow : Window
         DarkTitleBar.Apply(this);
     }
 
-    /// <summary>The section panels in sidebar order; index matches SectionList.SelectedIndex.</summary>
+    /// <summary>The section panels in tab-bar order; index matches SectionList.SelectedIndex.</summary>
     private ScrollViewer[] Sections() =>
         new[]
         {
-            SectionGeneral, SectionShortcuts, SectionCapture, SectionRecording,
-            SectionOcr, SectionNaming, SectionHistory, SectionAdvanced,
+            SectionGeneral, SectionShortcuts, SectionQuickAccess, SectionRecording,
+            SectionScreenshots, SectionAnnotate, SectionAdvanced,
         };
 
     private void OnSectionChanged(object sender, SelectionChangedEventArgs e)
@@ -67,6 +67,27 @@ public partial class SettingsWindow : Window
         if (index < 0) index = 0;
         for (int i = 0; i < sections.Length; i++)
             sections[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Switches the Recording General/Video/GIF sub-tab.</summary>
+    private void OnRecordingSubChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RecordingSubList is null ||
+            RecordingGeneralPanel is null || RecordingVideoPanel is null || RecordingGifPanel is null)
+            return;
+
+        int index = RecordingSubList.SelectedIndex;
+        if (index < 0) index = 0;
+        RecordingGeneralPanel.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RecordingVideoPanel.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
+        RecordingGifPanel.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Enables the overlay auto-close interval field only when auto-close is on.</summary>
+    private void OnOverlayAutoCloseToggled(object sender, RoutedEventArgs e)
+    {
+        if (OverlayAutoCloseCheck is null || OverlayCloseBox is null) return;
+        OverlayCloseBox.IsEnabled = OverlayAutoCloseCheck.IsChecked == true;
     }
 
     /// <summary>Maps each input box to the index of the section that contains it.</summary>
@@ -304,10 +325,17 @@ public partial class SettingsWindow : Window
         SelectByTag(FormatCombo, s.ImageFormat, fallbackIndex: 0);
         AutoCopyCheck.IsChecked = s.AutoCopyToClipboard;
         SelectByTag(PostActionCombo, s.PostCaptureAction, fallbackIndex: 0);
-        OverlayCloseBox.Text = s.OverlayAutoCloseSeconds.ToString();
         StartupCheck.IsChecked = s.LaunchAtStartup;
         HideIconsCheck.IsChecked = s.HideDesktopIconsDuringCapture;
         HiDpiCheck.IsChecked = s.DownscaleHiDpi;
+        PlaySoundsCheck.IsChecked = s.PlaySounds;
+        ShowTrayIconCheck.IsChecked = s.ShowTrayIcon;
+
+        // Quick Access overlay
+        OverlayAutoCloseCheck.IsChecked = s.OverlayAutoClose;
+        // Show a usable interval even when auto-close was previously off / seconds==0.
+        OverlayCloseBox.Text = (s.OverlayAutoCloseSeconds > 0 ? s.OverlayAutoCloseSeconds : 5).ToString();
+        OverlayCloseBox.IsEnabled = s.OverlayAutoClose;
 
         // Hotkeys
         HotkeyRegionBox.Text = s.HotkeyCaptureRegion;
@@ -331,18 +359,28 @@ public partial class SettingsWindow : Window
         CountdownBox.Text = s.RecordingCountdownSeconds.ToString();
         CaptureCursorCheck.IsChecked = s.CaptureCursor;
 
-        // OCR & Scrolling
+        // OCR (Annotate tab)
         OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
+        OcrDetectLinksCheck.IsChecked = s.OcrDetectLinks;
 
-        // Naming
+        // Pinned screenshots (Annotate tab)
+        PinnedRoundedCornersCheck.IsChecked = s.PinnedRoundedCorners;
+        PinnedShadowCheck.IsChecked = s.PinnedShadow;
+        PinnedBorderCheck.IsChecked = s.PinnedBorder;
+
+        // Screenshots
+        AddPixelBorderCheck.IsChecked = s.AddPixelBorder;
+        FreezeScreenCheck.IsChecked = s.FreezeScreen;
+        ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
+        ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
+        SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
+
+        // Naming & history (Advanced tab)
         TemplateBox.Text = s.FileNameTemplate;
-
-        // History
+        AskForNameCheck.IsChecked = s.AskForNameAfterCapture;
+        AllInOneRememberCheck.IsChecked = s.AllInOneRememberLast;
         HistoryLimitBox.Text = s.HistoryLimit.ToString();
         RetentionDaysBox.Text = s.HistoryRetentionDays.ToString();
-
-        // Capture & after-capture
-        SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
 
         UpdateTemplatePreview();
     }
@@ -449,10 +487,17 @@ public partial class SettingsWindow : Window
             s.ImageFormat = SelectedTag(FormatCombo, "png");
             s.AutoCopyToClipboard = AutoCopyCheck.IsChecked == true;
             s.PostCaptureAction = SelectedTag(PostActionCombo, "overlay");
-            s.OverlayAutoCloseSeconds = overlaySeconds;
             s.LaunchAtStartup = StartupCheck.IsChecked == true;
             s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
             s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
+            s.PlaySounds = PlaySoundsCheck.IsChecked == true;
+            s.ShowTrayIcon = ShowTrayIconCheck.IsChecked == true;
+
+            // Quick Access overlay
+            s.OverlayAutoClose = OverlayAutoCloseCheck.IsChecked == true;
+            // Persist seconds when auto-close is on; otherwise 0 = stay until dismissed
+            // (preserves the legacy meaning of OverlayAutoCloseSeconds for downstream code).
+            s.OverlayAutoCloseSeconds = OverlayAutoCloseCheck.IsChecked == true ? overlaySeconds : 0;
 
             // Hotkeys
             s.HotkeyCaptureRegion = HotkeyValue(HotkeyRegionBox);
@@ -476,18 +521,28 @@ public partial class SettingsWindow : Window
             s.RecordingCountdownSeconds = countdown;
             s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
 
-            // OCR & Scrolling
+            // OCR (Annotate tab)
             s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
+            s.OcrDetectLinks = OcrDetectLinksCheck.IsChecked == true;
 
-            // Naming
+            // Pinned screenshots (Annotate tab)
+            s.PinnedRoundedCorners = PinnedRoundedCornersCheck.IsChecked == true;
+            s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
+            s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
+
+            // Screenshots
+            s.AddPixelBorder = AddPixelBorderCheck.IsChecked == true;
+            s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
+            s.ShowCrosshair = ShowCrosshairCheck.IsChecked == true;
+            s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
+            s.SelfTimerSeconds = selfTimer;
+
+            // Naming & history (Advanced tab)
             s.FileNameTemplate = TemplateBox.Text.Trim();
-
-            // History
+            s.AskForNameAfterCapture = AskForNameCheck.IsChecked == true;
+            s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
             s.HistoryLimit = historyLimit;
             s.HistoryRetentionDays = retentionDays;
-
-            // Capture & after-capture
-            s.SelfTimerSeconds = selfTimer;
 
             await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
             await _settings.SaveAsync();
@@ -589,9 +644,22 @@ public partial class SettingsWindow : Window
             if (!ReferenceEquals(box.BorderBrush, ErrorBrush)) continue;
             if (SectionList is not null)
                 SectionList.SelectedIndex = SectionIndexOf(box);
+            RevealRecordingSubTabFor(box);
             box.Focus();
             return;
         }
+    }
+
+    /// <summary>If an invalid box lives in a hidden Recording sub-panel, switch to its sub-tab.</summary>
+    private void RevealRecordingSubTabFor(TextBox box)
+    {
+        if (RecordingSubList is null) return;
+        if (RecordingVideoPanel is not null && IsDescendantOf(box, RecordingVideoPanel))
+            RecordingSubList.SelectedIndex = 1;
+        else if (RecordingGifPanel is not null && IsDescendantOf(box, RecordingGifPanel))
+            RecordingSubList.SelectedIndex = 2;
+        else if (RecordingGeneralPanel is not null && IsDescendantOf(box, RecordingGeneralPanel))
+            RecordingSubList.SelectedIndex = 0;
     }
 
     private static void MarkInvalid(TextBox box, string message)

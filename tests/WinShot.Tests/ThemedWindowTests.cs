@@ -227,7 +227,9 @@ public class ThemedWindowTests
 
         InvokeQuickAction(overlay, "Pin");
         InvokeQuickAction(overlay, "Edit");
-        InvokeQuickAction(overlay, "OCR");
+        // OCR has no visible button (CleanShot's overlay is Pin/Close/Copy/Save/Edit/Background);
+        // it stays on the "O" keyboard shortcut, so invoke that path instead of a button.
+        InvokeKey(overlay, System.Windows.Forms.Keys.O);
         InvokeQuickAction(overlay, "Background");
 
         Assert.True(pin);
@@ -254,6 +256,14 @@ public class ThemedWindowTests
         }
 
         throw new InvalidOperationException($"Quick action not found: {tipPrefix}");
+    }
+
+    private static void InvokeKey(FastQuickActionsWindow overlay, System.Windows.Forms.Keys key)
+    {
+        var handler = typeof(FastQuickActionsWindow).GetMethod(
+            "OnOverlayKeyDown",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        handler.Invoke(overlay, new object?[] { overlay, new System.Windows.Forms.KeyEventArgs(key) });
     }
 
     private static void WaitForEditorOperation(EditorWindow editor, System.Reflection.FieldInfo activeField)
