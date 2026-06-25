@@ -214,6 +214,48 @@
                                      ToolTip="25% fill" Checked="OnFillChecked"/>
                         <RadioButton Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;"
                                      ToolTip="Solid fill" Checked="OnFillChecked"/>
+                        <!-- Opacity: applies to new shapes/arrows/lines/highlighter and (via the
+                             restyle path) to the currently selected annotation. -->
+                        <StackPanel x:Name="OpacityPanel" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                            <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <Slider x:Name="OpacitySlider" Style="{StaticResource DarkSlider}" Width="92"
+                                    Minimum="25" Maximum="100" Value="100" SmallChange="5" LargeChange="25"
+                                    TickFrequency="25" IsSnapToTickEnabled="False" VerticalAlignment="Center"
+                                    ValueChanged="OnOpacityChanged"
+                                    PreviewMouseUp="OnOpacitySliderReleased"
+                                    LostMouseCapture="OnOpacitySliderReleased"
+                                    KeyUp="OnOpacitySliderReleased"
+                                    ToolTip="Annotation opacity"/>
+                            <TextBlock x:Name="OpacityValue" Text="100%" Style="{StaticResource ValueLabel}"
+                                       MinWidth="38" TextAlignment="Right" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <!-- Arrow style: shown only while the Arrow tool is active. Straight is the
+                             original look; Double has a head at both ends; Thin is a slim tapered arrow. -->
+                        <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                            <TextBlock Text="Arrow" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" Width="98"
+                                      SelectedIndex="0" SelectionChanged="OnArrowStyleChanged">
+                                <ComboBoxItem Content="Straight" Tag="Straight"/>
+                                <ComboBoxItem Content="Double" Tag="Double"/>
+                                <ComboBoxItem Content="Thin" Tag="Thin"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <!-- Blur / Pixelate strength: shown only while those tools are active. -->
+                        <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                            <TextBlock x:Name="EffectStrengthLabel" Text="Strength" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <RadioButton x:Name="StrengthLightBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength"
+                                         Tag="Light" Content="S" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Light" Checked="OnEffectStrengthChecked"/>
+                            <RadioButton x:Name="StrengthMediumBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength"
+                                         Tag="Medium" Content="M" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True"/>
+                            <RadioButton x:Name="StrengthStrongBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength"
+                                         Tag="Strong" Content="L" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Strong" Checked="OnEffectStrengthChecked"/>
+                        </StackPanel>
                         <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>

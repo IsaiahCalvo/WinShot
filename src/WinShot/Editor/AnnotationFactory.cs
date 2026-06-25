@@ -6,33 +6,105 @@ using System.Windows.Shapes;
 
 namespace WinShot.Editor;
 
+/// <summary>
+/// Selectable straight-arrow variants. CleanShot's editor offers four arrow looks;
+/// combined with the curved-arrow tool these cover the parity set. Persisted in
+/// <c>AnnotationData.Style</c> (as the enum name) so a restyle/resize rebuilds the
+/// right geometry and an in-session round-trip keeps the chosen look.
+/// </summary>
+internal enum ArrowStyle
+{
+    /// <summary>Single filled head, thickness-scaled — the original WinShot arrow.</summary>
+    Straight,
+
+    /// <summary>Filled heads at BOTH ends (a double-headed / two-way arrow).</summary>
+    Double,
+
+    /// <summary>A slim tapered arrow: thinner head proportions and a hairline shaft accent.</summary>
+    Thin,
+}
+
+/// <summary>
+/// Intensity preset for the blur / pixelate tools. Maps to a blur radius or a
+/// pixelate block size so the user can dial the effect instead of a single hardcoded value.
+/// </summary>
+internal enum EffectStrength
+{
+    Light,
+    Medium,
+    Strong,
+}
+
 /// <summary>Builds the WPF elements used as canvas annotations.</summary>
 internal static class AnnotationFactory
 {
-    /// <summary>Shaft plus a filled triangular head; the head scales with stroke thickness.</summary>
-    public static Geometry ArrowGeometry(Point from, Point to, double thickness)
+    /// <summary>Box-blur radius (px) for an <see cref="EffectStrength"/>. Larger = smoother/heavier blur.</summary>
+    public static int BlurRadiusFor(EffectStrength strength) => strength switch
+    {
+        EffectStrength.Light => 3,
+        EffectStrength.Strong => 12,
+        _ => 6, // Medium — matches the previous hardcoded default
+    };
+
+    /// <summary>Pixelate block size (px) for an <see cref="EffectStrength"/>. Larger = coarser mosaic.</summary>
+    public static int PixelateCellFor(EffectStrength strength) => strength switch
+    {
+        EffectStrength.Light => 7,
+        EffectStrength.Strong => 22,
+        _ => 12, // Medium — matches the previous hardcoded default
+    };
+
+    /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
+    public static ArrowStyle ParseArrowStyle(string? name) =>
+        Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;
+
+    /// <summary>Straight arrow with the default (Straight) head style. Kept for existing callers.</summary>
+    public static Geometry ArrowGeometry(Point from, Point to, double thickness) =>
+        ArrowGeometry(from, to, thickness, ArrowStyle.Straight);
+
+    /// <summary>
+    /// Straight arrow in one of the <see cref="ArrowStyle"/> variants:
+    /// Straight (one filled head), Double (filled head at both ends), or Thin (a slimmer,
+    /// tapered head). All heads scale with stroke thickness so they read well at any size.
+    /// </summary>
+    public static Geometry ArrowGeometry(Point from, Point to, double thickness, ArrowStyle style)
     {
         var v = to - from;
         if (v.Length < 0.5) v = new Vector(0.5, 0);
         var dir = v;
         dir.Normalize();
 
-        double head = Math.Clamp(thickness * 3.5, 10, 30);
-        Point headBase = to - dir * head;
-        var perp = new Vector(-dir.Y, dir.X) * head * 0.45;
+        // Thin arrows use a smaller, narrower head so the whole mark looks slimmer.
+        double headScale = style == ArrowStyle.Thin ? 2.6 : 3.5;
+        double headWidth = style == ArrowStyle.Thin ? 0.34 : 0.45;
+        double head = Math.Clamp(thickness * headScale, style == ArrowStyle.Thin ? 8 : 10, 30);
+        var perp = new Vector(-dir.Y, dir.X) * head * headWidth;
+
+        // The shaft stops short of each head so the stroked line never pokes through the
+        // filled triangle. A double-headed arrow trims both ends.
+        Point endBase = to - dir * head;
+        Point startBase = style == ArrowStyle.Double ? from + dir * head : from;
 
         var geometry = new PathGeometry();
 
-        var shaft = new PathFigure { StartPoint = from, IsFilled = false };
-        shaft.Segments.Add(new LineSegment(headBase, isStroked: true));
+        var shaft = new PathFigure { StartPoint = startBase, IsFilled = false };
+        shaft.Segments.Add(new LineSegment(endBase, isStroked: true));
         geometry.Figures.Add(shaft);
 
-        var headFigure = new PathFigure { StartPoint = to, IsClosed = true, IsFilled = true };
-        headFigure.Segments.Add(new LineSegment(headBase + perp, isStroked: true));
-        headFigure.Segments.Add(new LineSegment(headBase - perp, isStroked: true));
-        geometry.Figures.Add(headFigure);
+        geometry.Figures.Add(HeadFigure(to, endBase, perp));
+        if (style == ArrowStyle.Double)
+            geometry.Figures.Add(HeadFigure(from, startBase, perp));
 
         return geometry;
+    }
+
+    /// <summary>One filled triangular arrowhead: tip at <paramref name="tip"/>, base centered at <paramref name="baseCenter"/>.</summary>
+    private static PathFigure HeadFigure(Point tip, Point baseCenter, Vector perp)
+    {
+        var head = new PathFigure { StartPoint = tip, IsClosed = true, IsFilled = true };
+        head.Segments.Add(new LineSegment(baseCenter + perp, isStroked: true));
+        head.Segments.Add(new LineSegment(baseCenter - perp, isStroked: true));
+        return head;
     }
 
     /// <summary>

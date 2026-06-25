@@ -55,6 +55,15 @@ public partial class EditorWindow : Window
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
     private TextStyle _textStyle = TextStyle.Plain;
+    private ArrowStyle _arrowStyle = ArrowStyle.Straight;
+    private double _opacity = 1.0; // annotation alpha multiplier (0.25–1.0) for new + restyled marks
+    private EffectStrength _blurStrength = EffectStrength.Medium;
+    private EffectStrength _pixelateStrength = EffectStrength.Medium;
+
+    // Opacity-slider gesture: a continuous drag previews live but records ONE undo entry.
+    // _opacityBefore is the selected element's style captured at gesture start.
+    private StyleSnapshot? _opacityBefore;
+    private UIElement? _opacityElement;
     private double? _cropRatio; // null = free
     private EditorTool _toolBeforeEyedropper = EditorTool.Select;
     private string _pendingEmoji = "😀";
@@ -269,6 +278,8 @@ public partial class EditorWindow : Window
         TextStylePanel.Visibility = Visibility.Collapsed;
         CropRatioPanel.Visibility = Visibility.Collapsed;
         StepModePanel.Visibility = Visibility.Collapsed;
+        ArrowStylePanel.Visibility = Visibility.Collapsed;
+        EffectStrengthPanel.Visibility = Visibility.Collapsed;
 
         Width = Math.Min(1240, SystemParameters.WorkArea.Width * 0.9);
         Height = Math.Min(800, SystemParameters.WorkArea.Height * 0.9);
@@ -462,12 +473,34 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Shows the crop-ratio, text-style and step-mode controls only while their tool is active.</summary>
+    /// <summary>Shows the crop-ratio, text-style, step-mode, arrow-style and effect-strength controls only while their tool is active.</summary>
     private void UpdateContextPanels()
     {
         CropRatioPanel.Visibility = _tool == EditorTool.Crop ? Visibility.Visible : Visibility.Collapsed;
         TextStylePanel.Visibility = _tool == EditorTool.Text ? Visibility.Visible : Visibility.Collapsed;
         StepModePanel.Visibility = _tool == EditorTool.Step ? Visibility.Visible : Visibility.Collapsed;
+        ArrowStylePanel.Visibility = _tool == EditorTool.Arrow ? Visibility.Visible : Visibility.Collapsed;
+
+        bool effectTool = _tool is EditorTool.Blur or EditorTool.Pixelate;
+        EffectStrengthPanel.Visibility = effectTool ? Visibility.Visible : Visibility.Collapsed;
+        if (effectTool)
+        {
+            EffectStrengthLabel.Text = _tool == EditorTool.Blur ? "Blur" : "Pixelate";
+            SyncEffectStrengthButtons(_tool == EditorTool.Blur ? _blurStrength : _pixelateStrength);
+        }
+    }
+
+    /// <summary>Reflects the active blur/pixelate strength on the strength radio group without re-triggering an apply.</summary>
+    private void SyncEffectStrengthButtons(EffectStrength strength)
+    {
+        RadioButton target = strength switch
+        {
+            EffectStrength.Light => StrengthLightBtn,
+            EffectStrength.Strong => StrengthStrongBtn,
+            _ => StrengthMediumBtn,
+        };
+        if (target.IsChecked != true)
+            target.IsChecked = true; // OnEffectStrengthChecked re-stores the same value (idempotent)
     }
 
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
@@ -532,26 +565,30 @@ public partial class EditorWindow : Window
     /// before/after snapshot of the affected visual properties and the stored
     /// <see cref="AnnotationData"/> so undo/redo simply replay the appropriate snapshot.
     /// </summary>
-    private void RestyleSelected(Color? color, double? thickness, ShapeFillMode? fill)
+    private void RestyleSelected(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null)
     {
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
             return;
         // Color is irrelevant to a few annotation kinds (spotlight/emoji/image); thickness
         // and fill only make sense for the shapes that carry them. Skip no-op restyles so
         // those annotations don't push empty undo entries.
-        if (!CanRestyle(_selected, color, thickness, fill))
+        if (!CanRestyle(_selected, color, thickness, fill) &&
+            !(opacity is not null && CanSetOpacity(_selected)))
             return;
 
-        // Highlighter strokes bake a translucent alpha into their color; keep it when the
-        // user picks a new (opaque) swatch so the stroke stays a highlight, not a solid line.
-        if (color is Color picked && meta.Type == AnnotationData.TypeHighlighter)
+        // A color pick (swatch / eyedropper) is opaque, but the annotation may carry a
+        // reduced alpha — from the highlighter's translucent base or an earlier opacity
+        // change. Preserve that existing alpha so changing the hue never silently resets
+        // opacity. An explicit opacity change (opacity != null) overrides this below.
+        if (color is Color picked && opacity is null)
         {
-            byte alpha = meta.Color is string hex0 && TryParseColor(hex0, out var cur) ? cur.A : (byte)0x59;
+            byte fallback = meta.Type == AnnotationData.TypeHighlighter ? (byte)0x59 : (byte)0xFF;
+            byte alpha = meta.Color is string hex0 && TryParseColor(hex0, out var cur) ? cur.A : fallback;
             color = Color.FromArgb(alpha, picked.R, picked.G, picked.B);
         }
 
         var before = SnapshotStyle(_selected, meta);
-        var after = before.With(color, thickness, fill);
+        var after = before.With(color, thickness, fill, opacity);
         ApplyStyleSnapshot(_selected, after);
 
         UIElement el = _selected;
@@ -577,6 +614,17 @@ public partial class EditorWindow : Window
         };
     }
 
+    /// <summary>Whether an opacity change has a visible effect on this annotation kind (the color-bearing ones).</summary>
+    private static bool CanSetOpacity(UIElement element) =>
+        element is FrameworkElement fe && fe.Tag is AnnotationData meta && meta.Type switch
+        {
+            AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow or AnnotationData.TypeLine
+                or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter
+                or AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
+                or AnnotationData.TypeText or AnnotationData.TypeStep => true,
+            _ => false,
+        };
+
     /// <summary>
     /// Immutable snapshot of every property a restyle can touch, plus a fresh
     /// <see cref="AnnotationData"/> for the element's Tag, so save round-trips stay correct.
@@ -587,11 +635,21 @@ public partial class EditorWindow : Window
         ShapeFillMode Fill,
         AnnotationData Meta)
     {
-        public StyleSnapshot With(Color? color, double? thickness, ShapeFillMode? fill)
+        public StyleSnapshot With(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null)
         {
             Color c = color ?? StrokeColor;
             double t = thickness ?? Thickness;
             ShapeFillMode f = fill ?? Fill;
+
+            // Opacity rewrites the color's alpha. Highlighter has a translucent base alpha
+            // (~0x59) that opacity scales; every other kind treats RGB as fully opaque and
+            // sets alpha straight from the multiplier so the result is idempotent.
+            if (opacity is double op)
+            {
+                byte baseAlpha = Meta.Type == AnnotationData.TypeHighlighter ? (byte)0x59 : (byte)0xFF;
+                byte alpha = (byte)Math.Clamp(Math.Round(baseAlpha * op), 0, 255);
+                c = Color.FromArgb(alpha, c.R, c.G, c.B);
+            }
 
             var meta = Meta.Clone();
             meta.Color = ToHex(c);
@@ -631,7 +689,8 @@ public partial class EditorWindow : Window
                         var p = pts.Select(q => new Point(q[0], q[1])).ToArray();
                         arrow.Data = meta.Type == AnnotationData.TypeCurvedArrow && p.Length >= 3
                             ? AnnotationFactory.CurvedArrowGeometry(p[0], p[1], p[2], snap.Thickness)
-                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness);
+                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness,
+                                AnnotationFactory.ParseArrowStyle(snap.Meta.Style));
                     }
                 }
                 break;
@@ -727,6 +786,138 @@ public partial class EditorWindow : Window
         if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item &&
             item.Tag is string tag && Enum.TryParse(tag, out TextStyle style))
             _textStyle = style;
+    }
+
+    // -------------------------------------------------- arrow style (parity tail)
+
+    /// <summary>
+    /// Arrow-style dropdown: sets the default style for new straight arrows, and re-shapes
+    /// the currently selected straight arrow in place (one undoable step) so a chosen look
+    /// can be applied after the fact too.
+    /// </summary>
+    private void OnArrowStyleChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
+            item.Tag is not string tag || !Enum.TryParse(tag, out ArrowStyle style))
+            return;
+        _arrowStyle = style;
+        if (IsLoaded) RestyleSelectedArrow(style);
+    }
+
+    /// <summary>
+    /// Re-shapes the selected straight arrow to a new <see cref="ArrowStyle"/>, recording one
+    /// undoable action. No-op for non-arrow (and curved-arrow) selections. The endpoints stay
+    /// put; only the head geometry and the stored Style change.
+    /// </summary>
+    private void RestyleSelectedArrow(ArrowStyle style)
+    {
+        if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
+            meta.Type != AnnotationData.TypeArrow)
+            return;
+        var before = meta.Clone();
+        if (AnnotationFactory.ParseArrowStyle(before.Style) == style) return; // nothing to do
+
+        var after = meta.Clone();
+        after.Style = style.ToString();
+        ApplyArrowStyleData(arrow, after);
+
+        Push(new EditorAction(
+            undo: () => { ApplyArrowStyleData(arrow, before); if (ReferenceEquals(_selected, arrow)) UpdateSelectionVisual(); },
+            redo: () => { ApplyArrowStyleData(arrow, after); if (ReferenceEquals(_selected, arrow)) UpdateSelectionVisual(); }),
+            apply: false);
+        UpdateSelectionVisual();
+    }
+
+    /// <summary>Rebuilds a straight arrow's geometry from its stored points + style and re-stores the metadata.</summary>
+    private static void ApplyArrowStyleData(Path arrow, AnnotationData meta)
+    {
+        if (meta.Points is { } pts && pts.Length >= 2)
+        {
+            Point from = new(pts[0][0], pts[0][1]);
+            Point to = new(pts[^1][0], pts[^1][1]);
+            double thickness = meta.Thickness ?? arrow.StrokeThickness;
+            arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style));
+        }
+        arrow.Tag = meta;
+    }
+
+    // ----------------------------------------------------- opacity (parity tail)
+
+    /// <summary>
+    /// Opacity slider (25–100%): sets the alpha multiplier used for new marks and previews it
+    /// live on the selected annotation. A continuous drag updates the visual on every tick but
+    /// records a SINGLE undo entry, committed when the drag ends (see
+    /// <see cref="OnOpacitySliderReleased"/>). The alpha is baked into the annotation's color,
+    /// so it persists.
+    /// </summary>
+    private void OnOpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        double pct = Math.Clamp(e.NewValue, 25, 100);
+        _opacity = pct / 100.0;
+        if (OpacityValue is not null)
+            OpacityValue.Text = $"{Math.Round(pct)}%";
+        if (!IsLoaded) return;
+
+        // Apply live to the selection without pushing undo, capturing a one-time "before" for
+        // the whole gesture so the eventual commit is a single reversible step.
+        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta && CanSetOpacity(_selected))
+        {
+            if (_opacityBefore is null || !ReferenceEquals(_opacityElement, _selected))
+            {
+                CommitOpacityGesture(); // flush any pending gesture on a different element first
+                _opacityBefore = SnapshotStyle(_selected, meta);
+                _opacityElement = _selected;
+            }
+            var after = SnapshotStyle(_selected, meta).With(null, null, null, _opacity);
+            ApplyStyleSnapshot(_selected, after);
+            UpdateSelectionVisual();
+        }
+    }
+
+    /// <summary>Slider drag/keyboard release: commits the pending opacity gesture as one undo entry.</summary>
+    private void OnOpacitySliderReleased(object sender, RoutedEventArgs e) => CommitOpacityGesture();
+
+    /// <summary>
+    /// Finalizes an in-progress opacity drag: records one undoable action from the captured
+    /// "before" snapshot to the element's current (live-previewed) state. No-op when nothing
+    /// changed or no gesture is pending.
+    /// </summary>
+    private void CommitOpacityGesture()
+    {
+        if (_opacityBefore is not { } before || _opacityElement is not FrameworkElement fe ||
+            fe.Tag is not AnnotationData meta)
+        {
+            _opacityBefore = null;
+            _opacityElement = null;
+            return;
+        }
+        UIElement el = _opacityElement;
+        _opacityBefore = null;
+        _opacityElement = null;
+
+        var after = SnapshotStyle(el, meta);
+        if (after.StrokeColor == before.StrokeColor) return; // alpha unchanged → no entry
+
+        Push(new EditorAction(
+            undo: () => { ApplyStyleSnapshot(el, before); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
+            redo: () => { ApplyStyleSnapshot(el, after); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); }),
+            apply: false);
+    }
+
+    /// <summary>Applies the current opacity multiplier to a base color's alpha channel.</summary>
+    private static Color WithOpacity(Color c, double opacity) =>
+        Color.FromArgb((byte)Math.Clamp(Math.Round(c.A * opacity), 0, 255), c.R, c.G, c.B);
+
+    // ------------------------------------------- blur/pixelate strength (parity tail)
+
+    private void OnEffectStrengthChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tag ||
+            !Enum.TryParse(tag, out EffectStrength strength))
+            return;
+        // The same radio group drives both tools; route to whichever effect is active.
+        if (_tool == EditorTool.Pixelate) _pixelateStrength = strength;
+        else _blurStrength = strength;
     }
 
     private void OnCropRatioChanged(object sender, SelectionChangedEventArgs e)
@@ -1037,7 +1228,7 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
-                arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness);
+                arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness, _arrowStyle);
                 break;
             case EditorTool.CurvedArrow when _activeShape is Path curve:
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
@@ -1114,9 +1305,13 @@ public partial class EditorWindow : Window
                 }
                 else
                 {
-                    shape.Tag = AnnotationData.ForStroke(
+                    var strokeData = AnnotationData.ForStroke(
                         _tool == EditorTool.Arrow ? AnnotationData.TypeArrow : AnnotationData.TypeLine,
                         new[] { _dragStart, pos }, StrokeColorOf(shape), shape.StrokeThickness);
+                    // Persist the head style so the resize/endpoint-handle code (and an
+                    // in-session re-edit) rebuilds the right geometry.
+                    if (_tool == EditorTool.Arrow) strokeData.Style = _arrowStyle.ToString();
+                    shape.Tag = strokeData;
                     PushAddElement(shape);
                 }
                 return;
@@ -1235,7 +1430,8 @@ public partial class EditorWindow : Window
         _dragging = true;
         Viewport.CaptureMouse();
 
-        var brush = new SolidColorBrush(_color);
+        // New shapes/arrows/lines pick up the current opacity by baking it into the brush alpha.
+        var brush = new SolidColorBrush(WithOpacity(_color, _opacity));
         switch (_tool)
         {
             case EditorTool.Arrow:
@@ -1247,7 +1443,7 @@ public partial class EditorWindow : Window
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
-                    Data = AnnotationFactory.ArrowGeometry(_dragStart, _dragStart, _thickness),
+                    Data = AnnotationFactory.ArrowGeometry(_dragStart, _dragStart, _thickness, _arrowStyle),
                 };
                 break;
             case EditorTool.CurvedArrow:
@@ -1278,7 +1474,7 @@ public partial class EditorWindow : Window
                     Stroke = brush,
                     StrokeThickness = _thickness,
                     RadiusX = 2, RadiusY = 2,
-                    Fill = ShapeFillBrush.Create(_fillMode, _color),
+                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity)),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -1288,7 +1484,7 @@ public partial class EditorWindow : Window
                 {
                     Stroke = brush,
                     StrokeThickness = _thickness,
-                    Fill = ShapeFillBrush.Create(_fillMode, _color),
+                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity)),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -1306,7 +1502,8 @@ public partial class EditorWindow : Window
                 break;
             case EditorTool.Highlighter:
                 var highlight = _color;
-                highlight.A = 0x59;
+                // Highlighter has a translucent base (~0x59); opacity scales it further.
+                highlight.A = (byte)Math.Clamp(Math.Round(0x59 * _opacity), 0, 255);
                 _activeShape = new Polyline
                 {
                     Stroke = new SolidColorBrush(highlight),
@@ -1531,6 +1728,10 @@ public partial class EditorWindow : Window
 
     private void Select(UIElement? element)
     {
+        // Selecting a different element (or deselecting) ends any in-progress opacity drag,
+        // committing it as one undo entry before the selection moves on.
+        if (_opacityElement is not null && !ReferenceEquals(_opacityElement, element))
+            CommitOpacityGesture();
         _selected = element;
         UpdateSelectionVisual();
     }
@@ -1945,7 +2146,7 @@ public partial class EditorWindow : Window
         }
         else
         {
-            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness);
+            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style));
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
         }
         // Keep the stored geometry in sync so the end-of-drag snapshot reads the live state.
@@ -2049,7 +2250,8 @@ public partial class EditorWindow : Window
                     bool curved = snap.Type == AnnotationData.TypeCurvedArrow && sp.Length >= 3;
                     path.Data = curved
                         ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness)
-                        : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness);
+                        : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness,
+                            AnnotationFactory.ParseArrowStyle(meta.Style));
                     meta.Points = sp.Select(p => new[] { p.X, p.Y }).ToArray();
                     meta.Tx = 0;
                     meta.Ty = 0;
@@ -2453,8 +2655,11 @@ public partial class EditorWindow : Window
         var backup = _source.Clone(region, _source.PixelFormat);
         _owned.Add(backup);
         var r = region;
+        // Capture the strength-mapped radius per action so undo → redo replays identically
+        // even if the user changes the strength control afterward.
+        int radius = AnnotationFactory.BlurRadiusFor(_blurStrength);
         if (!await ApplySourceRegionEffectAsync(
-                () => BitmapEffects.Blur(_source, r),
+                () => BitmapEffects.Blur(_source, r, radius),
                 "Blur failed"))
         {
             if (_owned.Remove(backup)) backup.Dispose();
@@ -2471,7 +2676,7 @@ public partial class EditorWindow : Window
             redo: async () =>
             {
                 await ApplySourceRegionEffectAsync(
-                    () => BitmapEffects.Blur(_source, r),
+                    () => BitmapEffects.Blur(_source, r, radius),
                     "Blur redo failed");
             },
             onDiscard: () =>
@@ -2495,8 +2700,10 @@ public partial class EditorWindow : Window
         _owned.Add(backup);
         var r = region;
         int seed = ToolRandom.Next();
+        // Capture the strength-mapped block size per action so undo → redo stays byte-identical.
+        int cellSize = AnnotationFactory.PixelateCellFor(_pixelateStrength);
         if (!await ApplySourceRegionEffectAsync(
-                () => BitmapEffects.PixelateRandomized(_source, r, seed),
+                () => BitmapEffects.PixelateRandomized(_source, r, seed, cellSize),
                 "Pixelate failed"))
         {
             if (_owned.Remove(backup)) backup.Dispose();
@@ -2513,7 +2720,7 @@ public partial class EditorWindow : Window
             redo: async () =>
             {
                 await ApplySourceRegionEffectAsync(
-                    () => BitmapEffects.PixelateRandomized(_source, r, seed),
+                    () => BitmapEffects.PixelateRandomized(_source, r, seed, cellSize),
                     "Pixelate redo failed");
             },
             onDiscard: () =>
