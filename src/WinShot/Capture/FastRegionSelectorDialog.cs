@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -5,25 +6,35 @@ using WF = System.Windows.Forms;
 namespace WinShot.Capture;
 
 /// <summary>
-/// Native lightweight region/window selector for simple capture flows. It keeps
-/// WPF out of the hot path; all-in-one still uses RegionSelectorWindow.
+/// Native lightweight region/window selector.
+///
+/// DPI correctness: instead of one window stretched across the whole virtual desktop
+/// (which Windows renders at a single monitor's scale and bitmap-stretches onto the
+/// others, drifting the selection on mixed-DPI multi-monitor setups), this puts ONE
+/// 1:1 overlay surface on EACH monitor. The primary monitor's surface is this Form
+/// (also the coordinator); extra monitors get lightweight <see cref="SelectorPane"/>
+/// children. All selection math is anchored to GetCursorPos, which returns true
+/// physical pixels regardless of which monitor's scale the cursor is over, so the
+/// painted selection always matches the captured pixels. On a single monitor there are
+/// no panes and this behaves exactly like the previous single-window selector.
 /// </summary>
 public sealed class FastRegionSelectorDialog : WF.Form
 {
     private const int DragThresholdPx = 4;
     private const int CrosshairGapPx = 10;
-    // Single accent identity (was #4DA3FF). The selection rectangle is filled with
-    // HoleKey, which the form's TransparencyKey turns into a full-brightness hole so the
-    // chosen region is NOT dimmed like the rest of the screen (CleanShot's punch-out).
+    // Single accent identity. The selection rectangle is filled with HoleKey, which each
+    // surface's TransparencyKey turns into a full-brightness hole (CleanShot's punch-out).
     private static readonly SD.Color Accent = ThemePalette.Accent;
     private static readonly SD.Color HoleKey = SD.Color.Magenta;
     private static FastRegionSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
+    private SD.Rectangle _monitorBounds;   // this surface's monitor (physical px); primary monitor for the coordinator
     private SettingsService? _settings;
     private List<WindowInfo> _windows = new();
-    private SD.Point _dragStartScreen;
-    private SD.Point _currentScreen;
+    private readonly List<SelectorPane> _panes = new();
+    private SD.Point _dragStartScreen;     // physical screen px (GetCursorPos)
+    private SD.Point _currentScreen;       // physical screen px (GetCursorPos)
     private bool _dragging;
     private bool _dragMoved;
     private WindowInfo? _hoverWindow;
@@ -48,28 +59,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _settings = settings;
         _prewarm = prewarm;
         _windowsProvider = windowsProvider;
+        _monitorBounds = PrimaryBounds();
 
-        AutoScaleMode = WF.AutoScaleMode.None;
-        BackColor = SD.Color.Black;
-        // Pixels painted in HoleKey become fully transparent (full-brightness hole),
-        // while everything else stays dimmed by Opacity below.
-        TransparencyKey = HoleKey;
-        Bounds = _vs;
-        Cursor = WF.Cursors.Cross;
+        ConfigureSurface(this);
         DoubleBuffered = true;
-        FormBorderStyle = WF.FormBorderStyle.None;
-        KeyPreview = true;
+        SetStyle(PaintStyles, true);
+        Bounds = _monitorBounds;
         Opacity = prewarm ? 0.01 : 0.45;
-        ShowInTaskbar = false;
-        StartPosition = WF.FormStartPosition.Manual;
-        TopMost = true;
-
-        SetStyle(
-            WF.ControlStyles.AllPaintingInWmPaint |
-            WF.ControlStyles.OptimizedDoubleBuffer |
-            WF.ControlStyles.ResizeRedraw |
-            WF.ControlStyles.UserPaint,
-            true);
 
         Shown += (_, _) => StartWindowLoad();
 
@@ -77,6 +73,33 @@ public sealed class FastRegionSelectorDialog : WF.Form
     }
 
     public SD.Rectangle? SelectedRegionPx { get; private set; }
+
+    /// <summary>Shared surface setup for the coordinator Form and every pane.</summary>
+    private static void ConfigureSurface(WF.Form form)
+    {
+        form.AutoScaleMode = WF.AutoScaleMode.None;
+        form.BackColor = SD.Color.Black;
+        // Pixels painted in HoleKey become a full-brightness hole; everything else is
+        // dimmed by Opacity. Each surface is wholly inside one monitor, so it is 1:1.
+        form.TransparencyKey = HoleKey;
+        form.Cursor = WF.Cursors.Cross;
+        form.FormBorderStyle = WF.FormBorderStyle.None;
+        form.KeyPreview = true;
+        form.ShowInTaskbar = false;
+        form.StartPosition = WF.FormStartPosition.Manual;
+        form.TopMost = true;
+    }
+
+    // DoubleBuffered + SetStyle are protected on Control, so each surface enables its own
+    // flicker-free painting from inside its own constructor.
+    private const WF.ControlStyles PaintStyles =
+        WF.ControlStyles.AllPaintingInWmPaint |
+        WF.ControlStyles.OptimizedDoubleBuffer |
+        WF.ControlStyles.ResizeRedraw |
+        WF.ControlStyles.UserPaint;
+
+    private static SD.Rectangle PrimaryBounds() =>
+        (WF.Screen.PrimaryScreen ?? WF.Screen.AllScreens[0]).Bounds;
 
     public static void Prewarm()
     {
@@ -130,6 +153,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector._dragging = false;
         selector._dragMoved = false;
         selector.Capture = false;
+        selector.DisposePanes();
         selector.Hide();
         selector.Dispose();
     }
@@ -138,7 +162,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         _completion = new TaskCompletionSource<WF.DialogResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _vs = CaptureService.VirtualScreen;
+        _monitorBounds = PrimaryBounds();
+        Bounds = _monitorBounds;
+        CreatePanes();
+
         Show();
+        foreach (var pane in _panes)
+            pane.Show();
+
         Activate();
         Focus();
         return _completion.Task;
@@ -147,6 +180,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings, bool prewarm)
     {
         _vs = CaptureService.VirtualScreen;
+        _monitorBounds = PrimaryBounds();
         _settings = settings;
         _prewarm = prewarm;
         _windowsProvider = windowsProvider;
@@ -158,14 +192,55 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _pendingPx = null;
         SelectedRegionPx = null;
         DialogResult = WF.DialogResult.None;
-        Bounds = _vs;
+        Bounds = _monitorBounds;
         Capture = false;
         Opacity = prewarm ? 0.01 : 0.45;
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
-        // pointer instead of the top-left corner until the first mouse-move arrives.
-        _currentScreen = WF.Cursor.Position;
+        // pointer instead of a corner until the first mouse-move arrives.
+        _currentScreen = CursorScreen();
         _completion = null;
     }
+
+    // ----------------------------------------------------------- per-monitor panes
+
+    private void CreatePanes()
+    {
+        DisposePanes();
+        if (_prewarm)
+            return;
+
+        foreach (var screen in WF.Screen.AllScreens)
+        {
+            if (screen.Bounds == _monitorBounds)
+                continue; // the coordinator Form already covers the primary monitor
+
+            var pane = new SelectorPane(this, screen.Bounds);
+            _panes.Add(pane);
+        }
+    }
+
+    private void DisposePanes()
+    {
+        foreach (var pane in _panes)
+        {
+            try { pane.Close(); pane.Dispose(); }
+            catch { /* best effort */ }
+        }
+        _panes.Clear();
+    }
+
+    /// <summary>Repaints the coordinator surface and every pane (the selection can span monitors).</summary>
+    private void InvalidateAllSurfaces()
+    {
+        Invalidate();
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed)
+                pane.Invalidate();
+        }
+    }
+
+    // ----------------------------------------------------------- window list
 
     private void StartWindowLoad()
     {
@@ -201,18 +276,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
     }
 
+    // ----------------------------------------------------------- input (coordinator)
+
     protected override void OnKeyDown(WF.KeyEventArgs e)
     {
-        if (e.KeyCode == WF.Keys.Escape)
-        {
-            Complete(WF.DialogResult.Cancel);
-        }
-        else if (e.KeyCode == WF.Keys.Enter && _pendingPx is SD.Rectangle pending)
-        {
-            e.Handled = true;
-            Confirm(pending);
-        }
-
+        HandleKeyDown(e);
         base.OnKeyDown(e);
     }
 
@@ -230,6 +298,49 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     protected override void OnMouseDown(WF.MouseEventArgs e)
     {
+        HandleMouseDown(e);
+        Capture = _dragging;
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(WF.MouseEventArgs e)
+    {
+        HandleMouseMove();
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(WF.MouseEventArgs e)
+    {
+        Capture = false;
+        HandleMouseUp(e);
+        base.OnMouseUp(e);
+    }
+
+    protected override void OnPaint(WF.PaintEventArgs e)
+    {
+        e.Graphics.Clear(SD.Color.Black);
+        PaintSurface(e.Graphics, _monitorBounds);
+        base.OnPaint(e);
+    }
+
+    // Called by panes so all input funnels through the one coordinator state.
+    internal void HandleKeyDown(WF.KeyEventArgs e)
+    {
+        if (e.KeyCode == WF.Keys.Escape)
+        {
+            Complete(WF.DialogResult.Cancel);
+        }
+        else if (e.KeyCode == WF.Keys.Enter && _pendingPx is SD.Rectangle pending)
+        {
+            e.Handled = true;
+            Confirm(pending);
+        }
+    }
+
+    internal void HandleMouseDown(WF.MouseEventArgs e)
+    {
+        SD.Point screen = CursorScreen();
+
         if (e.Button == WF.MouseButtons.Right)
         {
             Complete(WF.DialogResult.Cancel);
@@ -245,19 +356,17 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        _dragStartScreen = PointToScreen(e.Location);
-        _currentScreen = _dragStartScreen;
+        _dragStartScreen = screen;
+        _currentScreen = screen;
         _dragging = true;
         _dragMoved = false;
         _hoverWindow = null;
-        Capture = true;
-        RefreshOverlay();
-        base.OnMouseDown(e);
+        InvalidateAllSurfaces();
     }
 
-    protected override void OnMouseMove(WF.MouseEventArgs e)
+    internal void HandleMouseMove()
     {
-        _currentScreen = PointToScreen(e.Location);
+        _currentScreen = CursorScreen();
 
         if (_dragging)
         {
@@ -274,25 +383,26 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 _pendingPx = null;
             }
 
-            RefreshOverlay();
+            InvalidateAllSurfaces();
         }
         else if (_pendingPx is null)
         {
             HitTestWindow(_currentScreen);
         }
-
-        base.OnMouseMove(e);
+        else
+        {
+            InvalidateAllSurfaces();
+        }
     }
 
-    protected override void OnMouseUp(WF.MouseEventArgs e)
+    internal void HandleMouseUp(WF.MouseEventArgs e)
     {
         if (e.Button != WF.MouseButtons.Left)
             return;
 
-        Capture = false;
         if (!_dragging) return;
         _dragging = false;
-        _currentScreen = PointToScreen(e.Location);
+        _currentScreen = CursorScreen();
 
         if (!_dragMoved)
         {
@@ -314,51 +424,63 @@ public sealed class FastRegionSelectorDialog : WF.Form
         var virtualRect = VirtualFromScreen(screenRect);
         if (virtualRect.Width > 0 && virtualRect.Height > 0)
             Confirm(virtualRect);
-
-        base.OnMouseUp(e);
     }
 
-    protected override void OnPaint(WF.PaintEventArgs e)
-    {
-        e.Graphics.Clear(SD.Color.Black);
-        DrawOverlay(e.Graphics);
-        base.OnPaint(e);
-    }
+    internal bool IsDragging => _dragging;
 
-    private void DrawOverlay(SD.Graphics g)
+    // ----------------------------------------------------------- painting (per surface)
+
+    /// <summary>
+    /// Paints one monitor surface. <paramref name="monitorBounds"/> is that monitor's
+    /// physical bounds; the surface is 1:1, so screen->local is a pure subtraction.
+    /// </summary>
+    internal void PaintSurface(SD.Graphics g, SD.Rectangle monitorBounds)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
-        DrawCrosshair(g, PointToClient(_currentScreen));
+
+        bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
+        SD.Size clientSize = monitorBounds.Size;
+
+        if (cursorOnThisSurface)
+            DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
         if (_hoverWindow is not null && !_dragging && _pendingPx is null)
-            DrawRect(g, ClientFromScreen(_hoverWindow.Bounds), Accent);
+            DrawRect(g, ToLocal(_hoverWindow.Bounds, monitorBounds), Accent);
 
         if (_dragging && _dragMoved)
         {
             var screenRect = Normalize(_dragStartScreen, _currentScreen);
-            var clientRect = ClientFromScreen(screenRect);
-            DrawSelection(g, clientRect);
-            DrawLabel(g, $"{screenRect.Width} × {screenRect.Height}", clientRect.Right + 8, clientRect.Bottom + 8);
+            DrawSelection(g, ToLocal(screenRect, monitorBounds));
+            if (cursorOnThisSurface)
+            {
+                var local = ToLocal(screenRect, monitorBounds);
+                DrawLabel(g, clientSize, $"{screenRect.Width} × {screenRect.Height}", local.Right + 8, local.Bottom + 8);
+            }
         }
         else if (_pendingPx is SD.Rectangle pending)
         {
-            var clientRect = ClientFromScreen(ScreenFromVirtual(pending));
-            DrawSelection(g, clientRect);
-            DrawLabel(g, $"{pending.Width} × {pending.Height}", clientRect.Right + 8, clientRect.Bottom + 8);
+            var screenRect = ScreenFromVirtual(pending);
+            DrawSelection(g, ToLocal(screenRect, monitorBounds));
+            if (cursorOnThisSurface)
+            {
+                var local = ToLocal(screenRect, monitorBounds);
+                DrawLabel(g, clientSize, $"{pending.Width} × {pending.Height}", local.Right + 8, local.Bottom + 8);
+            }
         }
-        else if (_hoverWindow is not null)
+        else if (_hoverWindow is not null && cursorOnThisSurface)
         {
             var px = VirtualFromScreen(_hoverWindow.Bounds);
-            DrawLabel(g, $"{px.Width} x {px.Height}", PointToClient(_currentScreen).X + 14, PointToClient(_currentScreen).Y + 18);
+            SD.Point lc = ToLocal(_currentScreen, monitorBounds);
+            DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", lc.X + 14, lc.Y + 18);
         }
 
-        if (!_prewarm)
+        if (!_prewarm && cursorOnThisSurface)
         {
             FastSelectorLoupeRenderer.Draw(
                 g,
-                ClientSize,
+                clientSize,
                 _vs,
-                PointToClient(_currentScreen),
+                ToLocal(_currentScreen, monitorBounds),
                 _currentScreen);
         }
     }
@@ -368,19 +490,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
         var hover = ResolveWindow(screenPoint);
         if (ReferenceEquals(hover, _hoverWindow)) return;
         _hoverWindow = hover;
-        RefreshOverlay();
+        InvalidateAllSurfaces();
     }
 
     /// <summary>
-    /// Resolves the window under the cursor by real z-order (WindowFromPoint) so a
-    /// small foreground window wins over a larger background one. Falls back to the
-    /// first bounds-containing window when the topmost hwnd isn't in the cached list
-    /// (e.g. it's the selector overlay itself, or an excluded/untitled window).
+    /// Resolves the window under the cursor by real z-order (WindowFromPoint) so a small
+    /// foreground window wins over a larger background one; falls back to the first
+    /// bounds-containing window when the topmost hwnd isn't in the cached list.
     /// </summary>
     private WindowInfo? ResolveWindow(SD.Point screenPoint)
     {
         IntPtr top = WindowEnumerator.TopLevelWindowFromPoint(screenPoint);
-        if (top != IntPtr.Zero && top != Handle)
+        if (top != IntPtr.Zero && top != Handle && !IsPaneHandle(top))
         {
             var match = _windows.FirstOrDefault(w => w.Handle == top);
             if (match is not null)
@@ -388,6 +509,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
 
         return _windows.FirstOrDefault(w => w.Bounds.Contains(screenPoint));
+    }
+
+    private bool IsPaneHandle(IntPtr handle)
+    {
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed && pane.Handle == handle)
+                return true;
+        }
+        return false;
     }
 
     private void Confirm(SD.Rectangle virtualRect)
@@ -406,6 +537,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void Complete(WF.DialogResult result)
     {
         DialogResult = result;
+        Capture = false;
+        DisposePanes();
         Hide();
         _completion?.TrySetResult(result);
         _completion = null;
@@ -415,13 +548,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         _pendingPx = null;
         _hoverWindow = null;
-        RefreshOverlay();
+        InvalidateAllSurfaces();
     }
 
-    private void RefreshOverlay()
-    {
-        Invalidate();
-    }
+    // ----------------------------------------------------------- drawing helpers
 
     private static void DrawRect(SD.Graphics g, SD.Rectangle rect, SD.Color stroke)
     {
@@ -429,8 +559,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.DrawRectangle(pen, rect);
     }
 
-    /// <summary>Fills the selection with the transparency-key color (so it shows the live
-    /// screen at full brightness, undimmed) and strokes it with the accent border.</summary>
+    /// <summary>Fills the selection with the transparency-key color (full-brightness hole)
+    /// and strokes it with the accent border.</summary>
     private void DrawSelection(SD.Graphics g, SD.Rectangle rect)
     {
         if (rect.Width < 1 || rect.Height < 1)
@@ -457,9 +587,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return path;
     }
 
-    private void DrawCrosshair(SD.Graphics g, SD.Point cursor)
+    private void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor)
     {
-        var guides = FastSelectorGuideLayout.Calculate(ClientSize, cursor, CrosshairGapPx);
+        var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, CrosshairGapPx);
         if (!guides.IsVisible)
             return;
 
@@ -477,14 +607,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
     }
 
-    private void DrawLabel(SD.Graphics g, string text, int x, int y)
+    private void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
     {
         using var font = ThemePalette.UiFont(9f, SD.FontStyle.Bold);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
         int w = size.Width + 16;
         int h = size.Height + 8;
-        int left = Math.Clamp(x, 0, Math.Max(0, ClientRectangle.Width - w));
-        int top = Math.Clamp(y, 0, Math.Max(0, ClientRectangle.Height - h));
+        int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));
+        int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
         var bg = new SD.Rectangle(left, top, w, h);
 
         var prev = g.SmoothingMode;
@@ -498,6 +628,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
     }
 
+    // ----------------------------------------------------------- coordinate helpers
+
+    /// <summary>Screen-physical rect -> local pixels on a 1:1 surface (pure offset).</summary>
+    private static SD.Rectangle ToLocal(SD.Rectangle screenRect, SD.Rectangle monitorBounds) =>
+        new(screenRect.X - monitorBounds.X, screenRect.Y - monitorBounds.Y, screenRect.Width, screenRect.Height);
+
+    private static SD.Point ToLocal(SD.Point screenPoint, SD.Rectangle monitorBounds) =>
+        new(screenPoint.X - monitorBounds.X, screenPoint.Y - monitorBounds.Y);
+
     private SD.Rectangle VirtualFromScreen(SD.Rectangle screenRect)
     {
         var rect = new SD.Rectangle(screenRect.X - _vs.X, screenRect.Y - _vs.Y, screenRect.Width, screenRect.Height);
@@ -508,12 +647,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SD.Rectangle ScreenFromVirtual(SD.Rectangle virtualRect) =>
         new(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height);
 
-    private SD.Rectangle ClientFromScreen(SD.Rectangle screenRect)
-    {
-        SD.Point topLeft = PointToClient(screenRect.Location);
-        return new SD.Rectangle(topLeft.X, topLeft.Y, screenRect.Width, screenRect.Height);
-    }
-
     private static SD.Rectangle Normalize(SD.Point a, SD.Point b)
     {
         int x = Math.Min(a.X, b.X);
@@ -521,4 +654,77 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return new SD.Rectangle(x, y, Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
     }
 
+    /// <summary>True physical cursor position — DPI-independent across monitors, the
+    /// anchor that keeps selection math correct on mixed-DPI setups.</summary>
+    private static SD.Point CursorScreen()
+    {
+        return GetCursorPos(out POINT p) ? new SD.Point(p.X, p.Y) : WF.Cursor.Position;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    /// <summary>
+    /// A non-primary monitor's overlay surface. Owns no state — it forwards input to and
+    /// paints from the coordinator, so the selection is one logical thing spanning monitors.
+    /// </summary>
+    private sealed class SelectorPane : WF.Form
+    {
+        private readonly FastRegionSelectorDialog _owner;
+        private readonly SD.Rectangle _bounds;
+
+        public SelectorPane(FastRegionSelectorDialog owner, SD.Rectangle monitorBounds)
+        {
+            _owner = owner;
+            _bounds = monitorBounds;
+            ConfigureSurface(this);
+            DoubleBuffered = true;
+            SetStyle(PaintStyles, true);
+            Bounds = monitorBounds;
+            Opacity = 0.45;
+        }
+
+        protected override bool ShowWithoutActivation => true;
+
+        protected override void OnMouseDown(WF.MouseEventArgs e)
+        {
+            _owner.HandleMouseDown(e);
+            Capture = _owner.IsDragging;
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseMove(WF.MouseEventArgs e)
+        {
+            _owner.HandleMouseMove();
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseUp(WF.MouseEventArgs e)
+        {
+            Capture = false;
+            _owner.HandleMouseUp(e);
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnKeyDown(WF.KeyEventArgs e)
+        {
+            _owner.HandleKeyDown(e);
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnPaint(WF.PaintEventArgs e)
+        {
+            e.Graphics.Clear(SD.Color.Black);
+            _owner.PaintSurface(e.Graphics, _bounds);
+            base.OnPaint(e);
+        }
+    }
 }
