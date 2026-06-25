@@ -10,26 +10,39 @@ namespace WinShot.Overlay;
 
 public sealed class FastQuickActionsWindow : WF.Form
 {
-    private const int Pad = 12;
-    private const int ButtonSize = 30;
-    private const int ButtonGap = 6;
+    // CleanShot X-style two-card layout: a rounded thumbnail card floats on top,
+    // a separate rounded action panel sits below it with a transparent gap between.
+    private const int Margin = 14;              // transparent breathing room around both cards
+    private const int CardGap = 12;             // vertical gap between thumbnail card and panel
+    private const int PanelPad = 14;            // inner padding of the action panel
+    private const int IconButtonSize = 30;      // the four cream corner icon buttons
+    private const int OcrButtonSize = 26;       // the slim cream OCR control on the left edge
+    private const int PillHeight = 36;          // the cream Copy / Save pills
+    private const int PillGap = 10;             // vertical gap between the two pills
+    private const int PillSideInset = 6;        // keep pills clear of the corner buttons
     private const int MaxThumbWidth = 320;
     private const int MaxThumbHeight = 180;
-    private const int CornerRadius = 14;
+    private const int CardCornerRadius = 14;
+    private const int PillCornerRadius = 9;
+    private const int IconCornerRadius = 8;
     private const int WmNclbuttondown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
 
-    // All colors flow from the one shared palette (mirrors Theme.xaml) so the overlay
-    // matches the rest of the app instead of hardcoding its own grays.
-    private static readonly SD.Color Surface = ThemePalette.ToolbarBg;
-    private static readonly SD.Color SurfaceAlt = ThemePalette.Surface;
-    private static readonly SD.Color SurfaceHover = ThemePalette.SurfaceHover;
+    // Most chrome flows from the shared palette (mirrors Theme.xaml). The signature
+    // CleanShot look is the light "cream" buttons over a translucent dark panel, so the
+    // panel/cream tones are defined here on top of the palette.
+    private static readonly SD.Color PanelFill = SD.Color.FromArgb(0xF2, 0x26, 0x26, 0x28);   // translucent dark panel
+    private static readonly SD.Color CardFill = ThemePalette.ToolbarBg;                       // opaque thumbnail backing
     private static readonly SD.Color Border = ThemePalette.Border;
-    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
-    private static readonly SD.Color TextDim = ThemePalette.TextSecondary;
-    private static readonly SD.Color Accent = ThemePalette.Accent;
+    private static readonly SD.Color BorderStrong = ThemePalette.BorderStrong;
+    private static readonly SD.Color Cream = SD.Color.FromArgb(0xEC, 0xEA, 0xE3);             // the cream button face
+    private static readonly SD.Color CreamHover = SD.Color.FromArgb(0xF6, 0xF4, 0xEE);
+    private static readonly SD.Color CreamPressed = SD.Color.FromArgb(0xDA, 0xD7, 0xCD);
+    private static readonly SD.Color CreamText = SD.Color.FromArgb(0x22, 0x22, 0x24);         // dark glyph/text on cream
     private static readonly SD.Font GlyphFont = ThemePalette.IconFont(11f);
+    private static readonly SD.Font OcrGlyphFont = ThemePalette.IconFont(9f);
     private static readonly SD.Font CloseGlyphFont = ThemePalette.IconFont(9f);
+    private static readonly SD.Font PillFont = ThemePalette.UiFont(11.5f, SD.FontStyle.Bold);
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
 
@@ -41,6 +54,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly WF.ToolTip _toolTip = new() { InitialDelay = 300, ReshowDelay = 100 };
     private readonly List<ActionButton> _buttons = new();
     private SD.Rectangle _thumbRect;
+    private SD.Rectangle _panelRect;
     private SD.Bitmap? _preview;
     private Task? _previewTask;
     private Task? _copyTask;
@@ -86,7 +100,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         _loadPreview = loadPreview;
 
         AutoScaleMode = WF.AutoScaleMode.None;
-        BackColor = Surface;
+        BackColor = ThemePalette.WindowBg;
         DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
@@ -136,7 +150,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        _useRegionCorners = !TryApplySystemRoundedCorners(Handle);
+        // Two separate floating cards with a transparent gap can't use the single-window
+        // DWM rounded-corner trick — we always clip the window to the union of both cards
+        // so the gap (and everything outside the cards) is genuinely transparent.
+        _useRegionCorners = true;
     }
 
     public static FastQuickActionsWindow CreateWithDeferredImageRelease(
@@ -152,7 +169,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             using var bitmap = new SD.Bitmap(MaxThumbWidth, MaxThumbHeight, SD.Imaging.PixelFormat.Format32bppPArgb);
             using (var g = SD.Graphics.FromImage(bitmap))
-                g.Clear(SurfaceAlt);
+                g.Clear(CardFill);
             using var preview = CreatePreviewBitmap(bitmap, MaxThumbWidth, MaxThumbHeight);
             using var window = new FastQuickActionsWindow(
                 (SD.Bitmap)bitmap.Clone(),
@@ -247,18 +264,45 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     protected override void OnPaint(WF.PaintEventArgs e)
     {
-        base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.Clear(Surface);
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(SD.Color.Transparent);
 
-        DrawThumbnail(e.Graphics);
+        DrawThumbnailCard(g);
+        DrawPanel(g);
+
         for (int i = 0; i < _buttons.Count; i++)
-            DrawButton(e.Graphics, _buttons[i], i == _hoverButton, i == _pressedButton);
-
-        using var path = RoundedRect(new SD.Rectangle(0, 0, Width - 1, Height - 1), CornerRadius);
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawPath(pen, path);
+            DrawButton(g, _buttons[i], i == _hoverButton, i == _pressedButton);
     }
+
+    private void DrawThumbnailCard(SD.Graphics g)
+    {
+        // Opaque rounded card backing the thumbnail, with a soft hairline border.
+        using (var path = RoundedRect(_thumbRect, CardCornerRadius))
+        using (var fill = new SD.SolidBrush(CardFill))
+            g.FillPath(fill, path);
+
+        DrawThumbnail(g);
+
+        using var borderPath = RoundedRect(InsetForBorder(_thumbRect), CardCornerRadius);
+        using var pen = new SD.Pen(BorderStrong, 1);
+        g.DrawPath(pen, borderPath);
+    }
+
+    private void DrawPanel(SD.Graphics g)
+    {
+        // Translucent dark rounded panel that hosts the cream controls.
+        using (var path = RoundedRect(_panelRect, CardCornerRadius))
+        using (var fill = new SD.SolidBrush(PanelFill))
+            g.FillPath(fill, path);
+
+        using var borderPath = RoundedRect(InsetForBorder(_panelRect), CardCornerRadius);
+        using var pen = new SD.Pen(Border, 1);
+        g.DrawPath(pen, borderPath);
+    }
+
+    private static SD.Rectangle InsetForBorder(SD.Rectangle r)
+        => new(r.X, r.Y, Math.Max(0, r.Width - 1), Math.Max(0, r.Height - 1));
 
     protected override void Dispose(bool disposing)
     {
@@ -276,71 +320,155 @@ public sealed class FastQuickActionsWindow : WF.Form
         double scale = Math.Min(1.0, Math.Min(MaxThumbWidth / (double)size.Width, MaxThumbHeight / (double)size.Height));
         int thumbWidth = Math.Max(1, (int)Math.Round(size.Width * scale));
         int thumbHeight = Math.Max(1, (int)Math.Round(size.Height * scale));
-        int buttonCount = 6;
-        int buttonRowWidth = buttonCount * ButtonSize + (buttonCount - 1) * ButtonGap;
-        int contentWidth = Math.Max(thumbWidth, buttonRowWidth);
 
-        ClientSize = new SD.Size(contentWidth + Pad * 2, thumbHeight + ButtonSize + Pad * 3);
-        _thumbRect = new SD.Rectangle((ClientSize.Width - thumbWidth) / 2, Pad, thumbWidth, thumbHeight);
+        // Panel is wide enough for two corner icon buttons + breathing room and the pills,
+        // and at least as wide as the thumbnail card so the two cards align.
+        int minPanelWidth = IconButtonSize * 2 + PanelPad * 2 + 120;   // pills need room between the corners
+        int panelWidth = Math.Max(thumbWidth, minPanelWidth);
 
-        int x = (ClientSize.Width - buttonRowWidth) / 2;
-        int y = _thumbRect.Bottom + Pad;
-        AddButton("\uE718", "Pin (P)", x, y, () => PinRequested?.Invoke(this));
-        x += ButtonSize + ButtonGap;
-        AddButton("\uE8C8", "Copy (C)", x, y, CopyAsync);
-        x += ButtonSize + ButtonGap;
-        AddButton("\uE70F", "Edit (E)", x, y, () => EditRequested?.Invoke(this));
-        x += ButtonSize + ButtonGap;
-        AddButton("\uE74E", "Save (S)", x, y, SaveAsync);
-        x += ButtonSize + ButtonGap;
-        AddButton("\uE721", "OCR (O)", x, y, () => OcrRequested?.Invoke(this));
-        x += ButtonSize + ButtonGap;
-        AddButton("\uEB9F", "Background (B)", x, y, () => BackgroundRequested?.Invoke(this));
+        // The four corner icon buttons frame the two stacked pills in the centre, all sharing
+        // one vertical band. The left column also has to fit the OCR control between the Pin
+        // and Edit corners, so the band must clear: Pin + gap + OCR + gap + Edit.
+        int pillsBlockHeight = PillHeight * 2 + PillGap;
+        int leftColumnHeight = IconButtonSize * 2 + OcrButtonSize + CardGap * 2;
+        int panelHeight = PanelPad * 2 + Math.Max(pillsBlockHeight, leftColumnHeight);
 
-        _buttons.Add(new ActionButton(
-            "\uE8BB",
-            "Close (Esc)",
-            new SD.Rectangle(ClientSize.Width - 25, 3, 22, 22),
-            Close,
-            CloseGlyphFont));
+        int contentWidth = Math.Max(thumbWidth, panelWidth);
+
+        ClientSize = new SD.Size(
+            contentWidth + Margin * 2,
+            thumbHeight + CardGap + panelHeight + Margin * 2);
+
+        _thumbRect = new SD.Rectangle(
+            (ClientSize.Width - thumbWidth) / 2,
+            Margin,
+            thumbWidth,
+            thumbHeight);
+
+        _panelRect = new SD.Rectangle(
+            (ClientSize.Width - panelWidth) / 2,
+            _thumbRect.Bottom + CardGap,
+            panelWidth,
+            panelHeight);
+
+        BuildPanelButtons();
     }
 
-    private void AddButton(string glyph, string tip, int x, int y, Action action)
-        => _buttons.Add(new ActionButton(glyph, tip, new SD.Rectangle(x, y, ButtonSize, ButtonSize), action, GlyphFont));
+    private void BuildPanelButtons()
+    {
+        int left = _panelRect.Left + PanelPad;
+        int right = _panelRect.Right - PanelPad - IconButtonSize;
+        int top = _panelRect.Top + PanelPad;
+        int bottom = _panelRect.Bottom - PanelPad - IconButtonSize;
+
+        // Four cream corner icon buttons (Pin / Close / Edit / Background).
+        AddIconButton("\uE718", "Pin (P)", left, top, () => PinRequested?.Invoke(this));
+        AddIconButton("\uE8BB", "Close (Esc)", right, top, Close);
+        AddIconButton("\uE70F", "Edit (E)", left, bottom, () => EditRequested?.Invoke(this));
+        AddIconButton("\uEB9F", "Background (B)", right, bottom, () => BackgroundRequested?.Invoke(this));
+
+        // Two stacked cream pills (Copy / Save) centred between the corners.
+        int pillsBlockHeight = PillHeight * 2 + PillGap;
+        int pillLeft = left + IconButtonSize + PillSideInset;
+        int pillRight = right - PillSideInset;
+        int pillWidth = Math.Max(64, pillRight - pillLeft);
+        int pillX = _panelRect.Left + (_panelRect.Width - pillWidth) / 2;
+        int pillTop = _panelRect.Top + (_panelRect.Height - pillsBlockHeight) / 2;
+
+        AddPillButton("\uE8C8", "Copy", "Copy (C)", pillX, pillTop, pillWidth, CopyAsync);
+        AddPillButton("\uE74E", "Save", "Save (S)", pillX, pillTop + PillHeight + PillGap, pillWidth, SaveAsync);
+
+        // OCR has no CleanShot corner equivalent, so it lives as a slim cream control on the
+        // left edge, vertically centred between the Pin and Edit corner buttons (and stays on
+        // the keyboard "O" shortcut). This strip is clear of the centred Copy/Save pills.
+        int ocrX = left + (IconButtonSize - OcrButtonSize) / 2;
+        int ocrY = _panelRect.Top + (_panelRect.Height - OcrButtonSize) / 2;
+        _buttons.Add(new ActionButton(
+            "\uE721",
+            "OCR (O)",
+            new SD.Rectangle(ocrX, ocrY, OcrButtonSize, OcrButtonSize),
+            () => OcrRequested?.Invoke(this),
+            OcrGlyphFont,
+            ActionButtonShape.IconSquare,
+            IconCornerRadius));
+    }
+
+    private void AddIconButton(string glyph, string tip, int x, int y, Action action)
+        => _buttons.Add(new ActionButton(
+            glyph,
+            tip,
+            new SD.Rectangle(x, y, IconButtonSize, IconButtonSize),
+            action,
+            tip.StartsWith("Close", StringComparison.Ordinal) ? CloseGlyphFont : GlyphFont,
+            ActionButtonShape.IconSquare,
+            IconCornerRadius));
+
+    private void AddPillButton(string glyph, string label, string tip, int x, int y, int width, Action action)
+        => _buttons.Add(new ActionButton(
+            glyph,
+            tip,
+            new SD.Rectangle(x, y, width, PillHeight),
+            action,
+            PillFont,
+            ActionButtonShape.Pill,
+            PillCornerRadius)
+        {
+            Label = label,
+        });
 
     private void DrawThumbnail(SD.Graphics g)
     {
-        if (_preview is not null)
+        if (_preview is null)
+            return;
+
+        // Clip the preview to the card's rounded corners so the image follows the card shape.
+        using var clip = RoundedRect(_thumbRect, CardCornerRadius);
+        var oldClip = g.Clip;
+        var oldInterp = g.InterpolationMode;
+        var oldOffset = g.PixelOffsetMode;
+        try
         {
+            g.SetClip(clip, CombineMode.Intersect);
             g.InterpolationMode = InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode = PixelOffsetMode.Half;
             g.DrawImage(_preview, _thumbRect);
-            return;
         }
-
-        using var brush = new SD.SolidBrush(SurfaceAlt);
-        using var pen = new SD.Pen(Border);
-        g.FillRectangle(brush, _thumbRect);
-        g.DrawRectangle(pen, _thumbRect.X, _thumbRect.Y, Math.Max(0, _thumbRect.Width - 1), Math.Max(0, _thumbRect.Height - 1));
+        finally
+        {
+            g.Clip = oldClip;
+            g.InterpolationMode = oldInterp;
+            g.PixelOffsetMode = oldOffset;
+        }
     }
 
     private static void DrawButton(SD.Graphics g, ActionButton button, bool hot, bool pressed)
     {
-        // Rest: glyph only (dim white). Hover: subtle white circle + bright glyph.
-        // Pressed: solid accent-blue circle + white glyph — the one accent identity.
-        if (pressed)
+        // Every control is a light "cream" rounded shape with a dark glyph/label — the
+        // signature CleanShot look. Hover brightens the cream, press darkens it slightly.
+        SD.Color face = pressed ? CreamPressed : hot ? CreamHover : Cream;
+
+        using (var path = RoundedRect(button.Bounds, button.CornerRadius))
         {
-            using var accent = new SD.SolidBrush(Accent);
-            g.FillEllipse(accent, button.Bounds);
-        }
-        else if (hot)
-        {
-            using var hover = new SD.SolidBrush(ThemePalette.HoverFill);
-            g.FillEllipse(hover, button.Bounds);
+            using var fill = new SD.SolidBrush(face);
+            g.FillPath(fill, path);
+
+            using var pen = new SD.Pen(SD.Color.FromArgb(0x14, 0x00, 0x00, 0x00), 1);
+            g.DrawPath(pen, path);
         }
 
-        SD.Color glyphColor = pressed ? SD.Color.White : hot ? TextColor : TextDim;
-        TextRendererDrawGlyph(g, button.Glyph, button.Font, button.Bounds, glyphColor);
+        if (button.Shape == ActionButtonShape.Pill && button.Label is not null)
+            DrawCenteredText(g, button.Label, button.Font, button.Bounds, CreamText);
+        else
+            TextRendererDrawGlyph(g, button.Glyph, button.Font, button.Bounds, CreamText);
+    }
+
+    private static void DrawCenteredText(SD.Graphics g, string text, SD.Font font, SD.Rectangle bounds, SD.Color color)
+    {
+        var flags = WF.TextFormatFlags.HorizontalCenter |
+                    WF.TextFormatFlags.VerticalCenter |
+                    WF.TextFormatFlags.SingleLine |
+                    WF.TextFormatFlags.NoPadding;
+        WF.TextRenderer.DrawText(g, text, font, bounds, color, flags);
     }
 
     private static void TextRendererDrawGlyph(SD.Graphics g, string glyph, SD.Font font, SD.Rectangle bounds, SD.Color color)
@@ -386,9 +514,15 @@ public sealed class FastQuickActionsWindow : WF.Form
             if (!_useRegionCorners || IsDisposed || Width <= 0 || Height <= 0)
                 return;
 
+            // Clip the window to the union of the two cards so the gap between them — and the
+            // margin around them — is genuinely transparent (and click-through).
+            using var thumbPath = RoundedRect(_thumbRect, CardCornerRadius);
+            using var panelPath = RoundedRect(_panelRect, CardCornerRadius);
+            var region = new SD.Region(thumbPath);
+            region.Union(panelPath);
+
             Region?.Dispose();
-            using var path = RoundedRect(new SD.Rectangle(0, 0, Width, Height), CornerRadius);
-            Region = new SD.Region(path);
+            Region = region;
         }));
     }
 
@@ -651,7 +785,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             int index = _buttons.FindIndex(b => b.Tip.StartsWith("Copy", StringComparison.Ordinal));
             if (index < 0) return;
 
-            _buttons[index].Glyph = "\uE73E";
+            // Copy is a pill, so confirm by swapping its label text rather than a glyph.
+            _buttons[index].Label = "Copied";
             Invalidate(_buttons[index].Bounds);
             var timer = new WF.Timer { Interval = 1200 };
             timer.Tick += (_, _) =>
@@ -659,7 +794,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 timer.Stop();
                 timer.Dispose();
                 if (_closed || IsDisposed) return;
-                _buttons[index].Glyph = "\uE8C8";
+                _buttons[index].Label = "Copy";
                 Invalidate(_buttons[index].Bounds);
             };
             timer.Start();
@@ -725,44 +860,28 @@ public sealed class FastQuickActionsWindow : WF.Form
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
-    private static bool TryApplySystemRoundedCorners(IntPtr handle)
+    private enum ActionButtonShape
     {
-        if (Environment.OSVersion.Version.Build < 22000)
-            return false;
-
-        try
-        {
-            int preference = 2;
-            return DwmSetWindowAttribute(
-                handle,
-                33,
-                ref preference,
-                sizeof(int)) == 0;
-        }
-        catch
-        {
-            return false;
-        }
+        IconSquare,
+        Pill,
     }
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(
-        IntPtr hwnd,
-        int attribute,
-        ref int attributeValue,
-        int attributeSize);
 
     private sealed class ActionButton(
         string glyph,
         string tip,
         SD.Rectangle bounds,
         Action action,
-        SD.Font font)
+        SD.Font font,
+        ActionButtonShape shape = ActionButtonShape.IconSquare,
+        int cornerRadius = IconCornerRadius)
     {
         public string Glyph { get; set; } = glyph;
         public string Tip { get; } = tip;
         public SD.Rectangle Bounds { get; } = bounds;
         public Action Action { get; } = action;
         public SD.Font Font { get; } = font;
+        public ActionButtonShape Shape { get; } = shape;
+        public int CornerRadius { get; } = cornerRadius;
+        public string? Label { get; set; }
     }
 }

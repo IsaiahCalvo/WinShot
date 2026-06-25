@@ -32,20 +32,59 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- Centered blue "Restore" pill overlaid on the selected card. -->
+        <Style x:Key="RestorePill" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="16" Padding="16,8">
+                            <Border.Effect>
+                                <DropShadowEffect Color="Black" BlurRadius="12"
+                                                  ShadowDepth="0" Opacity="0.45"/>
+                            </Border.Effect>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                                        VerticalAlignment="Center">
+                                <!-- Refresh/restore glyph -->
+                                <TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}"
+                                           FontSize="13" Foreground="White"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="Restore" Foreground="White" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource AccentHoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- CleanShot-style filter pill: transparent/subtle when inactive,
+             solid accent fill when the segment is selected. -->
         <Style x:Key="FilterChip" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Medium"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Margin" Value="3,0"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Bd" Background="{StaticResource SurfaceBrush}" CornerRadius="12" Padding="12,4">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="14" Padding="14,6">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
@@ -60,15 +99,16 @@
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="{StaticResource ToolbarBgBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="0,0,0,1" Padding="12,8">
-            <StackPanel Orientation="Horizontal">
+                BorderThickness="0,0,0,1" Padding="12,10">
+            <!-- Centered segmented filter pills (CleanShot X style). -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                 <RadioButton x:Name="ChipAll" Content="All" IsChecked="True"
                              Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
-                <RadioButton x:Name="ChipImages" Content="Images"
+                <RadioButton x:Name="ChipImages" Content="Screenshots"
                              Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
-                <RadioButton x:Name="ChipVideo" Content="Video"
+                <RadioButton x:Name="ChipVideo" Content="Videos"
                              Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
-                <RadioButton x:Name="ChipGif" Content="GIF"
+                <RadioButton x:Name="ChipGif" Content="GIFs"
                              Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
             </StackPanel>
         </Border>
@@ -108,12 +148,23 @@
                                             BorderBrush="Transparent" BorderThickness="2"
                                             CornerRadius="{StaticResource RadiusCard}"
                                             Background="Transparent">
-                                        <ContentPresenter/>
+                                        <Grid>
+                                            <ContentPresenter/>
+                                            <!-- Centered blue Restore pill, shown only on the
+                                                 selected card. Wired to the existing open action. -->
+                                            <Button x:Name="RestoreOverlay"
+                                                    Style="{StaticResource RestorePill}"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                    Visibility="Collapsed"
+                                                    Click="OnRestore"/>
+                                        </Grid>
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsSelected" Value="True">
                                             <Setter TargetName="SelectionRing" Property="BorderBrush"
                                                     Value="{StaticResource AccentBrush}"/>
+                                            <Setter TargetName="RestoreOverlay" Property="Visibility"
+                                                    Value="Visible"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -196,12 +247,13 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- Thin caption: filename + friendly relative date. -->
+                                <!-- Centered relative-time caption ("1 minute ago"),
+                                     CleanShot X style. Filename/size kept as the tooltip. -->
                                 <StackPanel Grid.Row="1" Margin="10,8,10,10">
-                                    <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimaryBrush}"
-                                               FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}"/>
-                                    <TextBlock Text="{Binding Caption}" Foreground="{StaticResource TextSecondaryBrush}"
-                                               FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding RelativeTime}" Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12" HorizontalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding Caption}"/>
                                 </StackPanel>
                             </Grid>
                             <Border.Style>

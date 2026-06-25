@@ -66,18 +66,18 @@
             <Setter Property="LastChildFill" Value="True"/>
         </Style>
 
-        <!-- Sidebar nav item: Fluent glyph + label with an accent selection pill. -->
-        <Style x:Key="NavItem" TargetType="ListBoxItem">
+        <!-- Top tab: Fluent glyph stacked above a small label. Active tab tints accent,
+             matching CleanShot's icon-over-label tab strip. -->
+        <Style x:Key="NavTab" TargetType="ListBoxItem">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Margin" Value="0,1"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="2,0"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="10,8">
-                            <ContentPresenter VerticalAlignment="Center"/>
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
+                                Padding="10,6" MinWidth="64">
+                            <ContentPresenter HorizontalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -92,82 +92,90 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- A single icon-over-label tab cell. -->
+        <Style x:Key="NavTabIcon" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+        <Style x:Key="NavTabLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="0">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="186"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+    <DockPanel Margin="0">
 
-        <!-- =============================== SIDEBAR =============================== -->
-        <Border Grid.Column="0" Background="{StaticResource WindowBgBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+        <!-- =============================== TOP TAB BAR =============================== -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource WindowBgBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
             <ListBox x:Name="SectionList" Background="Transparent" BorderThickness="0"
-                     Margin="10,14,10,14" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     ItemContainerStyle="{StaticResource NavItem}"
+                     Padding="10,10" HorizontalAlignment="Center"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                     ItemContainerStyle="{StaticResource NavTab}"
                      SelectedIndex="0" SelectionChanged="OnSectionChanged">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE713;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="General" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE713;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="General"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE765;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="Shortcuts" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE765;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Shortcuts"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE722;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="Capture &amp; After" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE722;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Capture"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE714;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="Recording" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE714;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Recording"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8C1;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="OCR &amp; Scrolling" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE8C1;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="OCR"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8AC;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="File Naming" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE8AC;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Naming"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE81C;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="History" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE81C;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="History"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE90F;" FontSize="15"
-                                   Width="24" VerticalAlignment="Center"/>
-                        <TextBlock Text="Advanced" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE90F;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Advanced"/>
                     </StackPanel>
                 </ListBoxItem>
             </ListBox>
         </Border>
 
-        <!-- =============================== RIGHT PANE =============================== -->
-        <DockPanel Grid.Column="1" Margin="20,16,20,16">
+        <!-- =============================== CONTENT PANE =============================== -->
+        <DockPanel Margin="20,16,20,16">
             <!-- Footer action bar -->
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,8,0,0">
@@ -498,5 +506,5 @@
                 </ScrollViewer>
             </Grid>
         </DockPanel>
-    </Grid>
+    </DockPanel>
 </Window>

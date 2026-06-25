@@ -27,9 +27,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private const int DragThresholdPx = 4;
     private const int CrosshairGapPx = 10;
     private static readonly SD.Color Accent = ThemePalette.Accent;
-    private static readonly SD.Color ToolbarBack = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
-    private static readonly SD.Color ButtonSelected = ThemePalette.Accent;
     private static FastAllInOneSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
@@ -893,85 +890,97 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         }
     }
 
+    /// <summary>
+    /// CleanShot-style all-in-one capture bar. One borderless translucent host paints TWO
+    /// separate rounded dark bars: a main bar of icon-over-label mode buttons (Area, Fullscreen,
+    /// Window, Scrolling, Timer, OCR, Recording) and, to its right, a smaller bar holding the two
+    /// size fields, an expand/aspect-lock toggle, and a crop/confirm button. Everything except the
+    /// two real size text boxes is owner-drawn so there are no WinForms focus rectangles and the
+    /// bars get true rounded corners. The window's Region is the union of the two bar shapes, so the
+    /// frozen desktop shows through the gap between them, matching CleanShot.
+    /// </summary>
     private sealed class ToolbarForm : WF.Form
     {
+        // CleanShot palette: a near-black bar (form-level Opacity gives the soft translucency),
+        // white line-art glyphs over dim captions, the single app accent for the active mode.
+        private static readonly SD.Color BarFill = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
+        private static readonly SD.Color BarBorder = SD.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF);
+        private static readonly SD.Color HoverFill = SD.Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF);
+        private static readonly SD.Color SelectedFill = ThemePalette.Accent;
+        private static readonly SD.Color GlyphColor = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
+        private static readonly SD.Color LabelColor = SD.Color.FromArgb(0xC8, 0xC8, 0xCC);
+        private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x33, 0x33, 0x36);
+
+        private const int BarHeight = 64;
+        private const int CornerRadius = 14;
+        private const int ButtonWidth = 64;
+        private const int ButtonGap = 2;
+        private const int BarPadX = 6;
+        private const int BarGap = 12;       // transparent gap between the two bars
+        private const int GlyphTop = 12;
+        private const int GlyphHeight = 24;
+        private const int LabelTop = 38;
+        private const int LabelHeight = 16;
+
         private readonly FastAllInOneSelectorDialog _owner;
-        private readonly WF.Button[] _modeButtons;
+        private readonly SD.Font _glyphFont = ThemePalette.IconFont(15f);
+        private readonly SD.Font _caretFont = ThemePalette.IconFont(7f);
+        private readonly SD.Font _ocrFont = ThemePalette.UiFont(13f, SD.FontStyle.Bold);
+        private readonly SD.Font _labelFont = ThemePalette.UiFont(7.5f);
+        private readonly SD.Font _fieldFont = ThemePalette.UiFont(9.5f);
+        private readonly List<BarButton> _buttons = new();
         private readonly WF.TextBox _widthBox;
         private readonly WF.TextBox _heightBox;
-        private readonly WF.CheckBox _lockBox;
+        private readonly WF.ToolTip _toolTip = new() { InitialDelay = 350, ReshowDelay = 120 };
+
+        private SD.Rectangle _mainBar;       // client-space bounds of the mode bar
+        private SD.Rectangle _sizeBar;       // client-space bounds of the size bar
+        private SD.Rectangle _expandRect;    // aspect-lock toggle inside the size bar
+        private SD.Rectangle _cropRect;      // confirm/crop button inside the size bar
+        private SD.Rectangle _xLabelRect;    // the "×" between the size fields
+        private int _selectedMode;
+        private int _hoverIndex = -1;
+        private bool _aspectLocked;
 
         public ToolbarForm(FastAllInOneSelectorDialog owner)
         {
             _owner = owner;
 
             AutoScaleMode = WF.AutoScaleMode.None;
-            BackColor = ToolbarBack;
+            BackColor = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
+            DoubleBuffered = true;
             FormBorderStyle = WF.FormBorderStyle.None;
             KeyPreview = true;
             ShowInTaskbar = false;
             StartPosition = WF.FormStartPosition.Manual;
             TopMost = true;
+            SetStyle(
+                WF.ControlStyles.AllPaintingInWmPaint |
+                WF.ControlStyles.OptimizedDoubleBuffer |
+                WF.ControlStyles.ResizeRedraw |
+                WF.ControlStyles.UserPaint,
+                true);
 
-            var panel = new WF.FlowLayoutPanel
-            {
-                AutoSize = true,
-                AutoSizeMode = WF.AutoSizeMode.GrowAndShrink,
-                BackColor = ToolbarBack,
-                FlowDirection = WF.FlowDirection.LeftToRight,
-                Padding = new WF.Padding(12, 6, 12, 6),
-                WrapContents = false,
-            };
-
-            _modeButtons =
-            [
-                ModeButton("Area", 0, AllInOneAction.Capture),
-                ModeButton("Window", 1, AllInOneAction.Capture),
-                ModeButton("Record", 2, AllInOneAction.Record),
-                ModeButton("OCR", 3, AllInOneAction.Ocr),
-                ModeButton("Scroll", 4, AllInOneAction.Scroll),
-            ];
-
-            foreach (var button in _modeButtons)
-                panel.Controls.Add(button);
-
-            var fullscreen = ToolButton("Fullscreen");
-            fullscreen.Click += (_, _) => _owner.ConfirmFullscreen();
-            panel.Controls.Add(fullscreen);
-            panel.Controls.Add(Separator());
+            // Mode buttons — icon (or "Aa" for OCR) over a small caption, in reference order.
+            // Fullscreen confirms immediately; the rest select a mode that drives SelectedAction.
+            _buttons.Add(new BarButton("Area", "", 0, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Fullscreen", "", -1, AllInOneAction.Capture, isMode: false));
+            _buttons.Add(new BarButton("Window", "", 1, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Scrolling", "", 2, AllInOneAction.Scroll, isMode: true));
+            _buttons.Add(new BarButton("Timer", "", 3, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("OCR", "Aa", 4, AllInOneAction.Ocr, isMode: true) { IsTextGlyph = true });
+            _buttons.Add(new BarButton("Recording", "", 5, AllInOneAction.Record, isMode: true));
 
             _widthBox = SizeBox();
             _heightBox = SizeBox();
-            panel.Controls.Add(_widthBox);
-            panel.Controls.Add(Label("x"));
-            panel.Controls.Add(_heightBox);
+            Controls.Add(_widthBox);
+            Controls.Add(_heightBox);
 
-            _lockBox = new WF.CheckBox
-            {
-                Appearance = WF.Appearance.Button,
-                AutoSize = true,
-                BackColor = ToolbarBack,
-                FlatStyle = WF.FlatStyle.Flat,
-                ForeColor = SD.Color.White,
-                Margin = new WF.Padding(6, 0, 0, 0),
-                Padding = new WF.Padding(8, 5, 8, 5),
-                Text = "Lock",
-                TextAlign = SD.ContentAlignment.MiddleCenter,
-            };
-            _lockBox.FlatAppearance.BorderSize = 0;
-            _lockBox.CheckedChanged += (_, _) =>
-            {
-                _lockBox.BackColor = _lockBox.Checked ? ButtonSelected : ToolbarBack;
-            };
-            panel.Controls.Add(_lockBox);
+            BuildLayout();
 
-            Controls.Add(panel);
-            ClientSize = panel.PreferredSize;
-            IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 20, 20);
-            Region = SD.Region.FromHrgn(regionHandle);
-            DeleteObject(regionHandle);
-            UpdateMode(0);
-
+            MouseMove += OnBarMouseMove;
+            MouseLeave += (_, _) => SetHover(-1);
+            MouseClick += OnBarMouseClick;
             KeyDown += (_, e) =>
             {
                 if (e.KeyCode == WF.Keys.Escape)
@@ -981,11 +990,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         protected override bool ShowWithoutActivation => true;
 
+        /// <summary>Locked aspect ratio when the expand toggle is on (drives drag/exact-size).</summary>
         public double? AspectRatio
         {
             get
             {
-                if (!_lockBox.Checked)
+                if (!_aspectLocked)
                     return null;
                 if (!int.TryParse(_widthBox.Text, out int w) || !int.TryParse(_heightBox.Text, out int h))
                     return null;
@@ -1009,49 +1019,254 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         public void UpdateMode(int selectedMode)
         {
-            for (int i = 0; i < _modeButtons.Length; i++)
-                _modeButtons[i].BackColor = i == selectedMode ? ButtonSelected : ToolbarBack;
+            _selectedMode = selectedMode;
+            Invalidate(_mainBar);
         }
 
-        private WF.Button ModeButton(string text, int mode, AllInOneAction action)
-        {
-            var button = ToolButton(text);
-            button.Click += (_, _) => _owner.SetMode(mode, action);
-            return button;
-        }
+        // ---------------------------------------------------------------- layout
 
-        private static WF.Button ToolButton(string text)
+        private void BuildLayout()
         {
-            var button = new WF.Button
+            int x = BarPadX;
+            foreach (var b in _buttons)
             {
-                AutoSize = true,
-                BackColor = ToolbarBack,
-                Cursor = WF.Cursors.Hand,
-                FlatStyle = WF.FlatStyle.Flat,
-                ForeColor = SD.Color.White,
-                Margin = new WF.Padding(2, 0, 2, 0),
-                Padding = new WF.Padding(10, 5, 10, 5),
-                Text = text,
-                UseVisualStyleBackColor = false,
-            };
-            button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseOverBackColor = ButtonHot;
-            return button;
+                b.Bounds = new SD.Rectangle(x, 0, ButtonWidth, BarHeight);
+                x += ButtonWidth + ButtonGap;
+            }
+
+            int mainWidth = x - ButtonGap + BarPadX;
+            _mainBar = new SD.Rectangle(0, 0, mainWidth, BarHeight);
+
+            // Size bar: [ width ] × [ height ]  [expand]  [crop ▾]
+            const int fieldW = 48;
+            const int iconW = 34;
+            int innerPad = 12;
+            // A single-line TextBox sizes its own height to the font; center on that real height.
+            int fieldH = _widthBox.PreferredHeight;
+            int sizeBarLeft = _mainBar.Right + BarGap;
+            int sx = sizeBarLeft + innerPad;
+            int fieldY = (BarHeight - fieldH) / 2;
+
+            _widthBox.SetBounds(sx, fieldY, fieldW, fieldH);
+            sx += fieldW;
+            _xLabelRect = new SD.Rectangle(sx, 0, 16, BarHeight);
+            sx += 16;
+            _heightBox.SetBounds(sx, fieldY, fieldW, fieldH);
+            sx += fieldW + 8;
+
+            _expandRect = new SD.Rectangle(sx, (BarHeight - 40) / 2, iconW, 40);
+            sx += iconW + 4;
+            _cropRect = new SD.Rectangle(sx, (BarHeight - 40) / 2, iconW + 12, 40);
+            sx += iconW + 12 + innerPad;
+
+            _sizeBar = new SD.Rectangle(sizeBarLeft, 0, sx - sizeBarLeft, BarHeight);
+
+            ClientSize = new SD.Size(_sizeBar.Right, BarHeight);
+            ApplyRegion();
         }
+
+        private void ApplyRegion()
+        {
+            // The host window is shaped to the two bars only, so the desktop shows through the gap.
+            IntPtr main = CreateRoundRectRgn(
+                _mainBar.Left, _mainBar.Top, _mainBar.Right + 1, _mainBar.Bottom + 1,
+                CornerRadius * 2, CornerRadius * 2);
+            IntPtr size = CreateRoundRectRgn(
+                _sizeBar.Left, _sizeBar.Top, _sizeBar.Right + 1, _sizeBar.Bottom + 1,
+                CornerRadius * 2, CornerRadius * 2);
+            CombineRgn(main, main, size, RgnOr);
+            Region?.Dispose();
+            Region = SD.Region.FromHrgn(main);
+            DeleteObject(main);
+            DeleteObject(size);
+        }
+
+        // ---------------------------------------------------------------- painting
+
+        protected override void OnPaint(WF.PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(SD.Color.FromArgb(0x1C, 0x1C, 0x1E));
+
+            PaintBar(g, _mainBar);
+            PaintBar(g, _sizeBar);
+
+            for (int i = 0; i < _buttons.Count; i++)
+                PaintButton(g, _buttons[i], i == _hoverIndex);
+
+            PaintSizeBar(g);
+            base.OnPaint(e);
+        }
+
+        private static void PaintBar(SD.Graphics g, SD.Rectangle bar)
+        {
+            using var path = RoundedRect(new SD.Rectangle(bar.X, bar.Y, bar.Width - 1, bar.Height - 1), CornerRadius);
+            using var fill = new SD.SolidBrush(BarFill);
+            using var pen = new SD.Pen(BarBorder, 1);
+            g.FillPath(fill, path);
+            g.DrawPath(pen, path);
+        }
+
+        private void PaintButton(SD.Graphics g, BarButton b, bool hot)
+        {
+            bool selected = b.IsMode && b.Mode == _selectedMode;
+            var inner = SD.Rectangle.Inflate(b.Bounds, -4, -8);
+            if (selected || hot)
+            {
+                using var path = RoundedRect(inner, 9);
+                using var brush = new SD.SolidBrush(selected ? SelectedFill : HoverFill);
+                g.FillPath(brush, path);
+            }
+
+            SD.Color glyphColor = selected ? SD.Color.White : GlyphColor;
+            var glyphRect = new SD.Rectangle(b.Bounds.X, GlyphTop, b.Bounds.Width, GlyphHeight);
+            WF.TextRenderer.DrawText(g, b.Glyph, b.IsTextGlyph ? _ocrFont : _glyphFont, glyphRect, glyphColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+
+            var labelRect = new SD.Rectangle(b.Bounds.X, LabelTop, b.Bounds.Width, LabelHeight);
+            WF.TextRenderer.DrawText(g, b.Label, _labelFont, labelRect,
+                selected ? SD.Color.White : LabelColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+        }
+
+        private void PaintSizeBar(SD.Graphics g)
+        {
+            // Soft rounded wells behind the two size fields, plus the "×" separator.
+            DrawFieldWell(g, _widthBox.Bounds);
+            DrawFieldWell(g, _heightBox.Bounds);
+            WF.TextRenderer.DrawText(g, "×", _fieldFont, _xLabelRect, LabelColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+
+            // Expand / aspect-lock toggle (diagonal arrows). Accent-filled while locked.
+            bool expandHot = _hoverIndex == HoverExpand;
+            if (_aspectLocked || expandHot)
+            {
+                using var path = RoundedRect(_expandRect, 8);
+                using var brush = new SD.SolidBrush(_aspectLocked ? SelectedFill : HoverFill);
+                g.FillPath(brush, path);
+            }
+            WF.TextRenderer.DrawText(g, "", _glyphFont, _expandRect,
+                _aspectLocked ? SD.Color.White : GlyphColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+
+            // Crop / confirm with dropdown caret.
+            bool cropHot = _hoverIndex == HoverCrop;
+            if (cropHot)
+            {
+                using var path = RoundedRect(_cropRect, 8);
+                using var brush = new SD.SolidBrush(HoverFill);
+                g.FillPath(brush, path);
+            }
+            var cropGlyphRect = new SD.Rectangle(_cropRect.X, _cropRect.Y, _cropRect.Width - 12, _cropRect.Height);
+            WF.TextRenderer.DrawText(g, "", _glyphFont, cropGlyphRect, GlyphColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+            var caretRect = new SD.Rectangle(_cropRect.Right - 14, _cropRect.Y, 12, _cropRect.Height);
+            WF.TextRenderer.DrawText(g, "", _caretFont, caretRect, LabelColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+        }
+
+        private static void DrawFieldWell(SD.Graphics g, SD.Rectangle field)
+        {
+            var well = SD.Rectangle.Inflate(field, 3, 3);
+            using var path = RoundedRect(well, 7);
+            using var brush = new SD.SolidBrush(FieldFill);
+            g.FillPath(brush, path);
+        }
+
+        // ---------------------------------------------------------------- input
+
+        private const int HoverExpand = 1000;
+        private const int HoverCrop = 1001;
+
+        private void OnBarMouseMove(object? sender, WF.MouseEventArgs e)
+        {
+            int hit = HitTest(e.Location);
+            SetHover(hit);
+        }
+
+        private void SetHover(int index)
+        {
+            if (_hoverIndex == index)
+                return;
+            _hoverIndex = index;
+            Cursor = index == -1 ? WF.Cursors.Default : WF.Cursors.Hand;
+            _toolTip.SetToolTip(this,
+                index is >= 0 and < HoverExpand ? _buttons[index].Label
+                : index == HoverExpand ? "Lock aspect ratio"
+                : index == HoverCrop ? "Capture region"
+                : null);
+            Invalidate();
+        }
+
+        private void OnBarMouseClick(object? sender, WF.MouseEventArgs e)
+        {
+            if (e.Button != WF.MouseButtons.Left)
+                return;
+
+            int hit = HitTest(e.Location);
+            if (hit == HoverExpand)
+            {
+                _aspectLocked = !_aspectLocked;
+                Invalidate();
+                return;
+            }
+            if (hit == HoverCrop)
+            {
+                _owner.Cancel();   // dismiss the bar; the live region/drag drives the actual capture
+                return;
+            }
+            if (hit < 0 || hit >= _buttons.Count)
+                return;
+
+            var b = _buttons[hit];
+            if (b.IsMode)
+                _owner.SetMode(b.Mode, b.Action);
+            else
+                _owner.ConfirmFullscreen();
+        }
+
+        private int HitTest(SD.Point p)
+        {
+            for (int i = 0; i < _buttons.Count; i++)
+            {
+                if (_buttons[i].Bounds.Contains(p))
+                    return i;
+            }
+            if (_expandRect.Contains(p))
+                return HoverExpand;
+            if (_cropRect.Contains(p))
+                return HoverCrop;
+            return -1;
+        }
+
+        // ---------------------------------------------------------------- helpers
 
         private WF.TextBox SizeBox()
         {
             var box = new WF.TextBox
             {
-                BackColor = SD.Color.FromArgb(58, 58, 58),
-                BorderStyle = WF.BorderStyle.FixedSingle,
+                BackColor = FieldFill,
+                BorderStyle = WF.BorderStyle.None,
+                Font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold),
                 ForeColor = SD.Color.White,
-                Margin = new WF.Padding(2, 2, 2, 0),
                 TextAlign = WF.HorizontalAlignment.Center,
-                Width = 48,
             };
             box.KeyDown += (_, e) =>
             {
+                if (e.KeyCode == WF.Keys.Escape)
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    _owner.Cancel();
+                    return;
+                }
                 if (e.KeyCode != WF.Keys.Enter)
                     return;
                 e.Handled = true;
@@ -1062,27 +1277,52 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             return box;
         }
 
-        private static WF.Control Label(string text) =>
-            new WF.Label
-            {
-                AutoSize = true,
-                ForeColor = SD.Color.FromArgb(170, 170, 170),
-                Margin = new WF.Padding(4, 6, 4, 0),
-                Text = text,
-            };
+        private static SD.Drawing2D.GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
+        {
+            int d = radius * 2;
+            var path = new SD.Drawing2D.GraphicsPath();
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return path;
+            path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
+            path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
+            path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+            path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
 
-        private static WF.Control Separator() =>
-            new WF.Label
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
             {
-                AutoSize = false,
-                BackColor = SD.Color.FromArgb(90, 90, 90),
-                Margin = new WF.Padding(8, 2, 8, 2),
-                Width = 1,
-                Height = 24,
-            };
+                _glyphFont.Dispose();
+                _caretFont.Dispose();
+                _ocrFont.Dispose();
+                _labelFont.Dispose();
+                _fieldFont.Dispose();
+                _toolTip.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private sealed class BarButton(string label, string glyph, int mode, AllInOneAction action, bool isMode)
+        {
+            public string Label { get; } = label;
+            public string Glyph { get; } = glyph;
+            public int Mode { get; } = mode;
+            public AllInOneAction Action { get; } = action;
+            public bool IsMode { get; } = isMode;
+            public bool IsTextGlyph { get; init; }
+            public SD.Rectangle Bounds { get; set; }
+        }
+
+        private const int RgnOr = 2;
 
         [System.Runtime.InteropServices.DllImport("gdi32.dll")]
         private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
+
+        [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+        private static extern int CombineRgn(IntPtr dst, IntPtr src1, IntPtr src2, int mode);
 
         [System.Runtime.InteropServices.DllImport("gdi32.dll")]
         private static extern bool DeleteObject(IntPtr handle);

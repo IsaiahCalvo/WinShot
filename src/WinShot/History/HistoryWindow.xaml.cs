@@ -732,6 +732,14 @@ public partial class HistoryWindow : Window
             OpenItem(item);
     }
 
+    /// <summary>Centered "Restore" pill on the selected card: opens the capture
+    /// (same action as double-click / Enter / context-menu Open).</summary>
+    private void OnRestore(object sender, RoutedEventArgs e)
+    {
+        if (GetItem(sender) is { } item)
+            OpenItem(item);
+    }
+
     private void OnReveal(object sender, RoutedEventArgs e)
     {
         if (GetItem(sender) is not { } item) return;
@@ -824,6 +832,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
         CapturedAt = ParseCapturedAt(filePath);
         FileSize = TryGetFileSize(filePath);
         Caption = BuildCaption(CapturedAt, FileSize);
+        RelativeTime = BuildRelativeTime(CapturedAt);
         DayGroup = BuildDayGroup(CapturedAt);
     }
 
@@ -838,8 +847,13 @@ public sealed class HistoryItem : INotifyPropertyChanged
     /// the same format HistoryService writes. Falls back to last-write time.</summary>
     public DateTime CapturedAt { get; }
     public long FileSize { get; }
-    /// <summary>Friendly caption shown under the thumbnail, e.g. "Today 2:14 PM · 1.2 MB".</summary>
+    /// <summary>Friendly caption (filename context), e.g. "Today 2:14 PM · 1.2 MB".
+    /// Shown as the tooltip on the card caption.</summary>
     public string Caption { get; }
+
+    /// <summary>CleanShot-style relative-time caption shown under the thumbnail,
+    /// e.g. "1 minute ago", "3 minutes ago", "Yesterday".</summary>
+    public string RelativeTime { get; }
 
     /// <summary>Day-header label for grouping: "TODAY", "YESTERDAY", a weekday name,
     /// or "MMM D" for older captures. Uppercased for the themed header.</summary>
@@ -892,6 +906,36 @@ public sealed class HistoryItem : INotifyPropertyChanged
 
         string size = FormatSize(bytes);
         return size.Length == 0 ? when : $"{when} · {size}";
+    }
+
+    /// <summary>Builds a CleanShot-style relative-time string from the capture time:
+    /// "Just now", "1 minute ago", "3 minutes ago", "2 hours ago", "Yesterday",
+    /// or an absolute "MMM d" date for older captures.</summary>
+    private static string BuildRelativeTime(DateTime captured)
+    {
+        TimeSpan delta = DateTime.Now - captured;
+        if (delta < TimeSpan.Zero) delta = TimeSpan.Zero;
+
+        if (delta.TotalSeconds < 45) return "Just now";
+        if (delta.TotalMinutes < 60)
+        {
+            int m = Math.Max(1, (int)Math.Round(delta.TotalMinutes));
+            return m == 1 ? "1 minute ago" : $"{m} minutes ago";
+        }
+        if (delta.TotalHours < 24)
+        {
+            int h = (int)delta.TotalHours;
+            return h == 1 ? "1 hour ago" : $"{h} hours ago";
+        }
+
+        DateTime today = DateTime.Today;
+        if (captured.Date == today.AddDays(-1)) return "Yesterday";
+        if (delta.TotalDays < 7)
+        {
+            int d = (int)delta.TotalDays;
+            return d == 1 ? "1 day ago" : $"{d} days ago";
+        }
+        return captured.ToString("MMM d", System.Globalization.CultureInfo.CurrentCulture);
     }
 
     private static string FormatSize(long bytes)

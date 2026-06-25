@@ -49,6 +49,9 @@
                 <!-- Row 1: tools (left) + commit pills (right) -->
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Separate the commit pills from the tool cluster, mirroring
+                             CleanShot's gap between the font pill and the Save / Done group. -->
+                        <Rectangle Style="{StaticResource ToolbarDivider}" Margin="2,0,8,0"/>
                         <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
                                 Content="Save as…" Click="OnSave" ToolTip="Save to a file…"/>
                         <Button Style="{StaticResource PillButtonPrimary}"

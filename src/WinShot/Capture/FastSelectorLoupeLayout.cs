@@ -9,7 +9,8 @@ public readonly record struct FastSelectorLoupe(
     SD.Point CrosshairCenter,
     string Coordinates,
     int Zoom,
-    SD.Point TargetSample);
+    SD.Point TargetSample,
+    int CornerRadius);
 
 public static class FastSelectorLoupeLayout
 {
@@ -67,6 +68,10 @@ public static class FastSelectorLoupeLayout
             Clamp(cursorScreen.X - source.Left, 0, sampleSize - 1),
             Clamp(cursorScreen.Y - source.Top, 0, sampleSize - 1));
 
+        // CleanShot's loupe is a rounded SQUARE with a small corner radius (~8-10px
+        // on a ~120px loupe). Scale the radius with the loupe so it stays subtle.
+        int cornerRadius = Clamp((int)Math.Round(loupeSize * 0.075), 6, 14);
+
         return new FastSelectorLoupe(
             true,
             source,
@@ -74,7 +79,8 @@ public static class FastSelectorLoupeLayout
             crosshair,
             $"{cursorScreen.X}, {cursorScreen.Y}",
             zoom,
-            targetSample);
+            targetSample,
+            cornerRadius);
     }
 
     private static int Clamp(int value, int min, int max)
