@@ -322,20 +322,36 @@ public partial class SettingsWindow : Window
 
         // General
         SaveFolderBox.Text = s.SaveFolder;
-        SelectByTag(FormatCombo, s.ImageFormat, fallbackIndex: 0);
-        AutoCopyCheck.IsChecked = s.AutoCopyToClipboard;
-        SelectByTag(PostActionCombo, s.PostCaptureAction, fallbackIndex: 0);
         StartupCheck.IsChecked = s.LaunchAtStartup;
         HideIconsCheck.IsChecked = s.HideDesktopIconsDuringCapture;
-        HiDpiCheck.IsChecked = s.DownscaleHiDpi;
         PlaySoundsCheck.IsChecked = s.PlaySounds;
+        SelectByTag(ShutterSoundCombo, s.ShutterSound, fallbackIndex: 0);
         ShowTrayIconCheck.IsChecked = s.ShowTrayIcon;
 
+        // General > "After capture" matrix
+        ScreenshotShowOverlayCheck.IsChecked = s.ScreenshotShowOverlay;
+        RecordingShowOverlayCheck.IsChecked = s.RecordingShowOverlay;
+        ScreenshotCopyCheck.IsChecked = s.ScreenshotCopy;
+        RecordingCopyCheck.IsChecked = s.RecordingCopy;
+        ScreenshotSaveCheck.IsChecked = s.ScreenshotSave;
+        RecordingSaveCheck.IsChecked = s.RecordingSave;
+        ScreenshotOpenAnnotateCheck.IsChecked = s.ScreenshotOpenAnnotate;
+        ScreenshotOpenEditorCheck.IsChecked = s.ScreenshotOpenEditor;
+        ScreenshotPinCheck.IsChecked = s.ScreenshotPin;
+        RecordingOpenEditorCheck.IsChecked = s.RecordingOpenEditor;
+
         // Quick Access overlay
+        SelectByTag(OverlayPositionCombo, s.OverlayPosition, fallbackIndex: 0);
+        OverlayMoveToActiveScreenCheck.IsChecked = s.OverlayMoveToActiveScreen;
+        OverlaySizeSlider.Value = Math.Clamp(s.OverlaySizePercent, 0, 100);
         OverlayAutoCloseCheck.IsChecked = s.OverlayAutoClose;
+        SelectByTag(OverlayActionCombo, s.OverlayAutoCloseAction, fallbackIndex: 0);
         // Show a usable interval even when auto-close was previously off / seconds==0.
         OverlayCloseBox.Text = (s.OverlayAutoCloseSeconds > 0 ? s.OverlayAutoCloseSeconds : 5).ToString();
         OverlayCloseBox.IsEnabled = s.OverlayAutoClose;
+        OverlayActionCombo.IsEnabled = s.OverlayAutoClose;
+        OverlayCloseAfterDragCheck.IsChecked = s.OverlayCloseAfterDragging;
+        SelectByTag(OverlaySaveBehaviorCombo, s.OverlaySaveButtonBehavior, fallbackIndex: 0);
 
         // Hotkeys
         HotkeyRegionBox.Text = s.HotkeyCaptureRegion;
@@ -347,42 +363,125 @@ public partial class SettingsWindow : Window
         HotkeyPreviousBox.Text = s.HotkeyCapturePrevious;
         HotkeyAllInOneBox.Text = s.HotkeyAllInOne;
 
-        // Recording
-        RecordingFpsBox.Text = s.RecordingFps.ToString();
-        GifFpsBox.Text = s.GifFps.ToString();
-        RecordAudioCheck.IsChecked = s.RecordAudio;
-        SystemAudioCheck.IsChecked = s.RecordSystemAudio;
-        SelectByTag(WebcamCombo, s.WebcamOverlayPosition, fallbackIndex: 0);
-        WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(s.WebcamOverlaySizePercent).ToString();
+        // Recording > General
+        ShowRecordingControlsCheck.IsChecked = s.ShowRecordingControls;
+        ShowRecordingTimerCheck.IsChecked = s.ShowRecordingTimer;
+        ScaleHiDpiVideoCheck.IsChecked = s.ScaleHiDpiVideo;
+        DoNotDisturbCheck.IsChecked = s.DoNotDisturbWhileRecording;
+        CaptureCursorCheck.IsChecked = s.CaptureCursor;
         ClickHighlightsCheck.IsChecked = s.ShowClickHighlights;
         KeystrokesCheck.IsChecked = s.ShowKeystrokes;
+        RememberLastSelectionCheck.IsChecked = s.RememberLastSelection;
+        DimScreenCheck.IsChecked = s.DimScreenWhileRecording;
+        ShowCountdownCheck.IsChecked = s.ShowRecordingCountdown;
         CountdownBox.Text = s.RecordingCountdownSeconds.ToString();
-        CaptureCursorCheck.IsChecked = s.CaptureCursor;
+        SelectByTag(WebcamCombo, s.WebcamOverlayPosition, fallbackIndex: 0);
+        WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(s.WebcamOverlaySizePercent).ToString();
 
-        // OCR (Annotate tab)
-        OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
-        OcrDetectLinksCheck.IsChecked = s.OcrDetectLinks;
+        // Recording > Video
+        SelectByTag(MaxResolutionCombo, s.RecordingMaxResolution, fallbackIndex: 0);
+        RecordingFpsBox.Text = s.RecordingFps.ToString();
+        RecordAudioCheck.IsChecked = s.RecordAudio;
+        SystemAudioCheck.IsChecked = s.RecordSystemAudio;
+        RecordAudioMonoCheck.IsChecked = s.RecordAudioMono;
+        OpenVideoEditorCheck.IsChecked = s.OpenVideoEditorAfterRecording;
 
-        // Pinned screenshots (Annotate tab)
+        // Recording > GIF
+        GifFpsBox.Text = s.GifFps.ToString();
+        GifQualitySlider.Value = Math.Clamp(s.GifQuality, 0, 100);
+        OptimizeGifsCheck.IsChecked = s.OptimizeGifs;
+        SelectByTag(GifSizeCombo, s.GifSize, fallbackIndex: 0);
+
+        // Screenshots
+        SelectByTag(FormatCombo, s.ImageFormat, fallbackIndex: 0);
+        HiDpiCheck.IsChecked = s.DownscaleHiDpi;
+        ConvertToSrgbCheck.IsChecked = s.ConvertToSrgb;
+        AddPixelBorderCheck.IsChecked = s.AddPixelBorder;
+        SelectByTag(BackgroundCombo, s.ScreenshotBackground, fallbackIndex: 0);
+        SelectByTag(SelfTimerCombo, s.SelfTimerSeconds.ToString(), fallbackIndex: 1);
+        SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
+        CursorOnScreenshotsCheck.IsChecked = s.CursorOnScreenshots;
+        FreezeScreenCheck.IsChecked = s.FreezeScreen;
+        SelectByTag(CrosshairModeCombo, s.CrosshairMode, fallbackIndex: 1);
+        ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
+        ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
+
+        // Annotate
+        InverseArrowCheck.IsChecked = s.InverseArrowDirection;
+        SmoothPencilCheck.IsChecked = s.SmoothPencil;
+        RememberLastToolCheck.IsChecked = s.RememberLastTool;
+        DrawShadowCheck.IsChecked = s.DrawShadowOnObjects;
+        AutoExpandCanvasCheck.IsChecked = s.AutoExpandCanvas;
+        ShowColorNamesCheck.IsChecked = s.ShowColorNames;
+        AlwaysOnTopCheck.IsChecked = s.AlwaysOnTop;
+        ShowDockIconCheck.IsChecked = s.ShowDockIcon;
+
+        // Advanced
+        TemplateBox.Text = s.FileNameTemplate;
+        AskForNameCheck.IsChecked = s.AskForNameAfterCapture;
+        AddRetinaSuffixCheck.IsChecked = s.AddRetinaSuffix;
+        SelectByTag(CopyFormatCombo, s.CopyToClipboardFormat, fallbackIndex: 0);
         PinnedRoundedCornersCheck.IsChecked = s.PinnedRoundedCorners;
         PinnedShadowCheck.IsChecked = s.PinnedShadow;
         PinnedBorderCheck.IsChecked = s.PinnedBorder;
-
-        // Screenshots
-        AddPixelBorderCheck.IsChecked = s.AddPixelBorder;
-        FreezeScreenCheck.IsChecked = s.FreezeScreen;
-        ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
-        ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
-        SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
-
-        // Naming & history (Advanced tab)
-        TemplateBox.Text = s.FileNameTemplate;
-        AskForNameCheck.IsChecked = s.AskForNameAfterCapture;
+        HistorySlider.Value = RetentionDaysToSliderIndex(s.HistoryRetentionDays);
         AllInOneRememberCheck.IsChecked = s.AllInOneRememberLast;
+        SelectByTag(OcrLanguageCombo, s.OcrLanguage, fallbackIndex: 0);
+        OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
+        OcrDetectLinksCheck.IsChecked = s.OcrDetectLinks;
         HistoryLimitBox.Text = s.HistoryLimit.ToString();
         RetentionDaysBox.Text = s.HistoryRetentionDays.ToString();
 
         UpdateTemplatePreview();
+    }
+
+    // ----- Keep-history slider <-> retention-days mapping --------------------
+    // Slider stops: 0 Never, 1 = 1 day, 2 = 3 days, 3 = 1 week, 4 = 1 month.
+    private static readonly int[] HistoryRetentionDayStops = { 0, 1, 3, 7, 30 };
+
+    private static int SliderIndexToRetentionDays(double index)
+    {
+        int i = Math.Clamp((int)Math.Round(index), 0, HistoryRetentionDayStops.Length - 1);
+        return HistoryRetentionDayStops[i];
+    }
+
+    private static int RetentionDaysToSliderIndex(int days)
+    {
+        // Snap to the nearest defined stop (0 stays "Never").
+        int best = 0;
+        int bestDelta = int.MaxValue;
+        for (int i = 0; i < HistoryRetentionDayStops.Length; i++)
+        {
+            int delta = Math.Abs(HistoryRetentionDayStops[i] - days);
+            if (delta < bestDelta) { bestDelta = delta; best = i; }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Keep-history slider moved: mirror the snapped stop into the hidden RetentionDaysBox so
+    /// OnSave's existing ReadInt(RetentionDaysBox) path picks it up. RetentionDaysBox is declared
+    /// after the slider in XAML, so this can fire during InitializeComponent before it exists.
+    /// </summary>
+    private void OnHistorySliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (RetentionDaysBox is null) return;
+        RetentionDaysBox.Text = SliderIndexToRetentionDays(e.NewValue).ToString();
+    }
+
+    /// <summary>
+    /// CleanShot's "Reset all warning dialogs" re-enables every "Don't show again" prompt.
+    /// WinShot has no suppressed-dialog store yet, so this just confirms there's nothing to
+    /// restore rather than silently doing nothing (which reads as a broken button).
+    /// </summary>
+    private void OnResetWarnings(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(
+            this,
+            "All warning dialogs are already enabled.",
+            "Reset warnings",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     private void OnBrowse(object sender, RoutedEventArgs e)
@@ -485,19 +584,46 @@ public partial class SettingsWindow : Window
             // General
             s.SaveFolder = SaveFolderBox.Text.Trim();
             s.ImageFormat = SelectedTag(FormatCombo, "png");
-            s.AutoCopyToClipboard = AutoCopyCheck.IsChecked == true;
-            s.PostCaptureAction = SelectedTag(PostActionCombo, "overlay");
             s.LaunchAtStartup = StartupCheck.IsChecked == true;
             s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
             s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
             s.PlaySounds = PlaySoundsCheck.IsChecked == true;
+            s.ShutterSound = SelectedTag(ShutterSoundCombo, "default");
             s.ShowTrayIcon = ShowTrayIconCheck.IsChecked == true;
 
+            // General > "After capture" matrix (per-action, Screenshot vs Recording columns).
+            s.ScreenshotShowOverlay = ScreenshotShowOverlayCheck.IsChecked == true;
+            s.RecordingShowOverlay = RecordingShowOverlayCheck.IsChecked == true;
+            s.ScreenshotCopy = ScreenshotCopyCheck.IsChecked == true;
+            s.RecordingCopy = RecordingCopyCheck.IsChecked == true;
+            s.ScreenshotSave = ScreenshotSaveCheck.IsChecked == true;
+            s.RecordingSave = RecordingSaveCheck.IsChecked == true;
+            s.ScreenshotOpenAnnotate = ScreenshotOpenAnnotateCheck.IsChecked == true;
+            s.ScreenshotOpenEditor = ScreenshotOpenEditorCheck.IsChecked == true;
+            s.ScreenshotPin = ScreenshotPinCheck.IsChecked == true;
+            s.RecordingOpenEditor = RecordingOpenEditorCheck.IsChecked == true;
+
+            // Derive the legacy single-valued capture fields the screenshot flow still reads.
+            // "Show overlay" wins (the quick-actions card); copy is applied in addition.
+            s.AutoCopyToClipboard = ScreenshotCopyCheck.IsChecked == true;
+            s.PostCaptureAction =
+                ScreenshotShowOverlayCheck.IsChecked == true ? "overlay" :
+                ScreenshotPinCheck.IsChecked == true ? "pin" :
+                (ScreenshotOpenEditorCheck.IsChecked == true || ScreenshotOpenAnnotateCheck.IsChecked == true) ? "edit" :
+                ScreenshotSaveCheck.IsChecked == true ? "save" :
+                ScreenshotCopyCheck.IsChecked == true ? "copy" : "overlay";
+
             // Quick Access overlay
+            s.OverlayPosition = SelectedTag(OverlayPositionCombo, "left");
+            s.OverlayMoveToActiveScreen = OverlayMoveToActiveScreenCheck.IsChecked == true;
+            s.OverlaySizePercent = (int)Math.Round(OverlaySizeSlider.Value);
             s.OverlayAutoClose = OverlayAutoCloseCheck.IsChecked == true;
             // Persist seconds when auto-close is on; otherwise 0 = stay until dismissed
             // (preserves the legacy meaning of OverlayAutoCloseSeconds for downstream code).
             s.OverlayAutoCloseSeconds = OverlayAutoCloseCheck.IsChecked == true ? overlaySeconds : 0;
+            s.OverlayAutoCloseAction = SelectedTag(OverlayActionCombo, "save-close");
+            s.OverlayCloseAfterDragging = OverlayCloseAfterDragCheck.IsChecked == true;
+            s.OverlaySaveButtonBehavior = SelectedTag(OverlaySaveBehaviorCombo, "export");
 
             // Hotkeys
             s.HotkeyCaptureRegion = HotkeyValue(HotkeyRegionBox);
@@ -509,19 +635,47 @@ public partial class SettingsWindow : Window
             s.HotkeyCapturePrevious = HotkeyValue(HotkeyPreviousBox);
             s.HotkeyAllInOne = HotkeyValue(HotkeyAllInOneBox);
 
-            // Recording
-            s.RecordingFps = recordingFps;
-            s.GifFps = gifFps;
-            s.RecordAudio = RecordAudioCheck.IsChecked == true;
-            s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
-            s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
-            s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
+            // Recording > General
+            s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
+            s.ShowRecordingTimer = ShowRecordingTimerCheck.IsChecked == true;
+            s.ScaleHiDpiVideo = ScaleHiDpiVideoCheck.IsChecked == true;
+            s.DoNotDisturbWhileRecording = DoNotDisturbCheck.IsChecked == true;
+            s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
             s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
             s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
+            s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
+            s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
+            s.ShowRecordingCountdown = ShowCountdownCheck.IsChecked == true;
             s.RecordingCountdownSeconds = countdown;
-            s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
+            s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
+            s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
+
+            // Recording > Video
+            s.RecordingMaxResolution = SelectedTag(MaxResolutionCombo, "original");
+            s.RecordingFps = recordingFps;
+            s.RecordAudio = RecordAudioCheck.IsChecked == true;
+            s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
+            s.RecordAudioMono = RecordAudioMonoCheck.IsChecked == true;
+            s.OpenVideoEditorAfterRecording = OpenVideoEditorCheck.IsChecked == true;
+
+            // Recording > GIF
+            s.GifFps = gifFps;
+            s.GifQuality = (int)Math.Round(GifQualitySlider.Value);
+            s.OptimizeGifs = OptimizeGifsCheck.IsChecked == true;
+            s.GifSize = SelectedTag(GifSizeCombo, "800");
+
+            // Annotate
+            s.InverseArrowDirection = InverseArrowCheck.IsChecked == true;
+            s.SmoothPencil = SmoothPencilCheck.IsChecked == true;
+            s.RememberLastTool = RememberLastToolCheck.IsChecked == true;
+            s.DrawShadowOnObjects = DrawShadowCheck.IsChecked == true;
+            s.AutoExpandCanvas = AutoExpandCanvasCheck.IsChecked == true;
+            s.ShowColorNames = ShowColorNamesCheck.IsChecked == true;
+            s.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
+            s.ShowDockIcon = ShowDockIconCheck.IsChecked == true;
 
             // OCR (Annotate tab)
+            s.OcrLanguage = SelectedTag(OcrLanguageCombo, "auto");
             s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
             s.OcrDetectLinks = OcrDetectLinksCheck.IsChecked == true;
 
@@ -532,7 +686,11 @@ public partial class SettingsWindow : Window
 
             // Screenshots
             s.AddPixelBorder = AddPixelBorderCheck.IsChecked == true;
+            s.ConvertToSrgb = ConvertToSrgbCheck.IsChecked == true;
+            s.ScreenshotBackground = SelectedTag(BackgroundCombo, "none");
+            s.CursorOnScreenshots = CursorOnScreenshotsCheck.IsChecked == true;
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
+            s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
             s.ShowCrosshair = ShowCrosshairCheck.IsChecked == true;
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
             s.SelfTimerSeconds = selfTimer;
@@ -540,6 +698,8 @@ public partial class SettingsWindow : Window
             // Naming & history (Advanced tab)
             s.FileNameTemplate = TemplateBox.Text.Trim();
             s.AskForNameAfterCapture = AskForNameCheck.IsChecked == true;
+            s.AddRetinaSuffix = AddRetinaSuffixCheck.IsChecked == true;
+            s.CopyToClipboardFormat = SelectedTag(CopyFormatCombo, "file-image");
             s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
             s.HistoryLimit = historyLimit;
             s.HistoryRetentionDays = retentionDays;

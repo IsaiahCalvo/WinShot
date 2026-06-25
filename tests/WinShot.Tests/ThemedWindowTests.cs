@@ -114,7 +114,7 @@ public class ThemedWindowTests
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
         window.Close();
-        PumpDispatcherOnce();
+        WaitUntilHidden(window);
         Assert.False(window.IsVisible);
     }
 
@@ -125,7 +125,7 @@ public class ThemedWindowTests
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
         window.Close();
-        PumpDispatcherOnce();
+        WaitUntilHidden(window);
         Assert.False(window.IsVisible);
     }
 
@@ -276,6 +276,21 @@ public class ThemedWindowTests
         }
 
         Assert.False((bool)activeField.GetValue(editor)!);
+    }
+
+    /// <summary>
+    /// Window.Close() hides asynchronously: the Closed handlers and visibility flip run on
+    /// the dispatcher, so a single pump can race the assert (more likely now that the Settings
+    /// window carries more controls to tear down). Pump until hidden, with a timeout.
+    /// </summary>
+    private static void WaitUntilHidden(Window window)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (window.IsVisible && DateTime.UtcNow < deadline)
+        {
+            PumpDispatcherOnce();
+            Thread.Sleep(10);
+        }
     }
 
     private static void WaitForTask(Task task)
