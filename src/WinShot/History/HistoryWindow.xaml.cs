@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -28,10 +30,12 @@ public partial class HistoryWindow : Window
     private readonly SettingsService _settings;
     private readonly List<HistoryItem> _allItems = new();
     private readonly ObservableCollection<HistoryItem> _items = new();
+    private readonly CollectionViewSource _itemsView = new();
     private CancellationTokenSource? _loadCts;
     private string _filter = "all";
     private HistoryItem? _previewItem;
     private FastQuickPreviewWindow? _preview;
+    private bool _previewOpen;
     private Point _dragStart;
     private HistoryItem? _dragItem;
     private bool _dragging;
@@ -39,27 +43,49 @@ public partial class HistoryWindow : Window
     private bool _renderPrewarmed;
     private bool _suppressRefreshOnLoad;
     private bool _parkedVisible;
+    private FileSystemWatcher? _watcher;
+    private DispatcherTimer? _watcherDebounce;
 
     public event Action<string>? EditRequested;
     public event Action<string>? PinRequested;
 
     public HistoryWindow(HistoryService history, SettingsService settings)
     {
+        // Ensure the shared theme dictionary is available before the XAML (which references
+        // theme brushes like WindowBgBrush) is parsed — don't rely on another window having
+        // loaded it first. Idempotent; a no-op once App.xaml has merged it app-wide.
+        ThemeResources.EnsureLoaded();
         InitializeComponent();
         _history = history;
         _settings = settings;
-        ItemsList.ItemsSource = _items;
+
+        // Grouped view over the filtered items: tiles are grouped under day headers
+        // ("Today", "Yesterday", weekday, or "MMM d") using the parsed capture time.
+        // Source order is already newest-first, so groups appear in that order too.
+        _itemsView.Source = _items;
+        _itemsView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(HistoryItem.DayGroup)));
+        ItemsList.ItemsSource = _itemsView.View;
+        ItemsList.SelectionChanged += OnSelectionChanged;
+
         Loaded += (_, _) =>
         {
             _loadedOnce = true;
+            StartWatcher();
             if (_suppressRefreshOnLoad) return;
             Dispatcher.BeginInvoke(
                 System.Windows.Threading.DispatcherPriority.Background,
                 new Action(() => _ = RefreshOnShowAsync()));
         };
+        IsVisibleChanged += (_, e) =>
+        {
+            // Keep the live watcher running only while the window is actually shown.
+            if (e.NewValue is true) StartWatcher();
+            else StopWatcher();
+        };
         Closed += (_, _) =>
         {
             _loadCts?.Cancel();
+            StopWatcher();
             _preview?.Close();
             ClearLoadedItems();
             MemoryCleanup.Request();
@@ -199,6 +225,9 @@ public partial class HistoryWindow : Window
         Opacity = 1;
         ApplyParkedWindowStyle(parked: false);
         _parkedVisible = false;
+        // The parked window was already IsVisible, so IsVisibleChanged won't fire on
+        // restore — start the live watcher here.
+        StartWatcher();
     }
 
     private void ParkWindow()
@@ -234,7 +263,26 @@ public partial class HistoryWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.Escape) Close();
+        switch (e.Key)
+        {
+            case Key.Escape:
+                Close();
+                return;
+            case Key.Enter:
+                if (SelectedItem() is { } toOpen)
+                {
+                    OpenItem(toOpen);
+                    e.Handled = true;
+                }
+                return;
+            case Key.Delete:
+                if (SelectedItem() is { } toDelete)
+                {
+                    DeleteItem(toDelete);
+                    e.Handled = true;
+                }
+                return;
+        }
         base.OnKeyDown(e);
     }
 
@@ -260,10 +308,30 @@ public partial class HistoryWindow : Window
         // Tunneling so the chips/scroll viewer never swallow Space.
         if (e.Key == Key.Space)
         {
-            ShowQuickPreview();
+            ToggleQuickPreview();
             e.Handled = true;
             return;
         }
+
+        if (_previewOpen)
+        {
+            // While the quick-preview is open, Left/Right step to the adjacent item and
+            // re-show the preview for it WITHOUT collapsing back to the grid.
+            if (e.Key == Key.Left || e.Key == Key.Right)
+            {
+                StepPreview(e.Key == Key.Right ? 1 : -1);
+                e.Handled = true;
+                return;
+            }
+            // Escape closes the preview first, leaving the History grid open.
+            if (e.Key == Key.Escape)
+            {
+                ClosePreview();
+                e.Handled = true;
+                return;
+            }
+        }
+
         base.OnPreviewKeyDown(e);
     }
 
@@ -280,9 +348,23 @@ public partial class HistoryWindow : Window
             await Dispatcher.InvokeAsync(() =>
             {
                 if (cts.IsCancellationRequested) return;
+                // Remember selection by path so a live refresh doesn't yank it away;
+                // the rebuilt list holds fresh HistoryItem instances.
+                string? selectedPath = SelectedItem()?.FilePath;
                 _allItems.Clear();
                 _allItems.AddRange(newItems);
                 ApplyFilter();
+                RestoreSelection(selectedPath);
+                // Give keyboard nav an anchor when nothing was selected yet.
+                if (ItemsList.SelectedItem is null && _items.Count > 0)
+                {
+                    ItemsList.SelectedItem = _items[0];
+                    _previewItem = _items[0];
+                }
+                // Park keyboard focus on the grid so arrow keys drive selection
+                // immediately, without the user having to click a tile first.
+                if (_items.Count > 0 && !ItemsList.IsKeyboardFocusWithin && IsActive)
+                    Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => ItemsList.Focus()));
             });
 
             // Decode thumbnails one at a time on the pool; assignment happens back
@@ -314,6 +396,86 @@ public partial class HistoryWindow : Window
             catch (Exception ex) { Log.Error("History age prune failed", ex); }
         }
         await ReloadAsync().ConfigureAwait(false);
+    }
+
+    // ---- Live auto-refresh ----
+
+    /// <summary>Watches the history folder so captures taken elsewhere (or by WinShot
+    /// while History is open) appear live. Events are debounced and marshalled to the
+    /// UI thread; the manual Refresh button stays as a fallback.</summary>
+    private void StartWatcher()
+    {
+        // Don't spin the watcher up during the invisible prewarm pass.
+        if (_watcher is not null || !IsVisible || _suppressRefreshOnLoad) return;
+
+        string dir = HistoryService.Dir;
+        try
+        {
+            Directory.CreateDirectory(dir);
+            _watcherDebounce ??= CreateWatcherDebounce();
+            var watcher = new FileSystemWatcher(dir)
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                IncludeSubdirectories = false,
+                EnableRaisingEvents = true,
+            };
+            watcher.Created += OnHistoryFolderChanged;
+            watcher.Deleted += OnHistoryFolderChanged;
+            watcher.Renamed += OnHistoryFolderChanged;
+            watcher.Changed += OnHistoryFolderChanged;
+            _watcher = watcher;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to start history folder watcher", ex);
+        }
+    }
+
+    private DispatcherTimer CreateWatcherDebounce()
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(400),
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (IsVisible) _ = ReloadAsync();
+        };
+        return timer;
+    }
+
+    private void OnHistoryFolderChanged(object sender, FileSystemEventArgs e)
+    {
+        // Raised on a threadpool thread; coalesce bursts on the UI thread.
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            _watcherDebounce?.Stop();
+            _watcherDebounce?.Start();
+        }));
+    }
+
+    private void StopWatcher()
+    {
+        _watcherDebounce?.Stop();
+        if (_watcher is null) return;
+        try
+        {
+            _watcher.EnableRaisingEvents = false;
+            _watcher.Created -= OnHistoryFolderChanged;
+            _watcher.Deleted -= OnHistoryFolderChanged;
+            _watcher.Renamed -= OnHistoryFolderChanged;
+            _watcher.Changed -= OnHistoryFolderChanged;
+            _watcher.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to stop history folder watcher", ex);
+        }
+        finally
+        {
+            _watcher = null;
+        }
     }
 
     private static BitmapImage? TryLoadThumbnail(string path)
@@ -362,6 +524,20 @@ public partial class HistoryWindow : Window
         UpdateEmptyState();
     }
 
+    /// <summary>Re-selects the item with the given path after the list is rebuilt,
+    /// so keyboard focus and the preview anchor survive a refresh.</summary>
+    private void RestoreSelection(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        HistoryItem? match = _items.FirstOrDefault(i =>
+            string.Equals(i.FilePath, path, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+        {
+            ItemsList.SelectedItem = match;
+            _previewItem = match;
+        }
+    }
+
     private void UpdateEmptyState() =>
         EmptyState.Visibility = _items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
@@ -378,25 +554,91 @@ public partial class HistoryWindow : Window
 
     // ---- Quick preview (Spacebar) ----
 
-    private void ShowQuickPreview()
+    /// <summary>Spacebar: open the quick preview for the current item, or close it if
+    /// it is already open (Quick Look toggle).</summary>
+    private void ToggleQuickPreview()
     {
-        HistoryItem? target = _previewItem ?? _items.FirstOrDefault();
-        if (target is null || !File.Exists(target.FilePath)) return;
+        if (_previewOpen)
+        {
+            ClosePreview();
+            return;
+        }
 
+        HistoryItem? target = _previewItem ?? SelectedItem() ?? _items.FirstOrDefault();
+        if (target is null) return;
+        // Make sure selection follows the preview so arrow stepping has an anchor.
+        SelectItem(target);
+        OpenPreviewFor(target);
+    }
+
+    /// <summary>Left/Right while the preview is open: move selection to the adjacent
+    /// item (within the flattened, grouped order) and re-show the preview for it.</summary>
+    private void StepPreview(int direction)
+    {
+        if (_items.Count == 0) return;
+        HistoryItem? current = _previewItem ?? SelectedItem();
+        int index = current is null ? -1 : _items.IndexOf(current);
+        int next = index < 0
+            ? (direction > 0 ? 0 : _items.Count - 1)
+            : index + direction;
+        if (next < 0 || next >= _items.Count) return;
+
+        HistoryItem target = _items[next];
+        SelectItem(target);
+        OpenPreviewFor(target);
+    }
+
+    private void OpenPreviewFor(HistoryItem target)
+    {
+        if (!File.Exists(target.FilePath)) return;
+
+        _previewItem = target;
         _preview?.Close();
         var preview = new FastQuickPreviewWindow(target.FilePath);
         FastQuickPreviewWindow.TrackFirstShown(preview, "history quick preview");
         _preview = preview;
+        _previewOpen = true;
         preview.Closed += (_, _) =>
         {
-            if (ReferenceEquals(_preview, preview)) _preview = null;
+            if (ReferenceEquals(_preview, preview))
+            {
+                _preview = null;
+                _previewOpen = false;
+            }
         };
         preview.Show();
+        // Keep keyboard focus on History so Left/Right stepping continues to work.
+        Activate();
+    }
+
+    private void ClosePreview()
+    {
+        _previewOpen = false;
+        _preview?.Close();
+        _preview = null;
     }
 
     private void OnTileMouseEnter(object sender, MouseEventArgs e)
     {
         if (GetItem(sender) is { } item)
+            _previewItem = item;
+    }
+
+    // ---- Selection ----
+
+    private HistoryItem? SelectedItem() => ItemsList.SelectedItem as HistoryItem;
+
+    private void SelectItem(HistoryItem item)
+    {
+        if (ReferenceEquals(ItemsList.SelectedItem, item)) return;
+        ItemsList.SelectedItem = item;
+        ItemsList.ScrollIntoView(item);
+    }
+
+    private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Selection drives the spacebar preview target.
+        if (SelectedItem() is { } item)
             _previewItem = item;
     }
 
@@ -503,9 +745,16 @@ public partial class HistoryWindow : Window
         }
     }
 
-    private async void OnDelete(object sender, RoutedEventArgs e)
+    private void OnDelete(object sender, RoutedEventArgs e)
     {
-        if (GetItem(sender) is not { } item) return;
+        if (GetItem(sender) is { } item)
+            DeleteItem(item);
+    }
+
+    private async void DeleteItem(HistoryItem item)
+    {
+        // Pick the neighbour to land selection on after the row disappears.
+        int index = _items.IndexOf(item);
         try
         {
             await Task.Run(() => _history.Delete(item.FilePath));
@@ -520,6 +769,13 @@ public partial class HistoryWindow : Window
         if (ReferenceEquals(_previewItem, item)) _previewItem = null;
         UpdateCount();
         UpdateEmptyState();
+
+        // Keep keyboard navigation flowing: select the next (or previous) tile.
+        if (_items.Count > 0 && index >= 0)
+        {
+            int next = Math.Min(index, _items.Count - 1);
+            SelectItem(_items[next]);
+        }
     }
 
     private static void OpenItem(HistoryItem item)
@@ -568,6 +824,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
         CapturedAt = ParseCapturedAt(filePath);
         FileSize = TryGetFileSize(filePath);
         Caption = BuildCaption(CapturedAt, FileSize);
+        DayGroup = BuildDayGroup(CapturedAt);
     }
 
     public string FilePath { get; }
@@ -583,6 +840,23 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public long FileSize { get; }
     /// <summary>Friendly caption shown under the thumbnail, e.g. "Today 2:14 PM · 1.2 MB".</summary>
     public string Caption { get; }
+
+    /// <summary>Day-header label for grouping: "TODAY", "YESTERDAY", a weekday name,
+    /// or "MMM D" for older captures. Uppercased for the themed header.</summary>
+    public string DayGroup { get; }
+
+    private static string BuildDayGroup(DateTime captured)
+    {
+        DateTime today = DateTime.Today;
+        if (captured.Date == today) return "TODAY";
+        if (captured.Date == today.AddDays(-1)) return "YESTERDAY";
+        // Within the last week, show the weekday name (e.g. "MONDAY").
+        if (captured.Date > today.AddDays(-7))
+            return captured.ToString("dddd",
+                System.Globalization.CultureInfo.CurrentCulture).ToUpperInvariant();
+        return captured.ToString("MMM d",
+            System.Globalization.CultureInfo.CurrentCulture).ToUpperInvariant();
+    }
 
     private static DateTime ParseCapturedAt(string filePath)
     {

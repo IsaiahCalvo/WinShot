@@ -15,7 +15,8 @@ internal static class FastSelectorLoupeRenderer
         SD.Size clientSize,
         SD.Rectangle virtualScreen,
         SD.Point cursorClient,
-        SD.Point cursorScreen)
+        SD.Point cursorScreen,
+        SD.Bitmap? frozen = null)
     {
         var loupe = FastSelectorLoupeLayout.Calculate(
             clientSize,
@@ -29,7 +30,11 @@ internal static class FastSelectorLoupeRenderer
 
         try
         {
-            using var sample = CaptureService.CaptureScreenRegionWithoutLayeredWindows(loupe.SourceScreen);
+            // With screen-freeze, sample from the frozen desktop bitmap so the loupe shows
+            // the same still pixels the user is selecting (and avoids a live BitBlt per paint).
+            using var sample = frozen is not null
+                ? CropFrozenSample(frozen, loupe.SourceScreen, virtualScreen)
+                : CaptureService.CaptureScreenRegionWithoutLayeredWindows(loupe.SourceScreen);
             SD.Color pixel = ReadTargetPixel(sample, loupe.TargetSample);
             string hex = $"#{pixel.R:X2}{pixel.G:X2}{pixel.B:X2}";
             DrawSample(g, sample, loupe);
@@ -44,6 +49,24 @@ internal static class FastSelectorLoupeRenderer
             _failureLogged = true;
             Log.Error("Fast selector loupe draw failed", ex);
         }
+    }
+
+    /// <summary>Crops the loupe's source region out of the frozen virtual-desktop bitmap,
+    /// matching the size the live-capture path would have returned.</summary>
+    private static SD.Bitmap CropFrozenSample(SD.Bitmap frozen, SD.Rectangle sourceScreen, SD.Rectangle virtualScreen)
+    {
+        var crop = new SD.Bitmap(
+            Math.Max(1, sourceScreen.Width),
+            Math.Max(1, sourceScreen.Height),
+            SD.Imaging.PixelFormat.Format32bppArgb);
+        using var g = SD.Graphics.FromImage(crop);
+        var src = new SD.Rectangle(
+            sourceScreen.X - virtualScreen.X,
+            sourceScreen.Y - virtualScreen.Y,
+            sourceScreen.Width,
+            sourceScreen.Height);
+        g.DrawImage(frozen, new SD.Rectangle(0, 0, crop.Width, crop.Height), src, SD.GraphicsUnit.Pixel);
+        return crop;
     }
 
     private static SD.Color ReadTargetPixel(SD.Bitmap sample, SD.Point target)

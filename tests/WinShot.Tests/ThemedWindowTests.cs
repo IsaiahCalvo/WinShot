@@ -46,48 +46,24 @@ public class ThemedWindowTests
                     fastAllInOne.Show();
                     fastAllInOne.Close();
                 }
-                ShowAndClose(new RegionSelectorWindow(NewBitmap(), new List<WindowInfo>(), settings, allInOne: false));
-                using (var selectorBitmap = NewBitmap())
-                {
-                    var selectorSource = CaptureService.ToBitmapSource(selectorBitmap);
-                    ShowAndClose(new RegionSelectorWindow(
-                        selectorBitmap,
-                        selectorSource,
-                        new List<WindowInfo>(),
-                        settings,
-                        allInOne: false));
-                }
-                ShowAndClose(new RegionSelectorWindow(NewBitmap(), new List<WindowInfo>(), settings, allInOne: true));
-                ShowAndClose(new QuickActionsWindow(NewBitmap(), settings));
                 ShowAndClose(new FastQuickActionsWindow(NewBitmap(), settings));
                 QuickActionButtonSmoke(settings);
-                ShowAndClose(new PinWindow(NewBitmap(), settings));
                 ShowAndClose(new FastPinWindow(NewBitmap(), settings));
-                ShowAndClose(new QuickPreviewWindow(previewFile.Path));
                 ShowAndClose(new FastQuickPreviewWindow(previewFile.Path));
                 ShowAndClose(new HistoryWindow(history, settings));
                 ShowAndClose(new SettingsWindow(settings));
                 PrewarmedSettingsWindowCloseSmoke(settings);
                 PrewarmedHistoryWindowCloseSmoke(history, settings);
-                RecordingOptionsDialog.Prewarm(settings.Current);
-                ShowAndClose(CreatePrivate<SelfTimerWindow>(1));
                 ShowAndClose(new FastSelfTimerWindow(1));
-                ShowAndClose(new RecordingOptionsDialog(settings.Current));
                 ShowAndClose(new FastRecordingOptionsDialog(settings.Current));
-                ShowAndClose(new RecordingControlBar());
                 ShowAndClose(new FastRecordingControlBar());
-                ShowAndClose(new RecordingCountdownWindow(1, new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(new FastRecordingCountdownWindow(1, new SD.Rectangle(0, 0, 80, 60)));
-                ShowAndClose(new RecordingToastWindow(previewFile.Path, onEdit: null));
                 ShowAndClose(new FastRecordingToastWindow(previewFile.Path, onEdit: null));
-                ShowAndClose(new ClickHighlightOverlayWindow(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(FastClickHighlightOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
-                ShowAndClose(new KeystrokeOverlayWindow(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(FastKeystrokeOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(new ResizeDialog(80, 50));
                 ShowAndClose(new VideoEditorWindow(previewFile.Path, settings, history));
 
-                CreatePrivate<DisplayPickerDialog>().Close();
                 CreatePrivateForm<FastDisplayPickerDialog>().Close();
                 CreatePrivate<ScrollingModeDialog>().Close();
                 ShowAndClose(CreatePrivate<ScrollingStatusWindow>());

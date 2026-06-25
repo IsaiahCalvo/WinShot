@@ -175,6 +175,7 @@ public partial class BackgroundComposerWindow : Window
         PadValueLabel.Text = $"{pad} px";
         RadiusValueLabel.Text = $"{radius} px";
         BlurValueLabel.Text = blurValue.ToString();
+        ShadowOpacityValueLabel.Text = $"{(int)Math.Round(ShadowOpacitySlider.Value * 100)}%";
 
         // Padding is the single margin control; inset is retired (it collapsed
         // into padding and only duplicated the gutter), so always pass 0.
@@ -219,13 +220,16 @@ public partial class BackgroundComposerWindow : Window
     private DropShadowEffect CreateShadowEffect(RenderingBias renderingBias)
     {
         double blur = BlurSlider.Value;
+        // Softness drives the blur (and a proportional depth); Intensity is a
+        // direct opacity control clamped to the slider's pleasant 0.2-0.8 range.
+        double opacity = Math.Clamp(ShadowOpacitySlider.Value, 0.0, 1.0);
         return new DropShadowEffect
         {
             BlurRadius = blur,
             ShadowDepth = blur * 0.25,
             Direction = 270,
             Color = Colors.Black,
-            Opacity = 0.55,
+            Opacity = opacity,
             RenderingBias = renderingBias,
         };
     }
@@ -688,21 +692,59 @@ public partial class BackgroundComposerWindow : Window
 
     private void OnHexChanged(object sender, TextChangedEventArgs e)
     {
-        if (!_ready || _suppressBg) return;
+        if (!_ready) return;
         string text = HexBox.Text.Trim();
-        if (text.Length == 0) return;
+
+        // An empty box is neutral, not invalid: clear the error ring and bail.
+        if (text.Length == 0)
+        {
+            SetHexInvalid(false);
+            return;
+        }
         if (text[0] != '#' && text.All(Uri.IsHexDigit))
             text = "#" + text;
 
         Color color;
         try { color = (Color)ColorConverter.ConvertFromString(text); }
-        catch { return; } // incomplete input while typing
+        catch
+        {
+            // Flag the box only when a swatch isn't silently feeding the field;
+            // partial typing toward a valid value reads as an error until parsed.
+            SetHexInvalid(!_suppressBg);
+            return;
+        }
+
+        SetHexInvalid(false);
+        UpdateHexSwatch(color);
+
+        // When a solid swatch populated the box we only refresh the chip/ring;
+        // the swatch's own Checked handler already applied the background.
+        if (_suppressBg) return;
 
         UncheckBgSwatches();
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         SetBackground(brush);
         PresetNameHeader.Text = text;
+    }
+
+    /// <summary>Paints the live preview chip beside the hex box.</summary>
+    private void UpdateHexSwatch(Color color)
+    {
+        var chip = new SolidColorBrush(color);
+        chip.Freeze();
+        HexSwatch.Background = chip;
+    }
+
+    /// <summary>
+    /// Toggles the subtle invalid-state ring around the hex box (destructive red
+    /// when the text doesn't parse, transparent when it clears).
+    /// </summary>
+    private void SetHexInvalid(bool invalid)
+    {
+        HexInvalidRing.BorderBrush = invalid
+            ? (Brush)FindResource("AnnotationRedBrush")
+            : Brushes.Transparent;
     }
 
     private void OnBrowseImage(object sender, RoutedEventArgs e)

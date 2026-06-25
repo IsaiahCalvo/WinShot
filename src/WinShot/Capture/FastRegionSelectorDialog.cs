@@ -22,10 +22,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
 {
     private const int DragThresholdPx = 4;
     private const int CrosshairGapPx = 10;
-    // Single accent identity. The selection rectangle is filled with HoleKey, which each
-    // surface's TransparencyKey turns into a full-brightness hole (CleanShot's punch-out).
+    // Single accent identity. The selector FREEZES the screen: at open it snapshots the whole
+    // desktop, and each surface paints its frozen slice, dims it, and re-brightens the
+    // selection — so nothing moves under the cursor while you drag (CleanShot's screen-freeze).
     private static readonly SD.Color Accent = ThemePalette.Accent;
-    private static readonly SD.Color HoleKey = SD.Color.Magenta;
     private static FastRegionSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
@@ -39,6 +39,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private bool _dragMoved;
     private WindowInfo? _hoverWindow;
     private SD.Rectangle? _pendingPx;
+    private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
+    private SD.Bitmap? _capturedRegion;  // region cropped from _frozen at confirm; caller takes ownership
     private bool _prewarm;
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
@@ -65,7 +67,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DoubleBuffered = true;
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
-        Opacity = prewarm ? 0.01 : 0.45;
+        Opacity = prewarm ? 0.01 : 1.0;
 
         Shown += (_, _) => StartWindowLoad();
 
@@ -79,9 +81,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         form.AutoScaleMode = WF.AutoScaleMode.None;
         form.BackColor = SD.Color.Black;
-        // Pixels painted in HoleKey become a full-brightness hole; everything else is
-        // dimmed by Opacity. Each surface is wholly inside one monitor, so it is 1:1.
-        form.TransparencyKey = HoleKey;
         form.Cursor = WF.Cursors.Cross;
         form.FormBorderStyle = WF.FormBorderStyle.None;
         form.KeyPreview = true;
@@ -154,6 +153,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector._dragMoved = false;
         selector.Capture = false;
         selector.DisposePanes();
+        selector.DisposeFrozen();
+        selector._capturedRegion?.Dispose();
+        selector._capturedRegion = null;
         selector.Hide();
         selector.Dispose();
     }
@@ -166,6 +168,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
+        CaptureFrozen();
         CreatePanes();
 
         Show();
@@ -191,10 +194,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hoverWindow = null;
         _pendingPx = null;
         SelectedRegionPx = null;
+        DisposeFrozen();
+        _capturedRegion?.Dispose();
+        _capturedRegion = null;
         DialogResult = WF.DialogResult.None;
         Bounds = _monitorBounds;
         Capture = false;
-        Opacity = prewarm ? 0.01 : 0.45;
+        Opacity = prewarm ? 0.01 : 1.0;
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
@@ -437,52 +443,114 @@ public sealed class FastRegionSelectorDialog : WF.Form
     internal void PaintSurface(SD.Graphics g, SD.Rectangle monitorBounds)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
-
-        bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
         SD.Size clientSize = monitorBounds.Size;
+        bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
+
+        // Frozen desktop slice for this monitor, then a uniform dim over it.
+        DrawFrozenSlice(g, monitorBounds);
+        using (var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0)))
+            g.FillRectangle(dim, 0, 0, clientSize.Width, clientSize.Height);
+
+        // The active selection (or hovered window) shows the frozen pixels at full brightness.
+        SD.Rectangle? brightScreen = null;
+        if (_dragging && _dragMoved)
+            brightScreen = Normalize(_dragStartScreen, _currentScreen);
+        else if (_pendingPx is SD.Rectangle pending)
+            brightScreen = ScreenFromVirtual(pending);
+        else if (_hoverWindow is not null)
+            brightScreen = _hoverWindow.Bounds;
+
+        if (brightScreen is SD.Rectangle bright)
+        {
+            var local = ToLocal(bright, monitorBounds);
+            BrightenRegion(g, monitorBounds, local);
+            using (var pen = new SD.Pen(Accent, 2))
+                g.DrawRectangle(pen, local);
+            if (cursorOnThisSurface)
+            {
+                var px = _hoverWindow is not null && !_dragging && _pendingPx is null
+                    ? VirtualFromScreen(_hoverWindow.Bounds)
+                    : bright;
+                SD.Point at = _dragging || _pendingPx is not null
+                    ? new SD.Point(local.Right + 8, local.Bottom + 8)
+                    : new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
+                DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y);
+            }
+        }
 
         if (cursorOnThisSurface)
             DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
-        if (_hoverWindow is not null && !_dragging && _pendingPx is null)
-            DrawRect(g, ToLocal(_hoverWindow.Bounds, monitorBounds), Accent);
-
-        if (_dragging && _dragMoved)
-        {
-            var screenRect = Normalize(_dragStartScreen, _currentScreen);
-            DrawSelection(g, ToLocal(screenRect, monitorBounds));
-            if (cursorOnThisSurface)
-            {
-                var local = ToLocal(screenRect, monitorBounds);
-                DrawLabel(g, clientSize, $"{screenRect.Width} × {screenRect.Height}", local.Right + 8, local.Bottom + 8);
-            }
-        }
-        else if (_pendingPx is SD.Rectangle pending)
-        {
-            var screenRect = ScreenFromVirtual(pending);
-            DrawSelection(g, ToLocal(screenRect, monitorBounds));
-            if (cursorOnThisSurface)
-            {
-                var local = ToLocal(screenRect, monitorBounds);
-                DrawLabel(g, clientSize, $"{pending.Width} × {pending.Height}", local.Right + 8, local.Bottom + 8);
-            }
-        }
-        else if (_hoverWindow is not null && cursorOnThisSurface)
-        {
-            var px = VirtualFromScreen(_hoverWindow.Bounds);
-            SD.Point lc = ToLocal(_currentScreen, monitorBounds);
-            DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", lc.X + 14, lc.Y + 18);
-        }
-
         if (!_prewarm && cursorOnThisSurface)
         {
             FastSelectorLoupeRenderer.Draw(
-                g,
-                clientSize,
-                _vs,
-                ToLocal(_currentScreen, monitorBounds),
-                _currentScreen);
+                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
         }
+    }
+
+    /// <summary>Paints this monitor's slice of the frozen snapshot at 1:1 (pure offset).</summary>
+    private void DrawFrozenSlice(SD.Graphics g, SD.Rectangle monitorBounds)
+    {
+        if (_frozen is null) return;
+        var src = new SD.Rectangle(monitorBounds.X - _vs.X, monitorBounds.Y - _vs.Y, monitorBounds.Width, monitorBounds.Height);
+        g.DrawImage(_frozen, new SD.Rectangle(0, 0, monitorBounds.Width, monitorBounds.Height), src, SD.GraphicsUnit.Pixel);
+    }
+
+    /// <summary>Re-draws the frozen slice clipped to a region so it shows undimmed.</summary>
+    private void BrightenRegion(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle localRect)
+    {
+        if (_frozen is null) return;
+        var clip = SD.Rectangle.Intersect(localRect, new SD.Rectangle(0, 0, monitorBounds.Width, monitorBounds.Height));
+        if (clip.Width < 1 || clip.Height < 1) return;
+
+        var state = g.Save();
+        g.SetClip(clip);
+        DrawFrozenSlice(g, monitorBounds);
+        g.Restore(state);
+    }
+
+    private void CaptureFrozen()
+    {
+        DisposeFrozen();
+        if (_prewarm) return;
+        try
+        {
+            _frozen = CaptureService.CaptureVirtualDesktop();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
+            _frozen = null;
+        }
+    }
+
+    private void DisposeFrozen()
+    {
+        _frozen?.Dispose();
+        _frozen = null;
+    }
+
+    private SD.Bitmap? CropFrozen(SD.Rectangle virtualRect)
+    {
+        if (_frozen is null) return null;
+        var src = SD.Rectangle.Intersect(virtualRect, new SD.Rectangle(0, 0, _frozen.Width, _frozen.Height));
+        if (src.Width < 1 || src.Height < 1) return null;
+
+        var crop = new SD.Bitmap(src.Width, src.Height, SD.Imaging.PixelFormat.Format32bppArgb);
+        using var g = SD.Graphics.FromImage(crop);
+        g.DrawImage(_frozen, new SD.Rectangle(0, 0, src.Width, src.Height), src, SD.GraphicsUnit.Pixel);
+        return crop;
+    }
+
+    /// <summary>Returns the region cropped from the frozen snapshot at confirm time and transfers
+    /// ownership to the caller (null if freeze was unavailable). The capture flow uses this instead
+    /// of re-grabbing the live screen, so the result is exactly what was selected. Null after the
+    /// first call.</summary>
+    public SD.Bitmap? TakeCapturedRegion()
+    {
+        var bmp = _capturedRegion;
+        _capturedRegion = null;
+        return bmp;
     }
 
     private void HitTestWindow(SD.Point screenPoint)
@@ -527,6 +595,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (virtualRect.Width < 1 || virtualRect.Height < 1) return;
 
         SelectedRegionPx = virtualRect;
+        // Crop the result from the frozen snapshot so the capture is exactly what was selected.
+        _capturedRegion?.Dispose();
+        _capturedRegion = CropFrozen(virtualRect);
         if (_settings is not null)
             _settings.Current.LastCaptureRegion = PreviousRegion.Format(
                 new SD.Rectangle(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height));
@@ -539,6 +610,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DialogResult = result;
         Capture = false;
         DisposePanes();
+        DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Hide();
         _completion?.TrySetResult(result);
         _completion = null;
@@ -556,20 +628,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private static void DrawRect(SD.Graphics g, SD.Rectangle rect, SD.Color stroke)
     {
         using var pen = new SD.Pen(stroke, 2);
-        g.DrawRectangle(pen, rect);
-    }
-
-    /// <summary>Fills the selection with the transparency-key color (full-brightness hole)
-    /// and strokes it with the accent border.</summary>
-    private void DrawSelection(SD.Graphics g, SD.Rectangle rect)
-    {
-        if (rect.Width < 1 || rect.Height < 1)
-            return;
-
-        using (var hole = new SD.SolidBrush(HoleKey))
-            g.FillRectangle(hole, rect);
-
-        using var pen = new SD.Pen(Accent, 2);
         g.DrawRectangle(pen, rect);
     }
 
@@ -689,7 +747,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             DoubleBuffered = true;
             SetStyle(PaintStyles, true);
             Bounds = monitorBounds;
-            Opacity = 0.45;
+            Opacity = 1.0;
         }
 
         protected override bool ShowWithoutActivation => true;

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using Windows.Media.Editing;
 using Windows.Media.MediaProperties;
@@ -24,11 +25,21 @@ public partial class VideoEditorWindow : Window
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
 
     private double _durationSec;
-    private bool _trimInitialized; // trim sliders are set up once, not on preview reopen
+    private bool _trimInitialized; // trim range is set up once, not on preview reopen
     private bool _playing;
     private bool _syncingPosition; // true while the timer drives the position slider
     private bool _exporting;
     private bool _closed;
+
+    // Filmstrip-timeline trim state (seconds). Replaces the old trim sliders;
+    // every edit is run through VideoTrimRange so clamping stays centralized.
+    private double _trimStartSec;
+    private double _trimEndSec;
+    private bool _filmstripBuilt; // thumbnails are generated at most once
+
+    // Drag handles are 12px wide; the accent bar sits on their inner edge so the
+    // selection spans from the start-thumb's right edge to the end-thumb's left.
+    private const double ThumbWidth = 12;
 
     public VideoEditorWindow(string mp4Path, SettingsService settings, HistoryService history)
     {
@@ -93,9 +104,10 @@ public partial class VideoEditorWindow : Window
         if (!_trimInitialized)
         {
             _trimInitialized = true;
-            TrimStartSlider.Maximum = Math.Max(0.1, _durationSec);
-            TrimEndSlider.Maximum = Math.Max(0.1, _durationSec);
-            TrimEndSlider.Value = TrimEndSlider.Maximum;
+            _trimStartSec = 0;
+            _trimEndSec = Math.Max(0.1, _durationSec);
+            UpdateTrimUi();
+            _ = BuildFilmstripAsync();
         }
         UpdateTimeLabel();
     }
@@ -140,6 +152,7 @@ public partial class VideoEditorWindow : Window
         _syncingPosition = true;
         PositionSlider.Value = Media.Position.TotalSeconds;
         _syncingPosition = false;
+        UpdatePlayhead();
         UpdateTimeLabel();
     }
 
@@ -147,6 +160,7 @@ public partial class VideoEditorWindow : Window
     {
         if (_syncingPosition || _exporting) return;
         Media.Position = TimeSpan.FromSeconds(PositionSlider.Value);
+        UpdatePlayhead();
         UpdateTimeLabel();
     }
 
@@ -160,29 +174,208 @@ public partial class VideoEditorWindow : Window
         return $"{(int)t.TotalMinutes}:{t.Seconds:00}";
     }
 
-    // ---- trim / audio controls ----
+    // ---- filmstrip trim timeline ----
 
-    private void OnTrimStartChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    /// <summary>Usable horizontal span of the track (px) the playhead and thumbs map onto.</summary>
+    private double TimelineSpan => Math.Max(1, TimelineTrack.ActualWidth - ThumbWidth * 2);
+
+    /// <summary>Maps a position in seconds to an x offset (px) on the timeline canvas.</summary>
+    private double SecondsToX(double seconds)
     {
-        if (TrimStartLabel is null || TrimEndSlider is null) return; // XAML init order
-        var range = VideoTrimRange.FromStart(TrimStartSlider.Value, TrimEndSlider.Value, _durationSec);
-        if (Math.Abs(TrimStartSlider.Value - range.StartSeconds) > 0.001)
-            TrimStartSlider.Value = range.StartSeconds;
-        if (Math.Abs(TrimEndSlider.Value - range.EndSeconds) > 0.001)
-            TrimEndSlider.Value = range.EndSeconds;
-        TrimStartLabel.Text = FormatTime(TrimStartSlider.Value);
+        double duration = Math.Max(0.1, _durationSec);
+        double fraction = Math.Clamp(seconds / duration, 0, 1);
+        return ThumbWidth + fraction * TimelineSpan;
     }
 
-    private void OnTrimEndChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    /// <summary>Maps an x offset (px) on the timeline back to seconds.</summary>
+    private double XToSeconds(double x)
     {
-        if (TrimEndLabel is null || TrimStartSlider is null) return; // XAML init order
-        var range = VideoTrimRange.FromEnd(TrimStartSlider.Value, TrimEndSlider.Value, _durationSec);
-        if (Math.Abs(TrimStartSlider.Value - range.StartSeconds) > 0.001)
-            TrimStartSlider.Value = range.StartSeconds;
-        if (Math.Abs(TrimEndSlider.Value - range.EndSeconds) > 0.001)
-            TrimEndSlider.Value = range.EndSeconds;
-        TrimEndLabel.Text = FormatTime(TrimEndSlider.Value);
+        double fraction = Math.Clamp((x - ThumbWidth) / TimelineSpan, 0, 1);
+        return fraction * Math.Max(0.1, _durationSec);
     }
+
+    private void OnTimelineSizeChanged(object sender, SizeChangedEventArgs e) => UpdateTrimUi();
+
+    private void OnTimelineClicked(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_exporting || _durationSec <= 0) return;
+        // Clicking the empty track scrubs the preview (handles capture their own drags).
+        if (e.OriginalSource is FrameworkElement fe &&
+            (ReferenceEquals(fe, TrimStartThumb) || ReferenceEquals(fe, TrimEndThumb)))
+            return;
+        double x = e.GetPosition(TimelineCanvas).X;
+        double seconds = XToSeconds(x);
+        Media.Position = TimeSpan.FromSeconds(seconds);
+        _syncingPosition = true;
+        PositionSlider.Value = seconds;
+        _syncingPosition = false;
+        UpdatePlayhead();
+        UpdateTimeLabel();
+    }
+
+    private void OnTrimStartDrag(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+    {
+        if (_durationSec <= 0) return;
+        double newX = Canvas.GetLeft(TrimStartThumb) + ThumbWidth + e.HorizontalChange;
+        double requested = XToSeconds(newX);
+        var range = VideoTrimRange.FromStart(requested, _trimEndSec, _durationSec);
+        _trimStartSec = range.StartSeconds;
+        _trimEndSec = range.EndSeconds;
+        UpdateTrimUi();
+    }
+
+    private void OnTrimEndDrag(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+    {
+        if (_durationSec <= 0) return;
+        double newX = Canvas.GetLeft(TrimEndThumb) + e.HorizontalChange;
+        double requested = XToSeconds(newX);
+        var range = VideoTrimRange.FromEnd(_trimStartSec, requested, _durationSec);
+        _trimStartSec = range.StartSeconds;
+        _trimEndSec = range.EndSeconds;
+        UpdateTrimUi();
+    }
+
+    /// <summary>Repositions the thumbs, dimmers, selection border, and labels to match the trim range.</summary>
+    private void UpdateTrimUi()
+    {
+        if (TimelineTrack is null || TrimStartThumb is null || TrimEndThumb is null)
+            return; // XAML init order
+
+        double startX = SecondsToX(_trimStartSec); // inner edge of the kept region
+        double endX = SecondsToX(_trimEndSec);
+        double height = Math.Max(0, TimelineTrack.ActualHeight - 2);
+
+        // Thumbs are anchored so their accent bar sits on the selection boundary.
+        Canvas.SetLeft(TrimStartThumb, startX - ThumbWidth);
+        Canvas.SetLeft(TrimEndThumb, endX);
+        TrimStartThumb.Height = height;
+        TrimEndThumb.Height = height;
+
+        LeftDim.Width = Math.Max(0, startX);
+        LeftDim.Height = height;
+        Canvas.SetLeft(RightDim, endX);
+        RightDim.Width = Math.Max(0, TimelineCanvasWidth() - endX);
+        RightDim.Height = height;
+
+        Canvas.SetLeft(SelectionBorder, startX);
+        SelectionBorder.Width = Math.Max(0, endX - startX);
+        SelectionBorder.Height = height;
+
+        if (TrimStartLabel is not null) TrimStartLabel.Text = $"In {FormatTime(_trimStartSec)}";
+        if (TrimEndLabel is not null) TrimEndLabel.Text = $"Out {FormatTime(_trimEndSec)}";
+        if (TrimRangeLabel is not null) TrimRangeLabel.Text = FormatTime(Math.Max(0, _trimEndSec - _trimStartSec));
+
+        UpdatePlayhead();
+    }
+
+    private double TimelineCanvasWidth() => Math.Max(0, TimelineTrack.ActualWidth);
+
+    private void UpdatePlayhead()
+    {
+        if (Playhead is null || TimelineTrack is null) return;
+        Canvas.SetLeft(Playhead, SecondsToX(Media.Position.TotalSeconds) - 1);
+        Playhead.Height = Math.Max(0, TimelineTrack.ActualHeight - 4);
+    }
+
+    /// <summary>
+    /// Best-effort filmstrip: renders a handful of evenly spaced frames from the
+    /// MediaComposition and lays them across the track. On any failure the track
+    /// stays a plain dark strip — the trim handles work regardless.
+    /// </summary>
+    private async Task BuildFilmstripAsync()
+    {
+        if (_filmstripBuilt || _durationSec <= 0) return;
+        _filmstripBuilt = true;
+
+        const int frameCount = 8;
+        const int thumbHeight = 54;
+        try
+        {
+            var srcFile = await StorageFile.GetFileFromPathAsync(_mp4Path);
+            var clip = await MediaClip.CreateFromFileAsync(srcFile);
+            var composition = new MediaComposition();
+            composition.Clips.Add(clip);
+
+            var props = clip.GetVideoEncodingProperties();
+            double aspect = props.Width > 0 && props.Height > 0
+                ? (double)props.Width / props.Height
+                : 16.0 / 9.0;
+            int thumbWidth = Math.Max(1, (int)Math.Round(thumbHeight * aspect));
+
+            var images = new List<System.Windows.Media.Imaging.BitmapImage?>();
+            for (int i = 0; i < frameCount; i++)
+            {
+                if (_closed) return;
+                double t = _durationSec * (i + 0.5) / frameCount;
+                var time = TimeSpan.FromSeconds(Math.Clamp(t, 0, Math.Max(0, _durationSec - 0.01)));
+                images.Add(await TryGetThumbnailAsync(composition, time, thumbWidth, thumbHeight));
+            }
+
+            if (_closed) return;
+            RenderFilmstrip(images, thumbWidth, thumbHeight);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to build filmstrip thumbnails; using a plain track", ex);
+        }
+    }
+
+    private static async Task<System.Windows.Media.Imaging.BitmapImage?> TryGetThumbnailAsync(
+        MediaComposition composition, TimeSpan time, int width, int height)
+    {
+        try
+        {
+            // NearestKeyFrame is cheap to decode — good enough for a scrub strip.
+            var stream = await composition.GetThumbnailAsync(
+                time, width, height, VideoFramePrecision.NearestKeyFrame);
+            if (stream is null) return null;
+
+            using var netStream = stream.AsStreamForRead();
+            using var ms = new MemoryStream();
+            await netStream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            var bitmap = new System.Windows.Media.Imaging.BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bitmap.StreamSource = ms;
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to render a filmstrip frame", ex);
+            return null;
+        }
+    }
+
+    private void RenderFilmstrip(
+        IReadOnlyList<System.Windows.Media.Imaging.BitmapImage?> images, int thumbWidth, int thumbHeight)
+    {
+        FilmstripItems.Items.Clear();
+        if (images.Count == 0) return;
+
+        // Tile thumbnails left-to-right across the full track width.
+        double span = Math.Max(thumbWidth, TimelineTrack.ActualWidth);
+        double step = span / images.Count;
+        for (int i = 0; i < images.Count; i++)
+        {
+            if (images[i] is null) continue;
+            var image = new System.Windows.Controls.Image
+            {
+                Source = images[i],
+                Width = step + 1, // +1 avoids hairline gaps between tiles
+                Height = thumbHeight,
+                Stretch = System.Windows.Media.Stretch.UniformToFill,
+            };
+            Canvas.SetLeft(image, i * step);
+            Canvas.SetTop(image, 0);
+            FilmstripItems.Items.Add(image);
+        }
+    }
+
+    // ---- audio controls ----
 
     private void OnMuteChanged(object sender, RoutedEventArgs e)
     {
@@ -206,7 +399,7 @@ public partial class VideoEditorWindow : Window
             StatusText.Text = "Video is still loading — try again in a moment.";
             return;
         }
-        var trimRange = VideoTrimRange.Normalize(TrimStartSlider.Value, TrimEndSlider.Value, _durationSec);
+        var trimRange = VideoTrimRange.Normalize(_trimStartSec, _trimEndSec, _durationSec);
         if (!trimRange.IsExportable)
         {
             StatusText.Text = "Trim range is empty — nothing to export.";

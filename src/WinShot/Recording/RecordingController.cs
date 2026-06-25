@@ -53,6 +53,8 @@ public sealed class RecordingController
         bool ShowKeystrokes,
         string WebcamPosition,
         int WebcamSizePercent,
+        string? WebcamDeviceName,
+        string? MicrophoneDeviceName,
         int RecordingFps,
         int VideoQuality,
         int GifFps);
@@ -137,6 +139,8 @@ public sealed class RecordingController
         int countdownSeconds;
         string webcamPosition;
         int webcamSizePercent;
+        string? webcamDeviceName;
+        string? microphoneDeviceName;
         int recordingFps;
         int videoQuality;
         int gifFps;
@@ -153,6 +157,8 @@ public sealed class RecordingController
             countdownSeconds = dialog.CountdownSeconds;
             webcamPosition = dialog.WebcamPosition;
             webcamSizePercent = dialog.WebcamSizePercent;
+            webcamDeviceName = dialog.WebcamDeviceName;
+            microphoneDeviceName = dialog.MicrophoneDeviceName;
             recordingFps = dialog.RecordingFps;
             videoQuality = dialog.VideoQuality;
             gifFps = dialog.GifFps;
@@ -233,6 +239,8 @@ public sealed class RecordingController
             showKeystrokes,
             webcamPosition,
             webcamSizePercent,
+            webcamDeviceName,
+            microphoneDeviceName,
             recordingFps,
             videoQuality,
             gifFps);
@@ -290,7 +298,7 @@ public sealed class RecordingController
             if (_isGif)
                 StartGif(screenRect, p.CaptureCursor, p.GifFps);
             else
-                StartMp4(screenRect, p.RecordMicrophone, p.RecordSystemAudio, p.CaptureCursor, p.WebcamPosition, p.WebcamSizePercent, p.RecordingFps, p.VideoQuality);
+                StartMp4(screenRect, p.RecordMicrophone, p.RecordSystemAudio, p.CaptureCursor, p.WebcamPosition, p.WebcamSizePercent, p.WebcamDeviceName, p.MicrophoneDeviceName, p.RecordingFps, p.VideoQuality);
         }
         catch
         {
@@ -373,6 +381,8 @@ public sealed class RecordingController
         bool captureCursor,
         string webcamPosition,
         int webcamSizePercent,
+        string? webcamDeviceName,
+        string? microphoneDeviceName,
         int recordingFps,
         int videoQuality)
     {
@@ -416,13 +426,17 @@ public sealed class RecordingController
                 IsAudioEnabled = audio.IsAudioEnabled,
                 IsInputDeviceEnabled = audio.IsInputDeviceEnabled,
                 IsOutputDeviceEnabled = audio.IsOutputDeviceEnabled,
+                // null/empty => recorder uses the system default input device.
+                AudioInputDevice = micAudio && !string.IsNullOrEmpty(microphoneDeviceName)
+                    ? microphoneDeviceName
+                    : null,
             },
             // Click feedback comes from our own overlay window (shared with the
             // GIF path); ScreenRecorderLib's built-in click detection stays off.
             MouseOptions = new MouseOptions { IsMousePointerEnabled = captureCursor },
         };
 
-        ApplyWebcamOverlay(options, webcamPosition, webcamSizePercent, rect);
+        ApplyWebcamOverlay(options, webcamPosition, webcamSizePercent, webcamDeviceName, rect);
 
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnMp4Complete;
@@ -438,6 +452,7 @@ public sealed class RecordingController
         RecorderOptions options,
         string webcamPosition,
         int webcamSizePercent,
+        string? webcamDeviceName,
         SD.Rectangle rect)
     {
         if (!RecordingWebcamOverlayLayout.TryCreate(rect, webcamPosition, webcamSizePercent, out var layout))
@@ -452,7 +467,16 @@ public sealed class RecordingController
                 return;
             }
 
-            var overlay = new VideoCaptureOverlay(cameras[0].DeviceName)
+            // Honor the chosen camera when it's still present; otherwise fall back
+            // to the first available device (matches the dialog's default).
+            string deviceName = cameras[0].DeviceName;
+            if (!string.IsNullOrEmpty(webcamDeviceName) &&
+                cameras.Any(c => string.Equals(c.DeviceName, webcamDeviceName, StringComparison.OrdinalIgnoreCase)))
+            {
+                deviceName = webcamDeviceName;
+            }
+
+            var overlay = new VideoCaptureOverlay(deviceName)
             {
                 AnchorPoint = layout.Position switch
                 {

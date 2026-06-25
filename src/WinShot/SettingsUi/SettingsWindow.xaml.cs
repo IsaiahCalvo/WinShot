@@ -38,6 +38,9 @@ public partial class SettingsWindow : Window
 
     public SettingsWindow(SettingsService settings)
     {
+        // Load the shared theme before parsing XAML (which references theme brushes), rather
+        // than relying on another window having loaded it first. Idempotent.
+        ThemeResources.EnsureLoaded();
         InitializeComponent();
         _settings = settings;
         LoadFromSettings();

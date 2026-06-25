@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using ScreenRecorderLib;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -18,9 +19,19 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private readonly WF.RadioButton _mp4Radio;
     private readonly WF.RadioButton _gifRadio;
     private readonly WF.CheckBox _audioCheck;
+    private readonly WF.Label _micDeviceLabel;
+    private readonly WF.ComboBox _micDeviceCombo;
     private readonly WF.CheckBox _systemAudioCheck;
     private readonly WF.ComboBox _webcamCombo;
+    private readonly WF.Label _webcamDeviceLabel;
+    private readonly WF.ComboBox _webcamDeviceCombo;
     private readonly WF.TextBox _webcamSizeBox;
+
+    // DeviceName values parallel to the combo items (index 0 = "Default", which
+    // maps to the first real device). Populated lazily from ScreenRecorderLib.
+    private readonly List<string?> _micDeviceNames = new();
+    private readonly List<string?> _webcamDeviceNames = new();
+    private bool _devicesLoaded;
     private readonly WF.CheckBox _cursorCheck;
     private readonly WF.CheckBox _clickHighlightCheck;
     private readonly WF.CheckBox _keystrokeCheck;
@@ -38,7 +49,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     {
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
-        ClientSize = new SD.Size(286, 436);
+        ClientSize = new SD.Size(286, 504);
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
         MaximizeBox = false;
@@ -86,71 +97,87 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         Controls.Add(_gifFpsCombo);
 
         _audioCheck = Check("Record microphone", 18, 172, isChecked: false);
-        _systemAudioCheck = Check("Record system audio", 18, 198, isChecked: false);
         Controls.Add(_audioCheck);
+
+        // Microphone device picker — only shown when "Record microphone" is on.
+        _micDeviceLabel = Label("Mic device", 18, 202, 92);
+        Controls.Add(_micDeviceLabel);
+        _micDeviceCombo = Combo(110, 198, 150);
+        Controls.Add(_micDeviceCombo);
+
+        _systemAudioCheck = Check("Record system audio", 18, 232, isChecked: false);
         Controls.Add(_systemAudioCheck);
 
-        Controls.Add(Label("Webcam", 18, 232, 92));
+        Controls.Add(Label("Webcam", 18, 266, 92));
         _webcamCombo = new WF.ComboBox
         {
             BackColor = FieldBack,
             DropDownStyle = WF.ComboBoxStyle.DropDownList,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(110, 228),
+            Location = new SD.Point(110, 262),
             Size = new SD.Size(150, 24),
         };
         _webcamCombo.Items.AddRange(["Off", "Top left", "Top right", "Bottom left", "Bottom right", "Fullscreen"]);
         _webcamCombo.SelectedIndex = 0;
+        _webcamCombo.SelectedIndexChanged += (_, _) => UpdateMp4DependentState();
         Controls.Add(_webcamCombo);
 
-        Controls.Add(Label("Webcam size", 18, 266, 92));
+        // Webcam device picker — only shown when a webcam position is selected.
+        _webcamDeviceLabel = Label("Camera", 18, 300, 92);
+        Controls.Add(_webcamDeviceLabel);
+        _webcamDeviceCombo = Combo(110, 296, 150);
+        Controls.Add(_webcamDeviceCombo);
+
+        Controls.Add(Label("Webcam size", 18, 334, 92));
         _webcamSizeBox = new WF.TextBox
         {
             BackColor = FieldBack,
             BorderStyle = WF.BorderStyle.FixedSingle,
             ForeColor = TextColor,
-            Location = new SD.Point(110, 262),
+            Location = new SD.Point(110, 330),
             Size = new SD.Size(44, 24),
             Text = RecordingOptions.DefaultWebcamSizePercent.ToString(),
             TextAlign = WF.HorizontalAlignment.Center,
         };
         Controls.Add(_webcamSizeBox);
-        Controls.Add(Label("10-45%", 164, 266, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
+        Controls.Add(Label("10-45%", 164, 334, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
 
-        _cursorCheck = Check("Capture cursor", 18, 300, isChecked: false);
-        _clickHighlightCheck = Check("Highlight mouse clicks", 18, 326, isChecked: false);
-        _keystrokeCheck = Check("Show keystrokes", 18, 352, isChecked: false);
+        _cursorCheck = Check("Capture cursor", 18, 368, isChecked: false);
+        _clickHighlightCheck = Check("Highlight mouse clicks", 18, 394, isChecked: false);
+        _keystrokeCheck = Check("Show keystrokes", 18, 420, isChecked: false);
         Controls.Add(_cursorCheck);
         Controls.Add(_clickHighlightCheck);
         Controls.Add(_keystrokeCheck);
 
-        Controls.Add(Label("Countdown (s)", 18, 386, 92));
+        Controls.Add(Label("Countdown (s)", 18, 454, 92));
         _countdownBox = new WF.TextBox
         {
             BackColor = FieldBack,
             BorderStyle = WF.BorderStyle.FixedSingle,
             ForeColor = TextColor,
-            Location = new SD.Point(110, 382),
+            Location = new SD.Point(110, 450),
             Size = new SD.Size(44, 24),
             Text = "0",
             TextAlign = WF.HorizontalAlignment.Center,
         };
         Controls.Add(_countdownBox);
-        Controls.Add(Label("0 = off", 164, 386, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
+        Controls.Add(Label("0 = off", 164, 454, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
 
-        var cancel = Button("Cancel", 110, 414, SD.Color.FromArgb(58, 58, 58));
+        var cancel = Button("Cancel", 110, 482, SD.Color.FromArgb(58, 58, 58));
         cancel.Click += (_, _) => Complete(WF.DialogResult.Cancel);
         Controls.Add(cancel);
 
-        var start = Button("Start", 190, 414, Accent);
+        var start = Button("Start", 190, 482, Accent);
         start.Click += (_, _) => Complete(WF.DialogResult.OK);
         Controls.Add(start);
         AcceptButton = start;
         CancelButton = cancel;
 
+        _audioCheck.CheckedChanged += (_, _) => UpdateMp4DependentState();
         _mp4Radio.CheckedChanged += (_, _) => UpdateMp4DependentState();
         _gifRadio.CheckedChanged += (_, _) => UpdateMp4DependentState();
+        LoadDevices();
         ApplySettings(settings);
 
         MouseDown += (_, e) =>
@@ -159,6 +186,75 @@ public sealed class FastRecordingOptionsDialog : WF.Form
                 Native.ReleaseCaptureAndDrag(Handle);
         };
     }
+
+    /// <summary>
+    /// Populates the microphone and webcam device pickers from ScreenRecorderLib.
+    /// Item 0 of each combo is "Default" (mapped to a null DeviceName so the
+    /// recorder uses the system default); real devices follow. Best-effort: if
+    /// enumeration fails the combos simply show "Default" only.
+    /// </summary>
+    private void LoadDevices()
+    {
+        if (_devicesLoaded)
+            return;
+        _devicesLoaded = true;
+
+        _micDeviceCombo.Items.Clear();
+        _micDeviceNames.Clear();
+        _micDeviceCombo.Items.Add("Default");
+        _micDeviceNames.Add(null);
+        try
+        {
+            var inputs = Recorder.GetSystemAudioDevices(AudioDeviceSource.InputDevices);
+            if (inputs is not null)
+            {
+                foreach (var device in inputs)
+                {
+                    if (string.IsNullOrEmpty(device.DeviceName))
+                        continue;
+                    _micDeviceCombo.Items.Add(Truncate(device.FriendlyName ?? device.DeviceName));
+                    _micDeviceNames.Add(device.DeviceName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to enumerate microphone devices", ex);
+        }
+        // When exactly one real device exists, default to it; otherwise leave on
+        // "Default" so the recorder picks the system default microphone.
+        _micDeviceCombo.SelectedIndex = _micDeviceCombo.Items.Count == 2 ? 1 : 0;
+
+        _webcamDeviceCombo.Items.Clear();
+        _webcamDeviceNames.Clear();
+        try
+        {
+            var cameras = Recorder.GetSystemVideoCaptureDevices();
+            if (cameras is not null)
+            {
+                foreach (var camera in cameras)
+                {
+                    if (string.IsNullOrEmpty(camera.DeviceName))
+                        continue;
+                    _webcamDeviceCombo.Items.Add(Truncate(camera.FriendlyName ?? camera.DeviceName));
+                    _webcamDeviceNames.Add(camera.DeviceName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to enumerate webcam devices", ex);
+        }
+        if (_webcamDeviceCombo.Items.Count == 0)
+        {
+            _webcamDeviceCombo.Items.Add("No camera found");
+            _webcamDeviceNames.Add(null);
+        }
+        _webcamDeviceCombo.SelectedIndex = 0;
+    }
+
+    private static string Truncate(string text) =>
+        text.Length <= 28 ? text : text[..27] + "…";
 
     public static void Prewarm(Settings settings)
     {
@@ -257,6 +353,26 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         int.TryParse(_webcamSizeBox.Text.Trim(), out int percent)
             ? RecordingOptions.ClampWebcamSizePercent(percent)
             : RecordingOptions.DefaultWebcamSizePercent;
+
+    /// <summary>
+    /// DeviceName of the chosen microphone, or <c>null</c> to use the system
+    /// default. Only meaningful when <see cref="RecordMicrophone"/> is true.
+    /// </summary>
+    public string? MicrophoneDeviceName =>
+        SelectedDeviceName(_micDeviceCombo, _micDeviceNames);
+
+    /// <summary>
+    /// DeviceName of the chosen webcam, or <c>null</c> when none is available.
+    /// Only meaningful when <see cref="WebcamPosition"/> is not "off".
+    /// </summary>
+    public string? WebcamDeviceName =>
+        SelectedDeviceName(_webcamDeviceCombo, _webcamDeviceNames);
+
+    private static string? SelectedDeviceName(WF.ComboBox combo, List<string?> names)
+    {
+        int index = combo.SelectedIndex;
+        return index >= 0 && index < names.Count ? names[index] : null;
+    }
 
     /// <summary>Chosen MP4 frame rate (fps). Applies to the H.264 recorder.</summary>
     public int RecordingFps => _fpsCombo.SelectedIndex switch
@@ -403,6 +519,15 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         _qualityCombo.Visible = mp4;
         _gifFpsLabel.Visible = !mp4;
         _gifFpsCombo.Visible = !mp4;
+
+        // Device pickers only matter for MP4, and only when their feature is on.
+        bool micOn = mp4 && _audioCheck.Checked;
+        _micDeviceLabel.Visible = micOn;
+        _micDeviceCombo.Visible = micOn;
+
+        bool webcamOn = mp4 && _webcamCombo.SelectedIndex > 0;
+        _webcamDeviceLabel.Visible = webcamOn;
+        _webcamDeviceCombo.Visible = webcamOn;
     }
 
     private static WF.Label Label(

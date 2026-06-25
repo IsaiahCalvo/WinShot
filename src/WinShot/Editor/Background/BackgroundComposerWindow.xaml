@@ -43,9 +43,28 @@
 
                         <TextBlock Style="{StaticResource SectionHeader}" Text="Plain color"/>
                         <WrapPanel x:Name="SolidPanel" Margin="0,0,0,6"/>
-                        <TextBox x:Name="HexBox" Style="{StaticResource DarkTextBox}"
-                                 TextChanged="OnHexChanged"
-                                 ToolTip="Hex color, e.g. #1E1E2E (or a WPF color name)"/>
+                        <DockPanel>
+                            <!-- Live preview chip of the parsed color; sits to the
+                                 right of the hex box and updates as the user types
+                                 or picks a solid swatch. -->
+                            <Border DockPanel.Dock="Right" Width="30" Height="30"
+                                    Margin="6,0,0,0"
+                                    CornerRadius="{StaticResource RadiusInput}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    ToolTip="Selected color">
+                                <Border x:Name="HexSwatch" CornerRadius="4" Margin="1"
+                                        Background="Transparent"/>
+                            </Border>
+                            <!-- Invalid-state ring: turns red when the text doesn't
+                                 parse, transparent (clear) when it does. -->
+                            <Border x:Name="HexInvalidRing" BorderThickness="1"
+                                    BorderBrush="Transparent"
+                                    CornerRadius="{StaticResource RadiusInput}">
+                                <TextBox x:Name="HexBox" Style="{StaticResource DarkTextBox}"
+                                         TextChanged="OnHexChanged"
+                                         ToolTip="Hex color, e.g. #1E1E2E (or a WPF color name)"/>
+                            </Border>
+                        </DockPanel>
 
                         <!-- ============ LAYOUT SLIDERS ============ -->
                         <TextBlock Style="{StaticResource SectionHeader}" Text="Layout"/>
@@ -62,14 +81,28 @@
                         <CheckBox x:Name="ShadowCheck" Style="{StaticResource DarkCheckBox}"
                                   Content="Drop shadow" IsChecked="True"
                                   Checked="OnShadowToggled" Unchecked="OnShadowToggled" Margin="0,4,0,2"/>
+                        <!-- Softness drives the blur radius (and a proportional drop);
+                             Intensity drives the shadow opacity. Together they read
+                             like CleanShot's natural ambient shadow. -->
                         <DockPanel Margin="0,6,0,0"
                                    IsEnabled="{Binding IsChecked, ElementName=ShadowCheck}">
                             <TextBlock x:Name="BlurValueLabel" DockPanel.Dock="Right"
                                        Style="{StaticResource ValueLabel}"/>
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Shadow"/>
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Softness"/>
                         </DockPanel>
                         <Slider x:Name="BlurSlider" Style="{StaticResource DarkSlider}"
                                 Minimum="4" Maximum="100" Value="32"
+                                IsEnabled="{Binding IsChecked, ElementName=ShadowCheck}"
+                                ValueChanged="OnSliderChanged" Margin="0,2,0,8"/>
+
+                        <DockPanel Margin="0,2,0,0"
+                                   IsEnabled="{Binding IsChecked, ElementName=ShadowCheck}">
+                            <TextBlock x:Name="ShadowOpacityValueLabel" DockPanel.Dock="Right"
+                                       Style="{StaticResource ValueLabel}"/>
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Intensity"/>
+                        </DockPanel>
+                        <Slider x:Name="ShadowOpacitySlider" Style="{StaticResource DarkSlider}"
+                                Minimum="0.2" Maximum="0.8" Value="0.55"
                                 IsEnabled="{Binding IsChecked, ElementName=ShadowCheck}"
                                 ValueChanged="OnSliderChanged" Margin="0,2,0,8"/>
 

@@ -1,9 +1,0 @@
-<Window x:Class="WinShot.Recording.ClickHighlightOverlayWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="" WindowStyle="None" ResizeMode="NoResize"
-        AllowsTransparency="True" Background="Transparent" Topmost="True"
-        ShowInTaskbar="False" ShowActivated="False" Focusable="False"
-        WindowStartupLocation="Manual" IsHitTestVisible="False">
-    <Canvas x:Name="RingCanvas"/>
-</Window>

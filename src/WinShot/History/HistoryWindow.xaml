@@ -92,29 +92,63 @@
                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                      ScrollViewer.CanContentScroll="False">
                 <ListBox.ItemContainerStyle>
+                    <!-- Real selection: containers are focusable so arrow keys move a
+                         SelectedItem across the WrapPanel. The selection visual is a thin
+                         accent ring around the card (the card keeps its own hover border). -->
                     <Style TargetType="ListBoxItem">
-                        <Setter Property="Focusable" Value="False"/>
+                        <Setter Property="Focusable" Value="True"/>
                         <Setter Property="Margin" Value="0"/>
                         <Setter Property="Padding" Value="0"/>
                         <Setter Property="Template">
                             <Setter.Value>
+                                <!-- The ring carries the inter-tile spacing (margin) and
+                                     hugs the card edge; selection lights its accent border. -->
                                 <ControlTemplate TargetType="ListBoxItem">
-                                    <ContentPresenter/>
+                                    <Border x:Name="SelectionRing" Margin="6"
+                                            BorderBrush="Transparent" BorderThickness="2"
+                                            CornerRadius="{StaticResource RadiusCard}"
+                                            Background="Transparent">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="SelectionRing" Property="BorderBrush"
+                                                    Value="{StaticResource AccentBrush}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </Setter.Value>
                         </Setter>
                     </Style>
                 </ListBox.ItemContainerStyle>
+                <!-- Groups stack vertically (StackPanel); tiles wrap within each group. -->
                 <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal"/>
+                        <StackPanel Orientation="Vertical"/>
                     </ItemsPanelTemplate>
                 </ListBox.ItemsPanel>
+                <ListBox.GroupStyle>
+                    <GroupStyle>
+                        <GroupStyle.HeaderTemplate>
+                            <DataTemplate>
+                                <!-- Small uppercase secondary-text day header. -->
+                                <TextBlock Text="{Binding Name}" Margin="9,12,0,4"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="11" FontWeight="SemiBold"/>
+                            </DataTemplate>
+                        </GroupStyle.HeaderTemplate>
+                        <GroupStyle.Panel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </GroupStyle.Panel>
+                    </GroupStyle>
+                </ListBox.GroupStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <!-- Square-ish card: large thumbnail + thin caption.
                              Action row revealed on hover (named OverlayActions). -->
-                        <Border x:Name="Card" Width="190" Margin="6"
+                        <Border x:Name="Card" Width="190" Margin="0"
                                 Background="{StaticResource ToolbarBgBrush}"
                                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                                 CornerRadius="{StaticResource RadiusCard}" ClipToBounds="True"

@@ -332,8 +332,15 @@ public partial class App : Application
             {
                 if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
                 {
-                    await WaitForOverlayDismissAsync();
-                    HandleCapture(await CaptureSelectedRegionAsync(region, "capture-area"), postCaptureActionOverride);
+                    // Screen-freeze: the selector already cropped the result from its frozen
+                    // snapshot, so use that (exact, no dismiss delay). Fall back to a live grab.
+                    SD.Bitmap? frozenCrop = selector.TakeCapturedRegion();
+                    if (frozenCrop is null)
+                    {
+                        await WaitForOverlayDismissAsync();
+                        frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
+                    }
+                    HandleCapture(frozenCrop, postCaptureActionOverride);
                 }
             }
             finally
@@ -947,11 +954,16 @@ public partial class App : Application
             {
                 if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
                 {
-                    await WaitForOverlayDismissAsync();
                     // Screen center of the selection, so the confirmation HUD pops over it.
                     var vs = CaptureService.VirtualScreen;
                     anchor = new SD.Point(vs.X + region.X + region.Width / 2, vs.Y + region.Y + region.Height / 2);
-                    crop = await CaptureSelectedRegionAsync(region, "ocr");
+                    // Prefer the frozen-snapshot crop; fall back to a live grab.
+                    crop = selector.TakeCapturedRegion();
+                    if (crop is null)
+                    {
+                        await WaitForOverlayDismissAsync();
+                        crop = await CaptureSelectedRegionAsync(region, "ocr");
+                    }
                 }
             }
             finally
