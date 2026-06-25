@@ -62,7 +62,40 @@
             </Setter>
         </Style>
         <Style TargetType="TextBox" BasedOn="{StaticResource SettingsTextBox}"/>
-        <Style TargetType="{x:Type local:HotkeyBox}" BasedOn="{StaticResource SettingsTextBox}"/>
+        <!-- HotkeyBox inherits the readable input look but adds a muted "Record shortcut"
+             placeholder when no gesture is assigned (matches CleanShot's recorder pills). -->
+        <Style TargetType="{x:Type local:HotkeyBox}" BasedOn="{StaticResource SettingsTextBox}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type local:HotkeyBox}">
+                        <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                CornerRadius="{StaticResource RadiusInput}">
+                            <Grid>
+                                <TextBlock x:Name="Placeholder" Text="Record shortcut"
+                                           Margin="8,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextDisabledBrush}"
+                                           FontSize="12" FontWeight="Normal"
+                                           IsHitTestVisible="False" Visibility="Collapsed"/>
+                                <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                              VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Text" Value="">
+                                <Setter TargetName="Placeholder" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="CheckBox" BasedOn="{StaticResource DarkCheckBox}">
             <Setter Property="FontSize" Value="12"/>
         </Style>
@@ -399,56 +432,9 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource ShortcutCategory}" Text="General"/>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="All-In-One"/>
-                                    <local:HotkeyBox x:Name="HotkeyAllInOneBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-
-                                <Rectangle Style="{StaticResource GroupSep}"/>
-
-                                <TextBlock Style="{StaticResource ShortcutCategory}" Text="Screenshots"/>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture Area"/>
-                                    <local:HotkeyBox x:Name="HotkeyRegionBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture Window"/>
-                                    <local:HotkeyBox x:Name="HotkeyWindowBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture Fullscreen"/>
-                                    <local:HotkeyBox x:Name="HotkeyFullscreenBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture Previous Area"/>
-                                    <local:HotkeyBox x:Name="HotkeyPreviousBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-
-                                <Rectangle Style="{StaticResource GroupSep}"/>
-
-                                <TextBlock Style="{StaticResource ShortcutCategory}" Text="Screen Recording"/>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Record Screen"/>
-                                    <local:HotkeyBox x:Name="HotkeyRecordBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-
-                                <Rectangle Style="{StaticResource GroupSep}"/>
-
-                                <TextBlock Style="{StaticResource ShortcutCategory}" Text="Scrolling Capture"/>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Scrolling Capture"/>
-                                    <local:HotkeyBox x:Name="HotkeyScrollingBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-
-                                <Rectangle Style="{StaticResource GroupSep}"/>
-
-                                <TextBlock Style="{StaticResource ShortcutCategory}" Text="OCR"/>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture Text"/>
-                                    <local:HotkeyBox x:Name="HotkeyOcrBox" Width="180" HorizontalAlignment="Left"/>
-                                </DockPanel>
-
+                                <!-- Rows are generated from the shortcut catalog in
+                                     SettingsWindow.Shortcuts.cs (BuildShortcutsTab). -->
+                                <StackPanel x:Name="ShortcutsHost"/>
                                 <TextBlock Style="{StaticResource Hint}" Margin="0,12,0,2"
                                            Text="Click a field and press the keys. Esc cancels, Backspace clears."/>
                             </StackPanel>

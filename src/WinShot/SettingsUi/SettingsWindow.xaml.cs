@@ -43,6 +43,7 @@ public partial class SettingsWindow : Window
         ThemeResources.EnsureLoaded();
         InitializeComponent();
         _settings = settings;
+        BuildShortcutsTab();
         LoadFromSettings();
         WireInlineHotkeyConflictChecks();
         DarkTitleBar.Apply(this);
@@ -353,15 +354,8 @@ public partial class SettingsWindow : Window
         OverlayCloseAfterDragCheck.IsChecked = s.OverlayCloseAfterDragging;
         SelectByTag(OverlaySaveBehaviorCombo, s.OverlaySaveButtonBehavior, fallbackIndex: 0);
 
-        // Hotkeys
-        HotkeyRegionBox.Text = s.HotkeyCaptureRegion;
-        HotkeyWindowBox.Text = s.HotkeyCaptureWindow;
-        HotkeyFullscreenBox.Text = s.HotkeyCaptureFullscreen;
-        HotkeyRecordBox.Text = s.HotkeyRecord;
-        HotkeyOcrBox.Text = s.HotkeyOcr;
-        HotkeyScrollingBox.Text = s.HotkeyScrolling;
-        HotkeyPreviousBox.Text = s.HotkeyCapturePrevious;
-        HotkeyAllInOneBox.Text = s.HotkeyAllInOne;
+        // Hotkeys (Shortcuts tab is generated from the catalog; see SettingsWindow.Shortcuts.cs)
+        LoadShortcutBoxes();
 
         // Recording > General
         ShowRecordingControlsCheck.IsChecked = s.ShowRecordingControls;
@@ -625,15 +619,8 @@ public partial class SettingsWindow : Window
             s.OverlayCloseAfterDragging = OverlayCloseAfterDragCheck.IsChecked == true;
             s.OverlaySaveButtonBehavior = SelectedTag(OverlaySaveBehaviorCombo, "export");
 
-            // Hotkeys
-            s.HotkeyCaptureRegion = HotkeyValue(HotkeyRegionBox);
-            s.HotkeyCaptureWindow = HotkeyValue(HotkeyWindowBox);
-            s.HotkeyCaptureFullscreen = HotkeyValue(HotkeyFullscreenBox);
-            s.HotkeyRecord = HotkeyValue(HotkeyRecordBox);
-            s.HotkeyOcr = HotkeyValue(HotkeyOcrBox);
-            s.HotkeyScrolling = HotkeyValue(HotkeyScrollingBox);
-            s.HotkeyCapturePrevious = HotkeyValue(HotkeyPreviousBox);
-            s.HotkeyAllInOne = HotkeyValue(HotkeyAllInOneBox);
+            // Hotkeys (real + placeholder; see SettingsWindow.Shortcuts.cs)
+            SaveShortcutBoxes(s);
 
             // Recording > General
             s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
@@ -718,12 +705,7 @@ public partial class SettingsWindow : Window
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
 
-    private HotkeyBox[] AllHotkeyBoxes() =>
-        new[]
-        {
-            HotkeyRegionBox, HotkeyWindowBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
-            HotkeyScrollingBox, HotkeyPreviousBox, HotkeyAllInOneBox,
-        };
+    private HotkeyBox[] AllHotkeyBoxes() => RealHotkeyBoxes();
 
     /// <summary>
     /// Lightweight in-app feedback: after a hotkey field loses focus, flag any field that
@@ -779,13 +761,11 @@ public partial class SettingsWindow : Window
             : text.Trim();
 
     private TextBox[] AllInputBoxes() =>
-        new[]
+        new TextBox[]
         {
             SaveFolderBox, OverlayCloseBox, HistoryLimitBox, RetentionDaysBox, SelfTimerBox,
             RecordingFpsBox, GifFpsBox, WebcamSizeBox, CountdownBox, TemplateBox,
-            HotkeyRegionBox, HotkeyWindowBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
-            HotkeyScrollingBox, HotkeyPreviousBox, HotkeyAllInOneBox,
-        };
+        }.Concat(AllHotkeyBoxes()).ToArray();
 
     private void ResetValidation()
     {
@@ -841,22 +821,6 @@ public partial class SettingsWindow : Window
         if (clamped != value)
             box.Text = clamped.ToString();
         return clamped;
-    }
-
-    private HotkeyAssignmentValidator.Field[] CreateHotkeyFields()
-    {
-        var s = _settings.Current;
-        return
-        [
-            new("Capture area", HotkeyRegionBox, s.HotkeyCaptureRegion),
-            new("Capture window", HotkeyWindowBox, s.HotkeyCaptureWindow),
-            new("Capture fullscreen", HotkeyFullscreenBox, s.HotkeyCaptureFullscreen),
-            new("Record screen", HotkeyRecordBox, s.HotkeyRecord),
-            new("Capture text (OCR)", HotkeyOcrBox, s.HotkeyOcr),
-            new("Scrolling capture", HotkeyScrollingBox, s.HotkeyScrolling),
-            new("Repeat previous region", HotkeyPreviousBox, s.HotkeyCapturePrevious),
-            new("All-in-one capture", HotkeyAllInOneBox, s.HotkeyAllInOne),
-        ];
     }
 
     private static bool MarkHotkeyEntryIssues(HotkeyAssignmentValidator.Result result)

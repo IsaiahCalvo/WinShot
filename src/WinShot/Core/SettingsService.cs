@@ -38,6 +38,11 @@ public class Settings
     public string HotkeyCapturePrevious { get; set; } = "Ctrl+Shift+6";
     public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
 
+    // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet
+    // wired to behavior. Keyed by the catalog's stable action id -> gesture (e.g. "Ctrl+Alt+P").
+    // Unassigned actions are simply absent. Real/global hotkeys keep their own fields above.
+    public Dictionary<string, string> ShortcutBindings { get; set; } = new();
+
     // Recording extras
     public bool RecordSystemAudio { get; set; } = false;
     public bool ShowClickHighlights { get; set; } = false;
