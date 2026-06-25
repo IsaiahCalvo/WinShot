@@ -311,6 +311,7 @@ public partial class SettingsWindow : Window
 
         // Hotkeys
         HotkeyRegionBox.Text = s.HotkeyCaptureRegion;
+        HotkeyWindowBox.Text = s.HotkeyCaptureWindow;
         HotkeyFullscreenBox.Text = s.HotkeyCaptureFullscreen;
         HotkeyRecordBox.Text = s.HotkeyRecord;
         HotkeyOcrBox.Text = s.HotkeyOcr;
@@ -455,6 +456,7 @@ public partial class SettingsWindow : Window
 
             // Hotkeys
             s.HotkeyCaptureRegion = HotkeyValue(HotkeyRegionBox);
+            s.HotkeyCaptureWindow = HotkeyValue(HotkeyWindowBox);
             s.HotkeyCaptureFullscreen = HotkeyValue(HotkeyFullscreenBox);
             s.HotkeyRecord = HotkeyValue(HotkeyRecordBox);
             s.HotkeyOcr = HotkeyValue(HotkeyOcrBox);
@@ -504,7 +506,7 @@ public partial class SettingsWindow : Window
     private HotkeyBox[] AllHotkeyBoxes() =>
         new[]
         {
-            HotkeyRegionBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
+            HotkeyRegionBox, HotkeyWindowBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
             HotkeyScrollingBox, HotkeyPreviousBox, HotkeyAllInOneBox,
         };
 
@@ -566,7 +568,7 @@ public partial class SettingsWindow : Window
         {
             SaveFolderBox, OverlayCloseBox, HistoryLimitBox, RetentionDaysBox, SelfTimerBox,
             RecordingFpsBox, GifFpsBox, WebcamSizeBox, CountdownBox, TemplateBox,
-            HotkeyRegionBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
+            HotkeyRegionBox, HotkeyWindowBox, HotkeyFullscreenBox, HotkeyRecordBox, HotkeyOcrBox,
             HotkeyScrollingBox, HotkeyPreviousBox, HotkeyAllInOneBox,
         };
 
@@ -618,7 +620,8 @@ public partial class SettingsWindow : Window
         var s = _settings.Current;
         return
         [
-            new("Capture region / window", HotkeyRegionBox, s.HotkeyCaptureRegion),
+            new("Capture area", HotkeyRegionBox, s.HotkeyCaptureRegion),
+            new("Capture window", HotkeyWindowBox, s.HotkeyCaptureWindow),
             new("Capture fullscreen", HotkeyFullscreenBox, s.HotkeyCaptureFullscreen),
             new("Record screen", HotkeyRecordBox, s.HotkeyRecord),
             new("Capture text (OCR)", HotkeyOcrBox, s.HotkeyOcr),

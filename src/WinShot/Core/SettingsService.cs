@@ -14,6 +14,7 @@ public class Settings
     public int HistoryLimit { get; set; } = 200;
 
     public string HotkeyCaptureRegion { get; set; } = "Ctrl+Shift+1";
+    public string HotkeyCaptureWindow { get; set; } = "Ctrl+Shift+8";
     public string HotkeyCaptureFullscreen { get; set; } = "Ctrl+Shift+2";
     public string HotkeyRecord { get; set; } = "Ctrl+Shift+3";
     public string HotkeyOcr { get; set; } = "Ctrl+Shift+4";

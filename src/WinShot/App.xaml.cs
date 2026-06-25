@@ -131,7 +131,8 @@ public partial class App : Application
 
         var s = _settings.Current;
         var menu = new WF.ContextMenuStrip();
-        menu.Items.Add(MenuItem("Capture region / window", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
+        menu.Items.Add(MenuItem("Capture area", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
+        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window")));
         menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
         menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen")));
         menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, () => QueueCaptureCommand("self-timer")));
@@ -168,6 +169,7 @@ public partial class App : Application
         var s = _settings.Current;
         var failed = new List<string>();
         if (!_hotkeys.Register(s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"))) failed.Add(s.HotkeyCaptureRegion);
+        if (!_hotkeys.Register(s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"))) failed.Add(s.HotkeyCaptureWindow);
         if (!_hotkeys.Register(s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"))) failed.Add(s.HotkeyCaptureFullscreen);
         if (!_hotkeys.Register(s.HotkeyRecord, RecordFlow)) failed.Add(s.HotkeyRecord);
         if (!_hotkeys.Register(s.HotkeyOcr, () => QueueCaptureCommand("ocr"))) failed.Add(s.HotkeyOcr);
@@ -252,7 +254,7 @@ public partial class App : Application
     }
 
     private static bool IsCaptureCommand(string cmd) => cmd is
-        "capture-area" or "capture-fullscreen" or "capture-display" or "capture-previous" or
+        "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
         "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer";
 
@@ -267,10 +269,11 @@ public partial class App : Application
         switch (cmd)
         {
             case "capture-area": CaptureRegionFlow(); break;
+            case "capture-window": CaptureRegionFlow(mode: FastRegionSelectorDialog.SelectorMode.Window); break;
             case "capture-fullscreen": CaptureFullscreenFlow(); break;
             case "capture-display": CaptureDisplayFlow(); break;
             case "capture-previous": CapturePreviousFlow(); break;
-            case "capture-window-background": CaptureRegionFlow(PostCaptureAction.Background); break;
+            case "capture-window-background": CaptureRegionFlow(PostCaptureAction.Background, FastRegionSelectorDialog.SelectorMode.Window); break;
             case "all-in-one": AllInOneFlow(); break;
             case "ocr": OcrFlow(); break;
             case "scrolling": ScrollingFlow(); break;
@@ -320,17 +323,19 @@ public partial class App : Application
 
     // ---- Capture flows ----
 
-    private async void CaptureRegionFlow(string? postCaptureActionOverride = null)
+    private async void CaptureRegionFlow(
+        string? postCaptureActionOverride = null,
+        FastRegionSelectorDialog.SelectorMode mode = FastRegionSelectorDialog.SelectorMode.Area)
     {
         if (_captureInProgress) return;
         _captureInProgress = true;
         try
         {
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
-            TrackFirstShown(selector, "capture-area selector");
+            TrackFirstShown(selector, mode == FastRegionSelectorDialog.SelectorMode.Window ? "capture-window selector" : "capture-area selector");
             try
             {
-                if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
+                if (await selector.ShowAsync(mode) == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
                 {
                     // Screen-freeze: the selector already cropped the result from its frozen
                     // snapshot, so use that (exact, no dismiss delay). Fall back to a live grab.

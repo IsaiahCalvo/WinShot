@@ -6,41 +6,47 @@ using WF = System.Windows.Forms;
 namespace WinShot.Capture;
 
 /// <summary>
-/// Native lightweight region/window selector.
+/// Native lightweight region/window selector with two modes:
+///   • <see cref="SelectorMode.Area"/> — draw a rectangular marquee, then MOVE/RESIZE it
+///     (8 handles) and confirm with Enter or double-click. No window highlighting.
+///   • <see cref="SelectorMode.Window"/> — highlight the window under the cursor and click
+///     to capture that whole window. No marquee.
 ///
-/// DPI correctness: instead of one window stretched across the whole virtual desktop
-/// (which Windows renders at a single monitor's scale and bitmap-stretches onto the
-/// others, drifting the selection on mixed-DPI multi-monitor setups), this puts ONE
-/// 1:1 overlay surface on EACH monitor. The primary monitor's surface is this Form
-/// (also the coordinator); extra monitors get lightweight <see cref="SelectorPane"/>
-/// children. All selection math is anchored to GetCursorPos, which returns true
-/// physical pixels regardless of which monitor's scale the cursor is over, so the
-/// painted selection always matches the captured pixels. On a single monitor there are
-/// no panes and this behaves exactly like the previous single-window selector.
+/// The crosshair + magnifier loupe follow the cursor continuously (the surface repaints on
+/// every mouse-move). DPI correctness: one 1:1 overlay surface per monitor (primary monitor
+/// = this Form/coordinator, others = <see cref="SelectorPane"/> children), and all selection
+/// math is anchored to GetCursorPos (true physical px). Screen-freeze: the whole desktop is
+/// snapshotted on open and selection happens on that still image, cropped at confirm.
 /// </summary>
 public sealed class FastRegionSelectorDialog : WF.Form
 {
+    public enum SelectorMode { Area, Window }
+
     private const int DragThresholdPx = 4;
     private const int CrosshairGapPx = 10;
-    // Single accent identity. The selector FREEZES the screen: at open it snapshots the whole
-    // desktop, and each surface paints its frozen slice, dims it, and re-brightens the
-    // selection — so nothing moves under the cursor while you drag (CleanShot's screen-freeze).
+    private const int HandleHalf = 4;       // handle square is 2*HandleHalf px
+    private const int HandleHitTol = 9;     // grab tolerance around a handle center
     private static readonly SD.Color Accent = ThemePalette.Accent;
     private static FastRegionSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
-    private SD.Rectangle _monitorBounds;   // this surface's monitor (physical px); primary monitor for the coordinator
+    private SD.Rectangle _monitorBounds;
     private SettingsService? _settings;
+    private SelectorMode _mode = SelectorMode.Area;
     private List<WindowInfo> _windows = new();
     private readonly List<SelectorPane> _panes = new();
     private SD.Point _dragStartScreen;     // physical screen px (GetCursorPos)
     private SD.Point _currentScreen;       // physical screen px (GetCursorPos)
-    private bool _dragging;
+    private bool _dragging;                // drawing a fresh marquee
     private bool _dragMoved;
+    private SD.Rectangle? _pendingScreen;  // the adjustable selection (Area mode), screen px
+    private int _resizeHandle = -1;        // 0..7 while dragging a handle, else -1
+    private bool _movingPending;           // dragging the pending rect body to move it
+    private SD.Point _adjustAnchor;        // cursor at the start of a move/resize
+    private SD.Rectangle _adjustStartRect; // pending rect at the start of a move/resize
     private WindowInfo? _hoverWindow;
-    private SD.Rectangle? _pendingPx;
-    private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
-    private SD.Bitmap? _capturedRegion;  // region cropped from _frozen at confirm; caller takes ownership
+    private SD.Bitmap? _frozen;            // frozen virtual-desktop snapshot shown under the overlay
+    private SD.Bitmap? _capturedRegion;    // region cropped from _frozen at confirm; caller takes ownership
     private bool _prewarm;
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
@@ -148,9 +154,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector._settings = null;
         selector._windows = new List<WindowInfo>();
         selector._hoverWindow = null;
-        selector._pendingPx = null;
+        selector._pendingScreen = null;
         selector._dragging = false;
         selector._dragMoved = false;
+        selector._resizeHandle = -1;
+        selector._movingPending = false;
         selector.Capture = false;
         selector.DisposePanes();
         selector.DisposeFrozen();
@@ -160,8 +168,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector.Dispose();
     }
 
-    public Task<WF.DialogResult> ShowAsync()
+    public Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area)
     {
+        _mode = mode;
         _completion = new TaskCompletionSource<WF.DialogResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -186,13 +195,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         _settings = settings;
         _prewarm = prewarm;
+        _mode = SelectorMode.Area;
         _windowsProvider = windowsProvider;
         _windowsLoadStarted = false;
         _windows = new List<WindowInfo>();
         _dragging = false;
         _dragMoved = false;
+        _pendingScreen = null;
+        _resizeHandle = -1;
+        _movingPending = false;
         _hoverWindow = null;
-        _pendingPx = null;
         SelectedRegionPx = null;
         DisposeFrozen();
         _capturedRegion?.Dispose();
@@ -305,13 +317,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
     protected override void OnMouseDown(WF.MouseEventArgs e)
     {
         HandleMouseDown(e);
-        Capture = _dragging;
+        Capture = CapturingPointer;
         base.OnMouseDown(e);
     }
 
     protected override void OnMouseMove(WF.MouseEventArgs e)
     {
         HandleMouseMove();
+        Cursor = CursorForCurrent();
         base.OnMouseMove(e);
     }
 
@@ -329,23 +342,27 @@ public sealed class FastRegionSelectorDialog : WF.Form
         base.OnPaint(e);
     }
 
-    // Called by panes so all input funnels through the one coordinator state.
+    // The pointer is "captured" (events keep flowing to the pressed surface) while drawing a
+    // marquee or dragging a handle/the pending rect.
+    internal bool CapturingPointer => _dragging || _resizeHandle >= 0 || _movingPending;
+
     internal void HandleKeyDown(WF.KeyEventArgs e)
     {
         if (e.KeyCode == WF.Keys.Escape)
         {
             Complete(WF.DialogResult.Cancel);
         }
-        else if (e.KeyCode == WF.Keys.Enter && _pendingPx is SD.Rectangle pending)
+        else if (e.KeyCode == WF.Keys.Enter && _pendingScreen is SD.Rectangle pending)
         {
             e.Handled = true;
-            Confirm(pending);
+            Confirm(VirtualFromScreen(pending));
         }
     }
 
     internal void HandleMouseDown(WF.MouseEventArgs e)
     {
         SD.Point screen = CursorScreen();
+        _currentScreen = screen;
 
         if (e.Button == WF.MouseButtons.Right)
         {
@@ -356,17 +373,41 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (e.Button != WF.MouseButtons.Left)
             return;
 
-        if (e.Clicks >= 2 && _pendingPx is SD.Rectangle pending)
+        if (_mode == SelectorMode.Window)
+            return; // window mode confirms on mouse-up
+
+        // Area mode.
+        if (_pendingScreen is SD.Rectangle pending)
         {
-            Confirm(pending);
-            return;
+            if (e.Clicks >= 2 && pending.Contains(screen))
+            {
+                Confirm(VirtualFromScreen(pending));
+                return;
+            }
+
+            int handle = HitTestHandle(screen, pending);
+            if (handle >= 0)
+            {
+                _resizeHandle = handle;
+                _adjustStartRect = pending;
+                return;
+            }
+
+            if (pending.Contains(screen))
+            {
+                _movingPending = true;
+                _adjustAnchor = screen;
+                _adjustStartRect = pending;
+                return;
+            }
+
+            // Clicked outside the pending selection — start drawing a new one.
         }
 
+        _pendingScreen = null;
         _dragStartScreen = screen;
-        _currentScreen = screen;
         _dragging = true;
         _dragMoved = false;
-        _hoverWindow = null;
         InvalidateAllSurfaces();
     }
 
@@ -383,22 +424,39 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 return;
             }
 
-            if (!_dragMoved)
-            {
-                _dragMoved = true;
-                _pendingPx = null;
-            }
+            _dragMoved = true;
+            InvalidateAllSurfaces();
+            return;
+        }
 
-            InvalidateAllSurfaces();
-        }
-        else if (_pendingPx is null)
+        if (_resizeHandle >= 0)
         {
-            HitTestWindow(_currentScreen);
-        }
-        else
-        {
+            _pendingScreen = ResizeRect(_adjustStartRect, _resizeHandle, _currentScreen);
             InvalidateAllSurfaces();
+            return;
         }
+
+        if (_movingPending)
+        {
+            _pendingScreen = MoveRect(_adjustStartRect, _currentScreen.X - _adjustAnchor.X, _currentScreen.Y - _adjustAnchor.Y);
+            InvalidateAllSurfaces();
+            return;
+        }
+
+        if (_mode == SelectorMode.Window)
+        {
+            // Window highlight tracks the cursor.
+            _hoverWindow = ResolveWindow(_currentScreen);
+            InvalidateAllSurfaces();
+            return;
+        }
+
+        // Area mode, idle: keep the crosshair + loupe glued to the cursor by repainting
+        // on EVERY move (this is the "it should always follow me" behavior). Cheap — the
+        // frozen snapshot makes each repaint a bitmap blit. Skip while adjusting a pending
+        // rect (no crosshair then) to avoid needless churn.
+        if (_pendingScreen is null)
+            InvalidateAllSurfaces();
     }
 
     internal void HandleMouseUp(WF.MouseEventArgs e)
@@ -406,40 +464,41 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (e.Button != WF.MouseButtons.Left)
             return;
 
-        if (!_dragging) return;
-        _dragging = false;
         _currentScreen = CursorScreen();
 
-        if (!_dragMoved)
+        if (_mode == SelectorMode.Window)
         {
-            if (_pendingPx is SD.Rectangle pending)
-            {
-                if (!ScreenFromVirtual(pending).Contains(_currentScreen))
-                    ClearPending();
-                return;
-            }
-
             if (_hoverWindow is not null)
                 Confirm(VirtualFromScreen(_hoverWindow.Bounds));
-            else
-                ClearPending();
             return;
         }
 
-        var screenRect = Normalize(_dragStartScreen, _currentScreen);
-        var virtualRect = VirtualFromScreen(screenRect);
-        if (virtualRect.Width > 0 && virtualRect.Height > 0)
-            Confirm(virtualRect);
-    }
+        if (_resizeHandle >= 0 || _movingPending)
+        {
+            _resizeHandle = -1;
+            _movingPending = false;
+            InvalidateAllSurfaces();
+            return;
+        }
 
-    internal bool IsDragging => _dragging;
+        if (!_dragging)
+            return;
+
+        _dragging = false;
+        if (_dragMoved)
+        {
+            // Don't capture yet — present an adjustable selection (move/resize, then Enter or
+            // double-click to confirm), matching CleanShot's behavior.
+            var rect = Normalize(_dragStartScreen, _currentScreen);
+            rect.Intersect(_vs);
+            if (rect.Width > 0 && rect.Height > 0)
+                _pendingScreen = rect;
+            InvalidateAllSurfaces();
+        }
+    }
 
     // ----------------------------------------------------------- painting (per surface)
 
-    /// <summary>
-    /// Paints one monitor surface. <paramref name="monitorBounds"/> is that monitor's
-    /// physical bounds; the surface is 1:1, so screen->local is a pure subtraction.
-    /// </summary>
     internal void PaintSurface(SD.Graphics g, SD.Rectangle monitorBounds)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
@@ -451,14 +510,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
         using (var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0)))
             g.FillRectangle(dim, 0, 0, clientSize.Width, clientSize.Height);
 
-        // The active selection (or hovered window) shows the frozen pixels at full brightness.
+        // The active selection (drawing / adjustable pending / hovered window) shows the
+        // frozen pixels at full brightness with an accent border.
         SD.Rectangle? brightScreen = null;
+        bool showHandles = false;
         if (_dragging && _dragMoved)
+        {
             brightScreen = Normalize(_dragStartScreen, _currentScreen);
-        else if (_pendingPx is SD.Rectangle pending)
-            brightScreen = ScreenFromVirtual(pending);
-        else if (_hoverWindow is not null)
+        }
+        else if (_pendingScreen is SD.Rectangle pending)
+        {
+            brightScreen = pending;
+            showHandles = true;
+        }
+        else if (_mode == SelectorMode.Window && _hoverWindow is not null)
+        {
             brightScreen = _hoverWindow.Bounds;
+        }
 
         if (brightScreen is SD.Rectangle bright)
         {
@@ -466,23 +534,25 @@ public sealed class FastRegionSelectorDialog : WF.Form
             BrightenRegion(g, monitorBounds, local);
             using (var pen = new SD.Pen(Accent, 2))
                 g.DrawRectangle(pen, local);
+
+            if (showHandles)
+                DrawHandles(g, monitorBounds, bright);
+
             if (cursorOnThisSurface)
             {
-                var px = _hoverWindow is not null && !_dragging && _pendingPx is null
-                    ? VirtualFromScreen(_hoverWindow.Bounds)
-                    : bright;
-                SD.Point at = _dragging || _pendingPx is not null
-                    ? new SD.Point(local.Right + 8, local.Bottom + 8)
-                    : new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
-                DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y);
+                SD.Point at = new(local.Right + 8, local.Bottom + 8);
+                if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
+                    at = new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
+                DrawLabel(g, clientSize, $"{bright.Width} × {bright.Height}", at.X, at.Y);
             }
         }
 
-        if (cursorOnThisSurface)
-            DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
-
-        if (!_prewarm && cursorOnThisSurface)
+        // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
+        // rect, and never in Window mode where the window highlight is the affordance).
+        bool showCrosshair = _mode == SelectorMode.Area && _pendingScreen is null && !_prewarm && cursorOnThisSurface;
+        if (showCrosshair)
         {
+            DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
             FastSelectorLoupeRenderer.Draw(
                 g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
         }
@@ -507,6 +577,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.SetClip(clip);
         DrawFrozenSlice(g, monitorBounds);
         g.Restore(state);
+    }
+
+    /// <summary>Draws the 8 move/resize handles on the pending selection.</summary>
+    private void DrawHandles(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle screenRect)
+    {
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using var fill = new SD.SolidBrush(SD.Color.White);
+        using var pen = new SD.Pen(Accent, 1.5f);
+        foreach (SD.Point pt in HandlePoints(screenRect))
+        {
+            SD.Point l = ToLocal(pt, monitorBounds);
+            var sq = new SD.Rectangle(l.X - HandleHalf, l.Y - HandleHalf, HandleHalf * 2, HandleHalf * 2);
+            g.FillRectangle(fill, sq);
+            g.DrawRectangle(pen, sq);
+        }
+        g.SmoothingMode = prev;
     }
 
     private void CaptureFrozen()
@@ -543,22 +630,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     }
 
     /// <summary>Returns the region cropped from the frozen snapshot at confirm time and transfers
-    /// ownership to the caller (null if freeze was unavailable). The capture flow uses this instead
-    /// of re-grabbing the live screen, so the result is exactly what was selected. Null after the
-    /// first call.</summary>
+    /// ownership to the caller (null if freeze was unavailable). Null after the first call.</summary>
     public SD.Bitmap? TakeCapturedRegion()
     {
         var bmp = _capturedRegion;
         _capturedRegion = null;
         return bmp;
-    }
-
-    private void HitTestWindow(SD.Point screenPoint)
-    {
-        var hover = ResolveWindow(screenPoint);
-        if (ReferenceEquals(hover, _hoverWindow)) return;
-        _hoverWindow = hover;
-        InvalidateAllSurfaces();
     }
 
     /// <summary>
@@ -616,20 +693,83 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _completion = null;
     }
 
-    private void ClearPending()
+    // ----------------------------------------------------------- handle math
+
+    /// <summary>The 8 handle anchor points (screen px): TL, Top, TR, Right, BR, Bottom, BL, Left.</summary>
+    private static SD.Point[] HandlePoints(SD.Rectangle r)
     {
-        _pendingPx = null;
-        _hoverWindow = null;
-        InvalidateAllSurfaces();
+        int cx = r.Left + r.Width / 2;
+        int cy = r.Top + r.Height / 2;
+        return
+        [
+            new(r.Left, r.Top), new(cx, r.Top), new(r.Right, r.Top),
+            new(r.Right, cy), new(r.Right, r.Bottom),
+            new(cx, r.Bottom), new(r.Left, r.Bottom), new(r.Left, cy),
+        ];
+    }
+
+    private static int HitTestHandle(SD.Point cursor, SD.Rectangle r)
+    {
+        SD.Point[] pts = HandlePoints(r);
+        for (int i = 0; i < pts.Length; i++)
+        {
+            if (Math.Abs(cursor.X - pts[i].X) <= HandleHitTol && Math.Abs(cursor.Y - pts[i].Y) <= HandleHitTol)
+                return i;
+        }
+        return -1;
+    }
+
+    private SD.Rectangle ResizeRect(SD.Rectangle start, int handle, SD.Point cursor)
+    {
+        int l = start.Left, t = start.Top, r = start.Right, b = start.Bottom;
+        switch (handle)
+        {
+            case 0: l = cursor.X; t = cursor.Y; break;            // TL
+            case 1: t = cursor.Y; break;                          // Top
+            case 2: r = cursor.X; t = cursor.Y; break;            // TR
+            case 3: r = cursor.X; break;                          // Right
+            case 4: r = cursor.X; b = cursor.Y; break;            // BR
+            case 5: b = cursor.Y; break;                          // Bottom
+            case 6: l = cursor.X; b = cursor.Y; break;            // BL
+            case 7: l = cursor.X; break;                          // Left
+        }
+        var rect = SD.Rectangle.FromLTRB(Math.Min(l, r), Math.Min(t, b), Math.Max(l, r), Math.Max(t, b));
+        rect.Intersect(_vs);
+        return rect;
+    }
+
+    private SD.Rectangle MoveRect(SD.Rectangle start, int dx, int dy)
+    {
+        var rect = new SD.Rectangle(start.X + dx, start.Y + dy, start.Width, start.Height);
+        if (rect.Left < _vs.Left) rect.X = _vs.Left;
+        if (rect.Top < _vs.Top) rect.Y = _vs.Top;
+        if (rect.Right > _vs.Right) rect.X = _vs.Right - rect.Width;
+        if (rect.Bottom > _vs.Bottom) rect.Y = _vs.Bottom - rect.Height;
+        return rect;
+    }
+
+    internal WF.Cursor CursorForCurrent()
+    {
+        if (_mode == SelectorMode.Window)
+            return WF.Cursors.Hand;
+
+        if (_pendingScreen is SD.Rectangle p)
+        {
+            int h = _resizeHandle >= 0 ? _resizeHandle : HitTestHandle(_currentScreen, p);
+            switch (h)
+            {
+                case 0: case 4: return WF.Cursors.SizeNWSE;
+                case 2: case 6: return WF.Cursors.SizeNESW;
+                case 1: case 5: return WF.Cursors.SizeNS;
+                case 3: case 7: return WF.Cursors.SizeWE;
+            }
+            if (_movingPending || p.Contains(_currentScreen))
+                return WF.Cursors.SizeAll;
+        }
+        return WF.Cursors.Cross;
     }
 
     // ----------------------------------------------------------- drawing helpers
-
-    private static void DrawRect(SD.Graphics g, SD.Rectangle rect, SD.Color stroke)
-    {
-        using var pen = new SD.Pen(stroke, 2);
-        g.DrawRectangle(pen, rect);
-    }
 
     private static SD.Drawing2D.GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
     {
@@ -688,7 +828,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     // ----------------------------------------------------------- coordinate helpers
 
-    /// <summary>Screen-physical rect -> local pixels on a 1:1 surface (pure offset).</summary>
     private static SD.Rectangle ToLocal(SD.Rectangle screenRect, SD.Rectangle monitorBounds) =>
         new(screenRect.X - monitorBounds.X, screenRect.Y - monitorBounds.Y, screenRect.Width, screenRect.Height);
 
@@ -702,9 +841,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return rect;
     }
 
-    private SD.Rectangle ScreenFromVirtual(SD.Rectangle virtualRect) =>
-        new(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height);
-
     private static SD.Rectangle Normalize(SD.Point a, SD.Point b)
     {
         int x = Math.Min(a.X, b.X);
@@ -712,8 +848,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return new SD.Rectangle(x, y, Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
     }
 
-    /// <summary>True physical cursor position — DPI-independent across monitors, the
-    /// anchor that keeps selection math correct on mixed-DPI setups.</summary>
+    /// <summary>True physical cursor position — DPI-independent across monitors.</summary>
     private static SD.Point CursorScreen()
     {
         return GetCursorPos(out POINT p) ? new SD.Point(p.X, p.Y) : WF.Cursor.Position;
@@ -755,13 +890,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         protected override void OnMouseDown(WF.MouseEventArgs e)
         {
             _owner.HandleMouseDown(e);
-            Capture = _owner.IsDragging;
+            Capture = _owner.CapturingPointer;
             base.OnMouseDown(e);
         }
 
         protected override void OnMouseMove(WF.MouseEventArgs e)
         {
             _owner.HandleMouseMove();
+            Cursor = _owner.CursorForCurrent();
             base.OnMouseMove(e);
         }
 

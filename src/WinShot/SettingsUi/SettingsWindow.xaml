@@ -232,8 +232,12 @@
                             <StackPanel>
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="Global hotkeys"/>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture region / window"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture area"/>
                                     <local:HotkeyBox x:Name="HotkeyRegionBox" Width="180" HorizontalAlignment="Left"/>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture window"/>
+                                    <local:HotkeyBox x:Name="HotkeyWindowBox" Width="180" HorizontalAlignment="Left"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Capture fullscreen"/>

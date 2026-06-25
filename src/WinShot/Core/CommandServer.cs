@@ -17,6 +17,7 @@ public sealed class CommandServer : IDisposable
     private static readonly HashSet<string> ValidCommands = new(StringComparer.OrdinalIgnoreCase)
     {
         "capture-area",
+        "capture-window",
         "capture-fullscreen",
         "capture-display",
         "capture-previous",
