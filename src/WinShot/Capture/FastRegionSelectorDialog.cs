@@ -37,6 +37,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private readonly List<SelectorPane> _panes = new();
     private SD.Point _dragStartScreen;     // physical screen px (GetCursorPos)
     private SD.Point _currentScreen;       // physical screen px (GetCursorPos)
+    private SD.Point _lastFollowScreen;    // last cursor pos the crosshair/loupe were painted at
     private bool _dragging;                // drawing a fresh marquee
     private bool _dragMoved;
     private SD.Rectangle? _pendingScreen;  // the adjustable selection (Area mode), screen px
@@ -200,6 +201,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         Activate();
         Focus();
         _lastCtrlDown = false;
+        _currentScreen = CursorScreen();
+        _lastFollowScreen = _currentScreen;
         if (!_prewarm)
             _followTimer.Start();
         return _completion.Task;
@@ -272,6 +275,58 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (!pane.IsDisposed)
                 pane.Invalidate();
         }
+        _lastFollowScreen = _currentScreen; // a full repaint redraws the crosshair at the cursor
+    }
+
+    // Half-extents of the regions the idle crosshair/loupe occupy around the cursor.
+    private const int CrosshairBandHalf = 16;  // guide-line band half-width (covers line + shadow + AA)
+    private const int LoupeBoxHalf = 250;       // box that contains the loupe + label in any flip
+
+    /// <summary>
+    /// Invalidates just the crosshair guide bands (full monitor height/width strips at the old
+    /// and new cursor X/Y) and the loupe boxes, on whichever surfaces they touch. This makes
+    /// the follow repaint proportional to the thin bands, not the whole (possibly 4K) monitor.
+    /// </summary>
+    private void InvalidateFollowRegion(SD.Point oldScreen, SD.Point newScreen)
+    {
+        InvalidateFollowAt(oldScreen);
+        if (newScreen != oldScreen)
+            InvalidateFollowAt(newScreen);
+    }
+
+    private void InvalidateFollowAt(SD.Point pt)
+    {
+        SD.Rectangle mon = MonitorBoundsAt(pt);
+        InvalidateScreenRect(new SD.Rectangle(pt.X - CrosshairBandHalf, mon.Top, CrosshairBandHalf * 2, mon.Height));
+        InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - CrosshairBandHalf, mon.Width, CrosshairBandHalf * 2));
+        InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
+    }
+
+    /// <summary>The physical bounds of the surface (coordinator or pane) containing a screen point.</summary>
+    private SD.Rectangle MonitorBoundsAt(SD.Point screen)
+    {
+        if (_monitorBounds.Contains(screen)) return _monitorBounds;
+        foreach (var pane in _panes)
+            if (!pane.IsDisposed && pane.MonitorBounds.Contains(screen))
+                return pane.MonitorBounds;
+        return WF.Screen.FromPoint(screen).Bounds;
+    }
+
+    /// <summary>Invalidates a screen-space rectangle on every surface it intersects.</summary>
+    private void InvalidateScreenRect(SD.Rectangle screenRect)
+    {
+        InvalidateSurfaceRect(this, _monitorBounds, screenRect);
+        foreach (var pane in _panes)
+            if (!pane.IsDisposed)
+                InvalidateSurfaceRect(pane, pane.MonitorBounds, screenRect);
+    }
+
+    private static void InvalidateSurfaceRect(WF.Control surface, SD.Rectangle surfaceScreen, SD.Rectangle screenRect)
+    {
+        var hit = SD.Rectangle.Intersect(surfaceScreen, screenRect);
+        if (hit.Width <= 0 || hit.Height <= 0)
+            return;
+        surface.Invalidate(new SD.Rectangle(hit.X - surfaceScreen.X, hit.Y - surfaceScreen.Y, hit.Width, hit.Height));
     }
 
     // ----------------------------------------------------------- window list
@@ -467,12 +522,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        // Area mode, idle: keep the crosshair + loupe glued to the cursor by repainting
-        // on EVERY move (this is the "it should always follow me" behavior). Cheap — the
-        // frozen snapshot makes each repaint a bitmap blit. Skip while adjusting a pending
-        // rect (no crosshair then) to avoid needless churn.
+        // Area mode, idle: keep the crosshair + loupe glued to the cursor. Repaint only the
+        // old+new crosshair bands and loupe box (not the whole monitor), so a large external
+        // display stays smooth. Skip while adjusting a pending rect (no crosshair then).
         if (_pendingScreen is null)
-            InvalidateAllSurfaces();
+        {
+            InvalidateFollowRegion(_lastFollowScreen, _currentScreen);
+            _lastFollowScreen = _currentScreen;
+        }
     }
 
     /// <summary>
@@ -972,6 +1029,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
 
         protected override bool ShowWithoutActivation => true;
+
+        /// <summary>The physical monitor bounds this pane covers (used for dirty-region invalidation).</summary>
+        public SD.Rectangle MonitorBounds => _bounds;
 
         protected override void OnMouseDown(WF.MouseEventArgs e)
         {
