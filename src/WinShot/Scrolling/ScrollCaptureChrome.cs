@@ -173,12 +173,17 @@ public sealed class ScrollControlsBar : WF.Form
         BackColor = ThemePalette.Elevated;
         Padding = new WF.Padding(12, 8, 12, 8);
 
+        // Fixed width so the live status text ("Captured 12 frames - 4000px") never grows the
+        // bar mid-capture (which would otherwise leave the rounded region stale and clip Done).
         _status = new WF.Label
         {
-            AutoSize = true,
+            AutoSize = false,
+            Size = new SD.Size(230, 24),
+            AutoEllipsis = true,
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(9f),
             Text = "Scrolling capture…",
+            TextAlign = SD.ContentAlignment.MiddleLeft,
             Anchor = WF.AnchorStyles.None,
         };
 
@@ -210,6 +215,8 @@ public sealed class ScrollControlsBar : WF.Form
             ApplyRoundedRegion(Width, Height, 12);
             PositionNear(regionScreen);
         };
+        // Re-round whenever the bar resizes so the region never clips the content.
+        SizeChanged += (_, _) => ApplyRoundedRegion(Width, Height, 12);
     }
 
     protected override bool ShowWithoutActivation => true;
