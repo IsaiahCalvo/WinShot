@@ -96,8 +96,13 @@ public static class ScrollingCaptureService
                     // Auto mode: wait for the freshly-scrolled region to stabilize (two
                     // consecutive identical captures) before measuring, so animations and
                     // lazy-loaded content settle and aren't mistaken for end-of-content.
+                    // Deterministic GDI BitBlt (not WGC): consecutive grabs of unchanged content
+                    // are byte-identical, which the exact row-hash matcher relies on, and it
+                    // already excludes layered windows (our dim overlay). WGC can return subtly
+                    // different pixels frame-to-frame, which breaks the match. (odd-snap/ShareX
+                    // use BitBlt for exactly this reason.)
                     var frame = manual
-                        ? CaptureService.CaptureScreenRegion(screenRegion)
+                        ? CaptureService.CaptureScreenRegionWithoutLayeredWindows(screenRegion)
                         : await CaptureStableFrameAsync(screenRegion, ct).ConfigureAwait(false);
                     frames++;
 
@@ -136,6 +141,13 @@ public static class ScrollingCaptureService
                         // frame ignoring sticky bands: equal => truly at the bottom; different
                         // but offset==0 => it moved but we couldn't align (overlap too small).
                         bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
+
+                        // Diagnostic: shows, per frame, whether the content changed (the user
+                        // scrolled) and whether we could align it (offset>0). differ=true with
+                        // offset=0 means it scrolled but the matcher couldn't lock on.
+                        Log.Info($"Scroll frame {frames}: region={frame.Width}x{frame.Height} " +
+                                 $"differ={framesDiffer} offset={offset} topBand={topBand} bottomBand={bottomBand} " +
+                                 $"stitchedH={stitched!.Height}");
 
                         if (offset == 0)
                         {
@@ -264,7 +276,7 @@ public static class ScrollingCaptureService
     /// </summary>
     private static async Task<SD.Bitmap> CaptureStableFrameAsync(SD.Rectangle region, CancellationToken ct)
     {
-        var current = CaptureService.CaptureScreenRegion(region);
+        var current = CaptureService.CaptureScreenRegionWithoutLayeredWindows(region);
         for (int attempt = 1; attempt < StabilizeAttempts; attempt++)
         {
             if (ShouldStop(ct))
@@ -278,7 +290,7 @@ public static class ScrollingCaptureService
                 break;
             }
 
-            var next = CaptureService.CaptureScreenRegion(region);
+            var next = CaptureService.CaptureScreenRegionWithoutLayeredWindows(region);
             bool settled = ImageStitcher.FramesIdentical(current, next);
             current.Dispose();
             current = next;
