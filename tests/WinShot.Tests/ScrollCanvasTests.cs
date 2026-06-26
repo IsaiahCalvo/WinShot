@@ -105,6 +105,22 @@ public class ScrollCanvasTests
     }
 
     [Fact]
+    public void FlickGap_TransientBadFrame_DoesNotNukeRecovery()
+    {
+        using var c = new ScrollCanvas();
+        Feed(c, 0, 30, 60);   // main doc 0..179
+        Feed(c, 400);         // flick -> floating
+        Feed(c, 370, 340);    // grow the floating segment
+        Feed(c, 9000);        // ONE garbage frame that matches neither — must be dropped, not nuke recovery
+        Feed(c, 310, 280, 250, 220, 190, 160, 130, 100); // keep walking back
+
+        Assert.False(c.HasGap); // still bridges despite the bad frame
+        using var img = c.Flatten()!;
+        Assert.Equal(520, img.Height);
+        AssertRowIsDoc(img, 250, 250); // a former-gap row survived
+    }
+
+    [Fact]
     public void UnbridgedFlick_FlattensWithMarkerBand()
     {
         using var c = new ScrollCanvas();

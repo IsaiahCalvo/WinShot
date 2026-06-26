@@ -45,6 +45,11 @@ public sealed class ScrollCanvas : IDisposable
     private int _width;
 
     private ScrollCanvas? _floating; // disconnected segment awaiting a bridge frame to merge
+    private int _floatMisses;        // consecutive frames matching neither main nor the floating segment
+
+    /// <summary>Consecutive no-match frames before the floating segment is restarted at the current
+    /// position (vs. dropped as a transient blip). Keeps one bad/fast frame from nuking recovery.</summary>
+    private const int FloatingResetMisses = 10;
 
     public int Height => (_img?.Height ?? 0) + (_floating is null ? 0 : MarkerGapPx + _floating.Height);
 
@@ -107,24 +112,35 @@ public sealed class ScrollCanvas : IDisposable
             MergeFloating(floating, pm - pf);
             floating.Dispose();
             _floating = null;
+            _floatMisses = 0;
             Apply(frame, fh, pm); // make sure the bridge frame itself is committed
             return new PlaceResult(true, false, HasGap);
         }
         if (pFloat is int pf2)
         {
+            _floatMisses = 0;
             floating.Apply(frame, fh, pf2); // keep growing the floating segment
             return new PlaceResult(true, false, true);
         }
         if (pMain is int pm2)
         {
+            _floatMisses = 0;
             Apply(frame, fh, pm2); // back in known territory; floating stays pending
             return new PlaceResult(true, false, true);
         }
 
-        // Matches neither: a second discontinuity. Abandon the old floating detour for this one.
+        // Matches neither — almost always a transient (a fast/mid-scroll frame), not genuinely new
+        // content. DROP it and KEEP the floating segment: nuking it on every miss made the capture
+        // thrash (the segment reset every few frames and never survived long enough to stitch back).
+        // Only after a sustained run of misses (the user really did jump somewhere new) do we restart
+        // the floating segment at the current position.
+        if (++_floatMisses < FloatingResetMisses)
+            return new PlaceResult(false, false, true); // ignore the blip; retry next frame
+
         floating.Dispose();
         _floating = new ScrollCanvas();
         _floating.Seed(frame, fh);
+        _floatMisses = 0;
         return new PlaceResult(true, true, true);
     }
 
