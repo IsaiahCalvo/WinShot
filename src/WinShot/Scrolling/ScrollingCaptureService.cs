@@ -154,13 +154,23 @@ public static class ScrollingCaptureService
                             zeroOffsetStreak++;
                             if (manual)
                             {
-                                // Keep `previous` anchored to the frame whose bottom row (or
-                                // rightmost column) matches the stitch's edge. This makes
-                                // backward scrolls (which the forward-only offset search
-                                // reports as 0) harmless: once the user scrolls back past the
-                                // stitched edge, the next offset is computed against the
-                                // anchor and appends only truly new content.
-                                frame.Dispose();
+                                if (framesDiffer)
+                                {
+                                    // The content changed but we couldn't align this frame to the
+                                    // anchor (a quick scroll outran the overlap). Re-anchor to the
+                                    // CURRENT position so the next small scroll aligns against it.
+                                    // Keeping the old anchor instead would strand it behind the
+                                    // user — every later frame would then have zero overlap and the
+                                    // capture would stall forever (the bug behind "captures a bit
+                                    // then stops"). The skipped span is lost, not stitched wrong.
+                                    previous!.Dispose();
+                                    previous = frame;
+                                }
+                                else
+                                {
+                                    // Paused / nothing changed: keep the anchor.
+                                    frame.Dispose();
+                                }
                             }
                             else
                             {
