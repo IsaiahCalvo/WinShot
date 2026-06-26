@@ -9,6 +9,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WinShot</RootNamespace>
     <AssemblyName>WinShot</AssemblyName>
+    <!-- Embedded app icon (the blue lens mark) so the exe, taskbar, Alt-Tab, and any
+         desktop shortcut show the official icon instead of the generic .NET one. -->
+    <ApplicationIcon>Assets\winshot.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <!-- ScreenRecorderLib ships native per-arch binaries and refuses AnyCPU. -->
