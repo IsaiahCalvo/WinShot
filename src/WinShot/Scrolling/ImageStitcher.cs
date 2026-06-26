@@ -76,13 +76,20 @@ public static class ImageStitcher
         if (HashesMatchAtSamePosition(prevHashes, currHashes, contentStart, contentEnd))
             return 0;
 
+        // Pick the offset with the longest UNBROKEN run of identical rows that is anchored to
+        // real content (ShareX's scrolling capture uses longest-run matching). At the true
+        // scroll delta the overlapping content lines up into one long contiguous run; wrong
+        // offsets only ever produce short, scattered coincidences. Selecting by total matched
+        // rows (the old approach) let a wrong offset win on scattered matches, which garbled
+        // the stitch. The run must CONTAIN a distinctive (non-repeated) row, so a fixed blank
+        // band — which matches itself at many offsets — can't masquerade as the best alignment.
         int bestOffset = 0;
-        int bestMatches = 0;
+        int bestRun = 0;
         for (int offset = 1; offset < contentEnd - contentStart; offset++)
         {
             // Compare current row y against previous row y+offset, both restricted to the
             // content window (and y+offset must also stay inside it).
-            int compared = 0, matches = 0, distinctiveMatches = 0, runBest = 0, run = 0;
+            int compared = 0, run = 0, runDistinctive = 0, longestDistinctiveRun = 0;
             for (int y = contentStart; y < contentEnd; y++)
             {
                 int py = y + offset;
@@ -91,33 +98,33 @@ public static class ImageStitcher
                 compared++;
                 if (prevHashes[py] == currHashes[y])
                 {
-                    matches++;
-                    if (currDistinctive[y])
-                        distinctiveMatches++;
                     run++;
-                    if (run > runBest) runBest = run;
+                    if (currDistinctive[y])
+                        runDistinctive++;
+                    if (runDistinctive > 0 && run > longestDistinctiveRun)
+                        longestDistinctiveRun = run; // only runs touching real content count
                 }
                 else
                 {
                     run = 0;
+                    runDistinctive = 0;
                 }
             }
 
             if (compared < MinMatchedRows)
                 break; // even a perfect match cannot reach the row floor
 
-            // Accept only if the match is both substantial AND anchored to real content:
-            // enough distinctive matched rows OR a long contiguous matched run (which also
-            // rules out scattered blank-row coincidences).
-            bool distinctiveEnough = distinctiveMatches >= MinDistinctiveMatchedRows
-                                     || runBest >= MinMatchedRows;
-            if (matches >= MinMatchedRows && matches >= compared * MinMatchedFraction
-                && distinctiveEnough && matches > bestMatches)
+            if (longestDistinctiveRun > bestRun)
             {
-                bestMatches = matches;
+                bestRun = longestDistinctiveRun;
                 bestOffset = offset;
             }
         }
+
+        // Accept only a substantial content-anchored run (rejects short coincidences and
+        // all-whitespace frames, where no run ever contains a distinctive row).
+        if (bestRun < MinMatchedRows)
+            return 0;
 
         return bestOffset;
     }
