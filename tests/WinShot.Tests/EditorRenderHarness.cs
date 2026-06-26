@@ -85,6 +85,16 @@ public class EditorRenderHarness
                     $"ViewScale={viewScale.ScaleX}x{viewScale.ScaleY}\n" +
                     $"Viewport.Actual={viewport.ActualWidth}x{viewport.ActualHeight}\n");
 
+                // Force a fit-WHOLE view (small zoom, whole image centered) and render again, to
+                // verify the ENTIRE tall image renders — the original bug only drew the top.
+                var vt = (System.Windows.Media.TranslateTransform)editor.FindName("ViewTranslate");
+                double fw = Math.Min(viewport.ActualWidth / 253.0, viewport.ActualHeight / 3075.0);
+                viewScale.ScaleX = viewScale.ScaleY = fw;
+                vt.X = (viewport.ActualWidth - 253 * fw) / 2;
+                vt.Y = (viewport.ActualHeight - 3075 * fw) / 2;
+                for (int i = 0; i < 4; i++) { Pump(); Thread.Sleep(25); }
+                RenderToPng(editor, Path.Combine(outDir, "editor-fitwhole.png"));
+
                 editor.Close();
             }
             catch (Exception ex)

@@ -142,13 +142,6 @@ public static class ScrollingCaptureService
                         // but offset==0 => it moved but we couldn't align (overlap too small).
                         bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
 
-                        // Diagnostic: shows, per frame, whether the content changed (the user
-                        // scrolled) and whether we could align it (offset>0). differ=true with
-                        // offset=0 means it scrolled but the matcher couldn't lock on.
-                        Log.Info($"Scroll frame {frames}: region={frame.Width}x{frame.Height} " +
-                                 $"differ={framesDiffer} offset={offset} topBand={topBand} bottomBand={bottomBand} " +
-                                 $"stitchedH={stitched!.Height}");
-
                         if (offset == 0)
                         {
                             zeroOffsetStreak++;

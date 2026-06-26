@@ -330,11 +330,15 @@ public static class CaptureService
         BitmapData data = bmp.LockBits(rect, ImageLockMode.ReadOnly, bmp.PixelFormat);
         try
         {
+            // Always emit at 96 DPI so the BitmapSource's device-independent size equals its pixel
+            // size. A capture/stitch bitmap inherits the system DPI (e.g. 120 on a 125% display),
+            // which would make the WPF source report a SMALLER DIU size than the pixel-dimensioned
+            // editor surface it fills — and a tall capture then renders only its top portion.
             var source = BitmapSource.Create(
                 bmp.Width,
                 bmp.Height,
-                bmp.HorizontalResolution,
-                bmp.VerticalResolution,
+                96,
+                96,
                 bmp.PixelFormat == PixelFormat.Format32bppPArgb ? WpfPixelFormats.Pbgra32 : WpfPixelFormats.Bgra32,
                 null,
                 data.Scan0,
