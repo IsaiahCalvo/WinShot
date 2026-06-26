@@ -489,6 +489,107 @@ public class ImageStitcherTests
         Assert.Equal(0, ImageStitcher.FindScrollOffset(frame1, frame2));
     }
 
+    // ====================================================================
+    // End-to-end stitch loop (mirrors ScrollingCaptureService's manual path)
+    // ====================================================================
+
+    /// <summary>
+    /// Builds a small viewport frame of <paramref name="w"/>×<paramref name="h"/> showing document
+    /// rows starting at <paramref name="topGlobalRow"/>, with an optional constant sticky header of
+    /// <paramref name="header"/> rows pinned at the top (body-disjoint colors, never moves).
+    /// </summary>
+    private static SD.Bitmap MakeViewport(int topGlobalRow, int w, int h, int header)
+    {
+        var bmp = new SD.Bitmap(w, h, PixelFormat.Format32bppArgb);
+        var data = bmp.LockBits(new SD.Rectangle(0, 0, w, h),
+            ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var row = new byte[w * 4];
+            for (int y = 0; y < h; y++)
+            {
+                // Header rows are sticky chrome (constant across frames); body rows scroll.
+                var c = y < header ? BandColor(y) : RowColor(topGlobalRow + (y - header));
+                for (int x = 0; x < w; x++)
+                {
+                    int i = x * 4;
+                    row[i] = c.B; row[i + 1] = c.G; row[i + 2] = c.R; row[i + 3] = 255;
+                }
+                Marshal.Copy(row, 0, data.Scan0 + y * data.Stride, row.Length);
+            }
+        }
+        finally { bmp.UnlockBits(data); }
+        return bmp;
+    }
+
+    /// <summary>
+    /// Drives the stitcher exactly as ScrollingCaptureService's manual loop does — FindScrollOffset
+    /// then AppendBelow, re-anchoring on a zero offset — over a sequence of slowly-scrolled frames,
+    /// and returns the final stitched height. No bands, no footer handling.
+    /// </summary>
+    private static int RunStitchLoop(IReadOnlyList<SD.Bitmap> frames)
+    {
+        SD.Bitmap? stitched = null, previous = null;
+        try
+        {
+            foreach (var frame in frames)
+            {
+                if (stitched is null) { stitched = (SD.Bitmap)frame.Clone(); previous = (SD.Bitmap)frame.Clone(); continue; }
+
+                int offset = ImageStitcher.FindScrollOffset(previous!, frame);
+                if (offset == 0)
+                {
+                    if (!ImageStitcher.FramesIdentical(previous!, frame)) { previous!.Dispose(); previous = (SD.Bitmap)frame.Clone(); }
+                    continue;
+                }
+                var grown = ImageStitcher.AppendBelow(stitched, frame, offset);
+                stitched.Dispose(); stitched = grown;
+                previous!.Dispose(); previous = (SD.Bitmap)frame.Clone();
+            }
+            return stitched?.Height ?? 0;
+        }
+        finally { stitched?.Dispose(); previous?.Dispose(); }
+    }
+
+    [Fact]
+    public void StitchLoop_SlowScrollSmallRegion_ReconstructsFullHeight()
+    {
+        // The user's failure geometry: a narrow ~193×184 region scrolled slowly (~22px/frame).
+        const int w = 193, h = 184, step = 22, docRows = 900;
+        var frames = new List<SD.Bitmap>();
+        for (int top = 0; top + h <= docRows; top += step)
+            frames.Add(MakeViewport(top, w, h, header: 0));
+
+        int finalHeight = RunStitchLoop(frames);
+        try
+        {
+            // Every step must be detected and appended: first frame (h) + (n-1) steps of `step`.
+            int expected = h + (frames.Count - 1) * step;
+            Assert.Equal(expected, finalHeight);
+        }
+        finally { foreach (var f in frames) f.Dispose(); }
+    }
+
+    [Fact]
+    public void StitchLoop_SlowScrollWithStickyHeader_ReconstructsAndIgnoresHeader()
+    {
+        // Same slow scroll, now with a 28px sticky header. With band detection removed, the
+        // distinctive-run matcher must still lock onto the body (its overlap run dwarfs the
+        // 28-row header), so the stitch grows by the body offset each frame — not stall at 0.
+        const int w = 193, h = 184, header = 28, step = 22, docRows = 900;
+        var frames = new List<SD.Bitmap>();
+        for (int top = 0; top + (h - header) <= docRows; top += step)
+            frames.Add(MakeViewport(top, w, h, header));
+
+        int finalHeight = RunStitchLoop(frames);
+        try
+        {
+            int expected = h + (frames.Count - 1) * step;
+            Assert.Equal(expected, finalHeight);
+        }
+        finally { foreach (var f in frames) f.Dispose(); }
+    }
+
     [Fact]
     public void FramesIdentical_TrueForSamePixels_FalseWhenContentDiffers()
     {

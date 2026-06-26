@@ -74,15 +74,11 @@ public static class ScrollingCaptureService
         {
             SD.Bitmap? stitched = null;
             SD.Bitmap? previous = null;
-            SD.Bitmap? footerStrip = null; // sticky footer lifted off the body, re-applied once at the end
             try
             {
                 int frames = 0;
                 int stitchedFrames = 0;
                 int zeroOffsetStreak = 0;
-                // Sticky header/footer heights, persisted (grown to the max seen) across the run
-                // so a partially-sticky chrome is masked from offset/append once detected.
-                int topBand = 0, bottomBand = 0;
                 bool hitIterationCap = false;   // ran out of iterations while still moving
                 bool reachedContentEnd = false; // genuine no-movement bottom (auto only)
                 bool alignmentLost = false;     // scrolled but frames couldn't align (overlap too small)
@@ -119,24 +115,20 @@ public static class ScrollingCaptureService
                         // make the WHOLE frame look "constant", which (being Math.Max'd and never
                         // reset) would permanently lock topBand+bottomBand to ~full height and
                         // leave zero rows to align, stalling the capture for good.
-                        bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
-
                         // ponytail: no sticky-band detection. It conflated slowly-scrolling content
                         // with fixed chrome (a slow scroll leaves most rows matching, so it flagged
                         // them "sticky" and starved the match window — the stall). The longest-run
                         // matcher already ignores sticky chrome naturally (chrome rows don't line up
                         // at the true scroll offset). Tradeoff: a genuinely sticky footer can stitch
                         // more than once; add a ShareX-style bottom-offset trim back if that bites.
-                        topBand = 0;
-                        bottomBand = 0;
+                        bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
 
                         int offset = horizontal
                             ? ImageStitcher.FindScrollOffsetHorizontal(previous!, frame)
-                            : ImageStitcher.FindScrollOffset(previous!, frame, topBand, bottomBand);
+                            : ImageStitcher.FindScrollOffset(previous!, frame);
 
                         Log.Info($"Scroll frame {frames}: region={frame.Width}x{frame.Height} " +
-                                 $"differ={framesDiffer} offset={offset} topBand={topBand} bottomBand={bottomBand} " +
-                                 $"stitchedH={stitched!.Height}");
+                                 $"differ={framesDiffer} offset={offset} stitchedH={stitched!.Height}");
 
                         if (offset == 0)
                         {
@@ -182,9 +174,7 @@ public static class ScrollingCaptureService
                             else
                             {
                                 int rows = Math.Min(offset, MaxStitchedHeight - stitched.Height);
-                                // Append only genuinely-new content above the sticky footer, so
-                                // a pinned footer is stitched exactly once (at the very bottom).
-                                grown = ImageStitcher.AppendBelowExcludingFooter(stitched, frame, rows, bottomBand);
+                                grown = ImageStitcher.AppendBelow(stitched, frame, rows);
                             }
                             stitched.Dispose();
                             stitched = grown;
@@ -233,16 +223,6 @@ public static class ScrollingCaptureService
                     }
                 }
 
-                // Re-apply the sticky footer exactly once, at the very bottom of the finished stitch.
-                if (footerStrip is not null && stitched is not null
-                    && stitched.Width == footerStrip.Width
-                    && stitched.Height + footerStrip.Height <= MaxStitchedHeight)
-                {
-                    var withFooter = ImageStitcher.AppendBelow(stitched, footerStrip, footerStrip.Height);
-                    stitched.Dispose();
-                    stitched = withFooter;
-                }
-
                 // Final status reflects WHY auto capture stopped, so a truncated page is obvious.
                 if (!manual && stitched is not null)
                 {
@@ -262,7 +242,6 @@ public static class ScrollingCaptureService
             finally
             {
                 previous?.Dispose();
-                footerStrip?.Dispose();
             }
             return stitched;
         }, CancellationToken.None).ConfigureAwait(false);
