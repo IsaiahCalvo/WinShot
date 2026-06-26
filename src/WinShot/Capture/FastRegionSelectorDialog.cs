@@ -450,6 +450,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Area mode.
         if (_pendingScreen is SD.Rectangle pending)
         {
+            // Cancel / Done bar wins over move/resize, so a click on it always commits or cancels.
+            var (barRect, cancelRect, doneRect) = ActionBarRects(pending);
+            if (barRect.Contains(screen))
+            {
+                if (doneRect.Contains(screen)) Confirm(VirtualFromScreen(pending));
+                else if (cancelRect.Contains(screen)) Complete(WF.DialogResult.Cancel);
+                return; // consume any click on the bar (don't start a new marquee under it)
+            }
+
             if (e.Clicks >= 2 && pending.Contains(screen))
             {
                 Confirm(VirtualFromScreen(pending));
@@ -665,6 +674,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     at = new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
                 DrawLabel(g, clientSize, $"{bright.Width} × {bright.Height}", at.X, at.Y);
             }
+        }
+
+        // Cancel / Done bar on the adjustable selection: below the region, flipped above when it
+        // runs to the screen bottom, tucked inside the bottom when the region spans the full height.
+        if (_pendingScreen is SD.Rectangle pendBar)
+        {
+            var (bar, cancel, done) = ActionBarRects(pendBar);
+            if (bar.IntersectsWith(monitorBounds))
+                DrawActionBar(g, monitorBounds, bar, cancel, done);
         }
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
@@ -955,6 +973,76 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.DrawLine(pen, guides.RightStart, guides.RightEnd);
         g.DrawLine(pen, guides.TopStart, guides.TopEnd);
         g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
+    }
+
+    private const int BarBtnH = 30;
+    private const int BarPad = 8;
+    private const int BarInnerGap = 8;
+    private const int BarGap = 12;
+
+    /// <summary>
+    /// Screen rects for the Cancel/Done bar and its two buttons, given the pending selection.
+    /// Centered on the region and placed BELOW it; flipped ABOVE when the region runs to the
+    /// screen bottom; tucked INSIDE the region's bottom when it spans the full screen height.
+    /// Pure function of the region (+ its monitor) so paint and hit-test always agree.
+    /// </summary>
+    private static (SD.Rectangle bar, SD.Rectangle cancel, SD.Rectangle done) ActionBarRects(SD.Rectangle r)
+    {
+        using var font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold);
+        int cancelW = WF.TextRenderer.MeasureText("Cancel", font).Width + 28;
+        int doneW = WF.TextRenderer.MeasureText("Done", font).Width + 28;
+        int barW = BarPad + cancelW + BarInnerGap + doneW + BarPad;
+        int barH = BarPad + BarBtnH + BarPad;
+
+        SD.Rectangle m = WF.Screen.FromRectangle(r).Bounds;
+        SD.Point origin = PlaceActionBar(r, m, barW, barH);
+        var bar = new SD.Rectangle(origin.X, origin.Y, barW, barH);
+        var cancel = new SD.Rectangle(origin.X + BarPad, origin.Y + BarPad, cancelW, BarBtnH);
+        var done = new SD.Rectangle(cancel.Right + BarInnerGap, origin.Y + BarPad, doneW, BarBtnH);
+        return (bar, cancel, done);
+    }
+
+    /// <summary>
+    /// Top-left of the action bar for region <paramref name="r"/> within monitor <paramref name="m"/>:
+    /// centered horizontally and placed below the region; flipped above when it would run off the
+    /// monitor bottom; tucked inside the region's bottom when the region spans the full height
+    /// (no room either side). Clamped to stay on-monitor. Pure — unit-testable without a screen.
+    /// </summary>
+    internal static SD.Point PlaceActionBar(SD.Rectangle r, SD.Rectangle m, int barW, int barH)
+    {
+        int x = r.Left + (r.Width - barW) / 2;
+        int below = r.Bottom + BarGap;
+        int above = r.Top - barH - BarGap;
+        int y;
+        if (below + barH <= m.Bottom - BarPad) y = below;            // room below the region
+        else if (above >= m.Top + BarPad) y = above;                 // else above it
+        else y = r.Bottom - barH - BarGap;                           // full-height region: inside the bottom
+        x = Math.Clamp(x, m.Left + BarPad, Math.Max(m.Left + BarPad, m.Right - barW - BarPad));
+        y = Math.Clamp(y, m.Top + BarPad, Math.Max(m.Top + BarPad, m.Bottom - barH - BarPad));
+        return new SD.Point(x, y);
+    }
+
+    private void DrawActionBar(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle bar, SD.Rectangle cancel, SD.Rectangle done)
+    {
+        SD.Rectangle lb = ToLocal(bar, monitorBounds), lc = ToLocal(cancel, monitorBounds), ld = ToLocal(done, monitorBounds);
+        using var font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold);
+
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = RoundedRect(lb, 8))
+        using (var bg = new SD.SolidBrush(SD.Color.FromArgb(245, 0x1C, 0x1C, 0x1E)))
+            g.FillPath(bg, path);
+        using (var cp = RoundedRect(lc, 6))
+        using (var cb = new SD.SolidBrush(SD.Color.FromArgb(255, 0x3A, 0x3A, 0x3C)))
+            g.FillPath(cb, cp);
+        using (var dp = RoundedRect(ld, 6))
+        using (var db = new SD.SolidBrush(Accent))
+            g.FillPath(db, dp);
+        g.SmoothingMode = prev;
+
+        const WF.TextFormatFlags center = WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding;
+        WF.TextRenderer.DrawText(g, "Cancel", font, lc, ThemePalette.TextPrimary, center);
+        WF.TextRenderer.DrawText(g, "Done", font, ld, SD.Color.White, center);
     }
 
     private void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
