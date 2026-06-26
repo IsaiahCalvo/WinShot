@@ -51,6 +51,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
     private TaskCompletionSource<WF.DialogResult>? _completion;
+    // Polls the cursor while a selection is open so the crosshair/loupe follow continuously,
+    // independent of whether idle hover WM_MOUSEMOVE reaches the overlay (it doesn't reliably
+    // across multiple monitors / when the overlay isn't the foreground window). Runs ONLY while
+    // shown — started in ShowAsync, stopped in Complete — so it adds no idle background work.
+    private readonly WF.Timer _followTimer;
+    private bool _lastCtrlDown;
 
     public FastRegionSelectorDialog(Task<List<WindowInfo>> windowsTask, SettingsService? settings)
         : this(() => windowsTask, settings)
@@ -74,6 +80,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
         Opacity = prewarm ? 0.01 : 1.0;
+
+        _followTimer = new WF.Timer { Interval = 15 };
+        _followTimer.Tick += OnFollowTick;
 
         Shown += (_, _) => StartWindowLoad();
 
@@ -186,6 +195,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         Activate();
         Focus();
+        _lastCtrlDown = false;
+        if (!_prewarm)
+            _followTimer.Start();
         return _completion.Task;
     }
 
@@ -459,6 +471,35 @@ public sealed class FastRegionSelectorDialog : WF.Form
             InvalidateAllSurfaces();
     }
 
+    /// <summary>
+    /// Cursor-follow heartbeat (~66 fps) while a selection is open. Repaints when the cursor
+    /// moves or the Ctrl state changes (Ctrl gates the crosshair in "command" mode), so the
+    /// crosshair/loupe track the cursor even when no hover WM_MOUSEMOVE reaches the overlay.
+    /// </summary>
+    private void OnFollowTick(object? sender, EventArgs e)
+    {
+        if (_prewarm) return;
+        SD.Point p = CursorScreen();
+        bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+        if (p == _currentScreen && ctrl == _lastCtrlDown)
+            return;
+        _lastCtrlDown = ctrl;
+        HandleMouseMove();
+    }
+
+    /// <summary>Whether the full-bleed crosshair guide lines should be drawn, per the
+    /// Screenshots "Crosshair mode" setting (always / only while Ctrl is held / never).</summary>
+    private bool CrosshairLinesVisible()
+    {
+        string mode = _settings?.Current.CrosshairMode ?? "always";
+        return mode switch
+        {
+            "never" => false,
+            "command" => (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control,
+            _ => true,
+        };
+    }
+
     internal void HandleMouseUp(WF.MouseEventArgs e)
     {
         if (e.Button != WF.MouseButtons.Left)
@@ -549,12 +590,17 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
         // rect, and never in Window mode where the window highlight is the affordance).
-        bool showCrosshair = _mode == SelectorMode.Area && _pendingScreen is null && !_prewarm && cursorOnThisSurface;
-        if (showCrosshair)
+        bool inCrosshairContext = _mode == SelectorMode.Area && _pendingScreen is null && !_prewarm && cursorOnThisSurface;
+        if (inCrosshairContext)
         {
-            DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
-            FastSelectorLoupeRenderer.Draw(
-                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
+            // Crosshair guide lines honor the "Crosshair mode" setting; the magnifier/color
+            // loupe honors "Show magnifier". Both default on when no settings are attached.
+            if (CrosshairLinesVisible())
+                DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
+
+            if (_settings?.Current.ShowMagnifier ?? true)
+                FastSelectorLoupeRenderer.Draw(
+                    g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
         }
     }
 
@@ -685,6 +731,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void Complete(WF.DialogResult result)
     {
         DialogResult = result;
+        _followTimer.Stop();
         Capture = false;
         DisposePanes();
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
