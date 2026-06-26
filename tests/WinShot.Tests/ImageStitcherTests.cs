@@ -12,11 +12,16 @@ public class ImageStitcherTests
     private const int Height = 400;
 
     /// <summary>
-    /// Deterministic, collision-free per-row color: R/G encode the global row
-    /// index (unique up to 65536 rows), B adds extra variation.
+    /// Deterministic, well-separated per-row color. Spreads a multiplicative hash of the row index
+    /// across all three channels so each row stays distinct even after the matcher's averaging +
+    /// quantization (which deliberately drops low bits to tolerate sub-pixel render noise). Real
+    /// content is this distinctive; the old +1-per-row encoding was not and collided once quantized.
     /// </summary>
-    private static SD.Color RowColor(int globalRow) => SD.Color.FromArgb(
-        255, globalRow & 0xFF, (globalRow >> 8) & 0xFF, (globalRow * 31) & 0xFF);
+    private static SD.Color RowColor(int globalRow)
+    {
+        uint h = (uint)globalRow * 2654435761u; // Knuth multiplicative hash
+        return SD.Color.FromArgb(255, (int)((h >> 8) & 0xFF), (int)((h >> 16) & 0xFF), (int)((h >> 24) & 0xFF));
+    }
 
     /// <summary>
     /// Builds a frame whose row y shows "document" row <paramref name="topGlobalRow"/> + y,
@@ -61,6 +66,47 @@ public class ImageStitcherTests
         using var frame1 = MakeFrame(0);
         using var frame2 = MakeFrame(k); // frame1 scrolled up by k rows, new rows revealed below
 
+        Assert.Equal(k, ImageStitcher.FindScrollOffset(frame1, frame2));
+    }
+
+    /// <summary>A frame like <see cref="MakeFrame"/> but with small deterministic per-pixel noise
+    /// added — stands in for the same content re-rendered at a different sub-pixel scroll offset
+    /// (ClearType edges shift a few levels). Tolerant matching must see through it.</summary>
+    private static SD.Bitmap MakeNoisyFrame(int topGlobalRow, int amp, int height = Height)
+    {
+        var bmp = MakeFrame(topGlobalRow, height);
+        var data = bmp.LockBits(new SD.Rectangle(0, 0, Width, height),
+            ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        try
+        {
+            var row = new byte[Width * 4];
+            for (int y = 0; y < height; y++)
+            {
+                Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
+                for (int x = 0; x < Width; x++)
+                {
+                    int n = ((x * 37) % (2 * amp + 1)) - amp; // deterministic, mean ~0 across a bucket
+                    int i = x * 4;
+                    row[i] = (byte)Math.Clamp(row[i] + n, 0, 255);
+                    row[i + 1] = (byte)Math.Clamp(row[i + 1] + n, 0, 255);
+                    row[i + 2] = (byte)Math.Clamp(row[i + 2] + n, 0, 255);
+                }
+                Marshal.Copy(row, 0, data.Scan0 + y * data.Stride, row.Length);
+            }
+        }
+        finally { bmp.UnlockBits(data); }
+        return bmp;
+    }
+
+    [Theory]
+    [InlineData(37)]
+    [InlineData(150)]
+    public void FindScrollOffset_ToleratesSubpixelNoise(int k)
+    {
+        using var frame1 = MakeFrame(0);
+        using var frame2 = MakeNoisyFrame(k, amp: 6); // same content, re-rendered with ±6 noise
+
+        // Exact byte matching would miss this entirely; tolerant matching still finds the scroll.
         Assert.Equal(k, ImageStitcher.FindScrollOffset(frame1, frame2));
     }
 
