@@ -165,6 +165,11 @@ public partial class EditorWindow : Window
         // The reused prewarmed window often doesn't change size between captures, so Loaded
         // won't fire again; this catches the first laid-out frame for the initial fit.
         SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        // The WINDOW can stop resizing while the VIEWPORT keeps shrinking as the toolbars / zoom
+        // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
+        // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
+        // until the user takes control.
+        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -385,7 +390,10 @@ public partial class EditorWindow : Window
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
         ViewTranslate.Y = Math.Round((vh - _source.Height * _zoom) / 2);
-        _pendingInitialFit = false;
+        // Do NOT clear _pendingInitialFit here: the viewport keeps resizing as toolbars/the zoom
+        // bar lay out after open, and an early fit computed against a too-large viewport leaves the
+        // image too zoomed-in (bottom clipped). Keep re-fitting on every SizeChanged until the user
+        // actually takes control of the view (clicks/scrolls/zooms/pans — those clear the flag).
         Log.Info($"Editor fit: src={_source.Width}x{_source.Height} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
         OnViewChanged();
     }
@@ -402,7 +410,7 @@ public partial class EditorWindow : Window
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
         ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
-        _pendingInitialFit = false;
+        _pendingInitialFit = false; // explicit manual choice; SizeChanged would otherwise snap to fit-whole
         OnViewChanged();
     }
 
@@ -411,6 +419,7 @@ public partial class EditorWindow : Window
     {
         newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
         if (Math.Abs(newZoom - _zoom) < 0.00001) return;
+        _pendingInitialFit = false; // explicit zoom — stop auto-refitting on resize
 
         double cx = (anchor.X - ViewTranslate.X) / _zoom;
         double cy = (anchor.Y - ViewTranslate.Y) / _zoom;
@@ -437,6 +446,7 @@ public partial class EditorWindow : Window
 
     private void OnViewportMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        _pendingInitialFit = false; // user is navigating — stop auto-refitting on resize
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             // Ctrl+wheel zooms around the cursor.
@@ -1181,6 +1191,7 @@ public partial class EditorWindow : Window
     private void OnViewportMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_sourceOperationActive) return;
+        _pendingInitialFit = false; // user is interacting — stop auto-refitting on resize
         bool panGesture = e.ChangedButton == MouseButton.Middle ||
             (e.ChangedButton == MouseButton.Left && (_spaceDown || _tool == EditorTool.Pan));
         if (panGesture)

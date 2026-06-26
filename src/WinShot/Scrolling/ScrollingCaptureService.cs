@@ -470,21 +470,19 @@ public static class ScrollingCaptureService
         SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
-    /// <summary>Moves the cursor to the region center and sends one gentle wheel-UP step (one notch,
-    /// so auto-recover keeps overlap between frames and doesn't open a fresh gap).</summary>
+    /// <summary>Sends one gentle wheel-UP step to the window under the region center WITHOUT moving
+    /// the cursor — auto-recover must not yank the user's mouse. Posts WM_MOUSEWHEEL directly (the
+    /// dim overlay is click-through, so WindowFromPoint returns the real content beneath). One notch
+    /// keeps overlap between frames so it doesn't open a fresh gap.</summary>
     private static void ScrollUp(SD.Rectangle region)
     {
-        SetCursorPos(region.X + region.Width / 2, region.Y + region.Height / 2);
-        var input = new INPUT
-        {
-            type = InputMouse,
-            mi = new MOUSEINPUT
-            {
-                mouseData = (uint)WheelDelta, // +1 notch = scroll up (content moves down)
-                dwFlags = MouseEventFWheel,
-            },
-        };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        int cx = region.X + region.Width / 2;
+        int cy = region.Y + region.Height / 2;
+        IntPtr hwnd = WindowFromPoint(new POINT { X = cx, Y = cy });
+        if (hwnd == IntPtr.Zero) return;
+        IntPtr wParam = (IntPtr)(WheelDelta << 16);                       // +1 notch up (content moves down)
+        IntPtr lParam = (IntPtr)(((cy & 0xFFFF) << 16) | (cx & 0xFFFF));  // screen coords
+        PostMessage(hwnd, WM_MouseWheel, wParam, lParam);
     }
 
     /// <summary>Moves the cursor to the region center and sends one horizontal wheel-right step.</summary>
@@ -507,6 +505,10 @@ public static class ScrollingCaptureService
     private const uint InputMouse = 0;
     private const uint MouseEventFWheel = 0x0800;
     private const uint MouseEventFHWheel = 0x1000;
+    private const uint WM_MouseWheel = 0x020A;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MOUSEINPUT
@@ -536,4 +538,10 @@ public static class ScrollingCaptureService
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(POINT p);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }
