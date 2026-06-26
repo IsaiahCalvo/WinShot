@@ -93,6 +93,10 @@ public partial class EditorWindow : Window
     // Drawing state.
     private bool _dragging;
     private bool _sourceOperationActive;
+    // Set when a new source is loaded; the first layout pass with a real viewport runs the
+    // initial fit-to-view and clears it. Guarantees large/tall captures fit on open regardless
+    // of which path opened the editor (fresh window vs reused prewarmed window) or layout timing.
+    private bool _pendingInitialFit;
     private Point _dragStart;
     private Shape? _activeShape;
     private TextBox? _activeText;
@@ -125,6 +129,7 @@ public partial class EditorWindow : Window
         InitializeComponent();
         _source = source;
         _owned.Add(source);
+        _pendingInitialFit = true;
         _settings = settings;
         _history = history;
 
@@ -157,6 +162,9 @@ public partial class EditorWindow : Window
             AbortResize();
         };
         Loaded += (_, _) => FitToView();
+        // The reused prewarmed window often doesn't change size between captures, so Loaded
+        // won't fire again; this catches the first laid-out frame for the initial fit.
+        SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -245,6 +253,7 @@ public partial class EditorWindow : Window
         _owned.Clear();
         _source = source;
         _owned.Add(source);
+        _pendingInitialFit = true;
 
         _undoStack.Clear();
         _redoStack.Clear();
@@ -363,7 +372,7 @@ public partial class EditorWindow : Window
     private void FitToView()
     {
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
-        if (vw < 1 || vh < 1 || _source.Width < 1 || _source.Height < 1) return;
+        if (vw < 1 || vh < 1 || _source.Width < 1 || _source.Height < 1) return; // viewport not ready; retry on next trigger
 
         const double margin = 24;
         double fit = Math.Min((vw - margin * 2) / _source.Width, (vh - margin * 2) / _source.Height);
@@ -371,6 +380,8 @@ public partial class EditorWindow : Window
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
         ViewTranslate.Y = Math.Round((vh - _source.Height * _zoom) / 2);
+        _pendingInitialFit = false;
+        Log.Info($"Editor fit: src={_source.Width}x{_source.Height} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
         OnViewChanged();
     }
 
