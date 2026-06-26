@@ -247,7 +247,7 @@ public sealed class ScrollControlsBar : WF.Form
         if (on)
         {
             _status.ForeColor = WarnColor;
-            _status.Text = "⚠ Too fast — scroll slower";
+            _status.Text = "⚠ Section skipped — scroll back to fill";
         }
     }
 

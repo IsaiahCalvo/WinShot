@@ -85,6 +85,9 @@ public static class ScrollingCaptureService
         {
             SD.Bitmap? stitched = null;
             SD.Bitmap? previous = null;
+            // Manual vertical capture uses the position-aware canvas (scroll up/down freely, gaps
+            // refill on re-scroll). Auto mode and the niche manual-horizontal path keep append-only.
+            var canvas = (manual && !horizontal) ? new ScrollCanvas() : null;
             try
             {
                 int frames = 0;
@@ -115,6 +118,40 @@ public static class ScrollingCaptureService
                         ? CaptureService.CaptureScreenRegionWithoutLayeredWindows(screenRegion)
                         : await CaptureStableFrameAsync(screenRegion, ct).ConfigureAwait(false);
                     frames++;
+
+                    if (canvas is not null)
+                    {
+                        var pr = canvas.Place(frame);
+                        frame.Dispose();
+
+                        // An open gap = a section was skipped and not yet re-scrolled. Warn while it's
+                        // open (the fix is to scroll back over it); clear once it's bridged/refilled.
+                        bool gap = canvas.HasGap;
+                        if (gap && !warnedTooFast) { warnedTooFast = true; tooFast?.Invoke(true); }
+                        else if (!gap && warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
+
+                        Log.Info($"Scroll frame {frames}: canvasH={canvas.Height} " +
+                                 $"moved={pr.Moved} disconnected={pr.Disconnected} gap={gap}");
+
+                        if (canvas.Height >= MaxStitchedHeight)
+                            break;
+
+                        if (frames == 1 || previewClock.ElapsedMilliseconds >= PreviewThrottleMs)
+                        {
+                            using var snap = canvas.Flatten();
+                            if (snap is not null) PushPreview(preview, snap);
+                            previewClock.Restart();
+                        }
+                        status(gap
+                            ? $"Section skipped — scroll back over it to fill in. {canvas.Height}px"
+                            : $"Scroll to capture — click Done when finished. {canvas.Height}px");
+
+                        if (ShouldStop(ct))
+                            break;
+                        try { await Task.Delay(ManualPollMs, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { break; }
+                        continue;
+                    }
 
                     if (stitched is null)
                     {
@@ -254,6 +291,10 @@ public static class ScrollingCaptureService
                     }
                 }
 
+                // Manual canvas: flatten to the final image (pending gaps become a marker band).
+                if (canvas is not null)
+                    stitched = canvas.Flatten();
+
                 // Final status reflects WHY auto capture stopped, so a truncated page is obvious.
                 if (!manual && stitched is not null)
                 {
@@ -273,6 +314,7 @@ public static class ScrollingCaptureService
             finally
             {
                 previous?.Dispose();
+                canvas?.Dispose();
             }
             return stitched;
         }, CancellationToken.None).ConfigureAwait(false);
