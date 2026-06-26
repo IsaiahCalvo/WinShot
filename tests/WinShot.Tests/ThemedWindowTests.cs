@@ -66,7 +66,8 @@ public class ThemedWindowTests
 
                 CreatePrivateForm<FastDisplayPickerDialog>().Close();
                 CreatePrivate<ScrollingModeDialog>().Close();
-                ShowAndClose(CreatePrivate<ScrollingStatusWindow>());
+                ShowAndClose(new ScrollDimOverlay(new SD.Rectangle(20, 20, 160, 120)));
+                ShowAndClose(new ScrollControlsBar(new SD.Rectangle(20, 20, 160, 120)));
 
                 var editor = new EditorWindow(NewBitmap(), settings, history);
                 editor.Show();
