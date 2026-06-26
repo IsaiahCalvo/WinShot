@@ -7,10 +7,29 @@ using WF = System.Windows.Forms;
 namespace WinShot.Scrolling;
 
 /// <summary>
+/// Marks a window so it stays visible on screen but is skipped by screen capture
+/// (WGC / Desktop Duplication). Essential for the scrolling chrome: the dim overlay and
+/// controls must NOT end up in the frames the capture loop stitches.
+/// </summary>
+internal static class CaptureExclusion
+{
+    private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
+
+    public static void Apply(IntPtr hwnd)
+    {
+        try { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE); }
+        catch { /* pre-2004 Windows: no exclusion available; non-fatal */ }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+}
+
+/// <summary>
 /// Full-monitor dim with the capture region punched out as a bright, accent-framed hole,
 /// so during a scrolling capture the user sees exactly what's being captured while still
-/// scrolling the live content underneath. Purely cosmetic and click-through
-/// (WS_EX_TRANSPARENT) — all mouse/wheel input passes through to the content below.
+/// scrolling the live content underneath. Click-through (WS_EX_TRANSPARENT) so all input
+/// passes to the content, and excluded from capture so it never taints the stitched frames.
 /// </summary>
 public sealed class ScrollDimOverlay : WF.Form
 {
@@ -50,6 +69,12 @@ public sealed class ScrollDimOverlay : WF.Form
         }
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        CaptureExclusion.Apply(Handle);
+    }
+
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
@@ -69,13 +94,10 @@ public sealed class ScrollDimOverlay : WF.Form
 
             if (_holeLocal.Width > 0 && _holeLocal.Height > 0)
             {
-                // Punch a fully transparent hole so the live content shows through bright.
                 g.CompositingMode = CompositingMode.SourceCopy;
                 using (var clear = new SD.SolidBrush(SD.Color.FromArgb(0, 0, 0, 0)))
                     g.FillRectangle(clear, _holeLocal);
 
-                // Crisp accent frame drawn ENTIRELY outside the hole, so the 2px stroke never
-                // bleeds into the captured region (it would otherwise show up in the stitch).
                 g.CompositingMode = CompositingMode.SourceOver;
                 using var pen = new SD.Pen(SD.Color.FromArgb(255, ThemePalette.Accent), 2f);
                 g.DrawRectangle(pen, _holeLocal.X - 2, _holeLocal.Y - 2, _holeLocal.Width + 3, _holeLocal.Height + 3);
@@ -88,7 +110,7 @@ public sealed class ScrollDimOverlay : WF.Form
     {
         IntPtr screenDc = GetDC(IntPtr.Zero);
         IntPtr memDc = CreateCompatibleDC(screenDc);
-        IntPtr hBmp = bmp.GetHbitmap(SD.Color.FromArgb(0)); // 32bpp w/ alpha for a PArgb source
+        IntPtr hBmp = bmp.GetHbitmap(SD.Color.FromArgb(0));
         IntPtr old = SelectObject(memDc, hBmp);
         try
         {
@@ -129,9 +151,11 @@ public sealed class ScrollDimOverlay : WF.Form
 }
 
 /// <summary>
-/// Small Cancel / Done bar shown next to the capture region during a scrolling capture
-/// (replaces the old top-center "Stop" pill). Never activates, so wheel input keeps going
-/// to the content being scrolled. Done keeps the stitched result; Cancel discards it.
+/// Small Cancel / Done bar shown next to the capture region (replaces the old "Stop" pill).
+/// Placed just below the region; flips above when the region runs to the bottom of the
+/// screen, and tucks inside the bottom of the region when it spans the full screen height.
+/// Never activates (wheel keeps reaching the content) and is excluded from capture.
+/// Done keeps the stitched result; Cancel discards it.
 /// </summary>
 public sealed class ScrollControlsBar : WF.Form
 {
@@ -183,12 +207,18 @@ public sealed class ScrollControlsBar : WF.Form
 
         Shown += (_, _) =>
         {
-            ApplyRoundedRegion();
+            ApplyRoundedRegion(Width, Height, 12);
             PositionNear(regionScreen);
         };
     }
 
     protected override bool ShowWithoutActivation => true;
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        CaptureExclusion.Apply(Handle);
+    }
 
     public void SetStatus(string text)
     {
@@ -218,21 +248,29 @@ public sealed class ScrollControlsBar : WF.Form
         return b;
     }
 
-    private void PositionNear(SD.Rectangle regionScreen)
+    private void PositionNear(SD.Rectangle region)
     {
-        var mon = WF.Screen.FromRectangle(regionScreen).Bounds;
-        int x = regionScreen.Left + (regionScreen.Width - Width) / 2;
-        int y = regionScreen.Bottom + 14;                  // prefer just below the region
-        if (y + Height > mon.Bottom - 8)
-            y = regionScreen.Top - Height - 14;            // flip above if there's no room
-        x = Math.Clamp(x, mon.Left + 8, Math.Max(mon.Left + 8, mon.Right - Width - 8));
-        y = Math.Clamp(y, mon.Top + 8, Math.Max(mon.Top + 8, mon.Bottom - Height - 8));
+        var mon = WF.Screen.FromRectangle(region).Bounds;
+        const int gap = 14, pad = 8;
+        int x = region.Left + (region.Width - Width) / 2;
+
+        int below = region.Bottom + gap;
+        int above = region.Top - Height - gap;
+        int y;
+        if (below + Height <= mon.Bottom - pad)
+            y = below;                                  // room below the region
+        else if (above >= mon.Top + pad)
+            y = above;                                  // else above the region
+        else
+            y = region.Bottom - Height - gap;           // full-height region: tuck inside the bottom
+
+        x = Math.Clamp(x, mon.Left + pad, Math.Max(mon.Left + pad, mon.Right - Width - pad));
+        y = Math.Clamp(y, mon.Top + pad, Math.Max(mon.Top + pad, mon.Bottom - Height - pad));
         Location = new SD.Point(x, y);
     }
 
-    private void ApplyRoundedRegion()
+    private void ApplyRoundedRegion(int w, int h, int r)
     {
-        int r = 12, w = Width, h = Height;
         if (w < r * 2 || h < r * 2) return;
         using var path = new GraphicsPath();
         path.AddArc(0, 0, r, r, 180, 90);
@@ -241,5 +279,78 @@ public sealed class ScrollControlsBar : WF.Form
         path.AddArc(0, h - r, r, r, 90, 90);
         path.CloseFigure();
         Region = new SD.Region(path);
+    }
+}
+
+/// <summary>
+/// Live preview panel pinned to the bottom-right of the region's monitor, showing the
+/// stitched image growing as the capture proceeds (CleanShot shows the same). Excluded from
+/// capture so it never appears in the stitch; never activates.
+/// </summary>
+public sealed class ScrollPreviewPanel : WF.Form
+{
+    private readonly WF.PictureBox _pic;
+    private readonly WF.Label _caption;
+
+    public ScrollPreviewPanel(SD.Rectangle regionScreen)
+    {
+        FormBorderStyle = WF.FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = WF.FormStartPosition.Manual;
+        TopMost = true;
+        BackColor = ThemePalette.Elevated;
+        Padding = new WF.Padding(8);
+        Size = new SD.Size(220, 300);
+
+        _caption = new WF.Label
+        {
+            Dock = WF.DockStyle.Bottom,
+            Height = 20,
+            ForeColor = ThemePalette.TextSecondary,
+            Font = ThemePalette.UiFont(8.5f),
+            Text = "Capturing…",
+            TextAlign = SD.ContentAlignment.MiddleCenter,
+        };
+        _pic = new WF.PictureBox
+        {
+            Dock = WF.DockStyle.Fill,
+            SizeMode = WF.PictureBoxSizeMode.Zoom,
+            BackColor = ThemePalette.WindowBg,
+        };
+        Controls.Add(_pic);
+        Controls.Add(_caption);
+
+        Shown += (_, _) => PositionBottomRight(regionScreen);
+    }
+
+    protected override bool ShowWithoutActivation => true;
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        CaptureExclusion.Apply(Handle);
+    }
+
+    /// <summary>Takes ownership of <paramref name="image"/> (disposes the previous one).</summary>
+    public void SetImage(SD.Bitmap image, string caption)
+    {
+        if (IsDisposed) { image.Dispose(); return; }
+        var old = _pic.Image;
+        _pic.Image = image;
+        old?.Dispose();
+        _caption.Text = caption;
+    }
+
+    protected override void OnFormClosed(WF.FormClosedEventArgs e)
+    {
+        _pic.Image?.Dispose();
+        _pic.Image = null;
+        base.OnFormClosed(e);
+    }
+
+    private void PositionBottomRight(SD.Rectangle region)
+    {
+        var mon = WF.Screen.FromRectangle(region).Bounds;
+        Location = new SD.Point(mon.Right - Width - 20, mon.Bottom - Height - 20);
     }
 }

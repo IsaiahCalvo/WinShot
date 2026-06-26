@@ -33,6 +33,7 @@ public static class ScrollingStatusWindow
         bool cancelled = false;
 
         var overlay = new ScrollDimOverlay(screenRegion);
+        var preview = new ScrollPreviewPanel(screenRegion);
         var controls = new ScrollControlsBar(screenRegion);
         controls.DoneRequested += () => { try { cts.Cancel(); } catch { /* already torn down */ } };
         controls.CancelRequested += () =>
@@ -43,7 +44,9 @@ public static class ScrollingStatusWindow
 
         try { overlay.Show(); }
         catch (Exception ex) { Log.Error("Scroll dim overlay failed to show (non-fatal)", ex); }
-        controls.Show();
+        try { preview.Show(); }
+        catch (Exception ex) { Log.Error("Scroll preview failed to show (non-fatal)", ex); }
+        controls.Show(); // shown last so the buttons sit above the overlay/preview
 
         try
         {
@@ -53,7 +56,7 @@ public static class ScrollingStatusWindow
                 choice.Direction,
                 text => MarshalStatus(controls, text),
                 cts.Token,
-                preview: null); // the bright region is the live preview now
+                thumb => PushPreview(preview, thumb));
 
             if (cancelled)
             {
@@ -70,7 +73,32 @@ public static class ScrollingStatusWindow
         finally
         {
             try { controls.Close(); controls.Dispose(); } catch { /* best effort */ }
+            try { preview.Close(); preview.Dispose(); } catch { /* best effort */ }
             try { overlay.Close(); overlay.Dispose(); } catch { /* best effort */ }
+        }
+    }
+
+    /// <summary>
+    /// The live-stitch snapshot arrives on a capture thread and is disposed the moment this
+    /// returns, so clone it synchronously here, then hand the clone to the preview panel
+    /// (which takes ownership) on its UI thread.
+    /// </summary>
+    private static void PushPreview(ScrollPreviewPanel preview, SD.Bitmap thumb)
+    {
+        SD.Bitmap clone;
+        try { clone = (SD.Bitmap)thumb.Clone(); }
+        catch { return; }
+
+        try
+        {
+            if (!preview.IsDisposed && preview.IsHandleCreated)
+                preview.BeginInvoke(new Action(() => preview.SetImage(clone, "Capturing…")));
+            else
+                clone.Dispose();
+        }
+        catch
+        {
+            clone.Dispose();
         }
     }
 

@@ -68,6 +68,7 @@ public class ThemedWindowTests
                 CreatePrivate<ScrollingModeDialog>().Close();
                 ShowAndClose(new ScrollDimOverlay(new SD.Rectangle(20, 20, 160, 120)));
                 ShowAndClose(new ScrollControlsBar(new SD.Rectangle(20, 20, 160, 120)));
+                ShowAndClose(new ScrollPreviewPanel(new SD.Rectangle(20, 20, 160, 120)));
 
                 var editor = new EditorWindow(NewBitmap(), settings, history);
                 editor.Show();
