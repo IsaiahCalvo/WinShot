@@ -46,6 +46,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SD.Rectangle _adjustStartRect; // pending rect at the start of a move/resize
     private WindowInfo? _hoverWindow;
     private SD.Bitmap? _frozen;            // frozen virtual-desktop snapshot shown under the overlay
+    // Per-monitor frozen-slice-with-dim baked once, so each follow-frame is a single opaque
+    // blit instead of re-cropping the snapshot AND alpha-blending a full-screen dim every tick
+    // (the latter is what made the crosshair lag on large external monitors). Keyed by monitor.
+    private readonly Dictionary<SD.Rectangle, SD.Bitmap> _dimmedCache = new();
     private SD.Bitmap? _capturedRegion;    // region cropped from _frozen at confirm; caller takes ownership
     private bool _prewarm;
     private Func<Task<List<WindowInfo>>> _windowsProvider;
@@ -546,10 +550,19 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SD.Size clientSize = monitorBounds.Size;
         bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
 
-        // Frozen desktop slice for this monitor, then a uniform dim over it.
-        DrawFrozenSlice(g, monitorBounds);
-        using (var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0)))
+        // Frozen desktop slice + uniform dim, baked once and blitted as one opaque copy.
+        var dimmed = GetDimmedBackground(monitorBounds);
+        if (dimmed is not null)
+        {
+            var dest = new SD.Rectangle(0, 0, clientSize.Width, clientSize.Height);
+            g.DrawImage(dimmed, dest, 0, 0, dimmed.Width, dimmed.Height, SD.GraphicsUnit.Pixel);
+        }
+        else
+        {
+            // No frozen snapshot (capture failed): select over a plain dim.
+            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
             g.FillRectangle(dim, 0, 0, clientSize.Width, clientSize.Height);
+        }
 
         // The active selection (drawing / adjustable pending / hovered window) shows the
         // frozen pixels at full brightness with an accent border.
@@ -602,6 +615,29 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 FastSelectorLoupeRenderer.Draw(
                     g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
         }
+    }
+
+    /// <summary>
+    /// Returns this monitor's frozen slice with the selection dim baked in, building and
+    /// caching it on first use. Lets the hot follow-paint be one opaque blit instead of a
+    /// per-frame snapshot crop plus a full-screen software alpha fill.
+    /// </summary>
+    private SD.Bitmap? GetDimmedBackground(SD.Rectangle monitorBounds)
+    {
+        if (_frozen is null) return null;
+        if (_dimmedCache.TryGetValue(monitorBounds, out var cached))
+            return cached;
+
+        var bmp = new SD.Bitmap(monitorBounds.Width, monitorBounds.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
+        using (var g = SD.Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+            DrawFrozenSlice(g, monitorBounds);
+            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
+            g.FillRectangle(dim, 0, 0, monitorBounds.Width, monitorBounds.Height);
+        }
+        _dimmedCache[monitorBounds] = bmp;
+        return bmp;
     }
 
     /// <summary>Paints this monitor's slice of the frozen snapshot at 1:1 (pure offset).</summary>
@@ -661,6 +697,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         _frozen?.Dispose();
         _frozen = null;
+        foreach (var bmp in _dimmedCache.Values)
+            bmp.Dispose();
+        _dimmedCache.Clear();
     }
 
     private SD.Bitmap? CropFrozen(SD.Rectangle virtualRect)
