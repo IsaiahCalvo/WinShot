@@ -34,8 +34,14 @@ public static class ScrollingCaptureService
     /// <summary>Longest live-preview thumbnail edge (px); the snapshot is downscaled to fit.</summary>
     private const int PreviewMaxEdge = 220;
 
-    /// <summary>Manual mode: how often the region is re-captured and checked for movement.</summary>
-    private const int ManualPollMs = 300;
+    /// <summary>
+    /// Manual mode: how often the region is re-captured and checked for movement. Must be fast
+    /// enough that a normal-to-fast user scroll still leaves a generous overlap between
+    /// consecutive frames (the stitcher needs that overlap to align them) — at 300ms a quick
+    /// scroll jumped more than a frame and captured nothing. ~16 grabs/sec keeps the overlap
+    /// large even for fast flicks; it only runs during an active capture, so the cost is fine.
+    /// </summary>
+    private const int ManualPollMs = 60;
 
     /// <summary>Manual mode: generous overall cap so an abandoned capture eventually ends.</summary>
     private const int ManualTimeoutMs = 10 * 60 * 1000;
