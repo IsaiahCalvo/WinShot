@@ -4,21 +4,6 @@ using SD = System.Drawing;
 
 namespace WinShot.Scrolling;
 
-/// <summary>One-shot, thread-safe "please auto-recover the skipped section now" signal. The UI
-/// (Recover button) sets it; the capture loop consumes it. A click that arrives mid-recover is
-/// harmlessly coalesced.</summary>
-public sealed class ScrollRecoverSignal
-{
-    private volatile bool _requested;
-    public void Request() => _requested = true;
-    public bool ConsumeIfRequested()
-    {
-        if (!_requested) return false;
-        _requested = false;
-        return true;
-    }
-}
-
 /// <summary>
 /// Repeatedly captures a fixed screen region and stitches the frames into one
 /// tall image (or one wide image for <see cref="ScrollDirection.Horizontal"/>).
@@ -69,16 +54,9 @@ public static class ScrollingCaptureService
     /// means they're outrunning the capture.</summary>
     private const int TooFastStreakForWarning = 2;
 
-    /// <summary>Auto-recover: pause after each programmatic wheel-up so the content settles before
-    /// the next grab.</summary>
-    private const int RecoverSettleMs = 110;
-
-    /// <summary>Auto-recover: consecutive no-movement grabs (content didn't scroll — top of page or
-    /// nothing to recover) before giving up.</summary>
-    private const int RecoverStuckLimit = 4;
-
-    /// <summary>Auto-recover: hard cap on wheel-ups so a never-closing gap can't loop forever.</summary>
-    private const int RecoverMaxSteps = 600;
+    /// <summary>Manual mode: consecutive moving-but-not-appending frames (a backward scroll, or a
+    /// flick that outran the overlap) before nudging the user to scroll back down to keep capturing.</summary>
+    private const int StallWarnFrames = 4;
 
     /// <summary>Manual mode: generous overall cap so an abandoned capture eventually ends.</summary>
     private const int ManualTimeoutMs = 10 * 60 * 1000;
@@ -99,7 +77,7 @@ public static class ScrollingCaptureService
     /// </summary>
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion, ScrollCaptureMode mode,
         ScrollDirection direction, Action<string> status, CancellationToken ct,
-        Action<SD.Bitmap>? preview = null, Action<bool>? tooFast = null, ScrollRecoverSignal? recover = null)
+        Action<SD.Bitmap>? preview = null, Action<bool>? tooFast = null)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -111,15 +89,13 @@ public static class ScrollingCaptureService
         {
             SD.Bitmap? stitched = null;
             SD.Bitmap? previous = null;
-            // Manual vertical capture uses the position-aware canvas (scroll up/down freely, gaps
-            // refill on re-scroll). Auto mode and the niche manual-horizontal path keep append-only.
-            var canvas = (manual && !horizontal) ? new ScrollCanvas() : null;
             try
             {
                 int frames = 0;
                 int stitchedFrames = 0;
                 int zeroOffsetStreak = 0;
-                int tooFastStreak = 0;          // consecutive frames that moved but couldn't align
+                int tooFastStreak = 0;          // consecutive frames that moved but couldn't align (auto)
+                int noAppendStreak = 0;         // manual: consecutive moving frames that added nothing new
                 bool warnedTooFast = false;     // a "slow down" warning is currently showing
                 bool hitIterationCap = false;   // ran out of iterations while still moving
                 bool reachedContentEnd = false; // genuine no-movement bottom (auto only)
@@ -145,39 +121,61 @@ public static class ScrollingCaptureService
                         : await CaptureStableFrameAsync(screenRegion, ct).ConfigureAwait(false);
                     frames++;
 
-                    if (canvas is not null)
+                    if (manual && !horizontal)
                     {
-                        var pr = canvas.Place(frame);
-                        frame.Dispose();
-
-                        // An open gap = a section was skipped and not yet re-scrolled. Warn while it's
-                        // open (the fix is to scroll back over it); clear once it's bridged/refilled.
-                        bool gap = canvas.HasGap;
-                        if (gap && !warnedTooFast) { warnedTooFast = true; tooFast?.Invoke(true); }
-                        else if (!gap && warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
-
-                        // User hit "Recover": take over scrolling and walk back over the gap to fill it.
-                        if (gap && recover is not null && recover.ConsumeIfRequested())
+                        // odd-snap / ShareX append-only. Match this frame against the BOTTOM of the
+                        // running stitch and append only the rows that extend past it. Matching the
+                        // RESULT BOTTOM (not the previous frame) is the whole trick: a backward scroll
+                        // over already-captured content yields offset 0 and is simply ignored — no
+                        // duplication, no position tracking, no "gaps", nothing to recover or thrash.
+                        if (stitched is null)
                         {
-                            await AutoRecover(canvas, screenRegion, status, preview, previewClock, ct).ConfigureAwait(false);
-                            if (!canvas.HasGap && warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
+                            stitched = frame;
+                            stitchedFrames = 1;
+                        }
+                        else
+                        {
+                            using var tail = ImageStitcher.CropBottomRows(stitched, Math.Min(stitched.Height, frame.Height));
+                            int offset = ImageStitcher.FindScrollOffset(tail, frame);
+                            if (offset > 0)
+                            {
+                                int rows = Math.Min(offset, MaxStitchedHeight - stitched.Height);
+                                var grown = ImageStitcher.AppendBelow(stitched, frame, rows);
+                                stitched.Dispose();
+                                stitched = grown;
+                                stitchedFrames++;
+                                noAppendStreak = 0;
+                                if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
+                            }
+                            else if (!ImageStitcher.FramesIdentical(tail, frame))
+                            {
+                                // Moving but nothing new below the bottom — a backward scroll, or a
+                                // flick that outran the overlap. Not captured. After a few in a row,
+                                // nudge the user to scroll back down to keep capturing.
+                                if (++noAppendStreak >= StallWarnFrames && !warnedTooFast)
+                                {
+                                    warnedTooFast = true;
+                                    tooFast?.Invoke(true);
+                                }
+                            }
+                            else
+                            {
+                                noAppendStreak = 0; // paused on captured content
+                                if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
+                            }
+                            frame.Dispose();
                         }
 
-                        Log.Info($"Scroll frame {frames}: canvasH={canvas.Height} " +
-                                 $"moved={pr.Moved} disconnected={pr.Disconnected} gap={gap}");
+                        Log.Info($"Scroll frame {frames}: stitchedH={stitched.Height} appended={stitchedFrames} stall={noAppendStreak}");
 
-                        if (canvas.Height >= MaxStitchedHeight)
+                        if (stitched.Height >= MaxStitchedHeight)
                             break;
-
                         if (frames == 1 || previewClock.ElapsedMilliseconds >= PreviewThrottleMs)
                         {
-                            using var snap = canvas.Flatten();
-                            if (snap is not null) PushPreview(preview, snap);
+                            PushPreview(preview, stitched);
                             previewClock.Restart();
                         }
-                        status(gap
-                            ? $"Section skipped — scroll back over it to fill in. {canvas.Height}px"
-                            : $"Scroll to capture — click Done when finished. {canvas.Height}px");
+                        status($"Captured {stitched.Height}px — click Done when finished.");
 
                         if (ShouldStop(ct))
                             break;
@@ -324,10 +322,6 @@ public static class ScrollingCaptureService
                     }
                 }
 
-                // Manual canvas: flatten to the final image (pending gaps become a marker band).
-                if (canvas is not null)
-                    stitched = canvas.Flatten();
-
                 // Final status reflects WHY auto capture stopped, so a truncated page is obvious.
                 if (!manual && stitched is not null)
                 {
@@ -347,48 +341,9 @@ public static class ScrollingCaptureService
             finally
             {
                 previous?.Dispose();
-                canvas?.Dispose();
             }
             return stitched;
         }, CancellationToken.None).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Auto-recovers a skipped section: WinShot takes over and sends gentle wheel-ups, grabbing and
-    /// stitching each frame, walking back up over the gap until it bridges (the floating segment
-    /// merges into the canvas and <see cref="ScrollCanvas.HasGap"/> clears) — or the content stops
-    /// moving (top of page / nothing more to recover). The skipped rows blit into their true place
-    /// as the missing content scrolls back into view.
-    /// </summary>
-    private static async Task AutoRecover(ScrollCanvas canvas, SD.Rectangle region, Action<string> status,
-        Action<SD.Bitmap>? preview, System.Diagnostics.Stopwatch previewClock, CancellationToken ct)
-    {
-        status("Recovering skipped section…");
-        int stuck = 0;
-        for (int step = 0; canvas.HasGap && stuck < RecoverStuckLimit && step < RecoverMaxSteps; step++)
-        {
-            if (ShouldStop(ct))
-                break;
-            ScrollUp(region);
-            try { await Task.Delay(RecoverSettleMs, ct).ConfigureAwait(false); }
-            catch (OperationCanceledException) { break; }
-
-            var frame = CaptureService.CaptureScreenRegionWithoutLayeredWindows(region);
-            var pr = canvas.Place(frame);
-            frame.Dispose();
-            stuck = pr.Moved ? 0 : stuck + 1; // content stopped scrolling → we've reached the top
-
-            if (previewClock.ElapsedMilliseconds >= PreviewThrottleMs)
-            {
-                using var snap = canvas.Flatten();
-                if (snap is not null) PushPreview(preview, snap);
-                previewClock.Restart();
-            }
-            status($"Recovering skipped section… {canvas.Height}px");
-        }
-        status(canvas.HasGap
-            ? "Couldn't reach the skipped section — keep scrolling. " + $"{canvas.Height}px"
-            : $"Recovered. Scroll to capture — click Done when finished. {canvas.Height}px");
     }
 
     /// <summary>
@@ -470,21 +425,6 @@ public static class ScrollingCaptureService
         SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
-    /// <summary>Sends one gentle wheel-UP step to the window under the region center WITHOUT moving
-    /// the cursor — auto-recover must not yank the user's mouse. Posts WM_MOUSEWHEEL directly (the
-    /// dim overlay is click-through, so WindowFromPoint returns the real content beneath). One notch
-    /// keeps overlap between frames so it doesn't open a fresh gap.</summary>
-    private static void ScrollUp(SD.Rectangle region)
-    {
-        int cx = region.X + region.Width / 2;
-        int cy = region.Y + region.Height / 2;
-        IntPtr hwnd = WindowFromPoint(new POINT { X = cx, Y = cy });
-        if (hwnd == IntPtr.Zero) return;
-        IntPtr wParam = (IntPtr)(WheelDelta << 16);                       // +1 notch up (content moves down)
-        IntPtr lParam = (IntPtr)(((cy & 0xFFFF) << 16) | (cx & 0xFFFF));  // screen coords
-        PostMessage(hwnd, WM_MouseWheel, wParam, lParam);
-    }
-
     /// <summary>Moves the cursor to the region center and sends one horizontal wheel-right step.</summary>
     private static void ScrollRight(SD.Rectangle region)
     {
@@ -505,10 +445,6 @@ public static class ScrollingCaptureService
     private const uint InputMouse = 0;
     private const uint MouseEventFWheel = 0x0800;
     private const uint MouseEventFHWheel = 0x1000;
-    private const uint WM_MouseWheel = 0x020A;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT { public int X; public int Y; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MOUSEINPUT
@@ -538,10 +474,4 @@ public static class ScrollingCaptureService
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr WindowFromPoint(POINT p);
-
-    [DllImport("user32.dll")]
-    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }

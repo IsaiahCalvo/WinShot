@@ -360,11 +360,6 @@ public static class ImageStitcher
         return true;
     }
 
-    /// <summary>One FNV-1a hash per row (side-trimmed, scrollbar-safe). Exposed so the
-    /// position-aware <see cref="ScrollCanvas"/> hashes frames the SAME way the canvas rows
-    /// are hashed — any divergence would make a row never match itself.</summary>
-    public static ulong[] RowHashes(SD.Bitmap bmp) => ComputeRowHashes(bmp);
-
     /// <summary>One FNV-1a hash per row over the middle 90% of its pixels.</summary>
     private static ulong[] ComputeRowHashes(SD.Bitmap bmp)
     {

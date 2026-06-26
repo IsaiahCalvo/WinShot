@@ -32,12 +32,9 @@ public static class ScrollingStatusWindow
         using var cts = new CancellationTokenSource();
         bool cancelled = false;
 
-        var recoverSignal = new ScrollRecoverSignal();
-
         var overlay = new ScrollDimOverlay(screenRegion);
         var preview = new ScrollPreviewPanel(screenRegion);
         var controls = new ScrollControlsBar(screenRegion);
-        controls.RecoverRequested += () => recoverSignal.Request();
         controls.DoneRequested += () => { try { cts.Cancel(); } catch { /* already torn down */ } };
         controls.CancelRequested += () =>
         {
@@ -60,8 +57,7 @@ public static class ScrollingStatusWindow
                 text => MarshalStatus(controls, text),
                 cts.Token,
                 thumb => PushPreview(preview, thumb),
-                on => MarshalTooFast(controls, on),
-                recoverSignal);
+                on => MarshalTooFast(controls, on));
 
             if (cancelled)
             {
