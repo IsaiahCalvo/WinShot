@@ -212,8 +212,8 @@ public class ThemedWindowTests
         EditorWindow.Prewarm(settings, history);
         for (int i = 0; i < 4; i++) PumpDispatcherOnce();
 
-        const int imgH = 4000;
-        var tall = new SD.Bitmap(1000, imgH);
+        const int imgW = 1000;
+        var tall = new SD.Bitmap(imgW, 4000);
         using (var g = SD.Graphics.FromImage(tall)) g.Clear(SD.Color.CornflowerBlue);
 
         var editor = EditorWindow.CreateForCapture(tall, settings, history);
@@ -221,16 +221,18 @@ public class ThemedWindowTests
         for (int i = 0; i < 6; i++) PumpDispatcherOnce();
 
         var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
-        double vh = viewport.ActualHeight;
+        double vw = viewport.ActualWidth;
         double zoom = (double)typeof(EditorWindow)
             .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(editor)!;
 
         editor.Close();
 
-        Assert.True(vh > 1, $"viewport not laid out (height={vh})");
-        Assert.True(zoom * imgH <= vh + 1,
-            $"tall image not fitted on open: zoom={zoom}, scaledHeight={zoom * imgH}, viewportHeight={vh}");
+        Assert.True(vw > 1, $"viewport not laid out (width={vw})");
+        // A tall scrolling capture opens fit-to-WIDTH (and scrolls vertically), so the full
+        // image width must be visible — not opened at 1:1 showing only the top-left corner.
+        Assert.True(zoom * imgW <= vw + 1,
+            $"tall image not fit-to-width on open: zoom={zoom}, scaledWidth={zoom * imgW}, viewportWidth={vw}");
     }
 
     private static void PinSmoke(EditorWindow editor)
