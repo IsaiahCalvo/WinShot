@@ -4,6 +4,21 @@ using SD = System.Drawing;
 
 namespace WinShot.Scrolling;
 
+/// <summary>One-shot, thread-safe "please auto-recover the skipped section now" signal. The UI
+/// (Recover button) sets it; the capture loop consumes it. A click that arrives mid-recover is
+/// harmlessly coalesced.</summary>
+public sealed class ScrollRecoverSignal
+{
+    private volatile bool _requested;
+    public void Request() => _requested = true;
+    public bool ConsumeIfRequested()
+    {
+        if (!_requested) return false;
+        _requested = false;
+        return true;
+    }
+}
+
 /// <summary>
 /// Repeatedly captures a fixed screen region and stitches the frames into one
 /// tall image (or one wide image for <see cref="ScrollDirection.Horizontal"/>).
@@ -54,6 +69,17 @@ public static class ScrollingCaptureService
     /// means they're outrunning the capture.</summary>
     private const int TooFastStreakForWarning = 2;
 
+    /// <summary>Auto-recover: pause after each programmatic wheel-up so the content settles before
+    /// the next grab.</summary>
+    private const int RecoverSettleMs = 110;
+
+    /// <summary>Auto-recover: consecutive no-movement grabs (content didn't scroll — top of page or
+    /// nothing to recover) before giving up.</summary>
+    private const int RecoverStuckLimit = 4;
+
+    /// <summary>Auto-recover: hard cap on wheel-ups so a never-closing gap can't loop forever.</summary>
+    private const int RecoverMaxSteps = 600;
+
     /// <summary>Manual mode: generous overall cap so an abandoned capture eventually ends.</summary>
     private const int ManualTimeoutMs = 10 * 60 * 1000;
 
@@ -73,7 +99,7 @@ public static class ScrollingCaptureService
     /// </summary>
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion, ScrollCaptureMode mode,
         ScrollDirection direction, Action<string> status, CancellationToken ct,
-        Action<SD.Bitmap>? preview = null, Action<bool>? tooFast = null)
+        Action<SD.Bitmap>? preview = null, Action<bool>? tooFast = null, ScrollRecoverSignal? recover = null)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -129,6 +155,13 @@ public static class ScrollingCaptureService
                         bool gap = canvas.HasGap;
                         if (gap && !warnedTooFast) { warnedTooFast = true; tooFast?.Invoke(true); }
                         else if (!gap && warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
+
+                        // User hit "Recover": take over scrolling and walk back over the gap to fill it.
+                        if (gap && recover is not null && recover.ConsumeIfRequested())
+                        {
+                            await AutoRecover(canvas, screenRegion, status, preview, previewClock, ct).ConfigureAwait(false);
+                            if (!canvas.HasGap && warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
+                        }
 
                         Log.Info($"Scroll frame {frames}: canvasH={canvas.Height} " +
                                  $"moved={pr.Moved} disconnected={pr.Disconnected} gap={gap}");
@@ -321,6 +354,44 @@ public static class ScrollingCaptureService
     }
 
     /// <summary>
+    /// Auto-recovers a skipped section: WinShot takes over and sends gentle wheel-ups, grabbing and
+    /// stitching each frame, walking back up over the gap until it bridges (the floating segment
+    /// merges into the canvas and <see cref="ScrollCanvas.HasGap"/> clears) — or the content stops
+    /// moving (top of page / nothing more to recover). The skipped rows blit into their true place
+    /// as the missing content scrolls back into view.
+    /// </summary>
+    private static async Task AutoRecover(ScrollCanvas canvas, SD.Rectangle region, Action<string> status,
+        Action<SD.Bitmap>? preview, System.Diagnostics.Stopwatch previewClock, CancellationToken ct)
+    {
+        status("Recovering skipped section…");
+        int stuck = 0;
+        for (int step = 0; canvas.HasGap && stuck < RecoverStuckLimit && step < RecoverMaxSteps; step++)
+        {
+            if (ShouldStop(ct))
+                break;
+            ScrollUp(region);
+            try { await Task.Delay(RecoverSettleMs, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
+
+            var frame = CaptureService.CaptureScreenRegionWithoutLayeredWindows(region);
+            var pr = canvas.Place(frame);
+            frame.Dispose();
+            stuck = pr.Moved ? 0 : stuck + 1; // content stopped scrolling → we've reached the top
+
+            if (previewClock.ElapsedMilliseconds >= PreviewThrottleMs)
+            {
+                using var snap = canvas.Flatten();
+                if (snap is not null) PushPreview(preview, snap);
+                previewClock.Restart();
+            }
+            status($"Recovering skipped section… {canvas.Height}px");
+        }
+        status(canvas.HasGap
+            ? "Couldn't reach the skipped section — keep scrolling. " + $"{canvas.Height}px"
+            : $"Recovered. Scroll to capture — click Done when finished. {canvas.Height}px");
+    }
+
+    /// <summary>
     /// Captures the region, then re-captures up to <see cref="StabilizeAttempts"/> times until
     /// two consecutive captures are identical (the frame has settled). Returns the last (stable)
     /// capture; intermediate captures are disposed. On cancellation it returns whatever it has.
@@ -393,6 +464,23 @@ public static class ScrollingCaptureService
             mi = new MOUSEINPUT
             {
                 mouseData = unchecked((uint)(WheelDelta * ScrollNotchesPerStep)),
+                dwFlags = MouseEventFWheel,
+            },
+        };
+        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+    }
+
+    /// <summary>Moves the cursor to the region center and sends one gentle wheel-UP step (one notch,
+    /// so auto-recover keeps overlap between frames and doesn't open a fresh gap).</summary>
+    private static void ScrollUp(SD.Rectangle region)
+    {
+        SetCursorPos(region.X + region.Width / 2, region.Y + region.Height / 2);
+        var input = new INPUT
+        {
+            type = InputMouse,
+            mi = new MOUSEINPUT
+            {
+                mouseData = (uint)WheelDelta, // +1 notch = scroll up (content moves down)
                 dwFlags = MouseEventFWheel,
             },
         };

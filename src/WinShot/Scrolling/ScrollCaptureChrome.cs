@@ -161,8 +161,11 @@ public sealed class ScrollControlsBar : WF.Form
 {
     public event Action? CancelRequested;
     public event Action? DoneRequested;
+    public event Action? RecoverRequested;
 
     private readonly WF.Label _status;
+    private readonly WF.Button _recover;
+    private readonly SD.Rectangle _region;
     private bool _tooFast; // a "scroll slower" warning is showing; it overrides live status text
 
     // Amber warning — the palette only has red (error); "slow down" is a nudge, not an error.
@@ -191,6 +194,11 @@ public sealed class ScrollControlsBar : WF.Form
             Anchor = WF.AnchorStyles.None,
         };
 
+        // Shown only while a section is skipped: WinShot scrolls back and re-captures it.
+        _recover = MakeButton("Recover", WarnColor, SD.Color.White, SD.Color.FromArgb(0xFF, 0xB0, 0x7A, 0x20));
+        _recover.Visible = false;
+        _recover.Click += (_, _) => RecoverRequested?.Invoke();
+
         var cancel = MakeButton("Cancel", ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
         cancel.Click += (_, _) => CancelRequested?.Invoke();
 
@@ -201,26 +209,29 @@ public sealed class ScrollControlsBar : WF.Form
         {
             AutoSize = true,
             AutoSizeMode = WF.AutoSizeMode.GrowAndShrink,
-            ColumnCount = 3,
+            ColumnCount = 4,
             RowCount = 1,
             Dock = WF.DockStyle.Fill,
             BackColor = SD.Color.Transparent,
         };
         table.Controls.Add(_status, 0, 0);
-        table.Controls.Add(cancel, 1, 0);
-        table.Controls.Add(done, 2, 0);
+        table.Controls.Add(_recover, 1, 0);
+        table.Controls.Add(cancel, 2, 0);
+        table.Controls.Add(done, 3, 0);
 
         Controls.Add(table);
         AutoSize = true;
         AutoSizeMode = WF.AutoSizeMode.GrowAndShrink;
 
+        _region = regionScreen;
         Shown += (_, _) =>
         {
             ApplyRoundedRegion(Width, Height, 12);
-            PositionNear(regionScreen);
+            PositionNear(_region);
         };
-        // Re-round whenever the bar resizes so the region never clips the content.
-        SizeChanged += (_, _) => ApplyRoundedRegion(Width, Height, 12);
+        // Re-round AND re-center when the bar resizes (e.g. the Recover button appears/disappears),
+        // so it never clips the content or drifts off-center.
+        SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, 12); PositionNear(_region); };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -244,10 +255,11 @@ public sealed class ScrollControlsBar : WF.Form
     {
         if (IsDisposed) return;
         _tooFast = on;
+        _recover.Visible = on; // offer "Recover" exactly while a section is skipped
         if (on)
         {
             _status.ForeColor = WarnColor;
-            _status.Text = "⚠ Section skipped — scroll back to fill";
+            _status.Text = "⚠ Section skipped — scroll back, or hit Recover";
         }
     }
 
