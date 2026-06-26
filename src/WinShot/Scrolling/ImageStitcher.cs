@@ -364,7 +364,11 @@ public static class ImageStitcher
     private static ulong[] ComputeRowHashes(SD.Bitmap bmp)
     {
         int width = bmp.Width, height = bmp.Height;
-        int margin = width / 20; // 5% per side
+        // Trim the sides before hashing so a moving scrollbar thumb / anti-aliased edge never
+        // breaks an exact row match. Clamp(width/20, min 50px, max width/3) — the same formula
+        // ShareX and odd-snap use; a flat 5% was too thin to cover a ~17px scrollbar on a
+        // narrow region.
+        int margin = Math.Min(Math.Max(50, width / 20), width / 3);
         int startX = margin, endX = width - margin;
         if (endX <= startX) // degenerate width: hash the whole row
         {
