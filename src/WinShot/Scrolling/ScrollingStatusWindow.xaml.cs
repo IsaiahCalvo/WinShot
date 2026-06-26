@@ -56,7 +56,8 @@ public static class ScrollingStatusWindow
                 choice.Direction,
                 text => MarshalStatus(controls, text),
                 cts.Token,
-                thumb => PushPreview(preview, thumb));
+                thumb => PushPreview(preview, thumb),
+                on => MarshalTooFast(controls, on));
 
             if (cancelled)
             {
@@ -114,6 +115,21 @@ public static class ScrollingStatusWindow
         catch
         {
             // The capture can end while a status update is in flight; ignore.
+        }
+    }
+
+    /// <summary>"Scroll slower" toggle from the capture thread; hop to the controls bar's UI thread.</summary>
+    private static void MarshalTooFast(ScrollControlsBar controls, bool on)
+    {
+        try
+        {
+            if (controls.IsDisposed) return;
+            if (controls.IsHandleCreated)
+                controls.BeginInvoke(new Action(() => controls.SetTooFast(on)));
+        }
+        catch
+        {
+            // The capture can end while a warning toggle is in flight; ignore.
         }
     }
 }

@@ -36,12 +36,23 @@ public static class ScrollingCaptureService
 
     /// <summary>
     /// Manual mode: how often the region is re-captured and checked for movement. Must be fast
-    /// enough that a normal-to-fast user scroll still leaves a generous overlap between
-    /// consecutive frames (the stitcher needs that overlap to align them) — at 300ms a quick
-    /// scroll jumped more than a frame and captured nothing. ~16 grabs/sec keeps the overlap
-    /// large even for fast flicks; it only runs during an active capture, so the cost is fine.
+    /// enough that a normal-to-fast user scroll still leaves overlap between consecutive frames
+    /// (the stitcher needs that overlap to align them) — if a flick moves more than a full frame
+    /// height between grabs there's nothing to align and that span is lost. ShareX/odd-snap beat
+    /// this by over-sampling; ~33 grabs/sec (BitBlt is cheap, the preview is throttled separately)
+    /// keeps overlap even for fast flicks, and it only runs during an active capture.
     /// </summary>
-    private const int ManualPollMs = 60;
+    private const int ManualPollMs = 30;
+
+    /// <summary>Manual mode: minimum gap between live-preview refreshes. The preview downscales the
+    /// WHOLE growing stitch, which gets costly as it grows tall; refreshing it every frame would
+    /// inflate the real capture interval (and shrink overlap). Capture fast, preview lazily.</summary>
+    private const int PreviewThrottleMs = 150;
+
+    /// <summary>Manual mode: consecutive frames that moved but couldn't be aligned (scrolled faster
+    /// than a frame) before we tell the user to slow down. One miss is a benign blip; two in a row
+    /// means they're outrunning the capture.</summary>
+    private const int TooFastStreakForWarning = 2;
 
     /// <summary>Manual mode: generous overall cap so an abandoned capture eventually ends.</summary>
     private const int ManualTimeoutMs = 10 * 60 * 1000;
@@ -62,7 +73,7 @@ public static class ScrollingCaptureService
     /// </summary>
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion, ScrollCaptureMode mode,
         ScrollDirection direction, Action<string> status, CancellationToken ct,
-        Action<SD.Bitmap>? preview = null)
+        Action<SD.Bitmap>? preview = null, Action<bool>? tooFast = null)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -79,10 +90,13 @@ public static class ScrollingCaptureService
                 int frames = 0;
                 int stitchedFrames = 0;
                 int zeroOffsetStreak = 0;
+                int tooFastStreak = 0;          // consecutive frames that moved but couldn't align
+                bool warnedTooFast = false;     // a "slow down" warning is currently showing
                 bool hitIterationCap = false;   // ran out of iterations while still moving
                 bool reachedContentEnd = false; // genuine no-movement bottom (auto only)
                 bool alignmentLost = false;     // scrolled but frames couldn't align (overlap too small)
                 var elapsed = System.Diagnostics.Stopwatch.StartNew();
+                var previewClock = System.Diagnostics.Stopwatch.StartNew();
 
                 for (int i = 0; manual ? elapsed.ElapsedMilliseconds < ManualTimeoutMs : i < MaxIterations; i++)
                 {
@@ -110,11 +124,8 @@ public static class ScrollingCaptureService
                     }
                     else
                     {
-                        // Did the page actually move? Computed first because sticky-band detection
-                        // is only valid between DIFFERING frames — two identical (paused) frames
-                        // make the WHOLE frame look "constant", which (being Math.Max'd and never
-                        // reset) would permanently lock topBand+bottomBand to ~full height and
-                        // leave zero rows to align, stalling the capture for good.
+                        // Did the page actually move? Distinguishes a paused frame (keep the anchor)
+                        // from a too-fast scroll that outran the overlap (re-anchor + warn the user).
                         // ponytail: no sticky-band detection. It conflated slowly-scrolling content
                         // with fixed chrome (a slow scroll leaves most rows matching, so it flagged
                         // them "sticky" and starved the match window — the stall). The longest-run
@@ -146,11 +157,22 @@ public static class ScrollingCaptureService
                                     // then stops"). The skipped span is lost, not stitched wrong.
                                     previous!.Dispose();
                                     previous = frame;
+
+                                    // A real miss: they're scrolling faster than we can grab. After a
+                                    // couple in a row, tell them to slow down (one is a benign blip).
+                                    tooFastStreak++;
+                                    if (tooFastStreak >= TooFastStreakForWarning && !warnedTooFast)
+                                    {
+                                        warnedTooFast = true;
+                                        tooFast?.Invoke(true);
+                                    }
                                 }
                                 else
                                 {
-                                    // Paused / nothing changed: keep the anchor.
+                                    // Paused / nothing changed: keep the anchor, clear any warning.
                                     frame.Dispose();
+                                    tooFastStreak = 0;
+                                    if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
                                 }
                             }
                             else
@@ -165,6 +187,8 @@ public static class ScrollingCaptureService
                         {
                             zeroOffsetStreak = 0;
                             alignmentLost = false;
+                            tooFastStreak = 0;
+                            if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
                             SD.Bitmap grown;
                             if (horizontal)
                             {
@@ -192,7 +216,14 @@ public static class ScrollingCaptureService
                             break;
                     }
 
-                    PushPreview(preview, stitched);
+                    // Throttle the preview: downscaling a tall stitch every frame would inflate the
+                    // capture interval and shrink overlap. Always refresh on the first frame so the
+                    // panel isn't blank, then at most every PreviewThrottleMs.
+                    if (!manual || stitchedFrames <= 1 || previewClock.ElapsedMilliseconds >= PreviewThrottleMs)
+                    {
+                        PushPreview(preview, stitched);
+                        previewClock.Restart();
+                    }
                     string extent = horizontal ? $"{stitched.Width}px wide" : $"{stitched.Height}px";
                     status(manual
                         ? $"Scroll the content yourself — click Stop when done. {stitchedFrames} frames – {extent}"

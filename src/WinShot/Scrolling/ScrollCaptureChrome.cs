@@ -163,6 +163,10 @@ public sealed class ScrollControlsBar : WF.Form
     public event Action? DoneRequested;
 
     private readonly WF.Label _status;
+    private bool _tooFast; // a "scroll slower" warning is showing; it overrides live status text
+
+    // Amber warning — the palette only has red (error); "slow down" is a nudge, not an error.
+    private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
 
     public ScrollControlsBar(SD.Rectangle regionScreen)
     {
@@ -229,8 +233,22 @@ public sealed class ScrollControlsBar : WF.Form
 
     public void SetStatus(string text)
     {
-        if (!IsDisposed)
-            _status.Text = text;
+        if (IsDisposed || _tooFast) return; // the warning takes precedence over live status
+        _status.ForeColor = ThemePalette.TextSecondary;
+        _status.Text = text;
+    }
+
+    /// <summary>Shows/clears an amber "scroll slower" warning that overrides the live status text
+    /// until cleared (the next <see cref="SetStatus"/> repaints normal text once cleared).</summary>
+    public void SetTooFast(bool on)
+    {
+        if (IsDisposed) return;
+        _tooFast = on;
+        if (on)
+        {
+            _status.ForeColor = WarnColor;
+            _status.Text = "⚠ Too fast — scroll slower";
+        }
     }
 
     private static WF.Button MakeButton(string text, SD.Color back, SD.Color fore, SD.Color hover)
