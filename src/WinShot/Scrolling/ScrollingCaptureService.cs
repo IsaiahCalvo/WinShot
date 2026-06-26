@@ -114,12 +114,21 @@ public static class ScrollingCaptureService
                     }
                     else
                     {
-                        // Detect sticky bands between consecutive frames and keep the largest
-                        // seen so they stay masked even on frames that happen to match fully.
-                        if (!horizontal)
+                        // Did the page actually move? Computed first because sticky-band detection
+                        // is only valid between DIFFERING frames — two identical (paused) frames
+                        // make the WHOLE frame look "constant", which (being Math.Max'd and never
+                        // reset) would permanently lock topBand+bottomBand to ~full height and
+                        // leave zero rows to align, stalling the capture for good.
+                        bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
+
+                        // Detect sticky bands between consecutive (differing) frames; keep the
+                        // largest seen, but cap each at a third of the frame so a band can never
+                        // swallow the content window.
+                        if (!horizontal && framesDiffer)
                         {
-                            topBand = Math.Max(topBand, ImageStitcher.DetectConstantTopBand(previous!, frame));
-                            bottomBand = Math.Max(bottomBand, ImageStitcher.DetectConstantBottomBand(previous!, frame));
+                            int cap = frame.Height / 3;
+                            topBand = Math.Min(Math.Max(topBand, ImageStitcher.DetectConstantTopBand(previous!, frame)), cap);
+                            bottomBand = Math.Min(Math.Max(bottomBand, ImageStitcher.DetectConstantBottomBand(previous!, frame)), cap);
 
                             // First time a sticky footer is seen, lift it off the running body
                             // (which still carries frame 0's footer) so it isn't buried mid-stitch.
@@ -137,10 +146,9 @@ public static class ScrollingCaptureService
                             ? ImageStitcher.FindScrollOffsetHorizontal(previous!, frame)
                             : ImageStitcher.FindScrollOffset(previous!, frame, topBand, bottomBand);
 
-                        // In auto mode, did the page actually move? Compare against the prior
-                        // frame ignoring sticky bands: equal => truly at the bottom; different
-                        // but offset==0 => it moved but we couldn't align (overlap too small).
-                        bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
+                        Log.Info($"Scroll frame {frames}: region={frame.Width}x{frame.Height} " +
+                                 $"differ={framesDiffer} offset={offset} topBand={topBand} bottomBand={bottomBand} " +
+                                 $"stitchedH={stitched!.Height}");
 
                         if (offset == 0)
                         {
