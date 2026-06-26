@@ -121,26 +121,14 @@ public static class ScrollingCaptureService
                         // leave zero rows to align, stalling the capture for good.
                         bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
 
-                        // Detect sticky bands between consecutive (differing) frames; keep the
-                        // largest seen, but cap each at a third of the frame so a band can never
-                        // swallow the content window.
-                        if (!horizontal && framesDiffer)
-                        {
-                            int cap = frame.Height / 3;
-                            topBand = Math.Min(Math.Max(topBand, ImageStitcher.DetectConstantTopBand(previous!, frame)), cap);
-                            bottomBand = Math.Min(Math.Max(bottomBand, ImageStitcher.DetectConstantBottomBand(previous!, frame)), cap);
-
-                            // First time a sticky footer is seen, lift it off the running body
-                            // (which still carries frame 0's footer) so it isn't buried mid-stitch.
-                            // It's re-applied exactly once at the very bottom when the run ends.
-                            if (bottomBand > 0 && footerStrip is null && stitched!.Height > bottomBand)
-                            {
-                                footerStrip = ImageStitcher.CropBottomRows(stitched, bottomBand);
-                                var trimmed = ImageStitcher.RemoveBottomRows(stitched, bottomBand);
-                                stitched.Dispose();
-                                stitched = trimmed;
-                            }
-                        }
+                        // ponytail: no sticky-band detection. It conflated slowly-scrolling content
+                        // with fixed chrome (a slow scroll leaves most rows matching, so it flagged
+                        // them "sticky" and starved the match window — the stall). The longest-run
+                        // matcher already ignores sticky chrome naturally (chrome rows don't line up
+                        // at the true scroll offset). Tradeoff: a genuinely sticky footer can stitch
+                        // more than once; add a ShareX-style bottom-offset trim back if that bites.
+                        topBand = 0;
+                        bottomBand = 0;
 
                         int offset = horizontal
                             ? ImageStitcher.FindScrollOffsetHorizontal(previous!, frame)
