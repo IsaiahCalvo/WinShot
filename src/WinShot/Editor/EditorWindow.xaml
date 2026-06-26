@@ -364,6 +364,7 @@
                               SelectedIndex="0" SelectionChanged="OnZoomPresetChanged"
                               ToolTip="Jump to a zoom level">
                         <ComboBoxItem Content="Fit"/>
+                        <ComboBoxItem Content="Fit Width"/>
                         <ComboBoxItem Content="50%"/>
                         <ComboBoxItem Content="100%"/>
                         <ComboBoxItem Content="150%"/>

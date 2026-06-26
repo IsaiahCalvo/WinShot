@@ -369,11 +369,10 @@ public partial class EditorWindow : Window
     // --------------------------------------------------------- view (zoom/pan)
 
     /// <summary>
-    /// Fits the image to the viewport (never above 100%). A normal image is fit whole and
-    /// centered. A very tall capture (scrolling screenshot — aspect much taller than the
-    /// viewport) is fit to WIDTH and pinned to the top instead, so the content is readable and
-    /// the user scrolls down through it; fitting such a page whole would shrink it to an
-    /// unreadable sliver. Ctrl+0 / Center button / open all route here.
+    /// Fits the WHOLE image into the viewport, centered (never above 100%) — so a tall scrolling
+    /// capture shows top-to-bottom at once instead of only its top. Use <see cref="FitToWidth"/>
+    /// (the "Fit Width" preset) to read a long capture at full width and scroll down it.
+    /// Ctrl+0 / Center button / open all route here.
     /// </summary>
     private void FitToView()
     {
@@ -381,25 +380,29 @@ public partial class EditorWindow : Window
         if (vw < 1 || vh < 1 || _source.Width < 1 || _source.Height < 1) return; // viewport not ready; retry on next trigger
 
         const double margin = 24;
-        bool tall = (double)_source.Height / _source.Width > (vh / vw) * 2.0;
-        if (tall)
-        {
-            double fitWidth = (vw - margin * 2) / _source.Width;
-            _zoom = Math.Clamp(Math.Min(fitWidth, 1.0), MinZoom, MaxZoom);
-            ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-            ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
-            ViewTranslate.Y = margin; // pin to the top; scroll (mouse wheel) reveals the rest
-        }
-        else
-        {
-            double fit = Math.Min((vw - margin * 2) / _source.Width, (vh - margin * 2) / _source.Height);
-            _zoom = Math.Clamp(Math.Min(fit, 1.0), MinZoom, MaxZoom);
-            ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-            ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
-            ViewTranslate.Y = Math.Round((vh - _source.Height * _zoom) / 2);
-        }
+        double fit = Math.Min((vw - margin * 2) / _source.Width, (vh - margin * 2) / _source.Height);
+        _zoom = Math.Clamp(Math.Min(fit, 1.0), MinZoom, MaxZoom);
+        ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
+        ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
+        ViewTranslate.Y = Math.Round((vh - _source.Height * _zoom) / 2);
         _pendingInitialFit = false;
-        Log.Info($"Editor fit: src={_source.Width}x{_source.Height} viewport={vw:0}x{vh:0} zoom={_zoom:0.000} tall={tall}");
+        Log.Info($"Editor fit: src={_source.Width}x{_source.Height} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
+        OnViewChanged();
+    }
+
+    /// <summary>Fits to WIDTH and pins the top, so a long capture is readable and you scroll down
+    /// it (mouse wheel). Capped at 100%.</summary>
+    private void FitToWidth()
+    {
+        double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
+        if (vw < 1 || vh < 1 || _source.Width < 1 || _source.Height < 1) return;
+
+        const double margin = 24;
+        _zoom = Math.Clamp(Math.Min((vw - margin * 2) / _source.Width, 1.0), MinZoom, MaxZoom);
+        ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
+        ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
+        ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
+        _pendingInitialFit = false;
         OnViewChanged();
     }
 
@@ -3399,6 +3402,11 @@ public partial class EditorWindow : Window
         if (choice == "Fit")
         {
             FitToView();
+            return;
+        }
+        if (choice == "Fit Width")
+        {
+            FitToWidth();
             return;
         }
         if (double.TryParse(choice.TrimEnd('%'), NumberStyles.Number, CultureInfo.InvariantCulture, out double pct)

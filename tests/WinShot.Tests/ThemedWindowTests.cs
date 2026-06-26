@@ -267,18 +267,18 @@ public class ThemedWindowTests
         for (int i = 0; i < 6; i++) PumpDispatcherOnce();
 
         var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
-        double vw = viewport.ActualWidth;
+        double vw = viewport.ActualWidth, vh = viewport.ActualHeight;
         double zoom = (double)typeof(EditorWindow)
             .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(editor)!;
 
         editor.Close();
 
-        Assert.True(vw > 1, $"viewport not laid out (width={vw})");
-        // A tall scrolling capture opens fit-to-WIDTH (and scrolls vertically), so the full
-        // image width must be visible — not opened at 1:1 showing only the top-left corner.
-        Assert.True(zoom * imgW <= vw + 1,
-            $"tall image not fit-to-width on open: zoom={zoom}, scaledWidth={zoom * imgW}, viewportWidth={vw}");
+        Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
+        // A tall scrolling capture opens fit-WHOLE — the ENTIRE image (both dimensions) must be
+        // visible, not opened at 1:1 or fit-to-width showing only the top slice.
+        Assert.True(zoom * imgW <= vw + 1 && zoom * 4000 <= vh + 1,
+            $"tall image not fit-whole on open: zoom={zoom}, scaled={zoom * imgW}x{zoom * 4000}, viewport={vw}x{vh}");
     }
 
     private static void PinSmoke(EditorWindow editor)
