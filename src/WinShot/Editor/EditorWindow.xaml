@@ -308,7 +308,8 @@
               MouseWheel="OnViewportMouseWheel"
               MouseDown="OnViewportMouseDown"
               MouseMove="OnViewportMouseMove"
-              MouseUp="OnViewportMouseUp">
+              MouseUp="OnViewportMouseUp"
+              MouseRightButtonUp="OnViewportRightClick">
             <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
                   Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
                 <Grid.RenderTransform>

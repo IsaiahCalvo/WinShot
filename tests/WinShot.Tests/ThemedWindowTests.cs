@@ -73,6 +73,7 @@ public class ThemedWindowTests
                 var editor = new EditorWindow(NewBitmap(), settings, history);
                 editor.Show();
                 ApplyBlurUndoRedoSmoke(editor);
+                ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
                 PinSmoke(editor);
                 editor.Close();
@@ -152,6 +153,51 @@ public class ThemedWindowTests
             binder: null,
             args: args,
             culture: null)!;
+
+    /// <summary>
+    /// Drives the private ReorderSelected for all four z-order moves and an undo round-trip,
+    /// asserting AnnotationCanvas.Children ends in the right order each time. The Insert-after-Remove
+    /// index math is the easy place to get an off-by-one, so it gets a real check.
+    /// </summary>
+    private static void ZOrderReorderSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (System.Windows.Controls.Canvas)editor.FindName("AnnotationCanvas")!;
+        var selField = type.GetField("_selected", NP)!;
+        var zmoveType = type.GetNestedType("ZMove", System.Reflection.BindingFlags.NonPublic)!;
+        var reorder = type.GetMethod("ReorderSelected", NP)!;
+        var undoAsync = type.GetMethod("UndoAsync", NP)!;
+
+        (System.Windows.UIElement a, System.Windows.UIElement b, System.Windows.UIElement c) Setup()
+        {
+            canvas.Children.Clear();
+            var a = new System.Windows.Shapes.Rectangle();
+            var b = new System.Windows.Shapes.Rectangle();
+            var c = new System.Windows.Shapes.Rectangle();
+            canvas.Children.Add(a); canvas.Children.Add(b); canvas.Children.Add(c);
+            return (a, b, c);
+        }
+        void Move(System.Windows.UIElement sel, string move)
+        {
+            selField.SetValue(editor, sel);
+            reorder.Invoke(editor, new[] { Enum.Parse(zmoveType, move) });
+        }
+        System.Windows.UIElement[] Order() => canvas.Children.Cast<System.Windows.UIElement>().ToArray();
+
+        var (a, b, c) = Setup(); Move(b, "Front");    Assert.Equal(new[] { a, c, b }, Order());
+        (a, b, c) = Setup();     Move(b, "Back");     Assert.Equal(new[] { b, a, c }, Order());
+        (a, b, c) = Setup();     Move(a, "Forward");  Assert.Equal(new[] { b, a, c }, Order());
+        (a, b, c) = Setup();     Move(c, "Backward"); Assert.Equal(new[] { a, c, b }, Order());
+
+        // Undo restores original order.
+        (a, b, c) = Setup(); Move(b, "Front");
+        ((Task)undoAsync.Invoke(editor, null)!).GetAwaiter().GetResult();
+        Assert.Equal(new[] { a, b, c }, Order());
+
+        canvas.Children.Clear();
+    }
 
     private static void ApplyBlurUndoRedoSmoke(EditorWindow editor)
     {

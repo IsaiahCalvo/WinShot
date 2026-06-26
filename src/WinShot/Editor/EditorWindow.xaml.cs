@@ -2482,6 +2482,75 @@ public partial class EditorWindow : Window
             redo: () => AnnotationCanvas.Children.Remove(el)));
     }
 
+    /// <summary>Where to move the selected annotation in the z-order (child index of AnnotationCanvas).</summary>
+    private enum ZMove { Front, Forward, Backward, Back }
+
+    /// <summary>
+    /// Reorders the selected annotation within <c>AnnotationCanvas.Children</c>. Child index IS the
+    /// z-order — it's what renders, hit-tests, AND serializes (data.Z), so reordering children needs
+    /// no separate ZIndex bookkeeping. Removing then re-inserting only moves the one element, so
+    /// undo just puts it back at its old index. No-op (and no undo entry) when already at the edge.
+    /// </summary>
+    private void ReorderSelected(ZMove move)
+    {
+        if (_selected is null || _movingSelection) return;
+        var children = AnnotationCanvas.Children;
+        int oldIndex = children.IndexOf(_selected);
+        if (oldIndex < 0) return;
+        int last = children.Count - 1;
+        int newIndex = move switch
+        {
+            ZMove.Front => last,
+            ZMove.Back => 0,
+            ZMove.Forward => Math.Min(oldIndex + 1, last),
+            ZMove.Backward => Math.Max(oldIndex - 1, 0),
+            _ => oldIndex,
+        };
+        if (newIndex == oldIndex) return; // already at the requested end — nothing to do
+
+        UIElement el = _selected;
+        Push(new EditorAction(
+            undo: () => { children.Remove(el); children.Insert(oldIndex, el); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
+            redo: () => { children.Remove(el); children.Insert(newIndex, el); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); }));
+    }
+
+    /// <summary>Right-click an annotation to select it and open the z-order / delete context menu.</summary>
+    private void OnViewportRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_sourceOperationActive) return;
+        var hit = HitTestAnnotation(e.GetPosition(AnnotationCanvas));
+        if (hit is null) return;
+        Select(hit);
+        _annotationMenu ??= BuildAnnotationMenu();
+        _annotationMenu.PlacementTarget = Viewport;
+        _annotationMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        _annotationMenu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private ContextMenu? _annotationMenu;
+
+    private ContextMenu BuildAnnotationMenu()
+    {
+        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenu") };
+        var itemStyle = (Style)FindResource("DarkMenuItem");
+
+        MenuItem Item(string header, string gesture, Action act)
+        {
+            var mi = new MenuItem { Header = header, InputGestureText = gesture, Style = itemStyle };
+            mi.Click += (_, _) => act();
+            return mi;
+        }
+
+        menu.Items.Add(Item("Bring to Front", "Ctrl+Shift+]", () => ReorderSelected(ZMove.Front)));
+        menu.Items.Add(Item("Bring Forward", "Ctrl+]", () => ReorderSelected(ZMove.Forward)));
+        menu.Items.Add(Item("Send Backward", "Ctrl+[", () => ReorderSelected(ZMove.Backward)));
+        menu.Items.Add(Item("Send to Back", "Ctrl+Shift+[", () => ReorderSelected(ZMove.Back)));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(Item("Delete", "Del", DeleteSelected));
+        return menu;
+    }
+
     /// <summary>Nudges the selected annotation by a keyboard delta as one undoable move.</summary>
     private void NudgeSelected(double dx, double dy)
     {
@@ -3096,6 +3165,19 @@ public partial class EditorWindow : Window
             e.Handled = true; // keep Space from clicking a focused toolbar button
             return;
         }
+        // Z-order on the selected annotation: Ctrl+] / Ctrl+[ move it one step forward/back;
+        // add Shift to send it all the way to front/back (the standard + CleanShot convention).
+        if (_selected is not null && (Keyboard.Modifiers & ModifierKeys.Control) != 0 &&
+            e.Key is Key.OemOpenBrackets or Key.OemCloseBrackets)
+        {
+            bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+            bool toFront = e.Key == Key.OemCloseBrackets; // ']' raises, '[' lowers
+            ReorderSelected(toFront ? (shift ? ZMove.Front : ZMove.Forward)
+                                    : (shift ? ZMove.Back : ZMove.Backward));
+            e.Handled = true;
+            return;
+        }
+
         if (Keyboard.Modifiers == ModifierKeys.Control)
         {
             if (e.Key == Key.Z) { _ = UndoAsync(); e.Handled = true; }
