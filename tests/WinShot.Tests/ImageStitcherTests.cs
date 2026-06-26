@@ -601,62 +601,6 @@ public class ImageStitcherTests
         Assert.False(ImageStitcher.FramesIdentical(a, c));
     }
 
-    // ====================================================================
-    // Manual append-only loop (matches the running stitch's BOTTOM, odd-snap/ShareX style):
-    // forward scroll appends; backward scroll over captured content adds nothing (no duplication).
-    // ====================================================================
-
-    /// <summary>Drives the exact manual-capture stitch: match each frame against the running
-    /// stitch's bottom and append only the rows past it. Returns the final stitched height.</summary>
-    private static int RunAppendOnly(IReadOnlyList<SD.Bitmap> frames)
-    {
-        SD.Bitmap? stitched = null;
-        try
-        {
-            foreach (var f in frames)
-            {
-                if (stitched is null) { stitched = (SD.Bitmap)f.Clone(); continue; }
-                using var tail = ImageStitcher.CropBottomRows(stitched, Math.Min(stitched.Height, f.Height));
-                int offset = ImageStitcher.FindScrollOffset(tail, f);
-                if (offset > 0)
-                {
-                    var grown = ImageStitcher.AppendBelow(stitched, f, offset);
-                    stitched.Dispose();
-                    stitched = grown;
-                }
-            }
-            return stitched?.Height ?? 0;
-        }
-        finally { stitched?.Dispose(); }
-    }
-
-    [Fact]
-    public void AppendOnly_ForwardScroll_GrowsByEachStep()
-    {
-        var frames = new[] { MakeFrame(0), MakeFrame(100), MakeFrame(200), MakeFrame(300) };
-        try { Assert.Equal(Height + 300, RunAppendOnly(frames)); } // 400 + 3*100
-        finally { foreach (var f in frames) f.Dispose(); }
-    }
-
-    [Fact]
-    public void AppendOnly_BackwardScroll_AddsNothing_NoDuplication()
-    {
-        // Scroll down to 200, then back up over already-captured content: height must NOT grow.
-        var frames = new[] { MakeFrame(0), MakeFrame(100), MakeFrame(200), MakeFrame(100), MakeFrame(0) };
-        try { Assert.Equal(Height + 200, RunAppendOnly(frames)); } // 600, the back-scroll appends nothing
-        finally { foreach (var f in frames) f.Dispose(); }
-    }
-
-    [Fact]
-    public void AppendOnly_ReScrollPastBottom_AppendsOnlyTheNewTail()
-    {
-        // Down to 200, back up to 0, then forward again past the captured bottom: only the genuinely
-        // new rows beyond 200 are added — re-covered content (100, 200) duplicates nothing.
-        var frames = new[] { MakeFrame(0), MakeFrame(100), MakeFrame(200), MakeFrame(0), MakeFrame(100), MakeFrame(200), MakeFrame(300) };
-        try { Assert.Equal(Height + 300, RunAppendOnly(frames)); } // 700 = doc 0..699, no dupes
-        finally { foreach (var f in frames) f.Dispose(); }
-    }
-
     [Fact]
     public void CropBottomRows_ReturnsExactBottomBand()
     {

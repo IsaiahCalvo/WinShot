@@ -250,7 +250,7 @@ public sealed class ScrollControlsBar : WF.Form
         if (on)
         {
             _status.ForeColor = WarnColor;
-            _status.Text = "⚠ Not capturing — scroll down to continue";
+            _status.Text = "⚠ Too fast — scroll a little slower";
         }
     }
 

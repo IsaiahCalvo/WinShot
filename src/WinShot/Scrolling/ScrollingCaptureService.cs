@@ -54,9 +54,6 @@ public static class ScrollingCaptureService
     /// means they're outrunning the capture.</summary>
     private const int TooFastStreakForWarning = 2;
 
-    /// <summary>Manual mode: consecutive moving-but-not-appending frames (a backward scroll, or a
-    /// flick that outran the overlap) before nudging the user to scroll back down to keep capturing.</summary>
-    private const int StallWarnFrames = 4;
 
     /// <summary>Manual mode: generous overall cap so an abandoned capture eventually ends.</summary>
     private const int ManualTimeoutMs = 10 * 60 * 1000;
@@ -94,8 +91,7 @@ public static class ScrollingCaptureService
                 int frames = 0;
                 int stitchedFrames = 0;
                 int zeroOffsetStreak = 0;
-                int tooFastStreak = 0;          // consecutive frames that moved but couldn't align (auto)
-                int noAppendStreak = 0;         // manual: consecutive moving frames that added nothing new
+                int tooFastStreak = 0;          // consecutive frames that moved but couldn't align
                 bool warnedTooFast = false;     // a "slow down" warning is currently showing
                 bool hitIterationCap = false;   // ran out of iterations while still moving
                 bool reachedContentEnd = false; // genuine no-movement bottom (auto only)
@@ -120,69 +116,6 @@ public static class ScrollingCaptureService
                         ? CaptureService.CaptureScreenRegionWithoutLayeredWindows(screenRegion)
                         : await CaptureStableFrameAsync(screenRegion, ct).ConfigureAwait(false);
                     frames++;
-
-                    if (manual && !horizontal)
-                    {
-                        // odd-snap / ShareX append-only. Match this frame against the BOTTOM of the
-                        // running stitch and append only the rows that extend past it. Matching the
-                        // RESULT BOTTOM (not the previous frame) is the whole trick: a backward scroll
-                        // over already-captured content yields offset 0 and is simply ignored — no
-                        // duplication, no position tracking, no "gaps", nothing to recover or thrash.
-                        if (stitched is null)
-                        {
-                            stitched = frame;
-                            stitchedFrames = 1;
-                        }
-                        else
-                        {
-                            using var tail = ImageStitcher.CropBottomRows(stitched, Math.Min(stitched.Height, frame.Height));
-                            int offset = ImageStitcher.FindScrollOffset(tail, frame);
-                            if (offset > 0)
-                            {
-                                int rows = Math.Min(offset, MaxStitchedHeight - stitched.Height);
-                                var grown = ImageStitcher.AppendBelow(stitched, frame, rows);
-                                stitched.Dispose();
-                                stitched = grown;
-                                stitchedFrames++;
-                                noAppendStreak = 0;
-                                if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
-                            }
-                            else if (!ImageStitcher.FramesIdentical(tail, frame))
-                            {
-                                // Moving but nothing new below the bottom — a backward scroll, or a
-                                // flick that outran the overlap. Not captured. After a few in a row,
-                                // nudge the user to scroll back down to keep capturing.
-                                if (++noAppendStreak >= StallWarnFrames && !warnedTooFast)
-                                {
-                                    warnedTooFast = true;
-                                    tooFast?.Invoke(true);
-                                }
-                            }
-                            else
-                            {
-                                noAppendStreak = 0; // paused on captured content
-                                if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
-                            }
-                            frame.Dispose();
-                        }
-
-                        Log.Info($"Scroll frame {frames}: stitchedH={stitched.Height} appended={stitchedFrames} stall={noAppendStreak}");
-
-                        if (stitched.Height >= MaxStitchedHeight)
-                            break;
-                        if (frames == 1 || previewClock.ElapsedMilliseconds >= PreviewThrottleMs)
-                        {
-                            PushPreview(preview, stitched);
-                            previewClock.Restart();
-                        }
-                        status($"Captured {stitched.Height}px — click Done when finished.");
-
-                        if (ShouldStop(ct))
-                            break;
-                        try { await Task.Delay(ManualPollMs, ct).ConfigureAwait(false); }
-                        catch (OperationCanceledException) { break; }
-                        continue;
-                    }
 
                     if (stitched is null)
                     {
