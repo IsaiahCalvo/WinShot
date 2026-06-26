@@ -75,6 +75,16 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             Log.Error("Unhandled exception", args.ExceptionObject as Exception);
 
+        // WinForms controls (the Fast* selectors, scrolling chrome) route UI-thread exceptions
+        // through their own NativeWindow callback, which would otherwise pop the default .NET
+        // "Unhandled exception" dialog — e.g. on a transient graphics-device error (0x8007001F),
+        // common over RDP. Catch + log + continue instead; a capture overlay must never crash
+        // the whole app. Must be set before any WinForms window is created on this thread.
+        try { WF.Application.SetUnhandledExceptionMode(WF.UnhandledExceptionMode.CatchException); }
+        catch (Exception ex) { Log.Error("Could not set WinForms unhandled-exception mode", ex); }
+        WF.Application.ThreadException += (_, args) =>
+            Log.Error("Unhandled WinForms UI exception (continuing)", args.Exception);
+
         _settings.Load();
         _history = new HistoryService(_settings);
         _settings.Changed += RegisterHotkeys;

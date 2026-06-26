@@ -539,13 +539,22 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </summary>
     private void OnFollowTick(object? sender, EventArgs e)
     {
-        if (_prewarm) return;
-        SD.Point p = CursorScreen();
-        bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
-        if (p == _currentScreen && ctrl == _lastCtrlDown)
-            return;
-        _lastCtrlDown = ctrl;
-        HandleMouseMove();
+        try
+        {
+            if (_prewarm) return;
+            SD.Point p = CursorScreen();
+            bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+            if (p == _currentScreen && ctrl == _lastCtrlDown)
+                return;
+            _lastCtrlDown = ctrl;
+            HandleMouseMove();
+        }
+        catch (Exception ex)
+        {
+            // A transient GDI/device error (e.g. an RDP display blip) must not crash the app
+            // from the timer callback; the next tick recovers on its own.
+            Log.Error("Selector follow-tick failed (non-fatal)", ex);
+        }
     }
 
     /// <summary>Whether the full-bleed crosshair guide lines should be drawn, per the
