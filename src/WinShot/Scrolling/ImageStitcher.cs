@@ -65,30 +65,30 @@ public static class ImageStitcher
         if (contentEnd - contentStart < 2)
             return 0;
 
-        byte[] prevSig = ComputeRowSignatures(previous);
-        byte[] currSig = ComputeRowSignatures(current);
-
-        // Distinctiveness is judged by EXACT row hashes WITHIN the current frame (no cross-frame
-        // noise there): a row whose hash is unique anchors a match; rows that repeat (a blank band)
-        // do not, so whitespace can't carry a wrong offset. Matching ACROSS frames is tolerant (SAD).
+        ulong[] prevHashes = ComputeRowHashes(previous);
         ulong[] currHashes = ComputeRowHashes(current);
+
+        // Rows whose hash appears only once within the (banded) content window are
+        // "distinctive"; rows whose hash repeats (blank/whitespace runs) are not. We
+        // require enough distinctive matches so a whitespace band can't carry an offset.
         bool[] currDistinctive = MarkDistinctiveRows(currHashes, contentStart, contentEnd);
 
-        // No scroll? Every row matches its counterpart at the same position.
-        bool sameEverywhere = true;
-        for (int y = contentStart; y < contentEnd; y++)
-            if (!RowsSimilar(prevSig, y, currSig, y)) { sameEverywhere = false; break; }
-        if (sameEverywhere)
+        if (HashesMatchAtSamePosition(prevHashes, currHashes, contentStart, contentEnd))
             return 0;
 
-        // Pick the offset with the longest UNBROKEN run of SIMILAR rows that is anchored to real
-        // content (ShareX-style longest-run matching, but tolerant). At the true scroll delta the
-        // overlapping content lines up into one long contiguous run; wrong offsets only ever produce
-        // short, scattered coincidences. The run must contain a distinctive row.
+        // Pick the offset with the longest UNBROKEN run of identical rows that is anchored to
+        // real content (ShareX's scrolling capture uses longest-run matching). At the true
+        // scroll delta the overlapping content lines up into one long contiguous run; wrong
+        // offsets only ever produce short, scattered coincidences. Selecting by total matched
+        // rows (the old approach) let a wrong offset win on scattered matches, which garbled
+        // the stitch. The run must CONTAIN a distinctive (non-repeated) row, so a fixed blank
+        // band — which matches itself at many offsets — can't masquerade as the best alignment.
         int bestOffset = 0;
         int bestRun = 0;
         for (int offset = 1; offset < contentEnd - contentStart; offset++)
         {
+            // Compare current row y against previous row y+offset, both restricted to the
+            // content window (and y+offset must also stay inside it).
             int compared = 0, run = 0, runDistinctive = 0, longestDistinctiveRun = 0;
             for (int y = contentStart; y < contentEnd; y++)
             {
@@ -96,7 +96,7 @@ public static class ImageStitcher
                 if (py >= contentEnd)
                     break;
                 compared++;
-                if (RowsSimilar(prevSig, py, currSig, y))
+                if (prevHashes[py] == currHashes[y])
                 {
                     run++;
                     if (currDistinctive[y])
@@ -140,14 +140,9 @@ public static class ImageStitcher
         if (a.Width != b.Width || a.Height != b.Height)
             return false;
 
-        // Tolerant: a paused frame re-rendered with sub-pixel noise still counts as "unchanged",
-        // so the capture doesn't treat slow smooth scrolling as a flicker.
-        byte[] sa = ComputeRowSignatures(a);
-        byte[] sb = ComputeRowSignatures(b);
-        for (int y = 0; y < a.Height; y++)
-            if (!RowsSimilar(sa, y, sb, y))
-                return false;
-        return true;
+        ulong[] ha = ComputeRowHashes(a);
+        ulong[] hb = ComputeRowHashes(b);
+        return HashesMatchAtSamePosition(ha, hb);
     }
 
     /// <summary>
@@ -365,15 +360,21 @@ public static class ImageStitcher
         return true;
     }
 
-    /// <summary>One exact FNV-1a hash per row over the middle (scrollbar-trimmed) span. Used by the
-    /// niche band-detection + horizontal helpers; the main vertical matcher uses tolerant signatures
-    /// (<see cref="ComputeRowSignatures"/>) instead.</summary>
+    /// <summary>One FNV-1a hash per row over the middle 90% of its pixels.</summary>
     private static ulong[] ComputeRowHashes(SD.Bitmap bmp)
     {
         int width = bmp.Width, height = bmp.Height;
+        // Trim the sides before hashing so a moving scrollbar thumb / anti-aliased edge never
+        // breaks an exact row match. Clamp(width/20, min 50px, max width/3) — the same formula
+        // ShareX and odd-snap use; a flat 5% was too thin to cover a ~17px scrollbar on a
+        // narrow region.
         int margin = Math.Min(Math.Max(50, width / 20), width / 3);
         int startX = margin, endX = width - margin;
-        if (endX <= startX) { startX = 0; endX = width; }
+        if (endX <= startX) // degenerate width: hash the whole row
+        {
+            startX = 0;
+            endX = width;
+        }
 
         var data = bmp.LockBits(new SD.Rectangle(0, 0, width, height),
             ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
@@ -395,76 +396,6 @@ public static class ImageStitcher
         {
             bmp.UnlockBits(data);
         }
-    }
-
-    /// <summary>Averaged samples a row's middle span is reduced to for tolerant matching.</summary>
-    private const int SigBuckets = 32;
-    private const int SigLen = SigBuckets * 3; // B,G,R per bucket
-
-    /// <summary>Max average per-channel difference (0–255) for two rows to count as the SAME content.
-    /// Soft threshold (SAD), not exact equality — this is what lets the same line of text match even
-    /// when re-rendered with slightly different pixels at a different sub-pixel scroll offset.</summary>
-    private const int RowMatchMeanTol = 16;
-
-    /// <summary>
-    /// Per-row TOLERANT signature: the row's middle (scrollbar-trimmed) span is averaged into
-    /// <see cref="SigBuckets"/> buckets (B,G,R). Averaging smooths the sub-pixel/ClearType render
-    /// noise that makes the same content differ byte-for-byte at different scroll offsets — the root
-    /// cause of "captures a bit then stops" with exact matching. Rows are then compared by SAD with a
-    /// tolerance (<see cref="RowsSimilar"/>), not exact equality.
-    /// </summary>
-    private static byte[] ComputeRowSignatures(SD.Bitmap bmp)
-    {
-        int width = bmp.Width, height = bmp.Height;
-        int margin = Math.Min(Math.Max(50, width / 20), width / 3);
-        int startX = margin, endX = width - margin;
-        if (endX <= startX) { startX = 0; endX = width; }
-        int span = endX - startX;
-
-        var data = bmp.LockBits(new SD.Rectangle(0, 0, width, height),
-            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        try
-        {
-            var sig = new byte[height * SigLen];
-            var row = new byte[width * 4];
-            for (int y = 0; y < height; y++)
-            {
-                Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
-                int baseIdx = y * SigLen;
-                for (int b = 0; b < SigBuckets; b++)
-                {
-                    int x0 = startX + (int)((long)b * span / SigBuckets);
-                    int x1 = startX + (int)((long)(b + 1) * span / SigBuckets);
-                    if (x0 >= endX) x0 = endX - 1;
-                    if (x1 <= x0) x1 = Math.Min(x0 + 1, endX);
-                    long sumB = 0, sumG = 0, sumR = 0;
-                    for (int x = x0; x < x1; x++)
-                    {
-                        int i = x * 4;
-                        sumB += row[i]; sumG += row[i + 1]; sumR += row[i + 2];
-                    }
-                    int n = x1 - x0;
-                    int j = baseIdx + b * 3;
-                    sig[j] = (byte)(sumB / n); sig[j + 1] = (byte)(sumG / n); sig[j + 2] = (byte)(sumR / n);
-                }
-            }
-            return sig;
-        }
-        finally
-        {
-            bmp.UnlockBits(data);
-        }
-    }
-
-    /// <summary>True when row <paramref name="ra"/> of <paramref name="a"/> and row <paramref name="rb"/>
-    /// of <paramref name="b"/> are the same content within tolerance (mean per-channel |diff| ≤
-    /// <see cref="RowMatchMeanTol"/>).</summary>
-    private static bool RowsSimilar(byte[] a, int ra, byte[] b, int rb)
-    {
-        int ia = ra * SigLen, ib = rb * SigLen, sad = 0;
-        for (int k = 0; k < SigLen; k++)
-            sad += Math.Abs(a[ia + k] - b[ib + k]);
-        return sad <= RowMatchMeanTol * SigLen;
     }
 
     /// <summary>One FNV-1a hash per column over the middle 90% of its pixels.</summary>
