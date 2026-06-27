@@ -273,7 +273,7 @@ public partial class EditorWindow : Window
         _movingSelection = false;
         _sourceOperationActive = true;
 
-        BaseImage.Source = null;
+        BaseTiles.Children.Clear();
         AnnotationCanvas.Children.Clear();
         InteractionCanvas.Children.Clear();
         InteractionCanvas.Children.Add(CropDim);
@@ -351,10 +351,46 @@ public partial class EditorWindow : Window
         }
     }
 
+    /// <summary>Max tile height (px). 2048 is the lower of the common GPU texture limits and well
+    /// under the software rasterizer's 16.16 (32768) ceiling, so every tile renders even over RDP.</summary>
+    private const int BaseTileHeight = 2048;
+
     private async Task RefreshImageAsync()
     {
         var source = await CaptureService.ToBitmapSourceSnapshotAsync(_source);
-        await Dispatcher.InvokeAsync(() => BaseImage.Source = source);
+        var tiles = await Task.Run(() => SliceVertical(source, BaseTileHeight));
+        await Dispatcher.InvokeAsync(() => SetBaseTiles(tiles));
+    }
+
+    /// <summary>Slices a tall <see cref="BitmapSource"/> into ≤<paramref name="tileHeight"/>px frozen
+    /// tiles via CopyPixels (avoids CroppedBitmap's large-source crash). Tile pixel heights sum
+    /// exactly to the source height, so the stacked tiles are seamless.</summary>
+    private static List<BitmapSource> SliceVertical(BitmapSource src, int tileHeight)
+    {
+        var tiles = new List<BitmapSource>();
+        int w = src.PixelWidth, h = src.PixelHeight;
+        int stride = (w * src.Format.BitsPerPixel + 7) / 8;
+        for (int y = 0; y < h; y += tileHeight)
+        {
+            int th = Math.Min(tileHeight, h - y);
+            var buf = new byte[stride * th];
+            src.CopyPixels(new Int32Rect(0, y, w, th), buf, stride, 0);
+            var tile = BitmapSource.Create(w, th, src.DpiX, src.DpiY, src.Format, src.Palette, buf, stride);
+            tile.Freeze();
+            tiles.Add(tile);
+        }
+        return tiles;
+    }
+
+    private void SetBaseTiles(IReadOnlyList<BitmapSource> tiles)
+    {
+        BaseTiles.Children.Clear();
+        foreach (var t in tiles)
+        {
+            var img = new System.Windows.Controls.Image { Source = t, Stretch = Stretch.None };
+            RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+            BaseTiles.Children.Add(img);
+        }
     }
 
     private void SetSurfaceSize(double w, double h)
@@ -363,8 +399,8 @@ public partial class EditorWindow : Window
         EditorSurface.Height = h;
         CanvasHost.Width = w;
         CanvasHost.Height = h;
-        BaseImage.Width = w;
-        BaseImage.Height = h;
+        BaseTiles.Width = w;
+        BaseTiles.Height = h;
         AnnotationCanvas.Width = w;
         AnnotationCanvas.Height = h;
         InteractionCanvas.Width = w;

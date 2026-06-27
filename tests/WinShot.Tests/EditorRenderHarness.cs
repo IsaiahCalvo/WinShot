@@ -69,17 +69,19 @@ public class EditorRenderHarness
                 var t = typeof(EditorWindow);
                 double zoom = (double)t.GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(editor)!;
                 var src = (SD.Bitmap)t.GetField("_source", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(editor)!;
-                var baseImage = (System.Windows.Controls.Image)editor.FindName("BaseImage");
+                var baseTiles = (System.Windows.Controls.Panel)editor.FindName("BaseTiles");
                 var canvasHost = (FrameworkElement)editor.FindName("CanvasHost");
                 var viewport = (FrameworkElement)editor.FindName("Viewport");
                 var editorSurface = (FrameworkElement)editor.FindName("EditorSurface");
                 var viewScale = (System.Windows.Media.ScaleTransform)editor.FindName("ViewScale");
-                var bs = baseImage.Source as BitmapSource;
+                double tilesH = 0; int tileCount = baseTiles.Children.Count;
+                foreach (System.Windows.Controls.Image im in baseTiles.Children)
+                    tilesH += (im.Source as BitmapSource)?.PixelHeight ?? 0;
                 File.WriteAllText(Path.Combine(outDir, "dims.txt"),
                     $"_source={src.Width}x{src.Height}\n" +
                     $"_zoom={zoom}\n" +
-                    $"BaseImage.Source=" + (bs is null ? "null" : $"{bs.PixelWidth}x{bs.PixelHeight} dpi={bs.DpiX}x{bs.DpiY} DIU={bs.Width}x{bs.Height}") + "\n" +
-                    $"BaseImage.Width/Height={baseImage.Width}x{baseImage.Height} Actual={baseImage.ActualWidth}x{baseImage.ActualHeight} Stretch={baseImage.Stretch}\n" +
+                    $"BaseTiles count={tileCount} totalPixelHeight={tilesH}\n" +
+                    $"BaseTiles.Width/Height={baseTiles.Width}x{baseTiles.Height} Actual={baseTiles.ActualWidth}x{baseTiles.ActualHeight}\n" +
                     $"CanvasHost.Actual={canvasHost.ActualWidth}x{canvasHost.ActualHeight}\n" +
                     $"EditorSurface.Actual={editorSurface.ActualWidth}x{editorSurface.ActualHeight} Render={editorSurface.RenderSize}\n" +
                     $"ViewScale={viewScale.ScaleX}x{viewScale.ScaleY}\n" +

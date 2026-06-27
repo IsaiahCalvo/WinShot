@@ -319,7 +319,12 @@
                     </TransformGroup>
                 </Grid.RenderTransform>
                 <Grid x:Name="CanvasHost">
-                    <Image x:Name="BaseImage" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <!-- The base image is shown as a vertical stack of <=2048px tiles, not one giant
+                         Image: WPF's software rasterizer (always used over RDP, and the fallback when a
+                         surface exceeds the GPU texture limit) clips a single tall image past its
+                         16.16 fixed-point limit. Tiling keeps every element small enough to render. -->
+                    <StackPanel x:Name="BaseTiles" Orientation="Vertical"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"/>
                     <Canvas x:Name="AnnotationCanvas" Background="Transparent" ClipToBounds="True"/>
                 </Grid>
                 <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
