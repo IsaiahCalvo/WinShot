@@ -153,15 +153,37 @@ public class SettingsService
 
     public void Load()
     {
+        if (TryLoadFrom(FilePath))
+            return;
+        // Fall back to the last-known-good backup if the primary file is missing/corrupt/torn,
+        // so a bad write can never strand the user on defaults.
+        if (TryLoadFrom(FilePath + ".bak"))
+        {
+            Log.Info("Loaded settings from backup (primary settings.json was missing or unreadable)");
+            return;
+        }
+        Current = new Settings();
+    }
+
+    private bool TryLoadFrom(string path)
+    {
         try
         {
-            if (File.Exists(FilePath))
-                Current = JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new Settings();
+            if (!File.Exists(path))
+                return false;
+            string text = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+            Settings? loaded = JsonSerializer.Deserialize<Settings>(text);
+            if (loaded is null)
+                return false;
+            Current = loaded;
+            return true;
         }
         catch (Exception ex)
         {
-            Log.Error("Failed to load settings, using defaults", ex);
-            Current = new Settings();
+            Log.Error($"Failed to load settings from {path}", ex);
+            return false;
         }
     }
 
@@ -169,8 +191,7 @@ public class SettingsService
     {
         try
         {
-            Directory.CreateDirectory(Dir);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(Current, JsonOptions));
+            WriteAtomically(JsonSerializer.Serialize(Current, JsonOptions));
         }
         catch (Exception ex)
         {
@@ -184,16 +205,28 @@ public class SettingsService
         string json = JsonSerializer.Serialize(Current, JsonOptions);
         try
         {
-            await Task.Run(() =>
-            {
-                Directory.CreateDirectory(Dir);
-                File.WriteAllText(FilePath, json);
-            });
+            await Task.Run(() => WriteAtomically(json));
         }
         catch (Exception ex)
         {
             Log.Error("Failed to save settings", ex);
         }
         Changed?.Invoke();
+    }
+
+    // Atomic write + one-deep backup: write to a temp file, copy the current good file to .bak,
+    // then atomically move temp over the real file. A torn write or a bad in-memory state can
+    // never leave the user without a recoverable copy of their settings.
+    private void WriteAtomically(string json)
+    {
+        Directory.CreateDirectory(Dir);
+        string tmp = FilePath + ".tmp";
+        File.WriteAllText(tmp, json);
+        if (File.Exists(FilePath))
+        {
+            try { File.Copy(FilePath, FilePath + ".bak", overwrite: true); }
+            catch (Exception ex) { Log.Error("Failed to back up settings before save", ex); }
+        }
+        File.Move(tmp, FilePath, overwrite: true);
     }
 }

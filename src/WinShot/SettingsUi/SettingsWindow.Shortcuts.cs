@@ -210,7 +210,11 @@ public partial class SettingsWindow
             string value = HotkeyValue(box);
             if (def.IsReal)
             {
-                def.Set!(s, value);
+                // Never let a blank/unbound box wipe a good global hotkey — that was the reset the
+                // user hit. A real hotkey can only be CHANGED to another valid gesture here, never
+                // cleared to "" (which would silently fall back to the compiled default on relaunch).
+                if (value.Length > 0)
+                    def.Set!(s, value);
             }
             else if (value.Length > 0)
             {
