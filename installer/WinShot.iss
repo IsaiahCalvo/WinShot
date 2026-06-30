@@ -52,22 +52,28 @@ Name: "startupentry"; Description: "Launch {#MyAppName} when I sign in to Window
 
 [Files]
 Source: "..\publish\WinShot\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "register-autostart.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
-[Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WinShot"; ValueData: """{app}\{#MyAppExeName}"""; Tasks: startupentry; Flags: uninsdeletevalue
-
 [Run]
+; Durable autostart: register a per-user logon Scheduled Task instead of the HKCU "Run"
+; key. Windows 11 throttles/delays Run-key startup apps, and the in-app updater runs this
+; same installer, so a Run key here would silently regress the task-based fix on every update.
+; The helper also strips any legacy Run value. runhidden keeps the PowerShell window invisible.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\register-autostart.ps1"" -Exe ""{app}\{#MyAppExeName}"" -TaskName ""WinShot Autostart"" -RunValueName ""WinShot"""; Tasks: startupentry; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent
 ; Silent updates (one-click in-app updater runs Setup.exe /SILENT) never fire postinstall
 ; entries, so the line above can't relaunch the app. This second entry runs ONLY under a
 ; silent install (skipifnotsilent), giving exactly one launch per mode: interactive uses the
 ; postinstall+skipifsilent line, silent uses this one.
 Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent
+
+[UninstallRun]
+Filename: "schtasks.exe"; Parameters: "/delete /tn ""WinShot Autostart"" /f"; Flags: runhidden; RunOnceId: "DeleteWinShotAutostartTask"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
