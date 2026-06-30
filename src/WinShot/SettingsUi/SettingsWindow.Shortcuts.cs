@@ -210,11 +210,12 @@ public partial class SettingsWindow
             string value = HotkeyValue(box);
             if (def.IsReal)
             {
-                // Never let a blank/unbound box wipe a good global hotkey — that was the reset the
-                // user hit. A real hotkey can only be CHANGED to another valid gesture here, never
-                // cleared to "" (which would silently fall back to the compiled default on relaunch).
-                if (value.Length > 0)
-                    def.Set!(s, value);
+                // Store the box value verbatim, INCLUDING empty: an empty real hotkey means the
+                // user intentionally unbound it (no hotkey for that action). Boxes are always
+                // populated from settings when the window opens (LoadShortcutBoxes), so a blank
+                // here is a deliberate clear, never an accidental wipe. (.bak backup in
+                // SettingsService covers any unexpected loss.)
+                def.Set!(s, value);
             }
             else if (value.Length > 0)
             {

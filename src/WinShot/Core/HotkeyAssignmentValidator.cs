@@ -39,7 +39,10 @@ public static class HotkeyAssignmentValidator
         var issues = new List<Issue>();
         var blockedBoxes = new HashSet<TextBox>();
 
-        foreach (var item in prepared.Where(item => item.NormalizedGesture is null))
+        // An empty box means "no hotkey for this action" (intentionally unbound) — that is VALID,
+        // not an error. Only a NON-empty box that fails to parse is a real InvalidGesture.
+        foreach (var item in prepared.Where(item =>
+                     item.NormalizedGesture is null && !string.IsNullOrWhiteSpace(item.Field.Box.Text)))
         {
             issues.Add(new Issue(
                 HotkeyAssignmentIssueKind.InvalidGesture,

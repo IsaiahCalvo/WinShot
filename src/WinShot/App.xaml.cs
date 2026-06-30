@@ -198,14 +198,21 @@ public partial class App : Application
         _hotkeys.UnregisterAll();
         var s = _settings.Current;
         var failed = new List<string>();
-        if (!_hotkeys.Register(s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"))) failed.Add(s.HotkeyCaptureRegion);
-        if (!_hotkeys.Register(s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"))) failed.Add(s.HotkeyCaptureWindow);
-        if (!_hotkeys.Register(s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"))) failed.Add(s.HotkeyCaptureFullscreen);
-        if (!_hotkeys.Register(s.HotkeyRecord, RecordFlow)) failed.Add(s.HotkeyRecord);
-        if (!_hotkeys.Register(s.HotkeyOcr, () => QueueCaptureCommand("ocr"))) failed.Add(s.HotkeyOcr);
-        if (!_hotkeys.Register(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"))) failed.Add(s.HotkeyScrolling);
-        if (!_hotkeys.Register(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"))) failed.Add(s.HotkeyCapturePrevious);
-        if (!_hotkeys.Register(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"))) failed.Add(s.HotkeyAllInOne);
+        void Reg(string gesture, Action handler)
+        {
+            // Empty = the user unbound this action on purpose: no hotkey registered, and NOT a
+            // "failed" one (so it never triggers the "Some hotkeys unavailable" warning).
+            if (string.IsNullOrWhiteSpace(gesture)) return;
+            if (!_hotkeys.Register(gesture, handler)) failed.Add(gesture);
+        }
+        Reg(s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"));
+        Reg(s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"));
+        Reg(s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"));
+        Reg(s.HotkeyRecord, RecordFlow);
+        Reg(s.HotkeyOcr, () => QueueCaptureCommand("ocr"));
+        Reg(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"));
+        Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
+        Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
 
         if (failed.Count == 0)
         {
