@@ -185,9 +185,16 @@ public partial class App : Application
         return item;
     }
 
-    private void RegisterHotkeys()
+    private System.Windows.Threading.DispatcherTimer? _hotkeyRetryTimer;
+    private int _hotkeyRetryCount;
+    private const int MaxHotkeyRetries = 5;
+
+    private void RegisterHotkeys() => RegisterHotkeysCore(isRetry: false);
+
+    private void RegisterHotkeysCore(bool isRetry)
     {
         if (_hotkeys is null) return;
+        if (!isRetry) _hotkeyRetryCount = 0;
         _hotkeys.UnregisterAll();
         var s = _settings.Current;
         var failed = new List<string>();
@@ -199,8 +206,41 @@ public partial class App : Application
         if (!_hotkeys.Register(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"))) failed.Add(s.HotkeyScrolling);
         if (!_hotkeys.Register(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"))) failed.Add(s.HotkeyCapturePrevious);
         if (!_hotkeys.Register(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"))) failed.Add(s.HotkeyAllInOne);
-        if (failed.Count > 0)
-            ShowBalloon("Some hotkeys unavailable", string.Join(", ", failed));
+
+        if (failed.Count == 0)
+        {
+            _hotkeyRetryTimer?.Stop();
+            _hotkeyRetryCount = 0;
+            return;
+        }
+
+        // A failure here is usually transient — e.g. a previous WinShot instance was still dying
+        // (and still held the hotkey) when this one started during a silent self-update. Retry a
+        // few times so the hotkeys self-heal instead of staying dead until a manual restart; only
+        // warn the user once we've genuinely given up.
+        if (_hotkeyRetryCount < MaxHotkeyRetries)
+        {
+            _hotkeyRetryCount++;
+            Log.Info($"Hotkey registration incomplete ({failed.Count} failed); retry {_hotkeyRetryCount}/{MaxHotkeyRetries} in 2s");
+            _hotkeyRetryTimer ??= CreateHotkeyRetryTimer();
+            _hotkeyRetryTimer.Stop();
+            _hotkeyRetryTimer.Start();
+            return;
+        }
+
+        _hotkeyRetryTimer?.Stop();
+        ShowBalloon("Some hotkeys unavailable", string.Join(", ", failed));
+    }
+
+    private System.Windows.Threading.DispatcherTimer CreateHotkeyRetryTimer()
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            RegisterHotkeysCore(isRetry: true);
+        };
+        return timer;
     }
 
     private void ScheduleIdleWarmups()
