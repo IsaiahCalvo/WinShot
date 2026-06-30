@@ -63,6 +63,11 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent
+; Silent updates (one-click in-app updater runs Setup.exe /SILENT) never fire postinstall
+; entries, so the line above can't relaunch the app. This second entry runs ONLY under a
+; silent install (skipifnotsilent), giving exactly one launch per mode: interactive uses the
+; postinstall+skipifsilent line, silent uses this one.
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

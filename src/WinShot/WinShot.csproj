@@ -9,6 +9,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WinShot</RootNamespace>
     <AssemblyName>WinShot</AssemblyName>
+    <!-- Local-build fallback; the release workflow overrides this with -p:Version=<tag> so the
+         running assembly version matches the GitHub release tag the updater compares against. -->
+    <Version>1.0.0</Version>
     <!-- Embedded app icon (the blue lens mark) so the exe, taskbar, Alt-Tab, and any
          desktop shortcut show the official icon instead of the generic .NET one. -->
     <ApplicationIcon>Assets\winshot.ico</ApplicationIcon>

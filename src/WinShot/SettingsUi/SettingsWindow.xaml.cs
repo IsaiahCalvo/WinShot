@@ -324,6 +324,7 @@ public partial class SettingsWindow : Window
         // General
         SaveFolderBox.Text = s.SaveFolder;
         StartupCheck.IsChecked = s.LaunchAtStartup;
+        UpdatesCheck.IsChecked = s.CheckForUpdatesOnStartup;
         HideIconsCheck.IsChecked = s.HideDesktopIconsDuringCapture;
         PlaySoundsCheck.IsChecked = s.PlaySounds;
         SelectByTag(ShutterSoundCombo, s.ShutterSound, fallbackIndex: 0);
@@ -579,6 +580,7 @@ public partial class SettingsWindow : Window
             s.SaveFolder = SaveFolderBox.Text.Trim();
             s.ImageFormat = SelectedTag(FormatCombo, "png");
             s.LaunchAtStartup = StartupCheck.IsChecked == true;
+            s.CheckForUpdatesOnStartup = UpdatesCheck.IsChecked == true;
             s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
             s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
             s.PlaySounds = PlaySoundsCheck.IsChecked == true;

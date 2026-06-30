@@ -26,7 +26,7 @@ jobs:
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Version: $v"
       - name: Publish (self-contained, ReadyToRun, win-x64)
-        run: dotnet publish src/WinShot/WinShot.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -o publish/WinShot --nologo
+        run: dotnet publish src/WinShot/WinShot.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:Version=${{ steps.ver.outputs.version }} -o publish/WinShot --nologo
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path publish/WinShot/* -DestinationPath WinShot-win-x64.zip -Force
@@ -43,6 +43,13 @@ jobs:
           $setup = "artifacts\WinShot_${{ steps.ver.outputs.version }}-Setup.exe"
           if (-not (Test-Path $setup)) { throw "Missing $setup" }
           Get-Item $setup, WinShot-win-x64.zip | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
+      - name: Compute installer SHA-256 sidecar
+        shell: pwsh
+        run: |
+          $setup = "artifacts\WinShot_${{ steps.ver.outputs.version }}-Setup.exe"
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          $hash | Set-Content "$setup.sha256" -NoNewline -Encoding ascii
+          Write-Host "SHA-256: $hash"
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -50,4 +57,5 @@ jobs:
           files: |
             WinShot-win-x64.zip
             artifacts/WinShot_*-Setup.exe
+            artifacts/WinShot_*-Setup.exe.sha256
           generate_release_notes: true

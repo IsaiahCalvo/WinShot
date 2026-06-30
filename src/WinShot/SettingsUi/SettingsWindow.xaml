@@ -307,6 +307,10 @@
                                     <CheckBox x:Name="StartupCheck" Content="Start at login"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Updates"/>
+                                    <CheckBox x:Name="UpdatesCheck" Content="Check for updates on startup"/>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Sounds"/>
                                     <CheckBox x:Name="PlaySoundsCheck" Content="Play sounds"/>
                                 </DockPanel>

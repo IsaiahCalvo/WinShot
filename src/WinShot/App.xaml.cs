@@ -36,6 +36,10 @@ public partial class App : Application
     private bool _pendingCaptureDrainActive;
     private long _autoCopySuppressedUntilTick;
 
+    private WF.ToolStripMenuItem? _updateMenuItem;
+    private UpdateCheckResult? _pendingUpdate;
+    private bool _updateInProgress;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -103,6 +107,9 @@ public partial class App : Application
         ScheduleIdleWarmups();
         Log.Info("WinShot started");
 
+        if (_settings.Current.CheckForUpdatesOnStartup)
+            _ = StartupUpdateCheckAsync();
+
         if (incomingCommand is not null)
             RunCommand(incomingCommand);
     }
@@ -160,9 +167,15 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
         menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
         menu.Items.Add(new WF.ToolStripSeparator());
+        // Dynamic "Update available" item — hidden until a check finds a newer release.
+        _updateMenuItem = MenuItem("Install update", null, () => _ = InstallPendingUpdateAsync());
+        _updateMenuItem.Visible = false;
+        menu.Items.Add(_updateMenuItem);
+        menu.Items.Add(MenuItem("Check for updates…", null, () => _ = CheckForUpdatesFlowAsync()));
         menu.Items.Add(MenuItem("Exit", null, Shutdown));
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
+        _tray.BalloonTipClicked += (_, _) => { if (_pendingUpdate is not null) _ = InstallPendingUpdateAsync(); };
     }
 
     private static WF.ToolStripMenuItem MenuItem(string text, string? shortcut, Action onClick)
@@ -1209,6 +1222,77 @@ public partial class App : Application
 
     internal void ShowBalloon(string title, string message) =>
         _tray?.ShowBalloonTip(3000, title, message, WF.ToolTipIcon.Info);
+
+    // ---- Updates ----------------------------------------------------------
+
+    /// <summary>Silent startup poll: only surfaces UI when a newer release is found.</summary>
+    private async Task StartupUpdateCheckAsync()
+    {
+        var result = await UpdateService.CheckAsync();
+        if (result.State == UpdateState.UpdateAvailable)
+            await Dispatcher.InvokeAsync(() => OnUpdateAvailable(result));
+    }
+
+    /// <summary>Manual "Check for updates…" — reports the outcome either way.</summary>
+    private async Task CheckForUpdatesFlowAsync()
+    {
+        ShowBalloon("WinShot", "Checking for updates…");
+        var result = await UpdateService.CheckAsync();
+        await Dispatcher.InvokeAsync(() =>
+        {
+            switch (result.State)
+            {
+                case UpdateState.UpdateAvailable:
+                    OnUpdateAvailable(result);
+                    break;
+                case UpdateState.UpToDate:
+                    ShowBalloon("WinShot", "You're on the latest version.");
+                    break;
+                default:
+                    Log.Error($"Update check failed: {result.Message}");
+                    ShowBalloon("WinShot", "Couldn't check for updates.");
+                    break;
+            }
+        });
+    }
+
+    private void OnUpdateAvailable(UpdateCheckResult result)
+    {
+        _pendingUpdate = result;
+        if (_updateMenuItem is not null)
+        {
+            _updateMenuItem.Text = $"Install update ({result.LatestVersion})";
+            _updateMenuItem.Visible = true;
+        }
+        ShowBalloon("Update available", $"WinShot {result.LatestVersion} is ready — click to install.");
+    }
+
+    private async Task InstallPendingUpdateAsync()
+    {
+        var update = _pendingUpdate;
+        if (update?.DownloadUrl is null || _updateInProgress) return;
+        _updateInProgress = true;
+        try
+        {
+            ShowBalloon("WinShot", "Downloading update…");
+            await UpdateService.DownloadAndLaunchAsync(update.DownloadUrl, update.LatestVersion ?? "latest");
+            // Reached only when the installer launched (failures throw). Exit so it can replace our
+            // files; the installer relaunches WinShot itself.
+            await Dispatcher.InvokeAsync(Shutdown);
+        }
+        catch (UpdateVerificationException ex)
+        {
+            Log.Error("Update verification failed", ex);
+            _updateInProgress = false;
+            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update failed: download verification failed."));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Update install failed", ex);
+            _updateInProgress = false;
+            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update install failed. Log saved."));
+        }
+    }
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForSystem();

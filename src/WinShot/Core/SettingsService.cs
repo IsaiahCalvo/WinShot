@@ -67,6 +67,7 @@ public class Settings
     public bool PlaySounds { get; set; } = false;       // TODO: wire behavior — capture/record sound effects
     public string ShutterSound { get; set; } = "default"; // TODO: wire behavior — which shutter sound to play
     public bool ShowTrayIcon { get; set; } = true;      // TODO: wire behavior — show the menu/tray icon
+    public bool CheckForUpdatesOnStartup { get; set; } = true; // poll GitHub Releases on launch
 
     // General > "After capture" matrix. CleanShot has a per-action checkbox for
     // Screenshot and Recording independently. (TODO: wire behavior in App.xaml.cs.)
