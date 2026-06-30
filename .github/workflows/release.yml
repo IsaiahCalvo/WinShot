@@ -15,13 +15,39 @@ jobs:
       - name: Install Windows 10 SDK 10.0.19041 (UAP Platform.xml for CsWinRT)
         shell: pwsh
         run: choco install windows-sdk-10-version-2004-all -y --no-progress
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+      - name: Derive version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}" -replace '^v',''
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Version: $v"
       - name: Publish (self-contained, ReadyToRun, win-x64)
         run: dotnet publish src/WinShot/WinShot.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -o publish/WinShot --nologo
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path publish/WinShot/* -DestinationPath WinShot-win-x64.zip -Force
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc "/DMyAppVersion=${{ steps.ver.outputs.version }}" "installer\WinShot.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+      - name: Verify installer exists
+        shell: pwsh
+        run: |
+          $setup = "artifacts\WinShot_${{ steps.ver.outputs.version }}-Setup.exe"
+          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+          Get-Item $setup, WinShot-win-x64.zip | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: WinShot-win-x64.zip
+          fail_on_unmatched_files: true
+          files: |
+            WinShot-win-x64.zip
+            artifacts/WinShot_*-Setup.exe
           generate_release_notes: true
