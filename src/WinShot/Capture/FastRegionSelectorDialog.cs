@@ -200,6 +200,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         Activate();
         Focus();
+        if (!_prewarm)
+            ForceForeground();
         _lastCtrlDown = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
@@ -1104,6 +1106,41 @@ public sealed class FastRegionSelectorDialog : WF.Form
         public int X;
         public int Y;
     }
+
+    // A global hotkey can open this overlay while another app owns the foreground; Windows then
+    // silently downgrades Show()/Activate()/Focus() so the overlay never gets keyboard focus
+    // (Esc/Enter dead until the user clicks). Briefly attaching to the foreground thread's input
+    // queue lets the SetForegroundWindow call be honored. The follow-timer stays as the fallback
+    // if Windows still refuses (e.g. ForegroundLockTimeout). Mirrors Clip's proven shell sequence.
+    private void ForceForeground()
+    {
+        var hwnd = Handle;
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        var foreground = GetForegroundWindow();
+        var currentThread = GetCurrentThreadId();
+        var foregroundThread = foreground != IntPtr.Zero ? GetWindowThreadProcessId(foreground, out _) : 0u;
+        var attached = foregroundThread != 0 && foregroundThread != currentThread &&
+            AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            SetForegroundWindow(hwnd);
+            SetActiveWindow(hwnd);
+        }
+        finally
+        {
+            if (attached)
+                AttachThreadInput(currentThread, foregroundThread, false);
+        }
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern IntPtr SetActiveWindow(IntPtr hWnd);
 
     /// <summary>
     /// A non-primary monitor's overlay surface. Owns no state — it forwards input to and

@@ -24,7 +24,7 @@ Get-Process WinShot -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 800
 
 Write-Host "Publishing self-contained build to $InstallDir ..."
-dotnet publish $proj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o $InstallDir --nologo
+dotnet publish $proj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -o $InstallDir --nologo
 $exe = Join-Path $InstallDir 'WinShot.exe'
 if (-not (Test-Path $exe)) { throw "Publish failed: $exe not found." }
 
