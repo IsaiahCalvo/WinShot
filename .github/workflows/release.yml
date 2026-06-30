@@ -1,0 +1,24 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish (self-contained, ReadyToRun, win-x64)
+        run: dotnet publish src/WinShot/WinShot.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -o publish/WinShot --nologo
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path publish/WinShot/* -DestinationPath WinShot-win-x64.zip -Force
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: WinShot-win-x64.zip
+          generate_release_notes: true
