@@ -3,6 +3,15 @@
 A CleanShot X-style screenshot and screen-recording tool for Windows 11. Personal
 daily-driver: everything local, no cloud.
 
+## Download
+
+[![Download WinShot for Windows](https://img.shields.io/badge/⬇_Download-WinShot_for_Windows-2ea44f?style=for-the-badge)](https://github.com/IsaiahCalvo/WinShot/releases/latest/download/WinShot-Setup.exe)
+
+**[Click here to download the latest WinShot installer.](https://github.com/IsaiahCalvo/WinShot/releases/latest/download/WinShot-Setup.exe)** Then open the downloaded `WinShot-Setup.exe` and follow the prompts — that's it. The button always downloads the newest version.
+
+WinShot is not code-signed yet, so Windows SmartScreen may warn the first time you
+install or run it — click **More info → Run anyway**.
+
 ## Features
 
 - **Region / window / fullscreen capture** — `Ctrl+Shift+1` opens a frozen-screen

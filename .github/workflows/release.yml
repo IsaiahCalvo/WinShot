@@ -50,6 +50,12 @@ jobs:
           $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
           $hash | Set-Content "$setup.sha256" -NoNewline -Encoding ascii
           Write-Host "SHA-256: $hash"
+      - name: Copy installer to a stable name for the always-latest download link
+        shell: pwsh
+        run: |
+          # A version-independent copy so README's
+          # releases/latest/download/WinShot-Setup.exe link always fetches the newest installer.
+          Copy-Item "artifacts\WinShot_${{ steps.ver.outputs.version }}-Setup.exe" "artifacts\WinShot-Setup.exe" -Force
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -58,4 +64,5 @@ jobs:
             WinShot-win-x64.zip
             artifacts/WinShot_*-Setup.exe
             artifacts/WinShot_*-Setup.exe.sha256
+            artifacts/WinShot-Setup.exe
           generate_release_notes: true
