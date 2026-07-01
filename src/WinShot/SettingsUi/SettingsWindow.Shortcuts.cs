@@ -31,6 +31,12 @@ public partial class SettingsWindow
     private readonly Dictionary<string, HotkeyBox> _shortcutBoxes = new();
     private ShortcutSection[] _shortcutCatalog = Array.Empty<ShortcutSection>();
 
+    // True once LoadShortcutBoxes has populated every box from settings. SaveShortcutBoxes writes
+    // empty real-hotkey boxes verbatim (an empty box = a deliberate unbind), which is only safe
+    // BECAUSE the boxes were loaded first. If a save ever fires before a load, an empty box is an
+    // accident, not an unbind — so guard on this flag to make wiping a good global hotkey impossible.
+    private bool _shortcutBoxesLoaded;
+
     private static ShortcutDef Real(
         string key, string label, string validatorLabel,
         Func<Settings, string> get, Action<Settings, string> set) =>
@@ -199,11 +205,21 @@ public partial class SettingsWindow
                 ? def.Get!(s)
                 : s.ShortcutBindings.TryGetValue(def.Key, out var gesture) ? gesture : "";
         }
+        _shortcutBoxesLoaded = true;
     }
 
     /// <summary>Writes every shortcut box back to settings.</summary>
     private void SaveShortcutBoxes(Settings s)
     {
+        // Never persist shortcut boxes that were never loaded — that would overwrite good global
+        // hotkeys with blanks (the reported "hotkeys got wiped" bug). An empty box is only an
+        // intentional unbind once the boxes have been populated from settings.
+        if (!_shortcutBoxesLoaded)
+        {
+            Log.Info("SaveShortcutBoxes skipped: boxes not loaded from settings (guard against hotkey wipe)");
+            return;
+        }
+
         foreach (var def in AllShortcutDefs())
         {
             if (!_shortcutBoxes.TryGetValue(def.Key, out var box)) continue;
