@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.IO;
 using WinShot.Core;
@@ -75,19 +74,6 @@ public sealed class FastQuickPreviewWindow : WF.Form
         {
             Log.Error("Fast quick preview prewarm failed", ex);
         }
-    }
-
-    public static void TrackFirstShown(WF.Form form, string metricName)
-    {
-        var sw = Stopwatch.StartNew();
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            if (handler is not null)
-                form.Shown -= handler;
-            Log.Info($"Perf {metricName} first show: {sw.ElapsedMilliseconds} ms");
-        };
-        form.Shown += handler;
     }
 
     protected override void OnShown(EventArgs e)

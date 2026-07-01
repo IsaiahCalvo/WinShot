@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using System.IO;
@@ -129,7 +129,7 @@ public sealed class RecordingController
     private async Task StartFlowAsync(bool pickDisplay)
     {
         var dialog = FastRecordingOptionsDialog.Create(_settings.Current);
-        TrackFirstShown(dialog, "record options");
+        PerfLog.TrackFirstShown(dialog, "record options");
         bool isGif;
         bool recordMicrophone;
         bool recordSystemAudio;
@@ -195,7 +195,7 @@ public sealed class RecordingController
             var selector = FastRegionSelectorDialog.Rent(
                 () => Task.Run(() => WindowEnumerator.GetTopLevelWindows()),
                 settings: null);
-            TrackFirstShown(selector, "record selector");
+            PerfLog.TrackFirstShown(selector, "record selector");
             SD.Rectangle region;
             try
             {
@@ -225,7 +225,7 @@ public sealed class RecordingController
         if (countdownSeconds > 0)
         {
             using var countdown = new FastRecordingCountdownWindow(countdownSeconds, screenRect);
-            TrackFirstShown(countdown, "record countdown");
+            PerfLog.TrackFirstShown(countdown, "record countdown");
             if (countdown.ShowDialog() != WF.DialogResult.OK) return;
         }
 
@@ -315,41 +315,11 @@ public sealed class RecordingController
         _bar.ResumeRequested += ResumeRecording;
         _bar.RestartRequested += RestartRecording;
         if (trackBarPerf)
-            TrackFirstShown(_bar, "record control bar");
+            PerfLog.TrackFirstShown(_bar, "record control bar");
         _bar.Show();
 
         IsRecording = true;
         Log.Info($"Recording started ({(_isGif ? "GIF" : "MP4")}) {screenRect}");
-    }
-
-    private static void TrackFirstShown(WF.Form form, string metricName)
-    {
-        var sw = Stopwatch.StartNew();
-        bool logged = false;
-        EventHandler? shownHandler = null;
-        EventHandler? visibleHandler = null;
-
-        void LogOnce()
-        {
-            if (logged) return;
-            logged = true;
-            if (shownHandler is not null)
-                form.Shown -= shownHandler;
-            if (visibleHandler is not null)
-                form.VisibleChanged -= visibleHandler;
-            LogPerf($"{metricName} first show", sw);
-        }
-
-        shownHandler = (_, _) => LogOnce();
-        visibleHandler = (_, _) =>
-        {
-            if (form.Visible)
-                LogOnce();
-        };
-        form.Shown += shownHandler;
-        form.VisibleChanged += visibleHandler;
-        if (form.Visible)
-            LogOnce();
     }
 
     private static void LogPerf(string metricName, Stopwatch sw) =>
@@ -666,7 +636,7 @@ public sealed class RecordingController
                         editor.Show();
                     };
                 var toast = new FastRecordingToastWindow(savedPath, onEdit);
-                FastRecordingToastWindow.TrackFirstShown(toast, "recording toast");
+                PerfLog.TrackFirstShown(toast, "recording toast");
                 toast.Show();
             }
             catch (Exception ex)

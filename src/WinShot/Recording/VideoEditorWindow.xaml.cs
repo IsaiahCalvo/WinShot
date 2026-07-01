@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -490,7 +490,7 @@ public partial class VideoEditorWindow : Window
             var toast = new FastRecordingToastWindow(
                 savedPath,
                 onEdit: () => new VideoEditorWindow(savedPath, _settings, _history).Show());
-            FastRecordingToastWindow.TrackFirstShown(toast, "edited video toast");
+            PerfLog.TrackFirstShown(toast, "edited video toast");
             toast.Show();
         }
         catch (Exception ex)

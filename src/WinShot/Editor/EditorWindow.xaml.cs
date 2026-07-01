@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -3471,7 +3471,7 @@ public partial class EditorWindow : Window
         {
             // FastPinWindow takes ownership of the bitmap and disposes it on close.
             var pin = new WinShot.Pin.FastPinWindow(Flatten(), _settings);
-            WinShot.Pin.FastPinWindow.TrackFirstShown(pin, "editor pin window");
+            PerfLog.TrackFirstShown(pin, "editor pin window");
             pin.Show();
         }
         catch (Exception ex)

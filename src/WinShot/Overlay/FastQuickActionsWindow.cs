@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
@@ -193,19 +192,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             Log.Error("Fast quick actions prewarm failed", ex);
         }
-    }
-
-    public static void TrackFirstShown(WF.Form form, string metricName)
-    {
-        var sw = Stopwatch.StartNew();
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            if (handler is not null)
-                form.Shown -= handler;
-            Log.Info($"Perf {metricName} first show: {sw.ElapsedMilliseconds} ms");
-        };
-        form.Shown += handler;
     }
 
     public static string? PopRecentlyClosed()

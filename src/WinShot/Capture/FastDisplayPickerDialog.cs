@@ -1,5 +1,4 @@
-using System.Diagnostics;
-using WinShot.Core;
+﻿using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -136,7 +135,7 @@ public sealed class FastDisplayPickerDialog : WF.Form
             return screens[0].Bounds;
 
         using var dialog = Create();
-        TrackFirstShown(dialog, "display picker");
+        PerfLog.TrackFirstShown(dialog, "display picker");
         return dialog.ShowDialog() == WF.DialogResult.OK ? dialog.SelectedBounds : null;
     }
 
@@ -215,19 +214,6 @@ public sealed class FastDisplayPickerDialog : WF.Form
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = ButtonHot;
         return button;
-    }
-
-    private static void TrackFirstShown(WF.Form form, string metricName)
-    {
-        var sw = Stopwatch.StartNew();
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            if (handler is not null)
-                form.Shown -= handler;
-            Log.Info($"Perf {metricName} first show: {sw.ElapsedMilliseconds} ms");
-        };
-        form.Shown += handler;
     }
 
     private static class Native

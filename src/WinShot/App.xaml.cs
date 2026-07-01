@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -402,7 +402,7 @@ public partial class App : Application
         try
         {
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
-            TrackFirstShown(selector, mode == FastRegionSelectorDialog.SelectorMode.Window ? "capture-window selector" : "capture-area selector");
+            PerfLog.TrackFirstShown(selector, mode == FastRegionSelectorDialog.SelectorMode.Window ? "capture-window selector" : "capture-area selector");
             try
             {
                 if (await selector.ShowAsync(mode) == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
@@ -544,7 +544,7 @@ public partial class App : Application
             var selector = FastAllInOneSelectorDialog.Rent(CreateWindowListTask, _settings);
             try
             {
-                TrackFirstShown(selector, "all-in-one selector");
+                PerfLog.TrackFirstShown(selector, "all-in-one selector");
                 if (await selector.ShowAsync() != WF.DialogResult.OK || selector.SelectedRegionPx is not SD.Rectangle rp)
                     return;
 
@@ -654,36 +654,6 @@ public partial class App : Application
             new Action(LogOnce));
     }
 
-    private static void TrackFirstShown(WF.Form form, string metricName)
-    {
-        var sw = Stopwatch.StartNew();
-        bool logged = false;
-        EventHandler? shownHandler = null;
-        EventHandler? visibleHandler = null;
-
-        void LogOnce()
-        {
-            if (logged) return;
-            logged = true;
-            if (shownHandler is not null)
-                form.Shown -= shownHandler;
-            if (visibleHandler is not null)
-                form.VisibleChanged -= visibleHandler;
-            LogPerf($"{metricName} first show", sw);
-        }
-
-        shownHandler = (_, _) => LogOnce();
-        visibleHandler = (_, _) =>
-        {
-            if (form.Visible)
-                LogOnce();
-        };
-        form.Shown += shownHandler;
-        form.VisibleChanged += visibleHandler;
-        if (form.Visible)
-            LogOnce();
-    }
-
     private static void LogPerf(string metricName, Stopwatch sw) =>
         Log.Info($"Perf {metricName}: {sw.ElapsedMilliseconds} ms");
 
@@ -748,7 +718,7 @@ public partial class App : Application
                 try
                 {
                     var win = new FastPinWindow(bmp, _settings);
-                    FastPinWindow.TrackFirstShown(win, "pin window");
+                    PerfLog.TrackFirstShown(win, "pin window");
                     win.Show();
                 }
                 catch { bmp.Dispose(); throw; }
@@ -883,7 +853,7 @@ public partial class App : Application
             captureWorkComplete.Task);
         long createMs = sw.ElapsedMilliseconds;
         bool started = false;
-        FastQuickActionsWindow.TrackFirstShown(overlay, "quick actions overlay");
+        PerfLog.TrackFirstShown(overlay, "quick actions overlay");
         overlay.Shown += (_, _) =>
         {
             if (started) return;
@@ -945,7 +915,7 @@ public partial class App : Application
         var sw = Stopwatch.StartNew();
         var overlay = new FastQuickActionsWindow(bmp, _settings, historyPath);
         long createMs = sw.ElapsedMilliseconds;
-        FastQuickActionsWindow.TrackFirstShown(overlay, "quick actions overlay");
+        PerfLog.TrackFirstShown(overlay, "quick actions overlay");
         WireOverlay(overlay);
         long wireMs = sw.ElapsedMilliseconds - createMs;
         overlay.Show();
@@ -1010,7 +980,7 @@ public partial class App : Application
             SD.Bitmap? crop = null;
             SD.Point? anchor = null;
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
-            TrackFirstShown(selector, "ocr selector");
+            PerfLog.TrackFirstShown(selector, "ocr selector");
             try
             {
                 if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
@@ -1110,7 +1080,7 @@ public partial class App : Application
         {
             SD.Rectangle? picked = null;
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
-            TrackFirstShown(selector, "scrolling selector");
+            PerfLog.TrackFirstShown(selector, "scrolling selector");
             try
             {
                 if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle r)
@@ -1182,7 +1152,7 @@ public partial class App : Application
     private void PinFromOverlay(FastQuickActionsWindow overlay)
     {
         var win = new FastPinWindow(overlay.CloneImage(), _settings);
-        FastPinWindow.TrackFirstShown(win, "pin window");
+        PerfLog.TrackFirstShown(win, "pin window");
         win.Show();
         overlay.Close();
     }
@@ -1224,7 +1194,7 @@ public partial class App : Application
         if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
         {
             var win = new FastPinWindow(bmp, _settings);
-            FastPinWindow.TrackFirstShown(win, "pin window");
+            PerfLog.TrackFirstShown(win, "pin window");
             win.Show();
         }
     }

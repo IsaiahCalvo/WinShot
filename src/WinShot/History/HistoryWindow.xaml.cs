@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -595,7 +595,7 @@ public partial class HistoryWindow : Window
         _previewItem = target;
         _preview?.Close();
         var preview = new FastQuickPreviewWindow(target.FilePath);
-        FastQuickPreviewWindow.TrackFirstShown(preview, "history quick preview");
+        PerfLog.TrackFirstShown(preview, "history quick preview");
         _preview = preview;
         _previewOpen = true;
         preview.Closed += (_, _) =>

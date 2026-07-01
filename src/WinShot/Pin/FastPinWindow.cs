@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using WinShot.Core;
@@ -166,19 +165,6 @@ public sealed class FastPinWindow : WF.Form
         {
             Log.Error("Fast pin prewarm failed", ex);
         }
-    }
-
-    public static void TrackFirstShown(WF.Form form, string metricName)
-    {
-        var sw = Stopwatch.StartNew();
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            if (handler is not null)
-                form.Shown -= handler;
-            Log.Info($"Perf {metricName} first show: {sw.ElapsedMilliseconds} ms");
-        };
-        form.Shown += handler;
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)

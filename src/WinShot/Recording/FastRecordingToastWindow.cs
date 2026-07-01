@@ -115,19 +115,6 @@ public sealed class FastRecordingToastWindow : WF.Form
         }
     }
 
-    public static void TrackFirstShown(WF.Form form, string metricName)
-    {
-        var sw = Stopwatch.StartNew();
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            if (handler is not null)
-                form.Shown -= handler;
-            Log.Info($"Perf {metricName} first show: {sw.ElapsedMilliseconds} ms");
-        };
-        form.Shown += handler;
-    }
-
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
