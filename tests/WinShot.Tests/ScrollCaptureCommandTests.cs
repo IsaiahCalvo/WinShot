@@ -6,17 +6,14 @@ namespace WinShot.Tests;
 public class ScrollCaptureCommandTests
 {
     [Fact]
-    public void ChoiceForCommand_ReturnsHorizontalAutoChoice()
+    public void DirectionForCommand_ReturnsHorizontalPreset()
     {
-        var choice = ScrollCaptureCommand.ChoiceForCommand("scroll-horizontal");
-
-        Assert.Equal(ScrollCaptureMode.Auto, choice?.Mode);
-        Assert.Equal(ScrollDirection.Horizontal, choice?.Direction);
+        Assert.Equal(ScrollDirection.Horizontal, ScrollCaptureCommand.DirectionForCommand("scroll-horizontal"));
     }
 
     [Fact]
-    public void ChoiceForCommand_ReturnsNullForChooserCommand()
+    public void DirectionForCommand_ReturnsNullForAutoDetect()
     {
-        Assert.Null(ScrollCaptureCommand.ChoiceForCommand("scrolling"));
+        Assert.Null(ScrollCaptureCommand.DirectionForCommand("scrolling"));
     }
 }

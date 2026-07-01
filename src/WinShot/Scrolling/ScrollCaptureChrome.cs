@@ -14,6 +14,8 @@ namespace WinShot.Scrolling;
 internal static class CaptureExclusion
 {
     private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
+    private const uint LWA_ALPHA = 0x2;
+    internal const int WS_EX_LAYERED = 0x00080000;
 
     public static void Apply(IntPtr hwnd)
     {
@@ -21,8 +23,25 @@ internal static class CaptureExclusion
         catch { /* pre-2004 Windows: no exclusion available; non-fatal */ }
     }
 
+    /// <summary>
+    /// Display affinity covers WGC/Desktop Duplication but is not guaranteed for plain
+    /// BitBlt — which is exactly what the scrolling frame grab uses. The grab omits
+    /// CAPTUREBLT, so LAYERED windows are skipped by construction: marking the chrome
+    /// layered (at full opacity) makes its exclusion from the stitch deterministic.
+    /// Call from OnHandleCreated on a form whose CreateParams include WS_EX_LAYERED.
+    /// </summary>
+    public static void ApplyLayeredOpaque(IntPtr hwnd)
+    {
+        Apply(hwnd);
+        try { SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA); }
+        catch { /* worst case the window renders without the layered style */ }
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 }
 
 /// <summary>
@@ -151,22 +170,31 @@ public sealed class ScrollDimOverlay : WF.Form
 }
 
 /// <summary>
-/// Small Cancel / Done bar shown next to the capture region (replaces the old "Stop" pill).
-/// Placed just below the region; flips above when the region runs to the bottom of the
-/// screen, and tucks inside the bottom of the region when it spans the full screen height.
-/// Never activates (wheel keeps reaching the content) and is excluded from capture.
-/// Done keeps the stitched result; Cancel discards it.
+/// CleanShot-style controls bar shown next to the capture region. Before capture:
+/// Start Capture / Auto-Scroll / Cancel. During: live status (or a persistent amber hint),
+/// the Auto-Scroll toggle, Done and Cancel. Placed just below the region; flips above when
+/// the region runs to the bottom of the screen, and tucks inside the bottom of the region
+/// when it spans the full screen height. Never activates (wheel keeps reaching the content)
+/// and is excluded from capture. Done keeps the stitched result; Cancel and Esc discard it.
 /// </summary>
 public sealed class ScrollControlsBar : WF.Form
 {
     public event Action? CancelRequested;
     public event Action? DoneRequested;
+    public event Action? StartRequested;
+    /// <summary>Fires with the new autopilot state; clicking Auto-Scroll before Start also starts.</summary>
+    public event Action<bool>? AutoScrollToggled;
 
     private readonly WF.Label _status;
+    private readonly WF.Button _start;
+    private readonly WF.Button _auto;
+    private readonly WF.Button _done;
     private readonly SD.Rectangle _region;
-    private bool _tooFast; // a "scroll slower" warning is showing; it overrides live status text
+    private bool _started;
+    private bool _autoOn;
+    private ScrollHint _hint = ScrollHint.None; // a persistent hint overrides live status text
 
-    // Amber warning — the palette only has red (error); "slow down" is a nudge, not an error.
+    // Amber warning — the palette only has red (error); these are nudges, not errors.
     private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
 
     public ScrollControlsBar(SD.Rectangle regionScreen)
@@ -178,16 +206,16 @@ public sealed class ScrollControlsBar : WF.Form
         BackColor = ThemePalette.Elevated;
         Padding = new WF.Padding(12, 8, 12, 8);
 
-        // Fixed width so the live status text ("Captured 12 frames - 4000px") never grows the
+        // Fixed width so the live status text ("12 frames — 4000px") never grows the
         // bar mid-capture (which would otherwise leave the rounded region stale and clip Done).
         _status = new WF.Label
         {
             AutoSize = false,
-            Size = new SD.Size(230, 24),
+            Size = new SD.Size(250, 24),
             AutoEllipsis = true,
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(9f),
-            Text = "Scrolling capture…",
+            Text = "Scroll capture ready",
             TextAlign = SD.ContentAlignment.MiddleLeft,
             Anchor = WF.AnchorStyles.None,
         };
@@ -195,21 +223,30 @@ public sealed class ScrollControlsBar : WF.Form
         var cancel = MakeButton("Cancel", ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
         cancel.Click += (_, _) => CancelRequested?.Invoke();
 
-        var done = MakeButton("Done", ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
-        done.Click += (_, _) => DoneRequested?.Invoke();
+        _auto = MakeButton("Auto-Scroll", ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
+        _auto.Click += (_, _) => ToggleAuto();
+
+        _start = MakeButton("Start Capture", ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
+        _start.Click += (_, _) => Start();
+
+        _done = MakeButton("Done", ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
+        _done.Visible = false;
+        _done.Click += (_, _) => DoneRequested?.Invoke();
 
         var table = new WF.TableLayoutPanel
         {
             AutoSize = true,
             AutoSizeMode = WF.AutoSizeMode.GrowAndShrink,
-            ColumnCount = 3,
+            ColumnCount = 5,
             RowCount = 1,
             Dock = WF.DockStyle.Fill,
             BackColor = SD.Color.Transparent,
         };
         table.Controls.Add(_status, 0, 0);
-        table.Controls.Add(cancel, 1, 0);
-        table.Controls.Add(done, 2, 0);
+        table.Controls.Add(_auto, 1, 0);
+        table.Controls.Add(_start, 2, 0);
+        table.Controls.Add(_done, 3, 0);
+        table.Controls.Add(cancel, 4, 0);
 
         Controls.Add(table);
         AutoSize = true;
@@ -221,37 +258,69 @@ public sealed class ScrollControlsBar : WF.Form
             ApplyRoundedRegion(Width, Height, 12);
             PositionNear(_region);
         };
-        // Re-round AND re-center when the bar resizes (e.g. the Recover button appears/disappears),
-        // so it never clips the content or drifts off-center.
+        // Re-round AND re-center when the bar resizes (Start swaps to Done), so it never
+        // clips the content or drifts off-center.
         SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, 12); PositionNear(_region); };
     }
 
     protected override bool ShowWithoutActivation => true;
 
+    protected override WF.CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= CaptureExclusion.WS_EX_LAYERED; // BitBlt-proof exclusion from the stitch
+            return cp;
+        }
+    }
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        CaptureExclusion.Apply(Handle);
+        CaptureExclusion.ApplyLayeredOpaque(Handle);
+    }
+
+    private void Start()
+    {
+        if (_started) return;
+        _started = true;
+        _start.Visible = false;
+        _done.Visible = true;
+        StartRequested?.Invoke();
+    }
+
+    private void ToggleAuto()
+    {
+        _autoOn = !_autoOn;
+        _auto.Text = _autoOn ? "Pause Auto" : "Auto-Scroll";
+        if (_autoOn && !_started)
+            Start();
+        AutoScrollToggled?.Invoke(_autoOn);
     }
 
     public void SetStatus(string text)
     {
-        if (IsDisposed || _tooFast) return; // the warning takes precedence over live status
+        if (IsDisposed || _hint != ScrollHint.None) return; // hints take precedence
         _status.ForeColor = ThemePalette.TextSecondary;
         _status.Text = text;
     }
 
-    /// <summary>Shows/clears an amber "scroll slower" warning that overrides the live status text
-    /// until cleared (the next <see cref="SetStatus"/> repaints normal text once cleared).</summary>
-    public void SetTooFast(bool on)
+    /// <summary>Shows a persistent amber hint that overrides the live status text until the
+    /// service clears it (the next <see cref="SetStatus"/> repaints normal text once cleared).</summary>
+    public void SetHint(ScrollHint hint)
     {
         if (IsDisposed) return;
-        _tooFast = on;
-        if (on)
+        _hint = hint;
+        if (hint == ScrollHint.None) return;
+        _status.ForeColor = WarnColor;
+        _status.Text = hint switch
         {
-            _status.ForeColor = WarnColor;
-            _status.Text = "⚠ Too fast — scroll a little slower";
-        }
+            ScrollHint.SlowDown => "⚠ Please slow down — scroll back up a little",
+            ScrollHint.AlreadyCaptured => "Already captured — scroll down to continue",
+            ScrollHint.MoveCursorIntoArea => "Move cursor into the area to auto-scroll",
+            _ => _status.Text,
+        };
     }
 
     private static WF.Button MakeButton(string text, SD.Color back, SD.Color fore, SD.Color hover)
@@ -353,10 +422,20 @@ public sealed class ScrollPreviewPanel : WF.Form
 
     protected override bool ShowWithoutActivation => true;
 
+    protected override WF.CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= CaptureExclusion.WS_EX_LAYERED; // BitBlt-proof exclusion from the stitch
+            return cp;
+        }
+    }
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        CaptureExclusion.Apply(Handle);
+        CaptureExclusion.ApplyLayeredOpaque(Handle);
     }
 
     /// <summary>Takes ownership of <paramref name="image"/> (disposes the previous one).</summary>

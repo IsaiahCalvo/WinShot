@@ -347,7 +347,7 @@ public partial class App : Application
             case "all-in-one": AllInOneFlow(); break;
             case "ocr": OcrFlow(); break;
             case "scrolling": ScrollingFlow(); break;
-            case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.ChoiceForCommand(cmd)); break;
+            case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
         }
     }
@@ -1076,7 +1076,7 @@ public partial class App : Application
         }
     }
 
-    private async void ScrollingFlow(ScrollCaptureChoice? choice = null)
+    private async void ScrollingFlow(ScrollDirection? direction = null)
     {
         if (_captureInProgress) return;
         _captureInProgress = true;
@@ -1098,7 +1098,7 @@ public partial class App : Application
 
             await WaitForOverlayDismissAsync();
             region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
-            var stitched = await ScrollingStatusWindow.Run(region, choice);
+            var stitched = await ScrollingStatusWindow.Run(region, direction);
             if (stitched is not null)
                 HandleCapture(stitched);
             else

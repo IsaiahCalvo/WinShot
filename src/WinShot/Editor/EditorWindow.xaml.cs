@@ -422,7 +422,10 @@ public partial class EditorWindow : Window
 
         const double margin = 24;
         double fit = Math.Min((vw - margin * 2) / _source.Width, (vh - margin * 2) / _source.Height);
-        _zoom = Math.Clamp(Math.Min(fit, 1.0), MinZoom, MaxZoom);
+        // Fit may legitimately need to go below MinZoom (a 32000px scroll capture in a 650px
+        // viewport fits at ~0.02) — clamping it to MinZoom left only the middle band visible,
+        // which read as "the editor clipped my capture". MinZoom still floors user zooming.
+        _zoom = Math.Clamp(Math.Min(fit, 1.0), Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
         ViewTranslate.Y = Math.Round((vh - _source.Height * _zoom) / 2);
@@ -442,7 +445,9 @@ public partial class EditorWindow : Window
         if (vw < 1 || vh < 1 || _source.Width < 1 || _source.Height < 1) return;
 
         const double margin = 24;
-        _zoom = Math.Clamp(Math.Min((vw - margin * 2) / _source.Width, 1.0), MinZoom, MaxZoom);
+        double fitW = (vw - margin * 2) / _source.Width;
+        // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
+        _zoom = Math.Clamp(Math.Min(fitW, 1.0), Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
         ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
@@ -482,10 +487,12 @@ public partial class EditorWindow : Window
 
     private void OnViewportMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        _pendingInitialFit = false; // user is navigating — stop auto-refitting on resize
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
-            // Ctrl+wheel zooms around the cursor.
+            // Ctrl+wheel zooms around the cursor (ZoomAt clears _pendingInitialFit). A plain
+            // scroll must NOT clear it: one stray wheel tick during the just-opened window's
+            // toolbar layout would otherwise permanently cancel the pending refit and freeze
+            // a bottom-clipped view of a tall capture.
             ZoomAt(e.GetPosition(Viewport), _zoom * Math.Pow(1.2, e.Delta / 120.0));
         }
         else if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)

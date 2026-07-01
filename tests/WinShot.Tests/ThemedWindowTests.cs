@@ -65,7 +65,6 @@ public class ThemedWindowTests
                 ShowAndClose(new VideoEditorWindow(previewFile.Path, settings, history));
 
                 CreatePrivateForm<FastDisplayPickerDialog>().Close();
-                CreatePrivate<ScrollingModeDialog>().Close();
                 ShowAndClose(new ScrollDimOverlay(new SD.Rectangle(20, 20, 160, 120)));
                 ShowAndClose(new ScrollControlsBar(new SD.Rectangle(20, 20, 160, 120)));
                 ShowAndClose(new ScrollPreviewPanel(new SD.Rectangle(20, 20, 160, 120)));

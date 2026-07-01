@@ -1,44 +1,42 @@
+using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
-using WF = System.Windows.Forms;
 
 namespace WinShot.Scrolling;
 
 /// <summary>
-/// Orchestrates the scrolling-capture UI: a CleanShot-style dim overlay that keeps the
-/// captured region bright (so you see exactly what's being captured while you scroll the
-/// live content under it), plus a small Cancel / Done bar next to that region. Done keeps
-/// the stitched result; Cancel discards it; Esc (polled by the service) also finishes.
+/// Orchestrates the scrolling-capture UI, mirroring CleanShot's flow: a dim overlay keeps
+/// the captured region bright, a controls bar offers Start Capture / Auto-Scroll / Done /
+/// Cancel, and a live preview panel shows the stitch growing. Capture is armed only when
+/// the user clicks Start Capture (or Auto-Scroll, which starts with autopilot on), so they
+/// can position the page first. Done keeps the stitched result; Cancel and Esc discard it.
 /// </summary>
 public static class ScrollingStatusWindow
 {
     /// <summary>
-    /// Asks the user whether WinShot should auto-scroll or they will scroll themselves (and
-    /// in which direction), shows the dim overlay + controls around <paramref name="screenRegion"/>
-    /// (physical screen coordinates), runs the scrolling capture and tears the chrome down when
-    /// done. Must be called on the UI thread. Returns the stitched bitmap (caller owns disposal),
-    /// or null if nothing was captured, the chooser was cancelled, or the user pressed Cancel.
+    /// Shows the chrome around <paramref name="screenRegion"/> (physical screen coordinates),
+    /// runs the scrolling capture and tears the chrome down when done. Must be called on the
+    /// UI thread. Returns the stitched bitmap (caller owns disposal), or null when nothing was
+    /// captured or the user cancelled. <paramref name="presetDirection"/> forces an axis
+    /// (the scroll-horizontal command); null auto-detects from the first movement.
     /// </summary>
-    public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollCaptureChoice? presetChoice = null)
+    public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null)
     {
-        ScrollCaptureChoice choice;
-        if (presetChoice is ScrollCaptureChoice preset)
-            choice = preset;
-        else if (ScrollingModeDialog.Choose() is ScrollCaptureChoice picked)
-            choice = picked;
-        else
-            return null; // cancelled at the mode chooser
-
         using var cts = new CancellationTokenSource();
         bool cancelled = false;
+        var autoFlag = new bool[1]; // written on the UI thread, read by the capture thread
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var overlay = new ScrollDimOverlay(screenRegion);
         var preview = new ScrollPreviewPanel(screenRegion);
         var controls = new ScrollControlsBar(screenRegion);
+        controls.StartRequested += () => started.TrySetResult(true);
+        controls.AutoScrollToggled += on => Volatile.Write(ref autoFlag[0], on);
         controls.DoneRequested += () => { try { cts.Cancel(); } catch { /* already torn down */ } };
         controls.CancelRequested += () =>
         {
             cancelled = true;
+            started.TrySetResult(false);
             try { cts.Cancel(); } catch { /* already torn down */ }
         };
 
@@ -50,14 +48,27 @@ public static class ScrollingStatusWindow
 
         try
         {
+            // Wait for Start Capture / Auto-Scroll; Esc cancels while waiting.
+            while (!started.Task.IsCompleted)
+            {
+                if ((GetAsyncKeyState(VkEscape) & 0x8000) != 0)
+                {
+                    cancelled = true;
+                    break;
+                }
+                await Task.Delay(50);
+            }
+            if (cancelled || !await started.Task)
+                return null;
+
             SD.Bitmap? result = await ScrollingCaptureService.RunAsync(
                 screenRegion,
-                choice.Mode,
-                choice.Direction,
+                presetDirection,
+                () => Volatile.Read(ref autoFlag[0]),
                 text => MarshalStatus(controls, text),
+                hint => MarshalHint(controls, hint),
                 cts.Token,
-                thumb => PushPreview(preview, thumb),
-                on => MarshalTooFast(controls, on));
+                thumb => PushPreview(preview, thumb));
 
             if (cancelled)
             {
@@ -80,26 +91,21 @@ public static class ScrollingStatusWindow
     }
 
     /// <summary>
-    /// The live-stitch snapshot arrives on a capture thread and is disposed the moment this
-    /// returns, so clone it synchronously here, then hand the clone to the preview panel
-    /// (which takes ownership) on its UI thread.
+    /// The live-stitch snapshot arrives on a capture thread with ownership transferred here;
+    /// hand it to the preview panel (which takes ownership) on its UI thread.
     /// </summary>
     private static void PushPreview(ScrollPreviewPanel preview, SD.Bitmap thumb)
     {
-        SD.Bitmap clone;
-        try { clone = (SD.Bitmap)thumb.Clone(); }
-        catch { return; }
-
         try
         {
             if (!preview.IsDisposed && preview.IsHandleCreated)
-                preview.BeginInvoke(new Action(() => preview.SetImage(clone, "Capturing…")));
+                preview.BeginInvoke(new Action(() => preview.SetImage(thumb, "Capturing…")));
             else
-                clone.Dispose();
+                thumb.Dispose();
         }
         catch
         {
-            clone.Dispose();
+            thumb.Dispose();
         }
     }
 
@@ -118,18 +124,23 @@ public static class ScrollingStatusWindow
         }
     }
 
-    /// <summary>"Scroll slower" toggle from the capture thread; hop to the controls bar's UI thread.</summary>
-    private static void MarshalTooFast(ScrollControlsBar controls, bool on)
+    /// <summary>Guidance hints from the capture thread; hop to the controls bar's UI thread.</summary>
+    private static void MarshalHint(ScrollControlsBar controls, ScrollHint hint)
     {
         try
         {
             if (controls.IsDisposed) return;
             if (controls.IsHandleCreated)
-                controls.BeginInvoke(new Action(() => controls.SetTooFast(on)));
+                controls.BeginInvoke(new Action(() => controls.SetHint(hint)));
         }
         catch
         {
-            // The capture can end while a warning toggle is in flight; ignore.
+            // The capture can end while a hint toggle is in flight; ignore.
         }
     }
+
+    private const int VkEscape = 0x1B;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 }

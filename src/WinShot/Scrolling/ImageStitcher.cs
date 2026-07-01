@@ -11,24 +11,11 @@ namespace WinShot.Scrolling;
 /// </summary>
 public static class ImageStitcher
 {
-    private const ulong FnvOffsetBasis = 14695981039346656037UL;
-    private const ulong FnvPrime = 1099511628211UL;
+    internal const ulong FnvOffsetBasis = 14695981039346656037UL;
+    internal const ulong FnvPrime = 1099511628211UL;
 
     /// <summary>Minimum absolute number of matching rows required to accept an offset.</summary>
     private const int MinMatchedRows = 24;
-
-    /// <summary>Minimum absolute number of matching columns required to accept a horizontal offset.</summary>
-    private const int MinMatchedCols = 24;
-
-    /// <summary>Minimum fraction of compared rows/columns that must match to accept an offset.</summary>
-    private const double MinMatchedFraction = 0.3;
-
-    /// <summary>
-    /// Minimum number of DISTINCTIVE (non-repeated) matched rows/columns required to accept
-    /// an offset. Guards against locking onto a wrong alignment dominated by identical blank
-    /// rows that all share one hash (e.g. a tall whitespace band).
-    /// </summary>
-    private const int MinDistinctiveMatchedRows = 8;
 
     /// <summary>
     /// Returns how many pixels the content moved UP between <paramref name="previous"/> and
@@ -53,8 +40,24 @@ public static class ImageStitcher
         if (previous.Width != current.Width || previous.Height != current.Height)
             return 0;
 
-        int height = previous.Height;
-        if (height < 2 || previous.Width < 1)
+        if (previous.Height < 2 || previous.Width < 1)
+            return 0;
+
+        return FindScrollOffsetFromHashes(ComputeRowHashes(previous), ComputeRowHashes(current), topBand, bottomBand);
+    }
+
+    /// <summary>
+    /// Core of <see cref="FindScrollOffset(SD.Bitmap, SD.Bitmap, int, int)"/> operating on
+    /// precomputed row hashes, so callers that cache a <see cref="FrameSignature"/> per frame
+    /// never hash the same bitmap twice.
+    /// </summary>
+    public static int FindScrollOffsetFromHashes(ulong[] prevHashes, ulong[] currHashes, int topBand, int bottomBand)
+    {
+        if (prevHashes.Length != currHashes.Length)
+            return 0;
+
+        int height = currHashes.Length;
+        if (height < 2)
             return 0;
 
         // The scrollable content lives between the sticky bands. Clamp defensively.
@@ -64,9 +67,6 @@ public static class ImageStitcher
         int contentEnd = height - bottom; // exclusive
         if (contentEnd - contentStart < 2)
             return 0;
-
-        ulong[] prevHashes = ComputeRowHashes(previous);
-        ulong[] currHashes = ComputeRowHashes(current);
 
         // Rows whose hash appears only once within the (banded) content window are
         // "distinctive"; rows whose hash repeats (blank/whitespace runs) are not. We
@@ -177,8 +177,15 @@ public static class ImageStitcher
         if (previous.Width != current.Width || previous.Height != current.Height)
             return 0;
 
-        ulong[] prev = ComputeRowHashes(previous);
-        ulong[] curr = ComputeRowHashes(current);
+        return DetectConstantBottomBandFromHashes(ComputeRowHashes(previous), ComputeRowHashes(current));
+    }
+
+    /// <summary>Hash-array core of <see cref="DetectConstantBottomBand"/> for signature-caching callers.</summary>
+    public static int DetectConstantBottomBandFromHashes(ulong[] prev, ulong[] curr)
+    {
+        if (prev.Length != curr.Length)
+            return 0;
+
         int height = prev.Length;
         int band = 0;
         while (band < height && prev[height - 1 - band] == curr[height - 1 - band])
@@ -206,49 +213,24 @@ public static class ImageStitcher
     /// <summary>
     /// Horizontal counterpart of <see cref="FindScrollOffset"/>: returns how many pixels
     /// the content moved LEFT between <paramref name="previous"/> and <paramref name="current"/>
-    /// (0 = no movement detected). Columns are compared via 64-bit hashes; the offset
-    /// maximizing matched columns wins, but only if at least 30% of the compared columns
-    /// match and no fewer than 24 columns match — otherwise 0 is returned. The top and
-    /// bottom 5% of each column are excluded from the hash, where horizontal scrollbars
-    /// (which move differently from content) live.
+    /// (0 = no movement detected). Uses the same longest-distinctive-run selection as the
+    /// vertical matcher (the old scattered-total-matches rule let gridline-periodic content —
+    /// spreadsheets, tables — lock onto a wrong offset). The top and bottom margins of each
+    /// column (same clamp formula as rows, min 50px) are excluded from the hash, where
+    /// horizontal scrollbars live.
     /// </summary>
     public static int FindScrollOffsetHorizontal(SD.Bitmap previous, SD.Bitmap current)
     {
         if (previous.Width != current.Width || previous.Height != current.Height)
             return 0;
 
-        int width = previous.Width;
-        if (width < 2 || previous.Height < 1)
+        if (previous.Width < 2 || previous.Height < 1)
             return 0;
 
         ulong[] prevHashes = ComputeColumnHashes(previous);
         ulong[] currHashes = ComputeColumnHashes(current);
-        if (HashesMatchAtSamePosition(prevHashes, currHashes))
-            return 0;
-
-        int bestOffset = 0;
-        int bestMatches = 0;
-        for (int offset = 1; offset < width; offset++)
-        {
-            int compared = width - offset;
-            if (compared < MinMatchedCols)
-                break; // even a perfect match cannot reach the column floor
-
-            int matches = 0;
-            for (int x = 0; x < compared; x++)
-            {
-                if (prevHashes[x + offset] == currHashes[x])
-                    matches++;
-            }
-
-            if (matches >= MinMatchedCols && matches >= compared * MinMatchedFraction && matches > bestMatches)
-            {
-                bestMatches = matches;
-                bestOffset = offset;
-            }
-        }
-
-        return bestOffset;
+        // Same run-based selection as vertical; columns play the role of rows.
+        return FindScrollOffsetFromHashes(prevHashes, currHashes, 0, 0);
     }
 
     /// <summary>
@@ -402,7 +384,9 @@ public static class ImageStitcher
     private static ulong[] ComputeColumnHashes(SD.Bitmap bmp)
     {
         int width = bmp.Width, height = bmp.Height;
-        int margin = height / 20; // 5% top + bottom, where horizontal scrollbars live
+        // Same clamp formula as rows (min 50px) so a horizontal scrollbar inside a short
+        // region can't poison every column hash.
+        int margin = Math.Min(Math.Max(50, height / 20), height / 3);
         int startY = margin, endY = height - margin;
         if (endY <= startY) // degenerate height: hash the whole column
         {
@@ -441,6 +425,10 @@ public static class ImageStitcher
             bmp.UnlockBits(data);
         }
     }
+
+    /// <summary>Row blit exposed for the capture service's amortized stitch buffer.</summary>
+    internal static void CopyRowsInto(SD.Bitmap source, int sourceY, int rowCount, SD.Bitmap dest, int destY)
+        => CopyRows(source, sourceY, rowCount, dest, destY);
 
     private static void CopyRows(SD.Bitmap source, int sourceY, int rowCount, SD.Bitmap dest, int destY)
     {

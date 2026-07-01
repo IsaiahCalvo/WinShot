@@ -4,375 +4,777 @@ using SD = System.Drawing;
 
 namespace WinShot.Scrolling;
 
+/// <summary>Persistent guidance shown in the controls bar during a scrolling capture.</summary>
+public enum ScrollHint
+{
+    None,
+    /// <summary>Frames stopped aligning (scrolled too fast / blank gap). Scrolling back up
+    /// over captured content re-locks the capture and appending resumes.</summary>
+    SlowDown,
+    /// <summary>The live frame sits entirely over already-captured content (user scrolled
+    /// back up). Nothing is appended until they scroll past the capture's end again.</summary>
+    AlreadyCaptured,
+    /// <summary>Auto-scroll is paused because the cursor left the capture region
+    /// (wheel input goes to whatever is under the cursor — CleanShot behaves the same).</summary>
+    MoveCursorIntoArea,
+}
+
 /// <summary>
-/// Repeatedly captures a fixed screen region and stitches the frames into one
-/// tall image (or one wide image for <see cref="ScrollDirection.Horizontal"/>).
-/// In <see cref="ScrollCaptureMode.Auto"/> it also sends wheel-scroll input to
-/// the content under the region; in <see cref="ScrollCaptureMode.Manual"/>
-/// it only watches while the user scrolls themselves. The whole loop runs on the
-/// thread pool; the status callback fires on a thread-pool thread, so UI consumers
-/// must marshal via their Dispatcher.
+/// Repeatedly captures a fixed screen region and stitches the frames into one tall image
+/// (or one wide image for <see cref="ScrollDirection.Horizontal"/>). The user scrolls the
+/// content themselves; when <paramref name="autoScroll"/> reads true the service also injects
+/// wheel input (only while the cursor is inside the region, mirroring CleanShot's Auto-Scroll).
+/// Matching runs exact row hashing first and falls back to gradient-profile correlation
+/// (<see cref="ScrollMatcher"/>), so browsers that re-rasterize text on scroll still align.
+/// When alignment is lost, the frame is re-located against the WHOLE stitched canvas — so
+/// scrolling back up re-syncs the capture instead of silently dropping the span, and scrolling
+/// over already-captured content never duplicates rows. Sticky footers are detected and
+/// excluded from every seam, then re-attached once at the end.
+/// The loop runs on the thread pool; all callbacks fire on thread-pool threads.
 /// </summary>
 public static class ScrollingCaptureService
 {
-    private const int MaxIterations = 60;
     private const int MaxStitchedHeight = 32000;
     private const int MaxStitchedWidth = 32000;
-    private const int ScrollSettleMs = 400;
-    private const int WheelDelta = 120;
-    private const int ScrollNotchesPerStep = -3; // negative = scroll down (content moves up)
-    private const int HorizontalScrollNotchesPerStep = 3; // positive = scroll right (content moves left)
+    private const int VeryLargeThreshold = 24000;
 
-    /// <summary>Auto mode: how many times to re-capture, waiting for the frame to settle
-    /// (two consecutive identical captures) before measuring a scroll offset. Guards against
-    /// reading mid-animation / mid-lazy-load and mistaking the transient for end-of-content.</summary>
-    private const int StabilizeAttempts = 3;
+    /// <summary>Manual mode: pause between polls. Frame hashing + matching costs ~20-60ms on
+    /// top of this, so the real cadence is ~10 grabs/sec — canvas re-locking (not cadence)
+    /// is what makes fast flicks recoverable.</summary>
+    private const int ManualPollMs = 60;
 
-    /// <summary>Auto mode: pause between stabilization re-captures.</summary>
+    /// <summary>Auto mode: wait after injecting wheel input before sampling the frame.</summary>
+    private const int AutoSettleMs = 350;
+
+    /// <summary>Auto mode: re-captures while waiting for the frame to settle (animations,
+    /// lazy-load) — two consecutive identical grabs = settled.</summary>
+    private const int StabilizeAttempts = 4;
     private const int StabilizePollMs = 120;
 
-    /// <summary>Longest live-preview thumbnail edge (px); the snapshot is downscaled to fit.</summary>
-    private const int PreviewMaxEdge = 220;
+    /// <summary>Auto mode: consecutive identical frames after a scroll = end of content.
+    /// 3 (not 2) so a lazy-loading page gets ~2 extra seconds to produce new content.</summary>
+    private const int EndOfContentStreak = 3;
 
-    /// <summary>
-    /// Manual mode: how often the region is re-captured and checked for movement. Must be fast
-    /// enough that a normal-to-fast user scroll still leaves overlap between consecutive frames
-    /// (the stitcher needs that overlap to align them) — if a flick moves more than a full frame
-    /// height between grabs there's nothing to align and that span is lost. ShareX/odd-snap beat
-    /// this by over-sampling; ~33 grabs/sec (BitBlt is cheap, the preview is throttled separately)
-    /// keeps overlap even for fast flicks, and it only runs during an active capture.
-    /// </summary>
-    private const int ManualPollMs = 30;
+    /// <summary>Auto mode: consecutive unalignable (but changing) frames before giving up.</summary>
+    private const int MaxAutoMisses = 3;
 
-    /// <summary>Manual mode: minimum gap between live-preview refreshes. The preview downscales the
-    /// WHOLE growing stitch, which gets costly as it grows tall; refreshing it every frame would
-    /// inflate the real capture interval (and shrink overlap). Capture fast, preview lazily.</summary>
+    private const int WheelDelta = 120;
+    private const int ManualTimeoutMs = 10 * 60 * 1000;
     private const int PreviewThrottleMs = 150;
 
-    /// <summary>Manual mode: consecutive frames that moved but couldn't be aligned (scrolled faster
-    /// than a frame) before we tell the user to slow down. One miss is a benign blip; two in a row
-    /// means they're outrunning the capture.</summary>
-    private const int TooFastStreakForWarning = 2;
-
-
-    /// <summary>Manual mode: generous overall cap so an abandoned capture eventually ends.</summary>
-    private const int ManualTimeoutMs = 10 * 60 * 1000;
-
     /// <summary>
-    /// Runs a scrolling capture for <paramref name="screenRegion"/> (physical screen
-    /// coordinates) and returns whatever was stitched so far (null only if nothing
-    /// was captured). <paramref name="direction"/> picks the axis: vertical grows the
-    /// stitch downward, horizontal grows it rightward (capped at 32000px width).
-    /// Auto mode: sends wheel-scroll input (vertical wheel, or horizontal wheel for
-    /// horizontal captures) and stops at the content end (no movement detected twice
-    /// in a row), on cancellation, on Esc, after 60 iterations, or at the 32000px
-    /// stitched height/width cap.
-    /// Manual mode: never scrolls or moves the cursor — it just re-captures every
-    /// ~300 ms and appends whenever forward (down/right) movement is detected. Pauses
-    /// are fine (zero offset never ends the capture); backward scrolls are ignored.
-    /// Ends only on cancellation, Esc, the 32000px cap, or a 10-minute timeout.
+    /// Runs a scrolling capture over <paramref name="screenRegion"/> (physical screen
+    /// coordinates). <paramref name="presetDirection"/> null = auto-detect from the first
+    /// aligned movement. Returns the stitched bitmap, or null when cancelled (Esc) or when
+    /// nothing was captured. Cancelling <paramref name="ct"/> finalizes with the result so
+    /// far (the Done button); Esc discards.
     /// </summary>
-    public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion, ScrollCaptureMode mode,
-        ScrollDirection direction, Action<string> status, CancellationToken ct,
-        Action<SD.Bitmap>? preview = null, Action<bool>? tooFast = null)
+    public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion,
+        ScrollDirection? presetDirection, Func<bool> autoScroll, Action<string> status,
+        Action<ScrollHint> hint, CancellationToken ct, Action<SD.Bitmap>? preview = null,
+        Func<SD.Rectangle, SD.Bitmap>? frameSource = null)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
 
-        bool manual = mode == ScrollCaptureMode.Manual;
-        bool horizontal = direction == ScrollDirection.Horizontal;
-
-        return await Task.Run(async () =>
+        return await Task.Run(() =>
         {
-            SD.Bitmap? stitched = null;
-            SD.Bitmap? previous = null;
             try
             {
-                int frames = 0;
-                int stitchedFrames = 0;
-                int zeroOffsetStreak = 0;
-                int tooFastStreak = 0;          // consecutive frames that moved but couldn't align
-                bool warnedTooFast = false;     // a "slow down" warning is currently showing
-                bool hitIterationCap = false;   // ran out of iterations while still moving
-                bool reachedContentEnd = false; // genuine no-movement bottom (auto only)
-                bool alignmentLost = false;     // scrolled but frames couldn't align (overlap too small)
-                var elapsed = System.Diagnostics.Stopwatch.StartNew();
-                var previewClock = System.Diagnostics.Stopwatch.StartNew();
-
-                for (int i = 0; manual ? elapsed.ElapsedMilliseconds < ManualTimeoutMs : i < MaxIterations; i++)
-                {
-                    if (ShouldStop(ct))
-                        break;
-
-                    // Auto mode: wait for the freshly-scrolled region to stabilize (two
-                    // consecutive identical captures) before measuring, so animations and
-                    // lazy-loaded content settle and aren't mistaken for end-of-content.
-                    // Deterministic GDI BitBlt (not WGC): consecutive grabs of unchanged content
-                    // are byte-identical, which the exact row-hash matcher relies on, and it
-                    // already excludes layered windows (our dim overlay). WGC can return subtly
-                    // different pixels frame-to-frame, which breaks the match. (odd-snap/ShareX
-                    // use BitBlt for exactly this reason.)
-                    var frame = manual
-                        ? CaptureService.CaptureScreenRegionWithoutLayeredWindows(screenRegion)
-                        : await CaptureStableFrameAsync(screenRegion, ct).ConfigureAwait(false);
-                    frames++;
-
-                    if (stitched is null)
-                    {
-                        stitched = frame;
-                        previous = (SD.Bitmap)frame.Clone();
-                        stitchedFrames = 1;
-                    }
-                    else
-                    {
-                        // Did the page actually move? Distinguishes a paused frame (keep the anchor)
-                        // from a too-fast scroll that outran the overlap (re-anchor + warn the user).
-                        // ponytail: no sticky-band detection. It conflated slowly-scrolling content
-                        // with fixed chrome (a slow scroll leaves most rows matching, so it flagged
-                        // them "sticky" and starved the match window — the stall). The longest-run
-                        // matcher already ignores sticky chrome naturally (chrome rows don't line up
-                        // at the true scroll offset). Tradeoff: a genuinely sticky footer can stitch
-                        // more than once; add a ShareX-style bottom-offset trim back if that bites.
-                        bool framesDiffer = !ImageStitcher.FramesIdentical(previous!, frame);
-
-                        int offset = horizontal
-                            ? ImageStitcher.FindScrollOffsetHorizontal(previous!, frame)
-                            : ImageStitcher.FindScrollOffset(previous!, frame);
-
-                        Log.Info($"Scroll frame {frames}: region={frame.Width}x{frame.Height} " +
-                                 $"differ={framesDiffer} offset={offset} stitchedH={stitched!.Height}");
-
-                        if (offset == 0)
-                        {
-                            zeroOffsetStreak++;
-                            if (manual)
-                            {
-                                if (framesDiffer)
-                                {
-                                    // The content changed but we couldn't align this frame to the
-                                    // anchor (a quick scroll outran the overlap). Re-anchor to the
-                                    // CURRENT position so the next small scroll aligns against it.
-                                    // Keeping the old anchor instead would strand it behind the
-                                    // user — every later frame would then have zero overlap and the
-                                    // capture would stall forever (the bug behind "captures a bit
-                                    // then stops"). The skipped span is lost, not stitched wrong.
-                                    previous!.Dispose();
-                                    previous = frame;
-
-                                    // A real miss: they're scrolling faster than we can grab. After a
-                                    // couple in a row, tell them to slow down (one is a benign blip).
-                                    tooFastStreak++;
-                                    if (tooFastStreak >= TooFastStreakForWarning && !warnedTooFast)
-                                    {
-                                        warnedTooFast = true;
-                                        tooFast?.Invoke(true);
-                                    }
-                                }
-                                else
-                                {
-                                    // Paused / nothing changed: keep the anchor, clear any warning.
-                                    frame.Dispose();
-                                    tooFastStreak = 0;
-                                    if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
-                                }
-                            }
-                            else
-                            {
-                                if (framesDiffer)
-                                    alignmentLost = true; // it scrolled, just couldn't be stitched
-                                previous!.Dispose();
-                                previous = frame;
-                            }
-                        }
-                        else
-                        {
-                            zeroOffsetStreak = 0;
-                            alignmentLost = false;
-                            tooFastStreak = 0;
-                            if (warnedTooFast) { warnedTooFast = false; tooFast?.Invoke(false); }
-                            SD.Bitmap grown;
-                            if (horizontal)
-                            {
-                                int cols = Math.Min(offset, MaxStitchedWidth - stitched.Width);
-                                grown = ImageStitcher.AppendRight(stitched, frame, cols);
-                            }
-                            else
-                            {
-                                int rows = Math.Min(offset, MaxStitchedHeight - stitched.Height);
-                                grown = ImageStitcher.AppendBelow(stitched, frame, rows);
-                            }
-                            stitched.Dispose();
-                            stitched = grown;
-                            stitchedFrames++;
-                            previous!.Dispose();
-                            previous = frame;
-                        }
-
-                        if (!manual && zeroOffsetStreak >= 2)
-                        {
-                            reachedContentEnd = !alignmentLost;
-                            break; // content end reached (or overlap too small to continue)
-                        }
-                        if (horizontal ? stitched.Width >= MaxStitchedWidth : stitched.Height >= MaxStitchedHeight)
-                            break;
-                    }
-
-                    // Throttle the preview: downscaling a tall stitch every frame would inflate the
-                    // capture interval and shrink overlap. Always refresh on the first frame so the
-                    // panel isn't blank, then at most every PreviewThrottleMs.
-                    if (!manual || stitchedFrames <= 1 || previewClock.ElapsedMilliseconds >= PreviewThrottleMs)
-                    {
-                        PushPreview(preview, stitched);
-                        previewClock.Restart();
-                    }
-                    string extent = horizontal ? $"{stitched.Width}px wide" : $"{stitched.Height}px";
-                    status(manual
-                        ? $"Scroll the content yourself — click Stop when done. {stitchedFrames} frames – {extent}"
-                        : $"Captured {frames} frames - {extent}");
-
-                    if (ShouldStop(ct))
-                        break;
-
-                    if (!manual)
-                    {
-                        if (horizontal)
-                            ScrollRight(screenRegion);
-                        else
-                            ScrollDown(screenRegion);
-
-                        // Last allowed iteration but we were still making progress: we stopped
-                        // at the cap, not at the content's end. Surface that distinction.
-                        if (i == MaxIterations - 1 && zeroOffsetStreak == 0)
-                            hitIterationCap = true;
-                    }
-                    try
-                    {
-                        await Task.Delay(manual ? ManualPollMs : ScrollSettleMs, ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
-                }
-
-                // Final status reflects WHY auto capture stopped, so a truncated page is obvious.
-                if (!manual && stitched is not null)
-                {
-                    string extent = horizontal ? $"{stitched.Width}px wide" : $"{stitched.Height}px";
-                    if (hitIterationCap)
-                        status($"Stopped at limit — page may be longer. {extent}");
-                    else if (alignmentLost && !reachedContentEnd)
-                        status($"Stopped — couldn't align frames (overlap too small). {extent}");
-                    else if (reachedContentEnd)
-                        status($"Reached the bottom. {extent}");
-                }
+                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource);
+                return loop.Run();
             }
             catch (Exception ex)
             {
-                Log.Error("Scrolling capture failed mid-run; returning partial result", ex);
+                Log.Error("Scrolling capture failed mid-run", ex);
+                return null;
             }
-            finally
-            {
-                previous?.Dispose();
-            }
-            return stitched;
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Captures the region, then re-captures up to <see cref="StabilizeAttempts"/> times until
-    /// two consecutive captures are identical (the frame has settled). Returns the last (stable)
-    /// capture; intermediate captures are disposed. On cancellation it returns whatever it has.
-    /// </summary>
-    private static async Task<SD.Bitmap> CaptureStableFrameAsync(SD.Rectangle region, CancellationToken ct)
+    // =====================================================================
+    //  Capture loop
+    // =====================================================================
+
+    private sealed class Loop
     {
-        var current = CaptureService.CaptureScreenRegionWithoutLayeredWindows(region);
-        for (int attempt = 1; attempt < StabilizeAttempts; attempt++)
+        private readonly SD.Rectangle _region;
+        private readonly Func<bool> _autoScroll;
+        private readonly Action<string> _status;
+        private readonly Action<ScrollHint> _hint;
+        private readonly Action<SD.Bitmap>? _preview;
+        private readonly CancellationToken _ct;
+
+        private ScrollDirection? _direction;
+        private readonly StitchBuffer _stitch;
+        private readonly CanvasProfile _canvas = new();
+        private readonly PreviewStrip? _strip;
+        private readonly System.Diagnostics.Stopwatch _previewClock = System.Diagnostics.Stopwatch.StartNew();
+
+        private FrameSignature? _prevSig;
+        private SD.Bitmap? _lastFrame;      // most recent frame, kept for the final footer strip
+        private SD.Bitmap? _horizontalStitched; // horizontal path stitches the old way
+
+        private enum Track { Tracking, Reviewing, Lost }
+        private Track _state = Track.Tracking;
+        private ScrollHint _lastHint = ScrollHint.None;
+
+        private int _runningFooter;
+        private int _stitchedFrames;
+        private double _pxPerNotch;
+        private int _notches = 1; // start with one notch to calibrate px-per-notch
+        private int _autoMisses;
+        private int _identicalStreak;
+        private bool _scrolledBeforeFrame;
+
+        private readonly Func<SD.Rectangle, SD.Bitmap> _grab;
+
+        public Loop(SD.Rectangle region, ScrollDirection? presetDirection, Func<bool> autoScroll,
+            Action<string> status, Action<ScrollHint> hint, Action<SD.Bitmap>? preview,
+            CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource)
         {
-            if (ShouldStop(ct))
-                break;
+            _region = region;
+            _direction = presetDirection;
+            _autoScroll = autoScroll;
+            _status = status;
+            _hint = hint;
+            _preview = preview;
+            _ct = ct;
+            _grab = frameSource ?? CaptureService.CaptureScreenRegionWithoutLayeredWindows;
+            _stitch = new StitchBuffer(region.Width);
+            if (preview is not null)
+                _strip = new PreviewStrip(region.Width);
+        }
+
+        public SD.Bitmap? Run()
+        {
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            bool discard = false;
             try
             {
-                await Task.Delay(StabilizePollMs, ct).ConfigureAwait(false);
+                while (elapsed.ElapsedMilliseconds < ManualTimeoutMs)
+                {
+                    if (EscPressed()) { discard = true; break; }
+                    if (_ct.IsCancellationRequested) break; // Done — finalize with result
+
+                    var frame = CaptureFrame();
+                    if (_direction == ScrollDirection.Horizontal)
+                    {
+                        if (!ProcessHorizontal(frame)) break;
+                    }
+                    else
+                    {
+                        if (!ProcessVertical(frame)) break;
+                    }
+
+                    if (_ct.IsCancellationRequested) break;
+                    if (EscPressed()) { discard = true; break; }
+                    if (!Pace()) break; // injects auto-scroll or sleeps the manual poll
+                }
+            }
+            finally
+            {
+                if (!discard)
+                    AttachFooterOnce();
+            }
+
+            if (discard)
+            {
+                _lastFrame?.Dispose();
+                _horizontalStitched?.Dispose();
+                _stitch.Dispose();
+                _strip?.Dispose();
+                return null;
+            }
+
+            _lastFrame?.Dispose();
+            _strip?.Dispose();
+            if (_direction == ScrollDirection.Horizontal)
+            {
+                _stitch.Dispose();
+                return _horizontalStitched;
+            }
+            return _stitch.Take();
+        }
+
+        // ------------------------------------------------------------ frames
+
+        private SD.Bitmap CaptureFrame()
+        {
+            if (!_scrolledBeforeFrame)
+                return _grab(_region);
+
+            // After injected scroll input: wait for the region to settle (two consecutive
+            // identical grabs) so animations/lazy-load aren't measured mid-flight.
+            var current = _grab(_region);
+            for (int attempt = 1; attempt < StabilizeAttempts && !_ct.IsCancellationRequested; attempt++)
+            {
+                Sleep(StabilizePollMs);
+                var next = _grab(_region);
+                bool settled = ImageStitcher.FramesIdentical(current, next);
+                current.Dispose();
+                current = next;
+                if (settled)
+                    break;
+            }
+            return current;
+        }
+
+        // ------------------------------------------------------------ vertical
+
+        /// <summary>Handles one vertical (or not-yet-locked) frame. Returns false to end the capture.</summary>
+        private bool ProcessVertical(SD.Bitmap frame)
+        {
+            var sig = FrameSignature.Build(frame);
+            bool auto = _scrolledBeforeFrame;
+
+            if (_prevSig is null)
+            {
+                AdoptFirstFrame(frame, sig);
+                return true;
+            }
+
+            if (ScrollMatcher.Identical(_prevSig, sig))
+            {
+                frame.Dispose();
+                if (auto && ++_identicalStreak >= EndOfContentStreak)
+                {
+                    _status($"Reached the bottom — {_stitch.Height}px");
+                    return false;
+                }
+                return true; // manual pause / not yet at end
+            }
+            _identicalStreak = 0;
+
+            // Sticky-footer band: rows byte-identical between differing frames. Require the
+            // band to carry visual information — a run of blank rows at the bottom of two
+            // frames is scrolling whitespace, not a pinned footer, and must not lock in a
+            // permanent exclusion band.
+            int detected = ImageStitcher.DetectConstantBottomBandFromHashes(_prevSig.RowHash, sig.RowHash);
+            if (detected > 0 && !BandHasContent(sig, detected))
+                detected = 0;
+            int footer = Math.Min(Math.Max(_runningFooter, detected), sig.Height / 3);
+
+            // A footer can only be DETECTED from the second frame on, so the rows appended
+            // before detection (frame 1's bottom, or any append made with a smaller band)
+            // carry the footer misclassified as body — and they sit exactly at the stitch
+            // tail. Retract them; AttachFooterOnce puts the footer back at the very end.
+            if (footer > _runningFooter && _stitch.Height > 1)
+            {
+                int delta = Math.Min(footer - _runningFooter, _stitch.Height - 1);
+                _stitch.Retract(delta);
+                _canvas.Retract(delta);
+                _runningFooter = footer; // recorded now so a failed match can't re-retract
+            }
+
+            // Direction auto-detection: before anything is stitched beyond frame 1, a frame
+            // that won't align vertically but aligns horizontally locks horizontal mode.
+            if (_direction is null && _stitchedFrames <= 1 && _lastFrame is not null)
+            {
+                int dv = ScrollMatcher.FindOffset(_prevSig, sig, footer);
+                if (dv > 0)
+                {
+                    _direction = ScrollDirection.Vertical;
+                    // Locate against the canvas (frame 1) rather than blindly appending: if
+                    // frames scrolled past without aligning while direction was unknown, a
+                    // prev-frame append here would stitch across a content gap.
+                    RelockAgainstCanvas(sig, frame, footer);
+                    FinishVerticalFrame(frame, sig);
+                    return _stitch.Height < MaxStitchedHeight || EndAtCap();
+                }
+                int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame, frame);
+                if (dh > 0)
+                {
+                    _direction = ScrollDirection.Horizontal;
+                    _horizontalStitched = (SD.Bitmap)_lastFrame.Clone();
+                    return ProcessHorizontal(frame);
+                }
+                FinishVerticalFrame(frame, sig);
+                return true; // keep watching; direction still unknown
+            }
+
+            switch (_state)
+            {
+                case Track.Tracking:
+                    int d = ScrollMatcher.FindOffset(_prevSig, sig, footer);
+                    if (d > 0)
+                    {
+                        AppendVertical(frame, sig, d, footer);
+                        if (auto)
+                            Recalibrate(d);
+                    }
+                    else if (auto)
+                    {
+                        if (!HandleAutoMiss(frame, sig, footer))
+                            return false;
+                    }
+                    else
+                    {
+                        RelockAgainstCanvas(sig, frame, footer);
+                    }
+                    break;
+
+                case Track.Reviewing:
+                case Track.Lost:
+                    RelockAgainstCanvas(sig, frame, footer);
+                    break;
+            }
+
+            FinishVerticalFrame(frame, sig);
+            if (_stitch.Height >= MaxStitchedHeight)
+                return EndAtCap();
+            return true;
+        }
+
+        private void AdoptFirstFrame(SD.Bitmap frame, FrameSignature sig)
+        {
+            _stitch.Append(frame, 0, frame.Height);
+            _canvas.Append(sig, 0, sig.Height);
+            _strip?.Append(frame, 0, frame.Height);
+            _stitchedFrames = 1;
+            _prevSig = sig;
+            _lastFrame = frame; // owned; disposed when replaced
+            PushPreview(force: true);
+            _status($"1 frame — {_stitch.Height}px");
+        }
+
+        private void FinishVerticalFrame(SD.Bitmap frame, FrameSignature sig)
+        {
+            _prevSig = sig;
+            _lastFrame?.Dispose();
+            _lastFrame = frame;
+            PushPreview(force: false);
+        }
+
+        private void AppendVertical(SD.Bitmap frame, FrameSignature sig, int offset, int footer)
+        {
+            // The newly revealed span is [h-footer-offset, h-footer). When the 32000px cap
+            // clamps the row count, take rows from the TOP of that span (seam-adjacent) so
+            // the last seam stays continuous.
+            int newRows = Math.Min(offset, MaxStitchedHeight - _stitch.Height);
+            if (newRows <= 0)
+                return;
+            int srcStart = sig.Height - footer - offset;
+            _stitch.Append(frame, srcStart, newRows);
+            _canvas.Append(sig, srcStart, newRows);
+            _strip?.Append(frame, srcStart, newRows);
+            _stitchedFrames++;
+            _runningFooter = footer;
+            _state = Track.Tracking;
+            _autoMisses = 0;
+            SetHint(ScrollHint.None);
+            string large = _stitch.Height >= VeryLargeThreshold ? " — screenshot is very large" : "";
+            _status($"{_stitchedFrames} frames — {_stitch.Height}px{large}");
+        }
+
+        /// <summary>
+        /// The frame moved but wouldn't align to the previous frame. Try to find it anywhere
+        /// in the stitched canvas: overhanging the end = a recovered fast scroll (append the
+        /// overhang); fully inside = the user scrolled back up (append nothing, tell them);
+        /// nowhere = lost, ask them to scroll back so a future frame re-locks.
+        /// </summary>
+        private void RelockAgainstCanvas(FrameSignature sig, SD.Bitmap frame, int footer)
+        {
+            var l = ScrollMatcher.LocateInCanvas(_canvas, sig, int.MaxValue, footer);
+            if (l is { NewRows: > 0 } overhang)
+            {
+                AppendVertical(frame, sig, overhang.NewRows, footer);
+            }
+            else if (l is not null)
+            {
+                _state = Track.Reviewing;
+                SetHint(ScrollHint.AlreadyCaptured);
+            }
+            else
+            {
+                // From Reviewing, a single unlockable frame usually means mid-scroll blur or
+                // a blank gap; either way the user needs to slow down / come back.
+                _state = Track.Lost;
+                SetHint(ScrollHint.SlowDown);
+            }
+        }
+
+        private bool HandleAutoMiss(SD.Bitmap frame, FrameSignature sig, int footer)
+        {
+            if ((ScrollMatcher.IsLowInformation(sig) || ScrollMatcher.IsLowInformation(_prevSig!)) && _pxPerNotch > 0)
+            {
+                // A blank stretch (whitespace page section): pixels can't measure the motion,
+                // but we injected a known number of wheel notches and know px-per-notch from
+                // calibration. Appending the estimate is visually exact on uniform content.
+                int est = (int)Math.Round(_pxPerNotch * _notches);
+                est = Math.Clamp(est, 1, Math.Max(1, sig.Height - footer - 24));
+                AppendVertical(frame, sig, est, footer);
+                _status($"{_stitchedFrames} frames — {_stitch.Height}px (blank stretch)");
+                return true;
+            }
+
+            _autoMisses++;
+            _notches = Math.Max(1, _notches / 2); // smaller steps give the matcher more overlap
+            if (_autoMisses >= MaxAutoMisses)
+            {
+                _status($"Stopped — content wouldn't align (animation or video in the area?) — {_stitch.Height}px");
+                return false;
+            }
+            return true;
+        }
+
+        private void Recalibrate(int measuredOffset)
+        {
+            double perNotch = measuredOffset / (double)Math.Max(1, _notches);
+            _pxPerNotch = _pxPerNotch <= 0 ? perNotch : (_pxPerNotch + perNotch) / 2;
+            // Aim each step at ~60% of the usable frame height: fast, with wide overlap.
+            int usable = Math.Max(64, _region.Height - _runningFooter);
+            _notches = Math.Clamp((int)Math.Round(0.6 * usable / Math.Max(1, _pxPerNotch)), 1, 8);
+        }
+
+        private bool EndAtCap()
+        {
+            _status($"Reached the maximum capture length — {_stitch.Height}px");
+            return false;
+        }
+
+        /// <summary>Sticky footer rows were excluded from every seam; put them back exactly once.</summary>
+        private void AttachFooterOnce()
+        {
+            if (_direction == ScrollDirection.Horizontal || _runningFooter <= 0 || _lastFrame is null)
+                return;
+            if (_stitch.Height + _runningFooter > MaxStitchedHeight)
+                return;
+            _stitch.Append(_lastFrame, _lastFrame.Height - _runningFooter, _runningFooter);
+        }
+
+        // ------------------------------------------------------------ horizontal
+
+        /// <summary>
+        /// Horizontal captures keep the simpler previous-frame exact matching (no canvas
+        /// re-lock). ponytail: horizontal is the rare path; add profile matching here only
+        /// if real horizontal captures (spreadsheets over RDP) turn out to need it.
+        /// </summary>
+        private bool ProcessHorizontal(SD.Bitmap frame)
+        {
+            bool auto = _scrolledBeforeFrame;
+            if (_horizontalStitched is null)
+            {
+                _horizontalStitched = frame;
+                _lastFrame = (SD.Bitmap)frame.Clone();
+                _stitchedFrames = 1;
+                PushPreview(force: true);
+                _status($"1 frame — {_horizontalStitched.Width}px wide");
+                return true;
+            }
+
+            if (ImageStitcher.FramesIdentical(_lastFrame!, frame))
+            {
+                frame.Dispose();
+                if (auto && ++_identicalStreak >= EndOfContentStreak)
+                {
+                    _status($"Reached the end — {_horizontalStitched.Width}px wide");
+                    return false;
+                }
+                return true;
+            }
+            _identicalStreak = 0;
+
+            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame);
+            if (offset > 0)
+            {
+                int cols = Math.Min(offset, MaxStitchedWidth - _horizontalStitched.Width);
+                if (cols > 0)
+                {
+                    var grown = ImageStitcher.AppendRight(_horizontalStitched, frame, cols);
+                    _horizontalStitched.Dispose();
+                    _horizontalStitched = grown;
+                    _stitchedFrames++;
+                }
+                _autoMisses = 0;
+                SetHint(ScrollHint.None);
+                _status($"{_stitchedFrames} frames — {_horizontalStitched.Width}px wide");
+            }
+            else if (auto)
+            {
+                _autoMisses++;
+                _notches = Math.Max(1, _notches / 2);
+                if (_autoMisses >= MaxAutoMisses)
+                {
+                    _status($"Stopped — content wouldn't align — {_horizontalStitched.Width}px wide");
+                    return false;
+                }
+            }
+            else
+            {
+                SetHint(ScrollHint.SlowDown);
+            }
+
+            _lastFrame?.Dispose();
+            _lastFrame = frame;
+            PushPreview(force: false);
+            return _horizontalStitched.Width < MaxStitchedWidth
+                || Fail($"Reached the maximum capture width — {_horizontalStitched.Width}px wide");
+        }
+
+        private bool Fail(string message)
+        {
+            _status(message);
+            return false;
+        }
+
+        // ------------------------------------------------------------ pacing / input
+
+        /// <summary>End-of-iteration pacing: injects auto-scroll (cursor permitting) or sleeps
+        /// the manual poll. Returns false only when the wait was cancelled.</summary>
+        private bool Pace()
+        {
+            bool wantAuto = _autoScroll() && _state == Track.Tracking && _prevSig is not null;
+            if (wantAuto && _direction != ScrollDirection.Horizontal)
+                _direction ??= ScrollDirection.Vertical; // Auto-Scroll defaults to vertical
+
+            if (wantAuto)
+            {
+                if (!CursorInRegion())
+                {
+                    SetHint(ScrollHint.MoveCursorIntoArea);
+                    _scrolledBeforeFrame = false;
+                    return Sleep(150);
+                }
+                if (_lastHint == ScrollHint.MoveCursorIntoArea)
+                    SetHint(ScrollHint.None);
+                SendWheel(_direction == ScrollDirection.Horizontal ? _notches : -_notches,
+                    horizontal: _direction == ScrollDirection.Horizontal);
+                _scrolledBeforeFrame = true;
+                return Sleep(AutoSettleMs);
+            }
+
+            _scrolledBeforeFrame = false;
+            return Sleep(ManualPollMs);
+        }
+
+        private bool Sleep(int ms)
+        {
+            try
+            {
+                Task.Delay(ms, _ct).GetAwaiter().GetResult();
+                return true;
             }
             catch (OperationCanceledException)
             {
-                break;
+                return true; // Done clicked — the loop head handles finalize
             }
-
-            var next = CaptureService.CaptureScreenRegionWithoutLayeredWindows(region);
-            bool settled = ImageStitcher.FramesIdentical(current, next);
-            current.Dispose();
-            current = next;
-            if (settled)
-                break;
         }
-        return current;
-    }
 
-    /// <summary>Hands a downscaled snapshot of the growing stitch to the live-preview callback.</summary>
-    private static void PushPreview(Action<SD.Bitmap>? preview, SD.Bitmap? stitched)
-    {
-        if (preview is null || stitched is null)
-            return;
-        try
+        private void SetHint(ScrollHint hint)
         {
-            using var thumb = Downscale(stitched, PreviewMaxEdge);
-            preview(thumb);
+            if (hint == _lastHint) return;
+            _lastHint = hint;
+            _hint(hint);
         }
-        catch (Exception ex)
+
+        private void PushPreview(bool force)
         {
-            Log.Error("Scrolling capture: live preview snapshot failed (non-fatal)", ex);
-        }
-    }
-
-    /// <summary>Returns a new bitmap scaled so its longest edge is at most <paramref name="maxEdge"/>.</summary>
-    private static SD.Bitmap Downscale(SD.Bitmap source, int maxEdge)
-    {
-        double scale = Math.Min(1.0, maxEdge / (double)Math.Max(source.Width, source.Height));
-        int w = Math.Max(1, (int)Math.Round(source.Width * scale));
-        int h = Math.Max(1, (int)Math.Round(source.Height * scale));
-        var thumb = new SD.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        using var g = SD.Graphics.FromImage(thumb);
-        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
-        g.DrawImage(source, 0, 0, w, h);
-        return thumb;
-    }
-
-    private static bool ShouldStop(CancellationToken ct) =>
-        ct.IsCancellationRequested || (GetAsyncKeyState(VkEscape) & 0x8000) != 0;
-
-    /// <summary>Moves the cursor to the region center and sends one wheel-down step.</summary>
-    private static void ScrollDown(SD.Rectangle region)
-    {
-        SetCursorPos(region.X + region.Width / 2, region.Y + region.Height / 2);
-        var input = new INPUT
-        {
-            type = InputMouse,
-            mi = new MOUSEINPUT
+            if (_preview is null)
+                return;
+            if (!force && _previewClock.ElapsedMilliseconds < PreviewThrottleMs)
+                return;
+            _previewClock.Restart();
+            try
             {
-                mouseData = unchecked((uint)(WheelDelta * ScrollNotchesPerStep)),
-                dwFlags = MouseEventFWheel,
-            },
-        };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+                SD.Bitmap? snap = _direction == ScrollDirection.Horizontal
+                    ? SnapshotHorizontalPreview()
+                    : _strip?.SnapshotBottomWindow();
+                if (snap is not null)
+                    _preview(snap); // callback takes ownership
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Scrolling capture: live preview failed (non-fatal)", ex);
+            }
+        }
+
+        private SD.Bitmap? SnapshotHorizontalPreview()
+        {
+            if (_horizontalStitched is null || _horizontalStitched.Width > 8000)
+                return null; // ponytail: whole-stitch downscale; skipped once it gets huge
+            double scale = Math.Min(1.0, 204.0 / _horizontalStitched.Width);
+            int w = Math.Max(1, (int)Math.Round(_horizontalStitched.Width * scale));
+            int h = Math.Max(1, (int)Math.Round(_horizontalStitched.Height * scale));
+            var thumb = new SD.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using var g = SD.Graphics.FromImage(thumb);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
+            g.DrawImage(_horizontalStitched, 0, 0, w, h);
+            return thumb;
+        }
+
+        private static bool BandHasContent(FrameSignature sig, int band)
+        {
+            int informative = 0;
+            for (int y = sig.Height - band; y < sig.Height; y++)
+            {
+                if (sig.Energy[y] > 1.5f && ++informative >= 3)
+                    return true;
+            }
+            return false;
+        }
+
+        private bool CursorInRegion() => GetCursorPos(out var p) && _region.Contains(p.X, p.Y);
+
+        private static bool EscPressed() => (GetAsyncKeyState(VkEscape) & 0x8000) != 0;
+
+        private static void SendWheel(int notches, bool horizontal)
+        {
+            var input = new INPUT
+            {
+                type = InputMouse,
+                mi = new MOUSEINPUT
+                {
+                    mouseData = unchecked((uint)(WheelDelta * notches)),
+                    dwFlags = horizontal ? MouseEventFHWheel : MouseEventFWheel,
+                },
+            };
+            SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        }
     }
 
-    /// <summary>Moves the cursor to the region center and sends one horizontal wheel-right step.</summary>
-    private static void ScrollRight(SD.Rectangle region)
+    // =====================================================================
+    //  Amortized stitch buffer (audit: AppendBelow re-copied the whole stitch
+    //  on every frame — O(n²) over a capture; this grows in chunks instead)
+    // =====================================================================
+
+    private sealed class StitchBuffer : IDisposable
     {
-        SetCursorPos(region.X + region.Width / 2, region.Y + region.Height / 2);
-        var input = new INPUT
+        private SD.Bitmap? _buffer;
+        private readonly int _width;
+
+        public int Height { get; private set; }
+
+        public StitchBuffer(int width) => _width = width;
+
+        public void Append(SD.Bitmap frame, int srcY, int rows)
         {
-            type = InputMouse,
-            mi = new MOUSEINPUT
+            if (rows <= 0) return;
+            EnsureCapacity(Height + rows);
+            ImageStitcher.CopyRowsInto(frame, srcY, rows, _buffer!, Height);
+            Height += rows;
+        }
+
+        /// <summary>Drops the bottom rows (a newly detected sticky footer that was appended
+        /// as body before it could be detected). The buffer rows are simply overwritten later.</summary>
+        public void Retract(int rows) => Height = Math.Max(0, Height - rows);
+
+        /// <summary>Returns the stitched image trimmed to its used rows (ownership transfers)
+        /// or null when nothing was appended.</summary>
+        public SD.Bitmap? Take()
+        {
+            if (_buffer is null || Height == 0)
+                return null;
+            if (_buffer.Height == Height)
             {
-                mouseData = (uint)(WheelDelta * HorizontalScrollNotchesPerStep),
-                dwFlags = MouseEventFHWheel,
-            },
-        };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+                var exact = _buffer;
+                _buffer = null;
+                return exact;
+            }
+            var trimmed = new SD.Bitmap(_width, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            ImageStitcher.CopyRowsInto(_buffer, 0, Height, trimmed, 0);
+            _buffer.Dispose();
+            _buffer = null;
+            return trimmed;
+        }
+
+        public void Dispose()
+        {
+            _buffer?.Dispose();
+            _buffer = null;
+        }
+
+        private void EnsureCapacity(int rows)
+        {
+            if (_buffer is not null && rows <= _buffer.Height)
+                return;
+            int cap = Math.Min(MaxStitchedHeight, Math.Max(rows, (_buffer?.Height ?? 2048) * 2));
+            var grown = new SD.Bitmap(_width, cap, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            if (_buffer is not null)
+            {
+                ImageStitcher.CopyRowsInto(_buffer, 0, Height, grown, 0);
+                _buffer.Dispose();
+            }
+            _buffer = grown;
+        }
     }
+
+    // =====================================================================
+    //  Incremental preview strip (audit: downscaling the whole growing stitch
+    //  per refresh stalled the capture thread; this scales only appended rows)
+    // =====================================================================
+
+    private sealed class PreviewStrip : IDisposable
+    {
+        private const int MaxStripWidth = 204;
+        private const int WindowHeight = 280;
+
+        private SD.Bitmap? _strip;
+        private readonly int _width;
+        private readonly double _scale;
+        private int _used;
+
+        public PreviewStrip(int regionWidth)
+        {
+            _width = Math.Min(MaxStripWidth, regionWidth); // never upscale a narrow region
+            _scale = _width / (double)regionWidth;
+        }
+
+        public void Append(SD.Bitmap frame, int srcY, int rows)
+        {
+            if (rows <= 0) return;
+            int scaled = Math.Max(1, (int)Math.Round(rows * _scale));
+            EnsureCapacity(_used + scaled);
+            using var g = SD.Graphics.FromImage(_strip!);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
+            g.DrawImage(frame,
+                new SD.Rectangle(0, _used, _width, scaled),
+                new SD.Rectangle(0, srcY, frame.Width, rows),
+                SD.GraphicsUnit.Pixel);
+            _used += scaled;
+        }
+
+        /// <summary>Clone of the most recent ≤280 strip rows (the growing bottom edge).</summary>
+        public SD.Bitmap? SnapshotBottomWindow()
+        {
+            if (_strip is null || _used == 0)
+                return null;
+            int h = Math.Min(_used, WindowHeight);
+            var snap = new SD.Bitmap(_width, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using var g = SD.Graphics.FromImage(snap);
+            g.DrawImage(_strip,
+                new SD.Rectangle(0, 0, _width, h),
+                new SD.Rectangle(0, _used - h, _width, h),
+                SD.GraphicsUnit.Pixel);
+            return snap;
+        }
+
+        public void Dispose()
+        {
+            _strip?.Dispose();
+            _strip = null;
+        }
+
+        private void EnsureCapacity(int rows)
+        {
+            if (_strip is not null && rows <= _strip.Height)
+                return;
+            int cap = Math.Max(rows, (_strip?.Height ?? 1024) * 2);
+            var grown = new SD.Bitmap(_width, cap, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            if (_strip is not null)
+            {
+                using var g = SD.Graphics.FromImage(grown);
+                g.DrawImage(_strip, new SD.Rectangle(0, 0, _width, _used),
+                    new SD.Rectangle(0, 0, _width, _used), SD.GraphicsUnit.Pixel);
+                _strip.Dispose();
+            }
+            _strip = grown;
+        }
+    }
+
+    // =====================================================================
+    //  Win32
+    // =====================================================================
 
     private const int VkEscape = 0x1B;
     private const uint InputMouse = 0;
@@ -403,7 +805,7 @@ public static class ScrollingCaptureService
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
+    private static extern bool GetCursorPos(out WinShot.Recording.Point32 lpPoint);
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
