@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -129,7 +129,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
         int x = Math.Max(8, (Width - width) / 2);
         int y = Math.Max(0, Height - height - 14);
         int alpha = (int)Math.Round(230 * _opacity);
-        using var path = RoundedRect(new SD.Rectangle(x, y, width, height), 17);
+        using var path = GdiPaths.RoundedRect(new SD.Rectangle(x, y, width, height), 17);
         using var brush = new SD.SolidBrush(SD.Color.FromArgb(alpha, PillBack));
         using var pen = new SD.Pen(SD.Color.FromArgb((int)Math.Round(54 * _opacity), PillBorder), 1);
         e.Graphics.FillPath(brush, path);
@@ -366,18 +366,6 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
             }
         }
         return CallNextHookEx(_hook, nCode, wParam, lParam);
-    }
-
-    private static GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
-    {
-        int diameter = radius * 2;
-        var path = new GraphicsPath();
-        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 
     private const int WhKeyboardLl = 13;

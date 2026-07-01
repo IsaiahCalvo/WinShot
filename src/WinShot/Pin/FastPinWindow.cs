@@ -654,18 +654,7 @@ public sealed class FastPinWindow : WF.Form
     }
 
     private static SD.Drawing2D.GraphicsPath RoundedPath(SD.Rectangle bounds, int radius)
-    {
-        int d = Math.Max(1, radius * 2);
-        var path = new SD.Drawing2D.GraphicsPath();
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-            return path;
-        path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
-        path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
-        path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
+        => GdiPaths.RoundedRect(bounds, radius);
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();

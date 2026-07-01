@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.IO;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -167,7 +167,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        using var path = RoundedRect(new SD.Rectangle(0, 0, Width, Height), 10);
+        using var path = GdiPaths.RoundedRect(new SD.Rectangle(0, 0, Width, Height), 10);
         Region = new SD.Region(path);
     }
 
@@ -198,18 +198,4 @@ public sealed class FastQuickPreviewWindow : WF.Form
         }
     }
 
-    private static GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
-    {
-        int diameter = radius * 2;
-        var path = new GraphicsPath();
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-            return path;
-
-        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
 }

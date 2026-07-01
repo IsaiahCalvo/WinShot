@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -759,20 +759,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
     }
 
-    private static SD.Drawing2D.GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
-    {
-        int d = radius * 2;
-        var path = new SD.Drawing2D.GraphicsPath();
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-            return path;
-        path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
-        path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
-        path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
-
     private void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
     {
         using var font = ThemePalette.UiFont(9f, SD.FontStyle.Bold);
@@ -785,7 +771,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = RoundedRect(bg, 6))
+        using (var path = GdiPaths.RoundedRect(bg, 6))
         using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
@@ -1098,7 +1084,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         private static void PaintBar(SD.Graphics g, SD.Rectangle bar)
         {
-            using var path = RoundedRect(new SD.Rectangle(bar.X, bar.Y, bar.Width - 1, bar.Height - 1), CornerRadius);
+            using var path = GdiPaths.RoundedRect(new SD.Rectangle(bar.X, bar.Y, bar.Width - 1, bar.Height - 1), CornerRadius);
             using var fill = new SD.SolidBrush(BarFill);
             using var pen = new SD.Pen(BarBorder, 1);
             g.FillPath(fill, path);
@@ -1111,7 +1097,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             var inner = SD.Rectangle.Inflate(b.Bounds, -4, -8);
             if (selected || hot)
             {
-                using var path = RoundedRect(inner, 9);
+                using var path = GdiPaths.RoundedRect(inner, 9);
                 using var brush = new SD.SolidBrush(selected ? SelectedFill : HoverFill);
                 g.FillPath(brush, path);
             }
@@ -1142,7 +1128,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             bool expandHot = _hoverIndex == HoverExpand;
             if (_aspectLocked || expandHot)
             {
-                using var path = RoundedRect(_expandRect, 8);
+                using var path = GdiPaths.RoundedRect(_expandRect, 8);
                 using var brush = new SD.SolidBrush(_aspectLocked ? SelectedFill : HoverFill);
                 g.FillPath(brush, path);
             }
@@ -1155,7 +1141,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             bool cropHot = _hoverIndex == HoverCrop;
             if (cropHot)
             {
-                using var path = RoundedRect(_cropRect, 8);
+                using var path = GdiPaths.RoundedRect(_cropRect, 8);
                 using var brush = new SD.SolidBrush(HoverFill);
                 g.FillPath(brush, path);
             }
@@ -1172,7 +1158,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private static void DrawFieldWell(SD.Graphics g, SD.Rectangle field)
         {
             var well = SD.Rectangle.Inflate(field, 3, 3);
-            using var path = RoundedRect(well, 7);
+            using var path = GdiPaths.RoundedRect(well, 7);
             using var brush = new SD.SolidBrush(FieldFill);
             g.FillPath(brush, path);
         }
@@ -1272,20 +1258,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                     _owner.ApplyExactSize(w, h);
             };
             return box;
-        }
-
-        private static SD.Drawing2D.GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
-        {
-            int d = radius * 2;
-            var path = new SD.Drawing2D.GraphicsPath();
-            if (bounds.Width <= 0 || bounds.Height <= 0)
-                return path;
-            path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
-            path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
-            path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-            path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
         }
 
         protected override void Dispose(bool disposing)

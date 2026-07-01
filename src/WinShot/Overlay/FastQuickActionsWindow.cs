@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -263,7 +263,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         // The card: rounded dark backing + the thumbnail (sharp when idle, blurred on hover).
         using (var fill = new SD.SolidBrush(CardFill))
-        using (var cardPath = RoundedRect(_cardRect, CardCornerRadius))
+        using (var cardPath = GdiPaths.RoundedRect(_cardRect, CardCornerRadius))
             g.FillPath(fill, cardPath);
 
         DrawThumbnail(g, _hovering);
@@ -271,14 +271,14 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (_hovering)
         {
             using (var scrim = new SD.SolidBrush(HoverScrim))
-            using (var cardPath = RoundedRect(_cardRect, CardCornerRadius))
+            using (var cardPath = GdiPaths.RoundedRect(_cardRect, CardCornerRadius))
                 g.FillPath(scrim, cardPath);
 
             for (int i = 0; i < _buttons.Count; i++)
                 DrawButton(g, _buttons[i], i == _hoverButton, i == _pressedButton);
         }
 
-        using var borderPath = RoundedRect(InsetForBorder(_cardRect), CardCornerRadius);
+        using var borderPath = GdiPaths.RoundedRect(InsetForBorder(_cardRect), CardCornerRadius);
         using var pen = new SD.Pen(BorderStrong, 1);
         g.DrawPath(pen, borderPath);
     }
@@ -377,7 +377,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (bmp is null)
             return;
 
-        using var clip = RoundedRect(_cardRect, CardCornerRadius);
+        using var clip = GdiPaths.RoundedRect(_cardRect, CardCornerRadius);
         var oldClip = g.Clip;
         var oldInterp = g.InterpolationMode;
         var oldOffset = g.PixelOffsetMode;
@@ -400,7 +400,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         SD.Color face = pressed ? CreamPressed : hot ? CreamHover : Cream;
 
-        using (var path = RoundedRect(button.Bounds, button.CornerRadius))
+        using (var path = GdiPaths.RoundedRect(button.Bounds, button.CornerRadius))
         {
             using var fill = new SD.SolidBrush(face);
             g.FillPath(fill, path);
@@ -451,7 +451,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
             // Clip the window to the rounded card so the margin around it is transparent
             // (and click-through), and so MouseEnter/Leave fire on the card's real shape.
-            using var cardPath = RoundedRect(_cardRect, CardCornerRadius);
+            using var cardPath = GdiPaths.RoundedRect(_cardRect, CardCornerRadius);
             Region?.Dispose();
             Region = new SD.Region(cardPath);
         }));
@@ -804,21 +804,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             Log.Error("Save failed", ex);
         }
-    }
-
-    private static GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
-    {
-        int diameter = radius * 2;
-        var path = new GraphicsPath();
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-            return path;
-
-        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 
     [DllImport("user32.dll")]

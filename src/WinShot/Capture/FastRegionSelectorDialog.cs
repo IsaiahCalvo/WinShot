@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -940,20 +940,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     // ----------------------------------------------------------- drawing helpers
 
-    private static SD.Drawing2D.GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
-    {
-        int d = radius * 2;
-        var path = new SD.Drawing2D.GraphicsPath();
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-            return path;
-        path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
-        path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
-        path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
-
     private void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor)
     {
         var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, CrosshairGapPx);
@@ -1028,13 +1014,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = RoundedRect(lb, 8))
+        using (var path = GdiPaths.RoundedRect(lb, 8))
         using (var bg = new SD.SolidBrush(SD.Color.FromArgb(245, 0x1C, 0x1C, 0x1E)))
             g.FillPath(bg, path);
-        using (var cp = RoundedRect(lc, 6))
+        using (var cp = GdiPaths.RoundedRect(lc, 6))
         using (var cb = new SD.SolidBrush(SD.Color.FromArgb(255, 0x3A, 0x3A, 0x3C)))
             g.FillPath(cb, cp);
-        using (var dp = RoundedRect(ld, 6))
+        using (var dp = GdiPaths.RoundedRect(ld, 6))
         using (var db = new SD.SolidBrush(Accent))
             g.FillPath(db, dp);
         g.SmoothingMode = prev;
@@ -1056,7 +1042,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = RoundedRect(bg, 6))
+        using (var path = GdiPaths.RoundedRect(bg, 6))
         using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
