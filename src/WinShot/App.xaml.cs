@@ -869,20 +869,6 @@ public partial class App : Application
         }
     }
 
-    private void ShowOverlay(SD.Bitmap bmp, Task<string?>? historyPathTask)
-    {
-        var sw = Stopwatch.StartNew();
-        var overlay = new FastQuickActionsWindow(bmp, _settings, historyPathTask: historyPathTask);
-        long createMs = sw.ElapsedMilliseconds;
-        FastQuickActionsWindow.TrackFirstShown(overlay, "quick actions overlay");
-        WireOverlay(overlay);
-        long wireMs = sw.ElapsedMilliseconds - createMs;
-        overlay.Show();
-        long showMs = sw.ElapsedMilliseconds - createMs - wireMs;
-        if (sw.ElapsedMilliseconds > 50)
-            Log.Info($"Perf quick actions overlay breakdown: create={createMs} wire={wireMs} show={showMs} total={sw.ElapsedMilliseconds} ms");
-    }
-
     private void ShowOverlayWithDeferredCaptureWork(SD.Bitmap bmp, bool autoCopy)
     {
         var sw = Stopwatch.StartNew();

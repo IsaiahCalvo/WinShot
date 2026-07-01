@@ -35,11 +35,6 @@ public static class OcrService
     private static OcrEngine? _engine;
     private static bool _engineInitialized;
 
-    public static void Prewarm()
-    {
-        _ = GetEngine();
-    }
-
     /// <summary>
     /// Runs barcode detection and OCR over <paramref name="bmp"/>.
     /// <paramref name="joinLines"/>=true joins OCR lines with spaces into a
@@ -165,10 +160,6 @@ public static class OcrService
             $"deepBarcode={deepBarcodeMs} " +
             $"total={totalMs} ms size={snapshot.Width}x{snapshot.Height}");
     }
-
-    /// <summary>Legacy text-only entry point; preserved for existing callers.</summary>
-    public static async Task<string> ExtractTextAsync(SD.Bitmap bmp) =>
-        (await ExtractAsync(bmp, joinLines: false)).Text;
 
     /// <summary>Decodes QR / DataMatrix / Aztec symbols. Never throws — returns
     /// an empty list when nothing is found or decoding fails.</summary>

@@ -1,4 +1,3 @@
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using SkiaSharp;
@@ -34,29 +33,6 @@ public static class ImageSaver
                 bmp.Save(path, ImageFormat.Png);
                 break;
         }
-    }
-
-    /// <summary>Returns a half-size copy using high-quality bicubic resampling (HiDPI downscale).</summary>
-    public static SD.Bitmap HalfSize(SD.Bitmap source)
-    {
-        int width = Math.Max(1, source.Width / 2);
-        int height = Math.Max(1, source.Height / 2);
-
-        var result = new SD.Bitmap(width, height, PixelFormat.Format32bppArgb);
-        result.SetResolution(source.HorizontalResolution, source.VerticalResolution);
-
-        using var g = SD.Graphics.FromImage(result);
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        g.CompositingQuality = CompositingQuality.HighQuality;
-        g.SmoothingMode = SmoothingMode.HighQuality;
-        g.DrawImage(
-            source,
-            new SD.Rectangle(0, 0, width, height),
-            new SD.Rectangle(0, 0, source.Width, source.Height),
-            SD.GraphicsUnit.Pixel);
-
-        return result;
     }
 
     private static void SaveJpeg(SD.Bitmap bmp, string path)

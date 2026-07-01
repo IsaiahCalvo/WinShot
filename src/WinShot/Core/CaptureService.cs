@@ -128,18 +128,6 @@ public static class CaptureService
         return CaptureScreenRegionWithBitBlt(screenRect, includeLayeredWindows: false);
     }
 
-    public static void PrewarmDesktopDuplication()
-    {
-        try
-        {
-            DesktopDuplicationCapture.Prewarm(VirtualScreen);
-        }
-        catch
-        {
-            // Optional fast path. CaptureScreenRegion still falls back to GDI.
-        }
-    }
-
     public static void ReleaseCaptureResources()
     {
         WindowsGraphicsCaptureCapture.ReleaseResources();
@@ -202,36 +190,6 @@ public static class CaptureService
         {
             if (dispose)
                 bmp.Dispose();
-        }
-    }
-
-    private static void CaptureScreenRegionWithBitBlt(Rectangle screenRect, Bitmap bmp, bool includeLayeredWindows = true)
-    {
-        using var g = Graphics.FromImage(bmp);
-        IntPtr dest = g.GetHdc();
-        IntPtr source = GetDC(IntPtr.Zero);
-        int rasterOp = includeLayeredWindows ? RasterOpSourceCopy | RasterOpCaptureBlt : RasterOpSourceCopy;
-        try
-        {
-            if (!BitBlt(
-                    dest,
-                    0,
-                    0,
-                    screenRect.Width,
-                    screenRect.Height,
-                    source,
-                    screenRect.X,
-                    screenRect.Y,
-                    rasterOp))
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-        }
-        finally
-        {
-            if (source != IntPtr.Zero)
-                ReleaseDC(IntPtr.Zero, source);
-            g.ReleaseHdc(dest);
         }
     }
 
@@ -378,12 +336,6 @@ public static class CaptureService
         return ToBitmapSource(preview);
     }
 
-    public static Task<BitmapSource> ToBitmapSourceAsync(Bitmap bmp)
-        => RunBitmapSourceConversion(() => ToBitmapSource(bmp));
-
-    public static Task<BitmapSource> ToBitmapSourceAsync(Bitmap bmp, int maxPixelWidth, int maxPixelHeight)
-        => RunBitmapSourceConversion(() => ToBitmapSource(bmp, maxPixelWidth, maxPixelHeight));
-
     public static Task<BitmapSource> ToBitmapSourceSnapshotAsync(Bitmap bmp)
         => RunBitmapSourceConversion(() =>
         {
@@ -448,38 +400,12 @@ public static class CaptureService
             return new System.Drawing.Size(bmp.Width, bmp.Height);
     }
 
-    public static int GetBitmapWidth(Bitmap bmp)
-    {
-        lock (bmp)
-            return bmp.Width;
-    }
-
-    public static int GetBitmapHeight(Bitmap bmp)
-    {
-        lock (bmp)
-            return bmp.Height;
-    }
-
     public static Task<BitmapSource> ToBitmapSourceSnapshotAsync(Bitmap bmp, int maxPixelWidth, int maxPixelHeight)
         => RunBitmapSourceConversion(() =>
         {
             Bitmap copy = CreateBitmapSnapshot(bmp, maxPixelWidth, maxPixelHeight);
             using (copy)
                 return ToBitmapSource(copy);
-        });
-
-    public static Task<BitmapSource> ToBitmapSourceOwnedAsync(Bitmap bmp)
-        => RunBitmapSourceConversion(() =>
-        {
-            using (bmp)
-                return ToBitmapSource(bmp);
-        });
-
-    public static Task<BitmapSource> ToBitmapSourceOwnedAsync(Bitmap bmp, int maxPixelWidth, int maxPixelHeight)
-        => RunBitmapSourceConversion(() =>
-        {
-            using (bmp)
-                return ToBitmapSource(bmp, maxPixelWidth, maxPixelHeight);
         });
 
     private static Task<BitmapSource> RunBitmapSourceConversion(Func<BitmapSource> convert)
@@ -547,21 +473,6 @@ public static class CaptureService
             if (disposePreview)
                 preview.Dispose();
         }
-    }
-
-    public static Task PrewarmBitmapSourceConversionAsync()
-    {
-        var bitmap = new Bitmap(1, 1, PixelFormat.Format32bppArgb);
-        var task = ToBitmapSourceAsync(bitmap);
-        return task.ContinueWith(
-            completed =>
-            {
-                bitmap.Dispose();
-                completed.GetAwaiter().GetResult();
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
     }
 
     private static BlockingCollection<BitmapSourceWorkItem> BitmapSourceWork
@@ -899,16 +810,6 @@ public static class CaptureService
         }
 
         return completion.Task;
-    }
-
-    public static void Save(Bitmap bmp, string path)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        string ext = Path.GetExtension(path).ToLowerInvariant();
-        if (ext is ".jpg" or ".jpeg")
-            bmp.Save(path, ImageFormat.Jpeg);
-        else
-            bmp.Save(path, ImageFormat.Png);
     }
 
     public static string DefaultFileName(string extension) =>

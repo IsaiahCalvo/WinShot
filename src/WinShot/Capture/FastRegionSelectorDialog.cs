@@ -143,9 +143,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
     }
 
-    public static FastRegionSelectorDialog Rent(Task<List<WindowInfo>> windowsTask, SettingsService? settings) =>
-        Rent(() => windowsTask, settings);
-
     public static FastRegionSelectorDialog Rent(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
         var selector = Interlocked.Exchange(ref _cached, null);

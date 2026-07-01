@@ -36,7 +36,6 @@ public sealed class EditorAction
         _onDiscard = onDiscard;
     }
 
-    public void Undo() => _undo().GetAwaiter().GetResult();
     public void Redo() => _redo().GetAwaiter().GetResult();
     public Task UndoAsync() => _undo();
     public Task RedoAsync() => _redo();

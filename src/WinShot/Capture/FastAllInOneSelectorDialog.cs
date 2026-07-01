@@ -146,9 +146,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         }
     }
 
-    public static FastAllInOneSelectorDialog Rent(Task<List<WindowInfo>> windowsTask, SettingsService? settings) =>
-        Rent(() => windowsTask, settings);
-
     public static FastAllInOneSelectorDialog Rent(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
         var selector = Interlocked.Exchange(ref _cached, null);

@@ -48,16 +48,4 @@ public static class ProtocolRegistrar
             Log.Error("Failed to register winshot:// protocol", ex);
         }
     }
-
-    public static void Unregister()
-    {
-        try
-        {
-            Registry.CurrentUser.DeleteSubKeyTree(ClassesKeyPath, throwOnMissingSubKey: false);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Failed to unregister winshot:// protocol", ex);
-        }
-    }
 }
