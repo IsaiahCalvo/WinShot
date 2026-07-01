@@ -108,8 +108,11 @@ internal static class DesktopDuplicationCapture
             throw new ArgumentException("Capture region is empty.", nameof(screenRect));
 
         var screens = WF.Screen.AllScreens
-            .Where(s => Rectangle.Intersect(s.Bounds, screenRect).Width > 0 &&
-                        Rectangle.Intersect(s.Bounds, screenRect).Height > 0)
+            .Where(s =>
+            {
+                Rectangle overlap = Rectangle.Intersect(s.Bounds, screenRect);
+                return overlap.Width > 0 && overlap.Height > 0;
+            })
             .ToArray();
         if (screens.Length == 0)
             throw new InvalidOperationException("Capture region does not overlap any display.");

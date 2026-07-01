@@ -146,8 +146,11 @@ internal static class WindowsGraphicsCaptureCapture
             throw new ArgumentException("Capture region is empty.", nameof(screenRect));
 
         var screens = WF.Screen.AllScreens
-            .Where(s => Rectangle.Intersect(s.Bounds, screenRect).Width > 0 &&
-                        Rectangle.Intersect(s.Bounds, screenRect).Height > 0)
+            .Where(s =>
+            {
+                Rectangle overlap = Rectangle.Intersect(s.Bounds, screenRect);
+                return overlap.Width > 0 && overlap.Height > 0;
+            })
             .ToArray();
         if (screens.Length == 0)
             throw new InvalidOperationException("Capture region does not overlap any display.");
@@ -439,7 +442,14 @@ internal static class WindowsGraphicsCaptureCapture
 
         private static void TryConfigureSession(GraphicsCaptureSession session)
         {
-            TrySetSessionProperty(session, "IsCursorCaptureEnabled", false);
+            // IsCursorCaptureEnabled ships in the 19041 projection, so call it directly.
+            try { session.IsCursorCaptureEnabled = false; }
+            catch { /* optional polish; capture still works if Windows denies it */ }
+
+            // IsBorderRequired is Windows 11+ (build 22000) and isn't in the 19041 SDK
+            // projection this project targets, so it can't be called directly. Reflection
+            // sets it on newer OSes and no-ops on older ones. ponytail: reflection stays
+            // until the target platform is raised to 22000+.
             TrySetSessionProperty(session, "IsBorderRequired", false);
         }
 

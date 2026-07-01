@@ -47,7 +47,8 @@ internal static class MemoryCleanup
                     GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
                     GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
                     GC.WaitForPendingFinalizers();
-                    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                    // ponytail: one compacting collect + finalizer drain is enough here; the
+                    // second full collect roughly doubled the pause for marginal extra reclaim.
                 }
 
                 if (snapshot.WorkingSetBytes >= HighWorkingSetBytes)
