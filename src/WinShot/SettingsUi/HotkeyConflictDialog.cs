@@ -60,19 +60,19 @@ internal sealed class HotkeyConflictDialog : Window
         };
         panel.Children.Add(buttons);
 
-        buttons.Children.Add(CreateButton("Find app", isPrimary: true, () =>
+        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Find app", isPrimary: true, () =>
         {
             _choice = HotkeyConflictChoice.FindApp;
             DialogResult = true;
         }));
 
-        buttons.Children.Add(CreateButton("Change", isPrimary: false, () =>
+        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Change", isPrimary: false, () =>
         {
             _choice = HotkeyConflictChoice.Change;
             DialogResult = true;
         }));
 
-        buttons.Children.Add(CreateButton("Keep", isPrimary: false, () =>
+        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Keep", isPrimary: false, () =>
         {
             _choice = HotkeyConflictChoice.Keep;
             DialogResult = false;
@@ -84,22 +84,5 @@ internal sealed class HotkeyConflictDialog : Window
         var dialog = new HotkeyConflictDialog(actionLabel, gesture, source) { Owner = owner };
         dialog.ShowDialog();
         return dialog._choice;
-    }
-
-    private static Button CreateButton(string text, bool isPrimary, Action onClick)
-    {
-        var button = new Button
-        {
-            Content = text,
-            MinWidth = 86,
-            Padding = new Thickness(12, 6, 12, 6),
-            Margin = new Thickness(8, 0, 0, 0),
-            Background = new SolidColorBrush(isPrimary ? Color.FromRgb(0x2D, 0x7D, 0xFF) : Color.FromRgb(0x3A, 0x3A, 0x3A)),
-            Foreground = Brushes.White,
-            BorderBrush = Brushes.Transparent,
-            Cursor = System.Windows.Input.Cursors.Hand,
-        };
-        button.Click += (_, _) => onClick();
-        return button;
     }
 }

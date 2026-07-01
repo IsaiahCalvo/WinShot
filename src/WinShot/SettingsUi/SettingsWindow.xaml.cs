@@ -707,8 +707,6 @@ public partial class SettingsWindow : Window
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
 
-    private HotkeyBox[] AllHotkeyBoxes() => RealHotkeyBoxes();
-
     /// <summary>
     /// Lightweight in-app feedback: after a hotkey field loses focus, flag any field that
     /// now duplicates another field's gesture. Purely cosmetic — the authoritative
@@ -716,13 +714,13 @@ public partial class SettingsWindow : Window
     /// </summary>
     private void WireInlineHotkeyConflictChecks()
     {
-        foreach (var box in AllHotkeyBoxes())
+        foreach (var box in RealHotkeyBoxes())
             box.LostKeyboardFocus += (_, _) => RefreshInlineHotkeyConflicts();
     }
 
     private void RefreshInlineHotkeyConflicts()
     {
-        var boxes = AllHotkeyBoxes();
+        var boxes = RealHotkeyBoxes();
 
         // Group boxes by their normalized gesture; any group with >1 non-empty member conflicts.
         var byGesture = new Dictionary<string, List<HotkeyBox>>(StringComparer.OrdinalIgnoreCase);
@@ -767,7 +765,7 @@ public partial class SettingsWindow : Window
         {
             SaveFolderBox, OverlayCloseBox, HistoryLimitBox, RetentionDaysBox, SelfTimerBox,
             RecordingFpsBox, GifFpsBox, WebcamSizeBox, CountdownBox, TemplateBox,
-        }.Concat(AllHotkeyBoxes()).ToArray();
+        }.Concat(RealHotkeyBoxes()).ToArray();
 
     private void ResetValidation()
     {

@@ -170,9 +170,6 @@ public sealed class GifRecorder
     private const int DiNormal = 3;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct Point32 { public int X; public int Y; }
-
-    [StructLayout(LayoutKind.Sequential)]
     private struct CursorInfo
     {
         public int cbSize;

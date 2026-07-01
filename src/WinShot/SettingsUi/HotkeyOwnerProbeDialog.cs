@@ -65,11 +65,11 @@ internal sealed class HotkeyOwnerProbeDialog : Window
         };
         panel.Children.Add(buttons);
 
-        _openButton = CreateButton("Open app", isPrimary: true, OpenDetectedApp);
+        _openButton = HotkeyDialogButtons.CreateDialogButton("Open app", isPrimary: true, OpenDetectedApp);
         _openButton.IsEnabled = false;
         buttons.Children.Add(_openButton);
 
-        buttons.Children.Add(CreateButton("Close", isPrimary: false, Close));
+        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Close", isPrimary: false, Close));
 
         Loaded += OnLoaded;
         Closed += (_, _) => _cts.Cancel();
@@ -131,20 +131,4 @@ internal sealed class HotkeyOwnerProbeDialog : Window
         }
     }
 
-    private static Button CreateButton(string text, bool isPrimary, Action onClick)
-    {
-        var button = new Button
-        {
-            Content = text,
-            MinWidth = 86,
-            Padding = new Thickness(12, 6, 12, 6),
-            Margin = new Thickness(8, 0, 0, 0),
-            Background = new SolidColorBrush(isPrimary ? Color.FromRgb(0x2D, 0x7D, 0xFF) : Color.FromRgb(0x3A, 0x3A, 0x3A)),
-            Foreground = Brushes.White,
-            BorderBrush = Brushes.Transparent,
-            Cursor = System.Windows.Input.Cursors.Hand,
-        };
-        button.Click += (_, _) => onClick();
-        return button;
-    }
 }

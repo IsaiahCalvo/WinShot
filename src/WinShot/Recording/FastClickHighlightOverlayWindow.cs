@@ -210,9 +210,6 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
     private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct Point32 { public int X; public int Y; }
-
-    [StructLayout(LayoutKind.Sequential)]
     private struct MsllHookStruct
     {
         public Point32 pt;

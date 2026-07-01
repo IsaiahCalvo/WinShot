@@ -657,6 +657,12 @@ public partial class App : Application
     private static void LogPerf(string metricName, Stopwatch sw) =>
         Log.Info($"Perf {metricName}: {sw.ElapsedMilliseconds} ms");
 
+    private static void LogOverlayPerf(Stopwatch sw, long createMs, long wireMs, long showMs)
+    {
+        if (sw.ElapsedMilliseconds > 50)
+            Log.Info($"Perf quick actions overlay breakdown: create={createMs} wire={wireMs} show={showMs} total={sw.ElapsedMilliseconds} ms");
+    }
+
     private static Task<T> RunCaptureWorkAsync<T>(Func<T> work) =>
         Task.Factory.StartNew(
             work,
@@ -865,8 +871,7 @@ public partial class App : Application
         long wireMs = sw.ElapsedMilliseconds - createMs;
         overlay.Show();
         long showMs = sw.ElapsedMilliseconds - createMs - wireMs;
-        if (sw.ElapsedMilliseconds > 50)
-            Log.Info($"Perf quick actions overlay breakdown: create={createMs} wire={wireMs} show={showMs} total={sw.ElapsedMilliseconds} ms");
+        LogOverlayPerf(sw, createMs, wireMs, showMs);
     }
 
     private async Task RunDeferredOverlayCaptureWorkAsync(
@@ -920,8 +925,7 @@ public partial class App : Application
         long wireMs = sw.ElapsedMilliseconds - createMs;
         overlay.Show();
         long showMs = sw.ElapsedMilliseconds - createMs - wireMs;
-        if (sw.ElapsedMilliseconds > 50)
-            Log.Info($"Perf quick actions overlay breakdown: create={createMs} wire={wireMs} show={showMs} total={sw.ElapsedMilliseconds} ms");
+        LogOverlayPerf(sw, createMs, wireMs, showMs);
     }
 
     private void WireOverlay(FastQuickActionsWindow overlay)
