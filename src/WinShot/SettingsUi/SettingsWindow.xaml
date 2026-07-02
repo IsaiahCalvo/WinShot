@@ -221,14 +221,17 @@
         <Style x:Key="SectionScroll" TargetType="ScrollViewer">
             <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
             <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
-            <Setter Property="Padding" Value="0,0,12,0"/>
+            <!-- 20px symmetric inset centers the cards in the window. -->
+            <Setter Property="Padding" Value="20,0,20,0"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ScrollViewer">
                         <Grid>
                             <ScrollContentPresenter Margin="{TemplateBinding Padding}"/>
+                            <!-- 6px right margin centers the 8px bar within the 20px right
+                                 margin: 6px gap to the cards, 6px gap to the app edge. -->
                             <ScrollBar x:Name="PART_VerticalScrollBar" Orientation="Vertical"
-                                       HorizontalAlignment="Right" Minimum="0"
+                                       HorizontalAlignment="Right" Margin="0,0,6,0" Minimum="0"
                                        Maximum="{TemplateBinding ScrollableHeight}"
                                        ViewportSize="{TemplateBinding ViewportHeight}"
                                        Value="{TemplateBinding VerticalOffset}"
@@ -350,13 +353,14 @@
         </Border>
 
         <!-- =============================== CONTENT PANE =============================== -->
-        <!-- Right margin is small: each section ScrollViewer adds an 8px LEFT padding to mirror
-             the 8px slim scrollbar on the right, so the cards render symmetrically whether or
-             not the scrollbar is showing (no more left-shifted look). -->
-        <DockPanel Margin="14,12,14,12">
-            <!-- Footer action bar -->
+        <!-- No horizontal margin here: the content pane spans edge-to-edge so the section
+             cards can be centered (20px each side, via SectionScroll's symmetric padding) AND
+             the overlay scrollbar can sit CENTERED in the 20px right margin (6px of gap on
+             each side of the bar). The footer is inset 20px to match the cards. -->
+        <DockPanel Margin="0,12,0,12">
+            <!-- Footer action bar (inset to line up with the section cards) -->
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource BorderBrush}"
-                    BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,6,0,0">
+                    BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="20,6,20,0">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Content="Cancel" Style="{StaticResource PillButtonSecondary}" Click="OnCancel"/>
                     <Button x:Name="SaveButton" Content="Save" Style="{StaticResource PillButtonPrimary}" Click="OnSave"/>
@@ -422,13 +426,14 @@
                                                Text="Here you can decide what should happen after taking a screenshot or recording a video."/>
                                 </DockPanel>
 
-                                <Border Margin="162,8,0,0" BorderBrush="{StaticResource BorderBrush}"
+                                <Border Margin="0,10,0,0" HorizontalAlignment="Center"
+                                        BorderBrush="{StaticResource BorderBrush}"
                                         BorderThickness="1" CornerRadius="{StaticResource RadiusInput}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="78"/>
-                                            <ColumnDefinition Width="78"/>
-                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="82"/>
+                                            <ColumnDefinition Width="82"/>
+                                            <ColumnDefinition Width="210"/>
                                         </Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="28"/>
