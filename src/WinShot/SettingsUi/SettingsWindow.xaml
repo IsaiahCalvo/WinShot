@@ -6,10 +6,13 @@
         Background="{StaticResource WindowBgBrush}" ResizeMode="CanMinimize" ShowInTaskbar="True"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
-        <!-- Row label: fixed-width, RIGHT-aligned caption (CleanShot's "label:" column). -->
+        <!-- Row label: fixed-width, LEFT-aligned caption forming a clean left column. Left
+             alignment (not right) makes labels start at the card's left edge — same line the
+             card border/dividers start at — with controls forming their own left-aligned
+             column to the right, instead of both hugging the center with a dead left gutter. -->
         <Style x:Key="RowLabel" TargetType="TextBlock" BasedOn="{StaticResource FieldLabel}">
             <Setter Property="Width" Value="150"/>
-            <Setter Property="TextAlignment" Value="Right"/>
+            <Setter Property="TextAlignment" Value="Left"/>
             <Setter Property="Margin" Value="0,0,12,0"/>
         </Style>
         <!-- Hint: muted helper text, sits under or beside a control. -->
@@ -210,6 +213,32 @@
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+        <!-- Section scroller with an OVERLAY scrollbar: the 8px slim bar floats pinned to the
+             far-right edge instead of taking layout space, so (a) content never reflows when
+             the bar appears/disappears and (b) the bar sits the same distance from the app edge
+             as the cards sit from the left edge, with a small gap before the cards. The right
+             padding reserves that gutter so the bar never covers card content. -->
+        <Style x:Key="SectionScroll" TargetType="ScrollViewer">
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="Padding" Value="0,0,12,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollViewer">
+                        <Grid>
+                            <ScrollContentPresenter Margin="{TemplateBinding Padding}"/>
+                            <ScrollBar x:Name="PART_VerticalScrollBar" Orientation="Vertical"
+                                       HorizontalAlignment="Right" Minimum="0"
+                                       Maximum="{TemplateBinding ScrollableHeight}"
+                                       ViewportSize="{TemplateBinding ViewportHeight}"
+                                       Value="{TemplateBinding VerticalOffset}"
+                                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- A centered, label-less checkbox for the matrix cells. Uses its OWN template (just
              the box) rather than DarkCheckBox: DarkCheckBox reserves an 8px content gutter, so
              centering it left-shifted the box ~4px off the column center where the "—" dashes
@@ -337,8 +366,7 @@
             <!-- Sections (only one visible at a time; toggled from OnSectionChanged) -->
             <Grid>
                 <!-- ===================== GENERAL ===================== -->
-                <ScrollViewer x:Name="SectionGeneral" VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                <ScrollViewer x:Name="SectionGeneral" Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -468,8 +496,7 @@
 
                 <!-- ===================== SHORTCUTS ===================== -->
                 <ScrollViewer x:Name="SectionShortcuts" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                              Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -485,8 +512,7 @@
 
                 <!-- ===================== QUICK ACCESS (overlay) ===================== -->
                 <ScrollViewer x:Name="SectionQuickAccess" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                              Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -562,8 +588,7 @@
 
                 <!-- ===================== RECORDING ===================== -->
                 <ScrollViewer x:Name="SectionRecording" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                              Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <!-- Sub-tab strip: General / Video / GIF -->
                         <ListBox x:Name="RecordingSubList" Background="Transparent" BorderThickness="0"
@@ -758,8 +783,7 @@
 
                 <!-- ===================== SCREENSHOTS ===================== -->
                 <ScrollViewer x:Name="SectionScreenshots" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                              Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -845,8 +869,7 @@
 
                 <!-- ===================== ANNOTATE ===================== -->
                 <ScrollViewer x:Name="SectionAnnotate" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                              Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -898,8 +921,7 @@
 
                 <!-- ===================== ADVANCED ===================== -->
                 <ScrollViewer x:Name="SectionAdvanced" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                              Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -1040,8 +1062,7 @@
 
                 <!-- ===================== ABOUT ===================== -->
                 <ScrollViewer x:Name="SectionAbout" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
+                              Style="{StaticResource SectionScroll}">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel Margin="4,8" HorizontalAlignment="Center">
