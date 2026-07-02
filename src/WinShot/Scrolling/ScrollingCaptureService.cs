@@ -118,6 +118,11 @@ public static class ScrollingCaptureService
         private enum Track { Tracking, Reviewing, Lost }
         private Track _state = Track.Tracking;
         private ScrollHint _lastHint = ScrollHint.None;
+        /// <summary>Canvas row of the previous frame's top while Reviewing (-1 = unknown).
+        /// Lets Reviewing traverse blank stretches by dead-reckoning verified frame-to-frame
+        /// moves from the last absolute lock, instead of demanding an absolute re-lock
+        /// against featureless canvas rows every step.</summary>
+        private int _reviewPos = -1;
 
         private int _runningFooter;
         private int _stitchedFrames;
@@ -126,6 +131,23 @@ public static class ScrollingCaptureService
         private int _autoMisses;
         private int _identicalStreak;
         private bool _scrolledBeforeFrame;
+        private long _framesSeen;
+
+        // Auto-scroll input ladder. Injected wheel input is routed like hardware wheel — to
+        // the window under the CURSOR (or the focus window, per the "scroll inactive
+        // windows" setting) — and is silently discarded for elevated windows (UIPI), so it
+        // can stop working mid-run when another window drifts over the cursor. When
+        // injected scrolling produces NO movement we escalate: wheel input → WM_MOUSEWHEEL
+        // posted straight to the window under the region (focus/routing-independent) →
+        // activate + PageDown. "No movement" is only trusted as end-of-content after the
+        // remaining methods have been probed too.
+        private enum ScrollMethod { WheelInput, WheelMessage, PageKey }
+        private ScrollMethod _method = ScrollMethod.WheelInput;
+        private bool _methodProducedMovement;
+        private bool _everMoved;      // any method ever scrolled this page
+        private int _noEffectStreak;
+        private int _healSteps;       // auto-recovery scrolls while Lost/Reviewing
+        private int _lastSentNotches; // notches of the most recent injected step (dead-reckoning)
 
         private readonly Func<SD.Rectangle, SD.Bitmap> _grab;
 
@@ -148,6 +170,8 @@ public static class ScrollingCaptureService
 
         public SD.Bitmap? Run()
         {
+            Log.Info($"Scroll: start region={_region.Width}x{_region.Height} at ({_region.X},{_region.Y}) " +
+                     $"direction={_direction?.ToString() ?? "auto-detect"}");
             var elapsed = System.Diagnostics.Stopwatch.StartNew();
             bool discard = false;
             try
@@ -177,6 +201,9 @@ public static class ScrollingCaptureService
                 if (!discard)
                     AttachFooterOnce();
             }
+
+            Log.Info($"Scroll: finished — {( _direction == ScrollDirection.Horizontal ? $"{_horizontalStitched?.Width ?? 0}px wide" : $"{_stitch.Height}px tall")} " +
+                     $"frames={_stitchedFrames} seen={_framesSeen} footer={_runningFooter} method={_method} state={_state}{(discard ? " (discarded)" : "")}");
 
             if (discard)
             {
@@ -225,6 +252,7 @@ public static class ScrollingCaptureService
         /// <summary>Handles one vertical (or not-yet-locked) frame. Returns false to end the capture.</summary>
         private bool ProcessVertical(SD.Bitmap frame)
         {
+            _framesSeen++;
             var sig = FrameSignature.Build(frame);
             bool auto = _scrolledBeforeFrame;
 
@@ -237,12 +265,33 @@ public static class ScrollingCaptureService
             if (ScrollMatcher.Identical(_prevSig, sig))
             {
                 frame.Dispose();
-                if (auto && ++_identicalStreak >= EndOfContentStreak)
+                if (!auto || _state != Track.Tracking)
+                    return true; // manual pause / transient during auto-recovery
+
+                // We injected scroll input and NOTHING moved. Two very different causes:
+                // the page is at its end, or the injected input never reached the content
+                // (Win11 24H2 SendInput-wheel bug can even START working and then die
+                // mid-run — an unfocused window losing hover routing looks identical).
+                // So "bottom" is only declared after the REMAINING input methods have been
+                // probed and none of them moves the page either.
+                if (_methodProducedMovement)
                 {
-                    _status($"Reached the bottom — {_stitch.Height}px");
+                    if (++_identicalStreak >= EndOfContentStreak && !TryNextMethod())
+                    {
+                        Log.Info($"Scroll: end — reached bottom at {_stitch.Height}px ({_stitchedFrames} frames, method={_method})");
+                        _status($"Reached the bottom — {_stitch.Height}px");
+                        return false;
+                    }
+                }
+                else if (++_noEffectStreak >= 2 && !TryNextMethod())
+                {
+                    Log.Info($"Scroll: end — no input method moved the content ({_stitch.Height}px, everMoved={_everMoved})");
+                    _status(_everMoved
+                        ? $"Reached the bottom — {_stitch.Height}px"
+                        : $"Nothing to scroll (or content can't be scrolled here) — {_stitch.Height}px");
                     return false;
                 }
-                return true; // manual pause / not yet at end
+                return true;
             }
             _identicalStreak = 0;
 
@@ -315,6 +364,9 @@ public static class ScrollingCaptureService
                     break;
 
                 case Track.Reviewing:
+                    ProcessReviewing(frame, sig, footer, auto);
+                    break;
+
                 case Track.Lost:
                     RelockAgainstCanvas(sig, frame, footer);
                     break;
@@ -361,10 +413,41 @@ public static class ScrollingCaptureService
             _stitchedFrames++;
             _runningFooter = footer;
             _state = Track.Tracking;
+            _reviewPos = -1;
             _autoMisses = 0;
+            if (_scrolledBeforeFrame)
+            {
+                _methodProducedMovement = true; // this input method verifiably scrolls this page
+                _everMoved = true;
+                _noEffectStreak = 0;
+            }
+            _healSteps = 0;
             SetHint(ScrollHint.None);
+            Log.Info($"Scroll: +{newRows}px (offset={offset} footer={footer}) total={_stitch.Height}px frames={_stitchedFrames}");
             string large = _stitch.Height >= VeryLargeThreshold ? " — screenshot is very large" : "";
             _status($"{_stitchedFrames} frames — {_stitch.Height}px{large}");
+        }
+
+        /// <summary>Escalates to the next auto-scroll input method; false when exhausted.</summary>
+        private bool TryNextMethod()
+        {
+            // PageDown only makes sense vertically; the wheel-message tier covers horizontal.
+            ScrollMethod? next = _method switch
+            {
+                ScrollMethod.WheelInput => ScrollMethod.WheelMessage,
+                ScrollMethod.WheelMessage when _direction != ScrollDirection.Horizontal => ScrollMethod.PageKey,
+                _ => null,
+            };
+            if (next is null)
+                return false;
+            Log.Info($"Scroll: input method {_method} had no effect — switching to {next}");
+            _method = next.Value;
+            _methodProducedMovement = false;
+            _noEffectStreak = 0;
+            _identicalStreak = 0;
+            _pxPerNotch = 0; // recalibrate for the new method
+            _notches = 1;
+            return true;
         }
 
         /// <summary>
@@ -378,20 +461,76 @@ public static class ScrollingCaptureService
             var l = ScrollMatcher.LocateInCanvas(_canvas, sig, int.MaxValue, footer);
             if (l is { NewRows: > 0 } overhang)
             {
+                Log.Info($"Scroll: re-locked at canvas row {overhang.Position} (+{overhang.NewRows}px recovered)");
                 AppendVertical(frame, sig, overhang.NewRows, footer);
             }
             else if (l is not null)
             {
+                if (_state != Track.Reviewing)
+                    Log.Info($"Scroll: frame is inside already-captured content (canvas row {l.Value.Position}) — reviewing");
                 _state = Track.Reviewing;
+                _reviewPos = l.Value.Position;
                 SetHint(ScrollHint.AlreadyCaptured);
             }
             else
             {
                 // From Reviewing, a single unlockable frame usually means mid-scroll blur or
                 // a blank gap; either way the user needs to slow down / come back.
+                if (_state != Track.Lost)
+                    Log.Info($"Scroll: lost tracking at {_stitch.Height}px — waiting for the user to scroll back");
                 _state = Track.Lost;
+                _reviewPos = -1;
                 SetHint(ScrollHint.SlowDown);
             }
+        }
+
+        /// <summary>
+        /// Reviewing = the frame sits over already-captured content at a KNOWN canvas row.
+        /// Prefer verified frame-to-frame moves to advance that position (dead-reckoning) —
+        /// they keep working across blank stretches where an absolute canvas re-lock cannot
+        /// verify anything. The moment the tracked position passes the canvas end, append
+        /// the overhang and resume normal tracking.
+        /// </summary>
+        private void ProcessReviewing(SD.Bitmap frame, FrameSignature sig, int footer, bool auto)
+        {
+            int d = _reviewPos >= 0 ? ScrollMatcher.FindOffset(_prevSig!, sig, footer) : 0;
+            if (d > 0)
+            {
+                _reviewPos += d;
+                _healSteps = 0; // verified progress — never time out mid-traversal
+                if (!TryFinishReview(frame, sig, footer))
+                    SetHint(ScrollHint.AlreadyCaptured);
+                return;
+            }
+
+            if (auto && _reviewPos >= 0 && _pxPerNotch > 0 && _lastSentNotches > 0)
+            {
+                // No verified relative offset — typical mid-gap, where the two frames hold
+                // content slivers that don't overlap each other. We injected a KNOWN number
+                // of notches and px-per-notch is calibrated, so advance the tracked position
+                // by the estimate. Bookkeeping only; any residual error lands inside the
+                // blank stretch (invisible), and verified matches re-anchor as soon as
+                // shared content returns.
+                _reviewPos += (int)Math.Round(_pxPerNotch * _lastSentNotches);
+                TryFinishReview(frame, sig, footer);
+                return;
+            }
+
+            RelockAgainstCanvas(sig, frame, footer); // refresh the absolute lock / degrade honestly
+        }
+
+        /// <summary>Appends the overhang and resumes tracking once the dead-reckoned review
+        /// position passes the canvas end. True when review finished.</summary>
+        private bool TryFinishReview(SD.Bitmap frame, FrameSignature sig, int footer)
+        {
+            int frameRows = sig.Height - footer;
+            int overhang = _reviewPos + frameRows - _canvas.Height;
+            if (overhang <= 0)
+                return false;
+            Log.Info($"Scroll: review reached the capture end (pos {_reviewPos}) — appending {overhang}px");
+            AppendVertical(frame, sig, Math.Min(overhang, frameRows), footer);
+            _reviewPos = -1;
+            return true;
         }
 
         private bool HandleAutoMiss(SD.Bitmap frame, FrameSignature sig, int footer)
@@ -403,25 +542,35 @@ public static class ScrollingCaptureService
                 // calibration. Appending the estimate is visually exact on uniform content.
                 int est = (int)Math.Round(_pxPerNotch * _notches);
                 est = Math.Clamp(est, 1, Math.Max(1, sig.Height - footer - 24));
+                Log.Info($"Scroll: blank stretch — appending calibrated estimate of {est}px");
                 AppendVertical(frame, sig, est, footer);
                 _status($"{_stitchedFrames} frames — {_stitch.Height}px (blank stretch)");
                 return true;
             }
 
+            // Same recovery as manual mode: locate the frame in the stitched canvas. This
+            // repairs the case where the PREVIOUS step's motion couldn't be verified (e.g.
+            // sampled mid-animation): the previous frame became the match anchor without
+            // its rows being appended, so a naive prev-frame append would leave a hole.
+            RelockAgainstCanvas(sig, frame, footer);
+            if (_state == Track.Tracking)
+                return true; // recovered — the overhang was appended, nothing lost
+
             _autoMisses++;
             _notches = Math.Max(1, _notches / 2); // smaller steps give the matcher more overlap
-            if (_autoMisses >= MaxAutoMisses)
-            {
-                _status($"Stopped — content wouldn't align (animation or video in the area?) — {_stitch.Height}px");
-                return false;
-            }
-            return true;
+            Log.Info($"Scroll: auto miss {_autoMisses} (frames differ, no canvas lock) — notches now {_notches}, state={_state}");
+            return true; // the Lost/Reviewing auto-heal in Pace() takes it from here
         }
 
         private void Recalibrate(int measuredOffset)
         {
             double perNotch = measuredOffset / (double)Math.Max(1, _notches);
             _pxPerNotch = _pxPerNotch <= 0 ? perNotch : (_pxPerNotch + perNotch) / 2;
+            if (_method == ScrollMethod.PageKey)
+            {
+                _notches = 1; // one PageDown per step; the page itself decides the distance
+                return;
+            }
             // Aim each step at ~60% of the usable frame height: fast, with wide overlap.
             int usable = Math.Max(64, _region.Height - _runningFooter);
             _notches = Math.Clamp((int)Math.Round(0.6 * usable / Math.Max(1, _pxPerNotch)), 1, 8);
@@ -521,10 +670,10 @@ public static class ScrollingCaptureService
         // ------------------------------------------------------------ pacing / input
 
         /// <summary>End-of-iteration pacing: injects auto-scroll (cursor permitting) or sleeps
-        /// the manual poll. Returns false only when the wait was cancelled.</summary>
+        /// the manual poll. Returns false to end the capture (auto-recovery gave up).</summary>
         private bool Pace()
         {
-            bool wantAuto = _autoScroll() && _state == Track.Tracking && _prevSig is not null;
+            bool wantAuto = _autoScroll() && _prevSig is not null;
             if (wantAuto && _direction != ScrollDirection.Horizontal)
                 _direction ??= ScrollDirection.Vertical; // Auto-Scroll defaults to vertical
 
@@ -538,14 +687,83 @@ public static class ScrollingCaptureService
                 }
                 if (_lastHint == ScrollHint.MoveCursorIntoArea)
                     SetHint(ScrollHint.None);
-                SendWheel(_direction == ScrollDirection.Horizontal ? _notches : -_notches,
-                    horizontal: _direction == ScrollDirection.Horizontal);
+
+                if (_state == Track.Tracking)
+                {
+                    SendScrollStep(up: false);
+                }
+                else
+                {
+                    // Auto-heal: the automated version of "scroll back up to re-sync".
+                    // Lost → nudge UP toward captured content until the canvas re-locks;
+                    // Reviewing (inside captured content) → nudge DOWN toward the end.
+                    if (++_healSteps > 12)
+                    {
+                        Log.Info($"Scroll: auto-recovery gave up after {_healSteps} nudges (state={_state}) at {_stitch.Height}px");
+                        _status($"Stopped — couldn't re-sync with the page — {_stitch.Height}px");
+                        return false;
+                    }
+                    Log.Info($"Scroll: auto-heal nudge {(_state == Track.Lost ? "up" : "down")} ({_healSteps}/12)");
+                    SendScrollStep(up: _state == Track.Lost, singleNotch: true);
+                }
                 _scrolledBeforeFrame = true;
                 return Sleep(AutoSettleMs);
             }
 
             _scrolledBeforeFrame = false;
             return Sleep(ManualPollMs);
+        }
+
+        /// <summary>Injects one auto-scroll step using the current input-ladder method.
+        /// <paramref name="up"/> reverses direction (recovery nudges);
+        /// <paramref name="singleNotch"/> forces the gentlest step.</summary>
+        private void SendScrollStep(bool up, bool singleNotch = false)
+        {
+            bool horizontal = _direction == ScrollDirection.Horizontal;
+            int notches = singleNotch ? 1 : _notches;
+            _lastSentNotches = up ? 0 : notches; // dead-reckoning only advances downward
+            int sign = horizontal ? 1 : -1;
+            if (up) sign = -sign;
+            int delta = WheelDelta * notches * sign;
+            int centerX = _region.X + _region.Width / 2, centerY = _region.Y + _region.Height / 2;
+            switch (_method)
+            {
+                case ScrollMethod.WheelInput:
+                    // Park the cursor at the region center first: wheel routing follows the
+                    // cursor, and a cursor sitting near the region edge (or under another
+                    // window's corner) sends the wheel elsewhere — ShareX's classic failure.
+                    // Only small moves: Pace() already verified the cursor is IN the region.
+                    SetCursorPos(centerX, centerY);
+                    SendWheelInput(delta, horizontal);
+                    break;
+
+                case ScrollMethod.WheelMessage:
+                    // Post the wheel message straight to the window under the region center —
+                    // bypasses input routing entirely (no cursor/focus dependence). Chrome,
+                    // Edge and Electron handle it on their deepest child (the render widget),
+                    // which is exactly what WindowFromPoint returns.
+                    IntPtr hwnd = WindowFromPoint(new WinShot.Recording.Point32 { X = centerX, Y = centerY });
+                    if (hwnd != IntPtr.Zero)
+                    {
+                        nuint wParam = (nuint)(((uint)(short)delta) << 16);
+                        nint lParam = (centerY << 16) | (centerX & 0xFFFF);
+                        PostMessage(hwnd, horizontal ? WM_MOUSEHWHEEL : WM_MOUSEWHEEL, wParam, lParam);
+                    }
+                    else
+                    {
+                        SendWheelInput(delta, horizontal); // nothing under the point; best effort
+                    }
+                    break;
+
+                case ScrollMethod.PageKey:
+                    // Last resort, and keyboard input needs focus: bring the window under
+                    // the region to the foreground before the key tap (ShareX v15's rescue).
+                    IntPtr target = WindowFromPoint(new WinShot.Recording.Point32 { X = centerX, Y = centerY });
+                    if (target != IntPtr.Zero)
+                        SetForegroundWindow(GetAncestor(target, GA_ROOT));
+                    SendKeyTap(up ? VkPrior : VkNext);
+                    break;
+            }
         }
 
         private bool Sleep(int ms)
@@ -564,6 +782,7 @@ public static class ScrollingCaptureService
         private void SetHint(ScrollHint hint)
         {
             if (hint == _lastHint) return;
+            Log.Info($"Scroll: hint → {hint}");
             _lastHint = hint;
             _hint(hint);
         }
@@ -579,7 +798,7 @@ public static class ScrollingCaptureService
             {
                 SD.Bitmap? snap = _direction == ScrollDirection.Horizontal
                     ? SnapshotHorizontalPreview()
-                    : _strip?.SnapshotBottomWindow();
+                    : _strip?.SnapshotWhole();
                 if (snap is not null)
                     _preview(snap); // callback takes ownership
             }
@@ -618,18 +837,31 @@ public static class ScrollingCaptureService
 
         private static bool EscPressed() => (GetAsyncKeyState(VkEscape) & 0x8000) != 0;
 
-        private static void SendWheel(int notches, bool horizontal)
+        private static void SendWheelInput(int delta, bool horizontal)
         {
             var input = new INPUT
             {
                 type = InputMouse,
-                mi = new MOUSEINPUT
+                U = new INPUTUNION
                 {
-                    mouseData = unchecked((uint)(WheelDelta * notches)),
-                    dwFlags = horizontal ? MouseEventFHWheel : MouseEventFWheel,
+                    mi = new MOUSEINPUT
+                    {
+                        mouseData = unchecked((uint)delta),
+                        dwFlags = horizontal ? MouseEventFHWheel : MouseEventFWheel,
+                    },
                 },
             };
             SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        }
+
+        private static void SendKeyTap(ushort vk)
+        {
+            var inputs = new[]
+            {
+                new INPUT { type = InputKeyboard, U = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk } } },
+                new INPUT { type = InputKeyboard, U = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk, dwFlags = KeyEventFKeyUp } } },
+            };
+            SendInput(2, inputs, Marshal.SizeOf<INPUT>());
         }
     }
 
@@ -734,17 +966,22 @@ public static class ScrollingCaptureService
             _used += scaled;
         }
 
-        /// <summary>Clone of the most recent ≤280 strip rows (the growing bottom edge).</summary>
-        public SD.Bitmap? SnapshotBottomWindow()
+        /// <summary>The WHOLE growing capture, downscaled to fit the preview box — CleanShot
+        /// shows the entire stitched image shrinking as it grows, and that overview (not just
+        /// the newest edge) is what tells the user whether the capture is keeping up.</summary>
+        public SD.Bitmap? SnapshotWhole()
         {
             if (_strip is null || _used == 0)
                 return null;
-            int h = Math.Min(_used, WindowHeight);
-            var snap = new SD.Bitmap(_width, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            double s = Math.Min(1.0, WindowHeight / (double)_used);
+            int w = Math.Max(1, (int)Math.Round(_width * s));
+            int h = Math.Max(1, (int)Math.Round(_used * s));
+            var snap = new SD.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
             using var g = SD.Graphics.FromImage(snap);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
             g.DrawImage(_strip,
-                new SD.Rectangle(0, 0, _width, h),
-                new SD.Rectangle(0, _used - h, _width, h),
+                new SD.Rectangle(0, 0, w, h),
+                new SD.Rectangle(0, 0, _width, _used),
                 SD.GraphicsUnit.Pixel);
             return snap;
         }
@@ -777,9 +1014,15 @@ public static class ScrollingCaptureService
     // =====================================================================
 
     private const int VkEscape = 0x1B;
+    private const ushort VkNext = 0x22;  // PageDown
+    private const ushort VkPrior = 0x21; // PageUp
     private const uint InputMouse = 0;
+    private const uint InputKeyboard = 1;
     private const uint MouseEventFWheel = 0x0800;
     private const uint MouseEventFHWheel = 0x1000;
+    private const uint KeyEventFKeyUp = 0x0002;
+    private const uint WM_MOUSEWHEEL = 0x020A;
+    private const uint WM_MOUSEHWHEEL = 0x020E;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MOUSEINPUT
@@ -792,13 +1035,28 @@ public static class ScrollingCaptureService
         public IntPtr dwExtraInfo;
     }
 
-    // MOUSEINPUT is the largest member of the INPUT union, so declaring only it
-    // keeps the marshalled size correct for SendInput.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct INPUTUNION
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
     {
         public uint type;
-        public MOUSEINPUT mi;
+        public INPUTUNION U;
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -809,4 +1067,21 @@ public static class ScrollingCaptureService
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(WinShot.Recording.Point32 point);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, nuint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    private const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 }

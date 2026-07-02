@@ -62,7 +62,16 @@ public static class Log
         }
         catch
         {
-            // Logging must never take the app down.
+            // Main log unwritable (locked/permissions): fall back to a per-process file so a
+            // broken instance is at least diagnosable instead of silently logless.
+            try
+            {
+                File.AppendAllText(Path.Combine(Dir, $"winshot-{Environment.ProcessId}.log"), line);
+            }
+            catch
+            {
+                // Logging must never take the app down.
+            }
         }
     }
 }

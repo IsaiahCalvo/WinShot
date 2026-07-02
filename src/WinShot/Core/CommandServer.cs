@@ -130,6 +130,11 @@ public sealed class CommandServer : IDisposable
         s = s.TrimStart('-');
         s = s.Trim('/');
 
+        // Parameterized automation command (scroll-region:x,y,w,h[,auto][,save]) — the
+        // args ride in the command itself, so it bypasses the fixed-name table.
+        if (s.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase))
+            return s;
+
         return ValidCommands.TryGetValue(s, out string? command) ? command : null;
     }
 

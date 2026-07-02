@@ -299,6 +299,13 @@ public sealed class ScrollControlsBar : WF.Form
         AutoScrollToggled?.Invoke(_autoOn);
     }
 
+    /// <summary>Programmatic start for the scroll-region automation command.</summary>
+    public void StartAutomatically(bool auto)
+    {
+        if (auto && !_autoOn) ToggleAuto();
+        else Start();
+    }
+
     public void SetStatus(string text)
     {
         if (IsDisposed || _hint != ScrollHint.None) return; // hints take precedence
@@ -314,13 +321,7 @@ public sealed class ScrollControlsBar : WF.Form
         _hint = hint;
         if (hint == ScrollHint.None) return;
         _status.ForeColor = WarnColor;
-        _status.Text = hint switch
-        {
-            ScrollHint.SlowDown => "⚠ Please slow down — scroll back up a little",
-            ScrollHint.AlreadyCaptured => "Already captured — scroll down to continue",
-            ScrollHint.MoveCursorIntoArea => "Move cursor into the area to auto-scroll",
-            _ => _status.Text,
-        };
+        _status.Text = ScrollHintText.For(hint) ?? _status.Text;
     }
 
     private static WF.Button MakeButton(string text, SD.Color back, SD.Color fore, SD.Color hover)
@@ -379,6 +380,20 @@ public sealed class ScrollControlsBar : WF.Form
     }
 }
 
+/// <summary>User-facing text for the persistent capture hints, shared by the controls bar
+/// and the preview panel (the user watches the bottom-right preview, so warnings must show
+/// there too, not only on the bar).</summary>
+internal static class ScrollHintText
+{
+    public static string? For(ScrollHint hint) => hint switch
+    {
+        ScrollHint.SlowDown => "⚠ Please slow down — scroll back up a little",
+        ScrollHint.AlreadyCaptured => "Already captured — scroll down to continue",
+        ScrollHint.MoveCursorIntoArea => "Move cursor into the area to auto-scroll",
+        _ => null,
+    };
+}
+
 /// <summary>
 /// Live preview panel pinned to the bottom-right of the region's monitor, showing the
 /// stitched image growing as the capture proceeds (CleanShot shows the same). Excluded from
@@ -388,6 +403,10 @@ public sealed class ScrollPreviewPanel : WF.Form
 {
     private readonly WF.PictureBox _pic;
     private readonly WF.Label _caption;
+    private bool _hintShowing;
+
+    // Amber warning — matches the controls bar's nudge color.
+    private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
 
     public ScrollPreviewPanel(SD.Rectangle regionScreen)
     {
@@ -402,7 +421,7 @@ public sealed class ScrollPreviewPanel : WF.Form
         _caption = new WF.Label
         {
             Dock = WF.DockStyle.Bottom,
-            Height = 20,
+            Height = 32, // two lines, so the "slow down" warning fits
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(8.5f),
             Text = "Capturing…",
@@ -445,7 +464,31 @@ public sealed class ScrollPreviewPanel : WF.Form
         var old = _pic.Image;
         _pic.Image = image;
         old?.Dispose();
-        _caption.Text = caption;
+        if (!_hintShowing)
+            _caption.Text = caption;
+    }
+
+    /// <summary>Live progress text under the preview ("12 frames — 4000px").</summary>
+    public void SetCaption(string text)
+    {
+        if (IsDisposed || _hintShowing) return;
+        _caption.ForeColor = ThemePalette.TextSecondary;
+        _caption.Text = text;
+    }
+
+    /// <summary>Amber warning shown under the preview, mirroring the controls bar — the
+    /// user is usually watching this panel while scrolling.</summary>
+    public void SetHint(ScrollHint hint)
+    {
+        if (IsDisposed) return;
+        _hintShowing = hint != ScrollHint.None;
+        if (!_hintShowing)
+        {
+            _caption.ForeColor = ThemePalette.TextSecondary;
+            return;
+        }
+        _caption.ForeColor = WarnColor;
+        _caption.Text = ScrollHintText.For(hint) ?? _caption.Text;
     }
 
     protected override void OnFormClosed(WF.FormClosedEventArgs e)

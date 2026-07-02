@@ -326,7 +326,8 @@ public partial class App : Application
     private static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
-        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer";
+        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
+        || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
     private void QueueCaptureCommand(string cmd)
     {
@@ -349,6 +350,48 @@ public partial class App : Application
             case "scrolling": ScrollingFlow(); break;
             case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
+            // Automation hook (CleanShot's cleanshot://scrolling-capture analog):
+            // scroll-region:x,y,w,h[,auto][,save] — physical screen coords, no selector.
+            case var c when c.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase):
+                ScrollRegionFlow(c);
+                break;
+        }
+    }
+
+    /// <summary>Scripted scrolling capture over an explicit screen region — used by the
+    /// automated capture tests and external automation. "auto" starts Auto-Scroll
+    /// immediately; "save" writes the result silently instead of the configured action.</summary>
+    private async void ScrollRegionFlow(string cmd)
+    {
+        if (_captureInProgress) return;
+        _captureInProgress = true;
+        try
+        {
+            var parts = cmd["scroll-region:".Length..].Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length < 4 ||
+                !int.TryParse(parts[0], out int x) || !int.TryParse(parts[1], out int y) ||
+                !int.TryParse(parts[2], out int w) || !int.TryParse(parts[3], out int h))
+            {
+                ShowBalloon("Scrolling capture", "Bad scroll-region command (need x,y,w,h).");
+                return;
+            }
+            bool auto = parts.Contains("auto", StringComparer.OrdinalIgnoreCase);
+            bool save = parts.Contains("save", StringComparer.OrdinalIgnoreCase);
+
+            var stitched = await ScrollingStatusWindow.Run(new SD.Rectangle(x, y, w, h), null, autoStart: auto);
+            if (stitched is not null)
+                HandleCapture(stitched, save ? PostCaptureAction.Save : null);
+            else
+                ShowBalloon("Scrolling capture", "Nothing captured.");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Scripted scrolling capture failed", ex);
+            ShowBalloon("Scrolling capture failed", ex.Message);
+        }
+        finally
+        {
+            FinishCaptureFlow();
         }
     }
 

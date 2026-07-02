@@ -20,7 +20,8 @@ public static class ScrollingStatusWindow
     /// captured or the user cancelled. <paramref name="presetDirection"/> forces an axis
     /// (the scroll-horizontal command); null auto-detects from the first movement.
     /// </summary>
-    public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null)
+    public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null,
+        bool autoStart = false)
     {
         using var cts = new CancellationTokenSource();
         bool cancelled = false;
@@ -45,6 +46,8 @@ public static class ScrollingStatusWindow
         try { preview.Show(); }
         catch (Exception ex) { Log.Error("Scroll preview failed to show (non-fatal)", ex); }
         controls.Show(); // shown last so the buttons sit above the overlay/preview
+        if (autoStart)
+            controls.StartAutomatically(auto: true); // automation: skip the Start click
 
         try
         {
@@ -65,8 +68,8 @@ public static class ScrollingStatusWindow
                 screenRegion,
                 presetDirection,
                 () => Volatile.Read(ref autoFlag[0]),
-                text => MarshalStatus(controls, text),
-                hint => MarshalHint(controls, hint),
+                text => MarshalStatus(controls, preview, text),
+                hint => MarshalHint(controls, preview, hint),
                 cts.Token,
                 thumb => PushPreview(preview, thumb));
 
@@ -109,14 +112,15 @@ public static class ScrollingStatusWindow
         }
     }
 
-    /// <summary>Status arrives on a thread-pool thread; hop to the controls bar's UI thread.</summary>
-    private static void MarshalStatus(ScrollControlsBar controls, string text)
+    /// <summary>Status arrives on a thread-pool thread; hop to each window's UI thread.</summary>
+    private static void MarshalStatus(ScrollControlsBar controls, ScrollPreviewPanel preview, string text)
     {
         try
         {
-            if (controls.IsDisposed) return;
-            if (controls.IsHandleCreated)
+            if (!controls.IsDisposed && controls.IsHandleCreated)
                 controls.BeginInvoke(new Action(() => controls.SetStatus(text)));
+            if (!preview.IsDisposed && preview.IsHandleCreated)
+                preview.BeginInvoke(new Action(() => preview.SetCaption(text)));
         }
         catch
         {
@@ -124,14 +128,16 @@ public static class ScrollingStatusWindow
         }
     }
 
-    /// <summary>Guidance hints from the capture thread; hop to the controls bar's UI thread.</summary>
-    private static void MarshalHint(ScrollControlsBar controls, ScrollHint hint)
+    /// <summary>Guidance hints from the capture thread — shown on the bar AND the preview
+    /// panel (the user watches the bottom-right preview while scrolling).</summary>
+    private static void MarshalHint(ScrollControlsBar controls, ScrollPreviewPanel preview, ScrollHint hint)
     {
         try
         {
-            if (controls.IsDisposed) return;
-            if (controls.IsHandleCreated)
+            if (!controls.IsDisposed && controls.IsHandleCreated)
                 controls.BeginInvoke(new Action(() => controls.SetHint(hint)));
+            if (!preview.IsDisposed && preview.IsHandleCreated)
+                preview.BeginInvoke(new Action(() => preview.SetHint(hint)));
         }
         catch
         {

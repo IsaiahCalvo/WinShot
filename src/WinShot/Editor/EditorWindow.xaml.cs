@@ -179,6 +179,8 @@ public partial class EditorWindow : Window
         {
             foreach (var bmp in _owned) bmp.Dispose();
             _owned.Clear();
+            foreach (var bmp in _retired) bmp.Dispose();
+            _retired.Clear();
             MemoryCleanup.Request();
             if (_replenishPrewarmOnClose)
                 Dispatcher.BeginInvoke(
@@ -254,7 +256,12 @@ public partial class EditorWindow : Window
 
     private void ResetForSource(SD.Bitmap source)
     {
-        foreach (var bmp in _owned) bmp.Dispose();
+        // Do NOT dispose the old bitmaps yet: the bitmap-source worker may still be
+        // converting one of them (a queued RefreshImageAsync from the previous capture);
+        // disposing under it throws "Parameter is not valid" and the editor opens blank.
+        // The worker queue is serialized, so once the NEW source's conversion completes,
+        // every older job has finished and the retired bitmaps are safe to dispose.
+        _retired.AddRange(_owned);
         _owned.Clear();
         _source = source;
         _owned.Add(source);
@@ -355,11 +362,20 @@ public partial class EditorWindow : Window
     /// under the software rasterizer's 16.16 (32768) ceiling, so every tile renders even over RDP.</summary>
     private const int BaseTileHeight = 2048;
 
+    /// <summary>Old source bitmaps retired by <see cref="ResetForSource"/>, disposed only after
+    /// the next conversion completes (the serialized worker can no longer be touching them).</summary>
+    private readonly List<SD.Bitmap> _retired = new();
+
     private async Task RefreshImageAsync()
     {
         var source = await CaptureService.ToBitmapSourceSnapshotAsync(_source);
         var tiles = await Task.Run(() => SliceVertical(source, BaseTileHeight));
-        await Dispatcher.InvokeAsync(() => SetBaseTiles(tiles));
+        await Dispatcher.InvokeAsync(() =>
+        {
+            SetBaseTiles(tiles);
+            foreach (var bmp in _retired) bmp.Dispose();
+            _retired.Clear();
+        });
     }
 
     /// <summary>Slices a tall <see cref="BitmapSource"/> into ≤<paramref name="tileHeight"/>px frozen
