@@ -40,6 +40,7 @@ public partial class SettingsWindow : Window
         _settings = settings;
         BuildShortcutsTab();
         LoadFromSettings();
+        PopulateAbout();
         WireInlineHotkeyConflictChecks();
         DarkTitleBar.Apply(this);
     }
@@ -49,7 +50,7 @@ public partial class SettingsWindow : Window
         new[]
         {
             SectionGeneral, SectionShortcuts, SectionQuickAccess, SectionRecording,
-            SectionScreenshots, SectionAnnotate, SectionAdvanced,
+            SectionScreenshots, SectionAnnotate, SectionAdvanced, SectionAbout,
         };
 
     private void OnSectionChanged(object sender, SelectionChangedEventArgs e)
@@ -160,6 +161,13 @@ public partial class SettingsWindow : Window
                 $"show={showMs} activate={activateMs} total={total.ElapsedMilliseconds} ms");
         }
         return instance;
+    }
+
+    /// <summary>Selects the About tab (used by the tray "About WinShot…" item).</summary>
+    public void SelectAboutTab()
+    {
+        if (SectionList is not null)
+            SectionList.SelectedIndex = Sections().Length - 1;
     }
 
     private static void CreateInstance(SettingsService settings)
@@ -380,6 +388,58 @@ public partial class SettingsWindow : Window
             "Reset warnings",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
+    }
+
+    // ------------------------------------------------------------ About tab
+
+    private void PopulateAbout()
+    {
+        AboutVersionText.Text = $"Version {AppInfo.Version}";
+        AboutVersionValue.Text = AppInfo.Version;
+        AboutRuntimeValue.Text = $".NET {Environment.Version}";
+        AboutOsValue.Text = Environment.OSVersion.VersionString;
+        AboutInstallValue.Text = AppContext.BaseDirectory;
+    }
+
+    private async void OnAboutCheckUpdates(object sender, RoutedEventArgs e)
+    {
+        AboutCheckUpdatesButton.IsEnabled = false;
+        string original = (string)AboutCheckUpdatesButton.Content;
+        AboutCheckUpdatesButton.Content = "Checking…";
+        try
+        {
+            var result = await UpdateService.CheckAsync();
+            string message = result.State switch
+            {
+                UpdateState.UpdateAvailable => $"WinShot {result.LatestVersion} is available.\n\nYou have {AppInfo.Version}. Use the tray menu's \"Install update\" to update.",
+                UpdateState.UpToDate => $"You're on the latest version ({AppInfo.Version}).",
+                _ => $"Couldn't check for updates.\n\n{result.Message}",
+            };
+            MessageBox.Show(this, message, "Check for updates",
+                MessageBoxButton.OK,
+                result.State == UpdateState.Error ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        }
+        finally
+        {
+            AboutCheckUpdatesButton.Content = original;
+            AboutCheckUpdatesButton.IsEnabled = true;
+        }
+    }
+
+    private void OnAboutOpenRepo(object sender, RoutedEventArgs e) => OpenExternal(AppInfo.RepositoryUrl);
+
+    private void OnAboutOpenLogs(object sender, RoutedEventArgs e) => OpenExternal(Log.Dir);
+
+    private void OpenExternal(string target)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to open '{target}' from About tab", ex);
+        }
     }
 
     private void OnBrowse(object sender, RoutedEventArgs e)

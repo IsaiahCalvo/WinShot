@@ -275,6 +275,12 @@
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Advanced"/>
                     </StackPanel>
                 </ListBoxItem>
+                <ListBoxItem>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE946;"/>
+                        <TextBlock Style="{StaticResource NavTabLabel}" Text="About"/>
+                    </StackPanel>
+                </ListBoxItem>
             </ListBox>
         </Border>
 
@@ -993,6 +999,78 @@
                         <TextBox x:Name="RetentionDaysBox" Visibility="Collapsed"/>
                         <TextBox x:Name="HistoryLimitBox" Visibility="Collapsed"/>
                         <TextBox x:Name="SelfTimerBox" Visibility="Collapsed"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ===================== ABOUT ===================== -->
+                <ScrollViewer x:Name="SectionAbout" Visibility="Collapsed"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Margin="4,8" HorizontalAlignment="Center">
+                                <TextBlock Text="&#xE722;" FontFamily="{StaticResource IconFont}"
+                                           FontSize="44" HorizontalAlignment="Center"
+                                           Foreground="{StaticResource AccentBrush}"/>
+                                <TextBlock Text="WinShot" FontSize="22" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" Margin="0,8,0,0"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                <TextBlock x:Name="AboutVersionText" HorizontalAlignment="Center"
+                                           Margin="0,2,0,0" FontSize="13"
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                <TextBlock Text="A fast, lightweight screenshot &amp; recording tool for Windows."
+                                           HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Version"/>
+                                    <TextBlock x:Name="AboutVersionValue" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Runtime"/>
+                                    <TextBlock x:Name="AboutRuntimeValue" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Windows"/>
+                                    <TextBlock x:Name="AboutOsValue" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Install folder"/>
+                                    <TextBlock x:Name="AboutInstallValue" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                                </DockPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Updates"/>
+                                    <Button x:Name="AboutCheckUpdatesButton" Content="Check for updates"
+                                            MinWidth="160" HorizontalAlignment="Left"
+                                            Style="{StaticResource PillButtonSecondary}" Click="OnAboutCheckUpdates"/>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Project"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="GitHub repository" MinWidth="160"
+                                                HorizontalAlignment="Left"
+                                                Style="{StaticResource PillButtonSecondary}" Click="OnAboutOpenRepo"/>
+                                        <Button Content="Open logs folder" MinWidth="140" Margin="8,0,0,0"
+                                                HorizontalAlignment="Left"
+                                                Style="{StaticResource PillButtonSecondary}" Click="OnAboutOpenLogs"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>

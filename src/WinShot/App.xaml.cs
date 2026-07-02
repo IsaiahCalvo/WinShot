@@ -147,6 +147,10 @@ public partial class App : Application
 
         var s = _settings.Current;
         var menu = new WF.ContextMenuStrip();
+        // Non-clickable header showing the running version — always visible at a glance.
+        var versionHeader = new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false };
+        menu.Items.Add(versionHeader);
+        menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
         menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window")));
         menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
@@ -171,6 +175,7 @@ public partial class App : Application
         _updateMenuItem.Visible = false;
         menu.Items.Add(_updateMenuItem);
         menu.Items.Add(MenuItem("Check for updates…", null, () => _ = CheckForUpdatesFlowAsync()));
+        menu.Items.Add(MenuItem("About WinShot…", null, OpenAbout));
         menu.Items.Add(MenuItem("Exit", null, Shutdown));
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
@@ -1156,6 +1161,8 @@ public partial class App : Application
         SettingsWindow.Show(_settings);
         LogPerf("settings window show", sw);
     }
+
+    private void OpenAbout() => SettingsWindow.Show(_settings).SelectAboutTab();
 
     private void OpenEditorFromOverlay(FastQuickActionsWindow overlay)
     {
