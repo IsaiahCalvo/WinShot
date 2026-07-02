@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinShot.SettingsUi"
-        Title="WinShot - Settings" Width="600" Height="700"
+        Title="WinShot - Settings" Width="660" Height="720"
         Background="{StaticResource WindowBgBrush}" ResizeMode="CanMinimize" ShowInTaskbar="True"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
@@ -210,8 +210,44 @@
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
-        <!-- A centered checkbox (no label) for the matrix cells. -->
-        <Style x:Key="MatrixCheck" TargetType="CheckBox" BasedOn="{StaticResource DarkCheckBox}">
+        <!-- A centered, label-less checkbox for the matrix cells. Uses its OWN template (just
+             the box) rather than DarkCheckBox: DarkCheckBox reserves an 8px content gutter, so
+             centering it left-shifted the box ~4px off the column center where the "—" dashes
+             sit. Box-only keeps checkbox and dash on the exact same centerline. -->
+        <Style x:Key="MatrixCheck" TargetType="CheckBox">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Width="18" Height="18">
+                            <Border x:Name="Box" CornerRadius="5"
+                                    Background="{StaticResource SurfaceAltBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                            <Path x:Name="Check" Visibility="Collapsed"
+                                  Stroke="White" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round" Data="M4,9 L8,13 L14,5"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- The "not available for this column" placeholder, centered on the SAME line as the box. -->
+        <Style x:Key="MatrixNA" TargetType="TextBlock">
+            <Setter Property="Text" Value="—"/>
+            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
@@ -285,7 +321,10 @@
         </Border>
 
         <!-- =============================== CONTENT PANE =============================== -->
-        <DockPanel Margin="18,14,18,14">
+        <!-- Right margin is small: each section ScrollViewer adds an 8px LEFT padding to mirror
+             the 8px slim scrollbar on the right, so the cards render symmetrically whether or
+             not the scrollbar is showing (no more left-shifted look). -->
+        <DockPanel Margin="14,12,14,12">
             <!-- Footer action bar -->
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,6,0,0">
@@ -299,7 +338,7 @@
             <Grid>
                 <!-- ===================== GENERAL ===================== -->
                 <ScrollViewer x:Name="SectionGeneral" VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -317,7 +356,7 @@
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Shutter sound"/>
-                                    <ComboBox x:Name="ShutterSoundCombo" Width="170" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="ShutterSoundCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Default" Tag="default"/>
                                         <ComboBoxItem Content="Classic" Tag="classic"/>
                                         <ComboBoxItem Content="Subtle" Tag="subtle"/>
@@ -402,21 +441,18 @@
 
                                         <!-- Row: Open Annotate tool (screenshot only) -->
                                         <CheckBox Grid.Row="4" Grid.Column="0" x:Name="ScreenshotOpenAnnotateCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <TextBlock Grid.Row="4" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                   Foreground="{StaticResource TextDisabledBrush}" Text="—"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="4" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0" Text="Open Annotate tool"/>
 
                                         <!-- Row: Pin to the screen (screenshot only) -->
                                         <CheckBox Grid.Row="5" Grid.Column="0" x:Name="ScreenshotPinCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <TextBlock Grid.Row="5" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                   Foreground="{StaticResource TextDisabledBrush}" Text="—"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="5" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0" Text="Pin to the screen"/>
 
                                         <!-- Row: Open Video Editor (recording only) -->
-                                        <TextBlock Grid.Row="6" Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                   Foreground="{StaticResource TextDisabledBrush}" Text="—"/>
+                                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource MatrixNA}"/>
                                         <CheckBox Grid.Row="6" Grid.Column="1" x:Name="RecordingOpenEditorCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="6" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0" Text="Open Video Editor"/>
@@ -433,7 +469,7 @@
                 <!-- ===================== SHORTCUTS ===================== -->
                 <ScrollViewer x:Name="SectionShortcuts" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -450,13 +486,13 @@
                 <!-- ===================== QUICK ACCESS (overlay) ===================== -->
                 <ScrollViewer x:Name="SectionQuickAccess" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Position on screen"/>
-                                    <ComboBox x:Name="OverlayPositionCombo" Width="170" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="OverlayPositionCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Left" Tag="left"/>
                                         <ComboBoxItem Content="Right" Tag="right"/>
                                         <ComboBoxItem Content="Top" Tag="top"/>
@@ -473,7 +509,7 @@
                                            Text="Active screen is the screen where your cursor is pointing."/>
                                 <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Overlay size"/>
-                                    <Slider x:Name="OverlaySizeSlider" Width="220" HorizontalAlignment="Left"
+                                    <Slider x:Name="OverlaySizeSlider" HorizontalAlignment="Stretch"
                                             Minimum="0" Maximum="100" Value="50"/>
                                 </DockPanel>
                             </StackPanel>
@@ -488,7 +524,7 @@
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Action"/>
-                                    <ComboBox x:Name="OverlayActionCombo" Width="170" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="OverlayActionCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Save and Close" Tag="save-close"/>
                                         <ComboBoxItem Content="Copy and Close" Tag="copy-close"/>
                                         <ComboBoxItem Content="Close" Tag="close"/>
@@ -512,7 +548,7 @@
                                            Text="Hold Alt to keep the item on the Overlay after dragging."/>
                                 <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Save button behavior"/>
-                                    <ComboBox x:Name="OverlaySaveBehaviorCombo" Width="200" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="OverlaySaveBehaviorCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Save to &quot;Export location&quot;" Tag="export"/>
                                         <ComboBoxItem Content="Always ask where to save" Tag="ask"/>
                                     </ComboBox>
@@ -527,7 +563,7 @@
                 <!-- ===================== RECORDING ===================== -->
                 <ScrollViewer x:Name="SectionRecording" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <!-- Sub-tab strip: General / Video / GIF -->
                         <ListBox x:Name="RecordingSubList" Background="Transparent" BorderThickness="0"
@@ -604,7 +640,7 @@
 
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Webcam"/>
-                                        <ComboBox x:Name="WebcamCombo" Width="180" HorizontalAlignment="Left">
+                                        <ComboBox x:Name="WebcamCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="Off" Tag="off"/>
                                             <ComboBoxItem Content="Top left" Tag="top-left"/>
                                             <ComboBoxItem Content="Top right" Tag="top-right"/>
@@ -630,7 +666,7 @@
                                 <StackPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Max resolution"/>
-                                        <ComboBox x:Name="MaxResolutionCombo" Width="150" HorizontalAlignment="Left">
+                                        <ComboBox x:Name="MaxResolutionCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="Original" Tag="original"/>
                                             <ComboBoxItem Content="4K" Tag="4k"/>
                                             <ComboBoxItem Content="1080p" Tag="1080p"/>
@@ -705,7 +741,7 @@
 
                                     <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="GIF size"/>
-                                        <ComboBox x:Name="GifSizeCombo" Width="190" HorizontalAlignment="Left">
+                                        <ComboBox x:Name="GifSizeCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="800 x auto (default)" Tag="800"/>
                                             <ComboBoxItem Content="640 x auto" Tag="640"/>
                                             <ComboBoxItem Content="480 x auto" Tag="480"/>
@@ -723,13 +759,13 @@
                 <!-- ===================== SCREENSHOTS ===================== -->
                 <ScrollViewer x:Name="SectionScreenshots" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="File format"/>
-                                    <ComboBox x:Name="FormatCombo" Width="110" HorizontalAlignment="Left"
+                                    <ComboBox x:Name="FormatCombo" HorizontalAlignment="Stretch"
                                               SelectionChanged="OnFormatChanged">
                                         <ComboBoxItem Content="PNG" Tag="png"/>
                                         <ComboBoxItem Content="JPG" Tag="jpg"/>
@@ -750,7 +786,7 @@
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Background"/>
-                                    <ComboBox x:Name="BackgroundCombo" Width="170" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="BackgroundCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="None" Tag="none"/>
                                         <ComboBoxItem Content="Wallpaper" Tag="wallpaper"/>
                                         <ComboBoxItem Content="Gradient" Tag="gradient"/>
@@ -766,7 +802,7 @@
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Self-Timer interval"/>
-                                    <ComboBox x:Name="SelfTimerCombo" Width="150" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="SelfTimerCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="3 Seconds" Tag="3"/>
                                         <ComboBoxItem Content="5 Seconds" Tag="5"/>
                                         <ComboBoxItem Content="10 Seconds" Tag="10"/>
@@ -790,7 +826,7 @@
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Crosshair mode"/>
-                                    <ComboBox x:Name="CrosshairModeCombo" Width="200" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="CrosshairModeCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Always show" Tag="always"/>
                                         <ComboBoxItem Content="When Ctrl is pressed" Tag="command"/>
                                         <ComboBoxItem Content="Never" Tag="never"/>
@@ -810,7 +846,7 @@
                 <!-- ===================== ANNOTATE ===================== -->
                 <ScrollViewer x:Name="SectionAnnotate" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -863,7 +899,7 @@
                 <!-- ===================== ADVANCED ===================== -->
                 <ScrollViewer x:Name="SectionAdvanced" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
@@ -900,7 +936,7 @@
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Copy to clipboard"/>
-                                    <ComboBox x:Name="CopyFormatCombo" Width="200" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="CopyFormatCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="File &amp; image (default)" Tag="file-image"/>
                                         <ComboBoxItem Content="File only" Tag="file"/>
                                         <ComboBoxItem Content="Image only" Tag="image"/>
@@ -928,11 +964,11 @@
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Keep history"/>
-                                    <Slider x:Name="HistorySlider" Width="240" HorizontalAlignment="Left"
+                                    <Slider x:Name="HistorySlider" HorizontalAlignment="Stretch"
                                             Minimum="0" Maximum="4" TickFrequency="1" IsSnapToTickEnabled="True"
                                             ValueChanged="OnHistorySliderChanged"/>
                                 </DockPanel>
-                                <Grid Margin="162,0,0,0" Width="240" HorizontalAlignment="Left">
+                                <Grid Margin="162,0,0,0" HorizontalAlignment="Stretch">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
@@ -964,7 +1000,7 @@
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Text recognition"/>
-                                    <ComboBox x:Name="OcrLanguageCombo" Width="240" HorizontalAlignment="Left">
+                                    <ComboBox x:Name="OcrLanguageCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Automatically Detect Language" Tag="auto"/>
                                         <ComboBoxItem Content="English" Tag="en"/>
                                         <ComboBoxItem Content="Spanish" Tag="es"/>
@@ -1005,7 +1041,7 @@
                 <!-- ===================== ABOUT ===================== -->
                 <ScrollViewer x:Name="SectionAbout" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                              HorizontalScrollBarVisibility="Disabled" Padding="8,0,0,0">
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel Margin="4,8" HorizontalAlignment="Center">
