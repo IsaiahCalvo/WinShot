@@ -33,14 +33,14 @@ public class ThemedWindowTests
                 using var previewFile = new TempImageFile();
 
                 using (var fastSelector = new FastRegionSelectorDialog(
-                    Task.FromResult(new List<WindowInfo>()),
+                    () => Task.FromResult(new List<WindowInfo>()),
                     settings))
                 {
                     fastSelector.Show();
                     fastSelector.Close();
                 }
                 using (var fastAllInOne = new FastAllInOneSelectorDialog(
-                    Task.FromResult(new List<WindowInfo>()),
+                    () => Task.FromResult(new List<WindowInfo>()),
                     settings))
                 {
                     fastAllInOne.Show();
@@ -52,8 +52,8 @@ public class ThemedWindowTests
                 ShowAndClose(new FastQuickPreviewWindow(previewFile.Path));
                 ShowAndClose(new HistoryWindow(history, settings));
                 ShowAndClose(new SettingsWindow(settings));
-                PrewarmedSettingsWindowCloseSmoke(settings);
-                PrewarmedHistoryWindowCloseSmoke(history, settings);
+                SettingsWindowShowCloseSmoke(settings);
+                HistoryWindowShowCloseSmoke(history, settings);
                 ShowAndClose(new FastSelfTimerWindow(1));
                 ShowAndClose(new FastRecordingOptionsDialog(settings.Current));
                 ShowAndClose(new FastRecordingControlBar());
@@ -111,9 +111,8 @@ public class ThemedWindowTests
         form.Dispose();
     }
 
-    private static void PrewarmedSettingsWindowCloseSmoke(SettingsService settings)
+    private static void SettingsWindowShowCloseSmoke(SettingsService settings)
     {
-        SettingsWindow.Prewarm(settings);
         var window = SettingsWindow.Show(settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
@@ -122,9 +121,8 @@ public class ThemedWindowTests
         Assert.False(window.IsVisible);
     }
 
-    private static void PrewarmedHistoryWindowCloseSmoke(HistoryService history, SettingsService settings)
+    private static void HistoryWindowShowCloseSmoke(HistoryService history, SettingsService settings)
     {
-        HistoryWindow.Prewarm(history, settings);
         var window = HistoryWindow.Show(history, settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
@@ -249,14 +247,11 @@ public class ThemedWindowTests
     /// <summary>
     /// Reproduction guard for "the editor shows a cropped image": a tall capture (e.g. a
     /// scrolling capture, or any shot larger than the editor viewport) must be fully fitted
-    /// into the viewport on open, not shown 1:1 anchored top-left. Exercises the PREWARM
-    /// reuse path (CreateForCapture -> ResetForSource), which is the default at runtime.
+    /// into the viewport on open, not shown 1:1 anchored top-left. Exercises the
+    /// CreateForCapture path, which is the default at runtime.
     /// </summary>
     private static void EditorFitsTallImageSmoke(SettingsService settings, HistoryService history)
     {
-        EditorWindow.Prewarm(settings, history);
-        for (int i = 0; i < 4; i++) PumpDispatcherOnce();
-
         const int imgW = 1000;
         var tall = new SD.Bitmap(imgW, 4000);
         using (var g = SD.Graphics.FromImage(tall)) g.Clear(SD.Color.CornflowerBlue);

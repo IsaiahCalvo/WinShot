@@ -538,28 +538,25 @@ public static class CaptureService
             return;
         }
 
-        CopyWpfImageToClipboard(bmp, includePng);
+        CopyWpfImageToClipboard(bmp);
     }
 
-    private static void CopyWpfImageToClipboard(Bitmap bmp, bool includePng)
+    private static void CopyWpfImageToClipboard(Bitmap bmp)
     {
         var data = new DataObject();
         data.SetImage(ToBitmapSource(bmp));
         MemoryStream? pngStream = null;
         try
         {
-            if (includePng)
-            {
-                pngStream = new MemoryStream();
-                bmp.Save(pngStream, ImageFormat.Png);
-                pngStream.Position = 0;
-                data.SetData("PNG", pngStream, autoConvert: false);
-            }
+            pngStream = new MemoryStream();
+            bmp.Save(pngStream, ImageFormat.Png);
+            pngStream.Position = 0;
+            data.SetData("PNG", pngStream, autoConvert: false);
 
-            int maxAttempts = includePng ? 9 : 80;
-            int retryDelayMs = includePng ? 75 : 125;
+            const int maxAttempts = 9;
+            const int retryDelayMs = 75;
 
-            // The clipboard can be transiently locked by another process; auto-copy can wait longer.
+            // The clipboard can be transiently locked by another process; retry briefly.
             for (int attempt = 0; ; attempt++)
             {
                 try

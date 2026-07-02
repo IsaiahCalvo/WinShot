@@ -73,9 +73,9 @@ public sealed class RecordingController
         _restarting = false; // never spin up a fresh recording while tearing down
         try
         {
-            if (_isGif)
-                _gifRecorder?.Stop();
-            else
+            // The GIF recorder is stopped unconditionally below; only the MP4
+            // recorder needs an explicit stop here.
+            if (!_isGif)
                 _recorder?.Stop();
         }
         catch (Exception ex)
@@ -450,8 +450,7 @@ public sealed class RecordingController
             {
                 AnchorPoint = layout.Position switch
                 {
-                    "fullscreen" => Anchor.TopLeft,
-                    "top-left" => Anchor.TopLeft,
+                    "fullscreen" or "top-left" => Anchor.TopLeft,
                     "top-right" => Anchor.TopRight,
                     "bottom-left" => Anchor.BottomLeft,
                     _ => Anchor.BottomRight,

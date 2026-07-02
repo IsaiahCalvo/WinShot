@@ -21,6 +21,11 @@ internal static class WindowsGraphicsCaptureCapture
 {
     private const int FirstFrameTimeoutMs = 1000;
     private const int FailureCooldownMs = 30_000;
+    private const int CaptureAttemptTimeoutMs = 2_500;
+    // Background probes run off the user path, so they can afford a generous allowance —
+    // this keeps a slow-but-healthy WGC (e.g. large multi-monitor setups) from being
+    // misdiagnosed as broken and parked on the GDI fallback forever.
+    private const int ProbeTimeoutMs = 10_000;
     private const uint HResultAccessDenied = 0x80070005;
     private const uint HResultNoInterface = 0x80004002;
     private const uint MonitorDefaultToNearest = 2;
@@ -33,19 +38,148 @@ internal static class WindowsGraphicsCaptureCapture
     private static readonly Dictionary<string, DisplayCapture> Displays = new(StringComparer.OrdinalIgnoreCase);
     private static DeviceResources? _deviceResources;
     private static long _disabledUntilTick;
+    // Starts in probation (1): the first capture of the session uses the instant GDI
+    // fallback while a background probe checks WGC health. Probing on first capture, not
+    // at startup, keeps the WGC session's yellow capture border inside a user-initiated
+    // capture instead of an unprompted flash at app launch.
+    private static int _lastAttemptFailed = 1;
+    private static int _probeActive;
+    private static int _attemptInFlight;
 
     public static bool TryCaptureRegion(Rectangle screenRect, out Bitmap? bitmap)
     {
         bitmap = null;
-        if (!IsSupported() || IsTemporarilyDisabled())
+        if (IsTemporarilyDisabled())
             return false;
 
+        // Circuit breaker: after any failure, the user path never re-tests WGC inline —
+        // re-testing a stalled GPU capture path costs the full CaptureAttemptTimeoutMs on
+        // the user's keystroke, which reads as a laggy hotkey. Captures go straight to the
+        // GDI fallback (instant) and a background probe re-enables WGC once a healthy
+        // capture is observed.
+        if (Volatile.Read(ref _lastAttemptFailed) != 0)
+        {
+            StartBackgroundProbe(screenRect);
+            return false;
+        }
+
+        return TryCaptureBounded(screenRect, CaptureAttemptTimeoutMs, out bitmap);
+    }
+
+    private static bool TryCaptureBounded(Rectangle screenRect, int timeoutMs, out Bitmap? bitmap)
+    {
+        bitmap = null;
+
+        // At most one attempt worker per backend: a stalled worker holds the gate for the
+        // duration of the native stall, and spawning more would only pile blocked
+        // threadpool threads behind it (then burst-drain useless captures on recovery).
+        // Bail to the fallback without touching the health flag — a bail here says
+        // nothing new about WGC health.
+        if (Interlocked.CompareExchange(ref _attemptInFlight, 1, 0) != 0)
+            return false;
+
+        // WinRT activation / D3D device / capture-session creation can stall for minutes
+        // without failing when another consumer (RDP, remote-control mirroring like
+        // ScreenConnect/RustDesk) holds the GPU capture path — 30-280 s stalls observed in
+        // the field, including inside GraphicsCaptureSession.IsSupported() itself. The
+        // native calls are not cancellable, so run the whole attempt (support probe
+        // included) on a worker and give up after a bounded wait; callers then drop to the
+        // GDI fallbacks and the stalled attempt cleans itself up whenever the native call
+        // finally returns.
+        Task<Bitmap?> attempt = Task.Run(() =>
+        {
+            try
+            {
+                return IsSupported() ? CaptureRegionGated(screenRect) : null;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _attemptInFlight, 0);
+            }
+        });
+        bool finished;
+        try
+        {
+            finished = attempt.Wait(timeoutMs);
+        }
+        catch (AggregateException)
+        {
+            // CaptureRegionGated already logged and started the cooldown.
+            Volatile.Write(ref _lastAttemptFailed, 1);
+            return false;
+        }
+
+        if (finished)
+        {
+            bitmap = attempt.Result;
+            if (bitmap is null)
+                Volatile.Write(ref _lastAttemptFailed, 1);
+            return bitmap is not null;
+        }
+
+        // Cooldown first, then the flag: readers check the cooldown before the flag, so
+        // publishing in reverse read order keeps a concurrent capture from firing a probe
+        // in the instant between the two writes.
+        DisableTemporarily();
+        Volatile.Write(ref _lastAttemptFailed, 1);
+        Log.Info(
+            $"Windows Graphics Capture still starting after {timeoutMs} ms; " +
+            $"using GDI fallback and skipping WGC for {FailureCooldownMs / 1000} s.");
+        attempt.ContinueWith(
+            t =>
+            {
+                if (t.Status == TaskStatus.RanToCompletion)
+                    t.Result?.Dispose();
+                else
+                    _ = t.Exception; // observe so an abandoned attempt can't surface later
+            },
+            TaskScheduler.Default);
+        return false;
+    }
+
+    private static void StartBackgroundProbe(Rectangle screenRect)
+    {
+        if (Interlocked.CompareExchange(ref _probeActive, 1, 0) != 0)
+            return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                if (TryCaptureBounded(screenRect, ProbeTimeoutMs, out Bitmap? probe))
+                {
+                    probe!.Dispose();
+                    Volatile.Write(ref _lastAttemptFailed, 0);
+                    Log.Info("Windows Graphics Capture probe succeeded; re-enabling WGC for captures.");
+                }
+                else if (!IsTemporarilyDisabled())
+                {
+                    // Throttle probes to one per cooldown window — but never shorten a
+                    // cooldown the failure path already armed (e.g. a longer access-denied
+                    // back-off).
+                    DisableTemporarily();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Windows Graphics Capture probe failed", ex);
+                if (!IsTemporarilyDisabled())
+                    DisableTemporarily();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _probeActive, 0);
+            }
+        });
+    }
+
+    private static Bitmap? CaptureRegionGated(Rectangle screenRect)
+    {
         lock (Gate)
         {
             var total = Stopwatch.StartNew();
             try
             {
-                bitmap = CaptureRegionCore(screenRect);
+                Bitmap bitmap = CaptureRegionCore(screenRect);
                 if (total.ElapsedMilliseconds > 50)
                 {
                     Log.Info(
@@ -53,7 +187,7 @@ internal static class WindowsGraphicsCaptureCapture
                         $"total={total.ElapsedMilliseconds} ms size={screenRect.Width}x{screenRect.Height}");
                 }
 
-                return true;
+                return bitmap;
             }
             catch (Exception ex)
             {
@@ -64,11 +198,12 @@ internal static class WindowsGraphicsCaptureCapture
 
                 ResetDeviceResources();
                 DisableTemporarily();
-                return false;
+                return null;
             }
-            // Single-shot by design: never keep a WGC session alive between captures.
-            // A live session shows a yellow capture border and does idle GPU work, so we
-            // fully tear down device + sessions after every capture (see Prewarm comment).
+            // Single-shot by design: never keep a WGC session alive between captures —
+            // not even to warm the path. Windows shows monitor capture sessions with a
+            // yellow border while they are alive, and a live session does idle GPU work,
+            // so we fully tear down device + sessions after every capture.
             finally
             {
                 ResetDeviceResources();
@@ -76,17 +211,20 @@ internal static class WindowsGraphicsCaptureCapture
         }
     }
 
-    public static void Prewarm(Rectangle screenRect)
-    {
-        // Do not keep a WGC session open just to warm the path. Windows shows
-        // monitor capture sessions with a yellow border while they are alive.
-    }
-
     public static void ReleaseResources()
     {
-        lock (Gate)
+        // Best-effort: a stalled attempt can hold the gate for minutes inside a native
+        // call — never block app shutdown on it; the abandoned worker's own finally
+        // tears the device down whenever the native call returns.
+        if (!Monitor.TryEnter(Gate, 250))
+            return;
+        try
         {
             ResetDeviceResources();
+        }
+        finally
+        {
+            Monitor.Exit(Gate);
         }
     }
 
@@ -526,7 +664,7 @@ internal static class WindowsGraphicsCaptureCapture
 
     private static GraphicsCaptureItem GetItemForScreen(WF.Screen screen)
     {
-        string key = $"{screen.DeviceName}|{screen.Bounds.X},{screen.Bounds.Y},{screen.Bounds.Width},{screen.Bounds.Height}";
+        string key = GetScreenKey(screen);
         if (ItemCache.TryGetValue(key, out GraphicsCaptureItem? existing))
             return existing;
 

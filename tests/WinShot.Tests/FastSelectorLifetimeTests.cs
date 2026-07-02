@@ -50,7 +50,7 @@ public class FastSelectorLifetimeTests
         RunSta(() =>
         {
             var selector = new FastRegionSelectorDialog(
-                Task.FromResult(new List<WindowInfo>()),
+                () => Task.FromResult(new List<WindowInfo>()),
                 settings: null);
 
             FastRegionSelectorDialog.Return(selector);
@@ -65,7 +65,7 @@ public class FastSelectorLifetimeTests
         RunSta(() =>
         {
             var selector = new FastAllInOneSelectorDialog(
-                Task.FromResult(new List<WindowInfo>()),
+                () => Task.FromResult(new List<WindowInfo>()),
                 settings: null);
             var toolbar = GetToolbar(selector);
 

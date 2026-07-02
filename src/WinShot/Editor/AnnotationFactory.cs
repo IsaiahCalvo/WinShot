@@ -58,10 +58,6 @@ internal static class AnnotationFactory
     public static ArrowStyle ParseArrowStyle(string? name) =>
         Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;
 
-    /// <summary>Straight arrow with the default (Straight) head style. Kept for existing callers.</summary>
-    public static Geometry ArrowGeometry(Point from, Point to, double thickness) =>
-        ArrowGeometry(from, to, thickness, ArrowStyle.Straight);
-
     /// <summary>
     /// Straight arrow in one of the <see cref="ArrowStyle"/> variants:
     /// Straight (one filled head), Double (filled head at both ends), or Thin (a slimmer,
@@ -338,10 +334,6 @@ internal static class AnnotationFactory
             FontFamily = new FontFamily("Segoe UI Emoji"),
             Background = Brushes.Transparent,
         };
-
-    /// <summary>Numbered circle badge; ring and digit color flip to black on light fills.</summary>
-    public static Grid CreateStepBadge(int number, Color color, double thickness) =>
-        CreateStepBadge(number, color, thickness, letters: false);
 
     /// <summary>
     /// Circle badge whose caption is either the number (1, 2, …) or a letter sequence

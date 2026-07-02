@@ -121,11 +121,6 @@
             <Setter Property="LastChildFill" Value="True"/>
         </Style>
 
-        <!-- Compact section header inside a card. -->
-        <Style x:Key="CardHeader" TargetType="TextBlock" BasedOn="{StaticResource SectionHeader}">
-            <Setter Property="Margin" Value="0,2,0,8"/>
-        </Style>
-
         <!-- Category header used on the Shortcuts list (small, muted, all-caps feel). -->
         <Style x:Key="ShortcutCategory" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>

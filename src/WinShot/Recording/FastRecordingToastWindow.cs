@@ -92,29 +92,6 @@ public sealed class FastRecordingToastWindow : WF.Form
 
     protected override bool ShowWithoutActivation => true;
 
-    public static void Prewarm()
-    {
-        try
-        {
-            using var toast = new FastRecordingToastWindow(
-                Path.Combine(Path.GetTempPath(), "winshot-prewarm.mp4"),
-                onEdit: null)
-            {
-                Opacity = 0,
-                Location = new SD.Point(-32000, -32000),
-            };
-            toast.Show();
-            WF.Application.DoEvents();
-            using var render = new SD.Bitmap(toast.Width, toast.Height);
-            toast.DrawToBitmap(render, new SD.Rectangle(0, 0, render.Width, render.Height));
-            toast.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast recording toast prewarm failed", ex);
-        }
-    }
-
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);

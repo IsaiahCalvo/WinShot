@@ -55,27 +55,6 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     protected override bool ShowWithoutActivation => true;
 
-    public static void Prewarm()
-    {
-        try
-        {
-            using var preview = new FastQuickPreviewWindow("")
-            {
-                Opacity = 0,
-                Location = new SD.Point(-32000, -32000),
-            };
-            preview.Show();
-            WF.Application.DoEvents();
-            using var render = new SD.Bitmap(preview.Width, preview.Height);
-            preview.DrawToBitmap(render, new SD.Rectangle(0, 0, render.Width, render.Height));
-            preview.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast quick preview prewarm failed", ex);
-        }
-    }
-
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);

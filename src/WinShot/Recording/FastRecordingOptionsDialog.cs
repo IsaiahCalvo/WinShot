@@ -31,7 +31,6 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     // maps to the first real device). Populated lazily from ScreenRecorderLib.
     private readonly List<string?> _micDeviceNames = new();
     private readonly List<string?> _webcamDeviceNames = new();
-    private bool _devicesLoaded;
     private readonly WF.CheckBox _cursorCheck;
     private readonly WF.CheckBox _clickHighlightCheck;
     private readonly WF.CheckBox _keystrokeCheck;
@@ -195,10 +194,6 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     /// </summary>
     private void LoadDevices()
     {
-        if (_devicesLoaded)
-            return;
-        _devicesLoaded = true;
-
         _micDeviceCombo.Items.Clear();
         _micDeviceNames.Clear();
         _micDeviceCombo.Items.Add("Default");
@@ -255,30 +250,6 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
     private static string Truncate(string text) =>
         text.Length <= 28 ? text : text[..27] + "…";
-
-    public static void Prewarm(Settings settings)
-    {
-        try
-        {
-            if (_cached is { IsDisposed: false })
-                return;
-
-            var dialog = new FastRecordingOptionsDialog(settings)
-            {
-                Opacity = 0,
-                ShowInTaskbar = false,
-            };
-            _cached = dialog;
-            dialog.Show();
-            WF.Application.DoEvents();
-            dialog.Hide();
-            dialog.Opacity = 1;
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast recording options prewarm failed", ex);
-        }
-    }
 
     public static FastRecordingOptionsDialog Create(Settings settings)
     {

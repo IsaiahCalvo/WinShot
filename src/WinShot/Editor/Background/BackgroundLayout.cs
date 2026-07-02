@@ -9,12 +9,11 @@ public static class BackgroundLayout
     public static BackgroundLayoutResult Calculate(
         SD.Size sourceSize,
         int padding,
-        int inset,
         double? aspectRatio)
     {
         int sourceWidth = Math.Max(1, sourceSize.Width);
         int sourceHeight = Math.Max(1, sourceSize.Height);
-        int margin = Math.Max(0, padding) + Math.Max(0, inset);
+        int margin = Math.Max(0, padding);
         int contentWidth = sourceWidth + 2 * margin;
         int contentHeight = sourceHeight + 2 * margin;
         int canvasWidth = contentWidth;

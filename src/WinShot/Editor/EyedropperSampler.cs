@@ -53,17 +53,14 @@ public static class EyedropperSampler
             top = flippedTop < 0 ? source.Height - height : flippedTop;
         }
 
-        left = ClampToRange(left, 0, Math.Max(0, source.Width - width));
-        top = ClampToRange(top, 0, Math.Max(0, source.Height - height));
+        left = Math.Clamp(left, 0, Math.Max(0, source.Width - width));
+        top = Math.Clamp(top, 0, Math.Max(0, source.Height - height));
 
         return new EyedropperPreview(true, color, ToHex(color), scale, left, top);
     }
 
     private static double PreviewScale(double zoom) =>
         double.IsFinite(zoom) && zoom > 0 ? 1 / zoom : 1;
-
-    private static double ClampToRange(double value, double min, double max) =>
-        Math.Min(Math.Max(value, min), max);
 
     private static string ToHex(Color color) => $"#{color.R:X2}{color.G:X2}{color.B:X2}";
 }

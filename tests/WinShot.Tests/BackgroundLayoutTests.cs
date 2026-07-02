@@ -7,12 +7,11 @@ namespace WinShot.Tests;
 public class BackgroundLayoutTests
 {
     [Fact]
-    public void Calculate_AutoCanvasHugsImageWithPaddingAndInset()
+    public void Calculate_AutoCanvasHugsImageWithPadding()
     {
         var layout = BackgroundLayout.Calculate(
             new Size(400, 200),
-            padding: 40,
-            inset: 10,
+            padding: 50,
             aspectRatio: null);
 
         Assert.Equal(new Size(500, 300), layout.CanvasSize);
@@ -25,7 +24,6 @@ public class BackgroundLayoutTests
         var layout = BackgroundLayout.Calculate(
             new Size(400, 300),
             padding: 50,
-            inset: 0,
             aspectRatio: 16d / 9d);
 
         Assert.Equal(new Size(712, 400), layout.CanvasSize);
@@ -38,7 +36,6 @@ public class BackgroundLayoutTests
         var layout = BackgroundLayout.Calculate(
             new Size(400, 300),
             padding: 50,
-            inset: 0,
             aspectRatio: 1);
 
         Assert.Equal(new Size(500, 500), layout.CanvasSize);
@@ -50,7 +47,6 @@ public class BackgroundLayoutTests
         var layout = BackgroundLayout.Calculate(
             new Size(0, -5),
             padding: -10,
-            inset: -2,
             aspectRatio: 0);
 
         Assert.Equal(new Size(1, 1), layout.SourceSize);

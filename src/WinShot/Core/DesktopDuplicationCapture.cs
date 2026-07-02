@@ -14,6 +14,10 @@ internal static class DesktopDuplicationCapture
 {
     private const int FirstFrameTimeoutMs = 20;
     private const int FailureCooldownMs = 30_000;
+    private const int CaptureAttemptTimeoutMs = 2_500;
+    // Background probes run off the user path, so they can afford a generous allowance —
+    // see WindowsGraphicsCaptureCapture.ProbeTimeoutMs.
+    private const int ProbeTimeoutMs = 10_000;
     private const int AccessDeniedCooldownMs = 10 * 60 * 1000;
     private const uint DxgiErrorWaitTimeout = 0x887A0027;
     private const uint HResultAccessDenied = 0x80070005;
@@ -23,6 +27,10 @@ internal static class DesktopDuplicationCapture
     private static long _disabledUntilTick;
     private static long _lastUseTick;
     private static int _evictionScheduled;
+    // Starts in probation (1) — see WindowsGraphicsCaptureCapture._lastAttemptFailed.
+    private static int _lastAttemptFailed = 1;
+    private static int _probeActive;
+    private static int _attemptInFlight;
 
     public static bool TryCaptureRegion(Rectangle screenRect, out Bitmap? bitmap)
     {
@@ -30,14 +38,124 @@ internal static class DesktopDuplicationCapture
         if (IsTemporarilyDisabled())
             return false;
 
+        // Circuit breaker — see WindowsGraphicsCaptureCapture.TryCaptureRegion: after any
+        // failure, captures drop straight to BitBlt (instant) and a background probe
+        // re-enables duplication once a healthy capture is observed.
+        if (Volatile.Read(ref _lastAttemptFailed) != 0)
+        {
+            StartBackgroundProbe(screenRect);
+            return false;
+        }
+
+        return TryCaptureBounded(screenRect, CaptureAttemptTimeoutMs, out bitmap);
+    }
+
+    private static bool TryCaptureBounded(Rectangle screenRect, int timeoutMs, out Bitmap? bitmap)
+    {
+        bitmap = null;
+
+        // At most one attempt worker — see WindowsGraphicsCaptureCapture.TryCaptureBounded.
+        if (Interlocked.CompareExchange(ref _attemptInFlight, 1, 0) != 0)
+            return false;
+
+        // Same GPU-contention hazard as Windows Graphics Capture: DXGI duplication setup
+        // can stall for minutes (not fail) while remote-control software holds the capture
+        // path. Bound the attempt so callers drop to BitBlt; the stalled attempt cleans
+        // itself up whenever the native call finally returns.
+        Task<Bitmap?> attempt = Task.Run(() =>
+        {
+            try
+            {
+                return CaptureRegionGated(screenRect);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _attemptInFlight, 0);
+            }
+        });
+        bool finished;
+        try
+        {
+            finished = attempt.Wait(timeoutMs);
+        }
+        catch (AggregateException)
+        {
+            // CaptureRegionGated already logged and started the cooldown.
+            Volatile.Write(ref _lastAttemptFailed, 1);
+            return false;
+        }
+
+        if (finished)
+        {
+            bitmap = attempt.Result;
+            if (bitmap is null)
+                Volatile.Write(ref _lastAttemptFailed, 1);
+            return bitmap is not null;
+        }
+
+        // Cooldown first, then the flag — see WindowsGraphicsCaptureCapture.TryCaptureBounded.
+        DisableTemporarily(FailureCooldownMs);
+        Volatile.Write(ref _lastAttemptFailed, 1);
+        Log.Info(
+            $"Desktop duplication still starting after {timeoutMs} ms; " +
+            $"using GDI fallback and skipping duplication for {FailureCooldownMs / 1000} s.");
+        attempt.ContinueWith(
+            t =>
+            {
+                if (t.Status == TaskStatus.RanToCompletion)
+                    t.Result?.Dispose();
+                else
+                    _ = t.Exception; // observe so an abandoned attempt can't surface later
+            },
+            TaskScheduler.Default);
+        return false;
+    }
+
+    private static void StartBackgroundProbe(Rectangle screenRect)
+    {
+        if (Interlocked.CompareExchange(ref _probeActive, 1, 0) != 0)
+            return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                if (TryCaptureBounded(screenRect, ProbeTimeoutMs, out Bitmap? probe))
+                {
+                    probe!.Dispose();
+                    Volatile.Write(ref _lastAttemptFailed, 0);
+                    Log.Info("Desktop duplication probe succeeded; re-enabling duplication for captures.");
+                }
+                else if (!IsTemporarilyDisabled())
+                {
+                    // Throttle probes to one per cooldown window — but never shorten a
+                    // cooldown the failure path already armed (e.g. the longer
+                    // access-denied back-off).
+                    DisableTemporarily(FailureCooldownMs);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Desktop duplication probe failed", ex);
+                if (!IsTemporarilyDisabled())
+                    DisableTemporarily(FailureCooldownMs);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _probeActive, 0);
+            }
+        });
+    }
+
+    private static Bitmap? CaptureRegionGated(Rectangle screenRect)
+    {
         lock (Gate)
         {
             try
             {
-                bitmap = CaptureRegionCore(screenRect);
+                Bitmap bitmap = CaptureRegionCore(screenRect);
                 Interlocked.Exchange(ref _lastUseTick, Environment.TickCount64);
                 ScheduleIdleEviction();
-                return true;
+                return bitmap;
             }
             catch (Exception ex)
             {
@@ -47,50 +165,41 @@ internal static class DesktopDuplicationCapture
                     Log.Error("Desktop duplication capture failed; falling back to GDI", ex);
                 DisableTemporarily(ex);
                 Reset();
-                return false;
+                return null;
             }
         }
     }
 
-    public static void Prewarm(Rectangle screenRect)
-    {
-        if (IsTemporarilyDisabled())
-            return;
-
-        lock (Gate)
-        {
-            try
-            {
-                using var _ = CaptureRegionCore(screenRect);
-            }
-            catch (Exception ex)
-            {
-                if (IsAccessDenied(ex))
-                    Log.Info("Desktop duplication unavailable during prewarm; using GDI capture fallback.");
-                else if (!IsWaitTimeout(ex))
-                    Log.Error("Desktop duplication prewarm failed", ex);
-                DisableTemporarily(ex);
-                Reset();
-            }
-        }
-    }
-
-    public static bool IsTemporarilyUnavailable => IsTemporarilyDisabled();
+    // Probation counts as unavailable so CaptureService picks its fast BitBlt branch
+    // instead of the slower CAPTUREBLT path while duplication is sidelined.
+    public static bool IsTemporarilyUnavailable =>
+        IsTemporarilyDisabled() || Volatile.Read(ref _lastAttemptFailed) != 0;
 
     public static void ReleaseResources()
     {
-        lock (Gate)
+        // Best-effort: a stalled attempt can hold the gate for minutes inside a native
+        // call — never block app shutdown on it; the abandoned worker cleans up via
+        // Reset() in its own failure path whenever the native call returns.
+        if (!Monitor.TryEnter(Gate, 250))
+            return;
+        try
+        {
             Reset();
+        }
+        finally
+        {
+            Monitor.Exit(Gate);
+        }
     }
 
     private static bool IsTemporarilyDisabled() =>
         Environment.TickCount64 < Interlocked.Read(ref _disabledUntilTick);
 
-    private static void DisableTemporarily(Exception ex)
-    {
-        int cooldownMs = IsAccessDenied(ex) ? AccessDeniedCooldownMs : FailureCooldownMs;
+    private static void DisableTemporarily(Exception ex) =>
+        DisableTemporarily(IsAccessDenied(ex) ? AccessDeniedCooldownMs : FailureCooldownMs);
+
+    private static void DisableTemporarily(int cooldownMs) =>
         Interlocked.Exchange(ref _disabledUntilTick, Environment.TickCount64 + cooldownMs);
-    }
 
     private static bool IsWaitTimeout(Exception ex) =>
         unchecked((uint)ex.HResult) == DxgiErrorWaitTimeout ||
@@ -303,7 +412,7 @@ internal static class DesktopDuplicationCapture
             {
                 var result = _duplication.AcquireNextFrame(
                     _hasFrame ? 0u : FirstFrameTimeoutMs,
-                    out OutduplFrameInfo _,
+                    out OutduplFrameInfo frameInfo,
                     out resource);
 
                 if (result.Failure)
@@ -314,6 +423,21 @@ internal static class DesktopDuplicationCapture
                 }
 
                 acquired = true;
+
+                // A pointer-only update (LastPresentTime == 0) acquires successfully but the
+                // duplication's desktop-image surface has never received a present — staging
+                // it would return an all-black frame as a "successful" capture. Only possible
+                // before the first real frame; treat it like a first-frame wait timeout so the
+                // caller falls through to BitBlt.
+                if (!_hasFrame && frameInfo.LastPresentTime == 0)
+                {
+                    throw new InvalidOperationException(
+                        "First duplication frame was a pointer-only update with no desktop image (DXGI_ERROR_WAIT_TIMEOUT).")
+                    {
+                        HResult = unchecked((int)DxgiErrorWaitTimeout),
+                    };
+                }
+
                 using var texture = resource!.QueryInterface<ID3D11Texture2D>();
                 _context.CopyResource(_staging, texture);
                 _hasFrame = true;

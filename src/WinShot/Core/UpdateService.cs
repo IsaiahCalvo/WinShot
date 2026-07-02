@@ -195,7 +195,7 @@ public static class UpdateService
         token = token.ToLowerInvariant();
         if (token.Length != 64) return null;
         foreach (char c in token)
-            if (c is not ((>= '0' and <= '9') or (>= 'a' and <= 'f'))) return null;
+            if (!char.IsAsciiHexDigitLower(c)) return null;
         return token;
     }
 

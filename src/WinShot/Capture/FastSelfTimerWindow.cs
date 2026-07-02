@@ -53,26 +53,6 @@ public sealed class FastSelfTimerWindow : WF.Form
 
     protected override bool ShowWithoutActivation => true;
 
-    public static void Prewarm()
-    {
-        try
-        {
-            using var timer = new FastSelfTimerWindow(1)
-            {
-                Opacity = 0,
-                Location = new SD.Point(-32000, -32000),
-            };
-            timer.Show();
-            WF.Application.DoEvents();
-            using var render = new SD.Bitmap(timer.Width, timer.Height);
-            timer.DrawToBitmap(render, new SD.Rectangle(0, 0, render.Width, render.Height));
-            timer.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast self-timer prewarm failed", ex);
-        }
-    }
 
     public static Task RunAsync(int seconds)
     {

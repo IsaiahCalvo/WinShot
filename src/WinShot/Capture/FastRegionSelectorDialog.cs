@@ -27,7 +27,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private const int HandleHalf = 4;       // handle square is 2*HandleHalf px
     private const int HandleHitTol = 9;     // grab tolerance around a handle center
     private static readonly SD.Color Accent = ThemePalette.Accent;
-    private static FastRegionSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
     private SD.Rectangle _monitorBounds;
@@ -52,7 +51,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     // (the latter is what made the crosshair lag on large external monitors). Keyed by monitor.
     private readonly Dictionary<SD.Rectangle, SD.Bitmap> _dimmedCache = new();
     private SD.Bitmap? _capturedRegion;    // region cropped from _frozen at confirm; caller takes ownership
-    private bool _prewarm;
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
     private TaskCompletionSource<WF.DialogResult>? _completion;
@@ -63,20 +61,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private readonly WF.Timer _followTimer;
     private bool _lastCtrlDown;
 
-    public FastRegionSelectorDialog(Task<List<WindowInfo>> windowsTask, SettingsService? settings)
-        : this(() => windowsTask, settings)
-    {
-    }
-
     public FastRegionSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
-        : this(windowsProvider, settings, prewarm: false)
-    {
-    }
-
-    private FastRegionSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings, bool prewarm)
     {
         _settings = settings;
-        _prewarm = prewarm;
         _windowsProvider = windowsProvider;
         _monitorBounds = PrimaryBounds();
 
@@ -84,14 +71,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DoubleBuffered = true;
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
-        Opacity = prewarm ? 0.01 : 1.0;
+        Opacity = 1.0;
 
         _followTimer = new WF.Timer { Interval = 15 };
         _followTimer.Tick += OnFollowTick;
 
         Shown += (_, _) => StartWindowLoad();
 
-        ResetForUse(windowsProvider, settings, prewarm);
+        ResetForUse(windowsProvider, settings);
     }
 
     public SD.Rectangle? SelectedRegionPx { get; private set; }
@@ -120,38 +107,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private static SD.Rectangle PrimaryBounds() =>
         (WF.Screen.PrimaryScreen ?? WF.Screen.AllScreens[0]).Bounds;
 
-    public static void Prewarm()
-    {
-        try
-        {
-            if (_cached is { IsDisposed: false })
-                return;
-
-            var selector = new FastRegionSelectorDialog(
-                () => Task.FromResult(new List<WindowInfo>()),
-                settings: null,
-                prewarm: true);
-
-            selector.Show();
-            WF.Application.DoEvents();
-            selector.Hide();
-            _cached = selector;
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast selector prewarm failed", ex);
-        }
-    }
-
     public static FastRegionSelectorDialog Rent(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
-        var selector = Interlocked.Exchange(ref _cached, null);
-        if (selector is { IsDisposed: false })
-        {
-            selector.ResetForUse(windowsProvider, settings, prewarm: false);
-            return selector;
-        }
-
         return new FastRegionSelectorDialog(windowsProvider, settings);
     }
 
@@ -160,8 +117,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (selector.IsDisposed)
             return;
 
-        if (ReferenceEquals(_cached, selector))
-            _cached = null;
         selector._settings = null;
         selector._windows = new List<WindowInfo>();
         selector._hoverWindow = null;
@@ -179,7 +134,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector.Dispose();
     }
 
-    public Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area)
+    public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area)
     {
         _mode = mode;
         _completion = new TaskCompletionSource<WF.DialogResult>(
@@ -188,7 +143,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
-        CaptureFrozen();
+        // Snapshot off the UI thread: WGC can take seconds before its fallback kicks in
+        // when the GPU capture path is contended, and the app (tray menu, settings,
+        // queued hotkeys) must stay responsive while the freeze frame is grabbed.
+        await CaptureFrozenAsync();
         CreatePanes();
 
         Show();
@@ -197,22 +155,19 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         Activate();
         Focus();
-        if (!_prewarm)
-            ForceForeground();
+        ForceForeground();
         _lastCtrlDown = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
-        if (!_prewarm)
-            _followTimer.Start();
-        return _completion.Task;
+        _followTimer.Start();
+        return await _completion.Task;
     }
 
-    private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings, bool prewarm)
+    private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         _settings = settings;
-        _prewarm = prewarm;
         _mode = SelectorMode.Area;
         _windowsProvider = windowsProvider;
         _windowsLoadStarted = false;
@@ -230,7 +185,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DialogResult = WF.DialogResult.None;
         Bounds = _monitorBounds;
         Capture = false;
-        Opacity = prewarm ? 0.01 : 1.0;
+        Opacity = 1.0;
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
@@ -242,8 +197,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void CreatePanes()
     {
         DisposePanes();
-        if (_prewarm)
-            return;
 
         foreach (var screen in WF.Screen.AllScreens)
         {
@@ -549,7 +502,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         try
         {
-            if (_prewarm) return;
             SD.Point p = CursorScreen();
             bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
             if (p == _currentScreen && ctrl == _lastCtrlDown)
@@ -686,7 +638,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
         // rect, and never in Window mode where the window highlight is the affordance).
-        bool inCrosshairContext = _mode == SelectorMode.Area && _pendingScreen is null && !_prewarm && cursorOnThisSurface;
+        bool inCrosshairContext = _mode == SelectorMode.Area && _pendingScreen is null && cursorOnThisSurface;
         if (inCrosshairContext)
         {
             // Crosshair guide lines honor the "Crosshair mode" setting; the magnifier/color
@@ -761,13 +713,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.SmoothingMode = prev;
     }
 
-    private void CaptureFrozen()
+    private async Task CaptureFrozenAsync()
     {
         DisposeFrozen();
-        if (_prewarm) return;
         try
         {
-            _frozen = CaptureService.CaptureVirtualDesktop();
+            _frozen = await Task.Run(CaptureService.CaptureVirtualDesktop);
         }
         catch (Exception ex)
         {

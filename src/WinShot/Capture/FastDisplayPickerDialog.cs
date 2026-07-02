@@ -11,7 +11,6 @@ public sealed class FastDisplayPickerDialog : WF.Form
     private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
     private static readonly SD.Color Accent = ThemePalette.Accent;
     private static readonly SD.Color TextColor = SD.Color.White;
-    private static FastDisplayPickerDialog? _cached;
 
     private FastDisplayPickerDialog()
     {
@@ -102,31 +101,6 @@ public sealed class FastDisplayPickerDialog : WF.Form
 
     public SD.Rectangle? SelectedBounds { get; private set; }
 
-    public static void Prewarm()
-    {
-        try
-        {
-            if (WF.Screen.AllScreens.Length <= 1)
-                return;
-            if (_cached is { IsDisposed: false })
-                return;
-
-            var dialog = new FastDisplayPickerDialog
-            {
-                Opacity = 0,
-                ShowInTaskbar = false,
-            };
-            _cached = dialog;
-            dialog.Show();
-            WF.Application.DoEvents();
-            dialog.Hide();
-            dialog.Opacity = 1;
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast display picker prewarm failed", ex);
-        }
-    }
 
     public static SD.Rectangle? ChooseDisplay()
     {
@@ -134,7 +108,7 @@ public sealed class FastDisplayPickerDialog : WF.Form
         if (screens.Length == 1)
             return screens[0].Bounds;
 
-        using var dialog = Create();
+        using var dialog = new FastDisplayPickerDialog();
         PerfLog.TrackFirstShown(dialog, "display picker");
         return dialog.ShowDialog() == WF.DialogResult.OK ? dialog.SelectedBounds : null;
     }
@@ -161,28 +135,6 @@ public sealed class FastDisplayPickerDialog : WF.Form
     {
         base.OnShown(e);
         UpdateWindowRegion();
-    }
-
-    private static FastDisplayPickerDialog Create()
-    {
-        var dialog = Interlocked.Exchange(ref _cached, null);
-        if (dialog is { IsDisposed: false })
-        {
-            dialog.SelectedBounds = null;
-            dialog.Opacity = 1;
-            dialog.CenterOnCurrentScreen();
-            return dialog;
-        }
-
-        return new FastDisplayPickerDialog();
-    }
-
-    private void CenterOnCurrentScreen()
-    {
-        SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
-        Location = new SD.Point(
-            area.Left + Math.Max(0, (area.Width - Width) / 2),
-            area.Top + Math.Max(0, (area.Height - Height) / 2));
     }
 
     private void UpdateWindowRegion()

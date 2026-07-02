@@ -17,6 +17,10 @@ public static class WindowEnumerator
 
     private const int GaRoot = 2;
 
+    private const int GwlExStyle = -20;
+    private const long WsExTransparent = 0x00000020;
+    private const long WsExLayered = 0x00080000;
+
     /// <summary>
     /// Returns the top-level (root) window handle under <paramref name="screenPoint"/>
     /// using the real z-order (WindowFromPoint), or <see cref="IntPtr.Zero"/> if none.
@@ -44,6 +48,14 @@ public static class WindowEnumerator
 
             // Skip UWP/ghost windows that are "cloaked" (invisible but enumerable).
             if (DwmGetWindowAttributeInt(hwnd, DwmwaCloaked, out int cloaked, sizeof(int)) == 0 && cloaked != 0)
+                return true;
+
+            // Skip click-through overlays (layered + transparent, e.g. dictation HUDs, game
+            // overlays): they can never receive input, so they are never a meaningful capture
+            // target — and being TOPMOST they would otherwise shadow the real window
+            // underneath in the selectors' bounds fallback (ResolveWindow).
+            long exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+            if ((exStyle & WsExTransparent) != 0 && (exStyle & WsExLayered) != 0)
                 return true;
 
             int length = GetWindowTextLength(hwnd);
@@ -103,6 +115,9 @@ public static class WindowEnumerator
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr hwnd, int flags);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
     [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
     private static extern int DwmGetWindowAttributeInt(IntPtr hwnd, int attribute, out int value, int size);

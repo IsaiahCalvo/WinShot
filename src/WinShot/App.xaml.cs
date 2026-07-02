@@ -104,7 +104,6 @@ public partial class App : Application
         SetupTray();
         _hotkeys = new HotkeyManager();
         RegisterHotkeys();
-        ScheduleIdleWarmups();
         Log.Info("WinShot started");
 
         if (_settings.Current.CheckForUpdatesOnStartup)
@@ -148,13 +147,13 @@ public partial class App : Application
 
         var s = _settings.Current;
         var menu = new WF.ContextMenuStrip();
-        menu.Items.Add(MenuItem("Capture area", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
+        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
         menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window")));
         menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
         menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen")));
         menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, () => QueueCaptureCommand("self-timer")));
         menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
-        menu.Items.Add(MenuItem("Capture previous area", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
+        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
         menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow));
@@ -250,51 +249,6 @@ public partial class App : Application
         return timer;
     }
 
-    private void ScheduleIdleWarmups()
-    {
-        Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-            new Action(() =>
-            {
-                foreach (var stage in StartupWarmupPlan.LightweightStartupStages())
-                    ScheduleWarmup(stage.DelayMs, stage.Name, () => RunStartupWarmup(stage.Kind));
-            }));
-    }
-
-    private void RunStartupWarmup(StartupWarmupKind kind)
-    {
-        switch (kind)
-        {
-            case StartupWarmupKind.CaptureSelectors:
-                FastRegionSelectorDialog.Prewarm();
-                FastDisplayPickerDialog.Prewarm();
-                FastAllInOneSelectorDialog.Prewarm();
-                break;
-        }
-    }
-
-    private void ScheduleWarmup(int delayMs, string name, Action action)
-    {
-        var timer = new System.Windows.Threading.DispatcherTimer(
-            System.Windows.Threading.DispatcherPriority.ContextIdle)
-        {
-            Interval = TimeSpan.FromMilliseconds(delayMs),
-        };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Warmup failed: {name}", ex);
-            }
-        };
-        timer.Start();
-    }
-
     // ---- winshot:// command routing ----
 
     private void OnCommandReceived(string raw)
@@ -331,6 +285,11 @@ public partial class App : Application
 
     private void QueueCaptureCommand(string cmd)
     {
+        // A capture flow is already active (selector open, overlay finishing): drop the
+        // command instead of parking it in the pending slot. Every caller is user-initiated
+        // (hotkey, tray, winshot://), and replaying a press made while the selector was
+        // already open reads as a ghost re-trigger right after the user cancels with Esc.
+        if (_captureInProgress) return;
         _pendingCaptureCommand = cmd;
         SchedulePendingCaptureDrain();
     }
@@ -423,8 +382,13 @@ public partial class App : Application
             {
                 if (_captureInProgress)
                 {
-                    await Task.Delay(50);
-                    continue;
+                    // A flow started between this command being queued and the drain
+                    // reaching it (rapid double-press pumped before the first flow set
+                    // _captureInProgress): drop it, same intent as the guard in
+                    // QueueCaptureCommand — a press made while a capture is active must
+                    // never replay after the user cancels.
+                    _pendingCaptureCommand = null;
+                    return;
                 }
 
                 string cmd = _pendingCaptureCommand;
@@ -567,7 +531,7 @@ public partial class App : Application
                 HandleCapture(capture);
             }
             else
-                ShowBalloon("Capture previous area", "No previous region yet — capture an area first.");
+                ShowBalloon("Capture previous region", "No previous region yet — capture a region first.");
         }
         catch (Exception ex)
         {
@@ -599,16 +563,21 @@ public partial class App : Application
 
                 action = selector.SelectedAction;
                 regionPx = rp;
+                // Screen-freeze: prefer the crop from the frozen snapshot the user framed
+                // against (same as the region selector) — must be taken before Return()
+                // disposes it. Fall back to a live grab below if the freeze wasn't available.
+                if (action is AllInOneAction.Capture or AllInOneAction.Ocr)
+                    captured = selector.TakeCapturedRegion();
             }
             finally
             {
                 FastAllInOneSelectorDialog.Return(selector);
             }
 
-            if (action is AllInOneAction.Capture or AllInOneAction.Ocr or AllInOneAction.Scroll)
+            if (action is AllInOneAction.Scroll || (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr))
                 await WaitForOverlayDismissAsync();
 
-            if (action is AllInOneAction.Capture or AllInOneAction.Ocr)
+            if (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr)
                 captured = await CaptureSelectedRegionAsync(regionPx, $"all-in-one {action.ToString().ToLowerInvariant()}");
 
             switch (action)
@@ -744,7 +713,7 @@ public partial class App : Application
             return;
         }
 
-        Task<string?> historyPathTask = AddHistoryAsync(
+        _ = AddHistoryAsync(
             bmp,
             cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action));
         if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
@@ -753,7 +722,7 @@ public partial class App : Application
         switch (action)
         {
             case PostCaptureAction.Copy:
-                QueueClipboardCopy(bmp, takeOwnership: true, showSuccess: true, showFailure: true, includePng: true, failureContext: "Copy failed");
+                _ = CopyToClipboardAndNotifyAsync(bmp, takeOwnership: true, showSuccess: true, showFailure: true, includePng: true, failureContext: "Copy failed");
                 break;
             case PostCaptureAction.Save:
                 SaveSilently(bmp); // takes ownership
@@ -837,11 +806,6 @@ public partial class App : Application
     }
 
     private RecordingController Recording => _recording ??= new RecordingController(_settings, _history);
-
-    private void QueueClipboardCopy(SD.Bitmap bmp, bool takeOwnership, bool showSuccess, bool showFailure, bool includePng, string failureContext)
-    {
-        _ = CopyToClipboardAndNotifyAsync(bmp, takeOwnership, showSuccess, showFailure, includePng, failureContext);
-    }
 
     private void QueueAutoClipboardCopy(SD.Bitmap bmp)
     {
@@ -955,7 +919,6 @@ public partial class App : Application
         {
             Log.Error("Deferred overlay capture work failed", ex);
             historyPathCompletion.TrySetResult(null);
-            captureWorkCompletion.TrySetResult(null);
         }
         finally
         {

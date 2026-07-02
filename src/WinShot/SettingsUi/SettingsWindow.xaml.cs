@@ -17,9 +17,6 @@ namespace WinShot.SettingsUi;
 
 public partial class SettingsWindow : Window
 {
-    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValueName = "WinShot";
-
     private static SettingsWindow? _instance;
 
     private static readonly SolidColorBrush ErrorBrush = new(Color.FromRgb(0xE8, 0x5C, 0x5C));
@@ -32,8 +29,6 @@ public partial class SettingsWindow : Window
     }
 
     private readonly SettingsService _settings;
-    private bool _renderPrewarmed;
-    private bool _prewarmVisible;
     private bool _saving;
 
     public SettingsWindow(SettingsService settings)
@@ -123,7 +118,6 @@ public partial class SettingsWindow : Window
         long centerMs = 0;
         long showMs = 0;
         long activateMs = 0;
-        bool deferActivate = false;
 
         if (_instance is null)
         {
@@ -134,26 +128,7 @@ public partial class SettingsWindow : Window
 
         var instance = _instance ?? throw new InvalidOperationException("Settings window was not created.");
 
-        if (instance._prewarmVisible)
-        {
-            var step = Stopwatch.StartNew();
-            instance.ResetValidation();
-            resetMs = step.ElapsedMilliseconds;
-            step.Restart();
-            instance.LoadFromSettings();
-            loadMs = step.ElapsedMilliseconds;
-            if (!instance.IsMostlyWithinWorkArea())
-            {
-                step.Restart();
-                instance.CenterOnWorkArea();
-                centerMs = step.ElapsedMilliseconds;
-            }
-            step.Restart();
-            instance.RestorePrewarmedWindow();
-            showMs = step.ElapsedMilliseconds;
-            deferActivate = true;
-        }
-        else if (!instance.IsVisible)
+        if (!instance.IsVisible)
         {
             var step = Stopwatch.StartNew();
             instance.ShowInTaskbar = true;
@@ -174,18 +149,9 @@ public partial class SettingsWindow : Window
             instance.WindowState = WindowState.Normal;
         }
 
-        if (deferActivate)
-        {
-            instance.Dispatcher.BeginInvoke(
-                DispatcherPriority.Background,
-                new Action(() => instance.Activate()));
-        }
-        else
-        {
-            var activate = Stopwatch.StartNew();
-            instance.Activate();
-            activateMs = activate.ElapsedMilliseconds;
-        }
+        var activate = Stopwatch.StartNew();
+        instance.Activate();
+        activateMs = activate.ElapsedMilliseconds;
         if (total.ElapsedMilliseconds > 50)
         {
             Log.Info(
@@ -196,13 +162,6 @@ public partial class SettingsWindow : Window
         return instance;
     }
 
-    public static void Prewarm(SettingsService settings)
-    {
-        if (_instance is null)
-            CreateInstance(settings);
-        _instance?.PrewarmRender();
-    }
-
     private static void CreateInstance(SettingsService settings)
     {
         _instance = new SettingsWindow(settings);
@@ -211,42 +170,6 @@ public partial class SettingsWindow : Window
             _instance = null;
             MemoryCleanup.Request();
         };
-    }
-
-    private void PrewarmRender()
-    {
-        if (_renderPrewarmed || IsVisible) return;
-        _renderPrewarmed = true;
-
-        ShowInTaskbar = false;
-        ShowActivated = false;
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        Opacity = 0;
-        CenterOnWorkArea();
-
-        Show();
-        FlushPrewarmRender();
-        ApplyParkedWindowStyle(parked: true);
-        _prewarmVisible = true;
-    }
-
-    private void RestorePrewarmedWindow()
-    {
-        if (!IsMostlyWithinWorkArea())
-            CenterOnWorkArea();
-        ShowInTaskbar = true;
-        Opacity = 1;
-        ApplyParkedWindowStyle(parked: false);
-        _prewarmVisible = false;
-    }
-
-    private void FlushPrewarmRender()
-    {
-        var frame = new DispatcherFrame();
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.ApplicationIdle,
-            new Action(() => frame.Continue = false));
-        Dispatcher.PushFrame(frame);
     }
 
     private void CenterOnWorkArea()
@@ -273,15 +196,6 @@ public partial class SettingsWindow : Window
         Top = top;
     }
 
-    private bool IsMostlyWithinWorkArea()
-    {
-        var area = SystemParameters.WorkArea;
-        return Left < area.Right - 120 &&
-               Left + Width > area.Left + 120 &&
-               Top < area.Bottom - 80 &&
-               Top + Height > area.Top + 80;
-    }
-
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Escape) Close();
@@ -290,19 +204,8 @@ public partial class SettingsWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        _prewarmVisible = false;
         ApplyParkedWindowStyle(parked: false);
         base.OnClosing(e);
-    }
-
-    private void ParkPrewarmedWindow()
-    {
-        if (_prewarmVisible)
-            return;
-
-        Opacity = 0;
-        ApplyParkedWindowStyle(parked: true);
-        _prewarmVisible = true;
     }
 
     private void ApplyParkedWindowStyle(bool parked)

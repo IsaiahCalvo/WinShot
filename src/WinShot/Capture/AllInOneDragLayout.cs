@@ -1,4 +1,3 @@
-using System.Windows;
 using SD = System.Drawing;
 
 namespace WinShot.Capture;
@@ -13,12 +12,6 @@ public static class AllInOneDragLayout
         int x = Math.Min(start.X, currentX);
         int y = Math.Min(start.Y, currentY);
         return new SD.Rectangle(x, y, Math.Abs(start.X - currentX), Math.Abs(start.Y - currentY));
-    }
-
-    public static Rect CreateDipRect(Point start, Point current, double? aspectRatio)
-    {
-        var adjusted = AdjustCurrent(start.X, start.Y, current.X, current.Y, aspectRatio);
-        return new Rect(start, new Point(adjusted.X, adjusted.Y));
     }
 
     private static (double X, double Y) AdjustCurrent(
