@@ -389,7 +389,6 @@ internal static class ScrollHintText
     {
         ScrollHint.SlowDown => "⚠ Please slow down — scroll back up a little",
         ScrollHint.AlreadyCaptured => "Already captured — scroll down to continue",
-        ScrollHint.MoveCursorIntoArea => "Move cursor into the area to auto-scroll",
         _ => null,
     };
 }

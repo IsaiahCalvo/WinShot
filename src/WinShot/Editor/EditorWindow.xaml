@@ -310,6 +310,12 @@
               MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp"
               MouseRightButtonUp="OnViewportRightClick">
+            <!-- Canvas host: a Grid applies a LAYOUT CLIP (in the child's PRE-transform space)
+                 to a non-stretch child taller than the viewport, which visually truncated tall
+                 captures to the first ~viewport-height SOURCE rows at any zoom — the real cause
+                 of "the editor shows a cropped capture" (measured by EditorClipSweep). A Canvas
+                 never layout-clips; the Viewport's own ClipToBounds still crops in device space. -->
+            <Canvas x:Name="SurfaceHost">
             <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
                   Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
                 <Grid.RenderTransform>
@@ -348,6 +354,7 @@
                     </Border>
                 </Canvas>
             </Grid>
+            </Canvas>
         </Grid>
 
         <!-- ===================== BOTTOM UTILITY BAR ===================== -->

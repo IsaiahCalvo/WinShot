@@ -97,6 +97,33 @@ public class EditorRenderHarness
                 for (int i = 0; i < 4; i++) { Pump(); Thread.Sleep(25); }
                 RenderToPng(editor, Path.Combine(outDir, "editor-fitwhole.png"));
 
+                // Experiment: does the bitmap SCALING MODE cause the truncation at small zoom?
+                foreach (var mode in new[] { BitmapScalingMode.Linear, BitmapScalingMode.LowQuality, BitmapScalingMode.NearestNeighbor })
+                {
+                    foreach (System.Windows.Controls.Image im in baseTiles.Children)
+                        RenderOptions.SetBitmapScalingMode(im, mode);
+                    for (int i = 0; i < 4; i++) { Pump(); Thread.Sleep(25); }
+                    RenderToPng(editor, Path.Combine(outDir, $"editor-mode-{mode}.png"));
+                }
+
+                // Hypothesis: the ~589 SOURCE rows that survive == Viewport.ActualHeight, i.e.
+                // a clip evaluated in pre-transform space. Toggle the suspects one at a time.
+                var viewportPanel = (System.Windows.Controls.Panel)editor.FindName("Viewport");
+                viewportPanel.ClipToBounds = false;
+                for (int i = 0; i < 4; i++) { Pump(); Thread.Sleep(25); }
+                RenderToPng(editor, Path.Combine(outDir, "editor-noclip-viewport.png"));
+                viewportPanel.ClipToBounds = true;
+
+                var annotation = (System.Windows.Controls.Panel)editor.FindName("AnnotationCanvas");
+                var interaction = (System.Windows.Controls.Panel)editor.FindName("InteractionCanvas");
+                bool a0 = annotation.ClipToBounds, i0 = interaction.ClipToBounds;
+                annotation.ClipToBounds = false;
+                interaction.ClipToBounds = false;
+                for (int i = 0; i < 4; i++) { Pump(); Thread.Sleep(25); }
+                RenderToPng(editor, Path.Combine(outDir, "editor-noclip-canvases.png"));
+                annotation.ClipToBounds = a0;
+                interaction.ClipToBounds = i0;
+
                 editor.Close();
             }
             catch (Exception ex)

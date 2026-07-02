@@ -14,9 +14,6 @@ public enum ScrollHint
     /// <summary>The live frame sits entirely over already-captured content (user scrolled
     /// back up). Nothing is appended until they scroll past the capture's end again.</summary>
     AlreadyCaptured,
-    /// <summary>Auto-scroll is paused because the cursor left the capture region
-    /// (wheel input goes to whatever is under the cursor — CleanShot behaves the same).</summary>
-    MoveCursorIntoArea,
 }
 
 /// <summary>
@@ -679,15 +676,6 @@ public static class ScrollingCaptureService
 
             if (wantAuto)
             {
-                if (!CursorInRegion())
-                {
-                    SetHint(ScrollHint.MoveCursorIntoArea);
-                    _scrolledBeforeFrame = false;
-                    return Sleep(150);
-                }
-                if (_lastHint == ScrollHint.MoveCursorIntoArea)
-                    SetHint(ScrollHint.None);
-
                 if (_state == Track.Tracking)
                 {
                     SendScrollStep(up: false);
@@ -729,12 +717,17 @@ public static class ScrollingCaptureService
             switch (_method)
             {
                 case ScrollMethod.WheelInput:
-                    // Park the cursor at the region center first: wheel routing follows the
-                    // cursor, and a cursor sitting near the region edge (or under another
-                    // window's corner) sends the wheel elsewhere — ShareX's classic failure.
-                    // Only small moves: Pace() already verified the cursor is IN the region.
+                    // Cursor DIP: wheel routing follows the cursor, but a cursor parked in the
+                    // region triggers hover effects that end up in the capture. So teleport to
+                    // the region center just for the wheel tick and return immediately — the
+                    // page gets a mouseleave, hover styles clear, and the frame is only grabbed
+                    // after the ~350ms settle. If the user moved the mouse in the same instant,
+                    // leave their cursor alone rather than fight them.
+                    GetCursorPos(out var orig);
                     SetCursorPos(centerX, centerY);
                     SendWheelInput(delta, horizontal);
+                    if (GetCursorPos(out var now) && now.X == centerX && now.Y == centerY)
+                        SetCursorPos(orig.X, orig.Y);
                     break;
 
                 case ScrollMethod.WheelMessage:
@@ -758,10 +751,18 @@ public static class ScrollingCaptureService
                 case ScrollMethod.PageKey:
                     // Last resort, and keyboard input needs focus: bring the window under
                     // the region to the foreground before the key tap (ShareX v15's rescue).
+                    // If focus can't be acquired, DON'T type — a stray PageDown landing in
+                    // whatever app is focused would scroll/act on the user's other work.
                     IntPtr target = WindowFromPoint(new WinShot.Recording.Point32 { X = centerX, Y = centerY });
                     if (target != IntPtr.Zero)
-                        SetForegroundWindow(GetAncestor(target, GA_ROOT));
-                    SendKeyTap(up ? VkPrior : VkNext);
+                    {
+                        IntPtr root = GetAncestor(target, GA_ROOT);
+                        SetForegroundWindow(root);
+                        if (GetForegroundWindow() == root)
+                            SendKeyTap(up ? VkPrior : VkNext);
+                        else
+                            Log.Info("Scroll: PageKey skipped — couldn't focus the target window");
+                    }
                     break;
             }
         }
@@ -832,8 +833,6 @@ public static class ScrollingCaptureService
             }
             return false;
         }
-
-        private bool CursorInRegion() => GetCursorPos(out var p) && _region.Contains(p.X, p.Y);
 
         private static bool EscPressed() => (GetAsyncKeyState(VkEscape) & 0x8000) != 0;
 
@@ -1084,4 +1083,7 @@ public static class ScrollingCaptureService
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 }
