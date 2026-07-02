@@ -111,19 +111,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (selector.IsDisposed)
             return;
 
-        selector._settings = null;
-        selector._windows = new List<WindowInfo>();
-        selector._hoverWindow = null;
-        selector._pendingPx = null;
-        selector._dragging = false;
-        selector._dragMoved = false;
-        selector._dragRatio = null;
-        selector.Capture = false;
         selector.DisposePanes();
         selector.DisposeFrozen();
         selector._capturedRegion?.Dispose();
         selector._capturedRegion = null;
-        selector.Opacity = 0.01;
         selector.Hide();
         if (!selector._toolbar.IsDisposed)
             selector._toolbar.Hide();

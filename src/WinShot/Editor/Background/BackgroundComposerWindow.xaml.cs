@@ -50,11 +50,6 @@ public partial class BackgroundComposerWindow : Window
     private string _anchor = "CC";  // 3x3 alignment of the shot within the canvas
 
     public BackgroundComposerWindow(SD.Bitmap source, SettingsService settings, HistoryService history)
-        : this(source, settings, history, loadSourceImage: true)
-    {
-    }
-
-    private BackgroundComposerWindow(SD.Bitmap source, SettingsService settings, HistoryService history, bool loadSourceImage)
     {
         ThemeResources.EnsureLoaded();
         InitializeComponent();
@@ -98,8 +93,7 @@ public partial class BackgroundComposerWindow : Window
                             _bgSwatches[0].IsChecked = true; // applies the first preset
                     }
 
-                    if (loadSourceImage)
-                        _ = LoadShotBrushAsync(source);
+                    _ = LoadShotBrushAsync(source);
 
                     Log.Info($"Perf background composer deferred init: {_startup.ElapsedMilliseconds} ms");
                 }));

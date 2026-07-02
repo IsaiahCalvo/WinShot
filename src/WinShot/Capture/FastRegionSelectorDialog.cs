@@ -117,15 +117,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (selector.IsDisposed)
             return;
 
-        selector._settings = null;
-        selector._windows = new List<WindowInfo>();
-        selector._hoverWindow = null;
-        selector._pendingScreen = null;
-        selector._dragging = false;
-        selector._dragMoved = false;
-        selector._resizeHandle = -1;
-        selector._movingPending = false;
-        selector.Capture = false;
         selector.DisposePanes();
         selector.DisposeFrozen();
         selector._capturedRegion?.Dispose();

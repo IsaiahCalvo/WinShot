@@ -652,14 +652,6 @@ public partial class HistoryWindow : Window
             OpenItem(item);
     }
 
-    /// <summary>Centered "Restore" pill on the selected card: opens the capture
-    /// (same action as double-click / Enter / context-menu Open).</summary>
-    private void OnRestore(object sender, RoutedEventArgs e)
-    {
-        if (GetItem(sender) is { } item)
-            OpenItem(item);
-    }
-
     private void OnReveal(object sender, RoutedEventArgs e)
     {
         if (GetItem(sender) is not { } item) return;

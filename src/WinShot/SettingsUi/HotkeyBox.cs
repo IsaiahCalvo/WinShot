@@ -67,12 +67,12 @@ public sealed class HotkeyBox : TextBox
         if (IsModifier(key))
         {
             // Show the modifiers held so far while we wait for the main key.
-            string held = Describe(Keyboard.Modifiers, "+");
+            string held = Describe(Keyboard.Modifiers);
             Text = held.Length > 0 ? held + "+..." : Prompt;
             return;
         }
 
-        string gesture = Describe(Keyboard.Modifiers, "+");
+        string gesture = Describe(Keyboard.Modifiers);
         gesture = gesture.Length > 0 ? gesture + "+" + KeyName(key) : KeyName(key);
         _committed = gesture;
         Text = gesture;
@@ -94,14 +94,14 @@ public sealed class HotkeyBox : TextBox
         Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or
         Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin;
 
-    private static string Describe(ModifierKeys mods, string sep)
+    private static string Describe(ModifierKeys mods)
     {
         var parts = new List<string>(4);
         if (mods.HasFlag(ModifierKeys.Control)) parts.Add("Ctrl");
         if (mods.HasFlag(ModifierKeys.Alt)) parts.Add("Alt");
         if (mods.HasFlag(ModifierKeys.Shift)) parts.Add("Shift");
         if (mods.HasFlag(ModifierKeys.Windows)) parts.Add("Win");
-        return string.Join(sep, parts);
+        return string.Join("+", parts);
     }
 
     /// <summary>Maps a key to a name TryParseGesture round-trips (digits as "1", not "D1").</summary>

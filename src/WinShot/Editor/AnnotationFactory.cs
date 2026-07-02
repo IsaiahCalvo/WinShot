@@ -222,7 +222,7 @@ internal static class AnnotationFactory
     /// Formats a 1-based step index as a spreadsheet-style letter sequence
     /// (1→A, 26→Z, 27→AA, …). Values &lt; 1 fall back to "A".
     /// </summary>
-    public static string StepLetterLabel(int number)
+    private static string StepLetterLabel(int number)
     {
         if (number < 1) return "A";
         var sb = new System.Text.StringBuilder();

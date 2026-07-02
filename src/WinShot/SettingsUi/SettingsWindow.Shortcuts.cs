@@ -223,7 +223,7 @@ public partial class SettingsWindow
         foreach (var def in AllShortcutDefs())
         {
             if (!_shortcutBoxes.TryGetValue(def.Key, out var box)) continue;
-            string value = HotkeyValue(box);
+            string value = NormalizeForCompare(box.Text);
             if (def.IsReal)
             {
                 // Store the box value verbatim, INCLUDING empty: an empty real hotkey means the
