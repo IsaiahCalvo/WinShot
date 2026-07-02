@@ -35,10 +35,11 @@ public static class ScrollingCaptureService
     private const int MaxStitchedWidth = 32000;
     private const int VeryLargeThreshold = 24000;
 
-    /// <summary>Manual mode: pause between polls. Frame hashing + matching costs ~20-60ms on
-    /// top of this, so the real cadence is ~10 grabs/sec — canvas re-locking (not cadence)
-    /// is what makes fast flicks recoverable.</summary>
-    private const int ManualPollMs = 60;
+    /// <summary>Manual mode: pause between polls. A sparse-hash pre-check makes paused frames
+    /// nearly free, so the loop only pays full signature+matching cost while content is
+    /// actually moving — real cadence ~15-25 grabs/sec. Higher cadence = more overlap per
+    /// frame = comfortable-speed scrolling tracks continuously instead of needing recovery.</summary>
+    private const int ManualPollMs = 30;
 
     /// <summary>Auto mode: wait after injecting wheel input before sampling the frame.</summary>
     private const int AutoSettleMs = 350;
@@ -145,6 +146,7 @@ public static class ScrollingCaptureService
         private int _noEffectStreak;
         private int _healSteps;       // auto-recovery scrolls while Lost/Reviewing
         private int _lastSentNotches; // notches of the most recent injected step (dead-reckoning)
+        private ulong _lastProbe;     // sparse hash of the last manual-mode frame (pause fast path)
 
         private readonly Func<SD.Rectangle, SD.Bitmap> _grab;
 
@@ -179,13 +181,35 @@ public static class ScrollingCaptureService
                     if (_ct.IsCancellationRequested) break; // Done — finalize with result
 
                     var frame = CaptureFrame();
-                    if (_direction == ScrollDirection.Horizontal)
+
+                    // Manual-mode fast path: a 16-row sparse hash spots the (very common)
+                    // "nothing moved since last poll" case for ~0.5ms instead of a full
+                    // signature build + match — that's what lets the poll run at 30ms.
+                    bool skip = false;
+                    if (!_scrolledBeforeFrame && (_prevSig is not null || _horizontalStitched is not null))
                     {
-                        if (!ProcessHorizontal(frame)) break;
+                        ulong probe = ScrollMatcher.SparseProbe(frame);
+                        if (probe == _lastProbe)
+                        {
+                            frame.Dispose();
+                            skip = true;
+                        }
+                        else
+                        {
+                            _lastProbe = probe;
+                        }
                     }
-                    else
+
+                    if (!skip)
                     {
-                        if (!ProcessVertical(frame)) break;
+                        if (_direction == ScrollDirection.Horizontal)
+                        {
+                            if (!ProcessHorizontal(frame)) break;
+                        }
+                        else
+                        {
+                            if (!ProcessVertical(frame)) break;
+                        }
                     }
 
                     if (_ct.IsCancellationRequested) break;

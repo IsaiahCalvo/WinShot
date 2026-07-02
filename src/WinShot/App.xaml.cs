@@ -377,8 +377,14 @@ public partial class App : Application
             }
             bool auto = parts.Contains("auto", StringComparer.OrdinalIgnoreCase);
             bool save = parts.Contains("save", StringComparer.OrdinalIgnoreCase);
+            TimeSpan? stop = null;
+            foreach (var p in parts)
+            {
+                if (p.StartsWith("stop=", StringComparison.OrdinalIgnoreCase) && int.TryParse(p[5..], out int s))
+                    stop = TimeSpan.FromSeconds(s);
+            }
 
-            var stitched = await ScrollingStatusWindow.Run(new SD.Rectangle(x, y, w, h), null, autoStart: auto);
+            var stitched = await ScrollingStatusWindow.Run(new SD.Rectangle(x, y, w, h), null, autoStart: auto, autoStop: stop);
             if (stitched is not null)
                 HandleCapture(stitched, save ? PostCaptureAction.Save : null);
             else

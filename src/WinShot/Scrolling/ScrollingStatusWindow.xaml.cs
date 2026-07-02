@@ -21,7 +21,7 @@ public static class ScrollingStatusWindow
     /// (the scroll-horizontal command); null auto-detects from the first movement.
     /// </summary>
     public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null,
-        bool autoStart = false)
+        bool autoStart = false, TimeSpan? autoStop = null)
     {
         using var cts = new CancellationTokenSource();
         bool cancelled = false;
@@ -48,6 +48,10 @@ public static class ScrollingStatusWindow
         controls.Show(); // shown last so the buttons sit above the overlay/preview
         if (autoStart)
             controls.StartAutomatically(auto: true); // automation: skip the Start click
+        else if (autoStop is not null)
+            controls.StartAutomatically(auto: false); // scripted manual run
+        if (autoStop is TimeSpan stopAfter)
+            cts.CancelAfter(stopAfter); // automation: acts like Done after the deadline
 
         try
         {

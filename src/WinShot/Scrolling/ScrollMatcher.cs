@@ -352,6 +352,42 @@ public static class ScrollMatcher
         return true;
     }
 
+    /// <summary>
+    /// Cheap paused-frame pre-check: hashes 16 evenly spaced rows of <paramref name="bmp"/>
+    /// (side-trimmed like the full signature) so a manual-mode poll can skip the full
+    /// signature build while nothing moves. Any real scroll changes sampled rows, so a
+    /// sparse match is safe to treat as "no movement" — content changing ONLY between the
+    /// sampled rows (a blinking caret, a spinner) is exactly what we want to ignore anyway.
+    /// </summary>
+    public static ulong SparseProbe(SD.Bitmap bmp)
+    {
+        int width = bmp.Width, height = bmp.Height;
+        int margin = FrameSignature.SideMargin(width);
+        int startX = margin, endX = width - margin;
+        if (endX <= startX) { startX = 0; endX = width; }
+
+        var data = bmp.LockBits(new SD.Rectangle(0, 0, width, height),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            ulong hash = ImageStitcher.FnvOffsetBasis;
+            var row = new byte[width * 4];
+            int step = Math.Max(1, height / 16);
+            for (int y = step / 2; y < height; y += step)
+            {
+                Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
+                for (int i = startX * 4; i < endX * 4; i += 4) // one channel stride is plenty here
+                    hash = (hash ^ row[i]) * ImageStitcher.FnvPrime;
+                hash = (hash ^ (ulong)y) * ImageStitcher.FnvPrime;
+            }
+            return hash;
+        }
+        finally
+        {
+            bmp.UnlockBits(data);
+        }
+    }
+
     /// <summary>True when the frame carries almost no visual information (a blank viewport —
     /// e.g. scrolling through a whitespace gap). Alignment is impossible on such frames.</summary>
     public static bool IsLowInformation(FrameSignature sig) =>

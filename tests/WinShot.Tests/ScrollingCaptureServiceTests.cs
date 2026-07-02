@@ -146,6 +146,75 @@ public class ScrollingCaptureServiceTests
             AssertRowIsDocRow(stitched, y, y);
     }
 
+    /// <summary>
+    /// Simulates a user scrolling at a given velocity against the loop's WORST-CASE cadence:
+    /// virtual time advances a fixed 45ms per grab (30ms poll + ~15ms processing budget), so
+    /// each frame's scroll delta is exactly velocity × 45ms — deterministic and immune to CPU
+    /// load from parallel tests, unlike wall-clock pacing. This is the "can a user scroll at
+    /// a comfortable speed" regression test.
+    /// </summary>
+    private static SD.Bitmap? RunAtVelocity(Func<double, int> positionAtSeconds, int docEnd)
+    {
+        const double cadenceSeconds = 0.045;
+        using var cts = new CancellationTokenSource();
+        int grabs = 0, framesAtEnd = 0;
+        SD.Bitmap FrameSource(SD.Rectangle _)
+        {
+            double t = grabs++ * cadenceSeconds;
+            int pos = positionAtSeconds(t);
+            if (pos >= docEnd && ++framesAtEnd >= 8)
+                cts.Cancel(); // linger at the bottom a few frames, then Done
+            return MakeFrame(Math.Min(pos, docEnd));
+        }
+
+        return ScrollingCaptureService.RunAsync(
+            new SD.Rectangle(0, 0, Width, FrameHeight),
+            ScrollDirection.Vertical,
+            autoScroll: () => false,
+            status: _ => { },
+            hint: _ => { },
+            cts.Token,
+            preview: null,
+            frameSource: FrameSource).GetAwaiter().GetResult();
+    }
+
+    [Theory]
+    [InlineData(1200)]  // comfortable, steady reading-scroll
+    [InlineData(3000)]  // brisk, wheel spinning
+    [InlineData(5000)]  // very fast — ~225px per frame at worst-case cadence
+    public void SteadyScroll_AtRealVelocity_StaysContiguous(int pxPerSecond)
+    {
+        const int docEnd = 3000;
+        using var stitched = RunAtVelocity(t => (int)Math.Round(t * pxPerSecond), docEnd);
+
+        Assert.NotNull(stitched);
+        Assert.Equal(docEnd + FrameHeight, stitched!.Height);
+        for (int y = 0; y < stitched.Height; y += 173)
+            AssertRowIsDocRow(stitched, y, y);
+    }
+
+    [Fact]
+    public void FlickScrolling_BurstsWithPauses_StaysContiguous()
+    {
+        // Flick pattern: 250ms bursts at 4000px/s separated by 350ms pauses — an aggressive
+        // but realistic wheel-fling rhythm (~1000px per flick).
+        const int docEnd = 4000;
+        int PositionAt(double t)
+        {
+            const double burst = 0.25, pause = 0.35, cycle = burst + pause;
+            int full = (int)(t / cycle);
+            double rem = t - full * cycle;
+            double moved = full * burst * 4000 + Math.Min(rem, burst) * 4000;
+            return (int)Math.Round(moved);
+        }
+        using var stitched = RunAtVelocity(PositionAt, docEnd);
+
+        Assert.NotNull(stitched);
+        Assert.Equal(docEnd + FrameHeight, stitched!.Height);
+        for (int y = 0; y < stitched.Height; y += 211)
+            AssertRowIsDocRow(stitched, y, y);
+    }
+
     [Fact]
     public void StickyFooter_ExcludedFromSeams_AttachedExactlyOnce()
     {
