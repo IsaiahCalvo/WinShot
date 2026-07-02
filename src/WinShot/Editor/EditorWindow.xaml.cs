@@ -31,8 +31,6 @@ public partial class EditorWindow : Window
     private const string SaveDialogFilter =
         "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp|WinShot project|*.winshot";
 
-    private static EditorWindow? _prewarmInstance;
-
     private readonly SettingsService _settings;
     private readonly HistoryService _history;
 
@@ -94,8 +92,8 @@ public partial class EditorWindow : Window
     private bool _dragging;
     private bool _sourceOperationActive;
     // Set when a new source is loaded; the first layout pass with a real viewport runs the
-    // initial fit-to-view and clears it. Guarantees large/tall captures fit on open regardless
-    // of which path opened the editor (fresh window vs reused prewarmed window) or layout timing.
+    // initial fit-to-view and clears it. Guarantees large/tall captures fit on open
+    // regardless of layout timing.
     private bool _pendingInitialFit;
     private Point _dragStart;
     private Shape? _activeShape;
@@ -107,7 +105,6 @@ public partial class EditorWindow : Window
     private bool _movingSelection;
     private Point _moveLast;   // content coords
     private Vector _moveTotal; // accumulated drag delta for the undo record
-    private bool _replenishPrewarmOnClose;
 
     // Resize-handle state (shared between selected-annotation resize and crop adjust).
     // The eight box handles are indexed 0..7 (corners 0-3, edge midpoints 4-7); endpoint
@@ -119,11 +116,6 @@ public partial class EditorWindow : Window
     private bool _adjustingCrop;              // a handle drag is editing the pending crop rect, not an annotation
 
     public EditorWindow(SD.Bitmap source, SettingsService settings, HistoryService history)
-        : this(source, settings, history, loadSourceImage: true)
-    {
-    }
-
-    private EditorWindow(SD.Bitmap source, SettingsService settings, HistoryService history, bool loadSourceImage)
     {
         ThemeResources.EnsureLoaded();
         InitializeComponent();
@@ -134,16 +126,9 @@ public partial class EditorWindow : Window
         _history = history;
 
         SetSurfaceSize(source.Width, source.Height);
-        if (loadSourceImage)
-        {
-            _sourceOperationActive = true;
-            Cursor = Cursors.Wait;
-            ContentRendered += OnInitialContentRendered;
-        }
-        else
-        {
-            _sourceOperationActive = false;
-        }
+        _sourceOperationActive = true;
+        Cursor = Cursors.Wait;
+        ContentRendered += OnInitialContentRendered;
         ContentRendered += OnChromeContentRendered;
 
         // The viewport zooms/pans instead of the window sizing itself to the
@@ -162,8 +147,8 @@ public partial class EditorWindow : Window
             AbortResize();
         };
         Loaded += (_, _) => FitToView();
-        // The reused prewarmed window often doesn't change size between captures, so Loaded
-        // won't fire again; this catches the first laid-out frame for the initial fit.
+        // Loaded can fire before the window has its final size; this catches the first
+        // laid-out frame for the initial fit.
         SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
         // The WINDOW can stop resizing while the VIEWPORT keeps shrinking as the toolbars / zoom
         // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
@@ -180,10 +165,6 @@ public partial class EditorWindow : Window
             foreach (var bmp in _owned) bmp.Dispose();
             _owned.Clear();
             MemoryCleanup.Request();
-            if (_replenishPrewarmOnClose)
-                Dispatcher.BeginInvoke(
-                    DispatcherPriority.ApplicationIdle,
-                    new Action(() => Prewarm(_settings, _history)));
         };
         UpdateCursor();
         DarkTitleBar.Apply(this);
@@ -209,129 +190,9 @@ public partial class EditorWindow : Window
             }));
     }
 
-    public static void Prewarm(SettingsService settings, HistoryService history)
-    {
-        try
-        {
-            if (_prewarmInstance is not null)
-                return;
-
-            var bitmap = new SD.Bitmap(1, 1);
-            var window = new EditorWindow(bitmap, settings, history, loadSourceImage: false)
-            {
-                ShowInTaskbar = false,
-                ShowActivated = false,
-                Opacity = 0,
-                WindowStartupLocation = WindowStartupLocation.Manual,
-                Left = -32000,
-                Top = -32000,
-            };
-            window.Closed += (_, _) => _prewarmInstance = null;
-            _prewarmInstance = window;
-            window.Show();
-            FlushPrewarmRender(window.Dispatcher);
-            window.Hide();
-        }
-        catch (Exception ex)
-        {
-            _prewarmInstance = null;
-            Log.Error("Editor prewarm failed", ex);
-        }
-    }
-
     public static EditorWindow CreateForCapture(SD.Bitmap source, SettingsService settings, HistoryService history)
     {
-        if (_prewarmInstance is { } window && ReferenceEquals(window._settings, settings) && ReferenceEquals(window._history, history))
-        {
-            _prewarmInstance = null;
-            window.ResetForSource(source);
-            window._replenishPrewarmOnClose = false;
-            return window;
-        }
-
         return new EditorWindow(source, settings, history);
-    }
-
-    private void ResetForSource(SD.Bitmap source)
-    {
-        foreach (var bmp in _owned) bmp.Dispose();
-        _owned.Clear();
-        _source = source;
-        _owned.Add(source);
-        _pendingInitialFit = true;
-
-        _undoStack.Clear();
-        _redoStack.Clear();
-        _projectPath = null;
-        _selected = null;
-        _activeShape = null;
-        _activeText = null;
-        _pendingCurve = null;
-        _pendingCrop = null;
-        _dragging = false;
-        _panning = false;
-        _movingSelection = false;
-        _sourceOperationActive = true;
-
-        BaseTiles.Children.Clear();
-        AnnotationCanvas.Children.Clear();
-        InteractionCanvas.Children.Clear();
-        InteractionCanvas.Children.Add(CropDim);
-        InteractionCanvas.Children.Add(DragRect);
-        InteractionCanvas.Children.Add(SelectionRect);
-        InteractionCanvas.Children.Add(CurveHandle);
-        InteractionCanvas.Children.Add(HandleLayer);
-        InteractionCanvas.Children.Add(EyedropSwatch);
-        CropDim.Visibility = Visibility.Collapsed;
-        DragRect.Visibility = Visibility.Collapsed;
-        SelectionRect.Visibility = Visibility.Collapsed;
-        CurveHandle.Visibility = Visibility.Collapsed;
-        HandleLayer.Visibility = Visibility.Collapsed;
-        EyedropSwatch.Visibility = Visibility.Collapsed;
-        CropPanel.Visibility = Visibility.Collapsed;
-        TextStylePanel.Visibility = Visibility.Collapsed;
-        CropRatioPanel.Visibility = Visibility.Collapsed;
-        StepModePanel.Visibility = Visibility.Collapsed;
-        ArrowStylePanel.Visibility = Visibility.Collapsed;
-        EffectStrengthPanel.Visibility = Visibility.Collapsed;
-
-        Width = Math.Min(1240, SystemParameters.WorkArea.Width * 0.9);
-        Height = Math.Min(800, SystemParameters.WorkArea.Height * 0.9);
-        CenterOnWorkArea();
-        Opacity = 1;
-        ShowInTaskbar = true;
-        ShowActivated = true;
-        WindowState = WindowState.Normal;
-        Cursor = Cursors.Wait;
-        SetSurfaceSize(source.Width, source.Height);
-        // Best-effort immediate fit, then a deferred fit once the (re)shown window actually
-        // has a current viewport size. The prewarmed window was laid out at -32000 and then
-        // hidden, so its viewport may be stale/zero here; the caller Shows it right after, so
-        // FitToView would no-op now and leave the image at 1:1 top-left (= a "cropped" view of
-        // any image larger than the viewport). Re-fitting at Loaded priority mirrors the fresh
-        // constructor path (Loaded += FitToView) and is idempotent.
-        FitToView();
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(FitToView));
-        UpdateUndoRedoButtons();
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.Background,
-            new Action(() => _ = LoadInitialSourceImageAsync()));
-    }
-
-    private void CenterOnWorkArea()
-    {
-        var wa = SystemParameters.WorkArea;
-        Left = Math.Round(wa.Left + Math.Max(0, (wa.Width - Width) / 2));
-        Top = Math.Round(wa.Top + Math.Max(0, (wa.Height - Height) / 2));
-    }
-
-    private static void FlushPrewarmRender(Dispatcher dispatcher)
-    {
-        var frame = new DispatcherFrame();
-        dispatcher.BeginInvoke(
-            DispatcherPriority.ApplicationIdle,
-            new Action(() => frame.Continue = false));
-        Dispatcher.PushFrame(frame);
     }
 
     private async Task LoadInitialSourceImageAsync()
@@ -1764,13 +1625,6 @@ public partial class EditorWindow : Window
         EyedropSwatch.Visibility = Visibility.Visible;
     }
 
-    private void ClearSwatchSelection()
-    {
-        foreach (var child in ColorPanel.Children)
-            if (child is RadioButton rb)
-                rb.IsChecked = false;
-    }
-
     // ------------------------------------------------------------ select tool
 
     private void SelectMouseDown(Point pos, MouseButtonEventArgs e)
@@ -2139,10 +1993,8 @@ public partial class EditorWindow : Window
         {
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
-                ResizeBoxShape(fe, b);
-                break;
             case AnnotationData.TypeImage:
-                ResizeImageElement(fe, b);
+                ResizeBoxShape(fe, b);
                 break;
             case AnnotationData.TypeText:
                 ResizeTextElement(fe, meta, b);
@@ -2156,15 +2008,6 @@ public partial class EditorWindow : Window
 
     /// <summary>Rectangle/Ellipse: write Canvas.Left/Top + Width/Height directly (drop any move transform into the position).</summary>
     private static void ResizeBoxShape(FrameworkElement fe, Rect b)
-    {
-        FlattenTransformIntoCanvas(fe);
-        Canvas.SetLeft(fe, b.X);
-        Canvas.SetTop(fe, b.Y);
-        fe.Width = Math.Max(1, b.Width);
-        fe.Height = Math.Max(1, b.Height);
-    }
-
-    private static void ResizeImageElement(FrameworkElement fe, Rect b)
     {
         FlattenTransformIntoCanvas(fe);
         Canvas.SetLeft(fe, b.X);

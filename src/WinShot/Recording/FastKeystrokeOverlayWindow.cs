@@ -69,23 +69,6 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
 
     protected override bool ShowWithoutActivation => true;
 
-    public static void Prewarm()
-    {
-        try
-        {
-            using var overlay = new FastKeystrokeOverlayWindow(
-                new SD.Rectangle(-32000, -32000, 240, 120),
-                installHook: false);
-            overlay.Show();
-            WF.Application.DoEvents();
-            overlay.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast keystroke overlay prewarm failed", ex);
-        }
-    }
-
     public void SetPaused(bool paused)
     {
         _paused = paused;

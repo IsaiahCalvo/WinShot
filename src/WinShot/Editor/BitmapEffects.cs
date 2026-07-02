@@ -9,36 +9,13 @@ namespace WinShot.Editor;
 
 public static class BitmapEffects
 {
-    /// <summary>Pixelates a region of the bitmap in place using roughly cellSize-pixel blocks.</summary>
-    public static void Pixelate(SD.Bitmap bmp, SD.Rectangle region, int cellSize = 12)
-    {
-        region.Intersect(new SD.Rectangle(0, 0, bmp.Width, bmp.Height));
-        if (region.Width < 2 || region.Height < 2) return;
-
-        int sw = Math.Max(1, (int)Math.Round(region.Width / (double)cellSize));
-        int sh = Math.Max(1, (int)Math.Round(region.Height / (double)cellSize));
-
-        using var small = new SD.Bitmap(sw, sh, SD.Imaging.PixelFormat.Format32bppArgb);
-        using (var gs = SD.Graphics.FromImage(small))
-        {
-            gs.InterpolationMode = D2.InterpolationMode.HighQualityBilinear;
-            gs.PixelOffsetMode = D2.PixelOffsetMode.Half;
-            gs.DrawImage(bmp, new SD.Rectangle(0, 0, sw, sh), region, SD.GraphicsUnit.Pixel);
-        }
-
-        using var g = SD.Graphics.FromImage(bmp);
-        g.InterpolationMode = D2.InterpolationMode.NearestNeighbor;
-        g.PixelOffsetMode = D2.PixelOffsetMode.Half;
-        g.CompositingMode = D2.CompositingMode.SourceCopy;
-        g.DrawImage(small, region, new SD.Rectangle(0, 0, sw, sh), SD.GraphicsUnit.Pixel);
-    }
-
     /// <summary>
-    /// Like <see cref="Pixelate"/>, but every mosaic cell additionally gets random
-    /// brightness/channel jitter so the original text cannot be reconstructed by
-    /// averaging attacks. The jitter sequence is derived from <paramref name="seed"/>,
-    /// which makes one apply deterministic so undo/redo replays the exact same pixels;
-    /// callers draw the seed from a per-application random source.
+    /// Pixelates a region of the bitmap in place using roughly cellSize-pixel blocks,
+    /// where every mosaic cell additionally gets random brightness/channel jitter so
+    /// the original text cannot be reconstructed by averaging attacks. The jitter
+    /// sequence is derived from <paramref name="seed"/>, which makes one apply
+    /// deterministic so undo/redo replays the exact same pixels; callers draw the
+    /// seed from a per-application random source.
     /// </summary>
     public static void PixelateRandomized(SD.Bitmap bmp, SD.Rectangle region, int seed, int cellSize = 12)
     {
@@ -80,7 +57,7 @@ public static class BitmapEffects
     /// <summary>
     /// Blurs a region of the bitmap in place. Three passes of a clamped running-sum
     /// box blur approximate a Gaussian, giving a smooth blur (distinct from the
-    /// hard-edged mosaic produced by <see cref="Pixelate"/>).
+    /// hard-edged mosaic produced by <see cref="PixelateRandomized"/>).
     /// </summary>
     public static void Blur(SD.Bitmap bmp, SD.Rectangle region, int radius = 6)
     {

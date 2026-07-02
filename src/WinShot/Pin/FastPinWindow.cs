@@ -145,28 +145,6 @@ public sealed class FastPinWindow : WF.Form
             pin.SetLocked(false);
     }
 
-    public static void Prewarm(SettingsService? settings = null)
-    {
-        try
-        {
-            using var bitmap = new SD.Bitmap(1, 1);
-            using var pin = new FastPinWindow((SD.Bitmap)bitmap.Clone(), settings)
-            {
-                Opacity = 0,
-                ShowInTaskbar = false,
-                StartPosition = WF.FormStartPosition.Manual,
-                Location = new SD.Point(-32000, -32000),
-            };
-            pin.Show();
-            WF.Application.DoEvents();
-            pin.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast pin prewarm failed", ex);
-        }
-    }
-
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         e.Graphics.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
@@ -643,18 +621,15 @@ public sealed class FastPinWindow : WF.Form
 
     private static void FillRoundedRect(SD.Graphics g, SD.Brush brush, SD.Rectangle bounds, int radius)
     {
-        using var path = RoundedPath(bounds, radius);
+        using var path = GdiPaths.RoundedRect(bounds, radius);
         g.FillPath(brush, path);
     }
 
     private static void DrawRoundedRect(SD.Graphics g, SD.Pen pen, SD.Rectangle bounds, int radius)
     {
-        using var path = RoundedPath(new SD.Rectangle(bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1), radius);
+        using var path = GdiPaths.RoundedRect(new SD.Rectangle(bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1), radius);
         g.DrawPath(pen, path);
     }
-
-    private static SD.Drawing2D.GraphicsPath RoundedPath(SD.Rectangle bounds, int radius)
-        => GdiPaths.RoundedRect(bounds, radius);
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();

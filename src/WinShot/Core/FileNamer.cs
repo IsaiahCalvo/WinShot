@@ -60,11 +60,8 @@ public static class FileNamer
     {
         string result = template;
 
-        if (result.Contains("{date}", StringComparison.OrdinalIgnoreCase))
-            result = result.Replace("{date}", now.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase);
-
-        if (result.Contains("{time}", StringComparison.OrdinalIgnoreCase))
-            result = result.Replace("{time}", now.ToString("HH.mm.ss"), StringComparison.OrdinalIgnoreCase);
+        result = result.Replace("{date}", now.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase);
+        result = result.Replace("{time}", now.ToString("HH.mm.ss"), StringComparison.OrdinalIgnoreCase);
 
         if (result.Contains("{n}", StringComparison.OrdinalIgnoreCase))
         {

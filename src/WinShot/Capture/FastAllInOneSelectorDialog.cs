@@ -27,7 +27,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private const int DragThresholdPx = 4;
     private const int CrosshairGapPx = 10;
     private static readonly SD.Color Accent = ThemePalette.Accent;
-    private static FastAllInOneSelectorDialog? _cached;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
     private SD.Rectangle _monitorBounds;   // this surface's monitor (physical px); primary monitor for the coordinator
@@ -44,25 +43,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private SD.Rectangle? _pendingPx;
     private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
     private SD.Bitmap? _capturedRegion;  // region cropped from _frozen at confirm; caller takes ownership
-    private bool _prewarm;
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
     private TaskCompletionSource<WF.DialogResult>? _completion;
 
-    public FastAllInOneSelectorDialog(Task<List<WindowInfo>> windowsTask, SettingsService? settings)
-        : this(() => windowsTask, settings)
-    {
-    }
-
     public FastAllInOneSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
-        : this(windowsProvider, settings, prewarm: false)
-    {
-    }
-
-    private FastAllInOneSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings, bool prewarm)
     {
         _settings = settings;
-        _prewarm = prewarm;
         _windowsProvider = windowsProvider;
         _monitorBounds = PrimaryBounds();
         _toolbar = new ToolbarForm(this);
@@ -71,27 +58,19 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         DoubleBuffered = true;
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
-        Opacity = prewarm ? 0.01 : 1.0;
+        Opacity = 1.0;
 
         Shown += (_, _) =>
         {
             StartWindowLoad();
-            if (_prewarm)
+            BeginInvoke(new Action(() =>
             {
-                _toolbar.Opacity = 0;
                 ShowToolbar();
-            }
-            else
-            {
-                BeginInvoke(new Action(() =>
-                {
-                    ShowToolbar();
-                    BeginInvoke(new Action(TryRestoreLastRegion));
-                }));
-            }
+                BeginInvoke(new Action(TryRestoreLastRegion));
+            }));
         };
 
-        ResetForUse(windowsProvider, settings, prewarm);
+        ResetForUse(windowsProvider, settings);
     }
 
     public SD.Rectangle? SelectedRegionPx { get; private set; }
@@ -122,39 +101,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private static SD.Rectangle PrimaryBounds() =>
         (WF.Screen.PrimaryScreen ?? WF.Screen.AllScreens[0]).Bounds;
 
-    public static void Prewarm()
-    {
-        try
-        {
-            if (_cached is { IsDisposed: false })
-                return;
-
-            var selector = new FastAllInOneSelectorDialog(
-                () => Task.FromResult(new List<WindowInfo>()),
-                settings: null,
-                prewarm: true);
-
-            selector.Show();
-            WF.Application.DoEvents();
-            selector.Hide();
-            selector._toolbar.Hide();
-            _cached = selector;
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast all-in-one selector prewarm failed", ex);
-        }
-    }
-
     public static FastAllInOneSelectorDialog Rent(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
-        var selector = Interlocked.Exchange(ref _cached, null);
-        if (selector is { IsDisposed: false })
-        {
-            selector.ResetForUse(windowsProvider, settings, prewarm: false);
-            return selector;
-        }
-
         return new FastAllInOneSelectorDialog(windowsProvider, settings);
     }
 
@@ -163,8 +111,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (selector.IsDisposed)
             return;
 
-        if (ReferenceEquals(_cached, selector))
-            _cached = null;
         selector._settings = null;
         selector._windows = new List<WindowInfo>();
         selector._hoverWindow = null;
@@ -185,7 +131,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         selector.Dispose();
     }
 
-    public Task<WF.DialogResult> ShowAsync()
+    public async Task<WF.DialogResult> ShowAsync()
     {
         _completion = new TaskCompletionSource<WF.DialogResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -193,7 +139,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
-        CaptureFrozen();
+        // Snapshot off the UI thread — see FastRegionSelectorDialog.ShowAsync.
+        await CaptureFrozenAsync();
         CreatePanes();
 
         Show();
@@ -202,15 +149,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         Activate();
         Focus();
-        return _completion.Task;
+        return await _completion.Task;
     }
 
-    private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings, bool prewarm)
+    private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         _settings = settings;
-        _prewarm = prewarm;
         _windowsProvider = windowsProvider;
         _windowsLoadStarted = false;
         _windows = new List<WindowInfo>();
@@ -227,14 +173,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         DialogResult = WF.DialogResult.None;
         Bounds = _monitorBounds;
         Capture = false;
-        Opacity = prewarm ? 0.01 : 1.0;
+        Opacity = 1.0;
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
         _completion = null;
         if (!_toolbar.IsDisposed)
         {
-            _toolbar.Opacity = prewarm ? 0 : 1;
+            _toolbar.Opacity = 1;
             _toolbar.UpdateMode(0);
             _toolbar.SetSize(1, 1);
         }
@@ -245,8 +191,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private void CreatePanes()
     {
         DisposePanes();
-        if (_prewarm)
-            return;
 
         foreach (var screen in WF.Screen.AllScreens)
         {
@@ -573,7 +517,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (cursorOnThisSurface)
             DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
-        if (!_prewarm && cursorOnThisSurface)
+        if (cursorOnThisSurface)
         {
             FastSelectorLoupeRenderer.Draw(
                 g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
@@ -601,13 +545,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         g.Restore(state);
     }
 
-    private void CaptureFrozen()
+    private async Task CaptureFrozenAsync()
     {
         DisposeFrozen();
-        if (_prewarm) return;
         try
         {
-            _frozen = CaptureService.CaptureVirtualDesktop();
+            _frozen = await Task.Run(CaptureService.CaptureVirtualDesktop);
         }
         catch (Exception ex)
         {
@@ -946,7 +889,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
             // Mode buttons — icon (or "Aa" for OCR) over a small caption, in reference order.
             // Fullscreen confirms immediately; the rest select a mode that drives SelectedAction.
-            _buttons.Add(new BarButton("Area", "", 0, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Region", "", 0, AllInOneAction.Capture, isMode: true));
             _buttons.Add(new BarButton("Fullscreen", "", -1, AllInOneAction.Capture, isMode: false));
             _buttons.Add(new BarButton("Window", "", 1, AllInOneAction.Capture, isMode: true));
             _buttons.Add(new BarButton("Scrolling", "", 2, AllInOneAction.Scroll, isMode: true));

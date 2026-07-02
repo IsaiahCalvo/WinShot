@@ -30,7 +30,7 @@
 
 The current worktree already contains a large uncommitted parity batch. Stabilize that batch first:
 
-- self-timer and previous-area capture
+- self-timer and previous-region capture
 - all-in-one selector
 - WebP save paths
 - background composer
@@ -45,6 +45,7 @@ Do not start a new large feature until that batch builds, tests, and has a check
 
 - 2026-06-23: Startup warmup was trimmed to native capture selectors only. Release idle sample after startup: 0 CPU seconds over 10 seconds, 125.1 MB working set, 0 MB working-set growth.
 - 2026-06-23: Startup now keeps no hidden UI warmups resident. Release idle sample after startup: 0 CPU seconds over 10 seconds, 120.4 MB working set, 70.4 MB private memory, 0 MB private-memory growth.
+- 2026-07-01: The warmup wiring was later found fully disconnected (empty stage list); the dead warmup/prewarm machinery was removed. Startup performs no warmup.
 - 2026-06-23: Region/all-in-one selectors now dispose after use instead of caching hidden full-screen forms. Live cancel smoke settled at 125.0 MB working set and 70.6 MB private memory after cleanup.
 - 2026-06-23: Fast selectors now delay window-list enumeration until after first show. Region selector first-show smoke improved from 46 ms to 39 ms; post-cancel idle sample held at 124.9 MB working set and 70.5 MB private memory with 0 CPU growth.
 - 2026-06-23: Drag-out temp files now get bounded on-demand cleanup from `%TEMP%\WinShot`; cleanup runs only while creating a drag file and deletes at most 50 expired files per drag.

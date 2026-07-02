@@ -35,8 +35,6 @@ public static class DesktopIcons
 
     public static void Hide() => SetVisible(false);
 
-    public static void Toggle() => SetVisible(!Visible);
-
     private static void SetVisible(bool visible)
     {
         try

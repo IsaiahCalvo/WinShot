@@ -77,22 +77,6 @@ internal static class FastSelectorLoupeRenderer
         return sample.GetPixel(x, y);
     }
 
-    /// <summary>Builds a rounded-rectangle path for the loupe (CleanShot's loupe is a
-    /// rounded square, not a circle). <paramref name="radius"/> is the corner radius.</summary>
-    private static SD.Drawing2D.GraphicsPath RoundedRect(SD.Rectangle rect, int radius)
-    {
-        var path = new SD.Drawing2D.GraphicsPath();
-        int d = Math.Max(1, radius * 2);
-        d = Math.Min(d, Math.Min(rect.Width, rect.Height));
-        // Top-left, top-right, bottom-right, bottom-left arcs.
-        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
-        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
-        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
-        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
-
     /// <summary>Soft drop shadow under the loupe, drawn as a few concentric rounded
     /// rectangles with increasing transparency to fake a blur.</summary>
     private static void DrawShadow(SD.Graphics g, FastSelectorLoupe loupe)
@@ -106,7 +90,7 @@ internal static class FastSelectorLoupeRenderer
             rect.Offset(0, 1);
             int alpha = 14 - i * 2; // ~4..12, fades outward
             using var pen = new SD.Pen(SD.Color.FromArgb(Math.Max(2, alpha), 0, 0, 0), 2f);
-            using var path = RoundedRect(rect, loupe.CornerRadius + i);
+            using var path = GdiPaths.RoundedRect(rect, loupe.CornerRadius + i);
             g.DrawPath(pen, path);
         }
         g.SmoothingMode = prevSmoothing;
@@ -115,7 +99,7 @@ internal static class FastSelectorLoupeRenderer
     private static void DrawSample(SD.Graphics g, SD.Bitmap sample, FastSelectorLoupe loupe)
     {
         var state = g.Save();
-        using var clip = RoundedRect(loupe.Bounds, loupe.CornerRadius);
+        using var clip = GdiPaths.RoundedRect(loupe.Bounds, loupe.CornerRadius);
         g.SetClip(clip);
         g.InterpolationMode = SD.Drawing2D.InterpolationMode.NearestNeighbor;
         g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.Half;
@@ -184,13 +168,13 @@ internal static class FastSelectorLoupeRenderer
         // Subtle dark outer border + a faint inner light hairline so the loupe reads
         // crisply against both light and dark desktop content (CleanShot style).
         using var border = new SD.Pen(SD.Color.FromArgb(190, 28, 28, 30), 1.5f);
-        using (var path = RoundedRect(loupe.Bounds, loupe.CornerRadius))
+        using (var path = GdiPaths.RoundedRect(loupe.Bounds, loupe.CornerRadius))
             g.DrawPath(border, path);
 
         var inner = loupe.Bounds;
         inner.Inflate(-1, -1);
         using var innerLine = new SD.Pen(SD.Color.FromArgb(60, 255, 255, 255), 1f);
-        using (var innerPath = RoundedRect(inner, Math.Max(2, loupe.CornerRadius - 1)))
+        using (var innerPath = GdiPaths.RoundedRect(inner, Math.Max(2, loupe.CornerRadius - 1)))
             g.DrawPath(innerLine, innerPath);
 
         g.SmoothingMode = prevSmoothing;

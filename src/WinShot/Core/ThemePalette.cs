@@ -16,7 +16,6 @@ public static class ThemePalette
     // Surfaces (opaque) — match the dark elevation scale in Theme.xaml.
     public static readonly SD.Color WindowBg = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
     public static readonly SD.Color ToolbarBg = SD.Color.FromArgb(0x26, 0x26, 0x28);
-    public static readonly SD.Color Surface = SD.Color.FromArgb(0x2E, 0x2E, 0x30);
     public static readonly SD.Color SurfaceAlt = SD.Color.FromArgb(0x38, 0x38, 0x3B);
     public static readonly SD.Color Elevated = SD.Color.FromArgb(0x32, 0x32, 0x36);
     public static readonly SD.Color SurfaceHover = SD.Color.FromArgb(0x45, 0x45, 0x4A);
@@ -24,18 +23,13 @@ public static class ThemePalette
     // Single accent identity (macOS dark-mode system blue).
     public static readonly SD.Color Accent = SD.Color.FromArgb(0x0A, 0x84, 0xFF);
     public static readonly SD.Color AccentHover = SD.Color.FromArgb(0x40, 0x9C, 0xFF);
-    public static readonly SD.Color AccentPressed = SD.Color.FromArgb(0x00, 0x60, 0xDF);
-    public static readonly SD.Color Info = SD.Color.FromArgb(0x6B, 0xB1, 0xFF);
-    public static readonly SD.Color AnnotationRed = SD.Color.FromArgb(0xFF, 0x45, 0x3A);
 
     // Text.
     public static readonly SD.Color TextPrimary = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
     public static readonly SD.Color TextSecondary = SD.Color.FromArgb(0xB8, 0xB8, 0xBC);
-    public static readonly SD.Color TextDisabled = SD.Color.FromArgb(0x80, 0x80, 0x84);
 
     // White-alpha interaction fills / hairlines (GDI+ blends the alpha over dark).
     public static readonly SD.Color HoverFill = SD.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF);
-    public static readonly SD.Color PressedFill = SD.Color.FromArgb(0x2E, 0xFF, 0xFF, 0xFF);
     public static readonly SD.Color Border = SD.Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF);
     public static readonly SD.Color BorderStrong = SD.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF);
 

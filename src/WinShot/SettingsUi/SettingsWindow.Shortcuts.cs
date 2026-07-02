@@ -61,19 +61,19 @@ public partial class SettingsWindow
         }},
         new ShortcutSection { Title = "Screenshots", Items = new[]
         {
-            Real("capture-area", "Capture Area", "Capture area",
+            Real("capture-area", "Capture Region", "Capture region",
                  s => s.HotkeyCaptureRegion, (s, v) => s.HotkeyCaptureRegion = v),
-            Real("capture-previous", "Capture Previous Area", "Repeat previous region",
+            Real("capture-previous", "Capture Previous Region", "Repeat previous region",
                  s => s.HotkeyCapturePrevious, (s, v) => s.HotkeyCapturePrevious = v),
             Real("capture-fullscreen", "Capture Fullscreen", "Capture fullscreen",
                  s => s.HotkeyCaptureFullscreen, (s, v) => s.HotkeyCaptureFullscreen = v),
             Real("capture-window", "Capture Window", "Capture window",
                  s => s.HotkeyCaptureWindow, (s, v) => s.HotkeyCaptureWindow = v),
             Ph("self-timer", "Self-Timer"),
-            Ph("capture-copy", "Capture Area & Copy to Clipboard"),
-            Ph("capture-save", "Capture Area & Save"),
-            Ph("capture-annotate", "Capture Area & Annotate"),
-            Ph("capture-pin", "Capture Area & Pin to the Screen"),
+            Ph("capture-copy", "Capture Region & Copy to Clipboard"),
+            Ph("capture-save", "Capture Region & Save"),
+            Ph("capture-annotate", "Capture Region & Annotate"),
+            Ph("capture-pin", "Capture Region & Pin to the Screen"),
         }},
         new ShortcutSection { Title = "Screen Recording", Items = new[]
         {
@@ -171,7 +171,7 @@ public partial class SettingsWindow
             foreach (var item in section.Items)
             {
                 // Label fills the left, recorder pinned right (matches CleanShot and avoids the
-                // fixed-width label clipping long action names like "Capture Area & ...").
+                // fixed-width label clipping long action names like "Capture Region & ...").
                 var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = true };
 
                 var box = new HotkeyBox { Width = 180 };

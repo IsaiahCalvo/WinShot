@@ -158,42 +158,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         Task releaseAfterTask)
         => new(image, settings, historyPath: null, historyPathTask, releaseAfterTask);
 
-    public static void Prewarm(SettingsService settings)
-    {
-        try
-        {
-            using var bitmap = new SD.Bitmap(MaxCardWidth, MaxCardHeight, PixelFormat.Format32bppPArgb);
-            using (var g = SD.Graphics.FromImage(bitmap))
-                g.Clear(CardFill);
-            using var window = new FastQuickActionsWindow(
-                (SD.Bitmap)bitmap.Clone(),
-                settings,
-                historyPath: null,
-                historyPathTask: null,
-                releaseAfterTask: null,
-                requestMemoryCleanupOnClose: false,
-                loadPreview: false)
-            {
-                Opacity = 0,
-                ShowInTaskbar = false,
-                StartPosition = WF.FormStartPosition.Manual,
-                Location = new SD.Point(-32000, -32000),
-            };
-            window.Show();
-            using var render = new SD.Bitmap(
-                Math.Max(1, window.Width),
-                Math.Max(1, window.Height),
-                PixelFormat.Format32bppPArgb);
-            window.DrawToBitmap(render, new SD.Rectangle(0, 0, render.Width, render.Height));
-            WF.Application.DoEvents();
-            window.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast quick actions prewarm failed", ex);
-        }
-    }
-
     public static string? PopRecentlyClosed()
     {
         lock (RecentlyClosed)

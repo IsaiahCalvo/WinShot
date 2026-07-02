@@ -26,8 +26,8 @@ Status vs WinShot as of this date. Cloud/sharing is permanently out of scope.
 - **Quick Look-style spacebar preview** - implemented; preview sizing is now shared and tested so images stay bounded to the current work area without extra background work.
 - **Pin extras** - implemented; click-through lock mode, arrow-key nudge, drag handle, resize, and opacity controls now share tested interaction rules across both pin windows.
 - **Self-timer capture** - implemented; the countdown window and Settings now share tested 1-60 second bounds, while direct non-positive calls still skip the delay.
-- **Capture previous area** - implemented; saved-region parsing and formatting now use one tested helper across repeat capture, region restore, and all-in-one restore.
-- **All-in-One capture mode** - implemented; one hotkey opens area/window/fullscreen/record/OCR/scroll actions, exact size entry, and aspect-locked drag math now shares tested geometry across selector paths.
+- **Capture previous region** - implemented; saved-region parsing and formatting now use one tested helper across repeat capture, region restore, and all-in-one restore.
+- **All-in-One capture mode** - implemented; one hotkey opens region/window/fullscreen/record/OCR/scroll actions, exact size entry, and aspect-locked drag math now shares tested geometry across selector paths.
 - **Background/padding tool** - implemented; the composer supports styled backgrounds, padding, inset, ratios, alignment, rounded corners, and shadows, with canvas sizing now centralized and tested.
 - **Pixelate with randomization** - implemented; the editor uses deterministic per-action jitter for undo/redo, with focused bitmap tests proving same-seed replay, region bounds, and restore behavior.
 - **Crop aspect-ratio presets + edge snapping** - implemented; crop drag math now uses a shared tested helper for free crops, fixed ratios, edge snapping, reverse drags, and bounds clamping.

@@ -21,8 +21,8 @@ public readonly record struct VideoTrimRange(double StartSeconds, double EndSeco
     public static VideoTrimRange Normalize(double startSeconds, double endSeconds, double durationSeconds)
     {
         double duration = CleanDuration(durationSeconds);
-        double start = Clamp(CleanSeconds(startSeconds, 0), 0, Math.Max(0, duration - MinimumDurationSeconds));
-        double end = Clamp(CleanSeconds(endSeconds, duration), MinimumDurationSeconds, duration);
+        double start = Math.Clamp(CleanSeconds(startSeconds, 0), 0, Math.Max(0, duration - MinimumDurationSeconds));
+        double end = Math.Clamp(CleanSeconds(endSeconds, duration), MinimumDurationSeconds, duration);
 
         if (end - start < MinimumDurationSeconds)
         {
@@ -50,7 +50,4 @@ public readonly record struct VideoTrimRange(double StartSeconds, double EndSeco
 
     private static double CleanSeconds(double seconds, double fallback) =>
         double.IsFinite(seconds) ? seconds : fallback;
-
-    private static double Clamp(double value, double min, double max) =>
-        Math.Min(Math.Max(value, min), max);
 }

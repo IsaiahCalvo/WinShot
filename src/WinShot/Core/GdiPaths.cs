@@ -12,7 +12,9 @@ public static class GdiPaths
     /// </summary>
     public static GraphicsPath RoundedRect(SD.Rectangle bounds, int radius)
     {
-        int d = Math.Max(1, radius * 2);
+        // Clamp the corner diameter to the rect's short side so an oversized radius
+        // degrades to a capsule instead of a self-intersecting path.
+        int d = Math.Max(1, Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height)));
         var path = new GraphicsPath();
         if (bounds.Width <= 0 || bounds.Height <= 0)
             return path;

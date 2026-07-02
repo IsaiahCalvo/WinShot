@@ -40,9 +40,6 @@ public partial class HistoryWindow : Window
     private HistoryItem? _dragItem;
     private bool _dragging;
     private bool _loadedOnce;
-    private bool _renderPrewarmed;
-    private bool _suppressRefreshOnLoad;
-    private bool _parkedVisible;
     private FileSystemWatcher? _watcher;
     private DispatcherTimer? _watcherDebounce;
 
@@ -71,7 +68,6 @@ public partial class HistoryWindow : Window
         {
             _loadedOnce = true;
             StartWatcher();
-            if (_suppressRefreshOnLoad) return;
             Dispatcher.BeginInvoke(
                 System.Windows.Threading.DispatcherPriority.Background,
                 new Action(() => _ = RefreshOnShowAsync()));
@@ -114,18 +110,7 @@ public partial class HistoryWindow : Window
         bool deferActivate = false;
         wasVisible = instance.IsVisible;
 
-        if (instance._parkedVisible)
-        {
-            var center = Stopwatch.StartNew();
-            instance.RestoreParkedWindow();
-            centerMs = center.ElapsedMilliseconds;
-            if (instance._loadedOnce)
-                instance.Dispatcher.BeginInvoke(
-                    System.Windows.Threading.DispatcherPriority.Background,
-                    new Action(() => _ = instance.RefreshOnShowAsync()));
-            deferActivate = true;
-        }
-        else if (!instance.IsVisible)
+        if (!instance.IsVisible)
         {
             var center = Stopwatch.StartNew();
             instance.ShowInTaskbar = true;
@@ -170,35 +155,10 @@ public partial class HistoryWindow : Window
         return instance;
     }
 
-    public static void Prewarm(HistoryService history, SettingsService settings)
-    {
-        if (_instance is null)
-            CreateInstance(history, settings);
-        _instance?.PrewarmRender();
-    }
-
     private static void CreateInstance(HistoryService history, SettingsService settings)
     {
         _instance = new HistoryWindow(history, settings);
         _instance.Closed += (_, _) => _instance = null;
-    }
-
-    private void PrewarmRender()
-    {
-        if (_renderPrewarmed || IsVisible) return;
-        _renderPrewarmed = true;
-
-        _suppressRefreshOnLoad = true;
-        ShowInTaskbar = false;
-        ShowActivated = false;
-        Opacity = 0;
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        CenterOnWorkArea();
-
-        Show();
-        FlushPrewarmRender();
-        ParkWindow();
-        _suppressRefreshOnLoad = false;
     }
 
     private void CenterOnWorkArea()
@@ -206,35 +166,6 @@ public partial class HistoryWindow : Window
         var area = SystemParameters.WorkArea;
         Left = area.Left + (area.Width - Width) / 2;
         Top = area.Top + (area.Height - Height) / 2;
-    }
-
-    private bool IsMostlyWithinWorkArea()
-    {
-        var area = SystemParameters.WorkArea;
-        return Left < area.Right - 120 &&
-               Left + Width > area.Left + 120 &&
-               Top < area.Bottom - 80 &&
-               Top + Height > area.Top + 80;
-    }
-
-    private void RestoreParkedWindow()
-    {
-        if (!IsMostlyWithinWorkArea())
-            CenterOnWorkArea();
-        ShowInTaskbar = true;
-        Opacity = 1;
-        ApplyParkedWindowStyle(parked: false);
-        _parkedVisible = false;
-        // The parked window was already IsVisible, so IsVisibleChanged won't fire on
-        // restore — start the live watcher here.
-        StartWatcher();
-    }
-
-    private void ParkWindow()
-    {
-        Opacity = 0;
-        ApplyParkedWindowStyle(parked: true);
-        _parkedVisible = true;
     }
 
     private void ApplyParkedWindowStyle(bool parked)
@@ -250,15 +181,6 @@ public partial class HistoryWindow : Window
             return;
 
         SetWindowLong(hwnd, GwlExStyle, updated);
-    }
-
-    private void FlushPrewarmRender()
-    {
-        var frame = new DispatcherFrame();
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.ApplicationIdle,
-            new Action(() => frame.Continue = false));
-        Dispatcher.PushFrame(frame);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -288,7 +210,6 @@ public partial class HistoryWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        _parkedVisible = false;
         ApplyParkedWindowStyle(parked: false);
         base.OnClosing(e);
     }
@@ -405,8 +326,7 @@ public partial class HistoryWindow : Window
     /// UI thread; the manual Refresh button stays as a fallback.</summary>
     private void StartWatcher()
     {
-        // Don't spin the watcher up during the invisible prewarm pass.
-        if (_watcher is not null || !IsVisible || _suppressRefreshOnLoad) return;
+        if (_watcher is not null || !IsVisible) return;
 
         string dir = HistoryService.Dir;
         try
@@ -823,7 +743,6 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public HistoryItem(string filePath)
     {
         FilePath = filePath;
-        FileName = Path.GetFileName(filePath);
         string ext = Path.GetExtension(filePath).ToLowerInvariant();
         IsImage = ImageExtensions.Contains(ext);
         IsVideo = VideoExtensions.Contains(ext);
@@ -837,7 +756,6 @@ public sealed class HistoryItem : INotifyPropertyChanged
     }
 
     public string FilePath { get; }
-    public string FileName { get; }
     public bool IsImage { get; }
     public bool IsVideo { get; }
     public bool IsGif { get; }

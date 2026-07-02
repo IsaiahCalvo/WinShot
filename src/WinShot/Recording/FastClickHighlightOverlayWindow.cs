@@ -57,23 +57,6 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
 
     protected override bool ShowWithoutActivation => true;
 
-    public static void Prewarm()
-    {
-        try
-        {
-            using var overlay = new FastClickHighlightOverlayWindow(
-                new SD.Rectangle(-32000, -32000, 160, 120),
-                installHook: false);
-            overlay.Show();
-            WF.Application.DoEvents();
-            overlay.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast click-highlight overlay prewarm failed", ex);
-        }
-    }
-
     public void SetPaused(bool paused)
     {
         _paused = paused;

@@ -53,28 +53,6 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         };
     }
 
-    public static void Prewarm()
-    {
-        try
-        {
-            using var countdown = new FastRecordingCountdownWindow(
-                1,
-                new SD.Rectangle(-32000, -32000, 170, 170))
-            {
-                Opacity = 0,
-            };
-            countdown.Show();
-            WF.Application.DoEvents();
-            using var render = new SD.Bitmap(countdown.Width, countdown.Height);
-            countdown.DrawToBitmap(render, new SD.Rectangle(0, 0, render.Width, render.Height));
-            countdown.Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fast recording countdown prewarm failed", ex);
-        }
-    }
-
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);

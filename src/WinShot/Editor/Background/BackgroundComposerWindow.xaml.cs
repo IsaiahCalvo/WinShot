@@ -104,41 +104,6 @@ public partial class BackgroundComposerWindow : Window
         DarkTitleBar.Apply(this);
     }
 
-    public static void Prewarm(SettingsService settings, HistoryService history)
-    {
-        try
-        {
-            var bitmap = new SD.Bitmap(1, 1);
-            var window = new BackgroundComposerWindow(bitmap, settings, history, loadSourceImage: false)
-            {
-                ShowInTaskbar = false,
-                ShowActivated = false,
-                Opacity = 0,
-                WindowStartupLocation = WindowStartupLocation.Manual,
-                Left = -32000,
-                Top = -32000,
-            };
-            var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
-            fallback.Tick += (_, _) =>
-            {
-                fallback.Stop();
-                if (window.IsVisible)
-                    window.Close();
-            };
-            window.ContentRendered += (_, _) =>
-            {
-                fallback.Stop();
-                window.Close();
-            };
-            window.Show();
-            fallback.Start();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Background composer prewarm failed", ex);
-        }
-    }
-
     private async Task LoadShotBrushAsync(SD.Bitmap source)
     {
         try
@@ -178,8 +143,8 @@ public partial class BackgroundComposerWindow : Window
         ShadowOpacityValueLabel.Text = $"{(int)Math.Round(ShadowOpacitySlider.Value * 100)}%";
 
         // Padding is the single margin control; inset is retired (it collapsed
-        // into padding and only duplicated the gutter), so always pass 0.
-        var layout = BackgroundLayout.Calculate(new SD.Size(_srcW, _srcH), pad, inset: 0, _aspect);
+        // into padding and only duplicated the gutter).
+        var layout = BackgroundLayout.Calculate(new SD.Size(_srcW, _srcH), pad, _aspect);
         _canvasW = layout.CanvasSize.Width;
         _canvasH = layout.CanvasSize.Height;
 
@@ -281,6 +246,7 @@ public partial class BackgroundComposerWindow : Window
             Template = BuildThumbTemplate(showContent: false),
             Background = brush,
             ToolTip = tooltip,
+            GroupName = "Bg",
             Margin = new Thickness(0, 0, 6, 6),
             Cursor = Cursors.Hand,
         };
@@ -338,8 +304,6 @@ public partial class BackgroundComposerWindow : Window
         {
             var (name, brush) = presets[i];
             var rb = MakeGradientThumb(brush, name);
-            rb.GroupName = "Bg";
-            rb.ToolTip = name;
             string label = name;
             rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
             _bgSwatches.Add(rb);
@@ -403,7 +367,7 @@ public partial class BackgroundComposerWindow : Window
     /// Populates the "Blurred" row with real frosted variants of the user's own
     /// screenshot: a heavy gaussian blur of the shot itself, plus light- and
     /// dark-tinted versions. Picking one sets a frosted backdrop of their own
-    /// capture (not a gradient). Skipped when there is no real source (prewarm).
+    /// capture (not a gradient). Skipped when there is no real source.
     /// </summary>
     private void BuildBlurredBackdrops()
     {
@@ -435,8 +399,6 @@ public partial class BackgroundComposerWindow : Window
                 continue;
 
             var rb = MakeGradientThumb(brush, name);
-            rb.GroupName = "Bg";
-            rb.ToolTip = name;
             string label = name;
             rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
             _bgSwatches.Add(rb);
@@ -538,8 +500,6 @@ public partial class BackgroundComposerWindow : Window
 
             const string label = "Desktop wallpaper";
             var rb = MakeGradientThumb(brush, label);
-            rb.GroupName = "Bg";
-            rb.ToolTip = label;
             rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
             _bgSwatches.Add(rb);
             WallpaperPanel.Children.Add(rb);
@@ -792,8 +752,6 @@ public partial class BackgroundComposerWindow : Window
     private void ShowWallpaperThumb(ImageBrush brush, string tooltip)
     {
         var thumb = MakeGradientThumb(brush, tooltip);
-        thumb.GroupName = "Bg";
-        thumb.ToolTip = tooltip;
         thumb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = tooltip; };
         _bgSwatches.Add(thumb);
         WallpaperPanel.Children.Insert(Math.Max(0, WallpaperPanel.Children.Count - 1), thumb);

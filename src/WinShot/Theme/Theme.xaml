@@ -80,8 +80,6 @@
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
     <SolidColorBrush x:Key="TopHighlightBrush"  Color="{StaticResource TopHighlightColor}"/>
 
-    <SolidColorBrush x:Key="TransparentBrush"   Color="Transparent"/>
-
     <!-- ===================== TOKENS (radii / sizes) ==================== -->
     <CornerRadius x:Key="RadiusButton">8</CornerRadius>
     <CornerRadius x:Key="RadiusCard">14</CornerRadius>
@@ -591,79 +589,6 @@
                             <Setter Property="Opacity" Value="0.4"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- ====================================================================
-         THEMED WINDOW CHROME — clean dark Win11 look with rounded outer corners.
-         Apply this Style to a titled Window. It strips native chrome
-         (WindowStyle=None) and draws a 14px rounded charcoal shell with a
-         draggable top strip and a Win11-style close glyph. NO macOS dots.
-
-         The window's real content goes in a child element with x:Name="...".
-         See UI-SPEC.md for the exact host markup (ContentPresenter at the
-         "WindowContentHost" slot). Windows that prefer native chrome can skip
-         this and just set Background="{StaticResource WindowBgBrush}".
-         ==================================================================== -->
-    <Style x:Key="ThemedWindow" TargetType="Window">
-        <Setter Property="WindowStyle" Value="None"/>
-        <Setter Property="AllowsTransparency" Value="True"/>
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="FontFamily" Value="Segoe UI"/>
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="ResizeMode" Value="CanResizeWithGrip"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Window">
-                    <Border Margin="12" CornerRadius="{StaticResource RadiusCard}"
-                            Background="{StaticResource WindowBgBrush}"
-                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                            Effect="{StaticResource FloatingShadow}">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="40"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
-                            <!-- Title strip: drag area + title + close.
-                                 Code-behind should call DragMove() on MouseLeftButtonDown
-                                 of the element named PART_TitleBar. -->
-                            <Grid x:Name="PART_TitleBar" Grid.Row="0" Background="Transparent">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Margin="16,0,0,0"
-                                           VerticalAlignment="Center"
-                                           Text="{TemplateBinding Title}"
-                                           Foreground="{StaticResource TextSecondaryBrush}"
-                                           FontSize="13"/>
-                                <Button x:Name="PART_Close" Grid.Column="1" Width="40" Height="40"
-                                        Background="Transparent" BorderThickness="0"
-                                        Foreground="{StaticResource TextSecondaryBrush}"
-                                        FontFamily="{StaticResource IconFont}" FontSize="11"
-                                        Content="&#xE8BB;" Cursor="Hand">
-                                    <Button.Template>
-                                        <ControlTemplate TargetType="Button">
-                                            <Border x:Name="Cb" Background="Transparent"
-                                                    CornerRadius="0,13,0,0">
-                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Cb" Property="Background" Value="{StaticResource AnnotationRedBrush}"/>
-                                                    <Setter Property="Foreground" Value="White"/>
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Button.Template>
-                                </Button>
-                            </Grid>
-                            <ContentPresenter Grid.Row="1"/>
-                        </Grid>
-                    </Border>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
