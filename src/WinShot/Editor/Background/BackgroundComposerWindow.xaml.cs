@@ -69,7 +69,10 @@ public partial class BackgroundComposerWindow : Window
 
         Closed += (_, _) =>
         {
-            _source.Dispose();
+            // The shot-brush / blurred-backdrop conversions may still be queued on the
+            // bitmap-source worker; disposing directly here races their Clone ("Parameter
+            // is not valid" → blank composer/editor). Dispose behind the queue instead.
+            CaptureService.DisposeAfterPendingConversions(_source);
             MemoryCleanup.Request();
         };
         SourceInitialized += (_, _) => Log.Info($"Perf background composer source initialized: {_startup.ElapsedMilliseconds} ms");

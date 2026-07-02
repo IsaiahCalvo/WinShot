@@ -498,6 +498,18 @@ public static class CaptureService
         }
     }
 
+    /// <summary>
+    /// Disposes <paramref name="bmp"/> AFTER every conversion currently queued on the
+    /// bitmap-source worker has completed. Owners whose bitmap may still be referenced by an
+    /// in-flight <see cref="ToBitmapSourceSnapshotAsync(Bitmap)"/> call (e.g. a window closing
+    /// right after kicking off its image load) must dispose through this instead of directly —
+    /// a direct Dispose races the worker's Clone and produces "Parameter is not valid".
+    /// </summary>
+    public static void DisposeAfterPendingConversions(Bitmap bmp) =>
+        BitmapSourceWork.Add(new BitmapSourceWorkItem(
+            () => { bmp.Dispose(); return null!; },
+            new TaskCompletionSource<BitmapSource>(TaskCreationOptions.RunContinuationsAsynchronously)));
+
     private static void RunBitmapSourceWorker(BlockingCollection<BitmapSourceWorkItem> queue)
     {
         foreach (var item in queue.GetConsumingEnumerable())

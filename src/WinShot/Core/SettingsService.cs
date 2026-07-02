@@ -139,7 +139,12 @@ public class Settings
 
 public class SettingsService
 {
-    public static string Dir => Path.Combine(
+    /// <summary>Test seam: redirects the settings folder so tests can NEVER touch the real
+    /// %APPDATA%\WinShot\settings.json (a test suite writing defaults into the user's live
+    /// settings is exactly the data-loss class this service guards against).</summary>
+    internal static string? DirOverride;
+
+    public static string Dir => DirOverride ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WinShot");
 
     private static string FilePath => Path.Combine(Dir, "settings.json");
@@ -151,16 +156,46 @@ public class SettingsService
     /// <summary>Raised after Save() so the app can re-register hotkeys etc.</summary>
     public event Action? Changed;
 
+    /// <summary>True once Load() ran. Saves are refused before that — a Save() racing ahead
+    /// of Load() would write pristine defaults over the user's file.</summary>
+    private bool _loaded;
+
+    /// <summary>Set when a settings file EXISTED but could not be read even after retries and
+    /// the backups. The unreadable file is preserved to settings.json.corrupt-* before the
+    /// first subsequent save, so user data is never silently destroyed.</summary>
+    private bool _unreadablePrimaryPreserved;
+    private bool _preserveBeforeNextSave;
+
     public void Load()
     {
-        if (TryLoadFrom(FilePath))
-            return;
-        // Fall back to the last-known-good backup if the primary file is missing/corrupt/torn,
-        // so a bad write can never strand the user on defaults.
-        if (TryLoadFrom(FilePath + ".bak"))
+        _loaded = true;
+        // Transient share violations are real: an exiting instance's atomic File.Move can
+        // overlap a starting instance's read during upgrades/restarts. Falling back to
+        // defaults on a transient error is exactly how user hotkeys get wiped — the next
+        // auto-save cements the defaults and then rotates the backups past the good copy.
+        for (int attempt = 0; attempt < 4; attempt++)
         {
-            Log.Info("Loaded settings from backup (primary settings.json was missing or unreadable)");
-            return;
+            if (attempt > 0)
+                Thread.Sleep(50 * attempt);
+            if (TryLoadFrom(FilePath))
+                return;
+        }
+        // Fall back to the backup generations if the primary is missing/corrupt/torn.
+        foreach (string backup in new[] { FilePath + ".bak", FilePath + ".bak2" })
+        {
+            if (TryLoadFrom(backup))
+            {
+                Log.Info($"Loaded settings from {Path.GetFileName(backup)} (primary settings.json was missing or unreadable)");
+                return;
+            }
+        }
+        if (File.Exists(FilePath))
+        {
+            // A file exists but nothing was readable: run on defaults for this session, but
+            // DO NOT let a save destroy the file before a copy of it is preserved.
+            _preserveBeforeNextSave = true;
+            Log.Error("settings.json exists but is unreadable (and backups failed) — running on defaults; " +
+                      "the file will be preserved as settings.json.corrupt-* before any save");
         }
         Current = new Settings();
     }
@@ -191,7 +226,8 @@ public class SettingsService
     {
         try
         {
-            WriteAtomically(JsonSerializer.Serialize(Current, JsonOptions));
+            if (GuardSave())
+                WriteAtomically(JsonSerializer.Serialize(Current, JsonOptions));
         }
         catch (Exception ex)
         {
@@ -205,7 +241,8 @@ public class SettingsService
         string json = JsonSerializer.Serialize(Current, JsonOptions);
         try
         {
-            await Task.Run(() => WriteAtomically(json));
+            if (GuardSave())
+                await Task.Run(() => WriteAtomically(json));
         }
         catch (Exception ex)
         {
@@ -214,9 +251,36 @@ public class SettingsService
         Changed?.Invoke();
     }
 
-    // Atomic write + one-deep backup: write to a temp file, copy the current good file to .bak,
-    // then atomically move temp over the real file. A torn write or a bad in-memory state can
-    // never leave the user without a recoverable copy of their settings.
+    /// <summary>Pre-save safety: refuse saves before Load(), and preserve an unreadable-but-
+    /// existing settings file once before it can be overwritten.</summary>
+    private bool GuardSave()
+    {
+        if (!_loaded)
+        {
+            Log.Error("Settings save refused: Save() called before Load() — writing now would replace the user's settings with defaults");
+            return false;
+        }
+        if (_preserveBeforeNextSave && !_unreadablePrimaryPreserved)
+        {
+            try
+            {
+                string keep = FilePath + $".corrupt-{DateTime.Now:yyyyMMdd-HHmmss}";
+                File.Copy(FilePath, keep, overwrite: false);
+                Log.Info($"Preserved unreadable settings file as {Path.GetFileName(keep)}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Failed to preserve unreadable settings file (saving anyway)", ex);
+            }
+            _unreadablePrimaryPreserved = true;
+        }
+        return true;
+    }
+
+    // Atomic write + two backup generations: write to a temp file, rotate .bak -> .bak2 and
+    // current -> .bak, then atomically move temp over the real file. Two generations mean two
+    // consecutive bad saves still leave a good copy — a single .bak proved insufficient (two
+    // quick saves after a bad load cycled the user's data out of existence).
     private void WriteAtomically(string json)
     {
         Directory.CreateDirectory(Dir);
@@ -224,7 +288,12 @@ public class SettingsService
         File.WriteAllText(tmp, json);
         if (File.Exists(FilePath))
         {
-            try { File.Copy(FilePath, FilePath + ".bak", overwrite: true); }
+            try
+            {
+                if (File.Exists(FilePath + ".bak"))
+                    File.Copy(FilePath + ".bak", FilePath + ".bak2", overwrite: true);
+                File.Copy(FilePath, FilePath + ".bak", overwrite: true);
+            }
             catch (Exception ex) { Log.Error("Failed to back up settings before save", ex); }
         }
         File.Move(tmp, FilePath, overwrite: true);
