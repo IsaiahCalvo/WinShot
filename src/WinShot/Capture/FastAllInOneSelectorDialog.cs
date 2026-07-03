@@ -25,7 +25,6 @@ namespace WinShot.Capture;
 public sealed class FastAllInOneSelectorDialog : WF.Form
 {
     private const int DragThresholdPx = 4;
-    private const int CrosshairGapPx = 10;
     private static readonly SD.Color Accent = ThemePalette.Accent;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
@@ -54,7 +53,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         _toolbar = new ToolbarForm(this);
 
-        ConfigureSurface(this);
+        SelectorChrome.ConfigureSurface(this);
         DoubleBuffered = true;
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
@@ -76,19 +75,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     public SD.Rectangle? SelectedRegionPx { get; private set; }
 
     public AllInOneAction SelectedAction { get; private set; } = AllInOneAction.Capture;
-
-    /// <summary>Shared surface setup for the coordinator Form and every pane.</summary>
-    private static void ConfigureSurface(WF.Form form)
-    {
-        form.AutoScaleMode = WF.AutoScaleMode.None;
-        form.BackColor = SD.Color.Black;
-        form.Cursor = WF.Cursors.Cross;
-        form.FormBorderStyle = WF.FormBorderStyle.None;
-        form.KeyPreview = true;
-        form.ShowInTaskbar = false;
-        form.StartPosition = WF.FormStartPosition.Manual;
-        form.TopMost = true;
-    }
 
     // DoubleBuffered + SetStyle are protected on Control, so each surface enables its own
     // flicker-free painting from inside its own constructor.
@@ -501,12 +487,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 SD.Point at = _dragging || _pendingPx is not null
                     ? new SD.Point(local.Right + 8, local.Bottom + 8)
                     : new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
-                DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y);
+                SelectorChrome.DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y);
             }
         }
 
         if (cursorOnThisSurface)
-            DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
+            SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
         if (cursorOnThisSurface)
         {
@@ -671,49 +657,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private SD.Rectangle MakeDragRect(SD.Point screenPoint) =>
         AllInOneDragLayout.CreatePixelRectangle(_dragStartScreen, screenPoint, _dragRatio);
 
-    // ----------------------------------------------------------- drawing helpers
-
-    private void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor)
-    {
-        var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, CrosshairGapPx);
-        if (!guides.IsVisible)
-            return;
-
-        using var shadow = new SD.Pen(SD.Color.FromArgb(120, 0, 0, 0), 3);
-        using var pen = new SD.Pen(SD.Color.FromArgb(210, 255, 255, 255), 1);
-        DrawGuideLines(g, shadow, guides);
-        DrawGuideLines(g, pen, guides);
-    }
-
-    private static void DrawGuideLines(SD.Graphics g, SD.Pen pen, FastSelectorGuideLines guides)
-    {
-        g.DrawLine(pen, guides.LeftStart, guides.LeftEnd);
-        g.DrawLine(pen, guides.RightStart, guides.RightEnd);
-        g.DrawLine(pen, guides.TopStart, guides.TopEnd);
-        g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
-    }
-
-    private void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
-    {
-        using var font = ThemePalette.UiFont(9f, SD.FontStyle.Bold);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + 16;
-        int h = size.Height + 8;
-        int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));
-        int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
-        var bg = new SD.Rectangle(left, top, w, h);
-
-        var prev = g.SmoothingMode;
-        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bg, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
-            g.FillPath(bgBrush, path);
-        g.SmoothingMode = prev;
-
-        WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
-    }
-
     // ----------------------------------------------------------- coordinate helpers
 
     /// <summary>Screen-physical rect -> local pixels on a 1:1 surface (pure offset).</summary>
@@ -764,7 +707,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             _owner = owner;
             _bounds = monitorBounds;
-            ConfigureSurface(this);
+            SelectorChrome.ConfigureSurface(this);
             DoubleBuffered = true;
             SetStyle(PaintStyles, true);
             Bounds = monitorBounds;
