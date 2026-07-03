@@ -325,11 +325,8 @@ public partial class App : Application
     /// <summary>Scripted scrolling capture over an explicit screen region — used by the
     /// automated capture tests and external automation. "auto" starts Auto-Scroll
     /// immediately; "save" writes the result silently instead of the configured action.</summary>
-    private async void ScrollRegionFlow(string cmd)
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void ScrollRegionFlow(string cmd) => RunCaptureFlow(
+        "Scripted scrolling capture failed", "Scrolling capture failed", async () =>
         {
             var parts = cmd["scroll-region:".Length..].Split(',', StringSplitOptions.TrimEntries);
             if (parts.Length < 4 ||
@@ -353,23 +350,40 @@ public partial class App : Application
                 HandleCapture(stitched, save ? PostCaptureAction.Save : null);
             else
                 ShowBalloon("Scrolling capture", "Nothing captured.");
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Scripted scrolling capture failed", ex);
-            ShowBalloon("Scrolling capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
     private void FinishCaptureFlow()
     {
         _captureInProgress = false;
         MemoryCleanup.Request();
         SchedulePendingCaptureDrain();
+    }
+
+    /// <summary>
+    /// Shared envelope for every capture flow: the single-capture-in-progress guard, one
+    /// failure funnel (log + balloon), and the guaranteed FinishCaptureFlow release. The
+    /// guard runs synchronously before the first await, so a second trigger while a capture
+    /// is active is dropped exactly as before. Fire-and-forget (async void) to match the
+    /// hotkey/tray/pipe callers; exceptions surface through <paramref name="body"/>'s Task
+    /// and are caught here rather than lost to the sync context.
+    /// </summary>
+    private async void RunCaptureFlow(string failureLog, string failureBalloon, Func<Task> body)
+    {
+        if (_captureInProgress) return;
+        _captureInProgress = true;
+        try
+        {
+            await body();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(failureLog, ex);
+            ShowBalloon(failureBalloon, ex.Message);
+        }
+        finally
+        {
+            FinishCaptureFlow();
+        }
     }
 
     private void SchedulePendingCaptureDrain()
@@ -411,13 +425,10 @@ public partial class App : Application
 
     // ---- Capture flows ----
 
-    private async void CaptureRegionFlow(
+    private void CaptureRegionFlow(
         string? postCaptureActionOverride = null,
-        FastRegionSelectorDialog.SelectorMode mode = FastRegionSelectorDialog.SelectorMode.Area)
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+        FastRegionSelectorDialog.SelectorMode mode = FastRegionSelectorDialog.SelectorMode.Area) => RunCaptureFlow(
+        "Region capture failed", "Capture failed", async () =>
         {
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
             PerfLog.TrackFirstShown(selector, mode == FastRegionSelectorDialog.SelectorMode.Window ? "capture-window selector" : "capture-area selector");
@@ -440,68 +451,29 @@ public partial class App : Application
             {
                 FastRegionSelectorDialog.Return(selector);
             }
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Region capture failed", ex);
-            ShowBalloon("Capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
-    private async void CaptureFullscreenFlow()
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void CaptureFullscreenFlow() => RunCaptureFlow(
+        "Fullscreen capture failed", "Capture failed", async () =>
         {
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("capture-fullscreen screen grab", sw);
             HandleCapture(capture);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Fullscreen capture failed", ex);
-            ShowBalloon("Capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
-    private async void CaptureFullscreenTimerFlow()
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void CaptureFullscreenTimerFlow() => RunCaptureFlow(
+        "Self-timer capture failed", "Capture failed", async () =>
         {
             await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("self-timer screen grab", sw);
             HandleCapture(capture);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Self-timer capture failed", ex);
-            ShowBalloon("Capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
-    private async void CaptureDisplayFlow()
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void CaptureDisplayFlow() => RunCaptureFlow(
+        "Display capture failed", "Capture failed", async () =>
         {
             if (FastDisplayPickerDialog.ChooseDisplay() is SD.Rectangle r)
             {
@@ -510,23 +482,10 @@ public partial class App : Application
                 LogPerf("capture-display screen grab", sw);
                 HandleCapture(capture);
             }
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Display capture failed", ex);
-            ShowBalloon("Capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
-    private async void CapturePreviousFlow()
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void CapturePreviousFlow() => RunCaptureFlow(
+        "Capture-previous failed", "Capture failed", async () =>
         {
             if (PreviousRegion.TryParse(_settings.Current.LastCaptureRegion, out SD.Rectangle r))
             {
@@ -537,23 +496,10 @@ public partial class App : Application
             }
             else
                 ShowBalloon("Capture previous region", "No previous region yet — capture a region first.");
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Capture-previous failed", ex);
-            ShowBalloon("Capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
-    private async void AllInOneFlow()
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void AllInOneFlow() => RunCaptureFlow(
+        "All-in-one capture failed", "Capture failed", async () =>
         {
             AllInOneAction action;
             SD.Rectangle regionPx;
@@ -606,17 +552,7 @@ public partial class App : Application
                         ShowBalloon("Scrolling capture", "Nothing captured.");
                     break;
             }
-        }
-        catch (Exception ex)
-        {
-            Log.Error("All-in-one capture failed", ex);
-            ShowBalloon("Capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
     /// <summary>Captures the virtual desktop, optionally hiding desktop icons first per settings.</summary>
     private SD.Bitmap CaptureDesktopRespectingSettings() =>
@@ -992,11 +928,8 @@ public partial class App : Application
 
     private void RecordDisplayFlow() => Recording.ToggleDisplayFlow();
 
-    private async void OcrFlow()
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void OcrFlow() => RunCaptureFlow(
+        "OCR capture failed", "OCR failed", async () =>
         {
             SD.Bitmap? crop = null;
             SD.Point? anchor = null;
@@ -1025,17 +958,7 @@ public partial class App : Application
             if (crop is null) return;
             using (crop)
                 await RunOcrToClipboard(crop, anchor);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("OCR capture failed", ex);
-            ShowBalloon("OCR failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
     private async Task RunOcrToClipboard(SD.Bitmap bmp, SD.Point? anchor = null)
     {
@@ -1093,11 +1016,8 @@ public partial class App : Application
         }
     }
 
-    private async void ScrollingFlow(ScrollDirection? direction = null)
-    {
-        if (_captureInProgress) return;
-        _captureInProgress = true;
-        try
+    private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
+        "Scrolling capture failed", "Scrolling capture failed", async () =>
         {
             SD.Rectangle? picked = null;
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
@@ -1120,17 +1040,7 @@ public partial class App : Application
                 HandleCapture(stitched);
             else
                 ShowBalloon("Scrolling capture", "Nothing captured.");
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Scrolling capture failed", ex);
-            ShowBalloon("Scrolling capture failed", ex.Message);
-        }
-        finally
-        {
-            FinishCaptureFlow();
-        }
-    }
+        });
 
     private async void RestoreLastFlow()
     {

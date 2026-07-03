@@ -4,7 +4,7 @@ namespace WinShot.History;
 
 public static class HistoryPreviewLayout
 {
-    public const int TotalPadding = 16;
+    private const int TotalPadding = 16;
     private const int MinContentLength = 48;
     private const double MaxWorkAreaFactor = 0.8;
 

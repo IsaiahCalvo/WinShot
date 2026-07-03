@@ -156,7 +156,7 @@
                                                     Style="{StaticResource RestorePill}"
                                                     HorizontalAlignment="Center" VerticalAlignment="Center"
                                                     Visibility="Collapsed"
-                                                    Click="OnRestore"/>
+                                                    Click="OnOpen"/>
                                         </Grid>
                                     </Border>
                                     <ControlTemplate.Triggers>

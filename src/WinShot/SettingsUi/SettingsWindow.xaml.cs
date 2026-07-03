@@ -351,18 +351,10 @@ public partial class SettingsWindow : Window
         return HistoryRetentionDayStops[i];
     }
 
-    private static int RetentionDaysToSliderIndex(int days)
-    {
-        // Snap to the nearest defined stop (0 stays "Never").
-        int best = 0;
-        int bestDelta = int.MaxValue;
-        for (int i = 0; i < HistoryRetentionDayStops.Length; i++)
-        {
-            int delta = Math.Abs(HistoryRetentionDayStops[i] - days);
-            if (delta < bestDelta) { bestDelta = delta; best = i; }
-        }
-        return best;
-    }
+    private static int RetentionDaysToSliderIndex(int days) =>
+        // Snap to the nearest defined stop (0 stays "Never"); ties keep the lower index.
+        Enumerable.Range(0, HistoryRetentionDayStops.Length)
+            .MinBy(i => Math.Abs(HistoryRetentionDayStops[i] - days));
 
     /// <summary>
     /// Keep-history slider moved: mirror the snapped stop into the hidden RetentionDaysBox so
@@ -857,11 +849,6 @@ public partial class SettingsWindow : Window
             return false;
         }
     }
-
-    private static string HotkeyValue(TextBox box) =>
-        HotkeyManager.TryNormalizeGesture(box.Text, out string? normalized)
-            ? normalized!
-            : box.Text.Trim();
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)
     {

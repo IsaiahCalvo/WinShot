@@ -6,7 +6,9 @@ public sealed record OcrClipboardPayload(string ClipboardText, string BalloonTit
 
 public static class OcrClipboardFormatter
 {
-    public static OcrClipboardPayload? Build(OcrCaptureResult result, int previewLimit = 80)
+    private const int PreviewLimit = 80;
+
+    public static OcrClipboardPayload? Build(OcrCaptureResult result)
     {
         var text = BuildClipboardText(result);
         if (string.IsNullOrWhiteSpace(text))
@@ -15,7 +17,7 @@ public static class OcrClipboardFormatter
         return new OcrClipboardPayload(
             text,
             BuildTitle(result),
-            BuildPreview(text, previewLimit));
+            BuildPreview(text, PreviewLimit));
     }
 
     private static string BuildClipboardText(OcrCaptureResult result)

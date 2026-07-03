@@ -146,41 +146,10 @@ public static class ImageStitcher
     }
 
     /// <summary>
-    /// Height (in rows) of the constant TOP band shared by <paramref name="previous"/> and
-    /// <paramref name="current"/>: rows that are byte-identical from y=0 down to the first
-    /// divergence. This is a sticky header (or any pinned top chrome) that does not scroll.
-    /// Returns 0 when the very first row already differs.
+    /// Height (in rows) of the constant BOTTOM band shared by two frames: rows that are
+    /// byte-identical from the bottom up to the first divergence (a sticky footer or any
+    /// pinned bottom chrome). Returns 0 when the bottom-most row already differs.
     /// </summary>
-    public static int DetectConstantTopBand(SD.Bitmap previous, SD.Bitmap current)
-    {
-        if (previous.Width != current.Width || previous.Height != current.Height)
-            return 0;
-
-        ulong[] prev = ComputeRowHashes(previous);
-        ulong[] curr = ComputeRowHashes(current);
-        int height = prev.Length;
-        int band = 0;
-        while (band < height && prev[band] == curr[band])
-            band++;
-        // A frame that is identical top-to-bottom is "no scroll", not "all-sticky".
-        return band >= height ? 0 : band;
-    }
-
-    /// <summary>
-    /// Height (in rows) of the constant BOTTOM band shared by <paramref name="previous"/> and
-    /// <paramref name="current"/>: rows that are byte-identical from the bottom up to the
-    /// first divergence. This is a sticky footer (or any pinned bottom chrome). Returns 0
-    /// when the bottom-most row already differs.
-    /// </summary>
-    public static int DetectConstantBottomBand(SD.Bitmap previous, SD.Bitmap current)
-    {
-        if (previous.Width != current.Width || previous.Height != current.Height)
-            return 0;
-
-        return DetectConstantBottomBandFromHashes(ComputeRowHashes(previous), ComputeRowHashes(current));
-    }
-
-    /// <summary>Hash-array core of <see cref="DetectConstantBottomBand"/> for signature-caching callers.</summary>
     public static int DetectConstantBottomBandFromHashes(ulong[] prev, ulong[] curr)
     {
         if (prev.Length != curr.Length)
@@ -247,59 +216,6 @@ public static class ImageStitcher
         var result = new SD.Bitmap(stitched.Width, stitched.Height + newRows, PixelFormat.Format32bppArgb);
         CopyRows(stitched, 0, stitched.Height, result, 0);
         CopyRows(current, current.Height - newRows, newRows, result, stitched.Height);
-        return result;
-    }
-
-    /// <summary>
-    /// Footer-aware variant of <see cref="AppendBelow(SD.Bitmap, SD.Bitmap, int)"/>. When the
-    /// current frame carries a sticky footer of height <paramref name="footerBand"/>, the
-    /// bottom <paramref name="footerBand"/> rows are NOT content — they are the same pinned
-    /// footer that already sits once at the bottom of <paramref name="stitched"/>. This appends
-    /// only the <paramref name="newRows"/> genuinely-new CONTENT rows that sit directly ABOVE
-    /// the footer band, so the footer is never re-stitched into the body. With
-    /// <paramref name="footerBand"/> == 0 this is identical to <see cref="AppendBelow(SD.Bitmap, SD.Bitmap, int)"/>.
-    /// </summary>
-    public static SD.Bitmap AppendBelowExcludingFooter(SD.Bitmap stitched, SD.Bitmap current, int newRows, int footerBand)
-    {
-        if (stitched.Width != current.Width)
-            throw new ArgumentException("Bitmaps must have the same width.", nameof(current));
-
-        footerBand = Math.Clamp(footerBand, 0, current.Height);
-        int contentBottom = current.Height - footerBand; // first row of the footer (exclusive end of content)
-        newRows = Math.Clamp(newRows, 0, contentBottom);
-
-        var result = new SD.Bitmap(stitched.Width, stitched.Height + newRows, PixelFormat.Format32bppArgb);
-        CopyRows(stitched, 0, stitched.Height, result, 0);
-        // The newly revealed content rows are the last `newRows` rows of the content area,
-        // i.e. the rows directly above the sticky footer: [contentBottom - newRows, contentBottom).
-        CopyRows(current, contentBottom - newRows, newRows, result, stitched.Height);
-        return result;
-    }
-
-    /// <summary>
-    /// Returns a NEW bitmap containing the bottom <paramref name="rowCount"/> rows of
-    /// <paramref name="source"/> (a sticky-footer strip lifted off the running stitch so it
-    /// can be re-applied exactly once at the very end). <paramref name="source"/> is not disposed.
-    /// </summary>
-    public static SD.Bitmap CropBottomRows(SD.Bitmap source, int rowCount)
-    {
-        rowCount = Math.Clamp(rowCount, 1, source.Height);
-        var result = new SD.Bitmap(source.Width, rowCount, PixelFormat.Format32bppArgb);
-        CopyRows(source, source.Height - rowCount, rowCount, result, 0);
-        return result;
-    }
-
-    /// <summary>
-    /// Returns a NEW bitmap that is <paramref name="source"/> with its bottom
-    /// <paramref name="rowCount"/> rows removed (used to lift an interior sticky footer off the
-    /// running stitch). <paramref name="source"/> is not disposed.
-    /// </summary>
-    public static SD.Bitmap RemoveBottomRows(SD.Bitmap source, int rowCount)
-    {
-        rowCount = Math.Clamp(rowCount, 0, source.Height - 1);
-        int kept = source.Height - rowCount;
-        var result = new SD.Bitmap(source.Width, kept, PixelFormat.Format32bppArgb);
-        CopyRows(source, 0, kept, result, 0);
         return result;
     }
 
