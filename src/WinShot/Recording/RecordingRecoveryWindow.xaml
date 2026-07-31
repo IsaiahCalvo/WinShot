@@ -1,0 +1,64 @@
+<Window x:Class="WinShot.Recording.RecordingRecoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+        Title="Recover recordings"
+        Width="520" SizeToContent="Height" MaxHeight="520"
+        Background="{StaticResource WindowBgBrush}"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="True" UseLayoutRounding="True">
+    <Grid Margin="22,20,22,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="Unfinished recordings found"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       FontSize="18" FontWeight="SemiBold"/>
+            <TextBlock x:Name="SummaryText" Margin="0,7,0,0"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       FontSize="13" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Border Grid.Row="1" Margin="0,16,0,0" Padding="12,8"
+                MaxHeight="250" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                CornerRadius="{StaticResource RadiusButton}">
+            <ListBox x:Name="RecordingList" Background="Transparent"
+                     BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}"
+                     IsTabStop="True"
+                     automation:AutomationProperties.Name="Unfinished recordings">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="2,5">
+                            <TextBlock Text="{Binding FileName}" FontSize="13"
+                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding Details}" Margin="0,2,0,0"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="11" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+
+        <TextBlock Grid.Row="2" Margin="0,13,0,0"
+                   Foreground="{StaticResource TextSecondaryBrush}"
+                   FontSize="12" TextWrapping="Wrap"
+                   Text="Recover moves these files into your configured save folder. Keep for later leaves every file exactly where it is."/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button Content="Recover" Style="{StaticResource PillButtonPrimary}"
+                    Click="OnRecover" MinWidth="92"
+                    automation:AutomationProperties.Name="Recover unfinished recordings"/>
+            <Button Content="Keep for later" Style="{StaticResource PillButtonSecondary}"
+                    IsDefault="True" IsCancel="True" MinWidth="112"
+                    automation:AutomationProperties.Name="Keep unfinished recordings for later"/>
+        </StackPanel>
+    </Grid>
+</Window>

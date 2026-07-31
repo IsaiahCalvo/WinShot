@@ -68,6 +68,15 @@ public sealed class RecordingController
 
     public bool IsRecording { get; private set; }
 
+    /// <summary>The current strict WinShot temp path, exposed only so startup
+    /// recovery can always exclude it from orphan discovery.</summary>
+    internal string? ActiveTempPath => _tempPath;
+
+    /// <summary>Recovery UI must not compete with the chooser, recorder, stop,
+    /// or finalization path.</summary>
+    internal bool BlocksStartupRecovery =>
+        _flowActive || IsRecording || _stopping || _tempPath is not null;
+
     public void Shutdown()
     {
         _restarting = false; // never spin up a fresh recording while tearing down

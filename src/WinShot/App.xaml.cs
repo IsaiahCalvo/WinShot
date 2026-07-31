@@ -31,6 +31,7 @@ public partial class App : Application
     private readonly SettingsService _settings = new();
     private HistoryService _history = null!;
     private RecordingController? _recording;
+    private RecordingRecoveryStartup? _recordingRecovery;
     private bool _captureInProgress;
     private string? _pendingCaptureCommand;
     private bool _pendingCaptureDrainActive;
@@ -91,6 +92,13 @@ public partial class App : Application
 
         _settings.Load();
         _history = new HistoryService(_settings);
+        _recordingRecovery = new RecordingRecoveryStartup(
+            excludedPaths => RecordingTempRecovery.Discover(excludedPaths: excludedPaths),
+            candidate => RecordingTempRecovery.Recover(
+                candidate.Path,
+                _settings.Current.SaveFolder,
+                FileNamer.Next(_settings, candidate.Extension)),
+            recoveredPath => _history.AddFile(recoveredPath));
         _settings.Changed += RegisterHotkeys;
 
         _ = Task.Run(ProtocolRegistrar.EnsureRegistered);
@@ -111,6 +119,90 @@ public partial class App : Application
 
         if (incomingCommand is not null)
             RunCommand(incomingCommand);
+
+        // Recovery stays behind normal startup initialization and never interrupts an
+        // activation that immediately opens a capture/recording/settings surface.
+        Dispatcher.BeginInvoke(
+            () => RunRecordingRecoveryAtStartup(startupCommandActive: incomingCommand is not null),
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+    }
+
+    private void RunRecordingRecoveryAtStartup(bool startupCommandActive)
+    {
+        if (_recordingRecovery is null)
+            return;
+
+        HistoryService history = _history;
+
+        bool recordingActive = startupCommandActive ||
+            _captureInProgress ||
+            (_recording?.BlocksStartupRecovery ?? false);
+        string? activeTempPath = _recording?.ActiveTempPath;
+
+        RecordingRecoveryRunResult result;
+        try
+        {
+            result = _recordingRecovery.Run(
+                settingsReady: true,
+                historyReady: true,
+                recordingActive,
+                activeTempPath,
+                candidates =>
+                {
+                    var dialog = new RecordingRecoveryWindow(candidates);
+                    return dialog.ShowDialog() == true
+                        ? RecordingRecoveryDecision.Recover
+                        : RecordingRecoveryDecision.KeepForLater;
+                });
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Recording startup recovery check failed; temp files were not changed", ex);
+            ShowBalloon("Recording recovery", "Couldn't check unfinished recordings. Temp files were not changed.");
+            return;
+        }
+
+        foreach (string warning in result.HistoryWarnings)
+            Log.Error($"Recovered recording was not added to History: {warning}");
+
+        if (result.RecoveredPaths.Count > 0)
+        {
+            string latest = result.RecoveredPaths[^1];
+            try
+            {
+                Action? onEdit = Path.GetExtension(latest).Equals(".mp4", StringComparison.OrdinalIgnoreCase)
+                    ? () =>
+                    {
+                        var editor = new VideoEditorWindow(latest, _settings, history);
+                        TrackFirstRender(editor, "video editor window");
+                        editor.Show();
+                    }
+                    : null;
+                var toast = new FastRecordingToastWindow(latest, onEdit);
+                PerfLog.TrackFirstShown(toast, "recording recovery toast");
+                toast.Show();
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Failed to show recording recovery toast", ex);
+                ShowBalloon("Recording recovered", Path.GetFileName(latest));
+            }
+
+            if (result.RecoveredPaths.Count > 1)
+                ShowBalloon("Recordings recovered", $"Recovered {result.RecoveredPaths.Count} recordings.");
+        }
+
+        foreach (RecordingRecoveryFailure failure in result.Failures)
+        {
+            Log.Error($"Failed to recover recording; source retained at {failure.TempPath}", failure.Error);
+            MessageBox.Show(
+                $"WinShot couldn't recover this recording:\n\n{failure.TempPath}\n\n" +
+                $"The original file is still safe at that location. Check the save folder and available space, then try again next time.\n\n" +
+                failure.Error.Message,
+                "WinShot recording recovery",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
