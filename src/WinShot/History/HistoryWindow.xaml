@@ -148,6 +148,11 @@
                         Style="{StaticResource TileButton}" Click="OnRefresh"
                         AutomationProperties.Name="Refresh history"
                         AutomationProperties.HelpText="Reloads local history items from disk."/>
+                <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more"
+                        Margin="0,0,8,0" Style="{StaticResource TileButton}"
+                        Click="OnLoadMore" Visibility="Collapsed"
+                        AutomationProperties.Name="Load more history items"
+                        AutomationProperties.HelpText="Shows the next 200 local history items without loading the entire library at once."/>
                 <TextBlock x:Name="CountText" Foreground="{StaticResource TextSecondaryBrush}"
                            FontSize="12" VerticalAlignment="Center"
                            AutomationProperties.LiveSetting="Polite"/>
@@ -155,9 +160,10 @@
         </Border>
 
         <Grid>
-            <!-- Responsive thumbnail grid. WrapPanel inside a vertical ScrollViewer.
-                 Virtualization with wrapping is unreliable in WPF, so a plain
-                 WrapPanel is used; history is already capped by HistoryLimit. -->
+            <!-- Responsive thumbnail grid. WPF grouping does not reliably virtualize a
+                 wrapping panel, so the backing model incrementally exposes 200 cards.
+                 The full lightweight file model remains available for filters, grouping,
+                 refresh, and selection restoration without creating 5,000 visual cards. -->
             <ListBox x:Name="ItemsList" Background="Transparent" BorderThickness="0" Padding="12"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      ScrollViewer.VerticalScrollBarVisibility="Auto"

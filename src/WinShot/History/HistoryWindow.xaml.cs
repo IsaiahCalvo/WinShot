@@ -29,8 +29,8 @@ public partial class HistoryWindow : Window
 
     private readonly HistoryService _history;
     private readonly SettingsService _settings;
-    private readonly List<HistoryItem> _allItems = new();
-    private readonly ObservableCollection<HistoryItem> _items = new();
+    private readonly HistoryIncrementalCollection _paging = new();
+    private ObservableCollection<HistoryItem> _items => _paging.VisibleItems;
     private readonly CollectionViewSource _itemsView = new();
     private CancellationTokenSource? _loadCts;
     private string _filter = "all";
@@ -236,10 +236,9 @@ public partial class HistoryWindow : Window
 
     private void ClearLoadedItems()
     {
-        foreach (var item in _allItems)
+        foreach (var item in _paging.AllItems)
             item.Thumbnail = null;
-        _allItems.Clear();
-        _items.Clear();
+        _paging.Clear();
         UpdateCount();
         UpdateEmptyState();
     }
@@ -273,6 +272,18 @@ public partial class HistoryWindow : Window
             }
         }
 
+        // Grow the bounded collection before WPF tries to move past the final visible
+        // card. This keeps keyboard navigation continuous without realizing the full
+        // retained library at startup.
+        if (!_previewOpen && _paging.HasMore &&
+            (e.Key == Key.Right || e.Key == Key.Down || e.Key == Key.PageDown) &&
+            ItemsList.SelectedIndex >= _items.Count - 1)
+        {
+            IReadOnlyList<HistoryItem> added = _paging.LoadNextPage();
+            UpdateCollectionState();
+            _ = LoadThumbnailsSafelyAsync(added, _loadCts?.Token ?? CancellationToken.None);
+        }
+
         base.OnPreviewKeyDown(e);
     }
 
@@ -285,17 +296,29 @@ public partial class HistoryWindow : Window
             var files = await Task.Run(_history.GetItems).ConfigureAwait(false);
             if (cts.IsCancellationRequested) return;
 
+            cts.Token.ThrowIfCancellationRequested();
             var newItems = files.Select(file => new HistoryItem(file)).ToList();
+            IReadOnlyList<HistoryItem> visibleItems = Array.Empty<HistoryItem>();
             await Dispatcher.InvokeAsync(() =>
             {
-                if (cts.IsCancellationRequested) return;
+                cts.Token.ThrowIfCancellationRequested();
                 // Remember selection by path so a live refresh doesn't yank it away;
                 // the rebuilt list holds fresh HistoryItem instances.
                 string? selectedPath = SelectedItem()?.FilePath;
-                _allItems.Clear();
-                _allItems.AddRange(newItems);
-                ApplyFilter();
-                RestoreSelection(selectedPath);
+                var previousItems = _paging.AllItems.ToList();
+                HistoryItem? restored = _paging.ReplaceAll(
+                    newItems,
+                    MatchesFilter,
+                    selectedPath,
+                    cts.Token);
+                foreach (HistoryItem previous in previousItems)
+                    previous.Thumbnail = null;
+                UpdateCollectionState();
+                if (restored is not null)
+                {
+                    ItemsList.SelectedItem = restored;
+                    _previewItem = restored;
+                }
                 // Give keyboard nav an anchor when nothing was selected yet.
                 if (ItemsList.SelectedItem is null && _items.Count > 0)
                 {
@@ -306,21 +329,17 @@ public partial class HistoryWindow : Window
                 // immediately, without the user having to click a tile first.
                 if (_items.Count > 0 && !ItemsList.IsKeyboardFocusWithin && IsActive)
                     Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => ItemsList.Focus()));
+
+                visibleItems = _items.ToList();
             });
 
-            // Decode thumbnails one at a time on the pool; assignment happens back
-            // on the UI thread after each await.
-            foreach (var item in newItems.Where(i => i.IsImage))
-            {
-                if (cts.IsCancellationRequested) return;
-                var thumbnail = await Task.Run(() => TryLoadThumbnail(item.FilePath)).ConfigureAwait(false);
-                if (cts.IsCancellationRequested) return;
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    if (!cts.IsCancellationRequested)
-                        item.Thumbnail = thumbnail;
-                });
-            }
+            // Decode only the bounded visible page. A 5,000-file library therefore
+            // starts with at most 200 thumbnail decodes and card visuals.
+            await LoadThumbnailsAsync(visibleItems, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // A newer refresh owns the UI; leave the last complete page intact.
         }
         catch (Exception ex)
         {
@@ -439,6 +458,38 @@ public partial class HistoryWindow : Window
         }
     }
 
+    private async Task LoadThumbnailsAsync(
+        IEnumerable<HistoryItem> items,
+        CancellationToken cancellationToken)
+    {
+        foreach (HistoryItem item in items.Where(item => item.IsImage && item.Thumbnail is null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BitmapImage? thumbnail = await Task.Run(
+                () => TryLoadThumbnail(item.FilePath),
+                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);
+        }
+    }
+
+    private async Task LoadThumbnailsSafelyAsync(
+        IEnumerable<HistoryItem> items,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await LoadThumbnailsAsync(items, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to load visible history thumbnails", ex);
+        }
+    }
+
     // ---- Filter chips ----
 
     private void OnFilterChanged(object sender, RoutedEventArgs e)
@@ -457,25 +508,12 @@ public partial class HistoryWindow : Window
 
     private void ApplyFilter()
     {
-        _items.Clear();
-        foreach (var item in _allItems.Where(MatchesFilter))
-            _items.Add(item);
-        UpdateCount();
-        UpdateEmptyState();
-    }
-
-    /// <summary>Re-selects the item with the given path after the list is rebuilt,
-    /// so keyboard focus and the preview anchor survive a refresh.</summary>
-    private void RestoreSelection(string? path)
-    {
-        if (string.IsNullOrEmpty(path)) return;
-        HistoryItem? match = _items.FirstOrDefault(i =>
-            string.Equals(i.FilePath, path, StringComparison.OrdinalIgnoreCase));
-        if (match is not null)
-        {
-            ItemsList.SelectedItem = match;
-            _previewItem = match;
-        }
+        string? selectedPath = SelectedItem()?.FilePath;
+        HistoryItem? restored = _paging.ApplyFilter(MatchesFilter, selectedPath);
+        ItemsList.SelectedItem = restored ?? _items.FirstOrDefault();
+        _previewItem = ItemsList.SelectedItem as HistoryItem;
+        UpdateCollectionState();
+        _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
     }
 
     private void UpdateEmptyState() =>
@@ -489,8 +527,20 @@ public partial class HistoryWindow : Window
         _ => true,
     };
 
-    private void UpdateCount() =>
-        CountText.Text = $"{_items.Count} item{(_items.Count == 1 ? "" : "s")} (limit {_settings.Current.HistoryLimit})";
+    private void UpdateCount()
+    {
+        string count = _paging.HasMore
+            ? $"{_paging.VisibleCount:N0} of {_paging.FilteredCount:N0} items shown"
+            : $"{_paging.FilteredCount:N0} item{(_paging.FilteredCount == 1 ? "" : "s")}";
+        CountText.Text = $"{count} (limit {_settings.Current.HistoryLimit:N0})";
+        LoadMoreButton.Visibility = _paging.HasMore ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateCollectionState()
+    {
+        UpdateCount();
+        UpdateEmptyState();
+    }
 
     // ---- Quick preview (Spacebar) ----
 
@@ -521,6 +571,12 @@ public partial class HistoryWindow : Window
         int next = index < 0
             ? (direction > 0 ? 0 : _items.Count - 1)
             : index + direction;
+        if (direction > 0 && next >= _items.Count && _paging.HasMore)
+        {
+            IReadOnlyList<HistoryItem> added = _paging.LoadNextPage();
+            UpdateCollectionState();
+            _ = LoadThumbnailsSafelyAsync(added, _loadCts?.Token ?? CancellationToken.None);
+        }
         if (next < 0 || next >= _items.Count) return;
 
         HistoryItem target = _items[next];
@@ -585,6 +641,13 @@ public partial class HistoryWindow : Window
     // ---- Tile actions ----
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ReloadAsync();
+
+    private async void OnLoadMore(object sender, RoutedEventArgs e)
+    {
+        IReadOnlyList<HistoryItem> added = _paging.LoadNextPage();
+        UpdateCollectionState();
+        await LoadThumbnailsSafelyAsync(added, _loadCts?.Token ?? CancellationToken.None);
+    }
 
     private void OnTileMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -713,11 +776,10 @@ public partial class HistoryWindow : Window
             Log.Error($"Failed to delete history item {item.FilePath}", ex);
             return;
         }
-        _allItems.Remove(item);
-        _items.Remove(item);
+        _paging.Remove(item);
         if (ReferenceEquals(_previewItem, item)) _previewItem = null;
-        UpdateCount();
-        UpdateEmptyState();
+        UpdateCollectionState();
+        _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
 
         // Keep keyboard navigation flowing: select the next (or previous) tile.
         if (_items.Count > 0 && index >= 0)

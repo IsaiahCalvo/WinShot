@@ -118,6 +118,9 @@ public class HistoryAcceptanceTests
         Assert.Contains("Property=\"IsKeyboardFocusWithin\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding PinVisibility}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Delete\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LoadMoreButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnLoadMore\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Shows the next 200 local history items", xaml, StringComparison.Ordinal);
     }
 
     private static HistoryService CreateService(string dir)
