@@ -14,6 +14,7 @@ public sealed class FastPinWindow : WF.Form
     private const int WmNchittest = 0x0084;
     private const int WmSizing = 0x0214;
     private static readonly IntPtr HtCaption = new(2);
+    private const int CsDropShadow = 0x00020000;
 
     // WM_NCHITTEST results for the resize border / interior.
     private const int HtClient = 1;
@@ -36,10 +37,13 @@ public sealed class FastPinWindow : WF.Form
     private const int WmszBottomLeft = 7;
     private const int WmszBottomRight = 8;
 
-    private const int ResizeBorder = 6;          // px of outer edge that resizes the pin
-    private const int ToolbarButtonSize = 26;
-    private const int ToolbarButtonGap = 4;
-    private const int ToolbarPad = 6;
+    private const int ResizeBorderLogical = 6;
+    private const int ToolbarButtonSizeLogical = 28;
+    private const int ToolbarButtonGapLogical = 4;
+    private const int ToolbarPadLogical = 6;
+    private const int ToolbarTopLogical = 4;
+    private const int PinCornerRadiusLogical = 10;
+    private const int CascadeOffsetLogical = 24;
     private const int ReadoutDurationMs = 800;
 
     private static readonly SD.Font ToolbarGlyphFont = ThemePalette.IconFont(10f);
@@ -56,11 +60,15 @@ public sealed class FastPinWindow : WF.Form
     private readonly WF.ToolStripMenuItem _lockItem;
     private readonly List<ToolbarButton> _toolbarButtons = new();
     private readonly WF.Timer _readoutTimer = new() { Interval = ReadoutDurationMs };
+    private readonly bool _roundedCorners;
+    private readonly bool _shadow;
+    private readonly bool _border;
     private double _scale;
     private bool _locked;
     private double _opacityBeforeLock = 1.0;
     private bool _mouseInside;
     private int _hoverButton = -1;
+    private int _focusButton = -1;
     private string? _readoutText;
     private SD.Point _readoutPoint;
 
@@ -68,6 +76,9 @@ public sealed class FastPinWindow : WF.Form
     {
         _image = image;
         _settings = settings;
+        _roundedCorners = settings?.Current.PinnedRoundedCorners ?? false;
+        _shadow = settings?.Current.PinnedShadow ?? false;
+        _border = settings?.Current.PinnedBorder ?? false;
         _naturalWidth = image.Width;
         _naturalHeight = image.Height;
 
@@ -79,6 +90,8 @@ public sealed class FastPinWindow : WF.Form
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
+        AccessibleName = "Pinned screenshot";
+        AccessibleDescription = "Pinned screenshot. Drag anywhere to move it. Press Tab to reach Copy, Save, Lock, and Close. Use the arrow keys to move the pin, or middle-click to close it.";
 
         SetStyle(
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -88,12 +101,25 @@ public sealed class FastPinWindow : WF.Form
             true);
 
         _menu = new WF.ContextMenuStrip();
-        _menu.Items.Add("Copy", null, async (_, _) => await CopyAsync());
-        _menu.Items.Add("Save...", null, async (_, _) => await SaveAsync());
+        var copyItem = new WF.ToolStripMenuItem("Copy", null, async (_, _) => await CopyAsync())
+        {
+            ToolTipText = "Copy the pinned screenshot to the clipboard",
+        };
+        _menu.Items.Add(copyItem);
+        var saveItem = new WF.ToolStripMenuItem("Save...", null, async (_, _) => await SaveAsync())
+        {
+            ToolTipText = "Save the pinned screenshot to a local file",
+        };
+        _menu.Items.Add(saveItem);
         _lockItem = new WF.ToolStripMenuItem("Lock (Ctrl+L)", null, (_, _) => SetLocked(!_locked));
+        _lockItem.ToolTipText = "Toggle click-through mode for this pinned screenshot";
         _menu.Items.Add(_lockItem);
         _menu.Items.Add(new WF.ToolStripSeparator());
-        _menu.Items.Add("Close", null, (_, _) => Close());
+        var closeItem = new WF.ToolStripMenuItem("Close", null, (_, _) => Close())
+        {
+            ToolTipText = "Close this pinned screenshot",
+        };
+        _menu.Items.Add(closeItem);
         ContextMenuStrip = _menu;
 
         // The hover toolbar reuses the exact actions the context menu already exposes.
@@ -106,10 +132,13 @@ public sealed class FastPinWindow : WF.Form
         _scale = Math.Min(1.0, Math.Min(area.Width * 0.6 / _naturalWidth, area.Height * 0.6 / _naturalHeight));
         ApplyScale();
 
-        double offset = (_openCount++ % 8) * 24;
-        Location = new SD.Point(
-            area.Left + Math.Max(0, (area.Width - Width) / 2) + (int)offset,
-            area.Top + Math.Max(0, (area.Height - Height) / 2) + (int)offset);
+        int cascadeIndex = _openCount++ % 8;
+        Location = PinInteraction.CascadeLocation(
+            area,
+            Size,
+            cascadeIndex,
+            CascadeOffsetLogical,
+            DeviceDpi);
 
         MouseEnter += (_, _) => { _mouseInside = true; Invalidate(); };
         MouseLeave += (_, _) => { _mouseInside = false; SetHoverButton(-1); Invalidate(); };
@@ -123,6 +152,8 @@ public sealed class FastPinWindow : WF.Form
         };
         MouseWheel += OnPinMouseWheel;
         KeyDown += OnPinKeyDown;
+        GotFocus += (_, _) => Invalidate(ToolbarBounds());
+        LostFocus += (_, _) => Invalidate(ToolbarBounds());
         _readoutTimer.Tick += (_, _) =>
         {
             _readoutTimer.Stop();
@@ -139,6 +170,26 @@ public sealed class FastPinWindow : WF.Form
         OpenPins.Add(this);
     }
 
+    protected override WF.CreateParams CreateParams
+    {
+        get
+        {
+            WF.CreateParams parameters = base.CreateParams;
+            if (_shadow)
+                parameters.ClassStyle |= CsDropShadow;
+            return parameters;
+        }
+    }
+
+    protected override WF.AccessibleObject CreateAccessibilityInstance() =>
+        new FastPinAccessibleObject(this);
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        ApplyRoundedRegion();
+    }
+
     public static void UnlockAllPins()
     {
         foreach (var pin in OpenPins.ToList())
@@ -151,9 +202,15 @@ public sealed class FastPinWindow : WF.Form
         e.Graphics.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighQuality;
         e.Graphics.DrawImage(_image, new SD.Rectangle(1, 1, Math.Max(1, ClientSize.Width - 2), Math.Max(1, ClientSize.Height - 2)));
 
-        if (_mouseInside && !_locked)
+        if (_border)
         {
-            using var pen = new SD.Pen(ThemePalette.Accent, 1);
+            using var border = new SD.Pen(ThemePalette.BorderStrong, Ui(1));
+            e.Graphics.DrawRectangle(border, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+        }
+
+        if (ToolbarVisible)
+        {
+            using var pen = new SD.Pen(ThemePalette.Accent, Ui(1));
             e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
             DrawToolbar(e.Graphics);
         }
@@ -169,23 +226,33 @@ public sealed class FastPinWindow : WF.Form
 
     // ----- Hover toolbar -----------------------------------------------------
 
+    private bool ToolbarVisible => !_locked && (_mouseInside || (_focusButton >= 0 && ContainsFocus));
+
+    private int Ui(int logicalPixels) => PinInteraction.ScaleLogical(logicalPixels, DeviceDpi);
+
     private SD.Rectangle ToolbarBounds()
     {
         int count = _toolbarButtons.Count;
-        int rowWidth = count * ToolbarButtonSize + (count - 1) * ToolbarButtonGap;
-        int width = rowWidth + ToolbarPad * 2;
-        int height = ToolbarButtonSize + ToolbarPad * 2;
+        int buttonSize = Ui(ToolbarButtonSizeLogical);
+        int gap = Ui(ToolbarButtonGapLogical);
+        int pad = Ui(ToolbarPadLogical);
+        int rowWidth = count * buttonSize + (count - 1) * gap;
+        int width = rowWidth + pad * 2;
+        int height = buttonSize + pad * 2;
         int x = Math.Max(1, (ClientSize.Width - width) / 2);
-        int y = 4;
+        int y = Ui(ToolbarTopLogical);
         return new SD.Rectangle(x, y, width, height);
     }
 
     private SD.Rectangle ButtonBounds(int index)
     {
         SD.Rectangle bar = ToolbarBounds();
-        int x = bar.Left + ToolbarPad + index * (ToolbarButtonSize + ToolbarButtonGap);
-        int y = bar.Top + ToolbarPad;
-        return new SD.Rectangle(x, y, ToolbarButtonSize, ToolbarButtonSize);
+        int buttonSize = Ui(ToolbarButtonSizeLogical);
+        int gap = Ui(ToolbarButtonGapLogical);
+        int pad = Ui(ToolbarPadLogical);
+        int x = bar.Left + pad + index * (buttonSize + gap);
+        int y = bar.Top + pad;
+        return new SD.Rectangle(x, y, buttonSize, buttonSize);
     }
 
     private void DrawToolbar(SD.Graphics g)
@@ -196,12 +263,12 @@ public sealed class FastPinWindow : WF.Form
         using (var bg = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.ToolbarBg)))
         using (var border = new SD.Pen(ThemePalette.Border))
         {
-            FillRoundedRect(g, bg, bar, 8);
-            DrawRoundedRect(g, border, bar, 8);
+            FillRoundedRect(g, bg, bar, Ui(8));
+            DrawRoundedRect(g, border, bar, Ui(8));
         }
 
         for (int i = 0; i < _toolbarButtons.Count; i++)
-            DrawButton(g, ButtonBounds(i), GlyphFor(i), i == _hoverButton);
+            DrawButton(g, ButtonBounds(i), GlyphFor(i), i == _hoverButton, i == _focusButton && ContainsFocus);
     }
 
     private string GlyphFor(int index)
@@ -212,7 +279,7 @@ public sealed class FastPinWindow : WF.Form
         return _toolbarButtons[index].Glyph;
     }
 
-    private static void DrawButton(SD.Graphics g, SD.Rectangle bounds, string glyph, bool hot)
+    private static void DrawButton(SD.Graphics g, SD.Rectangle bounds, string glyph, bool hot, bool focused)
     {
         // Mirrors FastQuickActionsWindow.DrawButton: rest = dim glyph, hover = HoverFill circle.
         if (hot)
@@ -227,12 +294,18 @@ public sealed class FastPinWindow : WF.Form
                     WF.TextFormatFlags.SingleLine |
                     WF.TextFormatFlags.NoPadding;
         WF.TextRenderer.DrawText(g, glyph, ToolbarGlyphFont, bounds, glyphColor, flags);
+
+        if (focused)
+        {
+            SD.Rectangle focus = SD.Rectangle.Inflate(bounds, -2, -2);
+            WF.ControlPaint.DrawFocusRectangle(g, focus, ThemePalette.TextPrimary, SD.Color.Transparent);
+        }
     }
 
     private void DrawLockBadge(SD.Graphics g)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        var badge = new SD.Rectangle(6, 6, 22, 22);
+        var badge = new SD.Rectangle(Ui(6), Ui(6), Ui(22), Ui(22));
         using var bg = new SD.SolidBrush(SD.Color.FromArgb(217, ThemePalette.ToolbarBg));
         using var border = new SD.Pen(ThemePalette.Accent);
         g.FillEllipse(bg, badge);
@@ -319,12 +392,24 @@ public sealed class FastPinWindow : WF.Form
 
     private void OnMouseDown(object? sender, WF.MouseEventArgs e)
     {
+        if (e.Button == WF.MouseButtons.Middle)
+        {
+            Close();
+            return;
+        }
+
         if (e.Button != WF.MouseButtons.Left)
             return;
 
         // A click on a toolbar button must not start a window drag; it fires on MouseUp.
-        if (HitTestButton(e.Location) >= 0)
+        int button = HitTestButton(e.Location);
+        if (button >= 0)
+        {
+            FocusToolbarButton(button);
             return;
+        }
+
+        _focusButton = -1;
 
         ReleaseCapture();
         SendMessage(Handle, WmNclbuttondown, HtCaption, IntPtr.Zero);
@@ -382,6 +467,20 @@ public sealed class FastPinWindow : WF.Form
             return;
         }
 
+        if (e.KeyCode == WF.Keys.C && e.Control)
+        {
+            _ = CopyAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.KeyCode == WF.Keys.S && e.Control)
+        {
+            _ = SaveAsync();
+            e.Handled = true;
+            return;
+        }
+
         // Reset scale (and opacity) to 100% — keeps double-click reserved for close.
         if (e.KeyCode == WF.Keys.D0 && e.Control)
         {
@@ -398,6 +497,42 @@ public sealed class FastPinWindow : WF.Form
             case WF.Keys.Up: Top -= step; e.Handled = true; break;
             case WF.Keys.Down: Top += step; e.Handled = true; break;
         }
+    }
+
+    protected override bool ProcessCmdKey(ref WF.Message msg, WF.Keys keyData)
+    {
+        WF.Keys keyCode = keyData & WF.Keys.KeyCode;
+        WF.Keys modifiers = keyData & WF.Keys.Modifiers;
+
+        if (keyCode == WF.Keys.Tab && modifiers is WF.Keys.None or WF.Keys.Shift)
+        {
+            int direction = modifiers == WF.Keys.Shift ? -1 : 1;
+            int next = _focusButton < 0
+                ? (direction > 0 ? 0 : _toolbarButtons.Count - 1)
+                : (_focusButton + direction + _toolbarButtons.Count) % _toolbarButtons.Count;
+            FocusToolbarButton(next);
+            return true;
+        }
+
+        if (_focusButton >= 0 && modifiers == WF.Keys.None &&
+            keyCode is WF.Keys.Enter or WF.Keys.Space)
+        {
+            _toolbarButtons[_focusButton].Action();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private void FocusToolbarButton(int index)
+    {
+        if (_locked || index < 0 || index >= _toolbarButtons.Count)
+            return;
+
+        _focusButton = index;
+        Focus();
+        AccessibilityNotifyClients(WF.AccessibleEvents.Focus, index + 1);
+        Invalidate(ToolbarBounds());
     }
 
     private void ResetToNatural()
@@ -422,6 +557,7 @@ public sealed class FastPinWindow : WF.Form
             SetWindowLongPtr(Handle, GwlExStyle, new IntPtr(style | WsExTransparent));
             Opacity = PinInteraction.LockedOpacity(_opacityBeforeLock);
             _mouseInside = false;
+            _focusButton = -1;
             SetHoverButton(-1);
         }
         else
@@ -468,10 +604,11 @@ public sealed class FastPinWindow : WF.Form
         SD.Point p = PointToClient(WF.Cursor.Position);
         int w = ClientSize.Width;
         int h = ClientSize.Height;
-        bool left = p.X <= ResizeBorder;
-        bool right = p.X >= w - ResizeBorder;
-        bool top = p.Y <= ResizeBorder;
-        bool bottom = p.Y >= h - ResizeBorder;
+        int resizeBorder = Ui(ResizeBorderLogical);
+        bool left = p.X <= resizeBorder;
+        bool right = p.X >= w - resizeBorder;
+        bool top = p.Y <= resizeBorder;
+        bool bottom = p.Y >= h - resizeBorder;
 
         // Don't steal the top edge from the hover toolbar buttons.
         if (top && HitTestButton(p) >= 0)
@@ -562,7 +699,31 @@ public sealed class FastPinWindow : WF.Form
         base.OnResize(e);
         if (!_locked)
             SyncScaleFromClientSize();
+        ApplyRoundedRegion();
         Invalidate();
+    }
+
+    protected override void OnDpiChanged(WF.DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        ApplyRoundedRegion();
+        Invalidate();
+    }
+
+    private void ApplyRoundedRegion()
+    {
+        SD.Region? next = null;
+        if (_roundedCorners && ClientSize.Width > 0 && ClientSize.Height > 0)
+        {
+            using var path = GdiPaths.RoundedRect(
+                new SD.Rectangle(0, 0, ClientSize.Width, ClientSize.Height),
+                Ui(PinCornerRadiusLogical));
+            next = new SD.Region(path);
+        }
+
+        SD.Region? previous = Region;
+        Region = next;
+        previous?.Dispose();
     }
 
     // ----- Actions (reused by toolbar + context menu) ------------------------
@@ -583,8 +744,9 @@ public sealed class FastPinWindow : WF.Form
     {
         try
         {
-            string folder = System.IO.Path.Combine(
+            string fallbackFolder = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "WinShot");
+            string folder = PinInteraction.ResolveSaveFolder(_settings?.Current.SaveFolder, fallbackFolder);
             System.IO.Directory.CreateDirectory(folder);
             using var dialog = new WF.SaveFileDialog
             {
@@ -643,10 +805,103 @@ public sealed class FastPinWindow : WF.Form
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
+    private sealed class FastPinAccessibleObject(FastPinWindow owner)
+        : WF.Control.ControlAccessibleObject(owner)
+    {
+        public override string? Name
+        {
+            get => owner.AccessibleName;
+            set => owner.AccessibleName = value;
+        }
+
+        public override string? Description => owner.AccessibleDescription;
+        public override WF.AccessibleRole Role => WF.AccessibleRole.Window;
+
+        public override int GetChildCount() => owner._toolbarButtons.Count;
+
+        public override WF.AccessibleObject? GetChild(int index) =>
+            index >= 0 && index < owner._toolbarButtons.Count
+                ? new ToolbarButtonAccessibleObject(owner, index, this)
+                : null;
+
+        public override WF.AccessibleObject? GetFocused() =>
+            owner._focusButton >= 0 ? GetChild(owner._focusButton) : base.GetFocused();
+
+        public override WF.AccessibleObject? HitTest(int x, int y)
+        {
+            SD.Point client = owner.PointToClient(new SD.Point(x, y));
+            int button = owner.HitTestButton(client);
+            return button >= 0 ? GetChild(button) : base.HitTest(x, y);
+        }
+    }
+
+    private sealed class ToolbarButtonAccessibleObject(
+        FastPinWindow owner,
+        int index,
+        WF.AccessibleObject parent) : WF.AccessibleObject
+    {
+        public override string? Name
+        {
+            get => owner._toolbarButtons[index].Tip;
+            set { }
+        }
+
+        public override string? Description => owner._toolbarButtons[index].Help;
+        public override string? Help => owner._toolbarButtons[index].Help;
+        public override string? DefaultAction => "Press";
+        public override WF.AccessibleRole Role => WF.AccessibleRole.PushButton;
+        public override WF.AccessibleObject? Parent => parent;
+        public override SD.Rectangle Bounds => owner.RectangleToScreen(owner.ButtonBounds(index));
+
+        public override WF.AccessibleStates State
+        {
+            get
+            {
+                WF.AccessibleStates state = WF.AccessibleStates.Focusable |
+                                            WF.AccessibleStates.Selectable;
+                if (owner._focusButton == index && owner.ContainsFocus)
+                    state |= WF.AccessibleStates.Focused | WF.AccessibleStates.Selected;
+                if (owner._locked)
+                    state |= WF.AccessibleStates.Unavailable;
+                return state;
+            }
+        }
+
+        public override void DoDefaultAction()
+        {
+            if (!owner._locked)
+                owner._toolbarButtons[index].Action();
+        }
+
+        public override void Select(WF.AccessibleSelection flags)
+        {
+            if ((flags & (WF.AccessibleSelection.TakeFocus | WF.AccessibleSelection.TakeSelection)) != 0)
+                owner.FocusToolbarButton(index);
+        }
+
+        public override WF.AccessibleObject? Navigate(WF.AccessibleNavigation navdir) => navdir switch
+        {
+            WF.AccessibleNavigation.Next or WF.AccessibleNavigation.Right =>
+                parent.GetChild((index + 1) % owner._toolbarButtons.Count),
+            WF.AccessibleNavigation.Previous or WF.AccessibleNavigation.Left =>
+                parent.GetChild((index - 1 + owner._toolbarButtons.Count) % owner._toolbarButtons.Count),
+            WF.AccessibleNavigation.Up => parent,
+            _ => base.Navigate(navdir),
+        };
+    }
+
     private sealed class ToolbarButton(string glyph, string tip, Action action)
     {
         public string Glyph { get; } = glyph;
         public string Tip { get; } = tip;
+        public string Help { get; } = tip switch
+        {
+            "Copy" => "Copy the pinned screenshot to the clipboard",
+            "Save" => "Save the pinned screenshot to a local file",
+            "Lock" => "Toggle click-through mode for this pinned screenshot",
+            "Close" => "Close this pinned screenshot",
+            _ => tip,
+        };
         public Action Action { get; } = action;
     }
 }
