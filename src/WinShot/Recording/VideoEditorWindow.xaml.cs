@@ -1,7 +1,9 @@
 ﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
+using Windows.Foundation;
 using Windows.Media.Editing;
 using Windows.Media.MediaProperties;
 using Windows.Media.Transcoding;
@@ -30,6 +32,10 @@ public partial class VideoEditorWindow : Window
     private bool _syncingPosition; // true while the timer drives the position slider
     private bool _exporting;
     private bool _closed;
+    private bool _exportCancellationRequested;
+    private bool _exportCompleted;
+    private string? _pendingOutputPath;
+    private IAsyncOperationWithProgress<TranscodeFailureReason, double>? _activeRender;
 
     // Filmstrip-timeline trim state (seconds). Replaces the old trim sliders;
     // every edit is run through VideoTrimRange so clamping stays centralized.
@@ -48,12 +54,16 @@ public partial class VideoEditorWindow : Window
         _settings = settings;
         _history = history;
         Title = $"WinShot — Edit {Path.GetFileName(mp4Path)}";
+        UpdateOutputSummary();
 
         _positionTimer.Tick += OnPositionTimer;
         Closed += (_, _) =>
         {
             _closed = true;
             _positionTimer.Stop();
+            RequestExportCancellation();
+            if (_exporting && !_exportCompleted && _pendingOutputPath is not null)
+                _ = DeletePartialOutputAndLogAsync(_pendingOutputPath);
             try { Media.Close(); }
             catch (Exception ex) { Log.Error("Failed to close media preview", ex); }
             MemoryCleanup.Request();
@@ -76,7 +86,7 @@ public partial class VideoEditorWindow : Window
         Media.Play();
         Media.Pause();
         _playing = false;
-        BtnPlay.Content = "Play";
+        BtnPlay.Content = "_Play";
         _positionTimer.Stop();
     }
 
@@ -109,13 +119,14 @@ public partial class VideoEditorWindow : Window
             UpdateTrimUi();
             _ = BuildFilmstripAsync();
         }
+        UpdateOutputSummary();
         UpdateTimeLabel();
     }
 
     private void OnMediaEnded(object sender, RoutedEventArgs e)
     {
         _playing = false;
-        BtnPlay.Content = "Play";
+        BtnPlay.Content = "_Play";
         _positionTimer.Stop();
         UpdateTimeLabel();
     }
@@ -133,7 +144,7 @@ public partial class VideoEditorWindow : Window
         {
             Media.Pause();
             _playing = false;
-            BtnPlay.Content = "Play";
+            BtnPlay.Content = "_Play";
             _positionTimer.Stop();
         }
         else
@@ -142,8 +153,36 @@ public partial class VideoEditorWindow : Window
                 Media.Position = TimeSpan.Zero;
             Media.Play();
             _playing = true;
-            BtnPlay.Content = "Pause";
+            BtnPlay.Content = "_Pause";
             _positionTimer.Start();
+        }
+    }
+
+    private void OnWindowKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && _exporting)
+        {
+            CancelExport();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.E && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            if (!_exporting)
+                OnExport(BtnExport, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Space &&
+            Keyboard.FocusedElement is not System.Windows.Controls.Primitives.ButtonBase &&
+            Keyboard.FocusedElement is not Slider &&
+            Keyboard.FocusedElement is not ComboBox &&
+            Keyboard.FocusedElement is not System.Windows.Controls.Primitives.Thumb)
+        {
+            OnPlayPause(BtnPlay, new RoutedEventArgs());
+            e.Handled = true;
         }
     }
 
@@ -218,7 +257,8 @@ public partial class VideoEditorWindow : Window
         if (_durationSec <= 0) return;
         double newX = Canvas.GetLeft(TrimStartThumb) + ThumbWidth + e.HorizontalChange;
         double requested = XToSeconds(newX);
-        var range = VideoTrimRange.FromStart(requested, _trimEndSec, _durationSec);
+        var range = VideoEditorInteraction.AdjustTrimStart(
+            _trimStartSec, _trimEndSec, _durationSec, requested - _trimStartSec);
         _trimStartSec = range.StartSeconds;
         _trimEndSec = range.EndSeconds;
         UpdateTrimUi();
@@ -229,10 +269,100 @@ public partial class VideoEditorWindow : Window
         if (_durationSec <= 0) return;
         double newX = Canvas.GetLeft(TrimEndThumb) + e.HorizontalChange;
         double requested = XToSeconds(newX);
-        var range = VideoTrimRange.FromEnd(_trimStartSec, requested, _durationSec);
+        var range = VideoEditorInteraction.AdjustTrimEnd(
+            _trimStartSec, _trimEndSec, _durationSec, requested - _trimEndSec);
         _trimStartSec = range.StartSeconds;
         _trimEndSec = range.EndSeconds;
         UpdateTrimUi();
+    }
+
+    private void OnTrimStartKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_exporting || _durationSec <= 0) return;
+
+        VideoTrimRange range;
+        if (e.Key == Key.Home)
+        {
+            range = VideoTrimRange.FromStart(0, _trimEndSec, _durationSec);
+        }
+        else if (e.Key == Key.End)
+        {
+            range = VideoTrimRange.FromStart(
+                _trimEndSec - VideoTrimRange.MinimumDurationSeconds,
+                _trimEndSec,
+                _durationSec);
+        }
+        else if (TryGetTrimDirection(e.Key, out double direction))
+        {
+            double step = VideoEditorInteraction.TrimStepSeconds(
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Shift),
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+            range = VideoEditorInteraction.AdjustTrimStart(
+                _trimStartSec, _trimEndSec, _durationSec, direction * step);
+        }
+        else
+        {
+            return;
+        }
+
+        ApplyTrimRange(range, range.StartSeconds);
+        e.Handled = true;
+    }
+
+    private void OnTrimEndKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_exporting || _durationSec <= 0) return;
+
+        VideoTrimRange range;
+        if (e.Key == Key.Home)
+        {
+            range = VideoTrimRange.FromEnd(
+                _trimStartSec,
+                _trimStartSec + VideoTrimRange.MinimumDurationSeconds,
+                _durationSec);
+        }
+        else if (e.Key == Key.End)
+        {
+            range = VideoTrimRange.FromEnd(_trimStartSec, _durationSec, _durationSec);
+        }
+        else if (TryGetTrimDirection(e.Key, out double direction))
+        {
+            double step = VideoEditorInteraction.TrimStepSeconds(
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Shift),
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+            range = VideoEditorInteraction.AdjustTrimEnd(
+                _trimStartSec, _trimEndSec, _durationSec, direction * step);
+        }
+        else
+        {
+            return;
+        }
+
+        ApplyTrimRange(range, range.EndSeconds);
+        e.Handled = true;
+    }
+
+    private static bool TryGetTrimDirection(Key key, out double direction)
+    {
+        direction = key switch
+        {
+            Key.Left => -1,
+            Key.Right => 1,
+            _ => 0,
+        };
+        return direction != 0;
+    }
+
+    private void ApplyTrimRange(VideoTrimRange range, double previewSeconds)
+    {
+        _trimStartSec = range.StartSeconds;
+        _trimEndSec = range.EndSeconds;
+        Media.Position = TimeSpan.FromSeconds(previewSeconds);
+        _syncingPosition = true;
+        PositionSlider.Value = previewSeconds;
+        _syncingPosition = false;
+        UpdateTrimUi();
+        UpdateTimeLabel();
     }
 
     /// <summary>Repositions the thumbs, dimmers, selection border, and labels to match the trim range.</summary>
@@ -379,8 +509,9 @@ public partial class VideoEditorWindow : Window
 
     private void OnMuteChanged(object sender, RoutedEventArgs e)
     {
-        if (Media is null) return;
-        Media.IsMuted = MuteCheck.IsChecked == true;
+        if (Media is not null)
+            Media.IsMuted = MuteCheck.IsChecked == true;
+        UpdateOutputSummary();
     }
 
     private void OnVolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -388,6 +519,38 @@ public partial class VideoEditorWindow : Window
         if (Media is null) return;
         Media.Volume = VolumeSlider.Value;
     }
+
+    private void OnOutputSettingsChanged(object sender, RoutedEventArgs e) => UpdateOutputSummary();
+
+    private void UpdateOutputSummary()
+    {
+        if (OutputSummaryText is null || ResolutionCombo is null || QualityCombo is null ||
+            FrameRateCombo is null || MuteCheck is null || MonoCheck is null)
+            return;
+
+        string dimensions = "Source dimensions";
+        if (Media is not null && Media.NaturalVideoWidth > 0 && Media.NaturalVideoHeight > 0)
+        {
+            var video = VideoExportVideoSettings.FromControls(
+                (uint)Media.NaturalVideoWidth,
+                (uint)Media.NaturalVideoHeight,
+                sourceFrameRate: 30,
+                ResolutionCombo.SelectedIndex,
+                QualityCombo.SelectedIndex,
+                FrameRateCombo.SelectedIndex);
+            dimensions = $"{video.Width} × {video.Height}";
+        }
+
+        string quality = SelectedComboText(QualityCombo, "High");
+        string frameRate = SelectedComboText(FrameRateCombo, "Source") + " FPS";
+        string audio = MuteCheck.IsChecked == true
+            ? "Mute audio"
+            : MonoCheck.IsChecked == true ? "Mono audio" : "Original audio";
+        OutputSummaryText.Text = $"{dimensions}  •  {quality}  •  {frameRate}  •  {audio}";
+    }
+
+    private static string SelectedComboText(ComboBox combo, string fallback) =>
+        (combo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? fallback;
 
     // ---- export ----
 
@@ -409,15 +572,17 @@ public partial class VideoEditorWindow : Window
         double startSec = trimRange.StartSeconds;
 
         _exporting = true;
-        BtnExport.IsEnabled = false;
+        _exportCancellationRequested = false;
+        _exportCompleted = false;
+        _pendingOutputPath = null;
+        SetExportUiState(exporting: true);
         ExportProgress.Value = 0;
-        ExportProgress.Visibility = Visibility.Visible;
-        StatusText.Text = "Exporting…";
+        StatusText.Text = "Preparing export…";
         if (_playing)
         {
             Media.Pause();
             _playing = false;
-            BtnPlay.Content = "Play";
+            BtnPlay.Content = "_Play";
             _positionTimer.Stop();
         }
         // Release the preview's handle on the source while the render reads it.
@@ -427,7 +592,9 @@ public partial class VideoEditorWindow : Window
         try
         {
             var srcFile = await StorageFile.GetFileFromPathAsync(_mp4Path);
+            ThrowIfExportCanceled();
             var clip = await MediaClip.CreateFromFileAsync(srcFile);
+            ThrowIfExportCanceled();
             clip.TrimTimeFromStart = TimeSpan.FromSeconds(startSec);
             clip.TrimTimeFromEnd = TimeSpan.FromSeconds(trimRange.TrimFromEndSeconds(_durationSec));
             var audioSettings = VideoExportAudioSettings.FromControls(
@@ -470,20 +637,41 @@ public partial class VideoEditorWindow : Window
             string dir = Path.GetDirectoryName(_mp4Path)!;
             string baseName = Path.GetFileNameWithoutExtension(_mp4Path);
             var folder = await StorageFolder.GetFolderFromPathAsync(dir);
+            ThrowIfExportCanceled();
             var outFile = await folder.CreateFileAsync($"{baseName} (edited).mp4", CreationCollisionOption.GenerateUniqueName);
+            _pendingOutputPath = outFile.Path;
+            ThrowIfExportCanceled();
 
             var render = composition.RenderToFileAsync(outFile, MediaTrimmingPreference.Precise, profile);
-            render.Progress = (_, progress) => Dispatcher.InvokeAsync(() => ExportProgress.Value = progress);
+            _activeRender = render;
+            if (_exportCancellationRequested)
+                render.Cancel();
+            render.Progress = (operation, progress) =>
+            {
+                if (_closed) return;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_closed || !_exporting) return;
+                    double safeProgress = Math.Clamp(progress, 0, 100);
+                    ExportProgress.Value = safeProgress;
+                    StatusText.Text = $"Exporting… {Math.Round(safeProgress):0}%";
+                }));
+            };
             var result = await render;
+            ThrowIfExportCanceled();
             if (result != TranscodeFailureReason.None)
                 throw new InvalidOperationException($"Render failed: {result}");
 
             string savedPath = outFile.Path;
+            _exportCompleted = true;
             _ = Task.Run(() =>
             {
                 try { _history.AddFile(savedPath); }
                 catch (Exception ex) { Log.Error("Failed to add edited video to history", ex); }
             });
+
+            if (_closed)
+                return;
 
             StatusText.Text = $"Saved {outFile.Name}";
             Log.Info($"Edited video exported to {savedPath}");
@@ -493,18 +681,103 @@ public partial class VideoEditorWindow : Window
             PerfLog.TrackFirstShown(toast, "edited video toast");
             toast.Show();
         }
+        catch (Exception ex) when (VideoEditorInteraction.IsCancellation(ex) || _exportCancellationRequested)
+        {
+            string? partialPath = _pendingOutputPath;
+            bool removed = await DeletePartialOutputAndLogAsync(partialPath);
+            if (!_closed)
+            {
+                StatusText.Text = removed
+                    ? "Export canceled. No partial file was kept."
+                    : $"Export canceled, but WinShot could not remove {Path.GetFileName(partialPath)}. Delete that partial file before retrying.";
+            }
+        }
         catch (Exception ex)
         {
             Log.Error($"Video export failed for {_mp4Path}", ex);
-            StatusText.Text = "Export failed — see log for details.";
-            MessageBox.Show(this, $"Export failed: {ex.Message}", "WinShot", MessageBoxButton.OK, MessageBoxImage.Error);
+            string? partialPath = _pendingOutputPath;
+            bool removed = await DeletePartialOutputAndLogAsync(partialPath);
+            if (!_closed)
+            {
+                string message = VideoEditorInteraction.ExportFailureMessage(ex);
+                if (!removed && partialPath is not null)
+                    message += $" WinShot could not remove the partial file: {partialPath}";
+                StatusText.Text = "Export failed. Review the message and try again.";
+                MessageBox.Show(this, message, "WinShot export", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
         finally
         {
+            _activeRender = null;
             _exporting = false;
-            BtnExport.IsEnabled = true;
-            ExportProgress.Visibility = Visibility.Collapsed;
-            OpenPreviewSafely();
+            _pendingOutputPath = null;
+            if (!_closed)
+            {
+                SetExportUiState(exporting: false);
+                OpenPreviewSafely();
+            }
         }
+    }
+
+    private void OnCancelExport(object sender, RoutedEventArgs e) => CancelExport();
+
+    private void OnCloseEditor(object sender, RoutedEventArgs e)
+    {
+        if (!_exporting)
+            Close();
+    }
+
+    private void CancelExport()
+    {
+        if (!_exporting || _exportCancellationRequested)
+            return;
+
+        _exportCancellationRequested = true;
+        BtnCancelExport.IsEnabled = false;
+        StatusText.Text = "Canceling export…";
+        RequestExportCancellation();
+    }
+
+    private void RequestExportCancellation()
+    {
+        if (!_exporting)
+            return;
+
+        _exportCancellationRequested = true;
+        try { _activeRender?.Cancel(); }
+        catch (Exception ex) { Log.Error("Failed to request video export cancellation", ex); }
+    }
+
+    private void ThrowIfExportCanceled()
+    {
+        if (_exportCancellationRequested || _closed)
+            throw new OperationCanceledException("Video export canceled.");
+    }
+
+    private void SetExportUiState(bool exporting)
+    {
+        BtnExport.IsEnabled = !exporting;
+        BtnClose.Visibility = exporting ? Visibility.Collapsed : Visibility.Visible;
+        BtnCancelExport.Visibility = exporting ? Visibility.Visible : Visibility.Collapsed;
+        BtnCancelExport.IsEnabled = exporting;
+        ExportProgress.Visibility = exporting ? Visibility.Visible : Visibility.Collapsed;
+
+        BtnPlay.IsEnabled = !exporting;
+        PositionSlider.IsEnabled = !exporting;
+        TimelineTrack.IsEnabled = !exporting;
+        ResolutionCombo.IsEnabled = !exporting;
+        QualityCombo.IsEnabled = !exporting;
+        FrameRateCombo.IsEnabled = !exporting;
+        MuteCheck.IsEnabled = !exporting;
+        MonoCheck.IsEnabled = !exporting;
+        VolumeSlider.IsEnabled = !exporting;
+    }
+
+    private static async Task<bool> DeletePartialOutputAndLogAsync(string? partialPath)
+    {
+        bool removed = await VideoEditorInteraction.TryDeletePartialOutputAsync(partialPath);
+        if (!removed && partialPath is not null)
+            Log.Info($"Could not delete partial video export: {partialPath}");
+        return removed;
     }
 }
