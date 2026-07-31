@@ -87,10 +87,10 @@ public class Settings
     public bool ConvertToSrgb { get; set; } = false;    // TODO: wire behavior — convert screenshots to sRGB color profile
     public string ScreenshotBackground { get; set; } = "none"; // TODO: wire behavior — none | wallpaper | gradient | color
     public bool CursorOnScreenshots { get; set; } = false; // TODO: wire behavior — include cursor in fullscreen/self-timer shots
-    public bool FreezeScreen { get; set; } = true;      // TODO: wire behavior — freeze the screen while selecting
-    public bool ShowCrosshair { get; set; } = true;     // TODO: wire behavior — crosshair guides during region select
+    public bool FreezeScreen { get; set; } = true;      // freeze the screen while selecting
+    public bool ShowCrosshair { get; set; } = true;     // crosshair guides during selection
     public string CrosshairMode { get; set; } = "command"; // always | command | never — when crosshair is shown
-    public bool ShowMagnifier { get; set; } = true;     // TODO: wire behavior — pixel magnifier during region select
+    public bool ShowMagnifier { get; set; } = true;     // pixel magnifier during selection
 
     // Quick Access overlay (extends the post-capture overlay block)
     public string OverlayPosition { get; set; } = "bottom-right"; // left | right | top | bottom | bottom-left | bottom-right
@@ -134,7 +134,7 @@ public class Settings
     public bool AskForNameAfterCapture { get; set; } = false; // TODO: wire behavior — prompt for a file name after each capture
     public bool AddRetinaSuffix { get; set; } = true;         // TODO: wire behavior — add "@2x" suffix to HiDPI screenshots
     public string CopyToClipboardFormat { get; set; } = "file-image"; // TODO: wire behavior — file-image | file | image
-    public bool AllInOneRememberLast { get; set; } = true;    // TODO: wire behavior — All-in-One remembers last selection
+    public bool AllInOneRememberLast { get; set; } = true;    // All-in-One restores the last selection
 }
 
 public class SettingsService

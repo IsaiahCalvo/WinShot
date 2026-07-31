@@ -15,8 +15,8 @@ namespace WinShot.Capture;
 /// The crosshair + magnifier loupe follow the cursor continuously (the surface repaints on
 /// every mouse-move). DPI correctness: one 1:1 overlay surface per monitor (primary monitor
 /// = this Form/coordinator, others = <see cref="SelectorPane"/> children), and all selection
-/// math is anchored to GetCursorPos (true physical px). Screen-freeze: the whole desktop is
-/// snapshotted on open and selection happens on that still image, cropped at confirm.
+/// math is anchored to GetCursorPos (true physical px). Screen-freeze uses a desktop snapshot;
+/// when disabled, native translucent surfaces leave the live desktop visible.
 /// </summary>
 public sealed class FastRegionSelectorDialog : WF.Form
 {
@@ -30,6 +30,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
     private SD.Rectangle _monitorBounds;
     private SettingsService? _settings;
+    private SelectorOptions _options;
     private SelectorMode _mode = SelectorMode.Area;
     private List<WindowInfo> _windows = new();
     private readonly List<SelectorPane> _panes = new();
@@ -120,10 +121,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
+        _options = SelectorOptions.ForRegion(_settings?.Current);
+        SelectorChrome.ConfigurePresentation(this, _options.FreezeScreen);
         // Snapshot off the UI thread: WGC can take seconds before its fallback kicks in
         // when the GPU capture path is contended, and the app (tray menu, settings,
         // queued hotkeys) must stay responsive while the freeze frame is grabbed.
-        await CaptureFrozenAsync();
+        if (_options.FreezeScreen)
+            await CaptureFrozenAsync();
+        else
+            DisposeFrozen();
         CreatePanes();
 
         Show();
@@ -132,11 +138,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         Activate();
         Focus();
-        ForceForeground();
+        SelectorForeground.Restore(this);
         _lastCtrlDown = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
-        _followTimer.Start();
+        if (_options.NeedsCursorFollow)
+            _followTimer.Start();
         return await _completion.Task;
     }
 
@@ -145,6 +152,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         _settings = settings;
+        _options = SelectorOptions.ForRegion(settings?.Current);
         _mode = SelectorMode.Area;
         _windowsProvider = windowsProvider;
         _windowsLoadStarted = false;
@@ -180,7 +188,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (screen.Bounds == _monitorBounds)
                 continue; // the coordinator Form already covers the primary monitor
 
-            var pane = new SelectorPane(this, screen.Bounds);
+            var pane = new SelectorPane(this, screen.Bounds, _options.FreezeScreen);
             _panes.Add(pane);
         }
     }
@@ -498,13 +506,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// Screenshots "Crosshair mode" setting (always / only while Ctrl is held / never).</summary>
     private bool CrosshairLinesVisible()
     {
-        string mode = _settings?.Current.CrosshairMode ?? "always";
-        return mode switch
-        {
-            "never" => false,
-            "command" => (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control,
-            _ => true,
-        };
+        bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+        return _options.IsCrosshairVisible(controlPressed);
     }
 
     internal void HandleMouseUp(WF.MouseEventArgs e)
@@ -623,7 +626,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (CrosshairLinesVisible())
                 SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
-            if (_settings?.Current.ShowMagnifier ?? true)
+            if (_options.ShowMagnifier)
                 FastSelectorLoupeRenderer.Draw(
                     g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
         }
@@ -975,41 +978,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         public int Y;
     }
 
-    // A global hotkey can open this overlay while another app owns the foreground; Windows then
-    // silently downgrades Show()/Activate()/Focus() so the overlay never gets keyboard focus
-    // (Esc/Enter dead until the user clicks). Briefly attaching to the foreground thread's input
-    // queue lets the SetForegroundWindow call be honored. The follow-timer stays as the fallback
-    // if Windows still refuses (e.g. ForegroundLockTimeout). Mirrors Clip's proven shell sequence.
-    private void ForceForeground()
-    {
-        var hwnd = Handle;
-        if (hwnd == IntPtr.Zero)
-            return;
-
-        var foreground = GetForegroundWindow();
-        var currentThread = GetCurrentThreadId();
-        var foregroundThread = foreground != IntPtr.Zero ? GetWindowThreadProcessId(foreground, out _) : 0u;
-        var attached = foregroundThread != 0 && foregroundThread != currentThread &&
-            AttachThreadInput(currentThread, foregroundThread, true);
-        try
-        {
-            SetForegroundWindow(hwnd);
-            SetActiveWindow(hwnd);
-        }
-        finally
-        {
-            if (attached)
-                AttachThreadInput(currentThread, foregroundThread, false);
-        }
-    }
-
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
-    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern IntPtr SetActiveWindow(IntPtr hWnd);
-
     /// <summary>
     /// A non-primary monitor's overlay surface. Owns no state — it forwards input to and
     /// paints from the coordinator, so the selection is one logical thing spanning monitors.
@@ -1019,11 +987,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         private readonly FastRegionSelectorDialog _owner;
         private readonly SD.Rectangle _bounds;
 
-        public SelectorPane(FastRegionSelectorDialog owner, SD.Rectangle monitorBounds)
+        public SelectorPane(FastRegionSelectorDialog owner, SD.Rectangle monitorBounds, bool freezeScreen)
         {
             _owner = owner;
             _bounds = monitorBounds;
             SelectorChrome.ConfigureSurface(this);
+            SelectorChrome.ConfigurePresentation(this, freezeScreen);
             DoubleBuffered = true;
             SetStyle(PaintStyles, true);
             Bounds = monitorBounds;

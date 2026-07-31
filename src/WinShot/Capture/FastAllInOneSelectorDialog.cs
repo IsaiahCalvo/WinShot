@@ -18,9 +18,8 @@ namespace WinShot.Capture;
 /// GetCursorPos, which returns true physical pixels regardless of which monitor's scale the
 /// cursor is over, so the painted selection always matches the captured pixels.
 ///
-/// Screen-freeze: at open the selector snapshots the whole desktop, and each surface paints its
-/// frozen slice, dims it, and re-brightens the selection — so nothing moves under the cursor
-/// while you drag (CleanShot's screen-freeze). The snapshot is disposed on close.
+/// Screen-freeze: when enabled, the selector snapshots the whole desktop and each surface paints
+/// its frozen slice. When disabled, native translucent surfaces leave the live desktop visible.
 /// </summary>
 public sealed class FastAllInOneSelectorDialog : WF.Form
 {
@@ -30,6 +29,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
     private SD.Rectangle _monitorBounds;   // this surface's monitor (physical px); primary monitor for the coordinator
     private SettingsService? _settings;
+    private SelectorOptions _options;
     private readonly ToolbarForm _toolbar;
     private List<WindowInfo> _windows = new();
     private readonly List<SelectorPane> _panes = new();
@@ -45,6 +45,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
     private TaskCompletionSource<WF.DialogResult>? _completion;
+    private readonly WF.Timer _followTimer;
+    private bool _lastCtrlDown;
 
     public FastAllInOneSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
@@ -59,13 +61,22 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         Bounds = _monitorBounds;
         Opacity = 1.0;
 
+        _followTimer = new WF.Timer { Interval = 15 };
+        _followTimer.Tick += OnFollowTick;
+
         Shown += (_, _) =>
         {
             StartWindowLoad();
             BeginInvoke(new Action(() =>
             {
                 ShowToolbar();
-                BeginInvoke(new Action(TryRestoreLastRegion));
+                BeginInvoke(new Action(() =>
+                {
+                    TryRestoreLastRegion();
+                    Activate();
+                    Focus();
+                    SelectorForeground.Restore(this);
+                }));
             }));
         };
 
@@ -116,8 +127,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
+        _options = SelectorOptions.ForAllInOne(_settings?.Current);
+        SelectorChrome.ConfigurePresentation(this, _options.FreezeScreen);
         // Snapshot off the UI thread — see FastRegionSelectorDialog.ShowAsync.
-        await CaptureFrozenAsync();
+        if (_options.FreezeScreen)
+            await CaptureFrozenAsync();
+        else
+            DisposeFrozen();
         CreatePanes();
 
         Show();
@@ -126,6 +142,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         Activate();
         Focus();
+        SelectorForeground.Restore(this);
+        _lastCtrlDown = false;
+        if (_options.NeedsCursorFollow)
+            _followTimer.Start();
         return await _completion.Task;
     }
 
@@ -134,6 +154,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         _settings = settings;
+        _options = SelectorOptions.ForAllInOne(settings?.Current);
         _windowsProvider = windowsProvider;
         _windowsLoadStarted = false;
         _windows = new List<WindowInfo>();
@@ -154,6 +175,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
+        _lastCtrlDown = false;
         _completion = null;
         if (!_toolbar.IsDisposed)
         {
@@ -174,7 +196,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             if (screen.Bounds == _monitorBounds)
                 continue; // the coordinator Form already covers the primary monitor
 
-            var pane = new SelectorPane(this, screen.Bounds);
+            var pane = new SelectorPane(this, screen.Bounds, _options.FreezeScreen);
             _panes.Add(pane);
         }
     }
@@ -289,6 +311,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             DisposePanes();
             DisposeFrozen();
+            _followTimer.Dispose();
             _capturedRegion?.Dispose();
             _capturedRegion = null;
             if (!_toolbar.IsDisposed)
@@ -369,6 +392,24 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         else
         {
             InvalidateAllSurfaces();
+        }
+    }
+
+    private void OnFollowTick(object? sender, EventArgs e)
+    {
+        try
+        {
+            SD.Point cursor = CursorScreen();
+            bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+            if (cursor == _currentScreen && controlPressed == _lastCtrlDown)
+                return;
+
+            _lastCtrlDown = controlPressed;
+            HandleMouseMove();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("All-in-one selector follow-tick failed (non-fatal)", ex);
         }
     }
 
@@ -491,10 +532,11 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
         }
 
-        if (cursorOnThisSurface)
+        bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+        if (cursorOnThisSurface && _options.IsCrosshairVisible(controlPressed))
             SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
-        if (cursorOnThisSurface)
+        if (cursorOnThisSurface && _options.ShowMagnifier)
         {
             FastSelectorLoupeRenderer.Draw(
                 g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
@@ -608,8 +650,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private void TryRestoreLastRegion()
     {
         if (_settings is null) return;
-        if (!PreviousRegion.TryParse(_settings.Current.LastCaptureRegion, out SD.Rectangle screenRect)) return;
-        var px = VirtualFromScreen(screenRect);
+        if (!_options.TryGetRememberedRegion(_settings.Current.LastCaptureRegion, _vs, out SD.Rectangle px)) return;
         if (px.Width < 1 || px.Height < 1) return;
         _pendingPx = px;
         _toolbar.SetSize(px.Width, px.Height);
@@ -637,6 +678,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private void Complete(WF.DialogResult result)
     {
         DialogResult = result;
+        _followTimer.Stop();
         Capture = false;
         DisposePanes();
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
@@ -703,11 +745,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private readonly FastAllInOneSelectorDialog _owner;
         private readonly SD.Rectangle _bounds;
 
-        public SelectorPane(FastAllInOneSelectorDialog owner, SD.Rectangle monitorBounds)
+        public SelectorPane(FastAllInOneSelectorDialog owner, SD.Rectangle monitorBounds, bool freezeScreen)
         {
             _owner = owner;
             _bounds = monitorBounds;
             SelectorChrome.ConfigureSurface(this);
+            SelectorChrome.ConfigurePresentation(this, freezeScreen);
             DoubleBuffered = true;
             SetStyle(PaintStyles, true);
             Bounds = monitorBounds;

@@ -13,6 +13,7 @@ namespace WinShot.Capture;
 internal static class SelectorChrome
 {
     private const int CrosshairGapPx = 10;
+    private const double LiveDesktopOpacity = 0.45;
 
     /// <summary>Shared overlay-surface setup for a selector coordinator form or one of its panes.</summary>
     public static void ConfigureSurface(WF.Form form)
@@ -25,6 +26,13 @@ internal static class SelectorChrome
         form.ShowInTaskbar = false;
         form.StartPosition = WF.FormStartPosition.Manual;
         form.TopMost = true;
+    }
+
+    /// <summary>Freeze-on surfaces are opaque snapshots. Freeze-off surfaces are native
+    /// translucent overlays, leaving the changing desktop visible without background work.</summary>
+    public static void ConfigurePresentation(WF.Form form, bool freezeScreen)
+    {
+        form.Opacity = freezeScreen ? 1.0 : LiveDesktopOpacity;
     }
 
     /// <summary>Draws the crosshair guide lines (shadow + white) with a gap around the cursor.</summary>
