@@ -297,7 +297,7 @@ public static class ImageStitcher
     }
 
     /// <summary>One FNV-1a hash per column over the middle 90% of its pixels.</summary>
-    private static ulong[] ComputeColumnHashes(SD.Bitmap bmp)
+    internal static ulong[] ComputeColumnHashes(SD.Bitmap bmp)
     {
         int width = bmp.Width, height = bmp.Height;
         // Same clamp formula as rows (min 50px) so a horizontal scrollbar inside a short
@@ -345,6 +345,10 @@ public static class ImageStitcher
     /// <summary>Row blit exposed for the capture service's amortized stitch buffer.</summary>
     internal static void CopyRowsInto(SD.Bitmap source, int sourceY, int rowCount, SD.Bitmap dest, int destY)
         => CopyRows(source, sourceY, rowCount, dest, destY);
+
+    /// <summary>Column blit exposed for the capture service's amortized horizontal buffer.</summary>
+    internal static void CopyColumnsInto(SD.Bitmap source, int sourceX, int columnCount, SD.Bitmap dest, int destX)
+        => CopyColumns(source, sourceX, columnCount, dest, destX);
 
     private static void CopyRows(SD.Bitmap source, int sourceY, int rowCount, SD.Bitmap dest, int destY)
     {

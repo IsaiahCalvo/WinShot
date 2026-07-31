@@ -16,6 +16,25 @@ public enum ScrollHint
     AlreadyCaptured,
 }
 
+/// <summary>Hard limits that keep an in-memory scroll capture within a predictable budget.</summary>
+internal static class ScrollingCaptureLimits
+{
+    public const int AbsoluteMaxLength = 32000;
+    public const long MaxCanvasBytes = 512L * 1024 * 1024;
+    private const int BytesPerPixel = 4;
+
+    public static int MaxLengthForCrossAxis(int crossAxisPixels)
+    {
+        if (crossAxisPixels <= 0) return 0;
+        long memoryLimited = MaxCanvasBytes / (BytesPerPixel * (long)crossAxisPixels);
+        return (int)Math.Clamp(memoryLimited, 1, AbsoluteMaxLength);
+    }
+
+    public static bool IsRegionSafe(SD.Rectangle region)
+        => region.Width > 0 && region.Height > 0 &&
+           (long)region.Width * region.Height * BytesPerPixel <= MaxCanvasBytes;
+}
+
 /// <summary>
 /// Repeatedly captures a fixed screen region and stitches the frames into one tall image
 /// (or one wide image for <see cref="ScrollDirection.Horizontal"/>). The user scrolls the
@@ -31,8 +50,6 @@ public enum ScrollHint
 /// </summary>
 public static class ScrollingCaptureService
 {
-    private const int MaxStitchedHeight = 32000;
-    private const int MaxStitchedWidth = 32000;
     private const int VeryLargeThreshold = 24000;
 
     /// <summary>Manual mode: pause between polls. A sparse-hash pre-check makes paused frames
@@ -53,9 +70,6 @@ public static class ScrollingCaptureService
     /// 3 (not 2) so a lazy-loading page gets ~2 extra seconds to produce new content.</summary>
     private const int EndOfContentStreak = 3;
 
-    /// <summary>Auto mode: consecutive unalignable (but changing) frames before giving up.</summary>
-    private const int MaxAutoMisses = 3;
-
     private const int WheelDelta = 120;
     private const int ManualTimeoutMs = 10 * 60 * 1000;
     private const int PreviewThrottleMs = 150;
@@ -74,6 +88,11 @@ public static class ScrollingCaptureService
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
+        if (!ScrollingCaptureLimits.IsRegionSafe(screenRegion))
+        {
+            status("Selected region is too large to capture safely.");
+            return null;
+        }
 
         return await Task.Run(() =>
         {
@@ -107,11 +126,15 @@ public static class ScrollingCaptureService
         private readonly StitchBuffer _stitch;
         private readonly CanvasProfile _canvas = new();
         private readonly PreviewStrip? _strip;
+        private readonly HorizontalStitchBuffer _horizontal;
+        private readonly HorizontalCanvasProfile _horizontalCanvas = new();
+        private readonly HorizontalPreviewStrip? _horizontalStrip;
+        private readonly int _verticalLimit;
+        private readonly int _horizontalLimit;
         private readonly System.Diagnostics.Stopwatch _previewClock = System.Diagnostics.Stopwatch.StartNew();
 
         private FrameSignature? _prevSig;
         private SD.Bitmap? _lastFrame;      // most recent frame, kept for the final footer strip
-        private SD.Bitmap? _horizontalStitched; // horizontal path stitches the old way
 
         private enum Track { Tracking, Reviewing, Lost }
         private Track _state = Track.Tracking;
@@ -121,6 +144,7 @@ public static class ScrollingCaptureService
         /// moves from the last absolute lock, instead of demanding an absolute re-lock
         /// against featureless canvas rows every step.</summary>
         private int _reviewPos = -1;
+        private int _horizontalReviewPos = -1;
 
         private int _runningFooter;
         private int _stitchedFrames;
@@ -162,9 +186,15 @@ public static class ScrollingCaptureService
             _preview = preview;
             _ct = ct;
             _grab = frameSource ?? CaptureService.CaptureScreenRegionWithoutLayeredWindows;
-            _stitch = new StitchBuffer(region.Width);
+            _verticalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Width);
+            _horizontalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Height);
+            _stitch = new StitchBuffer(region.Width, _verticalLimit);
+            _horizontal = new HorizontalStitchBuffer(region.Height, _horizontalLimit);
             if (preview is not null)
+            {
                 _strip = new PreviewStrip(region.Width);
+                _horizontalStrip = new HorizontalPreviewStrip(region.Height);
+            }
         }
 
         public SD.Bitmap? Run()
@@ -186,7 +216,7 @@ public static class ScrollingCaptureService
                     // "nothing moved since last poll" case for ~0.5ms instead of a full
                     // signature build + match — that's what lets the poll run at 30ms.
                     bool skip = false;
-                    if (!_scrolledBeforeFrame && (_prevSig is not null || _horizontalStitched is not null))
+                    if (!_scrolledBeforeFrame && (_prevSig is not null || _horizontal.Width > 0))
                     {
                         ulong probe = ScrollMatcher.SparseProbe(frame);
                         if (probe == _lastProbe)
@@ -223,25 +253,28 @@ public static class ScrollingCaptureService
                     AttachFooterOnce();
             }
 
-            Log.Info($"Scroll: finished — {( _direction == ScrollDirection.Horizontal ? $"{_horizontalStitched?.Width ?? 0}px wide" : $"{_stitch.Height}px tall")} " +
+            Log.Info($"Scroll: finished — {( _direction == ScrollDirection.Horizontal ? $"{_horizontal.Width}px wide" : $"{_stitch.Height}px tall")} " +
                      $"frames={_stitchedFrames} seen={_framesSeen} footer={_runningFooter} method={_method} state={_state}{(discard ? " (discarded)" : "")}");
 
             if (discard)
             {
                 _lastFrame?.Dispose();
-                _horizontalStitched?.Dispose();
+                _horizontal.Dispose();
                 _stitch.Dispose();
                 _strip?.Dispose();
+                _horizontalStrip?.Dispose();
                 return null;
             }
 
             _lastFrame?.Dispose();
             _strip?.Dispose();
+            _horizontalStrip?.Dispose();
             if (_direction == ScrollDirection.Horizontal)
             {
                 _stitch.Dispose();
-                return _horizontalStitched;
+                return _horizontal.Take();
             }
+            _horizontal.Dispose();
             return _stitch.Take();
         }
 
@@ -350,13 +383,14 @@ public static class ScrollingCaptureService
                     // prev-frame append here would stitch across a content gap.
                     RelockAgainstCanvas(sig, frame, footer);
                     FinishVerticalFrame(frame, sig);
-                    return _stitch.Height < MaxStitchedHeight || EndAtCap();
+                    return _stitch.Height < _verticalLimit || EndAtCap();
                 }
                 int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame, frame);
                 if (dh > 0)
                 {
                     _direction = ScrollDirection.Horizontal;
-                    _horizontalStitched = (SD.Bitmap)_lastFrame.Clone();
+                    AdoptFirstHorizontalFrame(_lastFrame);
+                    _stitch.Dispose();
                     return ProcessHorizontal(frame);
                 }
                 FinishVerticalFrame(frame, sig);
@@ -394,7 +428,7 @@ public static class ScrollingCaptureService
             }
 
             FinishVerticalFrame(frame, sig);
-            if (_stitch.Height >= MaxStitchedHeight)
+            if (_stitch.Height >= _verticalLimit)
                 return EndAtCap();
             return true;
         }
@@ -424,7 +458,7 @@ public static class ScrollingCaptureService
             // The newly revealed span is [h-footer-offset, h-footer). When the 32000px cap
             // clamps the row count, take rows from the TOP of that span (seam-adjacent) so
             // the last seam stays continuous.
-            int newRows = Math.Min(offset, MaxStitchedHeight - _stitch.Height);
+            int newRows = Math.Min(offset, _verticalLimit - _stitch.Height);
             if (newRows <= 0)
                 return;
             int srcStart = sig.Height - footer - offset;
@@ -599,7 +633,10 @@ public static class ScrollingCaptureService
 
         private bool EndAtCap()
         {
-            _status($"Reached the maximum capture length — {_stitch.Height}px");
+            string reason = _verticalLimit < ScrollingCaptureLimits.AbsoluteMaxLength
+                ? "safe memory limit"
+                : "maximum capture length";
+            _status($"Reached the {reason} — {_stitch.Height}px");
             return false;
         }
 
@@ -608,37 +645,47 @@ public static class ScrollingCaptureService
         {
             if (_direction == ScrollDirection.Horizontal || _runningFooter <= 0 || _lastFrame is null)
                 return;
-            if (_stitch.Height + _runningFooter > MaxStitchedHeight)
+            if (_stitch.Height + _runningFooter > _verticalLimit)
                 return;
             _stitch.Append(_lastFrame, _lastFrame.Height - _runningFooter, _runningFooter);
         }
 
         // ------------------------------------------------------------ horizontal
 
-        /// <summary>
-        /// Horizontal captures keep the simpler previous-frame exact matching (no canvas
-        /// re-lock). ponytail: horizontal is the rare path; add profile matching here only
-        /// if real horizontal captures (spreadsheets over RDP) turn out to need it.
-        /// </summary>
+        /// <summary>Horizontal capture mirrors the vertical recovery state machine: append
+        /// aligned movement, re-lock anywhere in the captured canvas after a miss, and treat
+        /// reverse movement as review rather than duplicating columns.</summary>
         private bool ProcessHorizontal(SD.Bitmap frame)
         {
+            _framesSeen++;
             bool auto = _scrolledBeforeFrame;
-            if (_horizontalStitched is null)
+            ulong[] columns = ImageStitcher.ComputeColumnHashes(frame);
+            if (_horizontal.Width == 0)
             {
-                _horizontalStitched = frame;
-                _lastFrame = (SD.Bitmap)frame.Clone();
-                _stitchedFrames = 1;
-                PushPreview(force: true);
-                _status($"1 frame — {_horizontalStitched.Width}px wide");
+                AdoptFirstHorizontalFrame(frame, columns);
+                _lastFrame = frame;
                 return true;
             }
 
             if (ImageStitcher.FramesIdentical(_lastFrame!, frame))
             {
                 frame.Dispose();
-                if (auto && ++_identicalStreak >= EndOfContentStreak)
+                if (!auto || _state != Track.Tracking)
+                    return true;
+
+                if (_methodProducedMovement)
                 {
-                    _status($"Reached the end — {_horizontalStitched.Width}px wide");
+                    if (++_identicalStreak >= EndOfContentStreak && !TryNextMethod())
+                    {
+                        _status($"Reached the end — {_horizontal.Width}px wide");
+                        return false;
+                    }
+                }
+                else if (++_noEffectStreak >= 2 && !TryNextMethod())
+                {
+                    _status(_everMoved
+                        ? $"Reached the end — {_horizontal.Width}px wide"
+                        : $"Nothing to scroll (or content can't be scrolled here) — {_horizontal.Width}px wide");
                     return false;
                 }
                 return true;
@@ -646,40 +693,134 @@ public static class ScrollingCaptureService
             _identicalStreak = 0;
 
             int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame);
-            if (offset > 0)
+            if (_state == Track.Tracking && offset > 0)
             {
-                int cols = Math.Min(offset, MaxStitchedWidth - _horizontalStitched.Width);
-                if (cols > 0)
-                {
-                    var grown = ImageStitcher.AppendRight(_horizontalStitched, frame, cols);
-                    _horizontalStitched.Dispose();
-                    _horizontalStitched = grown;
-                    _stitchedFrames++;
-                }
-                _autoMisses = 0;
-                SetHint(ScrollHint.None);
-                _status($"{_stitchedFrames} frames — {_horizontalStitched.Width}px wide");
+                AppendHorizontal(frame, columns, offset);
+                if (auto)
+                    RecalibrateHorizontal(offset);
             }
-            else if (auto)
+            else if (_state == Track.Reviewing)
             {
-                _autoMisses++;
-                _notches = Math.Max(1, _notches / 2);
-                if (_autoMisses >= MaxAutoMisses)
-                {
-                    _status($"Stopped — content wouldn't align — {_horizontalStitched.Width}px wide");
-                    return false;
-                }
+                ProcessHorizontalReviewing(frame, columns, auto);
             }
             else
             {
-                SetHint(ScrollHint.SlowDown);
+                RelockHorizontal(frame, columns);
+                if (auto && _state != Track.Tracking)
+                {
+                    _autoMisses++;
+                    _notches = Math.Max(1, _notches / 2);
+                }
             }
 
             _lastFrame?.Dispose();
             _lastFrame = frame;
             PushPreview(force: false);
-            return _horizontalStitched.Width < MaxStitchedWidth
-                || Fail($"Reached the maximum capture width — {_horizontalStitched.Width}px wide");
+            if (_horizontal.Width >= _horizontalLimit)
+            {
+                string reason = _horizontalLimit < ScrollingCaptureLimits.AbsoluteMaxLength
+                    ? "safe memory limit"
+                    : "maximum capture width";
+                return Fail($"Reached the {reason} — {_horizontal.Width}px wide");
+            }
+            return true;
+        }
+
+        private void AdoptFirstHorizontalFrame(SD.Bitmap frame, ulong[]? columns = null)
+        {
+            columns ??= ImageStitcher.ComputeColumnHashes(frame);
+            int count = Math.Min(frame.Width, _horizontalLimit);
+            _horizontal.Append(frame, 0, count);
+            _horizontalCanvas.Append(columns, 0, count);
+            _horizontalStrip?.Append(frame, 0, count);
+            _stitchedFrames = 1;
+            PushPreview(force: true);
+            _status($"1 frame — {_horizontal.Width}px wide");
+        }
+
+        private void AppendHorizontal(SD.Bitmap frame, ulong[] columns, int offset)
+        {
+            int newColumns = Math.Min(offset, _horizontalLimit - _horizontal.Width);
+            if (newColumns <= 0) return;
+            int sourceX = frame.Width - offset;
+            _horizontal.Append(frame, sourceX, newColumns);
+            _horizontalCanvas.Append(columns, sourceX, newColumns);
+            _horizontalStrip?.Append(frame, sourceX, newColumns);
+            _stitchedFrames++;
+            _state = Track.Tracking;
+            _horizontalReviewPos = -1;
+            _autoMisses = 0;
+            if (_scrolledBeforeFrame)
+            {
+                _methodProducedMovement = true;
+                _everMoved = true;
+                _noEffectStreak = 0;
+            }
+            _healSteps = 0;
+            SetHint(ScrollHint.None);
+            Log.Info($"Scroll horizontal: +{newColumns}px total={_horizontal.Width}px frames={_stitchedFrames}");
+            string large = _horizontal.Width >= VeryLargeThreshold ? " — screenshot is very large" : "";
+            _status($"{_stitchedFrames} frames — {_horizontal.Width}px wide{large}");
+        }
+
+        private void RelockHorizontal(SD.Bitmap frame, ulong[] columns)
+        {
+            var location = _horizontalCanvas.Locate(columns);
+            if (location is { NewColumns: > 0 } overhang)
+            {
+                Log.Info($"Scroll horizontal: re-locked at column {overhang.Position} (+{overhang.NewColumns}px)");
+                AppendHorizontal(frame, columns, overhang.NewColumns);
+            }
+            else if (location is not null)
+            {
+                Log.Info($"Scroll horizontal: reviewing captured column {location.Value.Position}");
+                _state = Track.Reviewing;
+                _horizontalReviewPos = location.Value.Position;
+                SetHint(ScrollHint.AlreadyCaptured);
+            }
+            else
+            {
+                _state = Track.Lost;
+                _horizontalReviewPos = -1;
+                SetHint(ScrollHint.SlowDown);
+            }
+        }
+
+        private void ProcessHorizontalReviewing(SD.Bitmap frame, ulong[] columns, bool auto)
+        {
+            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame);
+            if (offset > 0 && _horizontalReviewPos >= 0)
+            {
+                _horizontalReviewPos += offset;
+                _healSteps = 0;
+                if (!TryFinishHorizontalReview(frame, columns))
+                    SetHint(ScrollHint.AlreadyCaptured);
+                return;
+            }
+
+            if (auto && _horizontalReviewPos >= 0 && _pxPerNotch > 0 && _lastSentNotches > 0)
+            {
+                _horizontalReviewPos += (int)Math.Round(_pxPerNotch * _lastSentNotches);
+                TryFinishHorizontalReview(frame, columns);
+                return;
+            }
+            RelockHorizontal(frame, columns);
+        }
+
+        private bool TryFinishHorizontalReview(SD.Bitmap frame, ulong[] columns)
+        {
+            int overhang = _horizontalReviewPos + columns.Length - _horizontalCanvas.Width;
+            if (overhang <= 0) return false;
+            AppendHorizontal(frame, columns, Math.Min(overhang, columns.Length));
+            _horizontalReviewPos = -1;
+            return true;
+        }
+
+        private void RecalibrateHorizontal(int measuredOffset)
+        {
+            double perNotch = measuredOffset / (double)Math.Max(1, _notches);
+            _pxPerNotch = _pxPerNotch <= 0 ? perNotch : (_pxPerNotch + perNotch) / 2;
+            _notches = Math.Clamp((int)Math.Round(0.6 * _region.Width / Math.Max(1, _pxPerNotch)), 1, 8);
         }
 
         private bool Fail(string message)
@@ -694,7 +835,10 @@ public static class ScrollingCaptureService
         /// the manual poll. Returns false to end the capture (auto-recovery gave up).</summary>
         private bool Pace()
         {
-            bool wantAuto = _autoScroll() && _prevSig is not null;
+            bool hasFrame = _direction == ScrollDirection.Horizontal
+                ? _horizontal.Width > 0
+                : _prevSig is not null;
+            bool wantAuto = _autoScroll() && hasFrame;
             if (wantAuto && _direction != ScrollDirection.Horizontal)
                 _direction ??= ScrollDirection.Vertical; // Auto-Scroll defaults to vertical
 
@@ -822,7 +966,7 @@ public static class ScrollingCaptureService
             try
             {
                 SD.Bitmap? snap = _direction == ScrollDirection.Horizontal
-                    ? SnapshotHorizontalPreview()
+                    ? _horizontalStrip?.SnapshotWhole()
                     : _strip?.SnapshotWhole();
                 if (snap is not null)
                     _preview(snap); // callback takes ownership
@@ -831,20 +975,6 @@ public static class ScrollingCaptureService
             {
                 Log.Error("Scrolling capture: live preview failed (non-fatal)", ex);
             }
-        }
-
-        private SD.Bitmap? SnapshotHorizontalPreview()
-        {
-            if (_horizontalStitched is null || _horizontalStitched.Width > 8000)
-                return null; // ponytail: whole-stitch downscale; skipped once it gets huge
-            double scale = Math.Min(1.0, 204.0 / _horizontalStitched.Width);
-            int w = Math.Max(1, (int)Math.Round(_horizontalStitched.Width * scale));
-            int h = Math.Max(1, (int)Math.Round(_horizontalStitched.Height * scale));
-            var thumb = new SD.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            using var g = SD.Graphics.FromImage(thumb);
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
-            g.DrawImage(_horizontalStitched, 0, 0, w, h);
-            return thumb;
         }
 
         private static bool BandHasContent(FrameSignature sig, int band)
@@ -897,10 +1027,15 @@ public static class ScrollingCaptureService
     {
         private SD.Bitmap? _buffer;
         private readonly int _width;
+        private readonly int _maxHeight;
 
         public int Height { get; private set; }
 
-        public StitchBuffer(int width) => _width = width;
+        public StitchBuffer(int width, int maxHeight)
+        {
+            _width = width;
+            _maxHeight = maxHeight;
+        }
 
         public void Append(SD.Bitmap frame, int srcY, int rows)
         {
@@ -943,7 +1078,8 @@ public static class ScrollingCaptureService
         {
             if (_buffer is not null && rows <= _buffer.Height)
                 return;
-            int cap = Math.Min(MaxStitchedHeight, Math.Max(rows, (_buffer?.Height ?? 2048) * 2));
+            int current = _buffer?.Height ?? Math.Min(2048, _maxHeight);
+            int cap = Math.Min(_maxHeight, Math.Max(rows, checked(current * 2)));
             var grown = new SD.Bitmap(_width, cap, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
             if (_buffer is not null)
             {
@@ -951,6 +1087,204 @@ public static class ScrollingCaptureService
                 _buffer.Dispose();
             }
             _buffer = grown;
+        }
+    }
+
+    private readonly record struct HorizontalLocation(int Position, int NewColumns);
+
+    /// <summary>Exact column profile of the complete horizontal canvas. Tail-overlap matches
+    /// are preferred so a fast forward step can append; otherwise a full in-canvas match
+    /// identifies reverse/review movement without duplicating pixels.</summary>
+    private sealed class HorizontalCanvasProfile
+    {
+        private const int MinimumOverlap = 24;
+        private readonly List<ulong> _columns = new();
+
+        public int Width => _columns.Count;
+
+        public void Append(ulong[] source, int sourceX, int count)
+        {
+            int end = Math.Min(source.Length, sourceX + count);
+            for (int x = Math.Max(0, sourceX); x < end; x++)
+                _columns.Add(source[x]);
+        }
+
+        public HorizontalLocation? Locate(ulong[] frame)
+        {
+            if (frame.Length < MinimumOverlap || Width < MinimumOverlap)
+                return null;
+
+            // First seek an overlap at the right edge. This is the only kind of match that
+            // can safely extend the image after a missed intermediate frame.
+            int firstTail = Math.Max(0, Width - frame.Length + 1);
+            HorizontalLocation? tail = null;
+            int bestTailOverlap = 0;
+            for (int position = firstTail; position <= Width - MinimumOverlap; position++)
+            {
+                int overlap = Width - position;
+                if (overlap <= bestTailOverlap || !Matches(frame, position, overlap)) continue;
+                tail = new HorizontalLocation(position, frame.Length - overlap);
+                bestTailOverlap = overlap;
+            }
+            if (tail is not null)
+                return tail;
+
+            // Otherwise the frame is wholly inside captured content. Search from the newest
+            // edge backwards so repeated spreadsheet bands do not jump to an older copy.
+            int latest = Width - frame.Length;
+            for (int position = latest; position >= 0; position--)
+            {
+                if (Matches(frame, position, frame.Length))
+                    return new HorizontalLocation(position, 0);
+            }
+            return null;
+        }
+
+        private bool Matches(ulong[] frame, int canvasX, int count)
+        {
+            if (canvasX < 0 || count < MinimumOverlap || canvasX + count > Width || count > frame.Length)
+                return false;
+            for (int x = 0; x < count; x++)
+            {
+                if (_columns[canvasX + x] != frame[x])
+                    return false;
+            }
+            return true;
+        }
+    }
+
+    /// <summary>Chunk-growing horizontal bitmap buffer. Growth is geometric, so a capture
+    /// copies its existing canvas O(log n) times rather than once for every frame.</summary>
+    internal sealed class HorizontalStitchBuffer : IDisposable
+    {
+        private SD.Bitmap? _buffer;
+        private readonly int _height;
+        private readonly int _maxWidth;
+
+        public int Width { get; private set; }
+        internal int GrowthCount { get; private set; }
+
+        public HorizontalStitchBuffer(int height, int maxWidth)
+        {
+            _height = height;
+            _maxWidth = maxWidth;
+        }
+
+        public void Append(SD.Bitmap frame, int sourceX, int columns)
+        {
+            columns = Math.Min(columns, _maxWidth - Width);
+            if (columns <= 0) return;
+            EnsureCapacity(Width + columns);
+            ImageStitcher.CopyColumnsInto(frame, sourceX, columns, _buffer!, Width);
+            Width += columns;
+        }
+
+        public SD.Bitmap? Take()
+        {
+            if (_buffer is null || Width == 0) return null;
+            if (_buffer.Width == Width)
+            {
+                var exact = _buffer;
+                _buffer = null;
+                return exact;
+            }
+            var trimmed = new SD.Bitmap(Width, _height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            ImageStitcher.CopyColumnsInto(_buffer, 0, Width, trimmed, 0);
+            _buffer.Dispose();
+            _buffer = null;
+            return trimmed;
+        }
+
+        public void Dispose()
+        {
+            _buffer?.Dispose();
+            _buffer = null;
+        }
+
+        private void EnsureCapacity(int columns)
+        {
+            if (_buffer is not null && columns <= _buffer.Width) return;
+            int current = _buffer?.Width ?? Math.Min(2048, _maxWidth);
+            int capacity = Math.Min(_maxWidth, Math.Max(columns, checked(current * 2)));
+            var grown = new SD.Bitmap(capacity, _height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            if (_buffer is not null)
+            {
+                ImageStitcher.CopyColumnsInto(_buffer, 0, Width, grown, 0);
+                _buffer.Dispose();
+            }
+            _buffer = grown;
+            GrowthCount++;
+        }
+    }
+
+    /// <summary>Incremental low-resolution horizontal preview; appended columns are scaled
+    /// once, avoiding repeated downscales of the full growing capture.</summary>
+    private sealed class HorizontalPreviewStrip : IDisposable
+    {
+        private const int MaxPreviewWidth = 204;
+        private const int MaxPreviewHeight = 280;
+        private readonly int _height;
+        private readonly double _scale;
+        private SD.Bitmap? _strip;
+        private int _used;
+
+        public HorizontalPreviewStrip(int regionHeight)
+        {
+            _height = Math.Min(MaxPreviewHeight, regionHeight);
+            _scale = _height / (double)regionHeight;
+        }
+
+        public void Append(SD.Bitmap frame, int sourceX, int columns)
+        {
+            if (columns <= 0) return;
+            int scaled = Math.Max(1, (int)Math.Round(columns * _scale));
+            EnsureCapacity(_used + scaled);
+            using var graphics = SD.Graphics.FromImage(_strip!);
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
+            graphics.DrawImage(frame,
+                new SD.Rectangle(_used, 0, scaled, _height),
+                new SD.Rectangle(sourceX, 0, columns, frame.Height),
+                SD.GraphicsUnit.Pixel);
+            _used += scaled;
+        }
+
+        public SD.Bitmap? SnapshotWhole()
+        {
+            if (_strip is null || _used == 0) return null;
+            double scale = Math.Min(1.0, MaxPreviewWidth / (double)_used);
+            int width = Math.Max(1, (int)Math.Round(_used * scale));
+            int height = Math.Max(1, (int)Math.Round(_height * scale));
+            var snapshot = new SD.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using var graphics = SD.Graphics.FromImage(snapshot);
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
+            graphics.DrawImage(_strip,
+                new SD.Rectangle(0, 0, width, height),
+                new SD.Rectangle(0, 0, _used, _height),
+                SD.GraphicsUnit.Pixel);
+            return snapshot;
+        }
+
+        public void Dispose()
+        {
+            _strip?.Dispose();
+            _strip = null;
+        }
+
+        private void EnsureCapacity(int columns)
+        {
+            if (_strip is not null && columns <= _strip.Width) return;
+            int capacity = Math.Max(columns, (_strip?.Width ?? 1024) * 2);
+            var grown = new SD.Bitmap(capacity, _height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            if (_strip is not null)
+            {
+                using var graphics = SD.Graphics.FromImage(grown);
+                graphics.DrawImage(_strip,
+                    new SD.Rectangle(0, 0, _used, _height),
+                    new SD.Rectangle(0, 0, _used, _height),
+                    SD.GraphicsUnit.Pixel);
+                _strip.Dispose();
+            }
+            _strip = grown;
         }
     }
 

@@ -31,6 +31,7 @@ public static class ScrollingStatusWindow
         var overlay = new ScrollDimOverlay(screenRegion);
         var preview = new ScrollPreviewPanel(screenRegion);
         var controls = new ScrollControlsBar(screenRegion);
+        using var keyboard = new HotkeyManager();
         controls.StartRequested += () => started.TrySetResult(true);
         controls.AutoScrollToggled += on => Volatile.Write(ref autoFlag[0], on);
         controls.DoneRequested += () => { try { cts.Cancel(); } catch { /* already torn down */ } };
@@ -40,6 +41,18 @@ public static class ScrollingStatusWindow
             started.TrySetResult(false);
             try { cts.Cancel(); } catch { /* already torn down */ }
         };
+
+        // The chrome intentionally never activates, so regular Tab/accelerator routing would
+        // steal focus from the page being captured. Scoped global accelerators keep that page
+        // focused and are unregistered automatically when this capture ends.
+        keyboard.Register(ScrollKeyboardShortcuts.Start,
+            () => controls.PerformAction(ScrollChromeAction.Start));
+        keyboard.Register(ScrollKeyboardShortcuts.ToggleAuto,
+            () => controls.PerformAction(ScrollChromeAction.ToggleAuto));
+        keyboard.Register(ScrollKeyboardShortcuts.Done,
+            () => controls.PerformAction(ScrollChromeAction.Done));
+        keyboard.Register(ScrollKeyboardShortcuts.Cancel,
+            () => controls.PerformAction(ScrollChromeAction.Cancel));
 
         try { overlay.Show(); }
         catch (Exception ex) { Log.Error("Scroll dim overlay failed to show (non-fatal)", ex); }

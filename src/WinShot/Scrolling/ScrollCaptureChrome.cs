@@ -16,6 +16,7 @@ internal static class CaptureExclusion
     private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
     private const uint LWA_ALPHA = 0x2;
     internal const int WS_EX_LAYERED = 0x00080000;
+    internal const int WS_EX_NOACTIVATE = 0x08000000;
 
     public static void Apply(IntPtr hwnd)
     {
@@ -199,6 +200,8 @@ public sealed class ScrollControlsBar : WF.Form
 
     public ScrollControlsBar(SD.Rectangle regionScreen)
     {
+        AutoScaleMode = WF.AutoScaleMode.Dpi;
+        AutoScaleDimensions = new SD.SizeF(96, 96);
         FormBorderStyle = WF.FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
@@ -210,6 +213,7 @@ public sealed class ScrollControlsBar : WF.Form
         // bar mid-capture (which would otherwise leave the rounded region stale and clip Done).
         _status = new WF.Label
         {
+            Name = "ScrollCaptureStatus",
             AutoSize = false,
             Size = new SD.Size(250, 24),
             AutoEllipsis = true,
@@ -218,20 +222,31 @@ public sealed class ScrollControlsBar : WF.Form
             Text = "Scroll capture ready",
             TextAlign = SD.ContentAlignment.MiddleLeft,
             Anchor = WF.AnchorStyles.None,
+            AccessibleName = "Scrolling capture status",
+            AccessibleDescription = "Live capture progress and recovery guidance.",
+            AccessibleRole = WF.AccessibleRole.StaticText,
         };
 
-        var cancel = MakeButton("Cancel", ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
-        cancel.Click += (_, _) => CancelRequested?.Invoke();
+        var cancel = MakeButton("Cancel", "ScrollCaptureCancel", "Cancel scrolling capture",
+            "Discard the capture. Keyboard shortcut: Alt+X or Escape.",
+            ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
+        cancel.Click += (_, _) => PerformAction(ScrollChromeAction.Cancel);
 
-        _auto = MakeButton("Auto-Scroll", ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
-        _auto.Click += (_, _) => ToggleAuto();
+        _auto = MakeButton("Auto-Scroll", "ScrollCaptureAuto", "Toggle automatic scrolling",
+            "Start or pause automatic scrolling. Keyboard shortcut: Alt+A.",
+            ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
+        _auto.Click += (_, _) => PerformAction(ScrollChromeAction.ToggleAuto);
 
-        _start = MakeButton("Start Capture", ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
-        _start.Click += (_, _) => Start();
+        _start = MakeButton("Start Capture", "ScrollCaptureStart", "Start scrolling capture",
+            "Begin capturing without moving focus from the captured app. Keyboard shortcut: Alt+S.",
+            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
+        _start.Click += (_, _) => PerformAction(ScrollChromeAction.Start);
 
-        _done = MakeButton("Done", ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
+        _done = MakeButton("Done", "ScrollCaptureDone", "Finish scrolling capture",
+            "Keep the captured result. Keyboard shortcut: Alt+D.",
+            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
         _done.Visible = false;
-        _done.Click += (_, _) => DoneRequested?.Invoke();
+        _done.Click += (_, _) => PerformAction(ScrollChromeAction.Done);
 
         var table = new WF.TableLayoutPanel
         {
@@ -255,12 +270,12 @@ public sealed class ScrollControlsBar : WF.Form
         _region = regionScreen;
         Shown += (_, _) =>
         {
-            ApplyRoundedRegion(Width, Height, 12);
+            ApplyRoundedRegion(Width, Height, ScalePx(12));
             PositionNear(_region);
         };
         // Re-round AND re-center when the bar resizes (Start swaps to Done), so it never
         // clips the content or drifts off-center.
-        SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, 12); PositionNear(_region); };
+        SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, ScalePx(12)); PositionNear(_region); };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -270,7 +285,7 @@ public sealed class ScrollControlsBar : WF.Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= CaptureExclusion.WS_EX_LAYERED; // BitBlt-proof exclusion from the stitch
+            cp.ExStyle |= CaptureExclusion.WS_EX_LAYERED | CaptureExclusion.WS_EX_NOACTIVATE;
             return cp;
         }
     }
@@ -299,6 +314,26 @@ public sealed class ScrollControlsBar : WF.Form
         AutoScrollToggled?.Invoke(_autoOn);
     }
 
+    /// <summary>Runs a scoped keyboard command without activating the controls window.</summary>
+    internal void PerformAction(ScrollChromeAction action)
+    {
+        switch (action)
+        {
+            case ScrollChromeAction.Start:
+                Start();
+                break;
+            case ScrollChromeAction.ToggleAuto:
+                ToggleAuto();
+                break;
+            case ScrollChromeAction.Done when _started:
+                DoneRequested?.Invoke();
+                break;
+            case ScrollChromeAction.Cancel:
+                CancelRequested?.Invoke();
+                break;
+        }
+    }
+
     /// <summary>Programmatic start for the scroll-region automation command.</summary>
     public void StartAutomatically(bool auto)
     {
@@ -311,6 +346,7 @@ public sealed class ScrollControlsBar : WF.Form
         if (IsDisposed || _hint != ScrollHint.None) return; // hints take precedence
         _status.ForeColor = ThemePalette.TextSecondary;
         _status.Text = text;
+        Announce(text);
     }
 
     /// <summary>Shows a persistent amber hint that overrides the live status text until the
@@ -322,12 +358,15 @@ public sealed class ScrollControlsBar : WF.Form
         if (hint == ScrollHint.None) return;
         _status.ForeColor = WarnColor;
         _status.Text = ScrollHintText.For(hint) ?? _status.Text;
+        Announce(_status.Text);
     }
 
-    private static WF.Button MakeButton(string text, SD.Color back, SD.Color fore, SD.Color hover)
+    private static WF.Button MakeButton(string text, string name, string accessibleName,
+        string accessibleDescription, SD.Color back, SD.Color fore, SD.Color hover)
     {
         var b = new WF.Button
         {
+            Name = name,
             Text = text,
             AutoSize = true,
             AutoSizeMode = WF.AutoSizeMode.GrowAndShrink,
@@ -339,6 +378,10 @@ public sealed class ScrollControlsBar : WF.Form
             Cursor = WF.Cursors.Hand,
             Anchor = WF.AnchorStyles.None,
             Font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold),
+            MinimumSize = new SD.Size(0, 40),
+            AccessibleName = accessibleName,
+            AccessibleDescription = accessibleDescription,
+            AccessibleRole = WF.AccessibleRole.PushButton,
         };
         b.FlatAppearance.BorderSize = 0;
         b.FlatAppearance.MouseOverBackColor = hover;
@@ -346,10 +389,26 @@ public sealed class ScrollControlsBar : WF.Form
         return b;
     }
 
+    private void Announce(string text)
+    {
+        if (!IsHandleCreated || string.IsNullOrWhiteSpace(text)) return;
+        try
+        {
+            _status.AccessibilityObject.RaiseAutomationNotification(
+                WF.Automation.AutomationNotificationKind.Other,
+                WF.Automation.AutomationNotificationProcessing.MostRecent,
+                text);
+        }
+        catch
+        {
+            // UI Automation is optional; visible status remains the fallback.
+        }
+    }
+
     private void PositionNear(SD.Rectangle region)
     {
         var mon = WF.Screen.FromRectangle(region).Bounds;
-        const int gap = 14, pad = 8;
+        int gap = ScalePx(14), pad = ScalePx(8);
         int x = region.Left + (region.Width - Width) / 2;
 
         int below = region.Bottom + gap;
@@ -378,6 +437,24 @@ public sealed class ScrollControlsBar : WF.Form
         path.CloseFigure();
         Region = new SD.Region(path);
     }
+
+    private int ScalePx(int logical) => ScrollChromeMetrics.Scale(logical, DeviceDpi);
+}
+
+internal enum ScrollChromeAction { Start, ToggleAuto, Done, Cancel }
+
+internal static class ScrollKeyboardShortcuts
+{
+    public const string Start = "Alt+S";
+    public const string ToggleAuto = "Alt+A";
+    public const string Done = "Alt+D";
+    public const string Cancel = "Alt+X";
+}
+
+internal static class ScrollChromeMetrics
+{
+    public static int Scale(int logicalPixels, int dpi)
+        => Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, dpi) / 96.0));
 }
 
 /// <summary>User-facing text for the persistent capture hints, shared by the controls bar
@@ -409,6 +486,8 @@ public sealed class ScrollPreviewPanel : WF.Form
 
     public ScrollPreviewPanel(SD.Rectangle regionScreen)
     {
+        AutoScaleMode = WF.AutoScaleMode.Dpi;
+        AutoScaleDimensions = new SD.SizeF(96, 96);
         FormBorderStyle = WF.FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
@@ -419,18 +498,26 @@ public sealed class ScrollPreviewPanel : WF.Form
 
         _caption = new WF.Label
         {
+            Name = "ScrollPreviewStatus",
             Dock = WF.DockStyle.Bottom,
             Height = 32, // two lines, so the "slow down" warning fits
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(8.5f),
             Text = "Capturing…",
             TextAlign = SD.ContentAlignment.MiddleCenter,
+            AccessibleName = "Scrolling capture preview status",
+            AccessibleDescription = "Live capture progress and recovery guidance.",
+            AccessibleRole = WF.AccessibleRole.StaticText,
         };
         _pic = new WF.PictureBox
         {
+            Name = "ScrollCapturePreview",
             Dock = WF.DockStyle.Fill,
             SizeMode = WF.PictureBoxSizeMode.Zoom,
             BackColor = ThemePalette.WindowBg,
+            AccessibleName = "Scrolling capture preview",
+            AccessibleDescription = "A local preview of the stitched screenshot.",
+            AccessibleRole = WF.AccessibleRole.Graphic,
         };
         Controls.Add(_pic);
         Controls.Add(_caption);
@@ -445,7 +532,7 @@ public sealed class ScrollPreviewPanel : WF.Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= CaptureExclusion.WS_EX_LAYERED; // BitBlt-proof exclusion from the stitch
+            cp.ExStyle |= CaptureExclusion.WS_EX_LAYERED | CaptureExclusion.WS_EX_NOACTIVATE;
             return cp;
         }
     }
@@ -500,6 +587,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     private void PositionBottomRight(SD.Rectangle region)
     {
         var mon = WF.Screen.FromRectangle(region).Bounds;
-        Location = new SD.Point(mon.Right - Width - 20, mon.Bottom - Height - 20);
+        int inset = ScrollChromeMetrics.Scale(20, DeviceDpi);
+        Location = new SD.Point(mon.Right - Width - inset, mon.Bottom - Height - inset);
     }
 }

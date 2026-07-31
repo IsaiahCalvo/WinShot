@@ -18,6 +18,8 @@ public class ScrollingCaptureServiceTests
 {
     private const int Width = 320;
     private const int FrameHeight = 400;
+    private const int HorizontalFrameWidth = 400;
+    private const int HorizontalHeight = 240;
 
     private static int Hash(int x, int y, int seed)
     {
@@ -33,6 +35,12 @@ public class ScrollingCaptureServiceTests
     private static SD.Color RowColor(int docRow)
     {
         int h = Hash(docRow, 0, 99);
+        return SD.Color.FromArgb(255, h & 0xFF, (h >> 8) & 0xFF, (h >> 16) & 0xFF);
+    }
+
+    private static SD.Color ColumnColor(int documentColumn)
+    {
+        int h = Hash(documentColumn, 17, 313);
         return SD.Color.FromArgb(255, h & 0xFF, (h >> 8) & 0xFF, (h >> 16) & 0xFF);
     }
 
@@ -91,6 +99,56 @@ public class ScrollingCaptureServiceTests
             preview: null,
             frameSource: FrameSource).GetAwaiter().GetResult();
     }
+
+    private static SD.Bitmap MakeHorizontalFrame(int left)
+    {
+        var bitmap = new SD.Bitmap(HorizontalFrameWidth, HorizontalHeight, PixelFormat.Format32bppArgb);
+        var data = bitmap.LockBits(new SD.Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var row = new byte[bitmap.Width * 4];
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                var color = ColumnColor(left + x);
+                int i = x * 4;
+                row[i] = color.B; row[i + 1] = color.G; row[i + 2] = color.R; row[i + 3] = 255;
+            }
+            for (int y = 0; y < bitmap.Height; y++)
+                Marshal.Copy(row, 0, data.Scan0 + y * data.Stride, row.Length);
+        }
+        finally { bitmap.UnlockBits(data); }
+        return bitmap;
+    }
+
+    private static SD.Bitmap? RunHorizontal(IReadOnlyList<int> positions, Action<ScrollHint>? hint = null)
+    {
+        using var cts = new CancellationTokenSource();
+        int index = 0;
+        SD.Bitmap FrameSource(SD.Rectangle _)
+        {
+            if (index >= positions.Count)
+            {
+                cts.Cancel();
+                return MakeHorizontalFrame(positions[^1]);
+            }
+            return MakeHorizontalFrame(positions[index++]);
+        }
+
+        return ScrollingCaptureService.RunAsync(
+            new SD.Rectangle(0, 0, HorizontalFrameWidth, HorizontalHeight),
+            ScrollDirection.Horizontal,
+            autoScroll: () => false,
+            status: _ => { },
+            hint: hint ?? (_ => { }),
+            cts.Token,
+            preview: null,
+            frameSource: FrameSource).GetAwaiter().GetResult();
+    }
+
+    private static void AssertColumnIsDocumentColumn(SD.Bitmap stitched, int stitchedX, int documentColumn)
+        => Assert.Equal(ColumnColor(documentColumn).ToArgb(),
+            stitched.GetPixel(stitchedX, HorizontalHeight / 2).ToArgb());
 
     private static void AssertRowIsDocRow(SD.Bitmap stitched, int stitchedY, int docRow)
     {
@@ -237,5 +295,70 @@ public class ScrollingCaptureServiceTests
         // …and nowhere inside the body.
         for (int y = 0; y < bodyRows; y++)
             Assert.NotEqual(footerTop, stitched.GetPixel(Width / 2, y).ToArgb());
+    }
+
+    [Fact]
+    public void HorizontalSlowScroll_ReconstructsContiguousDocument()
+    {
+        var positions = Enumerable.Range(0, 21).Select(i => i * 30).ToList();
+        using var stitched = RunHorizontal(positions);
+
+        Assert.NotNull(stitched);
+        Assert.Equal(600 + HorizontalFrameWidth, stitched!.Width);
+        for (int x = 0; x < stitched.Width; x += 79)
+            AssertColumnIsDocumentColumn(stitched, x, x);
+    }
+
+    [Fact]
+    public void HorizontalFastFlickThenBack_RelocksWithoutGap()
+    {
+        var positions = new List<int> { 0, 30, 60, 700, 300 };
+        for (int left = 330; left <= 900; left += 30)
+            positions.Add(left);
+        var hints = new List<ScrollHint>();
+
+        using var stitched = RunHorizontal(positions, hints.Add);
+
+        Assert.NotNull(stitched);
+        Assert.Equal(900 + HorizontalFrameWidth, stitched!.Width);
+        Assert.Contains(ScrollHint.SlowDown, hints);
+        for (int x = 0; x < stitched.Width; x += 83)
+            AssertColumnIsDocumentColumn(stitched, x, x);
+    }
+
+    [Fact]
+    public void HorizontalReverseThenForward_DoesNotDuplicateColumns()
+    {
+        int[] positions = { 0, 40, 80, 120, 40, 10, 90, 150, 200 };
+        using var stitched = RunHorizontal(positions);
+
+        Assert.NotNull(stitched);
+        Assert.Equal(200 + HorizontalFrameWidth, stitched!.Width);
+        for (int x = 0; x < stitched.Width; x += 47)
+            AssertColumnIsDocumentColumn(stitched, x, x);
+    }
+
+    [Fact]
+    public void HorizontalBuffer_GrowsGeometricallyRatherThanPerFrame()
+    {
+        using var frame = MakeHorizontalFrame(0);
+        using var buffer = new ScrollingCaptureService.HorizontalStitchBuffer(HorizontalHeight, 32000);
+        for (int i = 0; i < 500; i++)
+            buffer.Append(frame, 0, 64);
+
+        Assert.Equal(32000, buffer.Width);
+        Assert.InRange(buffer.GrowthCount, 1, 5);
+        using var result = buffer.Take();
+        Assert.NotNull(result);
+        Assert.Equal(32000, result!.Width);
+    }
+
+    [Fact]
+    public void CaptureLimits_Preserve32kForNormalRegionsAndBoundVeryWideOnes()
+    {
+        Assert.Equal(32000, ScrollingCaptureLimits.MaxLengthForCrossAxis(3200));
+        Assert.InRange(ScrollingCaptureLimits.MaxLengthForCrossAxis(8000), 16000, 17000);
+        Assert.True(ScrollingCaptureLimits.IsRegionSafe(new SD.Rectangle(0, 0, 4000, 3000)));
+        Assert.False(ScrollingCaptureLimits.IsRegionSafe(new SD.Rectangle(0, 0, 32000, 5000)));
     }
 }
