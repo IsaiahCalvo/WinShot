@@ -536,12 +536,20 @@ public sealed class RecordingController
             else if (_recorder is not null)
                 _recorder.Stop(); // finalization continues in OnMp4Complete
             else
-                CleanupAfterFailure(); // should not happen; avoid a stuck session
+            {
+                string? tempPath = _tempPath;
+                CleanupAfterFailure(preserveTemp: true); // should not happen; avoid a stuck session
+                ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(
+                    tempPath,
+                    "The recording engine was no longer available when Stop was pressed."));
+            }
         }
         catch (Exception ex)
         {
             Log.Error("Failed to stop recording", ex);
-            CleanupAfterFailure();
+            string? tempPath = _tempPath;
+            CleanupAfterFailure(preserveTemp: true);
+            ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(tempPath, ex.Message));
         }
     }
 
@@ -562,8 +570,15 @@ public sealed class RecordingController
             _dispatcher.InvokeAsync(async () =>
             {
                 _gifRecorder = null;
-                if (!ok || discard)
+                if (discard)
                     await Task.Run(() => TryDelete(tempPath));
+                else if (!ok)
+                {
+                    Log.Error($"GIF recording failed to finish (file kept at {tempPath})");
+                    ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(
+                        tempPath,
+                        "The GIF encoder could not finish the recording."));
+                }
                 else
                     await FinalizeFileAsync(tempPath, "gif");
                 EndSession();
@@ -596,10 +611,11 @@ public sealed class RecordingController
             if (recorder is not null && !ReferenceEquals(recorder, _recorder)) return; // stale event from an old session
             Log.Error($"MP4 recording failed: {e.Error}");
             DisposeRecorder();
-            TryDelete(_tempPath);
+            string? tempPath = _tempPath;
             CloseBar(); // failure can happen without the user pressing Stop
             CloseOverlays();
             EndSession();
+            ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(tempPath, e.Error));
         });
     }
 
@@ -616,10 +632,15 @@ public sealed class RecordingController
             string name = FileNamer.Next(_settings, extension);
             string finalPath = await Task.Run(() =>
             {
-                string movedPath = RecordingFileFinalizer.MoveToUniqueFinalPath(tempPath, folder, name);
-                try { _history.AddFile(movedPath); }
+                RecordingFinalizationResult finalized = RecordingFileFinalizer.FinalizeToUniqueFinalPath(
+                    tempPath,
+                    folder,
+                    name);
+                if (finalized.TempFileRetained)
+                    Log.Info($"Recording saved to {finalized.FinalPath}; temp duplicate retained at {tempPath}");
+                try { _history.AddFile(finalized.FinalPath); }
                 catch (Exception ex) { Log.Error("Failed to add recording to history", ex); }
-                return movedPath;
+                return finalized.FinalPath;
             });
 
             try
@@ -649,6 +670,10 @@ public sealed class RecordingController
         catch (Exception ex)
         {
             Log.Error($"Failed to finalize recording (file left at {tempPath})", ex);
+            ShowRecordingFailure(RecordingFailureMessage.ForFinalization(
+                _settings.Current.SaveFolder,
+                tempPath,
+                ex));
         }
     }
 
@@ -701,7 +726,7 @@ public sealed class RecordingController
         catch (Exception ex) { Log.Error("Failed to restore desktop icons after recording", ex); }
     }
 
-    private void CleanupAfterFailure()
+    private void CleanupAfterFailure(bool preserveTemp = false)
     {
         DisposeRecorder();
         string? temp = _tempPath;
@@ -713,16 +738,33 @@ public sealed class RecordingController
             Task.Run(() =>
             {
                 recorder.Stop();
-                TryDelete(temp);
+                if (!preserveTemp)
+                    TryDelete(temp);
             });
         }
-        else
+        else if (!preserveTemp)
         {
             TryDelete(temp);
         }
         CloseBar();
         CloseOverlays();
         EndSession();
+    }
+
+    private static void ShowRecordingFailure(string message)
+    {
+        try
+        {
+            MessageBox.Show(
+                message,
+                "WinShot recording",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to show recording error", ex);
+        }
     }
 
     private void DisposeRecorder()
