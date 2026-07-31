@@ -632,7 +632,7 @@ public partial class App : Application
                     using (captured) await RunOcrToClipboard(captured!);
                     break;
                 case AllInOneAction.Record:
-                    Recording.ToggleFlow();
+                    Recording.ToggleFlowWithRegion(regionPx);
                     break;
                 case AllInOneAction.Scroll:
                     var region = regionPx;
@@ -838,7 +838,26 @@ public partial class App : Application
         });
     }
 
-    private RecordingController Recording => _recording ??= new RecordingController(_settings, _history);
+    private RecordingController Recording
+    {
+        get
+        {
+            if (_recording is not null)
+                return _recording;
+            _recording = new RecordingController(_settings, _history);
+            _recording.RecordingElapsedChanged += OnRecordingElapsedChanged;
+            return _recording;
+        }
+    }
+
+    private void OnRecordingElapsedChanged(TimeSpan? elapsed)
+    {
+        if (_tray is null)
+            return;
+        _tray.Text = elapsed is null
+            ? "WinShot"
+            : $"WinShot — Recording {(int)elapsed.Value.TotalMinutes:00}:{elapsed.Value.Seconds:00}";
+    }
 
     private void QueueAutoClipboardCopy(SD.Bitmap bmp)
     {

@@ -72,15 +72,15 @@ public class Settings
     // General > "After capture" matrix. CleanShot has a per-action checkbox for
     // Screenshot and Recording independently. (TODO: wire behavior in App.xaml.cs.)
     public bool ScreenshotShowOverlay { get; set; } = true;   // TODO: wire behavior
-    public bool RecordingShowOverlay { get; set; } = true;    // TODO: wire behavior
+    public bool RecordingShowOverlay { get; set; } = true;
     public bool ScreenshotCopy { get; set; } = true;          // TODO: wire behavior
-    public bool RecordingCopy { get; set; } = false;          // TODO: wire behavior
+    public bool RecordingCopy { get; set; } = false;
     public bool ScreenshotSave { get; set; } = false;         // TODO: wire behavior
     public bool RecordingSave { get; set; } = false;          // TODO: wire behavior
     public bool ScreenshotOpenAnnotate { get; set; } = false; // TODO: wire behavior
     public bool ScreenshotOpenEditor { get; set; } = false;   // TODO: wire behavior (Open Annotate tool — screenshot only)
     public bool ScreenshotPin { get; set; } = false;          // TODO: wire behavior (Pin to the screen — screenshot only)
-    public bool RecordingOpenEditor { get; set; } = false;    // TODO: wire behavior (Open Video Editor — recording only)
+    public bool RecordingOpenEditor { get; set; } = false;    // Open Video Editor — recording only
 
     // Screenshots
     public bool AddPixelBorder { get; set; } = false;   // TODO: wire behavior — add 1px border to screenshots
@@ -101,19 +101,20 @@ public class Settings
     public string OverlaySaveButtonBehavior { get; set; } = "export"; // export | ask
 
     // Recording extras (CleanShot Recording > General / Video / GIF)
-    public bool ShowRecordingControls { get; set; } = true; // TODO: wire behavior — controls bar while recording
-    public bool ShowRecordingTimer { get; set; } = false;   // TODO: wire behavior — display recording time in tray
-    public bool ScaleHiDpiVideo { get; set; } = false;      // TODO: wire behavior — downscale HiDPI video to 1x
+    public bool ShowRecordingControls { get; set; } = true; // controls bar while recording
+    public bool ShowRecordingTimer { get; set; } = false;   // display recording time in tray/control bar
+    public bool ScaleHiDpiVideo { get; set; } = false;      // downscale HiDPI video to 1x
     public bool DoNotDisturbWhileRecording { get; set; } = false; // TODO: wire behavior
-    public bool RememberLastSelection { get; set; } = false; // TODO: wire behavior — recording area
-    public bool DimScreenWhileRecording { get; set; } = true; // TODO: wire behavior
+    public bool RememberLastSelection { get; set; } = false; // recording area
+    public string LastRecordingRegion { get; set; } = "";   // "x,y,w,h" physical screen px
+    public bool DimScreenWhileRecording { get; set; } = true;
     public bool ShowRecordingCountdown { get; set; } = false; // TODO: wire behavior — countdown before recording
-    public string RecordingMaxResolution { get; set; } = "original"; // TODO: wire behavior — original | 4K | 1080p | 720p
-    public bool RecordAudioMono { get; set; } = false;      // TODO: wire behavior — downmix mic to mono
-    public bool OpenVideoEditorAfterRecording { get; set; } = false; // TODO: wire behavior
-    public int GifQuality { get; set; } = 80;               // TODO: wire behavior — 0..100, GIF encode quality
-    public string GifSize { get; set; } = "800";            // TODO: wire behavior — max GIF width (px) or "auto"
-    public bool OptimizeGifs { get; set; } = true;          // TODO: wire behavior — palette/optimization pass
+    public string RecordingMaxResolution { get; set; } = "original"; // original | 4K | 1080p | 720p
+    public bool RecordAudioMono { get; set; } = false;      // downmix microphone input
+    public bool OpenVideoEditorAfterRecording { get; set; } = false;
+    public int GifQuality { get; set; } = 80;               // 0..100 palette quality
+    public string GifSize { get; set; } = "800";            // max GIF width (px) or "auto"
+    public bool OptimizeGifs { get; set; } = true;          // palette reduction during encode
 
     // Annotate
     public bool InverseArrowDirection { get; set; } = false; // TODO: wire behavior

@@ -23,6 +23,7 @@ public sealed class GifEncoder : IDisposable
     private readonly int _width;
     private readonly int _height;
     private readonly int _delayCentiseconds;
+    private readonly int _paletteColors;
     private bool _finished;
 
     // Reused per-frame buffers so a long recording does not churn the GC.
@@ -40,7 +41,7 @@ public sealed class GifEncoder : IDisposable
     private int _bitCount;
 
     /// <summary>Takes ownership of <paramref name="output"/> and writes the GIF header immediately.</summary>
-    public GifEncoder(Stream output, int width, int height, int fps)
+    public GifEncoder(Stream output, int width, int height, int fps, int paletteColors = 256)
     {
         if (width < 1 || width > ushort.MaxValue || height < 1 || height > ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(width), $"Invalid GIF dimensions {width}×{height}.");
@@ -50,6 +51,7 @@ public sealed class GifEncoder : IDisposable
         _height = height;
         _indices = new byte[width * height];
         _delayCentiseconds = Math.Max(2, (int)Math.Round(100.0 / Math.Max(1, fps)));
+        _paletteColors = Math.Clamp(paletteColors, 16, 256);
 
         WriteHeader();
     }
@@ -112,7 +114,7 @@ public sealed class GifEncoder : IDisposable
         }
 
         // Quantize to at most 256 colors and map every distinct color to a palette index.
-        var quantizer = new OctreeQuantizer(256);
+        var quantizer = new OctreeQuantizer(_paletteColors);
         foreach (var kv in _colorCounts)
             quantizer.AddColor(kv.Key, kv.Value);
         Array.Clear(_palette, 0, _palette.Length);

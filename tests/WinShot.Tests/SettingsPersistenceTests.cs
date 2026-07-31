@@ -69,6 +69,46 @@ public class SettingsPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void RecordingIntegrationSettings_SurviveLoadSaveCycle()
+    {
+        var svc = new SettingsService();
+        svc.Load();
+        svc.Current.LastRecordingRegion = "-120,40,800,600";
+        svc.Current.ShowRecordingControls = false;
+        svc.Current.ShowRecordingTimer = true;
+        svc.Current.DimScreenWhileRecording = false;
+        svc.Current.RememberLastSelection = true;
+        svc.Current.ScaleHiDpiVideo = true;
+        svc.Current.RecordingMaxResolution = "1080p";
+        svc.Current.RecordAudioMono = true;
+        svc.Current.OpenVideoEditorAfterRecording = true;
+        svc.Current.RecordingShowOverlay = false;
+        svc.Current.RecordingCopy = true;
+        svc.Current.GifQuality = 55;
+        svc.Current.GifSize = "640";
+        svc.Current.OptimizeGifs = false;
+        svc.Save();
+
+        var reopened = new SettingsService();
+        reopened.Load();
+
+        Assert.Equal("-120,40,800,600", reopened.Current.LastRecordingRegion);
+        Assert.False(reopened.Current.ShowRecordingControls);
+        Assert.True(reopened.Current.ShowRecordingTimer);
+        Assert.False(reopened.Current.DimScreenWhileRecording);
+        Assert.True(reopened.Current.RememberLastSelection);
+        Assert.True(reopened.Current.ScaleHiDpiVideo);
+        Assert.Equal("1080p", reopened.Current.RecordingMaxResolution);
+        Assert.True(reopened.Current.RecordAudioMono);
+        Assert.True(reopened.Current.OpenVideoEditorAfterRecording);
+        Assert.False(reopened.Current.RecordingShowOverlay);
+        Assert.True(reopened.Current.RecordingCopy);
+        Assert.Equal(55, reopened.Current.GifQuality);
+        Assert.Equal("640", reopened.Current.GifSize);
+        Assert.False(reopened.Current.OptimizeGifs);
+    }
+
+    [Fact]
     public void TwoBackupGenerations_KeepTheOldestGoodCopy()
     {
         WriteUserSettings("Ctrl+Alt+F9"); // save 1: user data in settings.json

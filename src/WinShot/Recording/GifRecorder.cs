@@ -19,6 +19,8 @@ public sealed class GifRecorder
     private readonly int _fps;
     private readonly string _outputPath;
     private readonly bool _captureCursor;
+    private readonly SD.Size _outputSize;
+    private readonly int _paletteColors;
     private readonly BlockingCollection<SD.Bitmap> _frames = new(boundedCapacity: 8);
     private readonly object _gate = new();
 
@@ -30,12 +32,20 @@ public sealed class GifRecorder
     private volatile bool _failed;
     private int _framesEncoded;
 
-    public GifRecorder(SD.Rectangle screenRect, int fps, string outputPath, bool captureCursor)
+    public GifRecorder(
+        SD.Rectangle screenRect,
+        int fps,
+        string outputPath,
+        bool captureCursor,
+        SD.Size? outputSize = null,
+        int paletteColors = 256)
     {
         _screenRect = screenRect;
         _fps = Math.Clamp(fps, 1, 30);
         _outputPath = outputPath;
         _captureCursor = captureCursor;
+        _outputSize = outputSize ?? screenRect.Size;
+        _paletteColors = Math.Clamp(paletteColors, 16, 256);
     }
 
     /// <summary>Stops grabbing frames until <see cref="Resume"/>; safe to call from any thread.</summary>
@@ -59,6 +69,12 @@ public sealed class GifRecorder
             var bmp = CaptureService.CaptureScreenRegion(_screenRect);
             if (_captureCursor)
                 DrawCursor(bmp);
+            if (bmp.Size != _outputSize)
+            {
+                SD.Bitmap scaled = ResizeFrame(bmp, _outputSize);
+                bmp.Dispose();
+                bmp = scaled;
+            }
             lock (_gate)
             {
                 if (_frames.IsAddingCompleted || !_frames.TryAdd(bmp))
@@ -80,7 +96,7 @@ public sealed class GifRecorder
         try
         {
             using var stream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
-            using var encoder = new GifEncoder(stream, _screenRect.Width, _screenRect.Height, _fps);
+            using var encoder = new GifEncoder(stream, _outputSize.Width, _outputSize.Height, _fps, _paletteColors);
             foreach (var frame in _frames.GetConsumingEnumerable())
             {
                 using (frame)
@@ -94,6 +110,18 @@ public sealed class GifRecorder
             _failed = true;
             Log.Error("GIF encoding failed", ex);
         }
+    }
+
+    private static SD.Bitmap ResizeFrame(SD.Bitmap source, SD.Size target)
+    {
+        var result = new SD.Bitmap(target.Width, target.Height, SD.Imaging.PixelFormat.Format32bppArgb);
+        using var graphics = SD.Graphics.FromImage(result);
+        graphics.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
+        graphics.CompositingQuality = SD.Drawing2D.CompositingQuality.HighSpeed;
+        graphics.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBilinear;
+        graphics.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighSpeed;
+        graphics.DrawImage(source, new SD.Rectangle(SD.Point.Empty, target));
+        return result;
     }
 
     /// <summary>

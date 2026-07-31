@@ -26,6 +26,15 @@ public readonly record struct RecordingRegionSelection(SD.Rectangle ScreenRect)
             RoundDownToEven(displayBounds.Height)));
     }
 
+    public static RecordingRegionSelection FromScreenSelection(SD.Rectangle screenRegion)
+    {
+        return new RecordingRegionSelection(new SD.Rectangle(
+            screenRegion.X,
+            screenRegion.Y,
+            RoundDownToEven(screenRegion.Width),
+            RoundDownToEven(screenRegion.Height)));
+    }
+
     private static int RoundDownToEven(int value) =>
         Math.Max(0, value) & ~1;
 }

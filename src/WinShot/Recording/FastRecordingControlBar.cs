@@ -26,12 +26,16 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly WF.Button _restart;
     private readonly WF.Button _stop;
     private readonly WF.Button _cancel;
+    private readonly SD.Rectangle? _recordingRegion;
+    private readonly bool _showTimer;
     private bool _actionTaken;
     private bool _paused;
     private bool _pulseDim;
 
-    public FastRecordingControlBar()
+    public FastRecordingControlBar(SD.Rectangle? recordingRegion = null, bool showTimer = true)
     {
+        _recordingRegion = recordingRegion;
+        _showTimer = showTimer;
         AutoScaleMode = WF.AutoScaleMode.None;
         AutoSize = true;
         AutoSizeMode = WF.AutoSizeMode.GrowAndShrink;
@@ -68,6 +72,7 @@ public sealed class FastRecordingControlBar : WF.Form
             Margin = new WF.Padding(2, 7, 8, 0),
             Size = new SD.Size(10, 10),
         };
+        _dot.Visible = showTimer;
         row.Controls.Add(_dot);
 
         _elapsedText = new WF.Label
@@ -80,6 +85,7 @@ public sealed class FastRecordingControlBar : WF.Form
             Text = "00:00",
             TextAlign = SD.ContentAlignment.MiddleLeft,
         };
+        _elapsedText.Visible = showTimer;
         row.Controls.Add(_elapsedText);
 
         _pause = Button("Pause", ButtonBack, ButtonHot);
@@ -131,8 +137,11 @@ public sealed class FastRecordingControlBar : WF.Form
         UpdateWindowRegion();
         PositionBottomCenter();
         ExcludeFromCapture();
-        _elapsed.Start();
-        _timer.Start();
+        if (_showTimer)
+        {
+            _elapsed.Start();
+            _timer.Start();
+        }
     }
 
     protected override void OnResize(EventArgs e)
@@ -162,10 +171,10 @@ public sealed class FastRecordingControlBar : WF.Form
 
     private void PositionBottomCenter()
     {
-        SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
-        Location = new SD.Point(
-            area.Left + Math.Max(0, (area.Width - Width) / 2),
-            area.Bottom - Height - 24);
+        SD.Rectangle area = _recordingRegion is SD.Rectangle region
+            ? WF.Screen.FromRectangle(region).WorkingArea
+            : WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        Location = RecordingControlBarPlacement.BottomCenter(area, Size);
     }
 
     private void TogglePause()
