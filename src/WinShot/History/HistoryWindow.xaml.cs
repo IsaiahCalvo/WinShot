@@ -13,6 +13,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using WinShot.Core;
 using SD = System.Drawing;
+using WF = System.Windows.Forms;
 
 namespace WinShot.History;
 
@@ -163,9 +164,28 @@ public partial class HistoryWindow : Window
 
     private void CenterOnWorkArea()
     {
-        var area = SystemParameters.WorkArea;
-        Left = area.Left + (area.Width - Width) / 2;
-        Top = area.Top + (area.Height - Height) / 2;
+        SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        double dpiScale = GetCursorMonitorDpiScale();
+        SD.Rectangle placement = HistoryWindowPlacement.CenterInWorkArea(
+            area,
+            new Size(Width, Height),
+            dpiScale);
+        IntPtr hwnd = new WindowInteropHelper(this).EnsureHandle();
+        if (!SetWindowPos(
+                hwnd,
+                IntPtr.Zero,
+                placement.Left,
+                placement.Top,
+                placement.Width,
+                placement.Height,
+                SwpNoZOrder | SwpNoActivate))
+        {
+            // SetWindowPos should be available on every supported Windows version.
+            // Keep a safe primary-monitor fallback if an unusual shell rejects it.
+            var fallback = SystemParameters.WorkArea;
+            Left = fallback.Left + (fallback.Width - Width) / 2;
+            Top = fallback.Top + (fallback.Height - Height) / 2;
+        }
     }
 
     private void ApplyParkedWindowStyle(bool parked)
@@ -621,11 +641,7 @@ public partial class HistoryWindow : Window
         if (GetItem(sender) is not { IsImage: true } item) return;
         try
         {
-            var bmp = await Task.Run(() =>
-            {
-                using var stream = File.OpenRead(item.FilePath);
-                return new SD.Bitmap(stream);
-            });
+            var bmp = await Task.Run(() => HistoryImageLoader.LoadDetachedBitmap(item.FilePath));
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership: true);
         }
         catch (Exception ex)
@@ -642,7 +658,7 @@ public partial class HistoryWindow : Window
 
     private void OnPin(object sender, RoutedEventArgs e)
     {
-        if (GetItem(sender) is { } item)
+        if (GetItem(sender) is { CanPin: true } item)
             PinRequested?.Invoke(item.FilePath);
     }
 
@@ -677,7 +693,20 @@ public partial class HistoryWindow : Window
         int index = _items.IndexOf(item);
         try
         {
-            await Task.Run(() => _history.Delete(item.FilePath));
+            HistoryDeleteResult result = await Task.Run(() => _history.Delete(item.FilePath));
+            if (!result.Succeeded)
+            {
+                string detail = string.IsNullOrWhiteSpace(result.ErrorMessage)
+                    ? "Windows could not remove this history item from disk."
+                    : result.ErrorMessage;
+                MessageBox.Show(
+                    this,
+                    $"WinShot could not delete this history item.\n\n{detail}",
+                    "Delete failed",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
         }
         catch (Exception ex)
         {
@@ -715,12 +744,63 @@ public partial class HistoryWindow : Window
 
     private const int GwlExStyle = -20;
     private const int WsExTransparent = 0x00000020;
+    private const uint MonitorDefaultToNearest = 2;
+    private const int EffectiveDpi = 0;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+
+    private static double GetCursorMonitorDpiScale()
+    {
+        try
+        {
+            SD.Point cursor = WF.Cursor.Position;
+            IntPtr monitor = MonitorFromPoint(new NativePoint(cursor.X, cursor.Y), MonitorDefaultToNearest);
+            if (monitor != IntPtr.Zero && GetDpiForMonitor(monitor, EffectiveDpi, out uint dpiX, out _) == 0)
+                return Math.Max(1, dpiX / 96d);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to read cursor monitor DPI for History placement", ex);
+        }
+
+        return 1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct NativePoint
+    {
+        public NativePoint(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+
+        public readonly int X;
+        public readonly int Y;
+    }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(NativePoint point, uint flags);
+
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
 }
 
 /// <summary>One history file shown as a tile. GIFs deliberately count as media,
@@ -751,6 +831,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public bool IsImage { get; }
     public bool IsVideo { get; }
     public bool IsGif { get; }
+    public bool CanPin => IsImage;
     public string ExtensionLabel { get; }
 
     /// <summary>Capture time parsed from the file name ("yyyyMMdd-HHmmss-fff"),
@@ -860,6 +941,12 @@ public sealed class HistoryItem : INotifyPropertyChanged
 
     public Visibility ImageOnlyVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MediaOnlyVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility PinVisibility => CanPin ? Visibility.Visible : Visibility.Collapsed;
+    public string AccessibleName => $"{(IsImage ? "Screenshot" : ExtensionLabel)} captured {Caption}";
+    public string AccessibleHelpText =>
+        CanPin
+            ? "Press Enter to open, Space to preview, or Tab for Copy, Edit, Pin, and Delete actions."
+            : "Press Enter to open, Space to preview, or Tab for Delete. Pin is available only for still images.";
 
     public ImageSource? Thumbnail
     {

@@ -61,12 +61,29 @@ public class HistoryService
             return GetItemsCore();
     }
 
-    public void Delete(string path)
+    /// <summary>
+    /// Deletes one history copy. Success is reported only after the file no longer exists,
+    /// so callers do not remove the visible tile when Windows rejected the disk operation.
+    /// </summary>
+    public HistoryDeleteResult Delete(string path)
     {
         lock (_gate)
         {
-            try { File.Delete(path); }
-            catch (Exception ex) { Log.Error($"Failed to delete history item {path}", ex); }
+            try
+            {
+                File.Delete(path);
+                if (!File.Exists(path))
+                    return HistoryDeleteResult.Success;
+
+                const string stillExists = "Windows reported that the file was deleted, but it is still on disk.";
+                Log.Error($"Failed to delete history item {path}: {stillExists}");
+                return HistoryDeleteResult.Failure(stillExists);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Failed to delete history item {path}", ex);
+                return HistoryDeleteResult.Failure(ex.Message);
+            }
         }
     }
 
@@ -134,4 +151,12 @@ public class HistoryService
             catch (Exception ex) { Log.Error($"Failed to delete history item {stale}", ex); }
         }
     }
+}
+
+public readonly record struct HistoryDeleteResult(bool Succeeded, string? ErrorMessage)
+{
+    public static HistoryDeleteResult Success => new(true, null);
+
+    public static HistoryDeleteResult Failure(string message) =>
+        new(false, string.IsNullOrWhiteSpace(message) ? "The history item could not be deleted." : message);
 }
