@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -425,6 +426,8 @@ public partial class EditorWindow : Window
                 Style = style,
                 Content = emoji,
             };
+            AutomationProperties.SetName(button, $"Emoji {emoji}");
+            AutomationProperties.SetHelpText(button, "Choose this emoji for placement on the image.");
             button.Click += OnEmojiPicked;
             EmojiGrid.Children.Add(button);
         }
@@ -488,6 +491,8 @@ public partial class EditorWindow : Window
                 BorderBrush = (Brush)FindResource("BorderStrongBrush"),
                 BorderThickness = new Thickness(1),
             };
+            AutomationProperties.SetName(btn, $"Color {hex}");
+            AutomationProperties.SetHelpText(btn, $"Use local annotation color {hex}.");
             btn.Click += OnColorPickerGridPick;
             ColorPickerGrid.Children.Add(btn);
         }

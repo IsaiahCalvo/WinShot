@@ -4,11 +4,9 @@
         Title="WinShot Editor" Background="{StaticResource WindowBgBrush}"
         MinWidth="980" MinHeight="520"
         AllowDrop="True" Drop="OnEditorDrop" DragOver="OnEditorDragOver"
-        WindowStartupLocation="CenterScreen" UseLayoutRounding="True">
+        WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
+        AutomationProperties.Name="WinShot annotation editor">
     <Window.Resources>
-        <!-- Emoji glyphs are color font content, not theme icon-font glyphs, so the
-             emoji palette keeps a tiny local button style. Everything else comes
-             from the shared Theme.xaml design system. -->
         <Style x:Key="EmojiButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="FontFamily" Value="Segoe UI Emoji"/>
@@ -19,12 +17,16 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                                BorderBrush="Transparent" BorderThickness="2">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -33,9 +35,6 @@
         </Style>
     </Window.Resources>
 
-    <!-- 3-row shell: floating toolbar over a full-bleed canvas over a floating
-         bottom utility bar. Rows keep the canvas clear of both bars so the
-         fit/center math (against Viewport size) is unaffected by the redesign. -->
     <Grid Background="{StaticResource WindowBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -43,137 +42,198 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- ===================== FLOATING TOP TOOLBAR ===================== -->
-        <Border Grid.Row="0" Style="{StaticResource FloatingToolbar}" Margin="12,12,12,6">
+        <Border x:Name="TopToolbar" Grid.Row="0" Style="{StaticResource FloatingToolbar}" Margin="12,12,12,6">
             <StackPanel>
-                <!-- Row 1: tools (left) + commit pills (right) -->
-                <DockPanel>
+                <DockPanel x:Name="ToolbarPrimaryRow">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <!-- Separate the commit pills from the tool cluster, mirroring
-                             CleanShot's gap between the font pill and the Save / Done group. -->
                         <Rectangle Style="{StaticResource ToolbarDivider}" Margin="2,0,8,0"/>
                         <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
-                                Content="Save as…" Click="OnSave" ToolTip="Save to a file…"/>
-                        <Button Style="{StaticResource PillButtonPrimary}"
-                                Content="Done" Click="OnClose" ToolTip="Finish and close the editor"/>
+                                Content="Save as…" Click="OnSave" ToolTip="Save as… (Ctrl+Shift+S)"
+                                AutomationProperties.Name="Save as"
+                                AutomationProperties.HelpText="Choose a local export file. Shortcut Ctrl+Shift+S."/>
+                        <Button x:Name="BtnDone" Style="{StaticResource PillButtonPrimary}"
+                                Content="Done" Click="OnClose" ToolTip="Finish and close the editor"
+                                AutomationProperties.Name="Done"
+                                AutomationProperties.HelpText="Finish editing and close this window."/>
                     </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                        <RadioButton x:Name="CropUtilityBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Crop" Content="&#xE7A8;" Checked="OnToolChecked"
+                                     ToolTip="Crop &amp; resize (C)"
+                                     AutomationProperties.Name="Crop and resize"
+                                     AutomationProperties.HelpText="Select Crop with C. Resize image remains in More image actions."/>
+                        <Button x:Name="AddImageBtn" Style="{StaticResource ToolIconButton}" Content="&#xEE71;"
+                                Click="OnAddImage" ToolTip="Add screenshot or image…"
+                                AutomationProperties.Name="Add screenshot or image"
+                                AutomationProperties.HelpText="Insert one or more local image files as movable annotations."/>
+                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource ToolIconButton}" Content="&#xE790;"
+                                Click="OnAddBackground" ToolTip="Add background"
+                                AutomationProperties.Name="Add background"
+                                AutomationProperties.HelpText="Open the local background composer with the current edited image."/>
+                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                    </StackPanel>
+
                     <WrapPanel x:Name="ToolPanel" VerticalAlignment="Center">
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Select" Content="&#xE8B0;"
-                                     ToolTip="Select (V) — click an annotation to select, drag to move, arrow keys nudge, Del deletes, double-click text to edit"
-                                     Checked="OnToolChecked" IsChecked="True"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Pan" Content="&#xE7C2;"
-                                     ToolTip="Pan — drag to move the view (middle-drag or hold Space works with any tool)"
-                                     Checked="OnToolChecked"/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Arrow" Content="&#xE72A;"
-                                     ToolTip="Arrow (A)" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="CurvedArrow" Content="&#xF0AD;"
-                                     ToolTip="Curved arrow — drag start to end, then drag the blue handle to bend it"
-                                     Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Line" Content="&#xE738;"
-                                     ToolTip="Line (L)" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Rectangle" Content="&#xE739;"
-                                     ToolTip="Rectangle (R)" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Ellipse" Content="&#xEA3A;"
-                                     ToolTip="Ellipse (E)" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Freehand" Content="&#xE70F;"
-                                     ToolTip="Draw (P) — freehand pen" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Highlighter" Content="&#xE891;"
-                                     ToolTip="Highlighter (H)" Checked="OnToolChecked"/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Text" Content="&#xE8D2;"
-                                     ToolTip="Text (T)" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Step" Content="&#xE8EF;"
-                                     ToolTip="Step counter (S) — numbered or lettered badges" Checked="OnToolChecked"/>
-                        <RadioButton x:Name="EmojiToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Emoji"
-                                     FontFamily="Segoe UI Emoji" Content="😀"
-                                     ToolTip="Emoji — pick an emoji, then click the image to place it"
-                                     Checked="OnToolChecked" Click="OnEmojiButtonClick"/>
-                        <Popup x:Name="EmojiPopup" PlacementTarget="{Binding ElementName=EmojiToolBtn}"
-                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True"
-                               PopupAnimation="Fade">
-                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
-                                    Effect="{StaticResource FloatingShadow}">
-                                <UniformGrid x:Name="EmojiGrid" Columns="6"/>
-                            </Border>
-                        </Popup>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Blur" Content="&#xE7E6;"
-                                     ToolTip="Blur (B) — smooth blur over a region" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Pixelate" Content="&#xE80A;"
-                                     ToolTip="Pixelate — irreversible randomized mosaic for sensitive text"
-                                     Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Spotlight" Content="&#xE8FB;"
-                                     ToolTip="Spotlight — dim everything except the dragged region"
-                                     Checked="OnToolChecked"/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Crop" Content="&#xE7A8;"
-                                     ToolTip="Crop (C)" Checked="OnToolChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Eyedropper" Content="&#xEF3C;"
-                                     ToolTip="Eyedropper — click the image to pick that pixel's color"
-                                     Checked="OnToolChecked"/>
+                        <RadioButton x:Name="SelectToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Select" Content="&#xE8B0;" Checked="OnToolChecked" IsChecked="True"
+                                     ToolTip="Cursor (V)" AutomationProperties.Name="Cursor"
+                                     AutomationProperties.HelpText="Select, move, resize, reorder, or delete annotations. Shortcut V."/>
+                        <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Rectangle" Content="&#xE739;" Checked="OnToolChecked"
+                                     ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
+                                     AutomationProperties.HelpText="Draw an outline rectangle. Shortcut R."/>
+                        <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="FilledRectangle" Content="&#xE73B;" Checked="OnFilledRectangleToolChecked"
+                                     ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
+                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current color."/>
+                        <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Ellipse" Content="&#xEA3A;" Checked="OnToolChecked" ToolTip="Ellipse (E)"
+                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."/>
+                        <RadioButton x:Name="LineToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Line" Content="&#xE738;" Checked="OnToolChecked" ToolTip="Line (L)"
+                                     AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."/>
+                        <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Arrow" Content="&#xE72A;" Checked="OnToolChecked" ToolTip="Arrow (A)"
+                                     AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw a straight, double, or thin arrow. Shortcut A."/>
+                        <RadioButton x:Name="TextToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Text" Content="&#xE8D2;" Checked="OnToolChecked" ToolTip="Text (T)"
+                                     AutomationProperties.Name="Text"
+                                     AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."/>
+                        <RadioButton x:Name="PixelateToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Pixelate" Content="&#xE80A;" Checked="OnToolChecked" ToolTip="Pixelate"
+                                     AutomationProperties.Name="Pixelate"
+                                     AutomationProperties.HelpText="Apply a randomized local mosaic redaction to a dragged region."/>
+                        <RadioButton x:Name="SpotlightToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Spotlight" Content="&#xE8FB;" Checked="OnToolChecked" ToolTip="Spotlight"
+                                     AutomationProperties.Name="Spotlight"
+                                     AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."/>
+                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Step" Content="&#xE8EF;" Checked="OnToolChecked" ToolTip="Counter (S)"
+                                     AutomationProperties.Name="Counter"
+                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."/>
+                        <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Freehand" Content="&#xE70F;" Checked="OnToolChecked" ToolTip="Draw (P)"
+                                     AutomationProperties.Name="Draw"
+                                     AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."/>
+                        <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Highlighter" Content="&#xE891;" Checked="OnToolChecked" ToolTip="Draw highlight (H)"
+                                     AutomationProperties.Name="Draw highlight"
+                                     AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."/>
+                        <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                            <RadioButton x:Name="EmojiToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Emoji"
+                                         FontFamily="Segoe UI Emoji" Content="&#x1F600;" Checked="OnToolChecked" Click="OnEmojiButtonClick"
+                                         ToolTip="Emoji" AutomationProperties.Name="Emoji"
+                                         AutomationProperties.HelpText="Pick an emoji, then click the image to place it."/>
+                            <Button x:Name="MoreToolsButton" Style="{StaticResource ToolIconButton}" Content="&#xE712;"
+                                    Click="OnMoreToolsClick" ToolTip="More tools and image actions"
+                                    AutomationProperties.Name="More tools and image actions"
+                                    AutomationProperties.HelpText="Open Pan, Curved Arrow, Blur, Eyedropper, transforms, resize, undo, and redo."/>
+                        </StackPanel>
                     </WrapPanel>
                 </DockPanel>
 
-                <!-- Row 2: contextual style controls (left) + image utilities (right) -->
+                <Popup x:Name="MoreToolsPopup" PlacementTarget="{Binding ElementName=MoreToolsButton}"
+                       Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                    <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
+                            Effect="{StaticResource FloatingShadow}">
+                        <StackPanel>
+                            <TextBlock Text="More tools" Style="{StaticResource FieldLabel}" Margin="4,0,4,6"/>
+                            <UniformGrid x:Name="MoreToolPanel" Columns="4">
+                                <RadioButton x:Name="PanToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                             Tag="Pan" Content="&#xE7C2;" Checked="OnToolChecked" ToolTip="Pan"
+                                             AutomationProperties.Name="Pan"
+                                             AutomationProperties.HelpText="Drag to move the view. Middle-drag or hold Space works with any tool."/>
+                                <RadioButton x:Name="CurvedArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                             Tag="CurvedArrow" Content="&#xF0AD;" Checked="OnToolChecked" ToolTip="Curved arrow"
+                                             AutomationProperties.Name="Curved arrow"
+                                             AutomationProperties.HelpText="Drag start to end, then drag the blue handle to bend the arrow."/>
+                                <RadioButton x:Name="BlurToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                             Tag="Blur" Content="&#xE7E6;" Checked="OnToolChecked" ToolTip="Blur (B)"
+                                             AutomationProperties.Name="Blur"
+                                             AutomationProperties.HelpText="Apply a smooth local blur to a dragged region. Shortcut B."/>
+                                <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                             Tag="Eyedropper" Content="&#xEF3C;" Checked="OnToolChecked" ToolTip="Eyedropper"
+                                             AutomationProperties.Name="Eyedropper"
+                                             AutomationProperties.HelpText="Sample a source pixel and make it the current annotation color."/>
+                            </UniformGrid>
+                            <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
+                            <TextBlock Text="Image actions" Style="{StaticResource FieldLabel}" Margin="4,0,4,6"/>
+                            <UniformGrid Columns="7">
+                                <Button x:Name="RotateCcwBtn" Style="{StaticResource ToolIconButton}" Content="&#xE7AD;"
+                                        ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"
+                                        AutomationProperties.Name="Rotate counter-clockwise"
+                                        AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise."/>
+                                <Button x:Name="RotateCwBtn" Style="{StaticResource ToolIconButton}" Content="&#xE7AD;"
+                                        RenderTransformOrigin="0.5,0.5" ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
+                                        AutomationProperties.Name="Rotate clockwise"
+                                        AutomationProperties.HelpText="Rotate the source image 90 degrees clockwise.">
+                                    <Button.RenderTransform><ScaleTransform ScaleX="-1"/></Button.RenderTransform>
+                                </Button>
+                                <Button x:Name="FlipHorizontalBtn" Style="{StaticResource ToolIconButton}" Content="&#xE13C;"
+                                        ToolTip="Flip horizontal" Click="OnFlipHorizontal" AutomationProperties.Name="Flip horizontal"
+                                        AutomationProperties.HelpText="Flip the source image from left to right."/>
+                                <Button x:Name="FlipVerticalBtn" Style="{StaticResource ToolIconButton}" Content="&#xE174;"
+                                        ToolTip="Flip vertical" Click="OnFlipVertical" AutomationProperties.Name="Flip vertical"
+                                        AutomationProperties.HelpText="Flip the source image from top to bottom."/>
+                                <Button x:Name="ResizeImageBtn" Style="{StaticResource ToolIconButton}" Content="&#xE740;"
+                                        ToolTip="Resize the image…" Click="OnResizeImage" AutomationProperties.Name="Resize image"
+                                        AutomationProperties.HelpText="Open local source-image resize controls."/>
+                                <Button x:Name="BtnUndo" Style="{StaticResource ToolIconButton}" Content="&#xE7A7;"
+                                        ToolTip="Undo (Ctrl+Z)" Click="OnUndo" IsEnabled="False"
+                                        AutomationProperties.Name="Undo" AutomationProperties.HelpText="Undo the last action. Shortcut Ctrl+Z."/>
+                                <Button x:Name="BtnRedo" Style="{StaticResource ToolIconButton}" Content="&#xE7A6;"
+                                        ToolTip="Redo (Ctrl+Y)" Click="OnRedo" IsEnabled="False"
+                                        AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y."/>
+                            </UniformGrid>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+
+                <Popup x:Name="EmojiPopup" PlacementTarget="{Binding ElementName=EmojiToolBtn}"
+                       Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                    <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
+                            Effect="{StaticResource FloatingShadow}">
+                        <UniformGrid x:Name="EmojiGrid" Columns="6"/>
+                    </Border>
+                </Popup>
+
                 <DockPanel x:Name="EditorStyleBar" Margin="0,8,0,0" Visibility="Collapsed">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="CropPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"/>
-                            <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" Click="OnCancelCrop"/>
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                            <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
+                                    AutomationProperties.Name="Apply crop"/>
+                            <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" Click="OnCancelCrop"
+                                    AutomationProperties.Name="Cancel crop"/>
                         </StackPanel>
-                        <Button Style="{StaticResource ToolIconButton}" Content="&#xE7AD;"
-                                ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"/>
-                        <Button Style="{StaticResource ToolIconButton}" Content="&#xE7AD;"
-                                RenderTransformOrigin="0.5,0.5"
-                                ToolTip="Rotate 90° clockwise" Click="OnRotateCw">
-                            <Button.RenderTransform>
-                                <ScaleTransform ScaleX="-1"/>
-                            </Button.RenderTransform>
-                        </Button>
-                        <Button Style="{StaticResource ToolIconButton}" Content="&#xE13C;"
-                                ToolTip="Flip horizontal" Click="OnFlipHorizontal"/>
-                        <Button Style="{StaticResource ToolIconButton}" Content="&#xE174;"
-                                ToolTip="Flip vertical" Click="OnFlipVertical"/>
-                        <Button Style="{StaticResource ToolIconButton}" Content="&#xE740;"
-                                ToolTip="Resize the image…" Click="OnResizeImage"/>
-                        <Button Style="{StaticResource ToolIconButton}" Content="&#xEE71;"
-                                ToolTip="Insert an image file as a movable annotation (you can also drag and drop image files onto the editor)"
-                                Click="OnAddImage"/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <Button x:Name="BtnUndo" Style="{StaticResource ToolIconButton}" Content="&#xE7A7;"
-                                ToolTip="Undo" Click="OnUndo" IsEnabled="False"/>
-                        <Button x:Name="BtnRedo" Style="{StaticResource ToolIconButton}" Content="&#xE7A6;"
-                                ToolTip="Redo" Click="OnRedo" IsEnabled="False"/>
                     </StackPanel>
-                    <WrapPanel VerticalAlignment="Center">
-                        <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center">
+
+                    <WrapPanel x:Name="ContextPanel" VerticalAlignment="Center">
+                        <StackPanel x:Name="ColorPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <TextBlock Text="Color" Style="{StaticResource FieldLabel}" Margin="2,0,4,0"/>
                             <Ellipse x:Name="CurrentColorIndicator" Width="16" Height="16" Fill="{StaticResource AnnotationRedBrush}"
                                      Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1" Margin="2,0,8,0"
-                                     VerticalAlignment="Center"
-                                     ToolTip="Current color (pick a swatch or use the eyedropper)"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF453A" ToolTip="Red" Checked="OnColorChecked" IsChecked="True"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF9500" ToolTip="Orange" Checked="OnColorChecked"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFCC00" ToolTip="Yellow" Checked="OnColorChecked"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#34C759" ToolTip="Green" Checked="OnColorChecked"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#0A84FF" ToolTip="Blue" Checked="OnColorChecked"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#AF52DE" ToolTip="Purple" Checked="OnColorChecked"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#000000" ToolTip="Black" Checked="OnColorChecked"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFFFFF" ToolTip="White" Checked="OnColorChecked"/>
-                            <!-- Persistent custom swatch: holds the last custom / eyedropper color.
-                                 The rainbow ring marks it as the "pick a custom color" entry until set. -->
+                                     VerticalAlignment="Center" ToolTip="Current color"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF453A" ToolTip="Red" Checked="OnColorChecked" IsChecked="True" AutomationProperties.Name="Red"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF9500" ToolTip="Orange" Checked="OnColorChecked" AutomationProperties.Name="Orange"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFCC00" ToolTip="Yellow" Checked="OnColorChecked" AutomationProperties.Name="Yellow"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#34C759" ToolTip="Green" Checked="OnColorChecked" AutomationProperties.Name="Green"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#0A84FF" ToolTip="Blue" Checked="OnColorChecked" AutomationProperties.Name="Blue"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#AF52DE" ToolTip="Purple" Checked="OnColorChecked" AutomationProperties.Name="Purple"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#000000" ToolTip="Black" Checked="OnColorChecked" AutomationProperties.Name="Black"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFFFFF" ToolTip="White" Checked="OnColorChecked" AutomationProperties.Name="White"/>
                             <RadioButton x:Name="CustomSwatch" Style="{StaticResource ColorSwatch}" GroupName="Color"
-                                         ToolTip="Custom color — click to open the color picker"
-                                         Checked="OnColorChecked" Click="OnCustomSwatchClick">
+                                         ToolTip="Custom color" Checked="OnColorChecked" Click="OnCustomSwatchClick"
+                                         AutomationProperties.Name="Custom color"
+                                         AutomationProperties.HelpText="Open the local palette or enter a hex color.">
                                 <RadioButton.Background>
                                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                        <GradientStop Color="#FF3B30" Offset="0.0"/>
-                                        <GradientStop Color="#FFCC00" Offset="0.25"/>
-                                        <GradientStop Color="#34C759" Offset="0.5"/>
-                                        <GradientStop Color="#0A84FF" Offset="0.75"/>
-                                        <GradientStop Color="#AF52DE" Offset="1.0"/>
+                                        <GradientStop Color="#FF3B30" Offset="0"/><GradientStop Color="#FFCC00" Offset="0.25"/>
+                                        <GradientStop Color="#34C759" Offset="0.5"/><GradientStop Color="#0A84FF" Offset="0.75"/>
+                                        <GradientStop Color="#AF52DE" Offset="1"/>
                                     </LinearGradientBrush>
                                 </RadioButton.Background>
                             </RadioButton>
@@ -186,223 +246,184 @@
                                         <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
                                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
                                         <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22"
-                                                       RadiusX="4" RadiusY="4" Stroke="{StaticResource BorderStrongBrush}"
-                                                       StrokeThickness="1" VerticalAlignment="Center"/>
-                                            <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}"
-                                                     Margin="8,0" VerticalAlignment="Center" Text="#FF3B30"
-                                                     KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
-                                                     ToolTip="Type a hex color (e.g. #FF3B30)"/>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
+                                                       Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
+                                            <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
+                                                     Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
+                                                     ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
                                             <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource PillButtonPrimary}"
-                                                    Content="Use" Click="OnColorPickerApply"/>
+                                                    Content="Use" Click="OnColorPickerApply" AutomationProperties.Name="Use color"/>
                                         </Grid>
                                     </StackPanel>
                                 </Border>
                             </Popup>
                         </StackPanel>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13" ToolTip="Thin stroke" Checked="OnThicknessChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="Segoe UI" FontSize="13" ToolTip="Medium stroke" Checked="OnThicknessChecked" IsChecked="True"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="Segoe UI" FontSize="13" ToolTip="Thick stroke" Checked="OnThicknessChecked"/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <TextBlock Text="Fill" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Fill" Tag="None" Content="&#xE739;"
-                                     ToolTip="No fill (outline only)" Checked="OnFillChecked" IsChecked="True"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Quarter" Content="&#xE7E6;"
-                                     ToolTip="25% fill" Checked="OnFillChecked"/>
-                        <RadioButton Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;"
-                                     ToolTip="Solid fill" Checked="OnFillChecked"/>
-                        <!-- Opacity: applies to new shapes/arrows/lines/highlighter and (via the
-                             restyle path) to the currently selected annotation. -->
-                        <StackPanel x:Name="OpacityPanel" Orientation="Horizontal" VerticalAlignment="Center">
+
+                        <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <Slider x:Name="OpacitySlider" Style="{StaticResource DarkSlider}" Width="92"
-                                    Minimum="25" Maximum="100" Value="100" SmallChange="5" LargeChange="25"
-                                    TickFrequency="25" IsSnapToTickEnabled="False" VerticalAlignment="Center"
-                                    ValueChanged="OnOpacityChanged"
-                                    PreviewMouseUp="OnOpacitySliderReleased"
-                                    LostMouseCapture="OnOpacitySliderReleased"
-                                    KeyUp="OnOpacitySliderReleased"
-                                    ToolTip="Annotation opacity"/>
-                            <TextBlock x:Name="OpacityValue" Text="100%" Style="{StaticResource ValueLabel}"
-                                       MinWidth="38" TextAlignment="Right" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="ThicknessLabel" Text="Thickness" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
+                            <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Thin" Checked="OnThicknessChecked" AutomationProperties.Name="Thin"/>
+                            <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Medium" Checked="OnThicknessChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
+                            <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="Segoe UI" FontSize="13"
+                                         ToolTip="Thick" Checked="OnThicknessChecked" AutomationProperties.Name="Thick"/>
                         </StackPanel>
-                        <!-- Arrow style: shown only while the Arrow tool is active. Straight is the
-                             original look; Double has a head at both ends; Thin is a slim tapered arrow. -->
+
                         <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock Text="Arrow" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" Width="98"
-                                      SelectedIndex="0" SelectionChanged="OnArrowStyleChanged">
-                                <ComboBoxItem Content="Straight" Tag="Straight"/>
-                                <ComboBoxItem Content="Double" Tag="Double"/>
-                                <ComboBoxItem Content="Thin" Tag="Thin"/>
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Arrow" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" Width="98" SelectedIndex="0"
+                                      SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrow style">
+                                <ComboBoxItem Content="Straight" Tag="Straight"/><ComboBoxItem Content="Double" Tag="Double"/><ComboBoxItem Content="Thin" Tag="Thin"/>
                             </ComboBox>
                         </StackPanel>
-                        <!-- Blur / Pixelate strength: shown only while those tools are active. -->
+
                         <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <TextBlock x:Name="EffectStrengthLabel" Text="Strength" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <RadioButton x:Name="StrengthLightBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength"
-                                         Tag="Light" Content="S" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Light" Checked="OnEffectStrengthChecked"/>
-                            <RadioButton x:Name="StrengthMediumBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength"
-                                         Tag="Medium" Content="M" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True"/>
-                            <RadioButton x:Name="StrengthStrongBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength"
-                                         Tag="Strong" Content="L" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Strong" Checked="OnEffectStrengthChecked"/>
+                            <RadioButton x:Name="StrengthLightBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Light" Content="S"
+                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Light" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Light"/>
+                            <RadioButton x:Name="StrengthMediumBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Medium" Content="M"
+                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
+                            <RadioButton x:Name="StrengthStrongBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Strong" Content="L"
+                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Strong" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Strong"/>
                         </StackPanel>
+
                         <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="TextStyleBox" Style="{StaticResource DarkComboBox}" Width="92"
-                                      SelectedIndex="0" SelectionChanged="OnTextStyleChanged">
-                                <ComboBoxItem Content="Plain" Tag="Plain"/>
-                                <ComboBoxItem Content="Bold" Tag="Bold"/>
-                                <ComboBoxItem Content="Outline" Tag="Outline"/>
-                                <ComboBoxItem Content="Pill" Tag="Pill"/>
-                                <ComboBoxItem Content="Huge" Tag="Huge"/>
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="TextStyleBox" Style="{StaticResource DarkComboBox}" Width="92" SelectedIndex="0"
+                                      SelectionChanged="OnTextStyleChanged" AutomationProperties.Name="Text style">
+                                <ComboBoxItem Content="Plain" Tag="Plain"/><ComboBoxItem Content="Bold" Tag="Bold"/><ComboBoxItem Content="Outline" Tag="Outline"/>
+                                <ComboBoxItem Content="Pill" Tag="Pill"/><ComboBoxItem Content="Huge" Tag="Huge"/>
                             </ComboBox>
                         </StackPanel>
+
                         <StackPanel x:Name="CropRatioPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock Text="Ratio" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="CropRatioBox" Style="{StaticResource DarkComboBox}" Width="88"
-                                      SelectedIndex="0" SelectionChanged="OnCropRatioChanged">
-                                <ComboBoxItem Content="Free" Tag=""/>
-                                <ComboBoxItem Content="1:1" Tag="1:1"/>
-                                <ComboBoxItem Content="4:3" Tag="4:3"/>
-                                <ComboBoxItem Content="16:9" Tag="16:9"/>
-                                <ComboBoxItem Content="9:16" Tag="9:16"/>
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Ratio" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="CropRatioBox" Style="{StaticResource DarkComboBox}" Width="88" SelectedIndex="0"
+                                      SelectionChanged="OnCropRatioChanged" AutomationProperties.Name="Crop ratio">
+                                <ComboBoxItem Content="Free" Tag=""/><ComboBoxItem Content="1:1" Tag="1:1"/><ComboBoxItem Content="4:3" Tag="4:3"/>
+                                <ComboBoxItem Content="16:9" Tag="16:9"/><ComboBoxItem Content="9:16" Tag="9:16"/>
                             </ComboBox>
                         </StackPanel>
+
                         <StackPanel x:Name="StepModePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock Text="Count" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <RadioButton x:Name="StepNumberBtn" Style="{StaticResource ToolButton}" GroupName="StepMode"
-                                         Tag="Number" Content="1" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Number the badges (1, 2, 3…)" Checked="OnStepModeChecked" IsChecked="True"/>
-                            <RadioButton x:Name="StepLetterBtn" Style="{StaticResource ToolButton}" GroupName="StepMode"
-                                         Tag="Letter" Content="A" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Letter the badges (A, B, C…)" Checked="OnStepModeChecked"/>
-                            <Button Style="{StaticResource PillButtonSecondary}" Content="Reset to 1"
-                                    ToolTip="Next badge restarts the sequence" Click="OnResetStepCounter"/>
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Count" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <RadioButton x:Name="StepNumberBtn" Style="{StaticResource ToolButton}" GroupName="StepMode" Tag="Number" Content="1"
+                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Number badges" Checked="OnStepModeChecked" IsChecked="True"
+                                         AutomationProperties.Name="Number badges"/>
+                            <RadioButton x:Name="StepLetterBtn" Style="{StaticResource ToolButton}" GroupName="StepMode" Tag="Letter" Content="A"
+                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Letter badges" Checked="OnStepModeChecked"
+                                         AutomationProperties.Name="Letter badges"/>
+                            <Button Style="{StaticResource PillButtonSecondary}" Content="Reset to 1" ToolTip="Reset counter"
+                                    Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>
+                        </StackPanel>
+
+                        <StackPanel x:Name="FillPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Fill" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
+                            <RadioButton x:Name="FillNoneBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="None" Content="&#xE739;" ToolTip="No fill"
+                                         Checked="OnFillChecked" IsChecked="True" AutomationProperties.Name="No fill"
+                                         AutomationProperties.HelpText="Draw shapes with an outline and no fill."/>
+                            <RadioButton x:Name="FillQuarterBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Quarter" Content="&#xE7E6;" ToolTip="25% fill"
+                                         Checked="OnFillChecked" AutomationProperties.Name="25 percent fill"
+                                         AutomationProperties.HelpText="Draw shapes with a translucent 25 percent fill."/>
+                            <RadioButton x:Name="FillSolidBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;" ToolTip="Solid fill"
+                                         Checked="OnFillChecked" AutomationProperties.Name="Solid fill"
+                                         AutomationProperties.HelpText="Draw shapes with a solid fill."/>
+                        </StackPanel>
+
+                        <StackPanel x:Name="OpacityPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <Slider x:Name="OpacitySlider" Style="{StaticResource DarkSlider}" Width="92" Minimum="25" Maximum="100" Value="100"
+                                    SmallChange="5" LargeChange="25" TickFrequency="25" IsSnapToTickEnabled="False"
+                                    ValueChanged="OnOpacityChanged" PreviewMouseUp="OnOpacitySliderReleased" LostMouseCapture="OnOpacitySliderReleased"
+                                    KeyUp="OnOpacitySliderReleased" ToolTip="Annotation opacity" AutomationProperties.Name="Annotation opacity"/>
+                            <TextBlock x:Name="OpacityValue" Text="100%" Style="{StaticResource ValueLabel}" MinWidth="38"
+                                       TextAlignment="Right" Margin="6,0,0,0"/>
                         </StackPanel>
                     </WrapPanel>
                 </DockPanel>
             </StackPanel>
         </Border>
 
-        <!-- ===================== INFINITE CANVAS ===================== -->
-        <!-- The content keeps a 1 DIP = 1 source pixel layout and is positioned
-             purely by the view transform below, so zoom/pan never touch annotation
-             math or the flatten/export path (which renders CanvasHost only). -->
         <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
-              MouseWheel="OnViewportMouseWheel"
-              MouseDown="OnViewportMouseDown"
-              MouseMove="OnViewportMouseMove"
-              MouseUp="OnViewportMouseUp"
-              MouseRightButtonUp="OnViewportRightClick">
-            <!-- Canvas host: a Grid applies a LAYOUT CLIP (in the child's PRE-transform space)
-                 to a non-stretch child taller than the viewport, which visually truncated tall
-                 captures to the first ~viewport-height SOURCE rows at any zoom — the real cause
-                 of "the editor shows a cropped capture" (measured by EditorClipSweep). A Canvas
-                 never layout-clips; the Viewport's own ClipToBounds still crops in device space. -->
+              MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
+              MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
+              AutomationProperties.Name="Annotation canvas"
+              AutomationProperties.HelpText="Source-resolution image canvas. Hold Space or middle-drag to pan; Ctrl+mouse wheel zooms.">
             <Canvas x:Name="SurfaceHost">
-            <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
-                  Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
-                <Grid.RenderTransform>
-                    <TransformGroup>
-                        <ScaleTransform x:Name="ViewScale"/>
-                        <TranslateTransform x:Name="ViewTranslate"/>
-                    </TransformGroup>
-                </Grid.RenderTransform>
-                <Grid x:Name="CanvasHost">
-                    <!-- The base image is shown as a vertical stack of <=2048px tiles, not one giant
-                         Image: WPF's software rasterizer (always used over RDP, and the fallback when a
-                         surface exceeds the GPU texture limit) clips a single tall image past its
-                         16.16 fixed-point limit. Tiling keeps every element small enough to render. -->
-                    <StackPanel x:Name="BaseTiles" Orientation="Vertical"
-                                HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                    <Canvas x:Name="AnnotationCanvas" Background="Transparent" ClipToBounds="True"/>
+                <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
+                      Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
+                    <Grid.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="ViewScale"/>
+                            <TranslateTransform x:Name="ViewTranslate"/>
+                        </TransformGroup>
+                    </Grid.RenderTransform>
+                    <Grid x:Name="CanvasHost">
+                        <StackPanel x:Name="BaseTiles" Orientation="Vertical" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                        <Canvas x:Name="AnnotationCanvas" Background="Transparent" ClipToBounds="True"/>
+                    </Grid>
+                    <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
+                        <Path x:Name="CropDim" Fill="#66000000" Visibility="Collapsed"/>
+                        <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
+                                   StrokeDashArray="4 3" Fill="#114DA3FF" Visibility="Collapsed"/>
+                        <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
+                                   StrokeDashArray="4 3" Visibility="Collapsed"/>
+                        <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
+                                 Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
+                        <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
+                        <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
+                                CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <Rectangle x:Name="EyedropColorRect" Width="14" Height="14" RadiusX="2" RadiusY="2"
+                                           Stroke="#88FFFFFF" StrokeThickness="1"/>
+                                <TextBlock x:Name="EyedropHexText" Foreground="White" FontSize="11" Margin="6,0,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </Canvas>
                 </Grid>
-                <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
-                    <Path x:Name="CropDim" Fill="#66000000" Visibility="Collapsed"/>
-                    <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                               StrokeDashArray="4 3" Fill="#114DA3FF" Visibility="Collapsed"/>
-                    <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                               StrokeDashArray="4 3" Visibility="Collapsed"/>
-                    <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
-                             Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
-                    <!-- Resize/endpoint handle thumbs (created in code-behind, sized in screen px). -->
-                    <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
-                    <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
-                            CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
-                        <StackPanel Orientation="Horizontal">
-                            <Rectangle x:Name="EyedropColorRect" Width="14" Height="14" RadiusX="2" RadiusY="2"
-                                       Stroke="#88FFFFFF" StrokeThickness="1"/>
-                            <TextBlock x:Name="EyedropHexText" Foreground="White" FontSize="11"
-                                       Margin="6,0,0,0" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Border>
-                </Canvas>
-            </Grid>
             </Canvas>
         </Grid>
 
-        <!-- ===================== BOTTOM UTILITY BAR ===================== -->
         <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"
                 Margin="12,6,12,12" Visibility="Collapsed">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-
-                <!-- Left: live zoom readout + preset jump -->
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
-                    <TextBlock x:Name="ZoomLabel" Text="100%" Style="{StaticResource ValueLabel}"
-                               MinWidth="42" TextAlignment="Right" Margin="4,0,8,0"
-                               ToolTip="Zoom level (mouse wheel to zoom)"/>
-                    <ComboBox x:Name="ZoomBox" Style="{StaticResource DarkComboBox}" Width="84"
-                              SelectedIndex="0" SelectionChanged="OnZoomPresetChanged"
-                              ToolTip="Jump to a zoom level">
-                        <ComboBoxItem Content="Fit"/>
-                        <ComboBoxItem Content="Fit Width"/>
-                        <ComboBoxItem Content="50%"/>
-                        <ComboBoxItem Content="100%"/>
-                        <ComboBoxItem Content="150%"/>
-                        <ComboBoxItem Content="200%"/>
+                    <TextBlock x:Name="ZoomLabel" Text="100%" Style="{StaticResource ValueLabel}" MinWidth="42"
+                               TextAlignment="Right" Margin="4,0,8,0" ToolTip="Zoom level"/>
+                    <ComboBox x:Name="ZoomBox" Style="{StaticResource DarkComboBox}" Width="84" SelectedIndex="0"
+                              SelectionChanged="OnZoomPresetChanged" ToolTip="Jump to a zoom level"
+                              AutomationProperties.Name="Zoom level">
+                        <ComboBoxItem Content="Fit"/><ComboBoxItem Content="Fit Width"/><ComboBoxItem Content="50%"/>
+                        <ComboBoxItem Content="100%"/><ComboBoxItem Content="150%"/><ComboBoxItem Content="200%"/>
                     </ComboBox>
                 </StackPanel>
 
-                <!-- Center: drag-out handle -->
-                <Border Grid.Column="1" Background="{StaticResource SurfaceBrush}" CornerRadius="{StaticResource RadiusPill}"
-                        Padding="12,5" Cursor="SizeAll" MouseLeftButtonDown="OnDragMeDown"
-                        ToolTip="Drag this onto another app to drop the image as a file">
+                <Border x:Name="DragMeHandle" Grid.Column="1" Background="{StaticResource SurfaceBrush}"
+                        CornerRadius="{StaticResource RadiusPill}" Padding="12,5" Cursor="SizeAll"
+                        MouseLeftButtonDown="OnDragMeDown" ToolTip="Drag this onto another app to drop the image as a file"
+                        AutomationProperties.Name="Drag me"
+                        AutomationProperties.HelpText="Drag the current source-resolution edited image to another local application.">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE76F;" FontFamily="{StaticResource IconFont}" FontSize="13"
-                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Text="Drag me" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
-                                   Margin="8,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="&#xE76F;" FontFamily="{StaticResource IconFont}" FontSize="13"
-                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="&#xE76F;" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}"/>
+                        <TextBlock Text="Drag me" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="8,0"/>
+                        <TextBlock Text="&#xE76F;" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}"/>
                     </StackPanel>
                 </Border>
 
-                <!-- Right: circular quick actions -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
-                    <Button Style="{StaticResource CircleActionButton}" Content="&#xE718;" ToolTip="Pin to screen" Click="OnPin"/>
-                    <Button x:Name="BtnCopy" Style="{StaticResource CircleActionButton}" Content="&#xE8C8;" ToolTip="Copy to clipboard (Ctrl+C)" Click="OnCopy"/>
-                    <Button x:Name="BtnCenter" Style="{StaticResource CircleActionButton}" Content="&#xE9A6;" ToolTip="Fit &amp; center (Ctrl+0)" Click="OnCenterView"/>
+                    <Button x:Name="BtnPin" Style="{StaticResource CircleActionButton}" Content="&#xE718;" ToolTip="Pin to screen"
+                            Click="OnPin" AutomationProperties.Name="Pin to screen"
+                            AutomationProperties.HelpText="Open the edited image in a local always-on-top pin window."/>
+                    <Button x:Name="BtnCopy" Style="{StaticResource CircleActionButton}" Content="&#xE8C8;"
+                            ToolTip="Copy to clipboard (Ctrl+C)" Click="OnCopy" AutomationProperties.Name="Copy"
+                            AutomationProperties.HelpText="Copy the source-resolution edited image. Shortcut Ctrl+C."/>
+                    <Button x:Name="BtnCenter" Style="{StaticResource CircleActionButton}" Content="&#xE9A6;"
+                            ToolTip="Fit &amp; center (Ctrl+0)" Click="OnCenterView" AutomationProperties.Name="Fit and center"
+                            AutomationProperties.HelpText="Fit and center the whole image. Shortcut Ctrl+0."/>
                 </StackPanel>
             </Grid>
         </Border>

@@ -52,6 +52,7 @@ public partial class EditorWindow : Window
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
+    private bool _filledRectangleMode;
     private TextStyle _textStyle = TextStyle.Plain;
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
     private double _opacity = 1.0; // annotation alpha multiplier (0.25–1.0) for new + restyled marks
@@ -135,8 +136,8 @@ public partial class EditorWindow : Window
         // image, so a sensible default footprint is enough; the image is
         // fitted and centered once layout is known.
         var wa = SystemParameters.WorkArea;
-        Width = Math.Min(1240, wa.Width * 0.9);
-        Height = Math.Min(800, wa.Height * 0.9);
+        Width = Math.Min(1167, wa.Width * 0.9);
+        Height = Math.Min(590, wa.Height * 0.9);
 
         Viewport.LostMouseCapture += (_, _) =>
         {
@@ -185,7 +186,7 @@ public partial class EditorWindow : Window
             DispatcherPriority.Background,
             new Action(() =>
             {
-                EditorStyleBar.Visibility = Visibility.Visible;
+                UpdateContextPanels();
                 EditorBottomBar.Visibility = Visibility.Visible;
             }));
     }
@@ -433,28 +434,92 @@ public partial class EditorWindow : Window
                 EyedropSwatch.Visibility = Visibility.Collapsed;
         }
         _tool = tool;
+        if (ReferenceEquals(rb, RectangleToolBtn))
+        {
+            _filledRectangleMode = false;
+            _fillMode = ShapeFillMode.None;
+            if (FillNoneBtn is not null) FillNoneBtn.IsChecked = true;
+        }
         if (IsLoaded)
         {
+            UncheckOtherToolButtons(rb);
+            MoreToolsPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
         }
     }
 
+    private void OnFilledRectangleToolChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb) return;
+        if (IsLoaded)
+        {
+            CommitText();
+            CommitPendingCurve();
+            Select(null);
+            if (_tool == EditorTool.Crop) ClearCropPreview();
+            UncheckOtherToolButtons(rb);
+        }
+
+        _tool = EditorTool.Rectangle;
+        _filledRectangleMode = true;
+        _fillMode = ShapeFillMode.Solid;
+        if (FillSolidBtn is not null) FillSolidBtn.IsChecked = true;
+        if (IsLoaded)
+        {
+            MoreToolsPopup.IsOpen = false;
+            UpdateCursor();
+            UpdateContextPanels();
+        }
+    }
+
+    private IEnumerable<RadioButton> ToolButtons()
+    {
+        if (CropUtilityBtn is not null) yield return CropUtilityBtn;
+        if (ToolPanel is not null)
+            foreach (var rb in ToolPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (EmojiToolBtn is not null) yield return EmojiToolBtn;
+        if (MoreToolPanel is not null)
+            foreach (var rb in MoreToolPanel.Children.OfType<RadioButton>()) yield return rb;
+    }
+
+    private void UncheckOtherToolButtons(RadioButton selected)
+    {
+        foreach (var rb in ToolButtons())
+            if (!ReferenceEquals(rb, selected) && rb.IsChecked == true)
+                rb.IsChecked = false;
+    }
+
+    private void OnMoreToolsClick(object sender, RoutedEventArgs e) =>
+        MoreToolsPopup.IsOpen = !MoreToolsPopup.IsOpen;
+
     /// <summary>Shows the crop-ratio, text-style, step-mode, arrow-style and effect-strength controls only while their tool is active.</summary>
     private void UpdateContextPanels()
     {
-        CropRatioPanel.Visibility = _tool == EditorTool.Crop ? Visibility.Visible : Visibility.Collapsed;
-        TextStylePanel.Visibility = _tool == EditorTool.Text ? Visibility.Visible : Visibility.Collapsed;
-        StepModePanel.Visibility = _tool == EditorTool.Step ? Visibility.Visible : Visibility.Collapsed;
-        ArrowStylePanel.Visibility = _tool == EditorTool.Arrow ? Visibility.Visible : Visibility.Collapsed;
+        EditorContextControls controls = EditorShellContract.ContextFor(_tool, _filledRectangleMode);
+        static Visibility Show(bool show) => show ? Visibility.Visible : Visibility.Collapsed;
+        bool Has(EditorContextControls value) => controls.HasFlag(value);
 
-        bool effectTool = _tool is EditorTool.Blur or EditorTool.Pixelate;
-        EffectStrengthPanel.Visibility = effectTool ? Visibility.Visible : Visibility.Collapsed;
-        if (effectTool)
+        ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
+        ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
+        FillPanel.Visibility = Show(Has(EditorContextControls.Fill));
+        OpacityPanel.Visibility = Show(Has(EditorContextControls.Opacity));
+        ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
+        EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
+        TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
+        CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
+        StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        ThicknessLabel.Text = _tool == EditorTool.Text ? "Size" : "Thickness";
+
+        if (Has(EditorContextControls.EffectStrength))
         {
             EffectStrengthLabel.Text = _tool == EditorTool.Blur ? "Blur" : "Pixelate";
             SyncEffectStrengthButtons(_tool == EditorTool.Blur ? _blurStrength : _pixelateStrength);
         }
+
+        EditorStyleBar.Visibility = controls == EditorContextControls.None
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 
     /// <summary>Reflects the active blur/pixelate strength on the strength radio group without re-triggering an apply.</summary>
@@ -473,9 +538,9 @@ public partial class EditorWindow : Window
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
     private void CheckToolButton(EditorTool tool)
     {
-        foreach (var child in ToolPanel.Children)
+        foreach (var rb in ToolButtons())
         {
-            if (child is RadioButton rb && rb.Tag is string tag &&
+            if (rb.Tag is string tag &&
                 string.Equals(tag, tool.ToString(), StringComparison.Ordinal))
             {
                 rb.IsChecked = true; // Checked → OnToolChecked updates _tool

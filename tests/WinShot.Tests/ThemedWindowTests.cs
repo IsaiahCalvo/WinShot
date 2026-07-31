@@ -1,5 +1,8 @@
 using System.Threading;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -71,10 +74,12 @@ public class ThemedWindowTests
 
                 var editor = new EditorWindow(NewBitmap(), settings, history);
                 editor.Show();
+                EditorShellContractSmoke(editor);
                 ApplyBlurUndoRedoSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
                 PinSmoke(editor);
+                BackgroundFromEditorSmoke(editor);
                 editor.Close();
 
                 var composer = new BackgroundComposerWindow(NewBitmap(), settings, history);
@@ -196,6 +201,100 @@ public class ThemedWindowTests
         canvas.Children.Clear();
     }
 
+    private static void EditorShellContractSmoke(EditorWindow editor)
+    {
+        var primary = (WrapPanel)editor.FindName("ToolPanel")!;
+        var primaryOrder = primary.Children.OfType<RadioButton>()
+            .Select(rb => (string)rb.Tag)
+            .ToArray();
+        Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
+
+        var more = (UniformGrid)editor.FindName("MoreToolPanel")!;
+        var moreOrder = more.Children.OfType<RadioButton>()
+            .Select(rb => (string)rb.Tag)
+            .ToArray();
+        Assert.Equal(EditorShellContract.MoreToolOrder, moreOrder);
+
+        string[] namedControls =
+        {
+            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EmojiToolBtn",
+            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
+            "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
+        };
+        foreach (string name in namedControls)
+        {
+            var element = Assert.IsAssignableFrom<FrameworkElement>(editor.FindName(name));
+            Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(element)), name);
+        }
+
+        string[] iconOnlyControls =
+        {
+            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EmojiToolBtn",
+            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
+            "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "BtnPin", "BtnCopy", "BtnCenter",
+        };
+        foreach (string name in iconOnlyControls)
+        {
+            var element = Assert.IsAssignableFrom<FrameworkElement>(editor.FindName(name));
+            Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(element)), name);
+        }
+
+        var select = (RadioButton)editor.FindName("SelectToolBtn")!;
+        var moreButton = (Button)editor.FindName("MoreToolsButton")!;
+        var copy = (Button)editor.FindName("BtnCopy")!;
+        foreach (Control control in new Control[] { select, moreButton, copy })
+        {
+            control.ApplyTemplate();
+            Assert.NotNull(control.Template.FindName("FocusRing", control));
+            Assert.True(control.Focusable);
+            Assert.True(control.IsTabStop);
+        }
+
+        var styleBar = (DockPanel)editor.FindName("EditorStyleBar")!;
+        var color = (StackPanel)editor.FindName("ColorPanel")!;
+        var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
+        var fill = (StackPanel)editor.FindName("FillPanel")!;
+        var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
+        var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
+        var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
+
+        Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
+        ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, color.Visibility);
+        Assert.Equal(Visibility.Visible, thickness.Visibility);
+        Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
+        Assert.Equal(Visibility.Collapsed, fill.Visibility);
+
+        ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, color.Visibility);
+        Assert.Equal(Visibility.Collapsed, thickness.Visibility);
+        Assert.Equal(Visibility.Visible, fill.Visibility);
+
+        ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, effects.Visibility);
+        Assert.Equal(Visibility.Collapsed, color.Visibility);
+
+        ((RadioButton)editor.FindName("CropUtilityBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, cropRatio.Visibility);
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+
+        editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        editor.UpdateLayout();
+        var toolbar = (Border)editor.FindName("TopToolbar")!;
+        Assert.True(toolbar.ActualWidth <= editor.ActualWidth);
+        Assert.True(primary.ActualHeight <= 42, $"Primary tools wrapped at minimum width: {primary.ActualHeight}");
+    }
+
     private static void ApplyBlurUndoRedoSmoke(EditorWindow editor)
     {
         var type = typeof(EditorWindow);
@@ -288,6 +387,18 @@ public class ThemedWindowTests
             if (form is FastPinWindow)
                 form.Close();
         }
+    }
+
+    private static void BackgroundFromEditorSmoke(EditorWindow editor)
+    {
+        var onBackground = typeof(EditorWindow).GetMethod(
+            "OnAddBackground",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        onBackground.Invoke(editor, new object[] { editor, new RoutedEventArgs() });
+        PumpDispatcherOnce();
+        foreach (Window window in Application.Current.Windows.Cast<Window>().ToList())
+            if (window is BackgroundComposerWindow)
+                window.Close();
     }
 
     private static void QuickActionButtonSmoke(SettingsService settings)

@@ -13,6 +13,7 @@ Status vs WinShot as of this date. Cloud/sharing is permanently out of scope.
 
 ## Stabilized in current batch
 
+- **Annotation editor hierarchy, accessibility, shortcuts, and project fidelity** - the local editor now follows the verified primary tool order with WinShot-only tools in More, exposes immediate per-tool controls, gives icon controls explicit automation help and focus rings, makes Ctrl+C copy, and preserves arrow and letter-counter styles through project reload.
 - **History type filters, restore-last-closed, time-based retention** - implemented; age retention now prunes when new history items are added and when History opens, with no background polling.
 - **File naming templates** - implemented with {date}, {time}, {n}, {app}, and {title}; silent saves and drag-out temp files now avoid overwriting same-second names by adding a numeric suffix.
 - **QR code decoding alongside OCR** - implemented with ZXing; QR-only captures now use a clear "QR code copied" notification instead of saying text was copied.

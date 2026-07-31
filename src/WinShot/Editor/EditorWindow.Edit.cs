@@ -8,6 +8,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Core;
+using WinShot.Editor.Background;
 using SD = System.Drawing;
 
 namespace WinShot.Editor;
@@ -248,13 +249,23 @@ public partial class EditorWindow : Window
             return;
         }
 
-        if (Keyboard.Modifiers == ModifierKeys.Control)
+        EditorShortcutCommand shortcut = EditorShortcut.Resolve(e.Key, Keyboard.Modifiers);
+        if (shortcut != EditorShortcutCommand.None)
         {
-            if (e.Key == Key.Z) { _ = UndoAsync(); e.Handled = true; }
-            else if (e.Key == Key.Y) { _ = RedoAsync(); e.Handled = true; }
-            else if (e.Key is Key.D0 or Key.NumPad0) { FitToView(); e.Handled = true; }
+            switch (shortcut)
+            {
+                case EditorShortcutCommand.Undo: _ = UndoAsync(); break;
+                case EditorShortcutCommand.Redo: _ = RedoAsync(); break;
+                case EditorShortcutCommand.FitAndCenter: FitToView(); break;
+                case EditorShortcutCommand.Copy: OnCopy(this, new RoutedEventArgs()); break;
+                case EditorShortcutCommand.SaveAs: OnSave(this, new RoutedEventArgs()); break;
+            }
+            e.Handled = true;
             return;
         }
+
+        // Preserve the existing rule that modified letters never activate drawing tools.
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0) return;
 
         // Arrow keys nudge the selection by 1px (10px with Shift). Allowed with a bare
         // Shift modifier only; any other modifier falls through.
@@ -347,6 +358,21 @@ public partial class EditorWindow : Window
         };
         if (dialog.ShowDialog(this) != true) return;
         await InsertImageFilesAsync(dialog.FileNames, ViewportCenterInContent());
+    }
+
+    /// <summary>Opens the existing local background composer with a source-resolution flattened clone.</summary>
+    private void OnAddBackground(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
+        try
+        {
+            var composer = new BackgroundComposerWindow(Flatten(), _settings, _history);
+            composer.Show();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor background composer failed", ex);
+        }
     }
 
     private void OnEditorDragOver(object sender, DragEventArgs e)

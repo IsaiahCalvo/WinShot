@@ -126,6 +126,8 @@
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        <Ellipse x:Name="FocusRing" Fill="Transparent" Stroke="Transparent"
+                                 StrokeThickness="2" Margin="1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -133,6 +135,9 @@
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bg" Property="Fill" Value="{StaticResource PressedFillBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
                         </Trigger>
                         <!-- ACTIVE / SELECTED TOOL = solid accent-blue circle, white glyph -->
                         <Trigger Property="IsChecked" Value="True">
@@ -175,6 +180,8 @@
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        <Ellipse x:Name="FocusRing" Fill="Transparent" Stroke="Transparent"
+                                 StrokeThickness="2" Margin="1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -182,6 +189,9 @@
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bg" Property="Fill" Value="{StaticResource PressedFillBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
@@ -209,6 +219,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bg" Background="{StaticResource AccentBrush}"
+                            BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           Margin="{TemplateBinding Padding}"/>
@@ -219,6 +230,9 @@
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentPressedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bg" Property="BorderBrush" Value="White"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bg" Property="Opacity" Value="0.4"/>
@@ -258,6 +272,10 @@
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bg" Property="Background" Value="{StaticResource ElevatedBrush}"/>
                         </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                            <Setter TargetName="Bg" Property="BorderThickness" Value="2"/>
+                        </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bg" Property="Opacity" Value="0.4"/>
                         </Trigger>
@@ -285,7 +303,7 @@
                 <ControlTemplate TargetType="Button">
                     <Grid>
                         <Ellipse x:Name="Bg" Fill="{StaticResource SurfaceBrush}"/>
-                        <Ellipse Stroke="{StaticResource BorderBrush}" StrokeThickness="1"/>
+                        <Ellipse x:Name="FocusRing" Stroke="{StaticResource BorderBrush}" StrokeThickness="1"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
@@ -297,6 +315,10 @@
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bg" Property="Fill" Value="{StaticResource ElevatedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
+                            <Setter TargetName="FocusRing" Property="StrokeThickness" Value="2"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
@@ -673,6 +695,10 @@
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Ring" Property="Stroke" Value="White"/>
                             <Setter TargetName="Ring" Property="StrokeThickness" Value="2"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource InfoBrush}"/>
+                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2.5"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

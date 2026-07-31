@@ -290,7 +290,8 @@ internal static class ProjectSerializer
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = curved
                         ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t)
-                        : AnnotationFactory.ArrowGeometry(pts[0], pts[1], t, ArrowStyle.Straight),
+                        : AnnotationFactory.ArrowGeometry(
+                            pts[0], pts[1], t, AnnotationFactory.ParseArrowStyle(a.Style)),
                 };
             }
             case AnnotationData.TypeLine:
@@ -362,7 +363,9 @@ internal static class ProjectSerializer
                 var pts = RequirePoints(a, 1);
                 int number = a.Number
                     ?? throw new InvalidDataException("Step annotation is missing its number.");
-                var badge = AnnotationFactory.CreateStepBadge(number, RequireColor(a), RequireThickness(a), letters: false);
+                bool letters = string.Equals(a.Style, "Letter", StringComparison.Ordinal);
+                var badge = AnnotationFactory.CreateStepBadge(
+                    number, RequireColor(a), RequireThickness(a), letters);
                 SetPos(badge, pts[0]);
                 return badge;
             }

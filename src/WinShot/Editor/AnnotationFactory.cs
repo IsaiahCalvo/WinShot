@@ -254,7 +254,7 @@ internal static class AnnotationFactory
         };
     }
 
-    public static double FontSizeFor(double thickness) => 10 + thickness * 4;
+    public static double FontSizeFor(double thickness) => 11 + thickness * 4;
 
     /// <summary>Takes the foreground brush and font size directly so re-editing a committed label can reproduce its look.</summary>
     public static TextBox CreateTextEditor(Brush foreground, double fontSize) =>

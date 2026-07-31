@@ -138,8 +138,7 @@ public partial class EditorWindow : Window
         Canvas.SetLeft(badge, left);
         Canvas.SetTop(badge, top);
         var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
-        // Record the caption mode so a future serializer can round-trip letter badges;
-        // the current project schema still rebuilds steps as numbers on reload.
+        // Record the caption mode so project reload rebuilds the same number/letter badge.
         if (letters) data.Style = "Letter";
         badge.Tag = data;
         Push(new EditorAction(

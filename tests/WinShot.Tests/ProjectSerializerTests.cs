@@ -12,6 +12,96 @@ namespace WinShot.Tests;
 public class ProjectSerializerTests
 {
     [Fact]
+    public void CreateElement_RestoresDoubleArrowAndLetterStepStyles()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var arrow = Assert.IsType<System.Windows.Shapes.Path>(ProjectSerializer.CreateElement(
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeArrow,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 100d, 0d } },
+                        Color = "#FFFF453A",
+                        Thickness = 4,
+                        Style = ArrowStyle.Double.ToString(),
+                    }, Array.Empty<BitmapSource>()));
+                var geometry = Assert.IsType<PathGeometry>(arrow.Data);
+                Assert.Equal(3, geometry.Figures.Count); // shaft plus a head at both ends
+
+                var step = Assert.IsType<System.Windows.Controls.Grid>(ProjectSerializer.CreateElement(
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 10d, 20d } },
+                        Number = 1,
+                        Color = "#FF34C759",
+                        Thickness = 4,
+                        Style = "Letter",
+                    }, Array.Empty<BitmapSource>()));
+                var caption = Assert.IsType<System.Windows.Controls.TextBlock>(step.Children[1]);
+                Assert.Equal("A", caption.Text);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void SaveAndLoad_PreservesArrowAndLetterStepStyleMetadata()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"winshot-style-project-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "styles.winshot");
+        try
+        {
+            using var source = new SD.Bitmap(4, 3);
+            var doc = new ProjectDocument
+            {
+                Annotations =
+                {
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeArrow,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 3d, 2d } },
+                        Color = "#FFFF453A",
+                        Thickness = 4,
+                        Style = ArrowStyle.Thin.ToString(),
+                    },
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 1d, 1d } },
+                        Number = 2,
+                        Color = "#FF34C759",
+                        Thickness = 4,
+                        Style = "Letter",
+                    },
+                },
+            };
+
+            ProjectSerializer.Save(path, source, doc, Array.Empty<BitmapSource>());
+            var loaded = ProjectSerializer.Load(path);
+            using var loadedSource = loaded.Source;
+            Assert.Equal("Thin", loaded.Doc.Annotations[0].Style);
+            Assert.Equal("Letter", loaded.Doc.Annotations[1].Style);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SaveAndLoad_RoundTripsMultipleEmbeddedImages()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"winshot-project-{Guid.NewGuid():N}");
