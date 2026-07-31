@@ -263,11 +263,11 @@
                         <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <TextBlock x:Name="ThicknessLabel" Text="Thickness" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
-                            <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13"
+                            <RadioButton x:Name="ThicknessThinBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13"
                                          ToolTip="Thin" Checked="OnThicknessChecked" AutomationProperties.Name="Thin"/>
-                            <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="Segoe UI" FontSize="13"
+                            <RadioButton x:Name="ThicknessMediumBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="Segoe UI" FontSize="13"
                                          ToolTip="Medium" Checked="OnThicknessChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
-                            <RadioButton Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="Segoe UI" FontSize="13"
+                            <RadioButton x:Name="ThicknessThickBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="Segoe UI" FontSize="13"
                                          ToolTip="Thick" Checked="OnThicknessChecked" AutomationProperties.Name="Thick"/>
                         </StackPanel>
 

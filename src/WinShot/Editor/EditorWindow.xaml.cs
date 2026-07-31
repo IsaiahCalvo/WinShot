@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -49,6 +50,9 @@ public partial class EditorWindow : Window
     private EditorTool _tool = EditorTool.Select;
     private Color _color = Color.FromRgb(0xFF, 0x3B, 0x30);
     private double _thickness = 4;
+    private double _strokeThickness = 4;
+    private double _textThickness = 4;
+    private bool _syncingThicknessButtons;
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
@@ -510,6 +514,8 @@ public partial class EditorWindow : Window
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
         ThicknessLabel.Text = _tool == EditorTool.Text ? "Size" : "Thickness";
+        if (Has(EditorContextControls.Thickness))
+            SyncThicknessButtons();
 
         if (Has(EditorContextControls.EffectStrength))
         {
@@ -520,6 +526,41 @@ public partial class EditorWindow : Window
         EditorStyleBar.Visibility = controls == EditorContextControls.None
             ? Visibility.Collapsed
             : Visibility.Visible;
+    }
+
+    /// <summary>
+    /// The project format keeps the established 2/4/6 thickness values. Text presents the
+    /// corresponding runtime font sizes (19/27/35 pt), while other tools keep stroke values.
+    /// Separate remembered values stop a thick shape from silently making the next text 35 pt.
+    /// </summary>
+    private void SyncThicknessButtons()
+    {
+        bool text = _tool == EditorTool.Text;
+        _thickness = text ? _textThickness : _strokeThickness;
+
+        var buttons = new[] { ThicknessThinBtn, ThicknessMediumBtn, ThicknessThickBtn };
+        string[] contents = text ? new[] { "19", "27", "35" } : new[] { "2", "4", "6" };
+        string[] names = text
+            ? new[] { "19 point text", "27 point text", "35 point text" }
+            : new[] { "Thin stroke", "Medium stroke", "Thick stroke" };
+
+        _syncingThicknessButtons = true;
+        try
+        {
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                RadioButton button = buttons[i];
+                button.Content = contents[i];
+                button.ToolTip = names[i];
+                AutomationProperties.SetName(button, names[i]);
+                if (button.Tag is string tag && double.TryParse(tag, out double value))
+                    button.IsChecked = Math.Abs(value - _thickness) < 0.01;
+            }
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
+        }
     }
 
     /// <summary>Reflects the active blur/pixelate strength on the strength radio group without re-triggering an apply.</summary>
@@ -573,7 +614,11 @@ public partial class EditorWindow : Window
         if (sender is RadioButton rb && rb.Tag is string s && double.TryParse(s, out double t))
         {
             _thickness = t;
-            if (IsLoaded)
+            if (_tool == EditorTool.Text)
+                _textThickness = t;
+            else
+                _strokeThickness = t;
+            if (IsLoaded && !_syncingThicknessButtons)
                 RestyleSelected(color: null, thickness: t, fill: null);
         }
     }

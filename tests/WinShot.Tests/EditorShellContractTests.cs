@@ -47,7 +47,16 @@ public class EditorShellContractTests
             .HasFlag(EditorContextControls.StepMode));
         Assert.Equal(EditorContextControls.CropRatio,
             EditorShellContract.ContextFor(EditorTool.Crop, false));
-        Assert.Equal(27, AnnotationFactory.FontSizeFor(thickness: 4));
+    }
+
+    [Theory]
+    [InlineData(2, 19)]
+    [InlineData(4, 27)]
+    [InlineData(6, 35)]
+    public void TextSizePresentation_MapsCompatibleThicknessValuesToActualPoints(
+        double compatibleThickness, double expectedPoints)
+    {
+        Assert.Equal(expectedPoints, AnnotationFactory.FontSizeFor(compatibleThickness));
     }
 
     [Theory]

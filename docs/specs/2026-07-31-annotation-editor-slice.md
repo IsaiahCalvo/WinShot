@@ -2,7 +2,7 @@
 
 ## Scope and result
 
-- Worktree: `C:\Users\icalvo\.codex\worktrees\cleanshot-annotation-20260731\winshot`
+- Worktree: isolated Codex worktree; no installed-app or main-branch changes.
 - Branch: `feature/cleanshot-annotation-editor`
 - Base: `origin/main` at `87bc2b73aee68cf45702d4fd9ed4043b57734bd1`
 - Source of truth: written CleanShot X 4.8.7 evidence contract `CS-ANN-001..010`.
@@ -23,29 +23,33 @@ The Mac contract left selection, pan, crop commit details, undo/redo behavior, e
 
 ## Evidence
 
-- Baseline inventory and acceptance skeleton: `artifacts/annotation-baseline/`
-- Six visually checked before renders: `artifacts/annotation-baseline/renders/`
-- Ten visually checked after renders: `artifacts/annotation-slice/renders/`
-- 200% render: `artifacts/annotation-slice/renders/editor-after-shell-200pct.png` (`2304x1180`)
-- Publish output: `artifacts/annotation-slice/publish/WinShot/`
-- Local package: `artifacts/annotation-slice/publish/WinShot-win-x64.zip`
+- Baseline inventory and generated comparison material remain untracked under `artifacts/annotation-baseline/`.
+- The complete generated after-render set and publish output remain untracked under `artifacts/annotation-slice/`.
+- Five small, accepted PNGs are tracked under `docs/evidence/annotation/20260731/`:
 
-All renders were produced in-process from synthetic content. `WinShot.exe` and the installed app were not launched.
+| Evidence | SHA-256 |
+| --- | --- |
+| `editor-normal.png` | `db7b0d890049d606697ca6fe3bc23aaa964793d093d2d5ddc29629d9379ab808` |
+| `editor-200-percent.png` | `eb23407cb0fd9a1f40d223fa519922ee385a3bad7436fd10dfea3a043b248408` |
+| `text-context-19-27-35.png` | `7ad22e35730b220926da6d0096822d82c7f69cc1a5e389c5808e34426574610b` |
+| `primary-shell.png` | `0596c43efafb26558a043f7869cd0e1b49e1c5d17546b21c64ba405201987751` |
+| `more-menu.png` | `0f3a072b5ce4912179633df6ae59ed0759ad8d0abae6168918f68371a89b41b4` |
+
+The current text-context proof visibly shows 19, 27, and 35 point choices with 27 selected. All renders were produced in-process from synthetic content, visually inspected, and contain no private screen content. `WinShot.exe` and the installed app were not launched.
 
 ## Verification
 
-All commands used the Dell SDK override:
-
-`-p:CsWinRTWindowsMetadata=C:\Users\icalvo\.nuget\packages\microsoft.windows.sdk.net.ref\10.0.19041.56\winmd`
+All commands used the Dell SDK metadata override from the local NuGet cache.
 
 - Baseline full Release suite: 328 passed.
 - Baseline focused editor set: 39 passed.
-- Final focused editor set: 54 passed, 0 failed, 0 skipped.
-- Final full Release suite: 343 passed, 0 failed, 0 skipped.
+- Initial focused editor set: 54 passed, 0 failed, 0 skipped.
+- Text-size follow-up focused set: 20 passed, 0 failed, 0 skipped.
+- Final full Release suite: 346 passed, 0 failed, 0 skipped.
 - Gated sanitized after-render run: 1 passed and produced ten PNGs.
 - Final Release build: succeeded with 0 warnings and 0 errors.
-- Self-contained ReadyToRun publish: succeeded. The publish warning is the pre-existing `FastQuickActionsWindow.Margin` warning.
-- Package diff against a fresh `origin/main` publish: 480 files in both; no added or removed files; only `WinShot.exe`, `WinShot.dll`, and `WinShot.pdb` changed. Uncompressed output grew 71,980 bytes; ZIP grew 60,088 bytes (118,051,865 to 118,111,953 bytes).
+- Self-contained ReadyToRun publish: succeeded. Its only warning is the pre-existing `FastQuickActionsWindow.Margin` warning.
+- Publish diff against the baseline: 480 files in both; no added or removed files; `WinShot.deps.json`, `WinShot.dll`, `WinShot.exe`, and `WinShot.pdb` changed. Uncompressed output grew 27,440 bytes.
 
 ## File overlap map
 

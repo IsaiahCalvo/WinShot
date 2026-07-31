@@ -267,6 +267,9 @@ public class ThemedWindowTests
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
         var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
+        var thin = (RadioButton)editor.FindName("ThicknessThinBtn")!;
+        var medium = (RadioButton)editor.FindName("ThicknessMediumBtn")!;
+        var thick = (RadioButton)editor.FindName("ThicknessThickBtn")!;
 
         Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
@@ -274,6 +277,22 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
+        thick.IsChecked = true;
+        Assert.Equal(new[] { "2", "4", "6" },
+            new[] { thin.Content, medium.Content, thick.Content }.Cast<string>());
+
+        ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
+        Assert.Equal("Size", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
+        Assert.Equal(new[] { "19", "27", "35" },
+            new[] { thin.Content, medium.Content, thick.Content }.Cast<string>());
+        Assert.True(medium.IsChecked);
+        Assert.False(thick.IsChecked);
+        Assert.Equal("27 point text", AutomationProperties.GetName(medium));
+
+        ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        Assert.Equal(new[] { "2", "4", "6" },
+            new[] { thin.Content, medium.Content, thick.Content }.Cast<string>());
+        Assert.True(thick.IsChecked);
 
         ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, color.Visibility);
