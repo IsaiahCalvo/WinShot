@@ -83,8 +83,10 @@ public partial class SettingsWindow : Window
     /// <summary>Enables the overlay auto-close interval field only when auto-close is on.</summary>
     private void OnOverlayAutoCloseToggled(object sender, RoutedEventArgs e)
     {
-        if (OverlayAutoCloseCheck is null || OverlayCloseBox is null) return;
-        OverlayCloseBox.IsEnabled = OverlayAutoCloseCheck.IsChecked == true;
+        if (OverlayAutoCloseCheck is null || OverlayCloseBox is null || OverlayActionCombo is null) return;
+        bool enabled = OverlayAutoCloseCheck.IsChecked == true;
+        OverlayCloseBox.IsEnabled = enabled;
+        OverlayActionCombo.IsEnabled = enabled;
     }
 
     /// <summary>Maps each input box to the index of the section that contains it.</summary>
@@ -254,7 +256,7 @@ public partial class SettingsWindow : Window
         RecordingOpenEditorCheck.IsChecked = s.RecordingOpenEditor;
 
         // Quick Access overlay
-        SelectByTag(OverlayPositionCombo, s.OverlayPosition, fallbackIndex: 0);
+        SelectByTag(OverlayPositionCombo, s.OverlayPosition, fallbackIndex: 5);
         OverlayMoveToActiveScreenCheck.IsChecked = s.OverlayMoveToActiveScreen;
         OverlaySizeSlider.Value = Math.Clamp(s.OverlaySizePercent, 0, 100);
         OverlayAutoCloseCheck.IsChecked = s.OverlayAutoClose;
@@ -565,7 +567,7 @@ public partial class SettingsWindow : Window
                 ScreenshotCopyCheck.IsChecked == true ? "copy" : "overlay";
 
             // Quick Access overlay
-            s.OverlayPosition = SelectedTag(OverlayPositionCombo, "left");
+            s.OverlayPosition = SelectedTag(OverlayPositionCombo, "bottom-right");
             s.OverlayMoveToActiveScreen = OverlayMoveToActiveScreenCheck.IsChecked == true;
             s.OverlaySizePercent = (int)Math.Round(OverlaySizeSlider.Value);
             s.OverlayAutoClose = OverlayAutoCloseCheck.IsChecked == true;

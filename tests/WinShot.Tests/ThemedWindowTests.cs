@@ -304,11 +304,11 @@ public class ThemedWindowTests
         overlay.BackgroundRequested += _ => background = true;
 
         InvokeQuickAction(overlay, "Pin");
-        InvokeQuickAction(overlay, "Edit");
-        // OCR has no visible button (CleanShot's overlay is Pin/Close/Copy/Save/Edit/Background);
-        // it stays on the "O" keyboard shortcut, so invoke that path instead of a button.
+        InvokeQuickAction(overlay, "Open Annotate");
+        // OCR and Background remain local features but moved to the overflow menu to keep
+        // the verified hover shell uncluttered. Exercise their legacy keyboard paths here.
         InvokeKey(overlay, System.Windows.Forms.Keys.O);
-        InvokeQuickAction(overlay, "Background");
+        InvokeKey(overlay, System.Windows.Forms.Keys.B);
 
         Assert.True(pin);
         Assert.True(edit);

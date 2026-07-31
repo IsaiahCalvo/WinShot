@@ -2,43 +2,30 @@
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Xml.Linq;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
+using W = System.Windows;
+using WM = System.Windows.Media;
+using WMI = System.Windows.Media.Imaging;
 
 namespace WinShot.Overlay;
 
 public sealed class FastQuickActionsWindow : WF.Form
 {
-    // CleanShot X-style ONE-card overlay: the captured thumbnail floats bottom-right. On
-    // hover the thumbnail blurs and the action buttons (Pin/Close/Copy/Save/Edit/Background)
-    // fade in on top; on mouse-out the clean thumbnail returns.
-    private const int Margin = 12;             // transparent breathing room around the card
-    private const int CardPad = 12;            // inset for the corner icon buttons
-    private const int IconButtonSize = 30;     // the four corner icon buttons
-    private const int PillHeight = 34;         // the cream Copy / Save pills
-    private const int PillGap = 8;
-    private const int MinCardWidth = 232;      // keep room for corners + centered pills
-    private const int MinCardHeight = 152;
-    private const int MaxCardWidth = 340;
-    private const int MaxCardHeight = 200;
-    private const int CardCornerRadius = 14;
-    private const int PillCornerRadius = 9;
-    private const int IconCornerRadius = 8;
+    // The idle surface is only the capture thumbnail. Hover reveals four corner actions and
+    // one centered Copy pill; OCR and Background stay available in the context menu.
+    private const int CsDropShadow = 0x00020000;
     private const int WmNclbuttondown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
 
     private static readonly SD.Color CardFill = ThemePalette.WindowBg;                       // backing behind the thumbnail
-    private static readonly SD.Color Border = ThemePalette.Border;
-    private static readonly SD.Color BorderStrong = ThemePalette.BorderStrong;
-    private static readonly SD.Color HoverScrim = SD.Color.FromArgb(96, 0, 0, 0);            // darkens the blur so cream pops
-    private static readonly SD.Color Cream = SD.Color.FromArgb(0xEC, 0xEA, 0xE3);            // the cream button face
-    private static readonly SD.Color CreamHover = SD.Color.FromArgb(0xF6, 0xF4, 0xEE);
-    private static readonly SD.Color CreamPressed = SD.Color.FromArgb(0xDA, 0xD7, 0xCD);
+    private static readonly SD.Color HoverScrim = SD.Color.FromArgb(112, 0, 0, 0);
+    private static readonly SD.Color Cream = SD.Color.FromArgb(0xF8, 0xF8, 0xF6);
+    private static readonly SD.Color CreamHover = SD.Color.White;
+    private static readonly SD.Color CreamPressed = SD.Color.FromArgb(0xE3, 0xE3, 0xDF);
     private static readonly SD.Color CreamText = SD.Color.FromArgb(0x22, 0x22, 0x24);        // dark glyph/label on cream
-    private static readonly SD.Font GlyphFont = ThemePalette.IconFont(11f);
-    private static readonly SD.Font CloseGlyphFont = ThemePalette.IconFont(9f);
-    private static readonly SD.Font PillFont = ThemePalette.UiFont(11.5f, SD.FontStyle.Bold);
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
 
@@ -48,9 +35,15 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly bool _requestMemoryCleanupOnClose;
     private readonly bool _loadPreview;
     private readonly WF.ToolTip _toolTip = new() { InitialDelay = 300, ReshowDelay = 100 };
+    private readonly WF.ContextMenuStrip _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
+    private WF.Timer? _autoCloseTimer;
+    private long _autoCloseDueTick;
+    private int _autoCloseRemainingMs;
     private SD.Rectangle _cardRect;
     private SD.Rectangle _thumbRect;   // the fitted thumbnail centered inside the card
+    private int _cornerRadius;
+    private int _dpi = 96;
     private SD.Bitmap? _preview;
     private SD.Bitmap? _blurredPreview;
     private Task? _previewTask;
@@ -61,6 +54,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private bool _hovering;
     private int _hoverButton = -1;
     private int _pressedButton = -1;
+    private int _focusedButton = -1;
     private bool _dragArmed;
     private bool _closed;
     private bool _regionUpdateQueued;
@@ -98,6 +92,8 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = CardFill;
+        AccessibleName = "Quick Access capture preview";
+        AccessibleDescription = "Captured image actions. Press Tab to move through actions or Shift+F10 for more actions.";
         DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
@@ -111,8 +107,9 @@ public sealed class FastQuickActionsWindow : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        BuildLayout(image);
-        PositionBottomRight();
+        BuildLayout(image, _dpi);
+        PositionFromSettings();
+        BuildOverflowMenu();
 
         MouseDown += OnOverlayMouseDown;
         MouseMove += OnOverlayMouseMove;
@@ -124,6 +121,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         FormClosed += (_, _) =>
         {
             OpenWindows.Remove(this);
+            StopAutoCloseTimer();
             _closed = true;
             if (_historyPath is not null)
                 PushRecentlyClosed(_historyPath);
@@ -134,20 +132,34 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (historyPathTask is not null)
             _ = WatchHistoryPathAsync(historyPathTask);
 
-        int seconds = settings.Current.OverlayAutoCloseSeconds;
-        if (seconds > 0)
-        {
-            var timer = new WF.Timer { Interval = seconds * 1000 };
-            timer.Tick += (_, _) => { timer.Stop(); timer.Dispose(); Close(); };
-            timer.Start();
-        }
+        StartAutoCloseTimer();
     }
 
     protected override bool ShowWithoutActivation => true;
 
+    protected override WF.CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ClassStyle |= CsDropShadow;
+            return cp;
+        }
+    }
+
+    protected override WF.AccessibleObject CreateAccessibilityInstance()
+        => new OverlayAccessibleObject(this);
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        int handleDpi = GetDpiForWindow(Handle);
+        if (handleDpi > 0 && handleDpi != _dpi)
+        {
+            _dpi = handleDpi;
+            BuildLayout(_image, _dpi);
+            PositionFromSettings();
+        }
         QueueRegionUpdate();
     }
 
@@ -210,6 +222,16 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void SetHovering(bool hovering)
     {
         if (_hovering == hovering) return;
+        if (hovering)
+        {
+            foreach (var window in OpenWindows.Where(w => !ReferenceEquals(w, this)))
+                window.SetHovering(false);
+            PauseAutoCloseTimer();
+        }
+        else if (!_overflowMenu.Visible)
+        {
+            ResumeAutoCloseTimer();
+        }
         _hovering = hovering;
         if (!hovering)
         {
@@ -225,9 +247,9 @@ public sealed class FastQuickActionsWindow : WF.Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.Clear(SD.Color.Transparent);
 
-        // The card: rounded dark backing + the thumbnail (sharp when idle, blurred on hover).
+        // Idle is only the rounded thumbnail card. The native window class supplies the soft shadow.
         using (var fill = new SD.SolidBrush(CardFill))
-        using (var cardPath = GdiPaths.RoundedRect(_cardRect, CardCornerRadius))
+        using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
             g.FillPath(fill, cardPath);
 
         DrawThumbnail(g, _hovering);
@@ -235,102 +257,101 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (_hovering)
         {
             using (var scrim = new SD.SolidBrush(HoverScrim))
-            using (var cardPath = GdiPaths.RoundedRect(_cardRect, CardCornerRadius))
+            using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
                 g.FillPath(scrim, cardPath);
 
             for (int i = 0; i < _buttons.Count; i++)
+            {
                 DrawButton(g, _buttons[i], i == _hoverButton, i == _pressedButton);
+                if (i == _focusedButton)
+                    DrawFocus(g, _buttons[i]);
+            }
         }
-
-        using var borderPath = GdiPaths.RoundedRect(InsetForBorder(_cardRect), CardCornerRadius);
-        using var pen = new SD.Pen(BorderStrong, 1);
-        g.DrawPath(pen, borderPath);
     }
-
-    private static SD.Rectangle InsetForBorder(SD.Rectangle r)
-        => new(r.X, r.Y, Math.Max(0, r.Width - 1), Math.Max(0, r.Height - 1));
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            OpenWindows.Remove(this);
+            _closed = true;
             _preview?.Dispose();
             _blurredPreview?.Dispose();
+            StopAutoCloseTimer();
             _toolTip.Dispose();
+            _overflowMenu.Dispose();
+            foreach (var button in _buttons)
+                button.Dispose();
         }
         base.Dispose(disposing);
     }
 
-    private void BuildLayout(SD.Bitmap image)
+    private void BuildLayout(SD.Bitmap image, int dpi)
     {
         var size = CaptureService.GetBitmapSize(image);
-        double scale = Math.Min(1.0, Math.Min(MaxCardWidth / (double)size.Width, MaxCardHeight / (double)size.Height));
-        int thumbWidth = Math.Max(1, (int)Math.Round(size.Width * scale));
-        int thumbHeight = Math.Max(1, (int)Math.Round(size.Height * scale));
+        var layout = QuickAccessOverlayLayout.Calculate(size, _settings.Current.OverlaySizePercent, dpi);
+        ClientSize = layout.ClientSize;
+        _cardRect = layout.CardBounds;
+        _thumbRect = layout.ThumbnailBounds;
+        _cornerRadius = layout.CornerRadius;
 
-        int cardWidth = Math.Clamp(thumbWidth, MinCardWidth, MaxCardWidth);
-        int cardHeight = Math.Clamp(thumbHeight, MinCardHeight, MaxCardHeight);
-
-        ClientSize = new SD.Size(cardWidth + Margin * 2, cardHeight + Margin * 2);
-        _cardRect = new SD.Rectangle(Margin, Margin, cardWidth, cardHeight);
-
-        // Thumbnail fitted (contained) inside the card, centered.
-        double fit = Math.Min(cardWidth / (double)thumbWidth, cardHeight / (double)thumbHeight);
-        int fw = Math.Max(1, (int)Math.Round(thumbWidth * fit));
-        int fh = Math.Max(1, (int)Math.Round(thumbHeight * fit));
-        _thumbRect = new SD.Rectangle(
-            _cardRect.X + (cardWidth - fw) / 2,
-            _cardRect.Y + (cardHeight - fh) / 2,
-            fw, fh);
-
-        BuildButtons();
+        BuildButtons(layout);
     }
 
-    private void BuildButtons()
+    private void BuildButtons(QuickAccessOverlayLayout layout)
     {
+        foreach (var button in _buttons)
+            button.Dispose();
         _buttons.Clear();
-        int left = _cardRect.Left + CardPad;
-        int right = _cardRect.Right - CardPad - IconButtonSize;
-        int top = _cardRect.Top + CardPad;
-        int bottom = _cardRect.Bottom - CardPad - IconButtonSize;
+        int left = _cardRect.Left + layout.ControlPadding;
+        int right = _cardRect.Right - layout.ControlPadding - layout.IconSize;
+        int top = _cardRect.Top + layout.ControlPadding;
+        int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
+        // Cloud is intentionally absent. Save occupies its former bottom-right corner.
+        AddIconButton("", "Pin to the screen", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
+        AddIconButton("", "Close (Ctrl+W)", "Close", right, top, layout.IconSize, Close);
+        AddIconButton("", "Open Annotate tool (Ctrl+E)", "Annotate", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
+        AddIconButton("", "Save (Ctrl+S)", "Save", right, bottom, layout.IconSize, SaveFromInput, CreateSaveIcon(layout.IconSize));
 
-        // Four corner icon buttons.
-        AddIconButton("", "Pin (P)", left, top, () => PinRequested?.Invoke(this));
-        AddIconButton("", "Close (Esc)", right, top, Close);
-        AddIconButton("", "Edit (E)", left, bottom, () => EditRequested?.Invoke(this));
-        AddIconButton("", "Background (B)", right, bottom, () => BackgroundRequested?.Invoke(this));
+        int pillX = _cardRect.Left + (_cardRect.Width - layout.PillWidth) / 2;
+        int pillTop = _cardRect.Top + (_cardRect.Height - layout.PillHeight) / 2;
 
-        // Two stacked cream pills (Copy / Save) centered between the corner columns.
-        int pillLeft = left + IconButtonSize + 10;
-        int pillRight = right - 10;
-        int pillWidth = Math.Max(96, pillRight - pillLeft);
-        int pillX = _cardRect.Left + (_cardRect.Width - pillWidth) / 2;
-        int block = PillHeight * 2 + PillGap;
-        int pillTop = _cardRect.Top + (_cardRect.Height - block) / 2;
-
-        AddPillButton("Copy", "Copy (C)", pillX, pillTop, pillWidth, CopyAsync);
-        AddPillButton("Save", "Save (S)", pillX, pillTop + PillHeight + PillGap, pillWidth, SaveAsync);
+        AddPillButton("Copy", "Copy (Ctrl+C)", pillX, pillTop, layout.PillWidth, layout.PillHeight, () => CopyAsync(keepOpen: IsAltDown()));
+        _focusedButton = Math.Clamp(_focusedButton, -1, _buttons.Count - 1);
     }
 
-    private void AddIconButton(string glyph, string tip, int x, int y, Action action)
+    private void AddIconButton(
+        string glyph,
+        string tip,
+        string name,
+        int x,
+        int y,
+        int size,
+        Action action,
+        SD.Bitmap? icon = null)
         => _buttons.Add(new ActionButton(
             glyph,
             tip,
-            new SD.Rectangle(x, y, IconButtonSize, IconButtonSize),
+            name,
+            new SD.Rectangle(x, y, size, size),
             action,
-            tip.StartsWith("Close", StringComparison.Ordinal) ? CloseGlyphFont : GlyphFont,
-            ActionButtonShape.IconSquare,
-            IconCornerRadius));
+            ThemePalette.IconFont(tip.StartsWith("Close", StringComparison.Ordinal) ? 8.5f : 10.5f),
+            ActionButtonShape.Circle,
+            size / 2)
+        {
+            Icon = icon,
+        });
 
-    private void AddPillButton(string label, string tip, int x, int y, int width, Action action)
+    private void AddPillButton(string label, string tip, int x, int y, int width, int height, Action action)
         => _buttons.Add(new ActionButton(
             label,
             tip,
-            new SD.Rectangle(x, y, width, PillHeight),
+            label,
+            new SD.Rectangle(x, y, width, height),
             action,
-            PillFont,
+            ThemePalette.UiFont(9.5f, SD.FontStyle.Bold),
             ActionButtonShape.Pill,
-            PillCornerRadius)
+            height / 2)
         {
             Label = label,
         });
@@ -341,7 +362,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (bmp is null)
             return;
 
-        using var clip = GdiPaths.RoundedRect(_cardRect, CardCornerRadius);
+        using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
         var oldClip = g.Clip;
         var oldInterp = g.InterpolationMode;
         var oldOffset = g.PixelOffsetMode;
@@ -364,12 +385,22 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         SD.Color face = pressed ? CreamPressed : hot ? CreamHover : Cream;
 
-        using (var path = GdiPaths.RoundedRect(button.Bounds, button.CornerRadius))
+        using (var path = button.Shape == ActionButtonShape.Circle
+            ? CirclePath(button.Bounds)
+            : GdiPaths.RoundedRect(button.Bounds, button.CornerRadius))
         {
             using var fill = new SD.SolidBrush(face);
             g.FillPath(fill, path);
             using var pen = new SD.Pen(SD.Color.FromArgb(0x18, 0x00, 0x00, 0x00), 1);
             g.DrawPath(pen, path);
+        }
+
+        if (button.Icon is not null)
+        {
+            int x = button.Bounds.Left + (button.Bounds.Width - button.Icon.Width) / 2;
+            int y = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
+            g.DrawImageUnscaled(button.Icon, x, y);
+            return;
         }
 
         string text = button.Shape == ActionButtonShape.Pill && button.Label is not null ? button.Label : button.Glyph;
@@ -378,6 +409,101 @@ public sealed class FastQuickActionsWindow : WF.Form
                     WF.TextFormatFlags.SingleLine |
                     WF.TextFormatFlags.NoPadding;
         WF.TextRenderer.DrawText(g, text, button.Font, button.Bounds, CreamText, flags);
+    }
+
+    private static SD.Bitmap? CreateSaveIcon(int buttonSize)
+    {
+        try
+        {
+            using Stream? stream = typeof(FastQuickActionsWindow).Assembly.GetManifestResourceStream(
+                "WinShot.Assets.download-window-svgrepo-com.svg");
+            if (stream is null)
+                return null;
+
+            XDocument document = XDocument.Load(stream);
+            XNamespace svg = "http://www.w3.org/2000/svg";
+            string? pathData = document.Root?.Element(svg + "path")?.Attribute("d")?.Value;
+            if (string.IsNullOrWhiteSpace(pathData))
+                return null;
+
+            WM.Geometry geometry = WM.Geometry.Parse(pathData);
+            W.Rect bounds = geometry.Bounds;
+            int pixelSize = Math.Max(10, (int)Math.Round(buttonSize * 0.64));
+            double inset = Math.Max(1, pixelSize * 0.06);
+            double scale = Math.Min(
+                (pixelSize - inset * 2) / bounds.Width,
+                (pixelSize - inset * 2) / bounds.Height);
+            var transform = new WM.MatrixTransform(new WM.Matrix(
+                scale,
+                0,
+                0,
+                scale,
+                (pixelSize - bounds.Width * scale) / 2 - bounds.X * scale,
+                (pixelSize - bounds.Height * scale) / 2 - bounds.Y * scale));
+
+            var visual = new WM.DrawingVisual();
+            using (WM.DrawingContext context = visual.RenderOpen())
+            {
+                context.PushTransform(transform);
+                context.DrawGeometry(
+                    new WM.SolidColorBrush(WM.Color.FromArgb(CreamText.A, CreamText.R, CreamText.G, CreamText.B)),
+                    null,
+                    geometry);
+                context.Pop();
+            }
+
+            var rendered = new WMI.RenderTargetBitmap(
+                pixelSize,
+                pixelSize,
+                96,
+                96,
+                WM.PixelFormats.Pbgra32);
+            rendered.Render(visual);
+
+            var bitmap = new SD.Bitmap(pixelSize, pixelSize, PixelFormat.Format32bppPArgb);
+            BitmapData data = bitmap.LockBits(
+                new SD.Rectangle(0, 0, pixelSize, pixelSize),
+                ImageLockMode.WriteOnly,
+                PixelFormat.Format32bppPArgb);
+            try
+            {
+                rendered.CopyPixels(
+                    new W.Int32Rect(0, 0, pixelSize, pixelSize),
+                    data.Scan0,
+                    data.Stride * data.Height,
+                    data.Stride);
+            }
+            finally
+            {
+                bitmap.UnlockBits(data);
+            }
+            return bitmap;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Save icon SVG could not be rendered", ex);
+            return null;
+        }
+    }
+
+    private static GraphicsPath CirclePath(SD.Rectangle bounds)
+    {
+        var path = new GraphicsPath();
+        path.AddEllipse(bounds);
+        return path;
+    }
+
+    private static void DrawFocus(SD.Graphics g, ActionButton button)
+    {
+        var bounds = SD.Rectangle.Inflate(button.Bounds, -2, -2);
+        using var pen = new SD.Pen(SD.Color.FromArgb(210, 36, 99, 180), 1) { DashStyle = DashStyle.Dot };
+        if (button.Shape == ActionButtonShape.Circle)
+            g.DrawEllipse(pen, bounds);
+        else
+        {
+            using var path = GdiPaths.RoundedRect(bounds, Math.Max(1, button.CornerRadius - 2));
+            g.DrawPath(pen, path);
+        }
     }
 
     private void SetPressed(int index)
@@ -389,16 +515,117 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (index >= 0) Invalidate(_buttons[index].Bounds);
     }
 
-    private void PositionBottomRight()
+    private void PositionFromSettings()
     {
-        // Pop on the monitor the user just acted on (under the cursor).
-        var area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        var screen = _settings.Current.OverlayMoveToActiveScreen
+            ? WF.Screen.FromPoint(WF.Cursor.Position)
+            : WF.Screen.PrimaryScreen ?? WF.Screen.FromPoint(WF.Cursor.Position);
+        var area = screen.WorkingArea;
         int offset = OpenWindows
-            .Where(w => !ReferenceEquals(w, this) && w.Visible)
+            .Where(w => !ReferenceEquals(w, this) && w.Visible && area.IntersectsWith(w.Bounds))
             .Sum(w => w.Height + 12);
-        Location = new SD.Point(
-            area.Right - Width - 16,
-            area.Bottom - Height - 16 - offset);
+        Location = QuickAccessOverlayLayout.Place(
+            area,
+            Size,
+            _settings.Current.OverlayPosition,
+            offset,
+            _dpi);
+    }
+
+    private void BuildOverflowMenu()
+    {
+        _overflowMenu.AccessibleName = "More capture actions";
+        _overflowMenu.Items.Add("Recognize text (OCR)", null, (_, _) => OcrRequested?.Invoke(this));
+        _overflowMenu.Items.Add("Add background", null, (_, _) => BackgroundRequested?.Invoke(this));
+        _overflowMenu.Opening += (_, _) =>
+        {
+            SetHovering(true);
+            PauseAutoCloseTimer();
+        };
+        _overflowMenu.Closed += (_, _) =>
+        {
+            if (!ClientRectangle.Contains(PointToClient(WF.Cursor.Position)))
+            {
+                if (_hovering)
+                    SetHovering(false);
+                else
+                    ResumeAutoCloseTimer();
+            }
+            else
+            {
+                SetHovering(true);
+                PauseAutoCloseTimer();
+            }
+        };
+    }
+
+    private void ShowOverflowMenu()
+    {
+        SetHovering(true);
+        _overflowMenu.Show(this, new SD.Point(Width / 2, Height / 2));
+    }
+
+    private void StartAutoCloseTimer()
+    {
+        int seconds = Math.Max(0, _settings.Current.OverlayAutoCloseSeconds);
+        if (!_settings.Current.OverlayAutoClose || seconds <= 0)
+            return;
+        _autoCloseRemainingMs = (int)Math.Min(int.MaxValue, seconds * 1000L);
+        ResumeAutoCloseTimer();
+    }
+
+    private void PauseAutoCloseTimer()
+    {
+        if (_autoCloseTimer is null || !_autoCloseTimer.Enabled)
+            return;
+        _autoCloseRemainingMs = (int)Math.Clamp(_autoCloseDueTick - Environment.TickCount64, 1, int.MaxValue);
+        _autoCloseTimer.Stop();
+    }
+
+    private void ResumeAutoCloseTimer()
+    {
+        if (_autoCloseRemainingMs <= 0 || _closed || IsDisposed)
+            return;
+        _autoCloseTimer ??= CreateAutoCloseTimer();
+        _autoCloseTimer.Interval = Math.Max(1, _autoCloseRemainingMs);
+        _autoCloseDueTick = Environment.TickCount64 + _autoCloseRemainingMs;
+        _autoCloseTimer.Start();
+    }
+
+    private WF.Timer CreateAutoCloseTimer()
+    {
+        var timer = new WF.Timer();
+        timer.Tick += async (_, _) =>
+        {
+            timer.Stop();
+            _autoCloseRemainingMs = 0;
+            await RunAutoCloseActionAsync();
+        };
+        return timer;
+    }
+
+    private void StopAutoCloseTimer()
+    {
+        _autoCloseTimer?.Stop();
+        _autoCloseTimer?.Dispose();
+        _autoCloseTimer = null;
+        _autoCloseRemainingMs = 0;
+    }
+
+    private async Task RunAutoCloseActionAsync()
+    {
+        switch (QuickAccessOverlayLayout.NormalizeAutoCloseAction(_settings.Current.OverlayAutoCloseAction))
+        {
+            case "copy-close":
+                await CopyCoreAsync(keepOpen: false);
+                break;
+            case "close":
+                Close();
+                break;
+            default:
+                await SaveCoreAsync(askForDestination: false, closeAfterSave: true);
+                break;
+        }
     }
 
     private void QueueRegionUpdate()
@@ -415,7 +642,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
             // Clip the window to the rounded card so the margin around it is transparent
             // (and click-through), and so MouseEnter/Leave fire on the card's real shape.
-            using var cardPath = GdiPaths.RoundedRect(_cardRect, CardCornerRadius);
+            using var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
             Region?.Dispose();
             Region = new SD.Region(cardPath);
         }));
@@ -575,22 +802,82 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private void OnOverlayKeyDown(object? sender, WF.KeyEventArgs e)
     {
-        if (e.Modifiers != WF.Keys.None) return;
+        bool ctrl = e.Control;
+        bool alt = e.Alt;
+        if (e.KeyCode == WF.Keys.Tab && !ctrl && !alt)
+        {
+            SetHovering(true);
+            int direction = e.Shift ? -1 : 1;
+            _focusedButton = (_focusedButton + direction + _buttons.Count) % _buttons.Count;
+            Invalidate();
+            AccessibilityNotifyClients(WF.AccessibleEvents.Focus, _focusedButton);
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+        if ((e.KeyCode == WF.Keys.Enter || e.KeyCode == WF.Keys.Space) && e.Modifiers == WF.Keys.None && _focusedButton >= 0)
+        {
+            _buttons[_focusedButton].Action();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+        if ((e.KeyCode == WF.Keys.Apps || (e.KeyCode == WF.Keys.F10 && e.Shift)) && !ctrl && !alt)
+        {
+            ShowOverflowMenu();
+            e.Handled = true;
+            return;
+        }
+
         switch (e.KeyCode)
         {
-            case WF.Keys.C: CopyAsync(); e.Handled = true; break;
-            case WF.Keys.S: SaveAsync(); e.Handled = true; break;
-            case WF.Keys.E: EditRequested?.Invoke(this); e.Handled = true; break;
-            case WF.Keys.P: PinRequested?.Invoke(this); e.Handled = true; break;
-            case WF.Keys.O: OcrRequested?.Invoke(this); e.Handled = true; break;
-            case WF.Keys.B: BackgroundRequested?.Invoke(this); e.Handled = true; break;
-            case WF.Keys.Escape: Close(); e.Handled = true; break;
+            case WF.Keys.C when ctrl:
+                CopyAsync(keepOpen: alt);
+                e.Handled = true;
+                break;
+            case WF.Keys.C when e.Modifiers == WF.Keys.None:
+                CopyAsync(keepOpen: true); // preserve the legacy single-key action
+                e.Handled = true;
+                break;
+            case WF.Keys.S when ctrl || e.Modifiers == WF.Keys.None:
+                SaveFromInput();
+                e.Handled = true;
+                break;
+            case WF.Keys.E when ctrl || e.Modifiers == WF.Keys.None:
+                EditRequested?.Invoke(this);
+                e.Handled = true;
+                break;
+            case WF.Keys.W when ctrl:
+            case WF.Keys.Escape when e.Modifiers == WF.Keys.None:
+                Close();
+                e.Handled = true;
+                break;
+            case WF.Keys.P when e.Modifiers == WF.Keys.None:
+                PinRequested?.Invoke(this);
+                e.Handled = true;
+                break;
+            case WF.Keys.O when e.Modifiers == WF.Keys.None:
+                OcrRequested?.Invoke(this);
+                e.Handled = true;
+                break;
+            case WF.Keys.B when e.Modifiers == WF.Keys.None:
+                BackgroundRequested?.Invoke(this);
+                e.Handled = true;
+                break;
         }
     }
 
     private void OnOverlayMouseDown(object? sender, WF.MouseEventArgs e)
     {
+        if (e.Button == WF.MouseButtons.Right)
+        {
+            ShowOverflowMenu();
+            return;
+        }
         if (e.Button != WF.MouseButtons.Left) return;
+
+        Activate();
+        Focus();
 
         int buttonIndex = _hovering ? HitTestButton(e.Location) : -1;
         if (buttonIndex >= 0)
@@ -627,9 +914,12 @@ public sealed class FastQuickActionsWindow : WF.Form
             string path = await EnsureDragFileAsync();
             if (_closed || IsDisposed) return;
 
+            bool keepOpen = IsAltDown();
             var data = new WF.DataObject();
             data.SetData(WF.DataFormats.FileDrop, new[] { path });
-            DoDragDrop(data, WF.DragDropEffects.Copy);
+            var result = DoDragDrop(data, WF.DragDropEffects.Copy);
+            if (result != WF.DragDropEffects.None && _settings.Current.OverlayCloseAfterDragging && !keepOpen)
+                Close();
         }
         catch (Exception ex)
         {
@@ -706,13 +996,22 @@ public sealed class FastQuickActionsWindow : WF.Form
         return path;
     }
 
-    private async void CopyAsync()
+    private async void CopyAsync(bool keepOpen)
+        => await CopyCoreAsync(keepOpen);
+
+    private async Task CopyCoreAsync(bool keepOpen)
     {
         try
         {
             _copyTask = CaptureService.CopyToClipboardAsync(_image);
             await _copyTask;
             if (_closed || IsDisposed) return;
+
+            if (!keepOpen)
+            {
+                Close();
+                return;
+            }
 
             int index = _buttons.FindIndex(b => b.Tip.StartsWith("Copy", StringComparison.Ordinal));
             if (index < 0) return;
@@ -736,33 +1035,48 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private async void SaveAsync()
+    private void SaveFromInput()
+        => _ = SaveCoreAsync(
+            askForDestination: IsAltDown() || QuickAccessOverlayLayout.NormalizeSaveBehavior(_settings.Current.OverlaySaveButtonBehavior) == "ask",
+            closeAfterSave: true);
+
+    private async Task SaveCoreAsync(bool askForDestination, bool closeAfterSave)
     {
         try
         {
             Directory.CreateDirectory(_settings.Current.SaveFolder);
-            using var dialog = new WF.SaveFileDialog
+            string path;
+            if (askForDestination)
             {
-                FileName = FileNamer.Next(_settings, _settings.Current.ImageFormat),
-                InitialDirectory = _settings.Current.SaveFolder,
-                Filter = "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp",
-                FilterIndex = _settings.Current.ImageFormat switch
+                using var dialog = new WF.SaveFileDialog
                 {
-                    "jpg" => 2,
-                    "webp" => 3,
-                    _ => 1,
-                },
-            };
-            if (dialog.ShowDialog(this) != WF.DialogResult.OK)
-                return;
+                    FileName = FileNamer.Next(_settings, _settings.Current.ImageFormat),
+                    InitialDirectory = _settings.Current.SaveFolder,
+                    Filter = "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp",
+                    FilterIndex = _settings.Current.ImageFormat switch
+                    {
+                        "jpg" => 2,
+                        "webp" => 3,
+                        _ => 1,
+                    },
+                };
+                if (dialog.ShowDialog(this) != WF.DialogResult.OK)
+                    return;
+                path = dialog.FileName;
+            }
+            else
+            {
+                path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, _settings.Current.ImageFormat);
+            }
 
             var copy = CaptureService.CloneBitmap(_image);
             await Task.Run(() =>
             {
                 using (copy)
-                    ImageSaver.Save(copy, dialog.FileName);
+                    ImageSaver.Save(copy, path);
             });
-            Close();
+            if (closeAfterSave && !_closed && !IsDisposed)
+                Close();
         }
         catch (Exception ex)
         {
@@ -770,34 +1084,92 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
+    private static bool IsAltDown() => (WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt;
+
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll")]
+    private static extern int GetDpiForWindow(IntPtr hWnd);
+
     private enum ActionButtonShape
     {
-        IconSquare,
+        Circle,
         Pill,
     }
 
     private sealed class ActionButton(
         string glyph,
         string tip,
+        string accessibleName,
         SD.Rectangle bounds,
         Action action,
         SD.Font font,
-        ActionButtonShape shape = ActionButtonShape.IconSquare,
-        int cornerRadius = IconCornerRadius)
+        ActionButtonShape shape = ActionButtonShape.Circle,
+        int cornerRadius = 11) : IDisposable
     {
         public string Glyph { get; set; } = glyph;
         public string Tip { get; } = tip;
+        public string AccessibleName { get; } = accessibleName;
         public SD.Rectangle Bounds { get; } = bounds;
         public Action Action { get; } = action;
         public SD.Font Font { get; } = font;
         public ActionButtonShape Shape { get; } = shape;
         public int CornerRadius { get; } = cornerRadius;
         public string? Label { get; set; }
+        public SD.Bitmap? Icon { get; init; }
+
+        public void Dispose()
+        {
+            Font.Dispose();
+            Icon?.Dispose();
+        }
+    }
+
+    private sealed class OverlayAccessibleObject(FastQuickActionsWindow owner)
+        : WF.Control.ControlAccessibleObject(owner)
+    {
+        public override int GetChildCount() => owner._buttons.Count;
+
+        public override WF.AccessibleObject? GetChild(int index) =>
+            index >= 0 && index < owner._buttons.Count
+                ? new ActionAccessibleObject(owner, index)
+                : null;
+
+        public override WF.AccessibleObject? GetFocused() =>
+            owner._focusedButton >= 0 ? GetChild(owner._focusedButton) : base.GetFocused();
+    }
+
+    private sealed class ActionAccessibleObject(FastQuickActionsWindow owner, int index) : WF.AccessibleObject
+    {
+        private ActionButton Button => owner._buttons[index];
+
+        public override string? Name
+        {
+            get => Button.AccessibleName;
+            set { }
+        }
+
+        public override string? Help => Button.Tip;
+        public override string? DefaultAction => "Press";
+        public override WF.AccessibleRole Role => WF.AccessibleRole.PushButton;
+        public override WF.AccessibleStates State =>
+            WF.AccessibleStates.Focusable |
+            (owner._focusedButton == index ? WF.AccessibleStates.Focused : WF.AccessibleStates.None);
+        public override SD.Rectangle Bounds => owner.RectangleToScreen(Button.Bounds);
+        public override WF.AccessibleObject? Parent => owner.AccessibilityObject;
+
+        public override void DoDefaultAction()
+        {
+            if (owner.IsDisposed)
+                return;
+            if (owner.InvokeRequired)
+                owner.BeginInvoke(Button.Action);
+            else
+                Button.Action();
+        }
     }
 }

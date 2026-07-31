@@ -93,12 +93,12 @@ public class Settings
     public bool ShowMagnifier { get; set; } = true;     // TODO: wire behavior — pixel magnifier during region select
 
     // Quick Access overlay (extends the post-capture overlay block)
-    public string OverlayPosition { get; set; } = "left";  // TODO: wire behavior — left | right | top | bottom etc.
-    public bool OverlayMoveToActiveScreen { get; set; } = true; // TODO: wire behavior
-    public int OverlaySizePercent { get; set; } = 50;      // TODO: wire behavior — overlay thumbnail size
-    public string OverlayAutoCloseAction { get; set; } = "save-close"; // TODO: wire behavior — what auto-close does
-    public bool OverlayCloseAfterDragging { get; set; } = true; // TODO: wire behavior
-    public string OverlaySaveButtonBehavior { get; set; } = "export"; // TODO: wire behavior — export | ask
+    public string OverlayPosition { get; set; } = "bottom-right"; // left | right | top | bottom | bottom-left | bottom-right
+    public bool OverlayMoveToActiveScreen { get; set; } = true;
+    public int OverlaySizePercent { get; set; } = 50;
+    public string OverlayAutoCloseAction { get; set; } = "save-close"; // save-close | copy-close | close
+    public bool OverlayCloseAfterDragging { get; set; } = true;
+    public string OverlaySaveButtonBehavior { get; set; } = "export"; // export | ask
 
     // Recording extras (CleanShot Recording > General / Video / GIF)
     public bool ShowRecordingControls { get; set; } = true; // TODO: wire behavior — controls bar while recording
