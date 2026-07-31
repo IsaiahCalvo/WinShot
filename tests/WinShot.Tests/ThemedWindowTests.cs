@@ -118,12 +118,119 @@ public class ThemedWindowTests
 
     private static void SettingsWindowShowCloseSmoke(SettingsService settings)
     {
+        settings.Current.ShortcutBindings["legacy-placeholder"] = "Ctrl+Alt+Q";
+        settings.Current.ShowCrosshair = false;
+        settings.Current.CrosshairMode = "always";
+        settings.Current.PostCaptureAction = "save";
         var window = SettingsWindow.Show(settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
+        AssertSettingsTruthfulAndAccessible(window);
+        Assert.Equal(
+            "never",
+            ((System.Windows.Controls.ComboBoxItem)
+                ((System.Windows.Controls.ComboBox)window.FindName("CrosshairModeCombo")).SelectedItem).Tag);
+        Assert.Equal(
+            "save",
+            ((System.Windows.Controls.ComboBoxItem)
+                ((System.Windows.Controls.ComboBox)window.FindName("PostCaptureActionCombo")).SelectedItem).Tag);
+        typeof(SettingsWindow).GetMethod(
+            "SaveShortcutBoxes",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(window, new object[] { settings.Current });
+        Assert.Equal("Ctrl+Alt+Q", settings.Current.ShortcutBindings["legacy-placeholder"]);
         window.Close();
         WaitUntilHidden(window);
         Assert.False(window.IsVisible);
+    }
+
+    private static void AssertSettingsTruthfulAndAccessible(SettingsWindow window)
+    {
+        T Named<T>(string name) where T : FrameworkElement =>
+            Assert.IsAssignableFrom<T>(window.FindName(name));
+
+        Assert.Equal(ResizeMode.CanResize, window.ResizeMode);
+        Assert.True(window.MinWidth >= 620);
+        Assert.True(window.MinHeight >= 560);
+
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("LegacyAfterCaptureMatrix").Visibility);
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("UnavailableSoundsRow").Visibility);
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("UnavailableMaxResolutionRow").Visibility);
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("UnavailableCopyFormatCard").Visibility);
+
+        var done = Named<System.Windows.Controls.Button>("SaveButton");
+        var cancel = Named<System.Windows.Controls.Button>("CancelButton");
+        Assert.True(done.IsDefault);
+        Assert.True(cancel.IsCancel);
+        Assert.NotNull(done.FocusVisualStyle);
+        Assert.NotNull(cancel.FocusVisualStyle);
+
+        string[] accessibleControls =
+        [
+            "StartupCheck", "UpdatesCheck", "SaveFolderBox", "BrowseSaveFolderButton",
+            "HideIconsCheck", "PostCaptureActionCombo", "PostCaptureCopyCheck", "CaptureCursorCheck",
+            "ClickHighlightsCheck", "KeystrokesCheck", "CountdownBox", "WebcamCombo", "WebcamSizeBox",
+            "RecordingFpsBox", "RecordAudioCheck", "SystemAudioCheck", "GifFpsBox", "FormatCombo",
+            "HiDpiCheck", "SelfTimerCombo", "FreezeScreenCheck", "CrosshairModeCombo",
+            "ShowMagnifierCheck", "TemplateBox", "HistorySlider", "AllInOneRememberCheck",
+            "OcrJoinLinesCheck", "CancelButton", "SaveButton", "AboutCheckUpdatesButton",
+            "AboutRepositoryButton", "AboutLogsButton",
+        ];
+
+        foreach (string name in accessibleControls)
+        {
+            var control = Named<System.Windows.Controls.Control>(name);
+            Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(control)), name);
+            Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(control)), name);
+        }
+
+        var shortcutBoxes = FindLogicalChildren<HotkeyBox>(window).ToArray();
+        Assert.Equal(SettingsTruthCatalog.ExecutableShortcutIds.Count, shortcutBoxes.Length);
+        Assert.All(shortcutBoxes, box =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(box)));
+            Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(box)));
+            Assert.NotNull(box.FocusVisualStyle);
+        });
+
+        var tabOrder = new[]
+        {
+            Named<System.Windows.Controls.Control>("StartupCheck").TabIndex,
+            Named<System.Windows.Controls.Control>("SaveFolderBox").TabIndex,
+            Named<System.Windows.Controls.Control>("PostCaptureActionCombo").TabIndex,
+            Named<System.Windows.Controls.Control>("CaptureCursorCheck").TabIndex,
+            Named<System.Windows.Controls.Control>("FormatCombo").TabIndex,
+            Named<System.Windows.Controls.Control>("TemplateBox").TabIndex,
+            cancel.TabIndex,
+            done.TabIndex,
+        };
+        Assert.Equal(tabOrder.Order().ToArray(), tabOrder);
+    }
+
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            DependencyObject child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is T match)
+                yield return match;
+            foreach (T descendant in FindVisualChildren<T>(child))
+                yield return descendant;
+        }
+    }
+
+    private static IEnumerable<T> FindLogicalChildren<T>(DependencyObject root) where T : DependencyObject
+    {
+        foreach (object child in LogicalTreeHelper.GetChildren(root))
+        {
+            if (child is T match)
+                yield return match;
+            if (child is DependencyObject dependencyObject)
+                foreach (T descendant in FindLogicalChildren<T>(dependencyObject))
+                    yield return descendant;
+        }
     }
 
     private static void HistoryWindowShowCloseSmoke(HistoryService history, SettingsService settings)

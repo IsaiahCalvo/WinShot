@@ -28,7 +28,8 @@ public class SettingsRenderHarness
         if (Environment.GetEnvironmentVariable("WINSHOT_RENDER") != "1")
             return;
 
-        string outDir = Path.Combine(Path.GetTempPath(), "winshot-settings-render");
+        string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_DIR")
+            ?? Path.Combine(Path.GetTempPath(), "winshot-settings-render");
         Directory.CreateDirectory(outDir);
         foreach (var f in Directory.GetFiles(outDir, "*.png"))
             File.Delete(f);
@@ -43,7 +44,7 @@ public class SettingsRenderHarness
                 ThemeResources.EnsureLoaded();
 
                 var settings = new SettingsService();
-                settings.Current.SaveFolder = @"C:\Users\icalvo\OneDrive - Eastern DataComm\Pictures\WinShot";
+                settings.Current.SaveFolder = @"C:\Pictures\WinShot";
 
                 var win = new SettingsWindow(settings)
                 {
@@ -56,16 +57,19 @@ public class SettingsRenderHarness
                 win.Show();
                 Pump();
 
-                var list = win.FindName("SectionList") as ListBox;
-                int tabs = list?.Items.Count ?? 1;
-                for (int i = 0; i < tabs; i++)
-                {
-                    if (list is not null) list.SelectedIndex = i;
-                    Pump();
-                    win.UpdateLayout();
-                    Pump();
-                    RenderToPng(win, Path.Combine(outDir, $"tab{i:00}.png"));
-                }
+                var list = (ListBox)win.FindName("SectionList");
+                list.SelectedIndex = 0;
+                Pump();
+                win.UpdateLayout();
+                RenderToPng(win, Path.Combine(outDir, "normal-general.png"), dpi: 96);
+
+                ((TextBox)win.FindName("SaveFolderBox")).Focus();
+                Pump();
+                win.UpdateLayout();
+                RenderToPng(win, Path.Combine(outDir, "focus-general.png"), dpi: 96);
+
+                // Same effective-pixel layout rasterized at 150% Windows display scaling.
+                RenderToPng(win, Path.Combine(outDir, "high-dpi-general.png"), dpi: 144);
 
                 win.Close();
             }
@@ -82,13 +86,14 @@ public class SettingsRenderHarness
         Assert.True(Directory.GetFiles(outDir, "*.png").Length > 0, "No tab PNGs were produced.");
     }
 
-    private static void RenderToPng(Window w, string path)
+    private static void RenderToPng(Window w, string path, double dpi)
     {
-        int width = (int)Math.Ceiling(w.ActualWidth);
-        int height = (int)Math.Ceiling(w.ActualHeight);
+        double scale = dpi / 96d;
+        int width = (int)Math.Ceiling(w.ActualWidth * scale);
+        int height = (int)Math.Ceiling(w.ActualHeight * scale);
         if (width <= 0 || height <= 0) return;
 
-        var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        var rtb = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
         rtb.Render(w);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(rtb));

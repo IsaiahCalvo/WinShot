@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -40,6 +41,8 @@ public partial class SettingsWindow : Window
         _settings = settings;
         BuildShortcutsTab();
         LoadFromSettings();
+        ConfigureAccessibility();
+        ApplyHighContrastPalette();
         PopulateAbout();
         WireInlineHotkeyConflictChecks();
         DarkTitleBar.Apply(this);
@@ -208,7 +211,12 @@ public partial class SettingsWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.Escape) Close();
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            Close();
+            return;
+        }
         base.OnKeyDown(e);
     }
 
@@ -242,6 +250,8 @@ public partial class SettingsWindow : Window
         PlaySoundsCheck.IsChecked = s.PlaySounds;
         SelectByTag(ShutterSoundCombo, s.ShutterSound, fallbackIndex: 0);
         ShowTrayIconCheck.IsChecked = s.ShowTrayIcon;
+        SelectByTag(PostCaptureActionCombo, PostCaptureAction.Normalize(s.PostCaptureAction), fallbackIndex: 0);
+        PostCaptureCopyCheck.IsChecked = s.AutoCopyToClipboard;
 
         // General > "After capture" matrix
         ScreenshotShowOverlayCheck.IsChecked = s.ScreenshotShowOverlay;
@@ -306,11 +316,11 @@ public partial class SettingsWindow : Window
         ConvertToSrgbCheck.IsChecked = s.ConvertToSrgb;
         AddPixelBorderCheck.IsChecked = s.AddPixelBorder;
         SelectByTag(BackgroundCombo, s.ScreenshotBackground, fallbackIndex: 0);
-        SelectByTag(SelfTimerCombo, s.SelfTimerSeconds.ToString(), fallbackIndex: 1);
+        SelectByTag(SelfTimerCombo, s.SelfTimerSeconds.ToString(), fallbackIndex: 0);
         SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
         CursorOnScreenshotsCheck.IsChecked = s.CursorOnScreenshots;
         FreezeScreenCheck.IsChecked = s.FreezeScreen;
-        SelectByTag(CrosshairModeCombo, s.CrosshairMode, fallbackIndex: 1);
+        SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 1);
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
 
@@ -495,14 +505,8 @@ public partial class SettingsWindow : Window
                 valid = false;
             }
 
-            int overlaySeconds = ReadInt(OverlayCloseBox, 0, 3600, ref valid);
-            int historyLimit = ReadInt(HistoryLimitBox, 1, 5000, ref valid);
-            int retentionDays = ReadInt(RetentionDaysBox, 0, 3650, ref valid);
-            int selfTimer = ReadInt(
-                SelfTimerBox,
-                SelfTimerOptions.MinDelaySeconds,
-                SelfTimerOptions.MaxDelaySeconds,
-                ref valid);
+            int retentionDays = SliderIndexToRetentionDays(HistorySlider.Value);
+            int selfTimer = int.Parse(SelectedTag(SelfTimerCombo, "3"));
             int recordingFps = ReadInt(RecordingFpsBox, 10, 60, ref valid);
             int gifFps = ReadInt(GifFpsBox, 5, 20, ref valid);
             int webcamSizePercent = ReadInt(
@@ -540,9 +544,8 @@ public partial class SettingsWindow : Window
             s.CheckForUpdatesOnStartup = UpdatesCheck.IsChecked == true;
             s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
             s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
-            s.PlaySounds = PlaySoundsCheck.IsChecked == true;
-            s.ShutterSound = SelectedTag(ShutterSoundCombo, "default");
-            s.ShowTrayIcon = ShowTrayIconCheck.IsChecked == true;
+            s.AutoCopyToClipboard = PostCaptureCopyCheck.IsChecked == true;
+            s.PostCaptureAction = PostCaptureAction.Normalize(SelectedTag(PostCaptureActionCombo, "overlay"));
 
             // General > "After capture" matrix (per-action, Screenshot vs Recording columns).
             s.ScreenshotShowOverlay = ScreenshotShowOverlayCheck.IsChecked == true;
@@ -578,76 +581,37 @@ public partial class SettingsWindow : Window
             s.OverlayCloseAfterDragging = OverlayCloseAfterDragCheck.IsChecked == true;
             s.OverlaySaveButtonBehavior = SelectedTag(OverlaySaveBehaviorCombo, "export");
 
-            // Hotkeys (real + placeholder; see SettingsWindow.Shortcuts.cs)
+            // Only executable global hotkeys are editable; unknown stored bindings survive.
             SaveShortcutBoxes(s);
 
             // Recording > General
-            s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
-            s.ShowRecordingTimer = ShowRecordingTimerCheck.IsChecked == true;
-            s.ScaleHiDpiVideo = ScaleHiDpiVideoCheck.IsChecked == true;
-            s.DoNotDisturbWhileRecording = DoNotDisturbCheck.IsChecked == true;
             s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
             s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
             s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
-            s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
-            s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
-            s.ShowRecordingCountdown = ShowCountdownCheck.IsChecked == true;
             s.RecordingCountdownSeconds = countdown;
             s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
             s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
 
             // Recording > Video
-            s.RecordingMaxResolution = SelectedTag(MaxResolutionCombo, "original");
             s.RecordingFps = recordingFps;
             s.RecordAudio = RecordAudioCheck.IsChecked == true;
             s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
-            s.RecordAudioMono = RecordAudioMonoCheck.IsChecked == true;
-            s.OpenVideoEditorAfterRecording = OpenVideoEditorCheck.IsChecked == true;
 
             // Recording > GIF
             s.GifFps = gifFps;
-            s.GifQuality = (int)Math.Round(GifQualitySlider.Value);
-            s.OptimizeGifs = OptimizeGifsCheck.IsChecked == true;
-            s.GifSize = SelectedTag(GifSizeCombo, "800");
 
-            // Annotate
-            s.InverseArrowDirection = InverseArrowCheck.IsChecked == true;
-            s.SmoothPencil = SmoothPencilCheck.IsChecked == true;
-            s.RememberLastTool = RememberLastToolCheck.IsChecked == true;
-            s.DrawShadowOnObjects = DrawShadowCheck.IsChecked == true;
-            s.AutoExpandCanvas = AutoExpandCanvasCheck.IsChecked == true;
-            s.ShowColorNames = ShowColorNamesCheck.IsChecked == true;
-            s.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
-            s.ShowDockIcon = ShowDockIconCheck.IsChecked == true;
-
-            // OCR (Annotate tab)
-            s.OcrLanguage = SelectedTag(OcrLanguageCombo, "auto");
             s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
-            s.OcrDetectLinks = OcrDetectLinksCheck.IsChecked == true;
-
-            // Pinned screenshots (Annotate tab)
-            s.PinnedRoundedCorners = PinnedRoundedCornersCheck.IsChecked == true;
-            s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
-            s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
 
             // Screenshots
-            s.AddPixelBorder = AddPixelBorderCheck.IsChecked == true;
-            s.ConvertToSrgb = ConvertToSrgbCheck.IsChecked == true;
-            s.ScreenshotBackground = SelectedTag(BackgroundCombo, "none");
-            s.CursorOnScreenshots = CursorOnScreenshotsCheck.IsChecked == true;
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
             s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
-            s.ShowCrosshair = ShowCrosshairCheck.IsChecked == true;
+            s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
             s.FileNameTemplate = TemplateBox.Text.Trim();
-            s.AskForNameAfterCapture = AskForNameCheck.IsChecked == true;
-            s.AddRetinaSuffix = AddRetinaSuffixCheck.IsChecked == true;
-            s.CopyToClipboardFormat = SelectedTag(CopyFormatCombo, "file-image");
             s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
-            s.HistoryLimit = historyLimit;
             s.HistoryRetentionDays = retentionDays;
 
             await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
@@ -663,6 +627,108 @@ public partial class SettingsWindow : Window
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
+
+    private void ConfigureAccessibility()
+    {
+        int tabIndex = 10;
+        Accessible(StartupCheck, "Start WinShot at login", "Adds or removes WinShot from Windows startup.");
+        Accessible(UpdatesCheck, "Check for updates at startup", "Checks GitHub Releases when WinShot starts.");
+        Accessible(SaveFolderBox, "Export location", "Folder where captures are saved.");
+        Accessible(BrowseSaveFolderButton, "Browse for export location", "Choose the folder where captures are saved.");
+        Accessible(HideIconsCheck, "Hide desktop icons while capturing", "Temporarily hides desktop icons during capture.");
+        Accessible(PostCaptureActionCombo, "After screenshot action", "Choose the action WinShot performs after a screenshot.");
+        Accessible(PostCaptureCopyCheck, "Also copy screenshots", "Also copy the screenshot after actions other than Copy.");
+
+        Accessible(CaptureCursorCheck, "Record cursor", "Include the mouse pointer in recordings.");
+        Accessible(ClickHighlightsCheck, "Highlight recording clicks", "Show a visual highlight for mouse clicks.");
+        Accessible(KeystrokesCheck, "Show recording keystrokes", "Show pressed keys in recordings.");
+        Accessible(CountdownBox, "Recording countdown seconds", "Use zero to start immediately.");
+        Accessible(WebcamCombo, "Webcam overlay position", "Choose the webcam overlay position or turn it off.");
+        Accessible(WebcamSizeBox, "Webcam overlay size", "Enter a value from 10 to 45 percent.");
+        Accessible(RecordingFpsBox, "Video frames per second", "Enter a value from 10 to 60.");
+        Accessible(RecordAudioCheck, "Record microphone", "Capture microphone audio in MP4 recordings.");
+        Accessible(SystemAudioCheck, "Record system audio", "Capture Windows system audio in MP4 recordings.");
+        Accessible(GifFpsBox, "GIF frames per second", "Enter a value from 5 to 20.");
+
+        Accessible(FormatCombo, "Screenshot file format", "Choose PNG, JPG, or WEBP.");
+        Accessible(HiDpiCheck, "Scale high DPI screenshots", "Scale high DPI screenshots down to one times size.");
+        Accessible(SelfTimerCombo, "Self timer interval", "Choose how long the self timer waits before capture.");
+        Accessible(FreezeScreenCheck, "Freeze screen during selection", "Use a still desktop image while choosing a region.");
+        Accessible(CrosshairModeCombo, "Crosshair mode", "Choose when selector crosshair guides appear.");
+        Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
+
+        Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
+        Accessible(HistorySlider, "Capture history retention", "Choose how long local capture history is kept.");
+        Accessible(AllInOneRememberCheck, "Remember All-In-One selection", "Restore the last All-In-One selection.");
+        Accessible(OcrJoinLinesCheck, "Join recognized text lines", "Copy recognized text as joined lines instead of preserving line breaks.");
+
+        foreach (Control control in new Control[]
+        {
+            StartupCheck, UpdatesCheck, SaveFolderBox, BrowseSaveFolderButton, HideIconsCheck,
+            PostCaptureActionCombo, PostCaptureCopyCheck, CaptureCursorCheck, ClickHighlightsCheck,
+            KeystrokesCheck, CountdownBox, WebcamCombo, WebcamSizeBox, RecordingFpsBox,
+            RecordAudioCheck, SystemAudioCheck, GifFpsBox, FormatCombo, HiDpiCheck, SelfTimerCombo,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
+            AllInOneRememberCheck, OcrJoinLinesCheck,
+        })
+        {
+            control.TabIndex = tabIndex++;
+        }
+
+        CancelButton.TabIndex = 1000;
+        SaveButton.TabIndex = 1001;
+    }
+
+    private static void Accessible(Control control, string name, string helpText)
+    {
+        AutomationProperties.SetName(control, name);
+        AutomationProperties.SetHelpText(control, helpText);
+    }
+
+    /// <summary>
+    /// WPF does not automatically replace custom application brushes in High Contrast mode.
+    /// Apply system colors to this window only; shared theme resources and other windows remain
+    /// untouched. The logical tree covers collapsed pages too, so changing categories later is safe.
+    /// </summary>
+    private void ApplyHighContrastPalette()
+    {
+        if (!SystemParameters.HighContrast)
+            return;
+
+        Background = SystemColors.WindowBrush;
+        foreach (DependencyObject node in LogicalDescendants(this))
+        {
+            switch (node)
+            {
+                case TextBlock text:
+                    text.Foreground = SystemColors.WindowTextBrush;
+                    break;
+                case Control control:
+                    control.Foreground = SystemColors.WindowTextBrush;
+                    control.BorderBrush = SystemColors.WindowTextBrush;
+                    break;
+                case Border border:
+                    border.Background = SystemColors.WindowBrush;
+                    border.BorderBrush = SystemColors.WindowTextBrush;
+                    break;
+                case System.Windows.Shapes.Rectangle rectangle:
+                    rectangle.Fill = SystemColors.WindowTextBrush;
+                    break;
+            }
+        }
+    }
+
+    private static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject root)
+    {
+        foreach (object child in LogicalTreeHelper.GetChildren(root))
+        {
+            if (child is not DependencyObject dependencyObject)
+                continue;
+            yield return dependencyObject;
+            foreach (DependencyObject descendant in LogicalDescendants(dependencyObject))
+                yield return descendant;
+        }
+    }
 
     /// <summary>
     /// Lightweight in-app feedback: after a hotkey field loses focus, flag any field that
@@ -720,8 +786,7 @@ public partial class SettingsWindow : Window
     private TextBox[] AllInputBoxes() =>
         new TextBox[]
         {
-            SaveFolderBox, OverlayCloseBox, HistoryLimitBox, RetentionDaysBox, SelfTimerBox,
-            RecordingFpsBox, GifFpsBox, WebcamSizeBox, CountdownBox, TemplateBox,
+            SaveFolderBox, RecordingFpsBox, GifFpsBox, WebcamSizeBox, CountdownBox, TemplateBox,
         }.Concat(RealHotkeyBoxes()).ToArray();
 
     private void ResetValidation()
