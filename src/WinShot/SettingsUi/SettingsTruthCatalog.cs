@@ -45,6 +45,30 @@ internal static class SettingsTruthCatalog
             "ShowCrosshair",
             "ShowMagnifier",
             "AllInOneRememberLast",
+            "RecordingShowOverlay",
+            "RecordingCopy",
+            "OverlayAutoClose",
+            "OverlayAutoCloseSeconds",
+            "OverlayPosition",
+            "OverlayMoveToActiveScreen",
+            "OverlaySizePercent",
+            "OverlayAutoCloseAction",
+            "OverlayCloseAfterDragging",
+            "OverlaySaveButtonBehavior",
+            "ShowRecordingControls",
+            "ShowRecordingTimer",
+            "ScaleHiDpiVideo",
+            "RememberLastSelection",
+            "DimScreenWhileRecording",
+            "RecordingMaxResolution",
+            "RecordAudioMono",
+            "OpenVideoEditorAfterRecording",
+            "GifQuality",
+            "GifSize",
+            "OptimizeGifs",
+            "PinnedRoundedCorners",
+            "PinnedShadow",
+            "PinnedBorder",
         };
 
     internal static readonly IReadOnlyList<string> ExecutableShortcutIds =
@@ -63,29 +87,24 @@ internal static class SettingsTruthCatalog
         new HashSet<string>(StringComparer.Ordinal)
         {
             "PlaySounds", "ShutterSound", "ShowTrayIcon",
-            "ScreenshotShowOverlay", "RecordingShowOverlay", "ScreenshotCopy", "RecordingCopy",
+            "ScreenshotShowOverlay", "ScreenshotCopy",
             "ScreenshotSave", "RecordingSave", "ScreenshotOpenAnnotate", "ScreenshotOpenEditor",
             "ScreenshotPin", "RecordingOpenEditor",
             "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
-            "OverlayAutoClose", "OverlayPosition", "OverlayMoveToActiveScreen", "OverlaySizePercent",
-            "OverlayAutoCloseAction", "OverlayCloseAfterDragging", "OverlaySaveButtonBehavior",
-            "ShowRecordingControls", "ShowRecordingTimer", "ScaleHiDpiVideo",
-            "DoNotDisturbWhileRecording", "RememberLastSelection", "DimScreenWhileRecording",
-            "ShowRecordingCountdown", "RecordingMaxResolution", "RecordAudioMono",
-            "OpenVideoEditorAfterRecording", "GifQuality", "GifSize", "OptimizeGifs",
+            "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
-            "PinnedRoundedCorners", "PinnedShadow", "PinnedBorder", "AskForNameAfterCapture",
+            "AskForNameAfterCapture",
             "AddRetinaSuffix", "CopyToClipboardFormat", "OcrDetectLinks", "OcrLanguage",
         };
 
     internal static readonly IReadOnlySet<string> NonInteractiveRuntimeStateProperties =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            "OverlayAutoCloseSeconds",
             "HistoryLimit",
             "NextCounter",
             "LastCaptureRegion",
+            "LastRecordingRegion",
             "ShortcutBindings",
         };
 }

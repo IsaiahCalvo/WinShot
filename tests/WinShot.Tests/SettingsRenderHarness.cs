@@ -58,10 +58,7 @@ public class SettingsRenderHarness
                 Pump();
 
                 var list = (ListBox)win.FindName("SectionList");
-                list.SelectedIndex = 0;
-                Pump();
-                win.UpdateLayout();
-                RenderToPng(win, Path.Combine(outDir, "normal-general.png"), dpi: 96);
+                SelectAndRender(win, list, 0, outDir, "normal-general.png");
 
                 ((TextBox)win.FindName("SaveFolderBox")).Focus();
                 Pump();
@@ -70,6 +67,18 @@ public class SettingsRenderHarness
 
                 // Same effective-pixel layout rasterized at 150% Windows display scaling.
                 RenderToPng(win, Path.Combine(outDir, "high-dpi-general.png"), dpi: 144);
+
+                SelectAndRender(win, list, 2, outDir, "quick-access.png");
+
+                list.SelectedIndex = 3;
+                Pump();
+                var recordingTabs = (ListBox)win.FindName("RecordingSubList");
+                SelectAndRender(win, recordingTabs, 0, outDir, "recording-general.png");
+                SelectAndRender(win, recordingTabs, 1, outDir, "recording-video.png");
+                SelectAndRender(win, recordingTabs, 2, outDir, "recording-gif.png");
+
+                SelectAndRender(win, list, 4, outDir, "screenshots.png");
+                SelectAndRender(win, list, 6, outDir, "advanced.png");
 
                 win.Close();
             }
@@ -84,6 +93,19 @@ public class SettingsRenderHarness
 
         Assert.Null(failure);
         Assert.True(Directory.GetFiles(outDir, "*.png").Length > 0, "No tab PNGs were produced.");
+    }
+
+    private static void SelectAndRender(
+        Window window,
+        ListBox list,
+        int index,
+        string outDir,
+        string fileName)
+    {
+        list.SelectedIndex = index;
+        Pump();
+        window.UpdateLayout();
+        RenderToPng(window, Path.Combine(outDir, fileName), dpi: 96);
     }
 
     private static void RenderToPng(Window w, string path, double dpi)

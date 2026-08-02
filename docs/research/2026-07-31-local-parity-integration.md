@@ -2,13 +2,15 @@
 
 Date: 2026-07-31
 
+Final Settings reconciliation and combined verification: 2026-08-02
+
 ## Protection and scope
 
 - Worktree: `C:\Users\icalvo\.codex\worktrees\cleanshot-integration-20260731\winshot`
 - Branch: `integration/cleanshot-local-parity`
 - Base: `origin/main` at `87bc2b73aee68cf45702d4fd9ed4043b57734bd1`
 - Local-only candidate. Main, the installed app, GitHub, PRs, tags, installers, and releases were not changed.
-- The Settings truth follow-up is intentionally not included yet.
+- The Settings truth follow-up and its integration reconciliation are included.
 
 ## Integrated slices
 
@@ -23,6 +25,7 @@ The following source commits were cherry-picked in order:
 7. `7ed21de`, `d928c9d` - recording finalization resilience and startup recovery
 8. `f81552a` - video editor accessibility and export recovery
 9. `22a01eb` - recording settings integration
+10. `8a7feb1` - truthful, accessible Settings surface
 
 ## Semantic reconciliation
 
@@ -39,29 +42,41 @@ Only `RecordingController.cs` required a content-conflict resolution. The resolu
 
 No product decision was required during reconciliation. The MP4 single-display limitation continues to be disclosed before capture; GIF retains cross-display capture.
 
+The Settings slice was built on an earlier selector-only base, so it correctly hid controls that were placeholders at that point. The final reconciliation re-exposed only controls that later slices made real:
+
+- Quick Access position, monitor, size, auto-close, drag, and save behavior.
+- Recording controls/timer, HiDPI scaling, remembered area, dimming, completion overlay/copy, MP4 resolution/mono/editor, and GIF quality/size/optimization.
+- Pinned screenshot corners, shadow, and border.
+
+Ambiguous or still-unimplemented controls remain hidden, including `RecordingSave`, the duplicate global countdown toggle, Do Not Disturb, placeholder annotation preferences, and unwired screenshot action-matrix fields. Hidden legacy values are preserved rather than overwritten when Settings is saved.
+
 ## Validation
 
 All commands used the local SDK metadata override:
 
 `C:\Users\icalvo\.nuget\packages\microsoft.windows.sdk.net.ref\10.0.19041.56\winmd`
 
-- Affected focused Release tests: **332 passed, 0 failed, 0 skipped**.
-- Complete Release suite: **490 passed, 0 failed, 0 skipped**.
+- Final focused Settings/integration Release tests: **10 passed, 0 failed, 0 skipped**.
+- Complete Release suite: **493 passed, 0 failed, 0 skipped**.
 - Release app build: **passed, 0 warnings, 0 errors**.
 - CI-equivalent self-contained `win-x64` Release publish: **passed**.
-- Publish output: 480 files, 342,700,710 bytes.
-- Published `WinShot.exe` SHA-256: `8EF81EE6115C487838C2866CAEAA0715563D4EA46E9D32AD81A1082582741C23`.
+- Publish output: 480 files, 342,738,106 bytes.
+- Delta from the pre-Settings integration candidate: +37,396 bytes (+0.0109%).
+- Published `WinShot.exe` SHA-256: `5A8658F382CDA6B41BEF5669A1E292CAAFCD6E365AA85396816EFA951E0F4797`.
+- Published `WinShot.dll` SHA-256: `992E1B5AE31E58AA3F936AE45BB95AC400F12E36461B3016DB9D69681533D51D`.
 - `git diff --check origin/main`: passed.
+
+Fresh sanitized Settings renders cover General, Quick Access, Recording General/Video/GIF, Screenshots, Advanced, focus, and 150% DPI under `docs/evidence/integration-settings/after/`. They were inspected from the rendered WPF window; no clipping, overlap, missing focus treatment, or disabled-state contradiction was found.
 
 The candidate was not launched because WinShot's single-instance path could interact with the protected installed app. Runtime/install verification remains a separate approval gate.
 
 ## Repository hygiene
 
 - No build output, executable, DLL, PDB, archive, installer, video, audio, log, database, or private capture is tracked.
-- The 36 newly tracked PNG files are small, sanitized UI render-harness evidence under `docs/evidence/`; all were visually reviewed together. They contain only synthetic labels/content.
+- The PNG files under `docs/evidence/` are small, sanitized UI render-harness evidence; they contain only synthetic labels/content.
 - The supplied save SVG is intentionally tracked as the quick-access Save icon source.
 - `publish/`, `bin/`, and `obj/` remain ignored and local only.
 
-## Next local integration step
+## Next approval gate
 
-Cherry-pick the separately verified Settings truth follow-up when it is ready, rerun the same focused/full/build/publish gates, and keep installation, push, PR, merge, tag, and release behind explicit approval.
+Review the consolidated evidence. A live launch of this isolated candidate remains separate because WinShot's single-instance mutex would otherwise hand commands to the protected installed app. Installation, push, PR, merge, tag, and release remain behind explicit approval.

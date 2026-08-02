@@ -153,11 +153,12 @@ public class ThemedWindowTests
         Assert.True(window.MinWidth >= 620);
         Assert.True(window.MinHeight >= 560);
 
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("LegacyAfterCaptureMatrix").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("UnavailableSoundsRow").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("UnavailableMaxResolutionRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("UnavailableCopyFormatCard").Visibility);
 
         var done = Named<System.Windows.Controls.Button>("SaveButton");
@@ -170,11 +171,18 @@ public class ThemedWindowTests
         string[] accessibleControls =
         [
             "StartupCheck", "UpdatesCheck", "SaveFolderBox", "BrowseSaveFolderButton",
-            "HideIconsCheck", "PostCaptureActionCombo", "PostCaptureCopyCheck", "CaptureCursorCheck",
-            "ClickHighlightsCheck", "KeystrokesCheck", "CountdownBox", "WebcamCombo", "WebcamSizeBox",
-            "RecordingFpsBox", "RecordAudioCheck", "SystemAudioCheck", "GifFpsBox", "FormatCombo",
+            "HideIconsCheck", "PostCaptureActionCombo", "PostCaptureCopyCheck", "OverlayPositionCombo",
+            "OverlayMoveToActiveScreenCheck", "OverlaySizeSlider", "OverlayAutoCloseCheck",
+            "OverlayActionCombo", "OverlayCloseBox", "OverlayCloseAfterDragCheck", "OverlaySaveBehaviorCombo",
+            "ShowRecordingControlsCheck", "ShowRecordingTimerCheck", "ScaleHiDpiVideoCheck", "CaptureCursorCheck",
+            "ClickHighlightsCheck", "KeystrokesCheck", "RememberLastSelectionCheck", "DimScreenCheck",
+            "CountdownBox", "WebcamCombo", "WebcamSizeBox", "RecordingShowOverlayCheck",
+            "RecordingCopyCheck", "MaxResolutionCombo", "RecordingFpsBox", "RecordAudioCheck",
+            "SystemAudioCheck", "RecordAudioMonoCheck", "OpenVideoEditorCheck", "GifFpsBox",
+            "GifQualitySlider", "OptimizeGifsCheck", "GifSizeCombo", "FormatCombo",
             "HiDpiCheck", "SelfTimerCombo", "FreezeScreenCheck", "CrosshairModeCombo",
-            "ShowMagnifierCheck", "TemplateBox", "HistorySlider", "AllInOneRememberCheck",
+            "ShowMagnifierCheck", "TemplateBox", "HistorySlider", "PinnedRoundedCornersCheck",
+            "PinnedShadowCheck", "PinnedBorderCheck", "AllInOneRememberCheck",
             "OcrJoinLinesCheck", "CancelButton", "SaveButton", "AboutCheckUpdatesButton",
             "AboutRepositoryButton", "AboutLogsButton",
         ];

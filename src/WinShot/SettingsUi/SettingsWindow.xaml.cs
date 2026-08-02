@@ -507,6 +507,9 @@ public partial class SettingsWindow : Window
 
             int retentionDays = SliderIndexToRetentionDays(HistorySlider.Value);
             int selfTimer = int.Parse(SelectedTag(SelfTimerCombo, "3"));
+            int overlaySeconds = 0;
+            if (OverlayAutoCloseCheck.IsChecked == true)
+                overlaySeconds = ReadInt(OverlayCloseBox, 1, 3600, ref valid);
             int recordingFps = ReadInt(RecordingFpsBox, 10, 60, ref valid);
             int gifFps = ReadInt(GifFpsBox, 5, 20, ref valid);
             int webcamSizePercent = ReadInt(
@@ -547,27 +550,10 @@ public partial class SettingsWindow : Window
             s.AutoCopyToClipboard = PostCaptureCopyCheck.IsChecked == true;
             s.PostCaptureAction = PostCaptureAction.Normalize(SelectedTag(PostCaptureActionCombo, "overlay"));
 
-            // General > "After capture" matrix (per-action, Screenshot vs Recording columns).
-            s.ScreenshotShowOverlay = ScreenshotShowOverlayCheck.IsChecked == true;
+            // Recording completion actions are runtime-backed. Hidden legacy screenshot fields
+            // and ambiguous save/editor flags remain untouched for migration compatibility.
             s.RecordingShowOverlay = RecordingShowOverlayCheck.IsChecked == true;
-            s.ScreenshotCopy = ScreenshotCopyCheck.IsChecked == true;
             s.RecordingCopy = RecordingCopyCheck.IsChecked == true;
-            s.ScreenshotSave = ScreenshotSaveCheck.IsChecked == true;
-            s.RecordingSave = RecordingSaveCheck.IsChecked == true;
-            s.ScreenshotOpenAnnotate = ScreenshotOpenAnnotateCheck.IsChecked == true;
-            s.ScreenshotOpenEditor = ScreenshotOpenEditorCheck.IsChecked == true;
-            s.ScreenshotPin = ScreenshotPinCheck.IsChecked == true;
-            s.RecordingOpenEditor = RecordingOpenEditorCheck.IsChecked == true;
-
-            // Derive the legacy single-valued capture fields the screenshot flow still reads.
-            // "Show overlay" wins (the quick-actions card); copy is applied in addition.
-            s.AutoCopyToClipboard = ScreenshotCopyCheck.IsChecked == true;
-            s.PostCaptureAction =
-                ScreenshotShowOverlayCheck.IsChecked == true ? "overlay" :
-                ScreenshotPinCheck.IsChecked == true ? "pin" :
-                (ScreenshotOpenEditorCheck.IsChecked == true || ScreenshotOpenAnnotateCheck.IsChecked == true) ? "edit" :
-                ScreenshotSaveCheck.IsChecked == true ? "save" :
-                ScreenshotCopyCheck.IsChecked == true ? "copy" : "overlay";
 
             // Quick Access overlay
             s.OverlayPosition = SelectedTag(OverlayPositionCombo, "bottom-right");
@@ -585,20 +571,31 @@ public partial class SettingsWindow : Window
             SaveShortcutBoxes(s);
 
             // Recording > General
+            s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
+            s.ShowRecordingTimer = ShowRecordingTimerCheck.IsChecked == true;
+            s.ScaleHiDpiVideo = ScaleHiDpiVideoCheck.IsChecked == true;
             s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
             s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
             s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
+            s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
+            s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
             s.RecordingCountdownSeconds = countdown;
             s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
             s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
 
             // Recording > Video
+            s.RecordingMaxResolution = SelectedTag(MaxResolutionCombo, "original");
             s.RecordingFps = recordingFps;
             s.RecordAudio = RecordAudioCheck.IsChecked == true;
             s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
+            s.RecordAudioMono = RecordAudioMonoCheck.IsChecked == true;
+            s.OpenVideoEditorAfterRecording = OpenVideoEditorCheck.IsChecked == true;
 
             // Recording > GIF
             s.GifFps = gifFps;
+            s.GifQuality = (int)Math.Round(GifQualitySlider.Value);
+            s.OptimizeGifs = OptimizeGifsCheck.IsChecked == true;
+            s.GifSize = SelectedTag(GifSizeCombo, "800");
 
             s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
 
@@ -613,6 +610,9 @@ public partial class SettingsWindow : Window
             s.FileNameTemplate = TemplateBox.Text.Trim();
             s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
             s.HistoryRetentionDays = retentionDays;
+            s.PinnedRoundedCorners = PinnedRoundedCornersCheck.IsChecked == true;
+            s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
+            s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
 
             await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
             await _settings.SaveAsync();
@@ -639,16 +639,38 @@ public partial class SettingsWindow : Window
         Accessible(PostCaptureActionCombo, "After screenshot action", "Choose the action WinShot performs after a screenshot.");
         Accessible(PostCaptureCopyCheck, "Also copy screenshots", "Also copy the screenshot after actions other than Copy.");
 
+        Accessible(OverlayPositionCombo, "Quick Access position", "Choose where the Quick Access overlay appears.");
+        Accessible(OverlayMoveToActiveScreenCheck, "Move Quick Access to active screen", "Show the overlay on the screen containing the pointer.");
+        Accessible(OverlaySizeSlider, "Quick Access size", "Adjust the size of the preview overlay.");
+        Accessible(OverlayAutoCloseCheck, "Automatically close Quick Access", "Close the overlay after the configured interval.");
+        Accessible(OverlayActionCombo, "Quick Access auto-close action", "Choose what happens when the overlay closes automatically.");
+        Accessible(OverlayCloseBox, "Quick Access auto-close interval", "Enter the number of seconds before the overlay closes.");
+        Accessible(OverlayCloseAfterDragCheck, "Close Quick Access after dragging", "Close the overlay after a successful drag unless Alt is held.");
+        Accessible(OverlaySaveBehaviorCombo, "Quick Access save behavior", "Choose whether Save uses the export location or asks for a destination.");
+
+        Accessible(ShowRecordingControlsCheck, "Show recording controls", "Show the control bar while recording.");
+        Accessible(ShowRecordingTimerCheck, "Show recording time", "Show elapsed recording time in the control bar and tray.");
+        Accessible(ScaleHiDpiVideoCheck, "Scale high DPI video", "Scale high DPI recordings down to one times size.");
         Accessible(CaptureCursorCheck, "Record cursor", "Include the mouse pointer in recordings.");
         Accessible(ClickHighlightsCheck, "Highlight recording clicks", "Show a visual highlight for mouse clicks.");
         Accessible(KeystrokesCheck, "Show recording keystrokes", "Show pressed keys in recordings.");
+        Accessible(RememberLastSelectionCheck, "Remember recording area", "Reuse the last valid recording rectangle.");
+        Accessible(DimScreenCheck, "Dim outside recording area", "Dim the screen outside the selected recording rectangle.");
         Accessible(CountdownBox, "Recording countdown seconds", "Use zero to start immediately.");
         Accessible(WebcamCombo, "Webcam overlay position", "Choose the webcam overlay position or turn it off.");
         Accessible(WebcamSizeBox, "Webcam overlay size", "Enter a value from 10 to 45 percent.");
+        Accessible(RecordingShowOverlayCheck, "Show Quick Access after recording", "Show the local completion overlay after a recording finishes.");
+        Accessible(RecordingCopyCheck, "Copy recording after capture", "Copy the completed recording file to the clipboard.");
+        Accessible(MaxResolutionCombo, "Maximum video resolution", "Choose the largest output resolution for MP4 recordings.");
         Accessible(RecordingFpsBox, "Video frames per second", "Enter a value from 10 to 60.");
         Accessible(RecordAudioCheck, "Record microphone", "Capture microphone audio in MP4 recordings.");
         Accessible(SystemAudioCheck, "Record system audio", "Capture Windows system audio in MP4 recordings.");
+        Accessible(RecordAudioMonoCheck, "Record microphone in mono", "Use one microphone audio channel when microphone capture is enabled.");
+        Accessible(OpenVideoEditorCheck, "Open video editor after recording", "Open the local editor after an MP4 recording finishes.");
         Accessible(GifFpsBox, "GIF frames per second", "Enter a value from 5 to 20.");
+        Accessible(GifQualitySlider, "GIF quality", "Adjust GIF palette quality and file size.");
+        Accessible(OptimizeGifsCheck, "Optimize GIFs", "Use the selected palette quality while encoding locally.");
+        Accessible(GifSizeCombo, "Maximum GIF width", "Choose the largest GIF width; smaller recordings are not enlarged.");
 
         Accessible(FormatCombo, "Screenshot file format", "Choose PNG, JPG, or WEBP.");
         Accessible(HiDpiCheck, "Scale high DPI screenshots", "Scale high DPI screenshots down to one times size.");
@@ -659,17 +681,27 @@ public partial class SettingsWindow : Window
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
         Accessible(HistorySlider, "Capture history retention", "Choose how long local capture history is kept.");
+        Accessible(PinnedRoundedCornersCheck, "Rounded pinned screenshot corners", "Use rounded corners for pinned screenshots.");
+        Accessible(PinnedShadowCheck, "Pinned screenshot shadow", "Show a shadow around pinned screenshots.");
+        Accessible(PinnedBorderCheck, "Pinned screenshot border", "Show a border around pinned screenshots.");
         Accessible(AllInOneRememberCheck, "Remember All-In-One selection", "Restore the last All-In-One selection.");
         Accessible(OcrJoinLinesCheck, "Join recognized text lines", "Copy recognized text as joined lines instead of preserving line breaks.");
 
         foreach (Control control in new Control[]
         {
             StartupCheck, UpdatesCheck, SaveFolderBox, BrowseSaveFolderButton, HideIconsCheck,
-            PostCaptureActionCombo, PostCaptureCopyCheck, CaptureCursorCheck, ClickHighlightsCheck,
-            KeystrokesCheck, CountdownBox, WebcamCombo, WebcamSizeBox, RecordingFpsBox,
-            RecordAudioCheck, SystemAudioCheck, GifFpsBox, FormatCombo, HiDpiCheck, SelfTimerCombo,
+            PostCaptureActionCombo, PostCaptureCopyCheck, OverlayPositionCombo, OverlayMoveToActiveScreenCheck,
+            OverlaySizeSlider, OverlayAutoCloseCheck, OverlayActionCombo, OverlayCloseBox,
+            OverlayCloseAfterDragCheck, OverlaySaveBehaviorCombo, ShowRecordingControlsCheck,
+            ShowRecordingTimerCheck, ScaleHiDpiVideoCheck, CaptureCursorCheck, ClickHighlightsCheck,
+            KeystrokesCheck, RememberLastSelectionCheck, DimScreenCheck, CountdownBox, WebcamCombo,
+            WebcamSizeBox, RecordingShowOverlayCheck, RecordingCopyCheck, MaxResolutionCombo,
+            RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
+            OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
+            FormatCombo, HiDpiCheck, SelfTimerCombo,
             FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
-            AllInOneRememberCheck, OcrJoinLinesCheck,
+            PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
+            OcrJoinLinesCheck,
         })
         {
             control.TabIndex = tabIndex++;

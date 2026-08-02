@@ -344,8 +344,8 @@
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Shortcuts"/>
                     </StackPanel>
                 </ListBoxItem>
-                <ListBoxItem x:Name="QuickAccessNavItem" Visibility="Collapsed"
-                             AutomationProperties.Name="Quick Access settings unavailable">
+                <ListBoxItem x:Name="QuickAccessNavItem"
+                             AutomationProperties.Name="Quick Access settings">
                     <StackPanel>
                         <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE7C4;"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Quick Access"/>
@@ -522,13 +522,13 @@
 
                                         <!-- Row: Show Quick Access Overlay -->
                                         <CheckBox Grid.Row="1" Grid.Column="0" x:Name="ScreenshotShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="1" Grid.Column="1" x:Name="RecordingShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <CheckBox Grid.Row="1" Grid.Column="1" x:Name="LegacyRecordingShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="1" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0" Text="Show Quick Access Overlay"/>
 
                                         <!-- Row: Copy file to clipboard -->
                                         <CheckBox Grid.Row="2" Grid.Column="0" x:Name="ScreenshotCopyCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="2" Grid.Column="1" x:Name="RecordingCopyCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <CheckBox Grid.Row="2" Grid.Column="1" x:Name="LegacyRecordingCopyCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="2" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0" Text="Copy file to clipboard"/>
 
@@ -681,15 +681,15 @@
                         <StackPanel x:Name="RecordingGeneralPanel">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
-                                    <DockPanel x:Name="UnavailableRecordingControlsRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="RecordingControlsRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Controls"/>
                                         <CheckBox x:Name="ShowRecordingControlsCheck" Content="Show controls while recording"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="UnavailableRecordingTimerRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="RecordingTimerRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="System tray"/>
                                         <CheckBox x:Name="ShowRecordingTimerCheck" Content="Display recording time"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="UnavailableRecordingScaleRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="RecordingScaleRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
                                         <CheckBox x:Name="ScaleHiDpiVideoCheck" Content="Scale HiDPI videos to 1x"/>
                                     </DockPanel>
@@ -715,11 +715,11 @@
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
-                                    <DockPanel x:Name="UnavailableRememberRecordingAreaRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="RememberRecordingAreaRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Recording area"/>
                                         <CheckBox x:Name="RememberLastSelectionCheck" Content="Remember last selection"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="UnavailableDimScreenRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="DimScreenRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                         <CheckBox x:Name="DimScreenCheck" Content="Dim screen while recording"/>
                                     </DockPanel>
@@ -757,13 +757,28 @@
                                     </DockPanel>
                                 </StackPanel>
                             </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
+                                        <CheckBox x:Name="RecordingShowOverlayCheck" Content="Show Quick Access"/>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
+                                        <CheckBox x:Name="RecordingCopyCheck" Content="Copy file to clipboard"/>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Completed recordings stay local and are added to History."/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
 
                         <!-- Recording > Video -->
                         <StackPanel x:Name="RecordingVideoPanel" Visibility="Collapsed">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
-                                    <DockPanel x:Name="UnavailableMaxResolutionRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="MaxResolutionRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Max resolution"/>
                                         <ComboBox x:Name="MaxResolutionCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="Original" Tag="original"/>
@@ -772,7 +787,7 @@
                                             <ComboBoxItem Content="720p" Tag="720p"/>
                                         </ComboBox>
                                     </DockPanel>
-                                    <TextBlock x:Name="UnavailableMaxResolutionHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
+                                    <TextBlock x:Name="MaxResolutionHint" Style="{StaticResource SubHint}"
                                                Text="Set maximum resolution to reduce file size and upload time."/>
 
                                     <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
@@ -793,19 +808,19 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                         <CheckBox x:Name="SystemAudioCheck" Content="Capture system sound while recording"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="UnavailableRecordMonoRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="RecordMonoRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                         <CheckBox x:Name="RecordAudioMonoCheck" Content="Record audio in mono"/>
                                     </DockPanel>
 
-                                    <Rectangle x:Name="UnavailableVideoEditorSeparator" Style="{StaticResource GroupSep}" Visibility="Collapsed"/>
+                                    <Rectangle x:Name="VideoEditorSeparator" Style="{StaticResource GroupSep}"/>
 
-                                    <DockPanel x:Name="UnavailableVideoEditorRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Video Encoder"/>
+                                    <DockPanel x:Name="VideoEditorRow" Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
                                         <CheckBox x:Name="OpenVideoEditorCheck" Content="Open Video Editor after recording"/>
                                     </DockPanel>
-                                    <TextBlock x:Name="UnavailableVideoEditorHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
-                                               Text="Use Video Editor to change the recording quality, resolution and adjust audio settings."/>
+                                    <TextBlock x:Name="VideoEditorHint" Style="{StaticResource SubHint}"
+                                               Text="Open the local editor to trim and export the finished video."/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -822,7 +837,7 @@
                                         </StackPanel>
                                     </DockPanel>
 
-                                    <DockPanel x:Name="UnavailableGifQualityRow" Style="{StaticResource Row}" Margin="0,8,0,4" Visibility="Collapsed">
+                                    <DockPanel x:Name="GifQualityRow" Style="{StaticResource Row}" Margin="0,8,0,4">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="GIF quality"/>
                                         <StackPanel Orientation="Horizontal">
                                             <StackPanel Width="180">
@@ -835,10 +850,10 @@
                                             <CheckBox x:Name="OptimizeGifsCheck" Content="Optimize GIFs" Margin="14,0,0,0" VerticalAlignment="Top"/>
                                         </StackPanel>
                                     </DockPanel>
-                                    <TextBlock x:Name="UnavailableGifQualityHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
+                                    <TextBlock x:Name="GifQualityHint" Style="{StaticResource SubHint}"
                                                Text="Setting the quality to maximum can speed up the processing time, but it will increase file size."/>
 
-                                    <DockPanel x:Name="UnavailableGifSizeRow" Style="{StaticResource Row}" Margin="0,8,0,4" Visibility="Collapsed">
+                                    <DockPanel x:Name="GifSizeRow" Style="{StaticResource Row}" Margin="0,8,0,4">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="GIF size"/>
                                         <ComboBox x:Name="GifSizeCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="800 x auto (default)" Tag="800"/>
@@ -847,7 +862,7 @@
                                             <ComboBoxItem Content="Original" Tag="auto"/>
                                         </ComboBox>
                                     </DockPanel>
-                                    <TextBlock x:Name="UnavailableGifSizeHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
+                                    <TextBlock x:Name="GifSizeHint" Style="{StaticResource SubHint}"
                                                Text="Set maximum resolution of your GIFs. Changing it will affect file size and quality. WinShot will only downscale the GIF if needed."/>
                                 </StackPanel>
                             </Border>
@@ -1043,7 +1058,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Border x:Name="UnavailablePinnedStyleCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                        <Border x:Name="PinnedStyleCard" Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Pinned screenshots"/>

@@ -69,18 +69,19 @@ public class Settings
     public bool ShowTrayIcon { get; set; } = true;      // TODO: wire behavior — show the menu/tray icon
     public bool CheckForUpdatesOnStartup { get; set; } = true; // poll GitHub Releases on launch
 
-    // General > "After capture" matrix. CleanShot has a per-action checkbox for
-    // Screenshot and Recording independently. (TODO: wire behavior in App.xaml.cs.)
-    public bool ScreenshotShowOverlay { get; set; } = true;   // TODO: wire behavior
+    // Legacy per-action settings. Recording overlay/copy/editor behavior is wired; screenshot
+    // behavior uses PostCaptureAction plus AutoCopyToClipboard. The remaining fields are kept
+    // for migration compatibility and stay hidden until their behavior is unambiguous.
+    public bool ScreenshotShowOverlay { get; set; } = true;   // legacy, hidden
     public bool RecordingShowOverlay { get; set; } = true;
-    public bool ScreenshotCopy { get; set; } = true;          // TODO: wire behavior
+    public bool ScreenshotCopy { get; set; } = true;          // legacy, hidden
     public bool RecordingCopy { get; set; } = false;
     public bool ScreenshotSave { get; set; } = false;         // TODO: wire behavior
     public bool RecordingSave { get; set; } = false;          // TODO: wire behavior
     public bool ScreenshotOpenAnnotate { get; set; } = false; // TODO: wire behavior
     public bool ScreenshotOpenEditor { get; set; } = false;   // TODO: wire behavior (Open Annotate tool — screenshot only)
     public bool ScreenshotPin { get; set; } = false;          // TODO: wire behavior (Pin to the screen — screenshot only)
-    public bool RecordingOpenEditor { get; set; } = false;    // Open Video Editor — recording only
+    public bool RecordingOpenEditor { get; set; } = false;    // legacy alias for OpenVideoEditorAfterRecording
 
     // Screenshots
     public bool AddPixelBorder { get; set; } = false;   // TODO: wire behavior — add 1px border to screenshots
@@ -127,9 +128,9 @@ public class Settings
     public bool ShowDockIcon { get; set; } = true;           // TODO: wire behavior
 
     // Pinned screenshots (CleanShot "Pin to screen")
-    public bool PinnedRoundedCorners { get; set; } = true;  // TODO: wire behavior
-    public bool PinnedShadow { get; set; } = true;          // TODO: wire behavior
-    public bool PinnedBorder { get; set; } = false;         // TODO: wire behavior
+    public bool PinnedRoundedCorners { get; set; } = true;
+    public bool PinnedShadow { get; set; } = true;
+    public bool PinnedBorder { get; set; } = false;
 
     // Advanced
     public bool AskForNameAfterCapture { get; set; } = false; // TODO: wire behavior — prompt for a file name after each capture
