@@ -60,10 +60,9 @@ All commands used the local SDK metadata override:
 - Complete Release suite: **493 passed, 0 failed, 0 skipped**.
 - Release app build: **passed, 0 warnings, 0 errors**.
 - CI-equivalent self-contained `win-x64` Release publish: **passed**.
-- Publish output: 480 files, 342,738,106 bytes.
-- Delta from the pre-Settings integration candidate: +37,396 bytes (+0.0109%).
-- Published `WinShot.exe` SHA-256: `5A8658F382CDA6B41BEF5669A1E292CAAFCD6E365AA85396816EFA951E0F4797`.
-- Published `WinShot.dll` SHA-256: `992E1B5AE31E58AA3F936AE45BB95AC400F12E36461B3016DB9D69681533D51D`.
+- Publish output: 480 files, 342,738,118 bytes.
+- Delta from the pre-Settings integration candidate: +37,408 bytes (+0.0109%).
+- Final executable and managed-assembly hashes are recorded from the exact handoff commit after publish.
 - `git diff --check origin/main`: passed.
 
 Fresh sanitized Settings renders cover General, Quick Access, Recording General/Video/GIF, Screenshots, Advanced, focus, and 150% DPI under `docs/evidence/integration-settings/after/`. They were inspected from the rendered WPF window; no clipping, overlap, missing focus treatment, or disabled-state contradiction was found.
