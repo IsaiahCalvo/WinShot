@@ -48,6 +48,8 @@ public class QuickAccessOverlayRenderHarness
         Assert.True(File.Exists(Path.Combine(outDir, "dark-hover.png")));
         Assert.True(File.Exists(Path.Combine(outDir, "light-idle.png")));
         Assert.True(File.Exists(Path.Combine(outDir, "light-hover.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "dark-tooltip-pin.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "light-tooltip-save.png")));
     }
 
     private static void RenderTheme(
@@ -61,6 +63,13 @@ public class QuickAccessOverlayRenderHarness
         RenderState(source, settings, theme, hovering: true, hoverButton: -1, Path.Combine(outDir, $"{prefix}-hover.png"));
         RenderState(source, settings, theme, hovering: true, hoverButton: 3, Path.Combine(outDir, $"{prefix}-hover-save.png"));
         RenderState(source, settings, theme, hovering: true, hoverButton: 4, Path.Combine(outDir, $"{prefix}-hover-copy.png"));
+        string tooltipText = theme == QuickAccessOverlayTheme.Dark ? "Pin" : "Save";
+        using var tooltip = QuickAccessTooltipRenderer.RenderEvidence(
+            tooltipText,
+            QuickAccessOverlayThemePalette.For(theme));
+        tooltip.Save(
+            Path.Combine(outDir, $"{prefix}-tooltip-{(theme == QuickAccessOverlayTheme.Dark ? "pin" : "save")}.png"),
+            SD.Imaging.ImageFormat.Png);
     }
 
     private static void RenderState(

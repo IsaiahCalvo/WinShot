@@ -27,10 +27,23 @@ local-only implementation.
   ready to follow a future app-wide theme setting without another redesign.
 - Theme selection stays local and adds no timer, background process, or service.
 
+## HTML proportion and tooltip refinement
+
+- The centered Copy control now uses the HTML card's proportions: a 78 by 27
+  logical-pixel pill with a 7-point Segoe UI label and a smaller line icon.
+- The native Windows tooltip was removed. Button hover now uses a compact,
+  rounded, theme-aware label (`Pin`, `Close`, `Edit`, `Save`, or `Copy`) in a
+  non-activating tool window, so it cannot take keyboard focus.
+- Tooltip measurement, placement, dark/light drawing, and the complete overlay
+  are rendered and inspected through the in-process bitmap harness. These checks
+  do not move the pointer, send keys, activate a window, or use the visible desktop.
+- The refinement adds 22,244 bytes across the DLL and symbols compared with the
+  installed HTML-design candidate; the published file and dependency sets are unchanged.
+
 ## Verification
 
-- Quick Access focused tests: 31/31 passed.
-- Full Release suite: 495/495 passed.
+- Quick Access focused tests: 38/38 passed.
+- Full Release suite: 502/502 passed.
 - Release x64 self-contained publish succeeded with product version 1.2.1.
 - Common published files grew by 21,824 bytes (20 KB in `WinShot.dll` and
   1,344 bytes in symbols); the file and dependency sets are unchanged.

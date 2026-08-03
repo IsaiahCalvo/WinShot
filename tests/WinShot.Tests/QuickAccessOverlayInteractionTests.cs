@@ -62,6 +62,30 @@ public class QuickAccessOverlayInteractionTests
             Assert.True(save.IconLoaded);
             Assert.InRange(copy.Bounds.Left + copy.Bounds.Width / 2, overlay.ClientSize.Width / 2 - 1, overlay.ClientSize.Width / 2 + 1);
             Assert.InRange(copy.Bounds.Top + copy.Bounds.Height / 2, overlay.ClientSize.Height / 2 - 1, overlay.ClientSize.Height / 2 + 1);
+            Assert.Equal(new SD.Size(78, 27), copy.Bounds.Size);
+            Assert.Equal(7f, copy.LabelFontSize);
+        });
+    }
+
+    [Fact]
+    public void CustomTooltipIsRoundedAndCannotActivate()
+    {
+        RunSta(() =>
+        {
+            var visuals = QuickAccessOverlayThemePalette.For(QuickAccessOverlayTheme.Dark);
+            using var tooltip = new QuickAccessTooltipWindow("Save", visuals, 96);
+            var createParams = (WF.CreateParams)typeof(QuickAccessTooltipWindow)
+                .GetProperty("CreateParams", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(tooltip)!;
+            var showWithoutActivation = (bool)typeof(QuickAccessTooltipWindow)
+                .GetProperty("ShowWithoutActivation", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(tooltip)!;
+
+            Assert.True(showWithoutActivation);
+            Assert.NotEqual(0, createParams.ExStyle & 0x08000000);
+            Assert.NotEqual(0, createParams.ExStyle & 0x00000080);
+            Assert.InRange(tooltip.ClientSize.Width, 40, 80);
+            Assert.InRange(tooltip.ClientSize.Height, 24, 36);
         });
     }
 
@@ -193,10 +217,11 @@ public class QuickAccessOverlayInteractionTests
                 StringComparison.Ordinal));
         return new ButtonSnapshot(
             (SD.Rectangle)button.GetType().GetProperty("Bounds")!.GetValue(button)!,
-            button.GetType().GetProperty("Icon")!.GetValue(button) is SD.Bitmap);
+            button.GetType().GetProperty("Icon")!.GetValue(button) is SD.Bitmap,
+            (button.GetType().GetProperty("LabelFont")!.GetValue(button) as SD.Font)?.SizeInPoints);
     }
 
-    private readonly record struct ButtonSnapshot(SD.Rectangle Bounds, bool IconLoaded);
+    private readonly record struct ButtonSnapshot(SD.Rectangle Bounds, bool IconLoaded, float? LabelFontSize);
 
     private static void RunSta(Action action)
     {

@@ -18,7 +18,10 @@ internal readonly record struct QuickAccessOverlayVisuals(
     SD.Color ControlBorder,
     SD.Color ControlShadow,
     SD.Color Glyph,
-    SD.Color FocusRing);
+    SD.Color FocusRing,
+    SD.Color TooltipFill,
+    SD.Color TooltipBorder,
+    SD.Color TooltipText);
 
 internal static class QuickAccessOverlayThemePalette
 {
@@ -37,7 +40,10 @@ internal static class QuickAccessOverlayThemePalette
             ControlBorder: SD.Color.FromArgb(245, 255, 255, 255),
             ControlShadow: SD.Color.FromArgb(46, 59, 79, 110),
             Glyph: SD.Color.FromArgb(0x11, 0x18, 0x20),
-            FocusRing: SD.Color.FromArgb(0x24, 0x86, 0xFF)),
+            FocusRing: SD.Color.FromArgb(0x24, 0x86, 0xFF),
+            TooltipFill: SD.Color.FromArgb(0xF7, 0xFB, 0xFF),
+            TooltipBorder: SD.Color.FromArgb(42, 17, 24, 32),
+            TooltipText: SD.Color.FromArgb(0x11, 0x18, 0x20)),
         _ => new(
             CardFill: ThemePalette.WindowBg,
             HoverTint: SD.Color.FromArgb(140, 15, 18, 25),
@@ -47,6 +53,9 @@ internal static class QuickAccessOverlayThemePalette
             ControlBorder: SD.Color.FromArgb(36, 255, 255, 255),
             ControlShadow: SD.Color.FromArgb(61, 0, 0, 0),
             Glyph: SD.Color.FromArgb(0xF7, 0xF9, 0xFC),
-            FocusRing: SD.Color.FromArgb(0x24, 0x86, 0xFF)),
+            FocusRing: SD.Color.FromArgb(0x24, 0x86, 0xFF),
+            TooltipFill: SD.Color.FromArgb(0x16, 0x18, 0x1F),
+            TooltipBorder: SD.Color.FromArgb(48, 255, 255, 255),
+            TooltipText: SD.Color.FromArgb(0xF7, 0xF9, 0xFC)),
     };
 }

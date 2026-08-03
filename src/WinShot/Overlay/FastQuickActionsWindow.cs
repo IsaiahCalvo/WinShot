@@ -30,9 +30,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly bool _requestMemoryCleanupOnClose;
     private readonly bool _loadPreview;
     private readonly QuickAccessOverlayVisuals _visuals;
-    private readonly WF.ToolTip _toolTip = new() { InitialDelay = 300, ReshowDelay = 100 };
+    private readonly WF.Timer _tooltipTimer = new() { Interval = 360 };
     private readonly WF.ContextMenuStrip _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
+    private QuickAccessTooltipWindow? _tooltipWindow;
     private WF.Timer? _autoCloseTimer;
     private long _autoCloseDueTick;
     private int _autoCloseRemainingMs;
@@ -122,6 +123,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         BuildLayout(image, _dpi);
         PositionFromSettings();
         BuildOverflowMenu();
+        _tooltipTimer.Tick += (_, _) => ShowActionTooltip();
 
         MouseDown += OnOverlayMouseDown;
         MouseMove += OnOverlayMouseMove;
@@ -134,6 +136,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
+            HideActionTooltip();
             _closed = true;
             if (_historyPath is not null)
                 PushRecentlyClosed(_historyPath);
@@ -290,7 +293,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             _preview?.Dispose();
             _blurredPreview?.Dispose();
             StopAutoCloseTimer();
-            _toolTip.Dispose();
+            HideActionTooltip();
+            _tooltipTimer.Dispose();
             _overflowMenu.Dispose();
             foreach (var button in _buttons)
                 button.Dispose();
@@ -320,10 +324,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         int top = _cardRect.Top + layout.ControlPadding;
         int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
         // Preserve the user's verified action placement while using the selected HTML design.
-        AddIconButton("quick-access-pin.svg", "Pin to the screen", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
-        AddIconButton("quick-access-close.svg", "Close (Ctrl+W)", "Close", right, top, layout.IconSize, Close);
-        AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
-        AddIconButton("quick-access-save.svg", "Save (Ctrl+S)", "Save", right, bottom, layout.IconSize, SaveFromInput);
+        AddIconButton("quick-access-pin.svg", "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
+        AddIconButton("quick-access-close.svg", "Close (Ctrl+W)", "Close", "Close", right, top, layout.IconSize, Close);
+        AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
+        AddIconButton("quick-access-save.svg", "Save (Ctrl+S)", "Save", "Save", right, bottom, layout.IconSize, SaveFromInput);
 
         int pillX = _cardRect.Left + (_cardRect.Width - layout.PillWidth) / 2;
         int pillTop = _cardRect.Top + (_cardRect.Height - layout.PillHeight) / 2;
@@ -336,6 +340,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         string assetName,
         string tip,
         string name,
+        string tooltipText,
         int x,
         int y,
         int size,
@@ -343,6 +348,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         => _buttons.Add(new ActionButton(
             tip,
             name,
+            tooltipText,
             new SD.Rectangle(x, y, size, size),
             action,
             ActionButtonShape.Circle,
@@ -353,14 +359,16 @@ public sealed class FastQuickActionsWindow : WF.Form
         => _buttons.Add(new ActionButton(
             tip,
             "Copy",
+            "Copy",
             new SD.Rectangle(x, y, width, height),
             action,
             ActionButtonShape.Pill,
             height / 2,
-            CreateSvgIcon("quick-access-copy.svg", Math.Max(14, (int)Math.Round(height * 0.47)), _visuals.Glyph))
+            CreateSvgIcon("quick-access-copy.svg", Math.Max(10, (int)Math.Round(height * 0.40)), _visuals.Glyph))
         {
             Label = label,
-            LabelFont = ThemePalette.UiFont(9.75f),
+            // 25px in the 512px HTML reference scales to roughly 9px on this 190px card.
+            LabelFont = ThemePalette.UiFont(7f),
         });
 
     private void DrawThumbnail(SD.Graphics g, bool blurred)
@@ -1024,18 +1032,45 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         if (_hoverButton == index) return;
 
+        _tooltipTimer.Stop();
+        HideActionTooltip();
         int old = _hoverButton;
         _hoverButton = index;
         if (old >= 0 && old < _buttons.Count) Invalidate(_buttons[old].Bounds);
         if (index >= 0)
         {
             Invalidate(_buttons[index].Bounds);
-            _toolTip.SetToolTip(this, _buttons[index].Tip);
+            _tooltipTimer.Start();
         }
-        else
+    }
+
+    private void ShowActionTooltip()
+    {
+        _tooltipTimer.Stop();
+        if (_closed || IsDisposed || !Visible || !_hovering || _hoverButton < 0 || _hoverButton >= _buttons.Count)
+            return;
+
+        ActionButton button = _buttons[_hoverButton];
+        var tooltip = new QuickAccessTooltipWindow(button.TooltipText, _visuals, _dpi);
+        _tooltipWindow = tooltip;
+        tooltip.FormClosed += (_, _) =>
         {
-            _toolTip.SetToolTip(this, null);
-        }
+            if (ReferenceEquals(_tooltipWindow, tooltip))
+                _tooltipWindow = null;
+        };
+        tooltip.ShowNear(this, RectangleToScreen(button.Bounds), RectangleToScreen(_cardRect));
+    }
+
+    private void HideActionTooltip()
+    {
+        _tooltipTimer.Stop();
+        QuickAccessTooltipWindow? tooltip = _tooltipWindow;
+        _tooltipWindow = null;
+        if (tooltip is null || tooltip.IsDisposed)
+            return;
+
+        tooltip.Close();
+        tooltip.Dispose();
     }
 
     private Task<string> EnsureDragFileAsync()
@@ -1175,6 +1210,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private sealed class ActionButton(
         string tip,
         string accessibleName,
+        string tooltipText,
         SD.Rectangle bounds,
         Action action,
         ActionButtonShape shape,
@@ -1184,6 +1220,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         public string Tip { get; } = tip;
         public string AccessibleName { get; } = accessibleName;
+        public string TooltipText { get; } = tooltipText;
         public SD.Rectangle Bounds { get; } = bounds;
         public Action Action { get; } = action;
         public ActionButtonShape Shape { get; } = shape;
