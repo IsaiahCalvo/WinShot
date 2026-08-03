@@ -1,5 +1,6 @@
 ﻿using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -36,6 +37,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private QuickAccessTooltipWindow? _tooltipWindow;
     private WF.Timer? _exitMotionTimer;
     private WF.Timer? _stackMotionTimer;
+    private bool _exitHighResolutionTimer;
+    private bool _stackHighResolutionTimer;
     private WF.Timer? _autoCloseTimer;
     private long _autoCloseDueTick;
     private int _autoCloseRemainingMs;
@@ -659,9 +662,10 @@ public sealed class FastQuickActionsWindow : WF.Form
             Bounds,
             _settings.Current.OverlayPosition);
         double startingOpacity = Opacity;
-        long started = Environment.TickCount64;
+        long started = Stopwatch.GetTimestamp();
 
         _exitMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _exitHighResolutionTimer = TimeBeginPeriod(1) == 0;
         _exitMotionTimer.Tick += (_, _) =>
         {
             if (IsDisposed)
@@ -671,13 +675,13 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
 
             double progress = Math.Clamp(
-                (Environment.TickCount64 - started) / (double)QuickAccessOverlayMotion.ExitDurationMs,
+                Stopwatch.GetElapsedTime(started).TotalMilliseconds / QuickAccessOverlayMotion.ExitDurationMs,
                 0d,
                 1d);
-            Location = QuickAccessOverlayMotion.Interpolate(
+            MoveWithoutActivation(QuickAccessOverlayMotion.Interpolate(
                 start,
                 target,
-                QuickAccessOverlayMotion.EaseInCubic(progress));
+                QuickAccessOverlayMotion.EaseInOutSine(progress)));
             Opacity = Math.Max(0.02d, startingOpacity * QuickAccessOverlayMotion.ExitOpacity(progress));
             if (progress < 1d)
                 return;
@@ -693,6 +697,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private static void ReflowOpenWindowsAnimated()
     {
         var offsets = new Dictionary<SD.Rectangle, int>();
+        long started = Stopwatch.GetTimestamp();
         foreach (FastQuickActionsWindow window in OpenWindows.Where(w =>
                      w.Visible && !w.IsDisposed && !w._exitMotionStarted))
         {
@@ -704,12 +709,12 @@ public sealed class FastQuickActionsWindow : WF.Form
                 window._settings.Current.OverlayPosition,
                 offset,
                 window._dpi);
-            window.BeginStackMotion(target);
+            window.BeginStackMotion(target, started);
             offsets[workingArea] = offset + window.Height + 12;
         }
     }
 
-    private void BeginStackMotion(SD.Point target)
+    private void BeginStackMotion(SD.Point target, long started)
     {
         StopStackMotionTimer();
         if (_exitMotionStarted || _closed || IsDisposed || Location == target)
@@ -721,8 +726,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
 
         SD.Point start = Location;
-        long started = Environment.TickCount64;
         _stackMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _stackHighResolutionTimer = TimeBeginPeriod(1) == 0;
         _stackMotionTimer.Tick += (_, _) =>
         {
             if (_exitMotionStarted || _closed || IsDisposed)
@@ -732,16 +737,16 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
 
             double progress = Math.Clamp(
-                (Environment.TickCount64 - started) / (double)QuickAccessOverlayMotion.RestackDurationMs,
+                Stopwatch.GetElapsedTime(started).TotalMilliseconds / QuickAccessOverlayMotion.RestackDurationMs,
                 0d,
                 1d);
-            Location = QuickAccessOverlayMotion.Interpolate(
+            MoveWithoutActivation(QuickAccessOverlayMotion.Interpolate(
                 start,
                 target,
-                QuickAccessOverlayMotion.EaseOutCubic(progress));
+                QuickAccessOverlayMotion.EaseOutCubic(progress)));
             if (progress >= 1d)
             {
-                Location = target;
+                MoveWithoutActivation(target);
                 StopStackMotionTimer();
             }
         };
@@ -753,6 +758,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         _exitMotionTimer?.Stop();
         _exitMotionTimer?.Dispose();
         _exitMotionTimer = null;
+        if (_exitHighResolutionTimer)
+        {
+            TimeEndPeriod(1);
+            _exitHighResolutionTimer = false;
+        }
     }
 
     private void StopStackMotionTimer()
@@ -760,6 +770,21 @@ public sealed class FastQuickActionsWindow : WF.Form
         _stackMotionTimer?.Stop();
         _stackMotionTimer?.Dispose();
         _stackMotionTimer = null;
+        if (_stackHighResolutionTimer)
+        {
+            TimeEndPeriod(1);
+            _stackHighResolutionTimer = false;
+        }
+    }
+
+    private void MoveWithoutActivation(SD.Point point)
+    {
+        const uint flags = 0x0001 | 0x0004 | 0x0010 | 0x0200; // NOSIZE, NOZORDER, NOACTIVATE, NOOWNERZORDER
+        if (!IsHandleCreated ||
+            !SetWindowPos(Handle, IntPtr.Zero, point.X, point.Y, 0, 0, flags))
+        {
+            Location = point;
+        }
     }
 
     private void BuildOverflowMenu()
@@ -1363,6 +1388,22 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     [DllImport("user32.dll")]
     private static extern int GetDpiForWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+    private static extern uint TimeBeginPeriod(uint period);
+
+    [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+    private static extern uint TimeEndPeriod(uint period);
 
     private enum ActionButtonShape
     {

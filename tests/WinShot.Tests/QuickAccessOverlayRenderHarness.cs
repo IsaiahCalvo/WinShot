@@ -209,7 +209,7 @@ public class QuickAccessOverlayRenderHarness
                 SD.Point point = QuickAccessOverlayMotion.Interpolate(
                     baseSlot,
                     exitTarget,
-                    QuickAccessOverlayMotion.EaseInCubic(progress));
+                    QuickAccessOverlayMotion.EaseInOutSine(progress));
                 DrawWithOpacity(graphics, card, point, QuickAccessOverlayMotion.ExitOpacity(progress));
             }
             DrawMotionLabel(graphics, $"Exit {progress:P0}");
