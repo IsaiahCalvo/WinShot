@@ -183,6 +183,10 @@
     const saved = frameHostSession;
     frameHostSession = null;
     clearInterval(saved.watchdog);
+    if (saved.frame) {
+      if (saved.styleBefore === null) saved.frame.removeAttribute("style");
+      else saved.frame.setAttribute("style", saved.styleBefore);
+    }
     window.scrollTo(saved.scroll.left, saved.scroll.top);
     try { saved.activeElement?.focus?.({ preventScroll: true }); } catch { /* The page may have replaced it. */ }
     return { restored: true };
@@ -211,21 +215,26 @@
       id: request.sessionId,
       scroll: { left: window.scrollX, top: window.scrollY },
       activeElement: document.activeElement,
+      frame,
+      styleBefore: frame.getAttribute("style"),
       lastHeartbeat: Date.now(),
       watchdog: 0
     };
     frameHostSession.watchdog = setInterval(() => {
       if (frameHostSession && Date.now() - frameHostSession.lastHeartbeat > WATCHDOG_MS) restoreFrameHost();
     }, 1000);
+    let view = viewport();
+    if (frame.clientWidth > view.width - 8) frame.style.setProperty("width", `${Math.max(1, Math.floor(view.width - 8))}px`, "important");
+    if (frame.clientHeight > view.height - 8) frame.style.setProperty("height", `${Math.max(1, Math.floor(view.height - 8))}px`, "important");
     frame.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
     await nextPaint();
     const rect = frame.getBoundingClientRect();
-    const view = viewport();
+    view = viewport();
     const left = rect.left + frame.clientLeft;
     const topOffset = rect.top + frame.clientTop;
     if (left < 0 || topOffset < 0 || left + frame.clientWidth > view.width || topOffset + frame.clientHeight > view.height) {
       restoreFrameHost();
-      throw new Error("The frame viewport is larger than the visible browser area and cannot be captured safely.");
+      throw new Error("The frame viewport could not be fitted inside the visible browser area for safe capture.");
     }
     return { located: true, left, top: topOffset, width: frame.clientWidth, height: frame.clientHeight, topViewport: view };
   }
@@ -380,40 +389,49 @@
       };
     };
 
-    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
-    while (text.length < limit) {
-      const node = walker.nextNode();
-      if (!node) break;
-      const value = node.nodeValue?.replace(/\s+/g, " ").trim();
-      if (!value || !(node.parentElement instanceof Element)) continue;
-      const style = getComputedStyle(node.parentElement);
-      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      for (const rect of range.getClientRects()) {
-        const mapped = intersect(rect);
-        if (!mapped) continue;
-        const key = `${value}|${mapped.x.toFixed(1)}|${mapped.y.toFixed(1)}`;
-        if (seenText.has(key)) continue;
-        seenText.add(key);
-        text.push({ ...mapped, text: value.slice(0, 1000), fontSize: Math.max(6, parseFloat(style.fontSize) || 12) });
-        if (text.length >= limit) break;
+    const roots = [document];
+    for (let index = 0; index < roots.length; index++) {
+      for (const element of roots[index].querySelectorAll("*")) {
+        if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
       }
     }
 
-    for (const anchor of document.querySelectorAll("a[href]")) {
-      if (links.length >= 2000) break;
-      const style = getComputedStyle(anchor);
-      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
-      for (const rect of anchor.getClientRects()) {
-        const mapped = intersect(rect);
-        if (!mapped) continue;
-        const url = anchor.href;
-        if (!/^https?:/i.test(url)) continue;
-        const key = `${url}|${mapped.x.toFixed(1)}|${mapped.y.toFixed(1)}`;
-        if (seenLinks.has(key)) continue;
-        seenLinks.add(key);
-        links.push({ ...mapped, url });
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (text.length < limit) {
+        const node = walker.nextNode();
+        if (!node) break;
+        const value = node.nodeValue?.replace(/\s+/g, " ").trim();
+        if (!value || !(node.parentElement instanceof Element)) continue;
+        const style = getComputedStyle(node.parentElement);
+        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const rect of range.getClientRects()) {
+          const mapped = intersect(rect);
+          if (!mapped) continue;
+          const key = `${value}|${mapped.x.toFixed(1)}|${mapped.y.toFixed(1)}`;
+          if (seenText.has(key)) continue;
+          seenText.add(key);
+          text.push({ ...mapped, text: value.slice(0, 1000), fontSize: Math.max(6, parseFloat(style.fontSize) || 12) });
+          if (text.length >= limit) break;
+        }
+      }
+
+      for (const anchor of root.querySelectorAll("a[href]")) {
+        if (links.length >= 2000) break;
+        const style = getComputedStyle(anchor);
+        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        for (const rect of anchor.getClientRects()) {
+          const mapped = intersect(rect);
+          if (!mapped) continue;
+          const url = anchor.href;
+          if (!/^https?:/i.test(url)) continue;
+          const key = `${url}|${mapped.x.toFixed(1)}|${mapped.y.toFixed(1)}`;
+          if (seenLinks.has(key)) continue;
+          seenLinks.add(key);
+          links.push({ ...mapped, url });
+        }
       }
     }
     return { text, links };

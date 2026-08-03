@@ -9,19 +9,19 @@ Checked against FireShot's official [edition comparison](https://getfireshot.com
 | Capture selected area | Implemented | Drag, edge-scroll, Ctrl-square, and Alt-full-width tests |
 | Capture page element | Implemented | Ctrl-hover exact-element test |
 | Capture independently scrolling area | Implemented | Nested scrolling-element test |
-| Handle sticky/floating page elements | Implemented | Dynamic/fixed fixture coverage |
+| Handle sticky/floating page elements | Implemented | Captured-pixel test proves header/footer appear exactly once |
 | Capture frames, iframes, and scrolling DIVs | Implemented | Same-origin, cross-origin, nested, and duplicate-frame tests |
 | Capture all open tabs | Implemented in visible or full-page mode | Multi-tab batch test |
 | Capture a list of URLs | Implemented in visible or full-page mode | URL-list batch and cleanup test |
 | Delayed capture | Implemented, 0-30 seconds | Delayed-capture end-to-end test |
-| Capture browser window | Implemented through WinShot desktop | Existing `capture-window` command plus extension protocol bridge |
+| Capture browser window | Available through WinShot desktop | Desktop command is tested; extension custom-protocol launch still needs live manual acceptance |
 | Extremely long page without one giant canvas | Implemented with tile storage | Greater-than-32K capture test |
-| Infinite/dynamically growing page controls | Implemented with configurable time, height, tile, and growth limits | Virtual-feed and settings tests |
+| Infinite/dynamically growing page controls | Implemented with configurable time, height, tile, and growth limits | Growing-page, virtual-feed, and settings tests |
 | Capture progress and cancellation | Implemented | Popup cancellation and exact-restoration test |
 | Single-page PDF | Implemented, including pages above 32K | Long single-page PDF test |
 | Multipage PDF | Implemented | PDF export tests |
-| Search/select/copy PDF text | Implemented with Unicode mapping | Searchable text-layer contract test |
-| Working links in PDF | Implemented | PDF annotation test |
+| Search/select/copy PDF text | Implemented with Unicode mapping | Independent PDF reader extracts Latin, Japanese, and Arabic text |
+| Working links in PDF | Implemented | Independent PDF reader extracts the link annotation |
 | Custom PDF page size | Implemented: Auto, A4, Letter, Legal, or custom | Custom MediaBox test |
 | Custom PDF headers, footers, and watermarks | Implemented | PDF template test |
 | All tabs to one PDF in one click | Implemented | Packaged extension download test |
@@ -30,4 +30,4 @@ Checked against FireShot's official [edition comparison](https://getfireshot.com
 
 ## Scope decision
 
-This matrix covers the full capture and PDF feature union shown across FireShot Lite, Standard, and Pro. Annotation editing, upload destinations, email/printing, and store packaging are intentionally outside this capture-engine milestone. FireShot's optional webpage JavaScript API is also tracked as future automation/integration rather than a missing capture mode.
+This matrix covers the browser-native capture and PDF feature union shown across FireShot Lite, Standard, and Pro. Browser-window capture is supplied by WinShot desktop, but the extension-to-desktop launch is not yet a dependable acknowledged bridge. Annotation editing, upload destinations, email/printing, and store packaging are intentionally outside this capture-engine milestone. FireShot's optional webpage JavaScript API is also tracked as future automation/integration rather than a missing capture mode.

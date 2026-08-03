@@ -32,8 +32,9 @@ Ctrl-square and Alt-full-width selection, exact element selection, self-scrollin
 horizontal and vertical tiling, fixed/sticky handling, delayed capture, configurable safety limits,
 dynamic extent growth, virtualized content, exact deep-frame selection, visible/full all-tab and
 URL-list batches, one-click all-tabs PDF, tile-backed captures beyond 32K, cancellation, watchdog
-restoration, and local export. Browser-window capture is handed to the existing WinShot desktop
-capture command through the `winshot://` protocol.
+restoration, and local export. WinShot desktop already supplies browser-window capture. The extension
+can request that selector through `winshot://`, but this custom-protocol convenience path does not yet
+provide the reliable success/failure acknowledgement that a Native Messaging bridge would provide.
 
 PDF export includes single/multipage layout, standard or custom page sizes, searchable Unicode text,
 working website links, and optional headers, footers, and watermarks. DRM video can be blank by

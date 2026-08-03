@@ -73,7 +73,7 @@ export function captureLimits(settings) {
     maxDurationMs: settings.maxDurationMs,
     maxTiles: settings.maxTiles,
     maxHeightCss: settings.maxHeightCss,
-    maxGrowthPasses: settings.captureInfiniteGrowth ? DEFAULT_LIMITS.maxGrowthPasses : 0
+    maxGrowthPasses: settings.captureInfiniteGrowth ? settings.maxTiles : 0
   };
 }
 

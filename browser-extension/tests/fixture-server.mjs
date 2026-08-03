@@ -39,6 +39,8 @@ function fixture(name, crossPort) {
       return shell("frames", `<h1>Frames</h1><iframe src="/frame"></iframe><iframe src="http://${host}:${crossPort}/frame"></iframe><iframe src="/nested-frame-host"></iframe><iframe src="/nested-cross-frame-host"></iframe>${rows(12)}`, "", "iframe{width:90%;height:350px;margin:20px;border:4px solid #1687ff}");
     case "duplicate-frames":
       return shell("duplicate-frames", `<h1>Duplicate frames</h1><iframe data-copy="first" src="http://${host}:${crossPort}/frame"></iframe><iframe data-copy="second" src="http://${host}:${crossPort}/frame"></iframe>`, "", "iframe{display:block;width:900px;height:350px;margin:20px;border:4px solid #1687ff}");
+    case "tall-frame":
+      return shell("tall-frame", `<h1>Tall frame</h1><iframe src="http://${host}:${crossPort}/frame"></iframe>`, "", "iframe{display:block;width:900px;height:1500px;margin:20px;border:4px solid #1687ff}");
     case "nested-frame-host":
       return shell("nested-frame-host", `<iframe src="/frame"></iframe>`, "", "iframe{width:900px;height:300px;margin:20px;border:4px solid #f4bd00}");
     case "nested-cross-frame-host":
@@ -49,6 +51,8 @@ function fixture(name, crossPort) {
       return shell("beyond-32k", rows(290, "LONG"));
     case "infinite":
       return shell("bounded-infinite", `<div id="feed">${rows(12,"FEED")}</div>`, `let page=1;addEventListener('scroll',()=>{if(scrollY+innerHeight>document.body.scrollHeight-400&&page<12){document.querySelector('#feed').insertAdjacentHTML('beforeend',${JSON.stringify(rows(8,"APPEND")).replaceAll("APPEND", "APPEND '+page+'")});page++}});`);
+    case "endless":
+      return shell("endless-feed", `<div id="feed">${rows(12,"FEED")}</div>`, `let page=1;addEventListener('scroll',()=>{if(scrollY+innerHeight>document.body.scrollHeight-400){document.querySelector('#feed').insertAdjacentHTML('beforeend',${JSON.stringify(rows(8,"APPEND")).replaceAll("APPEND", "APPEND '+page+'")} );page++}});`);
     case "virtual":
       return shell("virtualized-feed", `<div id="virtual"><div id="rail"></div></div>`, `
         const total=240,itemHeight=64,view=document.querySelector('#virtual'),rail=document.querySelector('#rail');rail.style.height=(total*itemHeight)+'px';
@@ -59,7 +63,7 @@ function fixture(name, crossPort) {
     case "recovery":
       return shell("recovery", `<input id="focus" value="original"><div id="snap" style="scroll-snap-type:y mandatory;height:500px;overflow:auto">${rows(20,"RECOVERY")}</div>`);
     default:
-      return shell("fixture-index", `<h1>WinShot fixture corpus</h1><ul>${["body","horizontal","nested","sticky","lazy","animated","repetitive","shadow","iframes","duplicate-frames","long","infinite","virtual","media","recovery"].map(value=>`<li><a href="/${value}">${value}</a></li>`).join("")}</ul>`);
+      return shell("fixture-index", `<h1>WinShot fixture corpus</h1><ul>${["body","horizontal","nested","sticky","lazy","animated","repetitive","shadow","iframes","duplicate-frames","tall-frame","long","infinite","endless","virtual","media","recovery"].map(value=>`<li><a href="/${value}">${value}</a></li>`).join("")}</ul>`);
   }
 }
 

@@ -203,7 +203,14 @@ function pdfHexUnicode(value) {
   return result.toUpperCase();
 }
 
-function pageSizePoints(options) {
+function pdfDirectionalRuns(value) {
+  return (String(value || "").match(/[\u0590-\u08ff]+|[^\u0590-\u08ff]+/g) || []).map((text) => ({
+    text,
+    encodedText: /^[\u0590-\u08ff]+$/.test(text) ? [...text].reverse().join("") : text
+  }));
+}
+
+export function pdfPageSizePoints(options) {
   if (options.pageSize === "a4") return { width: 595.28, height: 841.89 };
   if (options.pageSize === "letter") return { width: 612, height: 792 };
   if (options.pageSize === "legal") return { width: 612, height: 1008 };
@@ -247,7 +254,7 @@ function pageFurniture(options, record, pageNumber, totalPages, pageWidth, pageH
 
 function imagePage(image, options, pageNumber, totalPages) {
   const record = image.record;
-  const fixed = pageSizePoints(options);
+  const fixed = pdfPageSizePoints(options);
   let pageWidth = fixed?.width || image.width * 0.75;
   let pageHeight = fixed?.height || image.height * 0.75;
   let furniture = pageFurniture(options, record, pageNumber, totalPages, pageWidth, pageHeight);
@@ -288,7 +295,7 @@ function singleImagePage(images, options, pageNumber, totalPages) {
   const record = images[0].record;
   const sourceWidth = record.report.dimensionsPx.width;
   const sourceHeight = record.report.dimensionsPx.height;
-  const fixed = pageSizePoints(options);
+  const fixed = pdfPageSizePoints(options);
   const naturalWidth = sourceWidth * 0.75;
   const naturalHeight = sourceHeight * 0.75;
   const userUnit = fixed ? 1 : Math.max(1, naturalWidth / 14000, naturalHeight / 14000);
@@ -377,12 +384,16 @@ function buildPdf(images, title, options = {}) {
     const xScale = page.drawWidth / page.cssWidth;
     const yScale = page.drawHeight / page.sourceHeightCss;
     for (const entry of page.textEntries) {
-      const value = pdfHexUnicode(entry.text);
-      if (!value) continue;
       const x = page.drawX + entry.x * xScale;
       const y = page.drawY + page.drawHeight - (entry.y - page.sourceTopCss + entry.height) * yScale;
       const fontSize = Math.max(4, Math.min(200, entry.fontSize * Math.min(xScale, yScale)));
-      lines.push(`BT /F2 ${fontSize.toFixed(2)} Tf 3 Tr 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm <${value}> Tj ET`);
+      let cursorX = x;
+      for (const run of pdfDirectionalRuns(entry.text)) {
+        const value = pdfHexUnicode(run.encodedText);
+        if (!value) continue;
+        lines.push(`BT /F2 ${fontSize.toFixed(2)} Tf 3 Tr 1 0 0 1 ${cursorX.toFixed(2)} ${y.toFixed(2)} Tm <${value}> Tj ET`);
+        cursorX += [...run.text].length * fontSize * 0.5;
+      }
     }
     const furniture = page.furniture;
     if (furniture.header) lines.push(`BT /F1 10 Tf 0 Tr 0 g 1 0 0 1 ${furniture.left.toFixed(2)} ${(page.pageHeight - furniture.margin - 10).toFixed(2)} Tm (${pdfLiteral(furniture.header)}) Tj ET`);
@@ -433,7 +444,7 @@ function buildPdf(images, title, options = {}) {
 async function recordPdfImages(record, tiles, options, onProgress, progressStart = 0, progressSpan = 1) {
   const { width, height } = record.report.dimensionsPx;
   const outputWidth = Math.min(12000, width);
-  const fixed = pageSizePoints(options);
+  const fixed = pdfPageSizePoints(options);
   const furniture = fixed ? pageFurniture(options, record, 1, 1, fixed.width, fixed.height) : null;
   const sourcePageHeight = options.layout === "single" || !fixed
     ? Math.max(1, Math.floor(8000 * width / outputWidth))

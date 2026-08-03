@@ -8,6 +8,7 @@ import {
   validateCoverage
 } from "../../src/contract.js";
 import { normalizeSettings, renderFileName, renderPdfTemplate } from "../../src/settings.js";
+import { pdfPageSizePoints } from "../../src/exporters.js";
 
 test("axis positions finish exactly at the final reachable scroll offset", () => {
   assert.deepEqual(axisPositions(2500, 1000, 100), [0, 900, 1500]);
@@ -72,4 +73,12 @@ test("capture and PDF settings are bounded and filename templates are safe", () 
   assert.deepEqual([settings.pdf.layout, settings.pdf.pageSize, settings.pdf.customWidthIn, settings.pdf.customHeightIn], ["single", "custom", 1, 200]);
   assert.equal(renderFileName(settings.fileNameTemplate, { sourceTitle: "Bad / title", sourceUrl: "https://example.test/path", mode: "visible" }), "Bad - title-visible-example.test");
   assert.equal(renderPdfTemplate("{title} {page}/{pages}", { title: "Fixture", page: 2, pages: 4 }), "Fixture 2/4");
+});
+
+test("PDF presets use their advertised physical page sizes", () => {
+  assert.deepEqual(pdfPageSizePoints({ pageSize: "letter" }), { width: 612, height: 792 });
+  assert.deepEqual(pdfPageSizePoints({ pageSize: "legal" }), { width: 612, height: 1008 });
+  assert.deepEqual(pdfPageSizePoints({ pageSize: "a4" }), { width: 595.28, height: 841.89 });
+  assert.deepEqual(pdfPageSizePoints({ pageSize: "custom", customWidthIn: 7, customHeightIn: 9 }), { width: 504, height: 648 });
+  assert.equal(pdfPageSizePoints({ pageSize: "auto" }), null);
 });

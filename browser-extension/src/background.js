@@ -297,30 +297,34 @@ async function storeScrollingCapture(session, controller) {
       target: session.target
     }, session.frameId);
     prepared = true;
-    if (session.frameId && !prep.metrics.frame?.accessible) {
+    let captureMetrics = prep.metrics;
+    if (session.frameId) {
       frameHost = await locateFrameChain(session);
       frameHostPrepared = frameHost.preparedFrameIds;
+      captureMetrics = await sendToTab(session.tabId, { type: "WINSHOT_METRICS", sessionId: session.id }, session.frameId);
     }
-    extent = { width: prep.metrics.width, height: prep.metrics.height };
+    extent = { width: captureMetrics.width, height: captureMetrics.height };
     viewportSize = {
-      width: Math.max(1, prep.metrics.clip.width || prep.metrics.viewport.width),
-      height: Math.max(1, prep.metrics.clip.height || prep.metrics.viewport.height)
+      width: Math.max(1, captureMetrics.clip.width || captureMetrics.viewport.width),
+      height: Math.max(1, captureMetrics.clip.height || captureMetrics.viewport.height)
     };
     session.report.warnings.push(...(prep.warnings || []));
     session.report.dimensionsCss = { ...extent };
-    session.report.target = prep.metrics.kind;
+    session.report.target = captureMetrics.kind;
     session.state = SessionState.CAPTURING;
     await putRecord(session);
 
+    let safetyStopReason = null;
     if (extent.width > session.limits.maxWidthCss || extent.height > session.limits.maxHeightCss) {
       session.report.warnings.push(`Content exceeds the configured ${session.limits.maxWidthCss}×${session.limits.maxHeightCss} CSS-pixel safety limit.`);
+      safetyStopReason = "The capture reached its configured dimension limit.";
       extent.width = Math.min(extent.width, session.limits.maxWidthCss);
       extent.height = Math.min(extent.height, session.limits.maxHeightCss);
     }
 
     let growthPass = 0;
     let index = 0;
-    while (growthPass <= session.limits.maxGrowthPasses) {
+    captureLoop: while (growthPass <= session.limits.maxGrowthPasses) {
       const plannedExtent = { ...extent };
       const plan = buildTilePlan({
         width: extent.width,
@@ -334,8 +338,14 @@ async function storeScrollingCapture(session, controller) {
         const key = `${position.x.toFixed(2)}:${position.y.toFixed(2)}`;
         if (capturedPositions.has(key)) continue;
         throwIfAborted(controller.signal);
-        if (index >= session.limits.maxTiles) throw new Error(`Maximum tile limit (${session.limits.maxTiles}) reached.`);
-        if (Date.now() - startTime >= session.limits.maxDurationMs) throw new Error("Maximum capture duration reached.");
+        if (index >= session.limits.maxTiles) {
+          safetyStopReason = `Capture stopped at the configured ${session.limits.maxTiles}-tile limit.`;
+          break captureLoop;
+        }
+        if (Date.now() - startTime >= session.limits.maxDurationMs) {
+          safetyStopReason = "Capture stopped at the configured time limit.";
+          break captureLoop;
+        }
         await assertStillActive(session);
         if (frameHostPrepared.length) await heartbeatFrameChain(session, frameHostPrepared);
 
@@ -424,14 +434,19 @@ async function storeScrollingCapture(session, controller) {
         width: Math.min(latest.width, session.limits.maxWidthCss),
         height: Math.min(latest.height, session.limits.maxHeightCss)
       };
+      if (latest.width > session.limits.maxWidthCss || latest.height > session.limits.maxHeightCss) {
+        safetyStopReason = "Capture stopped at the configured dimension limit.";
+      }
       extent = { width: Math.max(extent.width, nextExtent.width), height: Math.max(extent.height, nextExtent.height) };
       if (extent.width <= plannedExtent.width + 1 && extent.height <= plannedExtent.height + 1) break;
+      if (safetyStopReason) break;
       growthPass++;
     }
 
     if (growthPass > session.limits.maxGrowthPasses) {
-      session.report.warnings.push("Content kept growing. Capture stopped at the explicit growth limit instead of guessing an end.");
+      safetyStopReason = "Content kept growing until the configured capture limit was reached.";
     }
+    if (safetyStopReason) session.report.warnings.push(safetyStopReason);
 
     const coverage = validateCoverage(extent.width, extent.height, tileMetadata);
     session.report.coverage = coverage;
@@ -446,7 +461,7 @@ async function storeScrollingCapture(session, controller) {
     session.semantics = { text: semanticText, links: semanticLinks };
     if (minimum < 0.7) session.report.warnings.push("One or more overlaps changed substantially; the result is marked partial rather than silently accepted.");
     if (!coverage.complete) session.report.warnings.push(...coverage.gaps);
-    session.state = coverage.complete && minimum >= 0.7 && growthPass <= session.limits.maxGrowthPasses
+    session.state = coverage.complete && minimum >= 0.7 && !safetyStopReason
       ? SessionState.COMPLETE
       : SessionState.PARTIAL;
   } finally {
