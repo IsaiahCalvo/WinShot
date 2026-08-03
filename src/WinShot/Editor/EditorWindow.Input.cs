@@ -304,12 +304,6 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
-        if (_tool == EditorTool.Emoji)
-        {
-            if (inImage) PlaceEmoji(pos);
-            e.Handled = true;
-            return;
-        }
         if (_tool == EditorTool.Eyedropper)
         {
             if (inImage) SampleEyedropper(pos);

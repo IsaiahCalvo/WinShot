@@ -6,35 +6,6 @@
         AllowDrop="True" Drop="OnEditorDrop" DragOver="OnEditorDragOver"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
         AutomationProperties.Name="WinShot annotation editor">
-    <Window.Resources>
-        <Style x:Key="EmojiButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="FontFamily" Value="Segoe UI Emoji"/>
-            <Setter Property="FontSize" Value="17"/>
-            <Setter Property="Width" Value="34"/>
-            <Setter Property="Height" Value="30"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
-                                BorderBrush="Transparent" BorderThickness="2">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
-
     <Grid Background="{StaticResource WindowBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -122,10 +93,6 @@
                                      AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."/>
                         <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <RadioButton x:Name="EmojiToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool" Tag="Emoji"
-                                         FontFamily="Segoe UI Emoji" Content="&#x1F600;" Checked="OnToolChecked" Click="OnEmojiButtonClick"
-                                         ToolTip="Emoji" AutomationProperties.Name="Emoji"
-                                         AutomationProperties.HelpText="Pick an emoji, then click the image to place it."/>
                             <Button x:Name="MoreToolsButton" Style="{StaticResource ToolIconButton}" Content="&#xE712;"
                                     Click="OnMoreToolsClick" ToolTip="More tools and image actions"
                                     AutomationProperties.Name="More tools and image actions"
@@ -189,15 +156,6 @@
                                         AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y."/>
                             </UniformGrid>
                         </StackPanel>
-                    </Border>
-                </Popup>
-
-                <Popup x:Name="EmojiPopup" PlacementTarget="{Binding ElementName=EmojiToolBtn}"
-                       Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                    <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                            BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
-                            Effect="{StaticResource FloatingShadow}">
-                        <UniformGrid x:Name="EmojiGrid" Columns="6"/>
                     </Border>
                 </Popup>
 
@@ -390,7 +348,7 @@
         <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"
                 Margin="12,6,12,12" Visibility="Collapsed">
             <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
                     <TextBlock x:Name="ZoomLabel" Text="100%" Style="{StaticResource ValueLabel}" MinWidth="42"
                                TextAlignment="Right" Margin="4,0,8,0" ToolTip="Zoom level"/>
@@ -402,19 +360,7 @@
                     </ComboBox>
                 </StackPanel>
 
-                <Border x:Name="DragMeHandle" Grid.Column="1" Background="{StaticResource SurfaceBrush}"
-                        CornerRadius="{StaticResource RadiusPill}" Padding="12,5" Cursor="SizeAll"
-                        MouseLeftButtonDown="OnDragMeDown" ToolTip="Drag this onto another app to drop the image as a file"
-                        AutomationProperties.Name="Drag me"
-                        AutomationProperties.HelpText="Drag the current source-resolution edited image to another local application.">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE76F;" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}"/>
-                        <TextBlock Text="Drag me" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="8,0"/>
-                        <TextBlock Text="&#xE76F;" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}"/>
-                    </StackPanel>
-                </Border>
-
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
                     <Button x:Name="BtnPin" Style="{StaticResource CircleActionButton}" Content="&#xE718;" ToolTip="Pin to screen"
                             Click="OnPin" AutomationProperties.Name="Pin to screen"
                             AutomationProperties.HelpText="Open the edited image in a local always-on-top pin window."/>

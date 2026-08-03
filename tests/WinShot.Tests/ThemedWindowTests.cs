@@ -335,7 +335,7 @@ public class ThemedWindowTests
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EmojiToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
             "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
@@ -352,7 +352,7 @@ public class ThemedWindowTests
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EmojiToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
             "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
@@ -363,6 +363,9 @@ public class ThemedWindowTests
             var element = Assert.IsAssignableFrom<FrameworkElement>(editor.FindName(name));
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(element)), name);
         }
+
+        Assert.Null(editor.FindName("EmojiToolBtn"));
+        Assert.Null(editor.FindName("DragMeHandle"));
 
         var select = (RadioButton)editor.FindName("SelectToolBtn")!;
         var moreButton = (Button)editor.FindName("MoreToolsButton")!;

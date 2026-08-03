@@ -45,9 +45,9 @@ internal static class EditorShellContract
         "Eyedropper",
     };
 
-    // 3 leading actions + 12 primary tools + Emoji/More + Save/Done and separators,
+    // 3 leading actions + 12 primary tools + More + Save/Done and separators,
     // using the shared 36-DIP controls and margins from Theme.xaml.
-    public const double PrimaryToolbarLogicalWidth = 914;
+    public const double PrimaryToolbarLogicalWidth = 872;
     public const double MinimumEditorLogicalWidth = 980;
     public const double ToolbarOuterMargin = 24;
 

@@ -526,34 +526,6 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>"Drag me" handle: start a file drag-out of the flattened image.</summary>
-    private async void OnDragMeDown(object sender, MouseButtonEventArgs e)
-    {
-        if (_sourceOperationActive) return;
-        try
-        {
-            string dir = TempFileJanitor.WinShotTempDirectory;
-            string path = FileNamer.NextUniquePath(_settings, dir, "png");
-            var flat = Flatten();
-            await Task.Run(() =>
-            {
-                using (flat)
-                {
-                    System.IO.Directory.CreateDirectory(dir);
-                    TempFileJanitor.DeleteOldFiles(dir, DateTimeOffset.UtcNow, TimeSpan.FromDays(1), maxFilesToDelete: 50);
-                    ImageSaver.Save(flat, path);
-                }
-            });
-            if (!IsVisible) return;
-            var data = new DataObject(DataFormats.FileDrop, new[] { path });
-            DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Copy);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Editor drag-out failed", ex);
-        }
-    }
-
     private async void OnSave(object sender, RoutedEventArgs e)
     {
         if (_sourceOperationActive) return;

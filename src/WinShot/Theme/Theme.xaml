@@ -345,7 +345,7 @@
     </Style>
 
     <!-- BOTTOM UTILITY-BAR CONTAINER — same material, used for the editor's
-         bottom bar (zoom dropdown · Drag me · circular actions). -->
+         bottom bar (zoom dropdown · circular actions). -->
     <Style x:Key="BottomUtilityBar" TargetType="Border" BasedOn="{StaticResource FloatingToolbar}">
         <Setter Property="Padding" Value="8,5"/>
     </Style>

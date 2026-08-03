@@ -155,26 +155,6 @@ public partial class EditorWindow : Window
             }));
     }
 
-    // ------------------------------------------------------------ emoji tool
-
-    /// <summary>Drops the picked emoji as a 32px text annotation centered on the click.</summary>
-    private void PlaceEmoji(Point pos)
-    {
-        var label = AnnotationFactory.CreateEmojiLabel(_pendingEmoji);
-        label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        double left = pos.X - label.DesiredSize.Width / 2, top = pos.Y - label.DesiredSize.Height / 2;
-        Canvas.SetLeft(label, left);
-        Canvas.SetTop(label, top);
-        label.Tag = AnnotationData.ForEmoji(new Point(left, top), _pendingEmoji);
-        Push(new EditorAction(
-            undo: () => AnnotationCanvas.Children.Remove(label),
-            redo: () =>
-            {
-                if (!AnnotationCanvas.Children.Contains(label))
-                    AnnotationCanvas.Children.Add(label);
-            }));
-    }
-
     // ------------------------------------------------------------------ blur
 
     private async void ApplyBlur(SD.Rectangle region)

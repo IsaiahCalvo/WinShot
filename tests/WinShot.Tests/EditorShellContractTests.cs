@@ -6,7 +6,7 @@ namespace WinShot.Tests;
 public class EditorShellContractTests
 {
     [Fact]
-    public void PrimaryAndMoreTools_FollowVerifiedHierarchyWithoutDroppingWinShotTools()
+    public void PrimaryAndMoreTools_FollowVerifiedHierarchyWithoutEmojiTool()
     {
         Assert.Equal(new[]
         {
@@ -19,11 +19,13 @@ public class EditorShellContractTests
         string[] uniqueTools = EditorShellContract.PrimaryToolOrder
             .Where(name => name != "FilledRectangle")
             .Concat(EditorShellContract.MoreToolOrder)
-            .Concat(new[] { "Crop", "Emoji" })
+            .Concat(new[] { "Crop" })
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        Assert.Equal(17, uniqueTools.Length);
-        Assert.All(Enum.GetNames<EditorTool>(), name => Assert.Contains(name, uniqueTools));
+        Assert.Equal(16, uniqueTools.Length);
+        Assert.DoesNotContain(nameof(EditorTool.Emoji), uniqueTools);
+        Assert.All(Enum.GetNames<EditorTool>().Where(name => name != nameof(EditorTool.Emoji)),
+            name => Assert.Contains(name, uniqueTools));
     }
 
     [Fact]
@@ -68,6 +70,6 @@ public class EditorShellContractTests
     {
         Assert.True(EditorShellContract.FitsPrimaryToolbar(
             EditorShellContract.MinimumEditorLogicalWidth, dpiScale));
-        Assert.False(EditorShellContract.FitsPrimaryToolbar(930, dpiScale));
+        Assert.False(EditorShellContract.FitsPrimaryToolbar(880, dpiScale));
     }
 }

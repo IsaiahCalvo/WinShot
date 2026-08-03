@@ -398,50 +398,6 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void OnEmojiButtonClick(object sender, RoutedEventArgs e)
-    {
-        BuildEmojiPalette();
-        EmojiPopup.IsOpen = true;
-    }
-
-    private void BuildEmojiPalette()
-    {
-        if (_emojiPaletteBuilt)
-            return;
-
-        _emojiPaletteBuilt = true;
-        var style = (Style)FindResource("EmojiButton");
-        string[] emojis =
-        [
-            "\U0001F600", "\U0001F605", "\U0001F602", "\U0001F60D", "\U0001F914", "\U0001F60E",
-            "\U0001F622", "\U0001F621", "\U0001F44D", "\U0001F44E", "\U0001F44F", "\U0001F64F",
-            "\U0001F440", "\U0001F4AA", "\u2764\uFE0F", "\U0001F525", "\u2B50", "\U0001F389",
-            "\u2705", "\u274C", "\u26A0\uFE0F", "\u2757", "\U0001F4A1", "\U0001F680",
-        ];
-
-        foreach (string emoji in emojis)
-        {
-            var button = new Button
-            {
-                Style = style,
-                Content = emoji,
-            };
-            AutomationProperties.SetName(button, $"Emoji {emoji}");
-            AutomationProperties.SetHelpText(button, "Choose this emoji for placement on the image.");
-            button.Click += OnEmojiPicked;
-            EmojiGrid.Children.Add(button);
-        }
-    }
-
-    private void OnEmojiPicked(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button b && b.Content is string emoji)
-            _pendingEmoji = emoji;
-        EmojiPopup.IsOpen = false;
-        if (EmojiToolBtn.IsChecked != true)
-            EmojiToolBtn.IsChecked = true;
-    }
-
     // ----------------------------------------------------- custom color picker (Gap)
 
     /// <summary>

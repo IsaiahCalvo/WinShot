@@ -69,8 +69,6 @@ public partial class EditorWindow : Window
     private UIElement? _opacityElement;
     private double? _cropRatio; // null = free
     private EditorTool _toolBeforeEyedropper = EditorTool.Select;
-    private string _pendingEmoji = "😀";
-    private bool _emojiPaletteBuilt;
     private bool _colorPickerBuilt;
     private Color _customColor = Color.FromRgb(0xFF, 0x3B, 0x30); // last custom / eyedropper color
     private bool _suppressHexEvents;
@@ -482,7 +480,6 @@ public partial class EditorWindow : Window
         if (CropUtilityBtn is not null) yield return CropUtilityBtn;
         if (ToolPanel is not null)
             foreach (var rb in ToolPanel.Children.OfType<RadioButton>()) yield return rb;
-        if (EmojiToolBtn is not null) yield return EmojiToolBtn;
         if (MoreToolPanel is not null)
             foreach (var rb in MoreToolPanel.Children.OfType<RadioButton>()) yield return rb;
     }
