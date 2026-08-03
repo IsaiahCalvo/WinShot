@@ -4,3 +4,8 @@ obj/
 .vs/
 .claudehelper/
 publish/
+node_modules/
+output/
+browser-extension/dist/
+browser-extension/test-results/
+browser-extension/playwright-report/

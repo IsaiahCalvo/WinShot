@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WinShot Capture</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <div><strong>WinShot</strong><small>Browser capture</small></div>
+  </header>
+  <main>
+    <button data-mode="full-page"><span>Entire page</span><kbd>Alt Shift F</kbd></button>
+    <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift V</kbd></button>
+    <button data-picker="region"><span>Drag a selection</span><small>Auto-scrolls at page edges</small></button>
+    <button data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
+    <button id="cancel"><span>Cancel active capture</span><small>Restores the page and discards the result</small></button>
+  </main>
+  <p id="status" role="status">Captures stay on this device.</p>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

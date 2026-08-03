@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "WinShot Capture",
+  "short_name": "WinShot",
+  "description": "Reliable, local-first webpage capture for WinShot.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "109",
+  "action": {
+    "default_title": "Capture with WinShot",
+    "default_popup": "src/popup.html"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "scripting",
+    "storage"
+  ],
+  "optional_permissions": [
+    "nativeMessaging",
+    "tabs"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "commands": {
+    "capture-visible": {
+      "suggested_key": {
+        "default": "Alt+Shift+V"
+      },
+      "description": "Capture the visible viewport"
+    },
+    "capture-full-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "Capture the entire page"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

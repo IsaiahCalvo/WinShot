@@ -1,0 +1,15 @@
+:root { color-scheme: light dark; font: 13px/1.35 system-ui,Segoe UI,sans-serif; }
+* { box-sizing: border-box; }
+body { width: 300px; margin: 0; background: #101216; color: #f7f8fa; }
+header { display: flex; gap: 10px; align-items: center; padding: 14px 15px 11px; border-bottom: 1px solid #ffffff18; }
+header div { display: grid; }
+header strong { font-size: 15px; }
+header small, button small { color: #aab2c0; }
+.mark { width: 26px; height: 26px; border: 3px solid #1d8cff; border-radius: 50%; box-shadow: inset 0 0 0 4px #101216; background: #1d8cff; }
+main { display: grid; gap: 7px; padding: 10px; }
+button { min-height: 48px; border: 1px solid #ffffff1c; border-radius: 8px; background: #1a1e25; color: inherit; padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; text-align: left; align-items: center; cursor: pointer; }
+button:hover, button:focus-visible { border-color: #268eff; background: #202a37; outline: none; }
+button small { grid-column: 1 / -1; font-size: 11px; }
+kbd { color: #8e99a9; font: 10px system-ui; }
+#status { margin: 0; min-height: 34px; padding: 8px 14px 11px; color: #97a1b1; border-top: 1px solid #ffffff10; font-size: 11px; }
+#status.error { color: #ff9d9d; }

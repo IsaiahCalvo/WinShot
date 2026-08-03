@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WinShot Capture</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="mark" aria-hidden="true"></span><strong>WinShot Capture</strong></div>
+    <div class="actions">
+      <button id="save-png">Save PNG</button>
+      <button id="save-jpeg">Save JPEG</button>
+      <button id="save-webp">Save WebP</button>
+      <button id="save-pdf">Save PDF</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <h1 id="title">Loading capture…</h1>
+      <div id="state" class="pill">Loading</div>
+      <dl id="report"></dl>
+      <section id="warnings" hidden><h2>Warnings</h2><ul></ul></section>
+      <p class="privacy">All rendering and exports happen locally in your browser.</p>
+    </aside>
+    <section class="stage" aria-label="Capture preview">
+      <div id="preview"></div>
+    </section>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="editor.js"></script>
+</body>
+</html>

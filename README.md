@@ -29,6 +29,9 @@ install or run it — click **More info → Run anyway**.
   (Windows' built-in offline OCR).
 - **Scrolling capture** — `Ctrl+Shift+5`, select a region, WinShot auto-scrolls
   and stitches the page into one tall image.
+- **Browser capture extension** — local-first visible, full-page, selection, and
+  exact scrolling-element capture with tile-backed output beyond 32K. See
+  [browser-extension/README.md](browser-extension/README.md).
 - **History** — every capture auto-saved locally (default cap 200), browsable
   from the tray menu.
 - **Settings** — hotkeys, save folder, formats, FPS, launch-at-startup.
