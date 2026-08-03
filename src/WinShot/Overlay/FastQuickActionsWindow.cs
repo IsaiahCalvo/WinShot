@@ -30,7 +30,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly bool _requestMemoryCleanupOnClose;
     private readonly bool _loadPreview;
     private readonly QuickAccessOverlayVisuals _visuals;
-    private readonly WF.Timer _tooltipTimer = new() { Interval = 360 };
+    private readonly WF.Timer _tooltipTimer = new() { Interval = 300 };
     private readonly WF.ContextMenuStrip _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
     private QuickAccessTooltipWindow? _tooltipWindow;
@@ -38,7 +38,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private long _autoCloseDueTick;
     private int _autoCloseRemainingMs;
     private SD.Rectangle _cardRect;
-    private SD.Rectangle _thumbRect;   // the fitted thumbnail centered inside the card
+    private SD.Rectangle _thumbRect;   // fixed-ratio, center-cropped capture preview
     private int _cornerRadius;
     private int _dpi = 96;
     private SD.Bitmap? _preview;
@@ -364,10 +364,10 @@ public sealed class FastQuickActionsWindow : WF.Form
             action,
             ActionButtonShape.Pill,
             height / 2,
-            CreateSvgIcon("quick-access-copy.svg", Math.Max(10, (int)Math.Round(height * 0.40)), _visuals.Glyph))
+            CreateSvgIcon("quick-access-copy.svg", Math.Max(14, (int)Math.Round(height * 0.52)), _visuals.Glyph))
         {
             Label = label,
-            // 25px in the 512px HTML reference scales to roughly 9px on this 190px card.
+            // 25px in the 512px HTML reference scales to roughly 9px on this 192px card.
             LabelFont = ThemePalette.UiFont(7f),
         });
 
@@ -851,7 +851,19 @@ public sealed class FastQuickActionsWindow : WF.Form
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.Half;
             g.SmoothingMode = SmoothingMode.None;
-            g.DrawImage(image, new SD.Rectangle(0, 0, width, height));
+            double scale = Math.Max(width / (double)Math.Max(1, image.Width), height / (double)Math.Max(1, image.Height));
+            float sourceWidth = (float)(width / scale);
+            float sourceHeight = (float)(height / scale);
+            float sourceX = (image.Width - sourceWidth) / 2f;
+            float sourceY = (image.Height - sourceHeight) / 2f;
+            g.DrawImage(
+                image,
+                new SD.Rectangle(0, 0, width, height),
+                sourceX,
+                sourceY,
+                sourceWidth,
+                sourceHeight,
+                SD.GraphicsUnit.Pixel);
         }
         return preview;
     }

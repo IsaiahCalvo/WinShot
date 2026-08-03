@@ -30,9 +30,13 @@ public class QuickAccessOverlayRenderHarness
             try
             {
                 using var source = CreateSyntheticCapture();
+                using var wide = CreateAspectCapture(2400, 400, SD.Color.FromArgb(48, 84, 150));
+                using var tall = CreateAspectCapture(400, 2400, SD.Color.FromArgb(100, 61, 142));
                 var settings = new SettingsService();
                 RenderTheme(source, settings, QuickAccessOverlayTheme.Dark, "dark", outDir);
                 RenderTheme(source, settings, QuickAccessOverlayTheme.Light, "light", outDir);
+                RenderState(wide, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-wide-idle.png"));
+                RenderState(tall, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-tall-idle.png"));
             }
             catch (Exception ex)
             {
@@ -50,6 +54,10 @@ public class QuickAccessOverlayRenderHarness
         Assert.True(File.Exists(Path.Combine(outDir, "light-hover.png")));
         Assert.True(File.Exists(Path.Combine(outDir, "dark-tooltip-pin.png")));
         Assert.True(File.Exists(Path.Combine(outDir, "light-tooltip-save.png")));
+        using var wideRender = SD.Image.FromFile(Path.Combine(outDir, "dark-wide-idle.png"));
+        using var tallRender = SD.Image.FromFile(Path.Combine(outDir, "dark-tall-idle.png"));
+        Assert.Equal(new SD.Size(192, 120), wideRender.Size);
+        Assert.Equal(wideRender.Size, tallRender.Size);
     }
 
     private static void RenderTheme(
@@ -63,13 +71,15 @@ public class QuickAccessOverlayRenderHarness
         RenderState(source, settings, theme, hovering: true, hoverButton: -1, Path.Combine(outDir, $"{prefix}-hover.png"));
         RenderState(source, settings, theme, hovering: true, hoverButton: 3, Path.Combine(outDir, $"{prefix}-hover-save.png"));
         RenderState(source, settings, theme, hovering: true, hoverButton: 4, Path.Combine(outDir, $"{prefix}-hover-copy.png"));
+        int tooltipButton = theme == QuickAccessOverlayTheme.Dark ? 0 : 3;
         string tooltipText = theme == QuickAccessOverlayTheme.Dark ? "Pin" : "Save";
-        using var tooltip = QuickAccessTooltipRenderer.RenderEvidence(
+        RenderStateWithTooltip(
+            source,
+            settings,
+            theme,
+            tooltipButton,
             tooltipText,
-            QuickAccessOverlayThemePalette.For(theme));
-        tooltip.Save(
-            Path.Combine(outDir, $"{prefix}-tooltip-{(theme == QuickAccessOverlayTheme.Dark ? "pin" : "save")}.png"),
-            SD.Imaging.ImageFormat.Png);
+            Path.Combine(outDir, $"{prefix}-tooltip-{tooltipText.ToLowerInvariant()}.png"));
     }
 
     private static void RenderState(
@@ -110,13 +120,61 @@ public class QuickAccessOverlayRenderHarness
 
     private static void Render(FastQuickActionsWindow overlay, string path)
     {
-        using var bitmap = new SD.Bitmap(overlay.ClientSize.Width, overlay.ClientSize.Height);
+        using var bitmap = RenderBitmap(overlay);
+        bitmap.Save(path, SD.Imaging.ImageFormat.Png);
+    }
+
+    private static SD.Bitmap RenderBitmap(FastQuickActionsWindow overlay)
+    {
+        var bitmap = new SD.Bitmap(overlay.ClientSize.Width, overlay.ClientSize.Height);
         using var graphics = SD.Graphics.FromImage(bitmap);
         using var args = new System.Windows.Forms.PaintEventArgs(graphics, new SD.Rectangle(SD.Point.Empty, bitmap.Size));
         typeof(FastQuickActionsWindow)
             .GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(overlay, new object[] { args });
-        bitmap.Save(path, SD.Imaging.ImageFormat.Png);
+        return bitmap;
+    }
+
+    private static void RenderStateWithTooltip(
+        SD.Bitmap source,
+        SettingsService settings,
+        QuickAccessOverlayTheme theme,
+        int hoverButton,
+        string tooltipText,
+        string path)
+    {
+        using var overlay = FastQuickActionsWindow.CreateForTheme(source, settings, theme);
+        overlay.CreateControl();
+        SetPreviewBitmaps(overlay, source);
+        Invoke(overlay, "SetHovering", true);
+        Invoke(overlay, "SetHover", hoverButton);
+        using var card = RenderBitmap(overlay);
+        using var tooltip = QuickAccessTooltipRenderer.RenderEvidence(
+            tooltipText,
+            QuickAccessOverlayThemePalette.For(theme));
+
+        const int inset = 16;
+        var canvasSize = new SD.Size(card.Width + inset * 2, card.Height + inset * 2);
+        using var canvas = new SD.Bitmap(canvasSize.Width, canvasSize.Height);
+        using var graphics = SD.Graphics.FromImage(canvas);
+        graphics.Clear(theme == QuickAccessOverlayTheme.Dark
+            ? SD.Color.FromArgb(26, 29, 36)
+            : SD.Color.FromArgb(232, 237, 244));
+        graphics.DrawImageUnscaled(card, inset, inset);
+
+        var buttonField = typeof(FastQuickActionsWindow).GetField("_buttons", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        object button = ((System.Collections.IEnumerable)buttonField.GetValue(overlay)!).Cast<object>().ElementAt(hoverButton);
+        var buttonBounds = (SD.Rectangle)button.GetType().GetProperty("Bounds")!.GetValue(button)!;
+        buttonBounds.Offset(inset, inset);
+        var cardBounds = new SD.Rectangle(inset, inset, card.Width, card.Height);
+        SD.Point tooltipPoint = QuickAccessTooltipLayout.Place(
+            new SD.Rectangle(SD.Point.Empty, canvasSize),
+            tooltip.Size,
+            buttonBounds,
+            cardBounds,
+            96);
+        graphics.DrawImageUnscaled(tooltip, tooltipPoint);
+        canvas.Save(path, SD.Imaging.ImageFormat.Png);
     }
 
     private static SD.Bitmap CreateSyntheticCapture()
@@ -142,6 +200,18 @@ public class QuickAccessOverlayRenderHarness
         using var line = new SD.Pen(SD.Color.FromArgb(90, 105, 125), 18) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         g.DrawLine(line, 190, 430, 960, 430);
         g.DrawLine(line, 190, 495, 780, 495);
+        return bitmap;
+    }
+
+    private static SD.Bitmap CreateAspectCapture(int width, int height, SD.Color color)
+    {
+        var bitmap = new SD.Bitmap(width, height);
+        using var graphics = SD.Graphics.FromImage(bitmap);
+        graphics.Clear(color);
+        int shortEdge = Math.Min(width, height);
+        int inset = Math.Max(8, shortEdge / 8);
+        using var accent = new SD.Pen(SD.Color.FromArgb(230, 245, 249), Math.Max(4, shortEdge / 25));
+        graphics.DrawRectangle(accent, inset, inset, Math.Max(1, width - inset * 2), Math.Max(1, height - inset * 2));
         return bitmap;
     }
 

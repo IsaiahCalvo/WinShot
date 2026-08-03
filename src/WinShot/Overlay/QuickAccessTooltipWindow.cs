@@ -19,15 +19,15 @@ internal readonly record struct QuickAccessTooltipLayout(
         probe.SetResolution(normalizedDpi, normalizedDpi);
         using var graphics = SD.Graphics.FromImage(probe);
         SD.Size textSize = WF.TextRenderer.MeasureText(graphics, text, font, SD.Size.Empty, flags);
-        int horizontalPadding = Scale(10, scale);
-        int verticalPadding = Scale(6, scale);
+        int horizontalPadding = Scale(7, scale);
+        int verticalPadding = Scale(3, scale);
         var size = new SD.Size(
             textSize.Width + horizontalPadding * 2,
             textSize.Height + verticalPadding * 2);
         return new QuickAccessTooltipLayout(
             size,
             new SD.Rectangle(horizontalPadding, verticalPadding, textSize.Width, textSize.Height),
-            Scale(8, scale));
+            Scale(6, scale));
     }
 
     public static SD.Point Place(
@@ -38,11 +38,33 @@ internal readonly record struct QuickAccessTooltipLayout(
         int dpi)
     {
         double scale = Math.Clamp(dpi, 96, 480) / 96d;
-        int gap = Scale(8, scale);
-        int x = anchorScreen.Left + (anchorScreen.Width - tooltipSize.Width) / 2;
-        int y = cardScreen.Top - tooltipSize.Height - gap;
-        if (y < workingArea.Top)
-            y = cardScreen.Bottom + gap;
+        int gap = Scale(5, scale);
+        int anchorCenterX = anchorScreen.Left + anchorScreen.Width / 2;
+        int cardCenterX = cardScreen.Left + cardScreen.Width / 2;
+        int centerTolerance = Math.Max(1, cardScreen.Width / 6);
+        int x;
+        int y;
+
+        if (anchorCenterX < cardCenterX - centerTolerance)
+        {
+            // Left-corner controls label inward, immediately to their right.
+            x = anchorScreen.Right + gap;
+            y = anchorScreen.Top + (anchorScreen.Height - tooltipSize.Height) / 2;
+        }
+        else if (anchorCenterX > cardCenterX + centerTolerance)
+        {
+            // Right-corner controls label inward, immediately to their left.
+            x = anchorScreen.Left - tooltipSize.Width - gap;
+            y = anchorScreen.Top + (anchorScreen.Height - tooltipSize.Height) / 2;
+        }
+        else
+        {
+            // The centered Copy control labels directly above itself.
+            x = anchorScreen.Left + (anchorScreen.Width - tooltipSize.Width) / 2;
+            y = anchorScreen.Top - tooltipSize.Height - gap;
+            if (y < workingArea.Top)
+                y = anchorScreen.Bottom + gap;
+        }
 
         return new SD.Point(
             Math.Clamp(x, workingArea.Left, Math.Max(workingArea.Left, workingArea.Right - tooltipSize.Width)),
@@ -59,10 +81,12 @@ internal static class QuickAccessTooltipRenderer
         QuickAccessTooltipLayout layout,
         string text,
         SD.Font font,
-        QuickAccessOverlayVisuals visuals)
+        QuickAccessOverlayVisuals visuals,
+        bool clearBackground = true)
     {
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        graphics.Clear(visuals.TooltipFill);
+        if (clearBackground)
+            graphics.Clear(visuals.TooltipFill);
         var surface = new SD.Rectangle(0, 0, layout.Size.Width - 1, layout.Size.Height - 1);
         using (var path = GdiPaths.RoundedRect(surface, layout.CornerRadius))
         using (var fill = new SD.SolidBrush(visuals.TooltipFill))
@@ -89,12 +113,13 @@ internal static class QuickAccessTooltipRenderer
         QuickAccessOverlayVisuals visuals,
         int dpi = 96)
     {
-        using var font = ThemePalette.UiFont(8.25f);
+        using var font = ThemePalette.UiFont(6.5f);
         QuickAccessTooltipLayout layout = QuickAccessTooltipLayout.Calculate(text, font, dpi);
         var bitmap = new SD.Bitmap(layout.Size.Width, layout.Size.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
         bitmap.SetResolution(dpi, dpi);
         using var graphics = SD.Graphics.FromImage(bitmap);
-        Draw(graphics, layout, text, font, visuals);
+        graphics.Clear(SD.Color.Transparent);
+        Draw(graphics, layout, text, font, visuals, clearBackground: false);
         return bitmap;
     }
 }
@@ -106,7 +131,7 @@ internal sealed class QuickAccessTooltipWindow : WF.Form
     private const int WsExNoActivate = 0x08000000;
     private readonly string _text;
     private readonly QuickAccessOverlayVisuals _visuals;
-    private readonly SD.Font _font = ThemePalette.UiFont(8.25f);
+    private readonly SD.Font _font = ThemePalette.UiFont(6.5f);
     private readonly QuickAccessTooltipLayout _layout;
     private readonly int _dpi;
 

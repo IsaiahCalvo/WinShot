@@ -13,35 +13,24 @@ internal readonly record struct QuickAccessOverlayLayout(
     int ControlPadding,
     int PillGap)
 {
-    private const int MinCardWidth = 150;
-    private const int MinCardHeight = 110;
-    private const int MaxCardWidth = 230;
-    private const int MaxCardHeight = 152;
+    // CleanShot keeps one preview shape regardless of the capture. The selected
+    // reference card is 16:10; the size preference scales that same shape.
+    private const int MinCardWidth = 160;
+    private const int MaxCardWidth = 224;
+    private const double CardHeightRatio = 10d / 16d;
 
     public static QuickAccessOverlayLayout Calculate(SD.Size imageSize, int sizePercent, int dpi)
     {
         int normalizedDpi = Math.Clamp(dpi, 96, 480);
         int normalizedSize = Math.Clamp(sizePercent, 0, 100);
         double dpiScale = normalizedDpi / 96d;
-        int logicalMaxWidth = MinCardWidth + (int)Math.Round((MaxCardWidth - MinCardWidth) * normalizedSize / 100d);
-        int logicalMaxHeight = MinCardHeight + (int)Math.Round((MaxCardHeight - MinCardHeight) * normalizedSize / 100d);
-
-        int maxWidth = Scale(logicalMaxWidth, dpiScale);
-        int maxHeight = Scale(logicalMaxHeight, dpiScale);
-        int sourceWidth = Math.Max(1, imageSize.Width);
-        int sourceHeight = Math.Max(1, imageSize.Height);
-        double fit = Math.Min(maxWidth / (double)sourceWidth, maxHeight / (double)sourceHeight);
-        int thumbWidth = Math.Max(1, (int)Math.Round(sourceWidth * fit));
-        int thumbHeight = Math.Max(1, (int)Math.Round(sourceHeight * fit));
-        int cardWidth = Math.Clamp(thumbWidth, Scale(MinCardWidth, dpiScale), maxWidth);
-        int cardHeight = Math.Clamp(thumbHeight, Scale(MinCardHeight, dpiScale), maxHeight);
+        int logicalWidth = MinCardWidth + (int)Math.Round((MaxCardWidth - MinCardWidth) * normalizedSize / 100d);
+        int logicalHeight = (int)Math.Round(logicalWidth * CardHeightRatio);
+        int cardWidth = Scale(logicalWidth, dpiScale);
+        int cardHeight = Scale(logicalHeight, dpiScale);
 
         var card = new SD.Rectangle(0, 0, cardWidth, cardHeight);
-        var thumbnail = new SD.Rectangle(
-            (cardWidth - thumbWidth) / 2,
-            (cardHeight - thumbHeight) / 2,
-            thumbWidth,
-            thumbHeight);
+        var thumbnail = card;
 
         return new QuickAccessOverlayLayout(
             card.Size,

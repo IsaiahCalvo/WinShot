@@ -12,16 +12,16 @@ public class QuickAccessOverlayLayoutTests
     {
         var layout = QuickAccessOverlayLayout.Calculate(new SD.Size(1512, 982), sizePercent: 10, dpi: 96);
 
-        Assert.Equal(new SD.Size(158, 110), layout.ClientSize);
+        Assert.Equal(new SD.Size(166, 104), layout.ClientSize);
         Assert.Equal(28, layout.IconSize);
         Assert.Equal(78, layout.PillWidth);
         Assert.Equal(27, layout.PillHeight);
     }
 
     [Theory]
-    [InlineData(96, 190, 120, 28, 27)]
-    [InlineData(144, 285, 180, 42, 40)]
-    [InlineData(192, 380, 241, 56, 54)]
+    [InlineData(96, 192, 120, 28, 27)]
+    [InlineData(144, 288, 180, 42, 40)]
+    [InlineData(192, 384, 240, 56, 54)]
     public void Layout_ScalesForHighDpi(int dpi, int expectedWidth, int expectedHeight, int icon, int pillHeight)
     {
         var layout = QuickAccessOverlayLayout.Calculate(new SD.Size(1200, 760), sizePercent: 50, dpi);
@@ -31,6 +31,20 @@ public class QuickAccessOverlayLayoutTests
         Assert.Equal(icon, layout.IconSize);
         Assert.Equal(pillHeight, layout.PillHeight);
         Assert.True(layout.CardBounds.Contains(layout.ThumbnailBounds));
+    }
+
+    [Theory]
+    [InlineData(4000, 300)]
+    [InlineData(300, 4000)]
+    [InlineData(1200, 1200)]
+    [InlineData(1200, 760)]
+    public void CaptureShapeNeverChangesTheCardSizeOrRatio(int captureWidth, int captureHeight)
+    {
+        var layout = QuickAccessOverlayLayout.Calculate(new SD.Size(captureWidth, captureHeight), sizePercent: 50, dpi: 96);
+
+        Assert.Equal(new SD.Size(192, 120), layout.ClientSize);
+        Assert.Equal(layout.CardBounds, layout.ThumbnailBounds);
+        Assert.Equal(1.6, layout.ClientSize.Width / (double)layout.ClientSize.Height, 3);
     }
 
     [Fact]

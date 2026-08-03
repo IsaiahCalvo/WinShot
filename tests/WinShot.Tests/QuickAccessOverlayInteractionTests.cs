@@ -63,6 +63,7 @@ public class QuickAccessOverlayInteractionTests
             Assert.InRange(copy.Bounds.Left + copy.Bounds.Width / 2, overlay.ClientSize.Width / 2 - 1, overlay.ClientSize.Width / 2 + 1);
             Assert.InRange(copy.Bounds.Top + copy.Bounds.Height / 2, overlay.ClientSize.Height / 2 - 1, overlay.ClientSize.Height / 2 + 1);
             Assert.Equal(new SD.Size(78, 27), copy.Bounds.Size);
+            Assert.Equal(new SD.Size(14, 14), copy.IconSize);
             Assert.Equal(7f, copy.LabelFontSize);
         });
     }
@@ -84,9 +85,29 @@ public class QuickAccessOverlayInteractionTests
             Assert.True(showWithoutActivation);
             Assert.NotEqual(0, createParams.ExStyle & 0x08000000);
             Assert.NotEqual(0, createParams.ExStyle & 0x00000080);
-            Assert.InRange(tooltip.ClientSize.Width, 40, 80);
-            Assert.InRange(tooltip.ClientSize.Height, 24, 36);
+            Assert.InRange(tooltip.ClientSize.Width, 25, 55);
+            Assert.InRange(tooltip.ClientSize.Height, 16, 26);
         });
+    }
+
+    [Fact]
+    public void FixedCardCenterCropsWideCapturesInsteadOfStretchingThem()
+    {
+        using var source = new SD.Bitmap(400, 100);
+        using (var graphics = SD.Graphics.FromImage(source))
+        {
+            graphics.Clear(SD.Color.Red);
+            graphics.FillRectangle(SD.Brushes.Lime, 120, 0, 160, 100);
+        }
+
+        var method = typeof(FastQuickActionsWindow)
+            .GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!;
+        using var preview = (SD.Bitmap)method.Invoke(null, new object[] { source, 192, 120 })!;
+
+        SD.Color left = preview.GetPixel(4, preview.Height / 2);
+        SD.Color center = preview.GetPixel(preview.Width / 2, preview.Height / 2);
+        Assert.True(left.G > left.R);
+        Assert.True(center.G > center.R);
     }
 
     [Fact]
@@ -218,10 +239,11 @@ public class QuickAccessOverlayInteractionTests
         return new ButtonSnapshot(
             (SD.Rectangle)button.GetType().GetProperty("Bounds")!.GetValue(button)!,
             button.GetType().GetProperty("Icon")!.GetValue(button) is SD.Bitmap,
+            (button.GetType().GetProperty("Icon")!.GetValue(button) as SD.Bitmap)?.Size,
             (button.GetType().GetProperty("LabelFont")!.GetValue(button) as SD.Font)?.SizeInPoints);
     }
 
-    private readonly record struct ButtonSnapshot(SD.Rectangle Bounds, bool IconLoaded, float? LabelFontSize);
+    private readonly record struct ButtonSnapshot(SD.Rectangle Bounds, bool IconLoaded, SD.Size? IconSize, float? LabelFontSize);
 
     private static void RunSta(Action action)
     {
