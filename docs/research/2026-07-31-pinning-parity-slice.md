@@ -40,4 +40,4 @@
 - CleanShot group-wide Hide/Show Pins and Close All Pins need shared tray/application command wiring, which this low-overlap slice intentionally did not edit.
 - CleanShot's OCR context action needs shared OCR result/toast orchestration; it is deferred rather than duplicated inside the pin window.
 - CleanShot uses two-finger scrolling for opacity. WinShot retains its established wheel-to-zoom and Ctrl+wheel-to-opacity behavior to preserve existing users' interaction contract.
-- The full pin surface already acts as WinShot's drag affordance. A literal CleanShot-style `Drag Me` label, exact CleanShot shadow geometry, and final light/high-contrast visual tuning remain for a later evidence-backed polish pass.
+- The full pin surface already acts as WinShot's drag affordance. A literal CleanShot-style `Drag Me` label is no longer planned following the product-owner decision on 2026-08-03. Exact CleanShot shadow geometry and final light/high-contrast visual tuning remain for a later evidence-backed polish pass.
