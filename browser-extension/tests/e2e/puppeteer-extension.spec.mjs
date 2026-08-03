@@ -522,6 +522,83 @@ test("virtualized feed is captured adaptively as nodes are recycled", async () =
   }
 });
 
+test("same-origin and permitted cross-origin frames scroll deeply and restore state", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    monitorPage(page, run.errors);
+    await page.goto("http://127.0.0.1:4173/iframes", { waitUntil: "networkidle0" });
+    const frameUrls = ["http://127.0.0.1:4173/frame", "http://127.0.0.1:4174/frame"];
+
+    for (const frameUrl of frameUrls) {
+      const frame = page.frames().find((candidate) => candidate.url() === frameUrl);
+      expect(frame).toBeTruthy();
+      await frame.evaluate(() => scrollTo(0, 240));
+      await page.$$eval("iframe", (frames, url) => {
+        frames.find((candidate) => candidate.src === url)?.scrollIntoView({ block: "center" });
+      }, frameUrl);
+      const selectionTop = await page.evaluate(() => scrollY);
+      const waitingEditor = editorTarget(run);
+      await startPicker(run, page, "frame");
+      const frameHandles = await page.$$("iframe");
+      let selectedFrameHandle = null;
+      for (const handle of frameHandles) {
+        if (await handle.evaluate((element) => element.src) === frameUrl) selectedFrameHandle = handle;
+      }
+      const box = await selectedFrameHandle.boundingBox();
+      await page.mouse.click(box.x + 40, box.y + 40);
+      const { record } = await recordFromEditorTarget(await waitingEditor);
+      expect(record, record.error).toMatchObject({ state: "complete", frameUrl });
+      expect(record.frameId).toBeGreaterThan(0);
+      expect(record.report.dimensionsCss.height).toBe(1680);
+      expect(record.report.tileCount).toBeGreaterThan(4);
+      expect(record.report.coverage.complete).toBe(true);
+      expect(record.report.restoration).toBe("verified");
+      expect(await frame.evaluate(() => scrollY)).toBeCloseTo(240, 0);
+      expect(await page.evaluate(() => scrollY)).toBeCloseTo(selectionTop, 0);
+    }
+
+    const nestedHost = page.frames().find((candidate) => candidate.url() === "http://127.0.0.1:4173/nested-frame-host");
+    const nestedFrame = page.frames().find((candidate) => candidate.url() === "http://127.0.0.1:4173/frame" && candidate.parentFrame() === nestedHost);
+    expect(nestedFrame).toBeTruthy();
+    await nestedFrame.evaluate(() => scrollTo(0, 360));
+    await page.$eval('iframe[src="/nested-frame-host"]', (frame) => frame.scrollIntoView({ block: "center" }));
+    const nestedSelectionTop = await page.evaluate(() => scrollY);
+    const nestedEditorTarget = editorTarget(run);
+    await startPicker(run, page, "frame");
+    const nestedFrameElement = await nestedHost.$("iframe");
+    const nestedBox = await nestedFrameElement.boundingBox();
+    await page.mouse.click(nestedBox.x + 40, nestedBox.y + 40);
+    const { record: nestedRecord } = await recordFromEditorTarget(await nestedEditorTarget);
+    expect(nestedRecord, nestedRecord.error).toMatchObject({ state: "complete", frameUrl: "http://127.0.0.1:4173/frame" });
+    expect(nestedRecord.report.dimensionsCss.height).toBe(1680);
+    expect(nestedRecord.report.coverage.complete).toBe(true);
+    expect(await nestedFrame.evaluate(() => scrollY)).toBeCloseTo(360, 0);
+    expect(await page.evaluate(() => scrollY)).toBeCloseTo(nestedSelectionTop, 0);
+
+    const nestedCrossHost = page.frames().find((candidate) => candidate.url() === "http://127.0.0.1:4173/nested-cross-frame-host");
+    const nestedCrossFrame = page.frames().find((candidate) => candidate.url() === "http://127.0.0.1:4174/frame" && candidate.parentFrame() === nestedCrossHost);
+    expect(nestedCrossFrame).toBeTruthy();
+    await nestedCrossFrame.evaluate(() => scrollTo(0, 420));
+    await page.$eval('iframe[src="/nested-cross-frame-host"]', (frame) => frame.scrollIntoView({ block: "center" }));
+    const nestedCrossSelectionTop = await page.evaluate(() => scrollY);
+    const nestedCrossEditorTarget = editorTarget(run);
+    await startPicker(run, page, "frame");
+    const nestedCrossFrameElement = await nestedCrossHost.$("iframe");
+    const nestedCrossBox = await nestedCrossFrameElement.boundingBox();
+    await page.mouse.click(nestedCrossBox.x + 40, nestedCrossBox.y + 40);
+    const { record: nestedCrossRecord } = await recordFromEditorTarget(await nestedCrossEditorTarget);
+    expect(nestedCrossRecord, nestedCrossRecord.error).toMatchObject({ state: "complete", frameUrl: "http://127.0.0.1:4174/frame" });
+    expect(nestedCrossRecord.report.dimensionsCss.height).toBe(1680);
+    expect(nestedCrossRecord.report.coverage.complete).toBe(true);
+    expect(await nestedCrossFrame.evaluate(() => scrollY)).toBeCloseTo(420, 0);
+    expect(await page.evaluate(() => scrollY)).toBeCloseTo(nestedCrossSelectionTop, 0);
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
 test("dynamic, horizontal, frame, and pixel-surface fixtures report honest results", async () => {
   const run = await launchExactExtension();
   try {

@@ -10,6 +10,7 @@ import {
 import { listRecords, putRecord, putTile } from "./store.js";
 
 const activeCaptures = new Map();
+const pickerFrames = new Map();
 let activeBatch = null;
 let lastScreenshotAt = 0;
 
@@ -38,14 +39,80 @@ async function activeTab() {
   return tab;
 }
 
-async function sendToTab(tabId, message) {
-  const response = await chrome.tabs.sendMessage(tabId, message);
+async function sendToTab(tabId, message, frameId = 0) {
+  const response = await chrome.tabs.sendMessage(tabId, message, { frameId });
   if (response?.error) throw new Error(response.error);
   return response;
 }
 
-async function injectCaptureScript(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ["src/content.js"] });
+async function injectCaptureScript(tabId, frameId = 0, allFrames = false) {
+  return await chrome.scripting.executeScript({
+    target: allFrames ? { tabId, allFrames: true } : { tabId, frameIds: [frameId] },
+    files: ["src/content.js"]
+  });
+}
+
+function screenshotMetrics(metrics, frameHost) {
+  if (metrics.frame?.isTop) return metrics;
+  const context = frameHost || metrics.frame;
+  if (!context?.accessible && !context?.located) throw new Error("The selected frame is cross-origin and its position could not be proven.");
+  return {
+    ...metrics,
+    viewport: context.topViewport,
+    clip: {
+      ...metrics.clip,
+      left: metrics.clip.left + context.left,
+      top: metrics.clip.top + context.top
+    }
+  };
+}
+
+async function locateFrameChain(session) {
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: session.tabId });
+  const byId = new Map(frames.map((frame) => [frame.frameId, frame]));
+  const edges = [];
+  let child = byId.get(session.frameId);
+  while (child && child.frameId !== 0) {
+    edges.push({ parentFrameId: child.parentFrameId, child });
+    child = byId.get(child.parentFrameId);
+  }
+  if (!edges.length || child?.frameId !== 0) throw new Error("The browser no longer exposes the selected frame tree.");
+  edges.reverse();
+
+  let left = 0;
+  let top = 0;
+  let topViewport = null;
+  const preparedFrameIds = [];
+  try {
+    for (const edge of edges) {
+      await injectCaptureScript(session.tabId, edge.parentFrameId);
+      const located = await sendToTab(session.tabId, {
+        type: "WINSHOT_LOCATE_FRAME",
+        sessionId: session.id,
+        frameUrl: edge.child.url
+      }, edge.parentFrameId);
+      preparedFrameIds.push(edge.parentFrameId);
+      left += located.left;
+      top += located.top;
+      topViewport ||= located.topViewport;
+    }
+  } catch (error) {
+    await restoreFrameChain(session, preparedFrameIds);
+    throw error;
+  }
+  return { located: true, left, top, topViewport, preparedFrameIds };
+}
+
+async function restoreFrameChain(session, preparedFrameIds) {
+  for (const frameId of [...preparedFrameIds].reverse()) {
+    try { await sendToTab(session.tabId, { type: "WINSHOT_RESTORE_FRAME_HOST", sessionId: session.id }, frameId); }
+    catch { session.report.warnings.push(`Frame ${frameId} disconnected before parent-page restoration was acknowledged.`); }
+  }
+}
+
+async function heartbeatFrameChain(session, preparedFrameIds) {
+  await Promise.allSettled(preparedFrameIds.map((frameId) =>
+    sendToTab(session.tabId, { type: "WINSHOT_HEARTBEAT_FRAME_HOST", sessionId: session.id }, frameId)));
 }
 
 async function assertStillActive(session) {
@@ -211,18 +278,24 @@ async function storeScrollingCapture(session, controller) {
   const capturedPositions = new Set();
   const startTime = Date.now();
   let expectedScale = null;
+  let frameHost = null;
+  let frameHostPrepared = [];
   let extent;
   let viewportSize;
 
   try {
-    await injectCaptureScript(session.tabId);
+    await injectCaptureScript(session.tabId, session.frameId);
     const prep = await sendToTab(session.tabId, {
       type: "WINSHOT_PREPARE",
       sessionId: session.id,
       mode: session.mode,
       target: session.target
-    });
+    }, session.frameId);
     prepared = true;
+    if (session.frameId && !prep.metrics.frame?.accessible) {
+      frameHost = await locateFrameChain(session);
+      frameHostPrepared = frameHost.preparedFrameIds;
+    }
     extent = { width: prep.metrics.width, height: prep.metrics.height };
     viewportSize = {
       width: Math.max(1, prep.metrics.clip.width || prep.metrics.viewport.width),
@@ -259,6 +332,7 @@ async function storeScrollingCapture(session, controller) {
         if (index >= session.limits.maxTiles) throw new Error(`Maximum tile limit (${session.limits.maxTiles}) reached.`);
         if (Date.now() - startTime >= session.limits.maxDurationMs) throw new Error("Maximum capture duration reached.");
         await assertStillActive(session);
+        if (frameHostPrepared.length) await heartbeatFrameChain(session, frameHostPrepared);
 
         progress(session, `Capturing tile ${index + 1}…`);
         const result = await sendToTab(session.tabId, {
@@ -269,8 +343,8 @@ async function storeScrollingCapture(session, controller) {
           extent,
           viewport: viewportSize,
           settleTimeoutMs: session.limits.settleTimeoutMs
-        });
-        if (result.metrics.url !== session.sourceUrl) throw new Error("The page navigated during capture.");
+        }, session.frameId);
+        if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) throw new Error("The page navigated during capture.");
         if (!result.stable) session.report.warnings.push(`Tile ${index + 1} did not reach full layout stability before capture.`);
         for (const entry of result.semantics?.text || []) {
           const key = `${entry.text}|${entry.x.toFixed(1)}|${entry.y.toFixed(1)}`;
@@ -288,7 +362,7 @@ async function storeScrollingCapture(session, controller) {
         }
 
         const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal);
-        const cropped = await cropScreenshot(source, result.metrics);
+        const cropped = await cropScreenshot(source, screenshotMetrics(result.metrics, frameHost));
         const scale = (cropped.scaleX + cropped.scaleY) / 2;
         if (expectedScale === null) expectedScale = scale;
         else if (Math.abs(scale - expectedScale) / expectedScale > 0.02) {
@@ -340,7 +414,7 @@ async function storeScrollingCapture(session, controller) {
         }
       }
       if (!capturedThisPass) break;
-      const latest = await sendToTab(session.tabId, { type: "WINSHOT_METRICS", sessionId: session.id });
+      const latest = await sendToTab(session.tabId, { type: "WINSHOT_METRICS", sessionId: session.id }, session.frameId);
       const nextExtent = {
         width: Math.min(latest.width, session.limits.maxWidthCss),
         height: Math.min(latest.height, session.limits.maxHeightCss)
@@ -373,13 +447,14 @@ async function storeScrollingCapture(session, controller) {
   } finally {
     if (prepared) {
       try {
-        const result = await sendToTab(session.tabId, { type: "WINSHOT_RESTORE", sessionId: session.id, reason: "capture-finished" });
+        const result = await sendToTab(session.tabId, { type: "WINSHOT_RESTORE", sessionId: session.id, reason: "capture-finished" }, session.frameId);
         restored = Boolean(result?.restored);
       } catch {
         restored = false;
       }
       session.report.restoration = restored ? "verified" : "watchdog requested; page disconnected before acknowledgement";
     }
+    if (frameHostPrepared.length) await restoreFrameChain(session, frameHostPrepared);
   }
 }
 
@@ -389,6 +464,8 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   if (activeCaptures.has(tab.id)) throw new Error("A WinShot capture is already running in this tab.");
 
   const session = createSession({ id: captureId(), mode, tab, target });
+  session.frameId = target?.frameId || 0;
+  session.frameUrl = target?.frameUrl || null;
   session.fileName = `${fileSafeTitle(tab.title)}-${mode}`;
   const controller = new AbortController();
   const activeEntry = { session, controller, failureReason: null };
@@ -530,11 +607,24 @@ async function runBatch(kind, urls = []) {
 async function startPicker(mode) {
   const tab = await activeTab();
   try {
-    await injectCaptureScript(tab.id);
-    return await sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode });
+    const injected = await injectCaptureScript(tab.id, 0, true);
+    const frameIds = [...new Set(injected.map((result) => result.frameId))];
+    pickerFrames.set(tab.id, frameIds);
+    const started = await Promise.allSettled(frameIds.map((frameId) =>
+      sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode }, frameId)));
+    if (!started.some((result) => result.status === "fulfilled")) throw new Error("The picker could not start in any accessible frame.");
+    return { started: true, frameCount: frameIds.length };
   } catch (error) {
+    pickerFrames.delete(tab.id);
     throw new Error(`${restrictedPageReason(tab.url)} (${friendlyError(error)})`);
   }
+}
+
+async function stopPickers(tabId, keepFrameId = null) {
+  const frameIds = pickerFrames.get(tabId) || [];
+  pickerFrames.delete(tabId);
+  await Promise.allSettled(frameIds.filter((frameId) => frameId !== keepFrameId).map((frameId) =>
+    sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER" }, frameId)));
 }
 
 async function cancelActiveCapture() {
@@ -557,10 +647,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return await cancelActiveCapture();
     }
     if (message.type === "WINSHOT_PICK_RESULT") {
-      if (message.cancelled) return { cancelled: true };
       const tab = sender.tab;
       if (!tab?.id) throw new Error("The picker tab is no longer available.");
-      runCapture(message.mode, message.target, tab).catch(() => {});
+      await stopPickers(tab.id, sender.frameId || 0);
+      if (message.cancelled) return { cancelled: true };
+      const target = {
+        ...(message.target || {}),
+        frameId: sender.frameId || 0,
+        frameUrl: sender.url || tab.url
+      };
+      runCapture(message.mode, target, tab).catch(() => {});
       return { started: true };
     }
     return undefined;

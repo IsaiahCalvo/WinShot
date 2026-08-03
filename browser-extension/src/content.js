@@ -5,6 +5,7 @@
   const WATCHDOG_MS = 9000;
   const PICKER_Z = "2147483647";
   let session = null;
+  let frameHostSession = null;
   let pickerCleanup = null;
   let pendingPickerState = null;
 
@@ -142,6 +143,82 @@
     };
   }
 
+  function frameContext() {
+    if (window === top) return { isTop: true, accessible: true, left: 0, top: 0, topViewport: viewport() };
+    let current = window;
+    let left = 0;
+    let topOffset = 0;
+    try {
+      while (current !== current.top) {
+        const frame = current.frameElement;
+        if (!frame) throw new Error("Frame element is unavailable.");
+        const rect = frame.getBoundingClientRect();
+        left += rect.left + frame.clientLeft;
+        topOffset += rect.top + frame.clientTop;
+        current = current.parent;
+      }
+      const visual = current.visualViewport;
+      return {
+        isTop: false,
+        accessible: true,
+        left,
+        top: topOffset,
+        topViewport: {
+          left: visual?.pageLeft ?? current.scrollX,
+          top: visual?.pageTop ?? current.scrollY,
+          offsetLeft: visual?.offsetLeft ?? 0,
+          offsetTop: visual?.offsetTop ?? 0,
+          width: visual?.width ?? current.document.documentElement.clientWidth,
+          height: visual?.height ?? current.document.documentElement.clientHeight
+        }
+      };
+    } catch {
+      return { isTop: false, accessible: false, url: location.href };
+    }
+  }
+
+  function restoreFrameHost() {
+    if (!frameHostSession) return { restored: true };
+    const saved = frameHostSession;
+    frameHostSession = null;
+    clearInterval(saved.watchdog);
+    window.scrollTo(saved.scroll.left, saved.scroll.top);
+    try { saved.activeElement?.focus?.({ preventScroll: true }); } catch { /* The page may have replaced it. */ }
+    return { restored: true };
+  }
+
+  async function locateFrameHost(request) {
+    restoreFrameHost();
+    const candidates = [...document.querySelectorAll("iframe,frame")].filter((frame) => {
+      try { return new URL(frame.src, location.href).href === request.frameUrl; } catch { return false; }
+    });
+    if (candidates.length !== 1) {
+      throw new Error(candidates.length ? "More than one matching frame is present; WinShot cannot safely choose one." : "The selected frame is nested or no longer present in the top page.");
+    }
+    const frame = candidates[0];
+    frameHostSession = {
+      id: request.sessionId,
+      scroll: { left: window.scrollX, top: window.scrollY },
+      activeElement: document.activeElement,
+      lastHeartbeat: Date.now(),
+      watchdog: 0
+    };
+    frameHostSession.watchdog = setInterval(() => {
+      if (frameHostSession && Date.now() - frameHostSession.lastHeartbeat > WATCHDOG_MS) restoreFrameHost();
+    }, 1000);
+    frame.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    await nextPaint();
+    const rect = frame.getBoundingClientRect();
+    const view = viewport();
+    const left = rect.left + frame.clientLeft;
+    const topOffset = rect.top + frame.clientTop;
+    if (left < 0 || topOffset < 0 || left + frame.clientWidth > view.width || topOffset + frame.clientHeight > view.height) {
+      restoreFrameHost();
+      throw new Error("The frame viewport is larger than the visible browser area and cannot be captured safely.");
+    }
+    return { located: true, left, top: topOffset, width: frame.clientWidth, height: frame.clientHeight, topViewport: view };
+  }
+
   function ownerClientRect(owner) {
     if (owner === scrollingElement()) {
       const view = viewport();
@@ -242,7 +319,8 @@
       reachedX,
       reachedY,
       mutationCount: session.mutationCount,
-      url: location.href
+      url: location.href,
+      frame: frameContext()
     };
   }
 
@@ -351,7 +429,7 @@
       }
     }
     if (inaccessibleFrames) {
-      warnings.push(`${inaccessibleFrames} cross-origin frame(s) can be captured as visible pixels, but their hidden scrollable content is not exposed by the browser.`);
+      warnings.push(`${inaccessibleFrames} cross-origin frame(s) are visible in this page capture; use "Capture a scrolling frame" for their hidden content when browser access permits.`);
     }
     if (document.querySelector("video")) {
       warnings.push("Video is captured at the displayed frame. DRM-protected video may be blank by browser policy.");
@@ -524,8 +602,14 @@
     restore("picker-started");
     savePickerState();
     if (mode === "region") startRegionPicker();
-    else startElementPicker();
+    else startElementPicker(mode);
     return { started: true };
+  }
+
+  function cancelPicker() {
+    pickerCleanup?.();
+    restorePickerState();
+    return { cancelled: true };
   }
 
   function pickerChrome(text) {
@@ -544,8 +628,12 @@
     chrome.runtime.sendMessage({ type: "WINSHOT_PICK_RESULT", ...payload }).catch(() => {});
   }
 
-  function startElementPicker() {
+  function startElementPicker(mode = "element") {
+    const frameMode = mode === "frame";
     const { outline, tip } = pickerChrome("Click an element · Hold Ctrl for the exact node · Yellow means hidden scrollable content · Esc cancels");
+    if (frameMode) tip.textContent = window === top
+      ? "Click inside the frame you want to capture · Esc cancels"
+      : "Click anywhere to capture this entire scrolling frame · Esc cancels";
     let current = null;
 
     const chooseCandidate = (event) => {
@@ -575,6 +663,15 @@
     const click = (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (frameMode) {
+        if (window === top) {
+          tip.textContent = "Click inside the frame, not its border.";
+          return;
+        }
+        cleanup();
+        sendPickerResult({ mode: "full-page", target: { frameDocument: true }, title: document.title || "Frame" });
+        return;
+      }
       current = chooseCandidate(event);
       if (!current) return;
       const before = current.getAttribute("data-winshot-target");
@@ -688,8 +785,14 @@
           if (session?.id === request.sessionId) session.lastHeartbeat = Date.now();
           return { alive: Boolean(session) };
         case "WINSHOT_RESTORE": return restore(request.reason || "complete");
+        case "WINSHOT_LOCATE_FRAME": return await locateFrameHost(request);
+        case "WINSHOT_RESTORE_FRAME_HOST": return restoreFrameHost();
+        case "WINSHOT_HEARTBEAT_FRAME_HOST":
+          if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();
+          return { alive: Boolean(frameHostSession) };
         case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
         case "WINSHOT_START_PICKER": return await beginPicker(request.mode);
+        case "WINSHOT_CANCEL_PICKER": return cancelPicker();
         default: return undefined;
       }
     };

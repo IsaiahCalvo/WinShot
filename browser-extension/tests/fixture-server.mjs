@@ -36,7 +36,11 @@ function fixture(name, crossPort) {
     case "shadow":
       return shell("shadow-dom", `<fixture-list></fixture-list>`, `customElements.define('fixture-list',class extends HTMLElement{connectedCallback(){const root=this.attachShadow({mode:'open'});root.innerHTML='<style>.item{height:130px;border-bottom:1px solid #1687ff;padding:20px}</style>'+Array.from({length:30},(_,i)=>'<div class="item">SHADOW '+i+'</div>').join('')}})`);
     case "iframes":
-      return shell("frames", `<h1>Frames</h1><iframe src="/frame"></iframe><iframe src="http://${host}:${crossPort}/frame"></iframe>${rows(12)}`, "", "iframe{width:90%;height:350px;margin:20px;border:4px solid #1687ff}");
+      return shell("frames", `<h1>Frames</h1><iframe src="/frame"></iframe><iframe src="http://${host}:${crossPort}/frame"></iframe><iframe src="/nested-frame-host"></iframe><iframe src="/nested-cross-frame-host"></iframe>${rows(12)}`, "", "iframe{width:90%;height:350px;margin:20px;border:4px solid #1687ff}");
+    case "nested-frame-host":
+      return shell("nested-frame-host", `<iframe src="/frame"></iframe>`, "", "iframe{width:900px;height:300px;margin:20px;border:4px solid #f4bd00}");
+    case "nested-cross-frame-host":
+      return shell("nested-cross-frame-host", `<iframe src="http://${host}:${crossPort}/frame"></iframe>`, "", "iframe{width:900px;height:300px;margin:20px;border:4px solid #f4bd00}");
     case "frame":
       return shell("frame-content", rows(14, "FRAME"));
     case "long":

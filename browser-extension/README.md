@@ -20,18 +20,19 @@ smoke tests because current releases block command-line unpacked-extension sidel
 
 ## Permissions
 
-The public package requires only `activeTab`, `scripting`, `downloads`, and `storage`.
-It does not require `<all_urls>` or debugger access. `tabs` and `nativeMessaging` are
-optional permissions reserved for explicit batch capture and desktop handoff.
+The package requires site access plus `activeTab`, `scripting`, `downloads`, `storage`, and
+`webNavigation`. Site access is needed for reliable all-tab batches and permitted cross-origin
+frame capture; WinShot does not use debugger access or send page data to a service. `tabs` and
+`nativeMessaging` remain optional.
 
 ## Current support boundary
 
 The working vertical slice supports visible viewport, full page, dragged selection with
 edge auto-scroll, exact element selection, self-scrolling/nested panels, horizontal and
 vertical tiling, fixed/sticky suppression, dynamic extent growth, virtualized content,
-tile-backed captures beyond 32K, cancellation, watchdog restoration, and local export.
+deep same-origin/cross-origin/nested frame capture, all-tab and URL-list batches, tile-backed
+captures beyond 32K, cancellation, watchdog restoration, and local export.
 
-Cross-origin frame pixels are captured when visible, but hidden cross-origin frame content
-cannot be inspected or scrolled without extra site access. DRM video can be blank by browser
-policy. Canvas/WebGL/video are captured as rendered pixels and explicitly warned when their
-motion can lower seam confidence. See `docs/capture-parity.md` for remaining gaps.
+PDF export includes searchable text and working website links. DRM video can be blank by browser
+policy. Canvas/WebGL/video are captured as rendered pixels and explicitly warned when their motion
+can lower seam confidence. See `docs/capture-parity.md` for remaining gaps.
