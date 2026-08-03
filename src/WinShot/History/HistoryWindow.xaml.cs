@@ -37,6 +37,7 @@ public partial class HistoryWindow : Window
     private string _sort = "date";
     private bool _sortDescending = true;
     private bool _selectionMode;
+    private HistoryItem? _selectionAnchor;
     private HistoryItem? _previewItem;
     private FastQuickPreviewWindow? _preview;
     private bool _previewOpen;
@@ -705,6 +706,7 @@ public partial class HistoryWindow : Window
         {
             ItemsList.UnselectAll();
         }
+        _selectionAnchor = null;
         UpdateSelectionState();
     }
 
@@ -725,13 +727,20 @@ public partial class HistoryWindow : Window
 
     private void OnShowAllFromSelection(object sender, RoutedEventArgs e)
     {
-        ChipAll.IsChecked = true;
+        if (!_selectionMode) return;
+        if (ItemsList.SelectedItems.Count == _items.Count && _items.Count > 0)
+            ItemsList.UnselectAll();
+        else
+            ItemsList.SelectAll();
+        _selectionAnchor = _items.FirstOrDefault();
+        UpdateSelectionState();
     }
 
     private void OnSelectAll(object sender, RoutedEventArgs e)
     {
         if (!_selectionMode) return;
         ItemsList.SelectAll();
+        _selectionAnchor = _items.FirstOrDefault();
         UpdateSelectionState();
     }
 
@@ -836,6 +845,11 @@ public partial class HistoryWindow : Window
         if (_selectionMode)
         {
             _dragItem = null;
+            e.Handled = true;
+            if (e.ClickCount > 1)
+                return;
+
+            ApplySelectionClick(item, Keyboard.Modifiers);
             return;
         }
         if (e.ClickCount == 2)
@@ -848,6 +862,41 @@ public partial class HistoryWindow : Window
         // past the system threshold while the left button stays down.
         _dragStart = e.GetPosition(null);
         _dragItem = item;
+    }
+
+    private void ApplySelectionClick(HistoryItem item, ModifierKeys modifiers)
+    {
+        bool shift = (modifiers & ModifierKeys.Shift) != 0;
+        int targetIndex = _items.IndexOf(item);
+        int anchorIndex = _selectionAnchor is null ? -1 : _items.IndexOf(_selectionAnchor);
+        if (targetIndex < 0)
+            return;
+
+        HistorySelectionChange change = HistorySelectionLogic.ResolveClick(
+            _items.Count,
+            anchorIndex,
+            targetIndex,
+            shift,
+            ItemsList.SelectedItems.Contains(item));
+        for (int index = change.Start; index <= change.End; index++)
+        {
+            HistoryItem rangeItem = _items[index];
+            if (change.Select)
+            {
+                if (!ItemsList.SelectedItems.Contains(rangeItem))
+                    ItemsList.SelectedItems.Add(rangeItem);
+            }
+            else
+            {
+                ItemsList.SelectedItems.Remove(rangeItem);
+            }
+        }
+        _selectionAnchor = _items[change.Anchor];
+
+        _previewItem = item;
+        if (ItemsList.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem container)
+            container.Focus();
+        UpdateSelectionState();
     }
 
     private void OnTileMouseMove(object sender, MouseEventArgs e)

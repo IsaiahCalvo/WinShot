@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -54,6 +55,7 @@ public class ThemedWindowTests
                 ShowAndClose(new FastPinWindow(NewBitmap(), settings));
                 ShowAndClose(new FastQuickPreviewWindow(previewFile.Path));
                 ShowAndClose(new HistoryWindow(history, settings));
+                HistorySelectionInteractionSmoke(history, settings);
                 ShowAndClose(new SettingsWindow(settings));
                 SettingsWindowShowCloseSmoke(settings);
                 HistoryWindowShowCloseSmoke(history, settings);
@@ -106,6 +108,47 @@ public class ThemedWindowTests
     private static void ShowAndClose(Window window)
     {
         window.Show();
+        window.Close();
+    }
+
+    private static void HistorySelectionInteractionSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        var items = Enumerable.Range(0, 5)
+            .Select(index => new HistoryItem($@"C:\sanitized-history\20260803-12000{index}-000.png"))
+            .ToList();
+        paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        ((Button)window.FindName("SelectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var applyClick = typeof(HistoryWindow).GetMethod("ApplySelectionClick", NP)!;
+        var list = (ListBox)window.FindName("ItemsList");
+
+        applyClick.Invoke(window, new object[] { items[0], ModifierKeys.None });
+        applyClick.Invoke(window, new object[] { items[2], ModifierKeys.None });
+        Assert.Equal(2, list.SelectedItems.Count);
+
+        applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Control });
+        applyClick.Invoke(window, new object[] { items[0], ModifierKeys.Control });
+        Assert.Equal(2, list.SelectedItems.Count);
+        Assert.DoesNotContain(items[0], list.SelectedItems.Cast<HistoryItem>());
+
+        applyClick.Invoke(window, new object[] { items[4], ModifierKeys.Shift });
+        Assert.Equal(5, list.SelectedItems.Count);
+        applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Shift });
+        Assert.Equal(3, list.SelectedItems.Count);
+
+        ((Button)window.FindName("AllSelectionButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.Equal(5, list.SelectedItems.Count);
+        ((Button)window.FindName("AllSelectionButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.Empty(list.SelectedItems.Cast<HistoryItem>());
+        ((Button)window.FindName("SelectAllButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.Equal(5, list.SelectedItems.Count);
+
         window.Close();
     }
 

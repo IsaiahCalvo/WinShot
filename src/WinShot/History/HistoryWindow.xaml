@@ -102,10 +102,10 @@
                     <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
                                FontSize="13" VerticalAlignment="Center" Margin="20,0,16,0"/>
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
-                    <Button Style="{StaticResource ToolbarButton}" Click="OnShowAllFromSelection" AutomationProperties.Name="Show all item types">
+                    <Button x:Name="AllSelectionButton" Style="{StaticResource ToolbarButton}" Click="OnShowAllFromSelection" AutomationProperties.Name="Select or clear all visible history items">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="All"/></StackPanel>
                     </Button>
-                    <Button Style="{StaticResource ToolbarButton}" Click="OnSelectAll" AutomationProperties.Name="Select all visible history items">
+                    <Button x:Name="SelectAllButton" Style="{StaticResource ToolbarButton}" Click="OnSelectAll" AutomationProperties.Name="Select all visible history items">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Select all"/></StackPanel>
                     </Button>
                     <Button x:Name="CopyToButton" Style="{StaticResource ToolbarButton}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
