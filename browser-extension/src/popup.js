@@ -34,6 +34,34 @@ for (const button of document.querySelectorAll("[data-picker]")) {
   });
 }
 
+async function launchBatch(kind, urls = []) {
+  return await request({ type: "WINSHOT_START_BATCH", kind, urls });
+}
+
+document.querySelector("#all-tabs").addEventListener("click", async () => {
+  try {
+    status.textContent = "Preparing batch captureâ€¦";
+    await launchBatch("all-tabs");
+    window.close();
+  } catch (error) {
+    status.className = "error";
+    status.textContent = error.message;
+  }
+});
+
+document.querySelector("#url-batch").addEventListener("click", async () => {
+  try {
+    const urls = document.querySelector("#batch-urls").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    if (!urls.length) throw new Error("Enter at least one website URL.");
+    status.textContent = "Preparing URL batchâ€¦";
+    await launchBatch("urls", urls);
+    window.close();
+  } catch (error) {
+    status.className = "error";
+    status.textContent = error.message;
+  }
+});
+
 document.querySelector("#cancel").addEventListener("click", async () => {
   try {
     const result = await request({ type: "WINSHOT_CANCEL_CAPTURE" });

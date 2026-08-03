@@ -19,13 +19,12 @@
     "scripting",
     "storage"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "optional_permissions": [
     "nativeMessaging",
     "tabs"
-  ],
-  "optional_host_permissions": [
-    "http://*/*",
-    "https://*/*"
   ],
   "commands": {
     "capture-visible": {

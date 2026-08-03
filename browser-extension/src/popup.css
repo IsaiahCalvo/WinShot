@@ -10,6 +10,9 @@ main { display: grid; gap: 7px; padding: 10px; }
 button { min-height: 48px; border: 1px solid #ffffff1c; border-radius: 8px; background: #1a1e25; color: inherit; padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; text-align: left; align-items: center; cursor: pointer; }
 button:hover, button:focus-visible { border-color: #268eff; background: #202a37; outline: none; }
 button small { grid-column: 1 / -1; font-size: 11px; }
+label { color: #aab2c0; font-size: 11px; padding: 2px 2px 0; }
+textarea { width: 100%; resize: vertical; min-height: 54px; border: 1px solid #ffffff1c; border-radius: 7px; background: #151920; color: inherit; padding: 7px; font: 11px/1.35 system-ui,sans-serif; }
+textarea:focus { border-color: #268eff; outline: none; }
 kbd { color: #8e99a9; font: 10px system-ui; }
 #status { margin: 0; min-height: 34px; padding: 8px 14px 11px; color: #97a1b1; border-top: 1px solid #ffffff10; font-size: 11px; }
 #status.error { color: #ff9d9d; }

@@ -116,6 +116,14 @@ function editorTarget(run) {
   );
 }
 
+function batchTarget(run) {
+  const existingTargets = new Set(run.browser.targets());
+  return run.browser.waitForTarget(
+    (target) => !existingTargets.has(target) && target.type() === "page" && target.url().includes(run.extension.id) && target.url().includes("/src/batch.html?id="),
+    { timeout: 180_000 }
+  );
+}
+
 async function startPicker(run, page, mode) {
   const popup = await openPopup(run, page);
   await popup.click(`[data-picker='${mode}']`);
@@ -198,6 +206,67 @@ test("exact MV3 popup captures the full page, exports PNG, and restores state", 
     } finally {
       removeOwnedDirectory(downloadRoot, "winshot-download-e2e-");
     }
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
+test("all-tabs batch captures each web tab and restores every captured page", async () => {
+  const run = await launchExactExtension();
+  try {
+    const first = await run.browser.newPage();
+    const second = await run.browser.newPage();
+    monitorPage(first, run.errors);
+    monitorPage(second, run.errors);
+    await first.goto("http://127.0.0.1:4173/frame", { waitUntil: "networkidle0" });
+    await second.goto("http://127.0.0.1:4173/nested", { waitUntil: "networkidle0" });
+    await first.evaluate(() => scrollTo(0, 333));
+    await second.$eval("#outer", (element) => { element.scrollTop = 75; });
+    await first.bringToFront();
+
+    const allTabsSummaryTarget = batchTarget(run);
+    const popup = await openPopup(run, first);
+    await popup.click("#all-tabs");
+    const allTabsSummary = await (await allTabsSummaryTarget).asPage();
+    await allTabsSummary.waitForSelector(".item.complete");
+    const allTabsBatch = await allTabsSummary.evaluate(async () => {
+      const id = new URL(location.href).searchParams.get("id");
+      return (await chrome.storage.local.get(`batch:${id}`))[`batch:${id}`];
+    });
+    expect(allTabsBatch.results).toHaveLength(2);
+    expect(allTabsBatch.results.every((item) => item.state === "complete")).toBe(true);
+    expect(allTabsBatch.results.every((item) => item.captureId)).toBe(true);
+    expect(await first.evaluate(() => scrollY)).toBeCloseTo(333, 0);
+    expect(await second.$eval("#outer", (element) => element.scrollTop)).toBeCloseTo(75, 0);
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
+test("URL-list batch closes its disposable fixture tabs", async () => {
+  const run = await launchExactExtension();
+  try {
+    const first = await run.browser.newPage();
+    monitorPage(first, run.errors);
+    await first.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    await first.bringToFront();
+    const urlSummaryTarget = batchTarget(run);
+    const urlPopup = await openPopup(run, first);
+    await urlPopup.type("#batch-urls", "http://127.0.0.1:4173/frame\nhttp://127.0.0.1:4173/sticky");
+    await urlPopup.click("#url-batch");
+    const urlSummary = await (await urlSummaryTarget).asPage();
+    await urlSummary.waitForSelector(".item.complete");
+    const urlBatch = await urlSummary.evaluate(async () => {
+      const id = new URL(location.href).searchParams.get("id");
+      return (await chrome.storage.local.get(`batch:${id}`))[`batch:${id}`];
+    });
+    expect(urlBatch.results).toHaveLength(2);
+    expect(urlBatch.results.every((item) => item.state === "complete")).toBe(true);
+    const remainingFixturePages = (await run.browser.pages()).filter((page) => /^http:\/\/127\.0\.0\.1:4173\/(frame|sticky)$/.test(page.url()));
+    expect(remainingFixturePages).toHaveLength(0);
+    expect((await run.browser.pages()).some((page) => page.url() === "http://127.0.0.1:4173/body")).toBe(true);
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);

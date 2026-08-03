@@ -16,6 +16,10 @@
     <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift V</kbd></button>
     <button data-picker="region"><span>Drag a selection</span><small>Auto-scrolls at page edges</small></button>
     <button data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
+    <button id="all-tabs"><span>Capture all web tabs</span><small>Requests optional access; maximum 20 tabs</small></button>
+    <label for="batch-urls">Capture a URL list</label>
+    <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
+    <button id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
     <button id="cancel"><span>Cancel active capture</span><small>Restores the page and discards the result</small></button>
   </main>
   <p id="status" role="status">Captures stay on this device.</p>

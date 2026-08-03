@@ -10,6 +10,7 @@ import {
 import { listRecords, putRecord, putTile } from "./store.js";
 
 const activeCaptures = new Map();
+let activeBatch = null;
 let lastScreenshotAt = 0;
 
 async function recoverInterruptedRecords() {
@@ -382,7 +383,7 @@ async function storeScrollingCapture(session, controller) {
   }
 }
 
-async function runCapture(mode, target = null, tabOverride = null) {
+async function runCapture(mode, target = null, tabOverride = null, options = {}) {
   const tab = tabOverride || await activeTab();
   if (!tab.id) throw new Error("No active tab.");
   if (activeCaptures.has(tab.id)) throw new Error("A WinShot capture is already running in this tab.");
@@ -419,10 +420,111 @@ async function runCapture(mode, target = null, tabOverride = null) {
     activeCaptures.delete(tab.id);
   }
 
-  if (session.state !== SessionState.CANCELLED) {
+  if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
     await chrome.tabs.create({ url: chrome.runtime.getURL(`src/editor.html?id=${encodeURIComponent(session.id)}`) });
   }
   return { captureId: session.id, state: session.state, error: session.error };
+}
+
+function supportedBatchUrl(url) {
+  return /^https?:\/\//i.test(url || "");
+}
+
+async function waitForTabComplete(tabId, signal, timeoutMs = 30000) {
+  const current = await chrome.tabs.get(tabId);
+  if (current.status === "complete") return current;
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => finish(new Error("The page did not finish loading within 30 seconds.")), timeoutMs);
+    const onUpdated = (updatedId, info, tab) => {
+      if (updatedId === tabId && info.status === "complete") finish(null, tab);
+    };
+    const onAbort = () => finish(new DOMException("Batch capture cancelled.", "AbortError"));
+    const finish = (error, tab) => {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      signal.removeEventListener("abort", onAbort);
+      if (error) reject(error); else resolve(tab);
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function captureBatchTab(tab, controller) {
+  throwIfAborted(controller.signal);
+  await chrome.tabs.update(tab.id, { active: true });
+  const ready = await waitForTabComplete(tab.id, controller.signal);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  throwIfAborted(controller.signal);
+  const result = await runCapture(CaptureMode.FULL_PAGE, null, ready, { openEditor: false });
+  return { tabId: tab.id, title: ready.title || tab.title || ready.url, url: ready.url, ...result };
+}
+
+async function runBatch(kind, urls = []) {
+  if (activeBatch) throw new Error("A WinShot batch is already running.");
+  const original = await activeTab();
+  const controller = new AbortController();
+  const createdTabIds = [];
+  const batchId = captureId();
+  const results = [];
+  const skipped = [];
+  activeBatch = { id: batchId, controller, currentTabId: null };
+
+  try {
+    let tabs;
+    if (kind === "all-tabs") {
+      const candidates = await chrome.tabs.query({ windowId: original.windowId });
+      const supported = candidates.filter((tab) => supportedBatchUrl(tab.url));
+      tabs = supported.slice(0, 20);
+      for (const tab of candidates.filter((tab) => !supportedBatchUrl(tab.url))) {
+        skipped.push({ title: tab.title || tab.url || "Restricted tab", reason: "This browser page cannot be scripted." });
+      }
+      if (supported.length > 20) skipped.push({ title: "Additional tabs", reason: "The 20-tab safety limit was reached." });
+    } else if (kind === "urls") {
+      const unique = [...new Set(urls.map((url) => String(url).trim()).filter(Boolean))];
+      const valid = unique.filter(supportedBatchUrl);
+      for (const url of unique.filter((url) => !supportedBatchUrl(url))) skipped.push({ title: url, reason: "Only http:// and https:// URLs are supported." });
+      if (valid.length > 20) skipped.push({ title: "Additional URLs", reason: "The 20-URL safety limit was reached." });
+      tabs = [];
+      for (const url of valid.slice(0, 20)) {
+        throwIfAborted(controller.signal);
+        const tab = await chrome.tabs.create({ url, active: false, windowId: original.windowId });
+        createdTabIds.push(tab.id);
+        tabs.push(tab);
+      }
+    } else {
+      throw new Error("Unknown batch capture type.");
+    }
+
+    if (!tabs.length) throw new Error("No capturable web pages were found.");
+    for (let index = 0; index < tabs.length; index++) {
+      const tab = tabs[index];
+      activeBatch.currentTabId = tab.id;
+      progress({ id: batchId, state: SessionState.CAPTURING, report: { tileCount: index } }, `Batch ${index + 1} of ${tabs.length}: ${tab.title || tab.url}`);
+      try {
+        results.push(await captureBatchTab(tab, controller));
+      } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        results.push({ tabId: tab.id, title: tab.title || tab.url, url: tab.url, state: SessionState.FAILED, error: friendlyError(error) });
+      }
+    }
+  } finally {
+    for (const tabId of createdTabIds) {
+      try { await chrome.tabs.remove(tabId); } catch { /* The page may already be closed. */ }
+    }
+    try { await chrome.tabs.update(original.id, { active: true }); } catch { /* The original tab may be gone. */ }
+    activeBatch = null;
+  }
+
+  const summary = { id: batchId, kind, createdAt: new Date().toISOString(), results, skipped };
+  await chrome.storage.local.set({ [`batch:${batchId}`]: summary });
+  await chrome.tabs.create({ url: chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`) });
+  return {
+    batchId,
+    complete: results.filter((item) => item.state === SessionState.COMPLETE).length,
+    failed: results.filter((item) => item.state !== SessionState.COMPLETE).length,
+    skipped: skipped.length
+  };
 }
 
 async function startPicker(mode) {
@@ -439,13 +541,18 @@ async function cancelActiveCapture() {
   const tab = await activeTab();
   const active = activeCaptures.get(tab.id);
   active?.controller.abort();
-  return { cancelled: Boolean(active) };
+  if (activeBatch) {
+    activeBatch.controller.abort();
+    activeCaptures.get(activeBatch.currentTabId)?.controller.abort();
+  }
+  return { cancelled: Boolean(active || activeBatch) };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
     if (message.type === "WINSHOT_START_CAPTURE") return await runCapture(message.mode, message.target || null);
     if (message.type === "WINSHOT_START_PICKER") return await startPicker(message.mode);
+    if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || []);
     if (message.type === "WINSHOT_CANCEL_CAPTURE") {
       return await cancelActiveCapture();
     }
@@ -486,6 +593,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // Playwright evaluates inside the private service-worker context because current branded
 // Chrome/Edge builds no longer accept side-load flags. This hook is not visible to webpages.
-globalThis.__winshotTest = Object.freeze({ runCapture, startPicker, cancelActiveCapture, handleCommand });
+globalThis.__winshotTest = Object.freeze({ runCapture, runBatch, startPicker, cancelActiveCapture, handleCommand });
 
 recoverInterruptedRecords().catch(() => {});
