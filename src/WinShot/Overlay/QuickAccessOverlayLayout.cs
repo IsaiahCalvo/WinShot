@@ -48,10 +48,10 @@ internal readonly record struct QuickAccessOverlayLayout(
             card,
             thumbnail,
             Scale(11, dpiScale),
-            Scale(22, dpiScale),
-            Scale(58, dpiScale),
-            Scale(29, dpiScale),
-            Scale(8, dpiScale),
+            Scale(28, dpiScale),
+            Scale(36, dpiScale),
+            Scale(32, dpiScale),
+            Scale(9, dpiScale),
             Scale(6, dpiScale));
     }
 

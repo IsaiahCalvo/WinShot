@@ -31,8 +31,10 @@ public class QuickAccessOverlayRenderHarness
             {
                 using var source = CreateSyntheticCapture();
                 var settings = new SettingsService();
-                RenderState(source, settings, hovering: false, Path.Combine(outDir, "idle.png"));
-                RenderState(source, settings, hovering: true, Path.Combine(outDir, "hover.png"));
+                RenderState(source, settings, hovering: false, hoverButton: -1, Path.Combine(outDir, "idle.png"));
+                RenderState(source, settings, hovering: true, hoverButton: -1, Path.Combine(outDir, "hover.png"));
+                RenderState(source, settings, hovering: true, hoverButton: 3, Path.Combine(outDir, "hover-save.png"));
+                RenderState(source, settings, hovering: true, hoverButton: 4, Path.Combine(outDir, "hover-copy.png"));
                 RenderSaveIcon(Path.Combine(outDir, "save-icon-source-render.png"));
             }
             catch (Exception ex)
@@ -57,13 +59,20 @@ public class QuickAccessOverlayRenderHarness
         icon.Save(path, SD.Imaging.ImageFormat.Png);
     }
 
-    private static void RenderState(SD.Bitmap source, SettingsService settings, bool hovering, string path)
+    private static void RenderState(
+        SD.Bitmap source,
+        SettingsService settings,
+        bool hovering,
+        int hoverButton,
+        string path)
     {
         using var overlay = new FastQuickActionsWindow(source, settings);
         overlay.CreateControl();
         SetPreviewBitmaps(overlay, source);
         if (hovering)
             Invoke(overlay, "SetHovering", true);
+        if (hoverButton >= 0)
+            Invoke(overlay, "SetHover", hoverButton);
         Render(overlay, path);
     }
 

@@ -14,18 +14,21 @@ namespace WinShot.Overlay;
 
 public sealed class FastQuickActionsWindow : WF.Form
 {
-    // The idle surface is only the capture thumbnail. Hover reveals four corner actions and
-    // one centered Copy pill; OCR and Background stay available in the context menu.
+    // The idle surface is only the capture thumbnail. Hover reveals four restrained corner
+    // actions and one centered primary Copy control; OCR and Background stay in the menu.
     private const int CsDropShadow = 0x00020000;
     private const int WmNclbuttondown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
 
     private static readonly SD.Color CardFill = ThemePalette.WindowBg;                       // backing behind the thumbnail
-    private static readonly SD.Color HoverScrim = SD.Color.FromArgb(112, 0, 0, 0);
-    private static readonly SD.Color Cream = SD.Color.FromArgb(0xF8, 0xF8, 0xF6);
-    private static readonly SD.Color CreamHover = SD.Color.White;
-    private static readonly SD.Color CreamPressed = SD.Color.FromArgb(0xE3, 0xE3, 0xDF);
-    private static readonly SD.Color CreamText = SD.Color.FromArgb(0x22, 0x22, 0x24);        // dark glyph/label on cream
+    private static readonly SD.Color HoverScrim = SD.Color.FromArgb(86, 0, 0, 0);
+    private static readonly SD.Color SecondaryFace = SD.Color.FromArgb(196, 20, 22, 27);
+    private static readonly SD.Color SecondaryHover = SD.Color.FromArgb(232, 48, 51, 59);
+    private static readonly SD.Color SecondaryPressed = SD.Color.FromArgb(238, 31, 33, 39);
+    private static readonly SD.Color PrimaryFace = SD.Color.FromArgb(232, 44, 112, 224);
+    private static readonly SD.Color PrimaryHover = SD.Color.FromArgb(245, 63, 130, 239);
+    private static readonly SD.Color PrimaryPressed = SD.Color.FromArgb(245, 34, 91, 190);
+    private static readonly SD.Color LightGlyph = SD.Color.FromArgb(0xF7, 0xF8, 0xFA);
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
 
@@ -316,7 +319,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         int pillX = _cardRect.Left + (_cardRect.Width - layout.PillWidth) / 2;
         int pillTop = _cardRect.Top + (_cardRect.Height - layout.PillHeight) / 2;
 
-        AddPillButton("Copy", "Copy (Ctrl+C)", pillX, pillTop, layout.PillWidth, layout.PillHeight, () => CopyAsync(keepOpen: IsAltDown()));
+        AddPrimaryButton("", "Copy (Ctrl+C)", pillX, pillTop, layout.PillWidth, layout.PillHeight, () => CopyAsync(keepOpen: IsAltDown()));
         _focusedButton = Math.Clamp(_focusedButton, -1, _buttons.Count - 1);
     }
 
@@ -335,25 +338,23 @@ public sealed class FastQuickActionsWindow : WF.Form
             name,
             new SD.Rectangle(x, y, size, size),
             action,
-            ThemePalette.IconFont(tip.StartsWith("Close", StringComparison.Ordinal) ? 8.5f : 10.5f),
-            ActionButtonShape.Circle,
-            size / 2)
+            ThemePalette.IconFont(tip.StartsWith("Close", StringComparison.Ordinal) ? 8.75f : 10f),
+            Math.Max(6, size / 3))
         {
             Icon = icon,
         });
 
-    private void AddPillButton(string label, string tip, int x, int y, int width, int height, Action action)
+    private void AddPrimaryButton(string glyph, string tip, int x, int y, int width, int height, Action action)
         => _buttons.Add(new ActionButton(
-            label,
+            glyph,
             tip,
-            label,
+            "Copy",
             new SD.Rectangle(x, y, width, height),
             action,
-            ThemePalette.UiFont(9.5f, SD.FontStyle.Bold),
-            ActionButtonShape.Pill,
-            height / 2)
+            ThemePalette.IconFont(11f),
+            Math.Max(9, height / 3))
         {
-            Label = label,
+            IsPrimary = true,
         });
 
     private void DrawThumbnail(SD.Graphics g, bool blurred)
@@ -383,15 +384,19 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private static void DrawButton(SD.Graphics g, ActionButton button, bool hot, bool pressed)
     {
-        SD.Color face = pressed ? CreamPressed : hot ? CreamHover : Cream;
+        SD.Color face = button.IsPrimary
+            ? pressed ? PrimaryPressed : hot ? PrimaryHover : PrimaryFace
+            : pressed ? SecondaryPressed : hot ? SecondaryHover : SecondaryFace;
 
-        using (var path = button.Shape == ActionButtonShape.Circle
-            ? CirclePath(button.Bounds)
-            : GdiPaths.RoundedRect(button.Bounds, button.CornerRadius))
+        using (var path = GdiPaths.RoundedRect(button.Bounds, button.CornerRadius))
         {
             using var fill = new SD.SolidBrush(face);
             g.FillPath(fill, path);
-            using var pen = new SD.Pen(SD.Color.FromArgb(0x18, 0x00, 0x00, 0x00), 1);
+            using var pen = new SD.Pen(
+                button.IsPrimary
+                    ? SD.Color.FromArgb(126, 210, 226, 255)
+                    : SD.Color.FromArgb(82, 255, 255, 255),
+                1);
             g.DrawPath(pen, path);
         }
 
@@ -403,12 +408,11 @@ public sealed class FastQuickActionsWindow : WF.Form
             return;
         }
 
-        string text = button.Shape == ActionButtonShape.Pill && button.Label is not null ? button.Label : button.Glyph;
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
                     WF.TextFormatFlags.SingleLine |
                     WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(g, text, button.Font, button.Bounds, CreamText, flags);
+        WF.TextRenderer.DrawText(g, button.Glyph, button.Font, button.Bounds, LightGlyph, flags);
     }
 
     private static SD.Bitmap? CreateSaveIcon(int buttonSize)
@@ -446,7 +450,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             {
                 context.PushTransform(transform);
                 context.DrawGeometry(
-                    new WM.SolidColorBrush(WM.Color.FromArgb(CreamText.A, CreamText.R, CreamText.G, CreamText.B)),
+                    new WM.SolidColorBrush(WM.Color.FromArgb(LightGlyph.A, LightGlyph.R, LightGlyph.G, LightGlyph.B)),
                     null,
                     geometry);
                 context.Pop();
@@ -486,24 +490,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private static GraphicsPath CirclePath(SD.Rectangle bounds)
-    {
-        var path = new GraphicsPath();
-        path.AddEllipse(bounds);
-        return path;
-    }
-
     private static void DrawFocus(SD.Graphics g, ActionButton button)
     {
         var bounds = SD.Rectangle.Inflate(button.Bounds, -2, -2);
         using var pen = new SD.Pen(SD.Color.FromArgb(210, 36, 99, 180), 1) { DashStyle = DashStyle.Dot };
-        if (button.Shape == ActionButtonShape.Circle)
-            g.DrawEllipse(pen, bounds);
-        else
-        {
-            using var path = GdiPaths.RoundedRect(bounds, Math.Max(1, button.CornerRadius - 2));
-            g.DrawPath(pen, path);
-        }
+        using var path = GdiPaths.RoundedRect(bounds, Math.Max(1, button.CornerRadius - 2));
+        g.DrawPath(pen, path);
     }
 
     private void SetPressed(int index)
@@ -1016,7 +1008,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             int index = _buttons.FindIndex(b => b.Tip.StartsWith("Copy", StringComparison.Ordinal));
             if (index < 0) return;
 
-            _buttons[index].Label = "Copied";
+            _buttons[index].Glyph = "";
             Invalidate(_buttons[index].Bounds);
             var timer = new WF.Timer { Interval = 1200 };
             timer.Tick += (_, _) =>
@@ -1024,7 +1016,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 timer.Stop();
                 timer.Dispose();
                 if (_closed || IsDisposed) return;
-                _buttons[index].Label = "Copy";
+                _buttons[index].Glyph = "";
                 Invalidate(_buttons[index].Bounds);
             };
             timer.Start();
@@ -1095,12 +1087,6 @@ public sealed class FastQuickActionsWindow : WF.Form
     [DllImport("user32.dll")]
     private static extern int GetDpiForWindow(IntPtr hWnd);
 
-    private enum ActionButtonShape
-    {
-        Circle,
-        Pill,
-    }
-
     private sealed class ActionButton(
         string glyph,
         string tip,
@@ -1108,7 +1094,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         SD.Rectangle bounds,
         Action action,
         SD.Font font,
-        ActionButtonShape shape = ActionButtonShape.Circle,
         int cornerRadius = 11) : IDisposable
     {
         public string Glyph { get; set; } = glyph;
@@ -1117,9 +1102,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         public SD.Rectangle Bounds { get; } = bounds;
         public Action Action { get; } = action;
         public SD.Font Font { get; } = font;
-        public ActionButtonShape Shape { get; } = shape;
         public int CornerRadius { get; } = cornerRadius;
-        public string? Label { get; set; }
+        public bool IsPrimary { get; init; }
         public SD.Bitmap? Icon { get; init; }
 
         public void Dispose()
