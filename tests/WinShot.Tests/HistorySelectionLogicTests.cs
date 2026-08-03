@@ -6,6 +6,14 @@ namespace WinShot.Tests;
 public class HistorySelectionLogicTests
 {
     [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    public void SelectionModeExit_AfterDelete_DependsOnRemainingHistory(int remaining, bool expected)
+    {
+        Assert.Equal(expected, HistorySelectionLogic.ShouldExitSelectionAfterDelete(remaining));
+    }
+
+    [Theory]
     [InlineData(false, false, true)]
     [InlineData(false, true, false)]
     public void IndividualClick_TogglesOnlyTheClickedItem(bool shift, bool selected, bool expectedSelection)

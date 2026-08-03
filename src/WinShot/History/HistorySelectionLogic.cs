@@ -4,6 +4,8 @@ internal readonly record struct HistorySelectionChange(int Start, int End, bool 
 
 internal static class HistorySelectionLogic
 {
+    public static bool ShouldExitSelectionAfterDelete(int remainingItemCount) => remainingItemCount <= 0;
+
     public static HistorySelectionChange ResolveClick(
         int itemCount,
         int anchorIndex,

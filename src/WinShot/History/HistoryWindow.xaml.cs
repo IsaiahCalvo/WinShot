@@ -690,7 +690,15 @@ public partial class HistoryWindow : Window
 
     private void OnToggleSelectionMode(object sender, RoutedEventArgs e)
     {
-        _selectionMode = !_selectionMode;
+        SetSelectionMode(!_selectionMode);
+    }
+
+    private void SetSelectionMode(bool enabled)
+    {
+        if (_selectionMode == enabled)
+            return;
+
+        _selectionMode = enabled;
         ItemsList.Tag = _selectionMode;
         ItemsList.SelectionMode = _selectionMode ? SelectionMode.Extended : SelectionMode.Single;
         NormalToolbar.Visibility = _selectionMode ? Visibility.Collapsed : Visibility.Visible;
@@ -821,7 +829,10 @@ public partial class HistoryWindow : Window
                 failed.Add(item.FileName);
         }
         ItemsList.UnselectAll();
-        UpdateCollectionState();
+        if (HistorySelectionLogic.ShouldExitSelectionAfterDelete(_paging.TotalCount))
+            SetSelectionMode(false);
+        else
+            UpdateCollectionState();
         _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
         if (failed.Count > 0)
             MessageBox.Show(this, $"WinShot could not delete {failed.Count:N0} selected item{(failed.Count == 1 ? string.Empty : "s")}.", "Delete incomplete", MessageBoxButton.OK, MessageBoxImage.Warning);

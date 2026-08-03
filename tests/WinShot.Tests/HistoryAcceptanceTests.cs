@@ -119,6 +119,8 @@ public class HistoryAcceptanceTests
         Assert.Contains("Visibility=\"{Binding PinVisibility}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectionToolbar\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CategoryRow\" Grid.Row=\"0\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SelectionCommandRow\" Grid.Row=\"1\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Scrolling\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnRestore\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnCopySelected\"", xaml, StringComparison.Ordinal);

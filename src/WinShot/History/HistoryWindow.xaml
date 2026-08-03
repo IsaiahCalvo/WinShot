@@ -86,8 +86,15 @@
         </Style>
     </Window.Resources>
 
-    <DockPanel>
-        <Border DockPanel.Dock="Top" Background="{StaticResource ToolbarBgBrush}"
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border x:Name="SelectionCommandRow" Grid.Row="1" Background="{StaticResource ToolbarBgBrush}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,10">
             <Grid>
                 <StackPanel x:Name="NormalToolbar" Orientation="Horizontal" HorizontalAlignment="Left">
@@ -124,7 +131,7 @@
             </Grid>
         </Border>
 
-        <Border DockPanel.Dock="Top" Background="{StaticResource WindowBgBrush}" Padding="16,12,16,10">
+        <Border x:Name="CategoryRow" Grid.Row="0" Background="{StaticResource WindowBgBrush}" Padding="16,12,16,10">
             <Grid>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <RadioButton x:Name="ChipAll" Content="All" IsChecked="True" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
@@ -144,7 +151,7 @@
             </Grid>
         </Border>
 
-        <Border DockPanel.Dock="Bottom" Background="{StaticResource ToolbarBgBrush}"
+        <Border Grid.Row="3" Background="{StaticResource ToolbarBgBrush}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,10">
             <DockPanel>
                 <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more" Style="{StaticResource ToolbarButton}"
@@ -161,7 +168,7 @@
             </DockPanel>
         </Border>
 
-        <Grid>
+        <Grid Grid.Row="2">
             <ListBox x:Name="ItemsList" Tag="False" SelectionMode="Single"
                      Background="Transparent" BorderThickness="0" Padding="14,2,14,14"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -295,5 +302,5 @@
                 <TextBlock Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextDisabledBrush}" FontSize="12" Margin="0,6,0,0" HorizontalAlignment="Center"/>
             </StackPanel>
         </Grid>
-    </DockPanel>
+    </Grid>
 </Window>
