@@ -17,7 +17,7 @@ function rows(count, prefix = "ROW") {
 function fixture(name, crossPort) {
   switch (name) {
     case "body":
-      return shell("body-scroll", `<input id="state" value="focus-restoration"><div id="rows">${rows(28)}</div>`, "");
+      return shell("body-scroll", `<h1>SEARCHABLE WINSHOT DOCUMENT</h1><a href="https://example.com/winshot-link">WORKING PDF LINK</a><input id="state" value="focus-restoration"><div id="rows">${rows(28)}</div>`, "");
     case "horizontal":
       return shell("horizontal-scroll", `<div class="wide">${Array.from({length:18},(_,i)=>`<span>COL ${i}</span>`).join("")}</div>`, "", ".wide{display:flex;width:5400px;height:900px}.wide span{flex:0 0 300px;border-right:2px solid #172033;padding:30px}");
     case "nested":

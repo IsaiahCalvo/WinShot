@@ -162,6 +162,15 @@ async function storeVisibleCapture(session, controller) {
   const width = bitmap.width;
   const height = bitmap.height;
   bitmap.close();
+  try {
+    await injectCaptureScript(session.tabId);
+    const snapshot = await sendToTab(session.tabId, { type: "WINSHOT_VISIBLE_SEMANTICS" });
+    session.semantics = snapshot.semantics;
+    session.report.dimensionsCss = { width: snapshot.metrics.width, height: snapshot.metrics.height };
+  } catch {
+    session.semantics = { text: [], links: [] };
+    session.report.warnings.push("Searchable text and links could not be read on this restricted page; the pixels were still captured.");
+  }
   const tile = {
     captureId: session.id,
     index: 0,
@@ -179,7 +188,7 @@ async function storeVisibleCapture(session, controller) {
     seamScore: null
   };
   await putTile(tile);
-  session.report.dimensionsCss = { width, height };
+  session.report.dimensionsCss ||= { width, height };
   session.report.dimensionsPx = { width, height };
   session.report.tileCount = 1;
   session.report.seamConfidence = { minimum: 1, average: 1, method: "single browser screenshot" };
@@ -194,6 +203,10 @@ async function storeScrollingCapture(session, controller) {
   const tileMetadata = [];
   const workingTiles = [];
   const seamScores = [];
+  const semanticText = [];
+  const semanticLinks = [];
+  const semanticTextKeys = new Set();
+  const semanticLinkKeys = new Set();
   const capturedPositions = new Set();
   const startTime = Date.now();
   let expectedScale = null;
@@ -258,6 +271,20 @@ async function storeScrollingCapture(session, controller) {
         });
         if (result.metrics.url !== session.sourceUrl) throw new Error("The page navigated during capture.");
         if (!result.stable) session.report.warnings.push(`Tile ${index + 1} did not reach full layout stability before capture.`);
+        for (const entry of result.semantics?.text || []) {
+          const key = `${entry.text}|${entry.x.toFixed(1)}|${entry.y.toFixed(1)}`;
+          if (!semanticTextKeys.has(key) && semanticText.length < 50000) {
+            semanticTextKeys.add(key);
+            semanticText.push(entry);
+          }
+        }
+        for (const entry of result.semantics?.links || []) {
+          const key = `${entry.url}|${entry.x.toFixed(1)}|${entry.y.toFixed(1)}`;
+          if (!semanticLinkKeys.has(key) && semanticLinks.length < 10000) {
+            semanticLinkKeys.add(key);
+            semanticLinks.push(entry);
+          }
+        }
 
         const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal);
         const cropped = await cropScreenshot(source, result.metrics);
@@ -336,6 +363,7 @@ async function storeScrollingCapture(session, controller) {
     const minimum = seamScores.length ? Math.min(...seamScores) : 1;
     const average = seamScores.length ? seamScores.reduce((sum, value) => sum + value, 0) / seamScores.length : 1;
     session.report.seamConfidence = { minimum, average, method: "DOM placement plus raster overlap comparison" };
+    session.semantics = { text: semanticText, links: semanticLinks };
     if (minimum < 0.7) session.report.warnings.push("One or more overlaps changed substantially; the result is marked partial rather than silently accepted.");
     if (!coverage.complete) session.report.warnings.push(...coverage.gaps);
     session.state = coverage.complete && minimum >= 0.7 && growthPass <= session.limits.maxGrowthPasses

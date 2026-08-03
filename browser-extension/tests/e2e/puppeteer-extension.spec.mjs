@@ -191,6 +191,10 @@ test("exact MV3 popup captures the full page, exports PNG, and restores state", 
       const pdf = fs.readFileSync(path.join(downloadRoot, fs.readdirSync(downloadRoot).find((value) => value.endsWith(".pdf"))));
       expect(pdf.subarray(0, 8).toString("ascii")).toBe("%PDF-1.7");
       expect(pdf.subarray(-5).toString("ascii")).toBe("%%EOF");
+      const pdfText = pdf.toString("latin1");
+      expect(pdfText).toContain("SEARCHABLE WINSHOT DOCUMENT");
+      expect(pdfText).toContain("/Subtype /Link");
+      expect(pdfText).toContain("https://example.com/winshot-link");
     } finally {
       removeOwnedDirectory(downloadRoot, "winshot-download-e2e-");
     }

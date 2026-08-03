@@ -268,6 +268,78 @@
     return { stable: false, metrics: currentMetrics() };
   }
 
+  function semanticSnapshot(metrics, limit = 5000) {
+    const clip = metrics.clip;
+    const right = clip.left + clip.width;
+    const bottom = clip.top + clip.height;
+    const text = [];
+    const links = [];
+    const seenText = new Set();
+    const seenLinks = new Set();
+
+    const intersect = (rect) => {
+      const left = Math.max(rect.left, clip.left);
+      const top = Math.max(rect.top, clip.top);
+      const clippedRight = Math.min(rect.right, right);
+      const clippedBottom = Math.min(rect.bottom, bottom);
+      if (clippedRight - left < 0.5 || clippedBottom - top < 0.5) return null;
+      return {
+        x: metrics.destX + left - clip.left,
+        y: metrics.destY + top - clip.top,
+        width: clippedRight - left,
+        height: clippedBottom - top
+      };
+    };
+
+    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+    while (text.length < limit) {
+      const node = walker.nextNode();
+      if (!node) break;
+      const value = node.nodeValue?.replace(/\s+/g, " ").trim();
+      if (!value || !(node.parentElement instanceof Element)) continue;
+      const style = getComputedStyle(node.parentElement);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        const mapped = intersect(rect);
+        if (!mapped) continue;
+        const key = `${value}|${mapped.x.toFixed(1)}|${mapped.y.toFixed(1)}`;
+        if (seenText.has(key)) continue;
+        seenText.add(key);
+        text.push({ ...mapped, text: value.slice(0, 1000), fontSize: Math.max(6, parseFloat(style.fontSize) || 12) });
+        if (text.length >= limit) break;
+      }
+    }
+
+    for (const anchor of document.querySelectorAll("a[href]")) {
+      if (links.length >= 2000) break;
+      const style = getComputedStyle(anchor);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+      for (const rect of anchor.getClientRects()) {
+        const mapped = intersect(rect);
+        if (!mapped) continue;
+        const url = anchor.href;
+        if (!/^https?:/i.test(url)) continue;
+        const key = `${url}|${mapped.x.toFixed(1)}|${mapped.y.toFixed(1)}`;
+        if (seenLinks.has(key)) continue;
+        seenLinks.add(key);
+        links.push({ ...mapped, url });
+      }
+    }
+    return { text, links };
+  }
+
+  function visibleSemantics() {
+    const view = viewport();
+    const metrics = {
+      clip: { left: view.offsetLeft, top: view.offsetTop, width: view.width, height: view.height },
+      destX: 0,
+      destY: 0
+    };
+    return { metrics: { width: view.width, height: view.height }, semantics: semanticSnapshot(metrics) };
+  }
+
   function collectWarnings() {
     const warnings = [];
     let inaccessibleFrames = 0;
@@ -442,7 +514,9 @@
       session.owner.scrollTo(session.ownerOffset.left + request.x, session.ownerOffset.top + request.y);
     }
 
-    return await waitForStable(request.settleTimeoutMs);
+    const result = await waitForStable(request.settleTimeoutMs);
+    result.semantics = semanticSnapshot(result.metrics);
+    return result;
   }
 
   async function beginPicker(mode) {
@@ -614,6 +688,7 @@
           if (session?.id === request.sessionId) session.lastHeartbeat = Date.now();
           return { alive: Boolean(session) };
         case "WINSHOT_RESTORE": return restore(request.reason || "complete");
+        case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
         case "WINSHOT_START_PICKER": return await beginPicker(request.mode);
         default: return undefined;
       }

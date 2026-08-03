@@ -168,32 +168,90 @@ async function pdfPageJpeg(record, tiles, top, sliceHeight, outputWidth) {
     for (const { bitmap } of decoded) bitmap.close();
   }
   const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.9 });
-  return { bytes: new Uint8Array(await blob.arrayBuffer()), width: outputWidth, height: outputHeight };
+  return {
+    bytes: new Uint8Array(await blob.arrayBuffer()),
+    width: outputWidth,
+    height: outputHeight,
+    sourceTop: top,
+    sourceHeight: sliceHeight
+  };
 }
 
-function buildPdf(images, title) {
-  const objectCount = 2 + images.length * 3;
-  const objects = new Array(objectCount + 1);
-  const pageRefs = [];
-  for (let i = 0; i < images.length; i++) pageRefs.push(3 + i * 3);
+function pdfLiteral(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7e]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[()\\]/g, (character) => `\\${character}`);
+}
+
+function buildPdf(images, title, record) {
+  const cssWidth = Math.max(1, record.report.dimensionsCss?.width || record.report.dimensionsPx.width);
+  const sourceWidth = Math.max(1, record.report.dimensionsPx.width);
+  const cssToSource = sourceWidth / cssWidth;
+  const allText = record.semantics?.text || [];
+  const allLinks = record.semantics?.links || [];
+  const objects = [null, null, null];
+  const pages = [];
+  let nextId = 3;
+
+  for (const image of images) {
+    const pageTopCss = image.sourceTop / cssToSource;
+    const pageBottomCss = (image.sourceTop + image.sourceHeight) / cssToSource;
+    const textEntries = allText.filter((entry) => entry.y < pageBottomCss && entry.y + entry.height > pageTopCss);
+    const linkEntries = allLinks.filter((entry) => entry.y < pageBottomCss && entry.y + entry.height > pageTopCss);
+    pages.push({
+      image,
+      pageTopCss,
+      textEntries,
+      linkEntries,
+      pageId: nextId++,
+      contentId: nextId++,
+      imageId: nextId++,
+      annotationIds: linkEntries.map(() => nextId++)
+    });
+  }
+
+  const objectCount = nextId - 1;
+  objects.length = objectCount + 1;
+  const pageRefs = pages.map((page) => page.pageId);
   objects[1] = [ascii("<< /Type /Catalog /Pages 2 0 R >>")];
   objects[2] = [ascii(`<< /Type /Pages /Count ${images.length} /Kids [${pageRefs.map((id) => `${id} 0 R`).join(" ")}] >>`)];
 
-  for (let i = 0; i < images.length; i++) {
-    const image = images[i];
-    const pageId = 3 + i * 3;
-    const contentId = pageId + 1;
-    const imageId = pageId + 2;
+  for (const page of pages) {
+    const { image, pageId, contentId, imageId } = page;
     const pageWidth = image.width * 0.75;
     const pageHeight = image.height * 0.75;
-    const commands = ascii(`q\n${pageWidth} 0 0 ${pageHeight} 0 0 cm\n/Im0 Do\nQ\n`);
-    objects[pageId] = [ascii(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>`)];
+    const pointsPerCss = pageWidth / cssWidth;
+    const commandLines = [`q\n${pageWidth} 0 0 ${pageHeight} 0 0 cm\n/Im0 Do\nQ`];
+    for (const entry of page.textEntries) {
+      const value = pdfLiteral(entry.text).slice(0, 1000);
+      if (!value) continue;
+      const x = Math.max(0, entry.x * pointsPerCss);
+      const y = Math.max(0, pageHeight - (entry.y - page.pageTopCss + entry.height) * pointsPerCss);
+      const fontSize = Math.max(4, Math.min(200, entry.fontSize * pointsPerCss));
+      commandLines.push(`BT /F1 ${fontSize.toFixed(2)} Tf 3 Tr 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${value}) Tj ET`);
+    }
+    const commands = ascii(`${commandLines.join("\n")}\n`);
+    const annotations = page.annotationIds.length
+      ? ` /Annots [${page.annotationIds.map((id) => `${id} 0 R`).join(" ")}]`
+      : "";
+    objects[pageId] = [ascii(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 ${imageId} 0 R >> /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents ${contentId} 0 R${annotations} >>`)];
     objects[contentId] = [ascii(`<< /Length ${commands.length} >>\nstream\n`), commands, ascii("endstream")];
     objects[imageId] = [
       ascii(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>\nstream\n`),
       image.bytes,
       ascii("\nendstream")
     ];
+    for (let i = 0; i < page.linkEntries.length; i++) {
+      const entry = page.linkEntries[i];
+      const left = Math.max(0, entry.x * pointsPerCss);
+      const right = Math.min(pageWidth, (entry.x + entry.width) * pointsPerCss);
+      const top = Math.min(pageHeight, pageHeight - (entry.y - page.pageTopCss) * pointsPerCss);
+      const bottom = Math.max(0, pageHeight - (entry.y - page.pageTopCss + entry.height) * pointsPerCss);
+      objects[page.annotationIds[i]] = [ascii(`<< /Type /Annot /Subtype /Link /Rect [${left.toFixed(2)} ${bottom.toFixed(2)} ${right.toFixed(2)} ${top.toFixed(2)}] /Border [0 0 0] /A << /S /URI /URI (${pdfLiteral(entry.url)}) >> >>`)];
+    }
   }
 
   const parts = [ascii("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n")];
@@ -224,5 +282,5 @@ export async function exportPdf(record, tiles, onProgress = () => {}) {
     images.push(await pdfPageJpeg(record, tiles, top, Math.min(sourcePageHeight, height - top), outputWidth));
     onProgress(Math.min(1, (top + sourcePageHeight) / height));
   }
-  return buildPdf(images, record.sourceTitle);
+  return buildPdf(images, record.sourceTitle, record);
 }
