@@ -37,6 +37,7 @@ public class QuickAccessOverlayRenderHarness
                 RenderTheme(source, settings, QuickAccessOverlayTheme.Light, "light", outDir);
                 RenderState(wide, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-wide-idle.png"));
                 RenderState(tall, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-tall-idle.png"));
+                RenderStackMotion(source, settings, outDir);
             }
             catch (Exception ex)
             {
@@ -54,6 +55,7 @@ public class QuickAccessOverlayRenderHarness
         Assert.True(File.Exists(Path.Combine(outDir, "light-hover.png")));
         Assert.True(File.Exists(Path.Combine(outDir, "dark-tooltip-pin.png")));
         Assert.True(File.Exists(Path.Combine(outDir, "light-tooltip-save.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "dark-stack-motion-contact-sheet.png")));
         using var wideRender = SD.Image.FromFile(Path.Combine(outDir, "dark-wide-idle.png"));
         using var tallRender = SD.Image.FromFile(Path.Combine(outDir, "dark-tall-idle.png"));
         Assert.Equal(new SD.Size(192, 120), wideRender.Size);
@@ -175,6 +177,110 @@ public class QuickAccessOverlayRenderHarness
             96);
         graphics.DrawImageUnscaled(tooltip, tooltipPoint);
         canvas.Save(path, SD.Imaging.ImageFormat.Png);
+    }
+
+    private static void RenderStackMotion(SD.Bitmap source, SettingsService settings, string outDir)
+    {
+        using var overlay = FastQuickActionsWindow.CreateForTheme(source, settings, QuickAccessOverlayTheme.Dark);
+        overlay.CreateControl();
+        SetPreviewBitmaps(overlay, source);
+        using var card = RenderBitmap(overlay);
+
+        var canvasSize = new SD.Size(720, 520);
+        int edge = 24;
+        int step = card.Height + 12;
+        var baseSlot = new SD.Point(canvasSize.Width - card.Width - edge, canvasSize.Height - card.Height - edge);
+        var secondSlot = new SD.Point(baseSlot.X, baseSlot.Y - step);
+        var thirdSlot = new SD.Point(baseSlot.X, baseSlot.Y - step * 2);
+        SD.Point exitTarget = QuickAccessOverlayMotion.ExitTarget(
+            new SD.Rectangle(SD.Point.Empty, canvasSize),
+            new SD.Rectangle(baseSlot, card.Size),
+            "bottom-right");
+
+        var frames = new List<SD.Bitmap>();
+        foreach (double progress in new[] { 0d, 0.25d, 0.5d, 0.75d, 1d })
+        {
+            var frame = CreateMotionCanvas(canvasSize);
+            using var graphics = SD.Graphics.FromImage(frame);
+            graphics.DrawImageUnscaled(card, secondSlot);
+            graphics.DrawImageUnscaled(card, thirdSlot);
+            if (progress < 1d)
+            {
+                SD.Point point = QuickAccessOverlayMotion.Interpolate(
+                    baseSlot,
+                    exitTarget,
+                    QuickAccessOverlayMotion.EaseInCubic(progress));
+                DrawWithOpacity(graphics, card, point, QuickAccessOverlayMotion.ExitOpacity(progress));
+            }
+            DrawMotionLabel(graphics, $"Exit {progress:P0}");
+            frames.Add(frame);
+        }
+
+        foreach (double progress in new[] { 0.5d, 1d })
+        {
+            double eased = QuickAccessOverlayMotion.EaseOutCubic(progress);
+            var frame = CreateMotionCanvas(canvasSize);
+            using var graphics = SD.Graphics.FromImage(frame);
+            graphics.DrawImageUnscaled(card, QuickAccessOverlayMotion.Interpolate(secondSlot, baseSlot, eased));
+            graphics.DrawImageUnscaled(card, QuickAccessOverlayMotion.Interpolate(thirdSlot, secondSlot, eased));
+            DrawMotionLabel(graphics, $"Restack {progress:P0}");
+            frames.Add(frame);
+        }
+
+        const int columns = 4;
+        const int cellWidth = 360;
+        const int cellHeight = 260;
+        int rows = (int)Math.Ceiling(frames.Count / (double)columns);
+        using var sheet = new SD.Bitmap(columns * cellWidth, rows * cellHeight);
+        using (var graphics = SD.Graphics.FromImage(sheet))
+        {
+            graphics.Clear(SD.Color.FromArgb(18, 21, 27));
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            for (int i = 0; i < frames.Count; i++)
+            {
+                int x = i % columns * cellWidth;
+                int y = i / columns * cellHeight;
+                graphics.DrawImage(frames[i], new SD.Rectangle(x, y, cellWidth, cellHeight));
+            }
+        }
+        sheet.Save(Path.Combine(outDir, "dark-stack-motion-contact-sheet.png"), SD.Imaging.ImageFormat.Png);
+        foreach (SD.Bitmap frame in frames)
+            frame.Dispose();
+    }
+
+    private static SD.Bitmap CreateMotionCanvas(SD.Size size)
+    {
+        var bitmap = new SD.Bitmap(size.Width, size.Height);
+        using var graphics = SD.Graphics.FromImage(bitmap);
+        using var gradient = new LinearGradientBrush(
+            new SD.Rectangle(SD.Point.Empty, size),
+            SD.Color.FromArgb(34, 45, 65),
+            SD.Color.FromArgb(20, 74, 88),
+            35f);
+        graphics.FillRectangle(gradient, new SD.Rectangle(SD.Point.Empty, size));
+        return bitmap;
+    }
+
+    private static void DrawWithOpacity(SD.Graphics graphics, SD.Bitmap bitmap, SD.Point point, double opacity)
+    {
+        using var attributes = new SD.Imaging.ImageAttributes();
+        var matrix = new SD.Imaging.ColorMatrix { Matrix33 = (float)Math.Clamp(opacity, 0d, 1d) };
+        attributes.SetColorMatrix(matrix, SD.Imaging.ColorMatrixFlag.Default, SD.Imaging.ColorAdjustType.Bitmap);
+        graphics.DrawImage(
+            bitmap,
+            new SD.Rectangle(point, bitmap.Size),
+            0,
+            0,
+            bitmap.Width,
+            bitmap.Height,
+            SD.GraphicsUnit.Pixel,
+            attributes);
+    }
+
+    private static void DrawMotionLabel(SD.Graphics graphics, string text)
+    {
+        using var font = new SD.Font("Segoe UI", 18, SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        graphics.DrawString(text, font, SD.Brushes.White, 18, 16);
     }
 
     private static SD.Bitmap CreateSyntheticCapture()

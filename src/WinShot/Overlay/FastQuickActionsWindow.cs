@@ -34,6 +34,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly WF.ContextMenuStrip _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
     private QuickAccessTooltipWindow? _tooltipWindow;
+    private WF.Timer? _exitMotionTimer;
+    private WF.Timer? _stackMotionTimer;
     private WF.Timer? _autoCloseTimer;
     private long _autoCloseDueTick;
     private int _autoCloseRemainingMs;
@@ -54,6 +56,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private int _focusedButton = -1;
     private bool _dragArmed;
     private bool _closed;
+    private bool _exitMotionStarted;
+    private bool _allowImmediateClose;
     private bool _regionUpdateQueued;
     private SD.Point _dragStart;
 
@@ -141,6 +145,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             if (_historyPath is not null)
                 PushRecentlyClosed(_historyPath);
             DisposeImageWhenUnused();
+            ReflowOpenWindowsAnimated();
         };
         OpenWindows.Add(this);
 
@@ -151,6 +156,26 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     protected override bool ShowWithoutActivation => true;
+
+    protected override void OnFormClosing(WF.FormClosingEventArgs e)
+    {
+        bool systemClose = e.CloseReason is
+            WF.CloseReason.ApplicationExitCall or
+            WF.CloseReason.TaskManagerClosing or
+            WF.CloseReason.WindowsShutDown;
+        if (!_allowImmediateClose &&
+            !systemClose &&
+            W.SystemParameters.ClientAreaAnimation &&
+            Visible &&
+            IsHandleCreated &&
+            !IsDisposed)
+        {
+            e.Cancel = true;
+            BeginExitMotion();
+        }
+
+        base.OnFormClosing(e);
+    }
 
     protected override WF.CreateParams CreateParams
     {
@@ -288,16 +313,20 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         if (disposing)
         {
-            OpenWindows.Remove(this);
+            bool removed = OpenWindows.Remove(this);
             _closed = true;
             _preview?.Dispose();
             _blurredPreview?.Dispose();
+            StopExitMotionTimer();
+            StopStackMotionTimer();
             StopAutoCloseTimer();
             HideActionTooltip();
             _tooltipTimer.Dispose();
             _overflowMenu.Dispose();
             foreach (var button in _buttons)
                 button.Dispose();
+            if (removed)
+                ReflowOpenWindowsAnimated();
         }
         base.Dispose(disposing);
     }
@@ -609,6 +638,128 @@ public sealed class FastQuickActionsWindow : WF.Form
             _settings.Current.OverlayPosition,
             offset,
             _dpi);
+    }
+
+    private void BeginExitMotion()
+    {
+        if (_exitMotionStarted || _closed || IsDisposed)
+            return;
+
+        _exitMotionStarted = true;
+        StopStackMotionTimer();
+        StopAutoCloseTimer();
+        HideActionTooltip();
+        if (_overflowMenu.Visible)
+            _overflowMenu.Close();
+
+        SD.Point start = Location;
+        SD.Rectangle workingArea = WF.Screen.FromRectangle(Bounds).WorkingArea;
+        SD.Point target = QuickAccessOverlayMotion.ExitTarget(
+            workingArea,
+            Bounds,
+            _settings.Current.OverlayPosition);
+        double startingOpacity = Opacity;
+        long started = Environment.TickCount64;
+
+        _exitMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _exitMotionTimer.Tick += (_, _) =>
+        {
+            if (IsDisposed)
+            {
+                StopExitMotionTimer();
+                return;
+            }
+
+            double progress = Math.Clamp(
+                (Environment.TickCount64 - started) / (double)QuickAccessOverlayMotion.ExitDurationMs,
+                0d,
+                1d);
+            Location = QuickAccessOverlayMotion.Interpolate(
+                start,
+                target,
+                QuickAccessOverlayMotion.EaseInCubic(progress));
+            Opacity = Math.Max(0.02d, startingOpacity * QuickAccessOverlayMotion.ExitOpacity(progress));
+            if (progress < 1d)
+                return;
+
+            StopExitMotionTimer();
+            Hide();
+            _allowImmediateClose = true;
+            Close();
+        };
+        _exitMotionTimer.Start();
+    }
+
+    private static void ReflowOpenWindowsAnimated()
+    {
+        var offsets = new Dictionary<SD.Rectangle, int>();
+        foreach (FastQuickActionsWindow window in OpenWindows.Where(w =>
+                     w.Visible && !w.IsDisposed && !w._exitMotionStarted))
+        {
+            SD.Rectangle workingArea = WF.Screen.FromRectangle(window.Bounds).WorkingArea;
+            offsets.TryGetValue(workingArea, out int offset);
+            SD.Point target = QuickAccessOverlayLayout.Place(
+                workingArea,
+                window.Size,
+                window._settings.Current.OverlayPosition,
+                offset,
+                window._dpi);
+            window.BeginStackMotion(target);
+            offsets[workingArea] = offset + window.Height + 12;
+        }
+    }
+
+    private void BeginStackMotion(SD.Point target)
+    {
+        StopStackMotionTimer();
+        if (_exitMotionStarted || _closed || IsDisposed || Location == target)
+            return;
+        if (!W.SystemParameters.ClientAreaAnimation)
+        {
+            Location = target;
+            return;
+        }
+
+        SD.Point start = Location;
+        long started = Environment.TickCount64;
+        _stackMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _stackMotionTimer.Tick += (_, _) =>
+        {
+            if (_exitMotionStarted || _closed || IsDisposed)
+            {
+                StopStackMotionTimer();
+                return;
+            }
+
+            double progress = Math.Clamp(
+                (Environment.TickCount64 - started) / (double)QuickAccessOverlayMotion.RestackDurationMs,
+                0d,
+                1d);
+            Location = QuickAccessOverlayMotion.Interpolate(
+                start,
+                target,
+                QuickAccessOverlayMotion.EaseOutCubic(progress));
+            if (progress >= 1d)
+            {
+                Location = target;
+                StopStackMotionTimer();
+            }
+        };
+        _stackMotionTimer.Start();
+    }
+
+    private void StopExitMotionTimer()
+    {
+        _exitMotionTimer?.Stop();
+        _exitMotionTimer?.Dispose();
+        _exitMotionTimer = null;
+    }
+
+    private void StopStackMotionTimer()
+    {
+        _stackMotionTimer?.Stop();
+        _stackMotionTimer?.Dispose();
+        _stackMotionTimer = null;
     }
 
     private void BuildOverflowMenu()
