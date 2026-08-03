@@ -49,8 +49,8 @@ internal readonly record struct QuickAccessOverlayLayout(
             thumbnail,
             Scale(11, dpiScale),
             Scale(28, dpiScale),
-            Scale(36, dpiScale),
-            Scale(32, dpiScale),
+            Scale(82, dpiScale),
+            Scale(34, dpiScale),
             Scale(9, dpiScale),
             Scale(6, dpiScale));
     }

@@ -1,4 +1,4 @@
-# Quick Access visual redesign — 2026-08-03
+# Quick Access HTML design adoption - 2026-08-03
 
 ## Scope
 
@@ -6,18 +6,33 @@ Polish only the post-capture Quick Access overlay. Preserve its five actions,
 keyboard shortcuts, accessibility names, placement, auto-close behavior, and
 local-only implementation.
 
-## Visual correction
+## Selected source
 
-- Replaced the cramped 22-pixel bright circles with 28-pixel dark translucent
-  rounded controls and consistent Fluent glyphs.
-- Replaced the centered white `Copy` label pill with a compact blue icon action.
-- Reduced the hover scrim so the capture remains recognizable.
-- Kept Pin, Close, Annotate, and Save in their existing corners.
-- Added rendered hover evidence for Save and Copy so icon contrast is checked.
+- The user-selected `windows_screenshot_hover_cards_custom_pin.html` artifact is
+  the visual source for this revision.
+- Idle shows only the unobstructed capture thumbnail. Hover blurs and darkens the
+  thumbnail, then reveals translucent controls above it.
+- The exact SVG paths from the selected design are embedded locally for Pin,
+  Close, Edit, Save, and Copy. No network or cloud dependency was added.
+- The selected pill treatment, Segoe UI label, subtle borders, shadows, and
+  light/dark palettes are carried into the native overlay.
+- The user's previously approved placement remains Pin top-left, Close
+  top-right, Edit bottom-left, Save bottom-right, and Copy centered.
+
+## Theme behavior
+
+- WinShot remains dark-only today, so the installed candidate uses the dark
+  palette.
+- A light palette is implemented and rendered under test so the overlay is
+  ready to follow a future app-wide theme setting without another redesign.
+- Theme selection stays local and adds no timer, background process, or service.
 
 ## Verification
 
-- Quick Access focused tests: 29/29 passed.
-- Full Release suite: 493/493 passed.
+- Quick Access focused tests: 31/31 passed.
+- Full Release suite: 495/495 passed.
 - Release x64 self-contained publish succeeded with product version 1.2.1.
-- Published package changed by less than 1 KB and added no dependency or idle work.
+- Common published files grew by 21,824 bytes (20 KB in `WinShot.dll` and
+  1,344 bytes in symbols); the file and dependency sets are unchanged.
+- Render evidence includes idle, hover, Save hover, and Copy hover in both
+  palettes.

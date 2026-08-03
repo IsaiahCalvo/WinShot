@@ -1,5 +1,6 @@
 ﻿using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Xml.Linq;
@@ -20,15 +21,6 @@ public sealed class FastQuickActionsWindow : WF.Form
     private const int WmNclbuttondown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
 
-    private static readonly SD.Color CardFill = ThemePalette.WindowBg;                       // backing behind the thumbnail
-    private static readonly SD.Color HoverScrim = SD.Color.FromArgb(86, 0, 0, 0);
-    private static readonly SD.Color SecondaryFace = SD.Color.FromArgb(196, 20, 22, 27);
-    private static readonly SD.Color SecondaryHover = SD.Color.FromArgb(232, 48, 51, 59);
-    private static readonly SD.Color SecondaryPressed = SD.Color.FromArgb(238, 31, 33, 39);
-    private static readonly SD.Color PrimaryFace = SD.Color.FromArgb(232, 44, 112, 224);
-    private static readonly SD.Color PrimaryHover = SD.Color.FromArgb(245, 63, 130, 239);
-    private static readonly SD.Color PrimaryPressed = SD.Color.FromArgb(245, 34, 91, 190);
-    private static readonly SD.Color LightGlyph = SD.Color.FromArgb(0xF7, 0xF8, 0xFA);
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
 
@@ -37,6 +29,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly Task? _releaseAfterTask;
     private readonly bool _requestMemoryCleanupOnClose;
     private readonly bool _loadPreview;
+    private readonly QuickAccessOverlayVisuals _visuals;
     private readonly WF.ToolTip _toolTip = new() { InitialDelay = 300, ReshowDelay = 100 };
     private readonly WF.ContextMenuStrip _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
@@ -73,9 +66,23 @@ public sealed class FastQuickActionsWindow : WF.Form
         SettingsService settings,
         string? historyPath = null,
         Task<string?>? historyPathTask = null)
-        : this(image, settings, historyPath, historyPathTask, releaseAfterTask: null)
+        : this(image, settings, historyPath, historyPathTask, releaseAfterTask: null, themeOverride: null)
     {
     }
+
+    internal static FastQuickActionsWindow CreateForTheme(
+        SD.Bitmap image,
+        SettingsService settings,
+        QuickAccessOverlayTheme theme)
+        => new(
+            image,
+            settings,
+            historyPath: null,
+            historyPathTask: null,
+            releaseAfterTask: null,
+            requestMemoryCleanupOnClose: false,
+            loadPreview: true,
+            themeOverride: theme);
 
     private FastQuickActionsWindow(
         SD.Bitmap image,
@@ -84,7 +91,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         Task<string?>? historyPathTask,
         Task? releaseAfterTask,
         bool requestMemoryCleanupOnClose = true,
-        bool loadPreview = true)
+        bool loadPreview = true,
+        QuickAccessOverlayTheme? themeOverride = null)
     {
         _image = image;
         _settings = settings;
@@ -92,9 +100,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         _releaseAfterTask = releaseAfterTask;
         _requestMemoryCleanupOnClose = requestMemoryCleanupOnClose;
         _loadPreview = loadPreview;
+        _visuals = QuickAccessOverlayThemePalette.For(themeOverride ?? QuickAccessOverlayThemePalette.Current);
 
         AutoScaleMode = WF.AutoScaleMode.None;
-        BackColor = CardFill;
+        BackColor = _visuals.CardFill;
         AccessibleName = "Quick Access capture preview";
         AccessibleDescription = "Captured image actions. Press Tab to move through actions or Shift+F10 for more actions.";
         DoubleBuffered = true;
@@ -171,7 +180,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         SettingsService settings,
         Task<string?> historyPathTask,
         Task releaseAfterTask)
-        => new(image, settings, historyPath: null, historyPathTask, releaseAfterTask);
+        => new(image, settings, historyPath: null, historyPathTask, releaseAfterTask, themeOverride: null);
 
     public static string? PopRecentlyClosed()
     {
@@ -251,7 +260,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         g.Clear(SD.Color.Transparent);
 
         // Idle is only the rounded thumbnail card. The native window class supplies the soft shadow.
-        using (var fill = new SD.SolidBrush(CardFill))
+        using (var fill = new SD.SolidBrush(_visuals.CardFill))
         using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
             g.FillPath(fill, cardPath);
 
@@ -259,7 +268,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         if (_hovering)
         {
-            using (var scrim = new SD.SolidBrush(HoverScrim))
+            using (var scrim = new SD.SolidBrush(_visuals.HoverTint))
             using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
                 g.FillPath(scrim, cardPath);
 
@@ -310,51 +319,48 @@ public sealed class FastQuickActionsWindow : WF.Form
         int right = _cardRect.Right - layout.ControlPadding - layout.IconSize;
         int top = _cardRect.Top + layout.ControlPadding;
         int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
-        // Cloud is intentionally absent. Save occupies its former bottom-right corner.
-        AddIconButton("", "Pin to the screen", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
-        AddIconButton("", "Close (Ctrl+W)", "Close", right, top, layout.IconSize, Close);
-        AddIconButton("", "Open Annotate tool (Ctrl+E)", "Annotate", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
-        AddIconButton("", "Save (Ctrl+S)", "Save", right, bottom, layout.IconSize, SaveFromInput, CreateSaveIcon(layout.IconSize));
+        // Preserve the user's verified action placement while using the selected HTML design.
+        AddIconButton("quick-access-pin.svg", "Pin to the screen", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
+        AddIconButton("quick-access-close.svg", "Close (Ctrl+W)", "Close", right, top, layout.IconSize, Close);
+        AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
+        AddIconButton("quick-access-save.svg", "Save (Ctrl+S)", "Save", right, bottom, layout.IconSize, SaveFromInput);
 
         int pillX = _cardRect.Left + (_cardRect.Width - layout.PillWidth) / 2;
         int pillTop = _cardRect.Top + (_cardRect.Height - layout.PillHeight) / 2;
 
-        AddPrimaryButton("", "Copy (Ctrl+C)", pillX, pillTop, layout.PillWidth, layout.PillHeight, () => CopyAsync(keepOpen: IsAltDown()));
+        AddCopyButton("Copy", "Copy (Ctrl+C)", pillX, pillTop, layout.PillWidth, layout.PillHeight, () => CopyAsync(keepOpen: IsAltDown()));
         _focusedButton = Math.Clamp(_focusedButton, -1, _buttons.Count - 1);
     }
 
     private void AddIconButton(
-        string glyph,
+        string assetName,
         string tip,
         string name,
         int x,
         int y,
         int size,
-        Action action,
-        SD.Bitmap? icon = null)
+        Action action)
         => _buttons.Add(new ActionButton(
-            glyph,
             tip,
             name,
             new SD.Rectangle(x, y, size, size),
             action,
-            ThemePalette.IconFont(tip.StartsWith("Close", StringComparison.Ordinal) ? 8.75f : 10f),
-            Math.Max(6, size / 3))
-        {
-            Icon = icon,
-        });
+            ActionButtonShape.Circle,
+            size / 2,
+            CreateSvgIcon(assetName, Math.Max(14, (int)Math.Round(size * 0.56)), _visuals.Glyph)));
 
-    private void AddPrimaryButton(string glyph, string tip, int x, int y, int width, int height, Action action)
+    private void AddCopyButton(string label, string tip, int x, int y, int width, int height, Action action)
         => _buttons.Add(new ActionButton(
-            glyph,
             tip,
             "Copy",
             new SD.Rectangle(x, y, width, height),
             action,
-            ThemePalette.IconFont(11f),
-            Math.Max(9, height / 3))
+            ActionButtonShape.Pill,
+            height / 2,
+            CreateSvgIcon("quick-access-copy.svg", Math.Max(14, (int)Math.Round(height * 0.47)), _visuals.Glyph))
         {
-            IsPrimary = true,
+            Label = label,
+            LabelFont = ThemePalette.UiFont(9.75f),
         });
 
     private void DrawThumbnail(SD.Graphics g, bool blurred)
@@ -382,22 +388,52 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private static void DrawButton(SD.Graphics g, ActionButton button, bool hot, bool pressed)
+    private void DrawButton(SD.Graphics g, ActionButton button, bool hot, bool pressed)
     {
-        SD.Color face = button.IsPrimary
-            ? pressed ? PrimaryPressed : hot ? PrimaryHover : PrimaryFace
-            : pressed ? SecondaryPressed : hot ? SecondaryHover : SecondaryFace;
+        SD.Color face = pressed ? _visuals.ControlPressed : hot ? _visuals.ControlHover : _visuals.ControlFace;
 
-        using (var path = GdiPaths.RoundedRect(button.Bounds, button.CornerRadius))
+        var shadowBounds = button.Bounds;
+        shadowBounds.Offset(0, Math.Max(1, button.Bounds.Height / 18));
+        using (var shadowPath = CreateButtonPath(shadowBounds, button.Shape, button.CornerRadius))
+        using (var shadow = new SD.SolidBrush(_visuals.ControlShadow))
+            g.FillPath(shadow, shadowPath);
+
+        using (var path = CreateButtonPath(button.Bounds, button.Shape, button.CornerRadius))
         {
             using var fill = new SD.SolidBrush(face);
             g.FillPath(fill, path);
-            using var pen = new SD.Pen(
-                button.IsPrimary
-                    ? SD.Color.FromArgb(126, 210, 226, 255)
-                    : SD.Color.FromArgb(82, 255, 255, 255),
-                1);
+            using var pen = new SD.Pen(_visuals.ControlBorder, 1);
             g.DrawPath(pen, path);
+        }
+
+        if (button.Label is not null && button.LabelFont is not null)
+        {
+            var flags = WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding;
+            SD.Size labelSize = WF.TextRenderer.MeasureText(g, button.Label, button.LabelFont, SD.Size.Empty, flags);
+            int iconWidth = button.Icon?.Width ?? 0;
+            int gap = button.Icon is null ? 0 : Math.Max(4, button.Bounds.Height / 7);
+            int contentWidth = iconWidth + gap + labelSize.Width;
+            int contentX = button.Bounds.Left + (button.Bounds.Width - contentWidth) / 2;
+
+            if (button.Icon is not null)
+            {
+                int iconY = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
+                g.DrawImageUnscaled(button.Icon, contentX, iconY);
+            }
+
+            var labelBounds = new SD.Rectangle(
+                contentX + iconWidth + gap,
+                button.Bounds.Top,
+                labelSize.Width,
+                button.Bounds.Height);
+            WF.TextRenderer.DrawText(
+                g,
+                button.Label,
+                button.LabelFont,
+                labelBounds,
+                _visuals.Glyph,
+                flags | WF.TextFormatFlags.VerticalCenter);
+            return;
         }
 
         if (button.Icon is not null)
@@ -405,54 +441,73 @@ public sealed class FastQuickActionsWindow : WF.Form
             int x = button.Bounds.Left + (button.Bounds.Width - button.Icon.Width) / 2;
             int y = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
             g.DrawImageUnscaled(button.Icon, x, y);
-            return;
         }
-
-        var flags = WF.TextFormatFlags.HorizontalCenter |
-                    WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine |
-                    WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(g, button.Glyph, button.Font, button.Bounds, LightGlyph, flags);
     }
 
-    private static SD.Bitmap? CreateSaveIcon(int buttonSize)
+    private static GraphicsPath CreateButtonPath(SD.Rectangle bounds, ActionButtonShape shape, int cornerRadius)
+    {
+        if (shape == ActionButtonShape.Pill)
+            return GdiPaths.RoundedRect(bounds, cornerRadius);
+
+        var path = new GraphicsPath();
+        path.AddEllipse(bounds);
+        return path;
+    }
+
+    private static SD.Bitmap? CreateSvgIcon(string assetName, int pixelSize, SD.Color color)
     {
         try
         {
             using Stream? stream = typeof(FastQuickActionsWindow).Assembly.GetManifestResourceStream(
-                "WinShot.Assets.download-window-svgrepo-com.svg");
+                $"WinShot.Assets.{assetName}");
             if (stream is null)
                 return null;
 
             XDocument document = XDocument.Load(stream);
-            XNamespace svg = "http://www.w3.org/2000/svg";
-            string? pathData = document.Root?.Element(svg + "path")?.Attribute("d")?.Value;
-            if (string.IsNullOrWhiteSpace(pathData))
+            XElement? root = document.Root;
+            if (root is null)
                 return null;
 
-            WM.Geometry geometry = WM.Geometry.Parse(pathData);
-            W.Rect bounds = geometry.Bounds;
-            int pixelSize = Math.Max(10, (int)Math.Round(buttonSize * 0.64));
+            W.Rect viewBox = ParseViewBox(root.Attribute("viewBox")?.Value);
             double inset = Math.Max(1, pixelSize * 0.06);
-            double scale = Math.Min(
-                (pixelSize - inset * 2) / bounds.Width,
-                (pixelSize - inset * 2) / bounds.Height);
-            var transform = new WM.MatrixTransform(new WM.Matrix(
-                scale,
-                0,
-                0,
-                scale,
-                (pixelSize - bounds.Width * scale) / 2 - bounds.X * scale,
-                (pixelSize - bounds.Height * scale) / 2 - bounds.Y * scale));
+            double scale = Math.Min((pixelSize - inset * 2) / viewBox.Width, (pixelSize - inset * 2) / viewBox.Height);
+            var transform = new WM.MatrixTransform(new WM.Matrix(scale, 0, 0, scale,
+                (pixelSize - viewBox.Width * scale) / 2 - viewBox.X * scale,
+                (pixelSize - viewBox.Height * scale) / 2 - viewBox.Y * scale));
+            var iconBrush = new WM.SolidColorBrush(WM.Color.FromArgb(color.A, color.R, color.G, color.B));
 
             var visual = new WM.DrawingVisual();
             using (WM.DrawingContext context = visual.RenderOpen())
             {
                 context.PushTransform(transform);
-                context.DrawGeometry(
-                    new WM.SolidColorBrush(WM.Color.FromArgb(LightGlyph.A, LightGlyph.R, LightGlyph.G, LightGlyph.B)),
-                    null,
-                    geometry);
+                foreach (XElement element in root.Descendants())
+                {
+                    WM.Geometry? geometry = element.Name.LocalName switch
+                    {
+                        "path" when !string.IsNullOrWhiteSpace(element.Attribute("d")?.Value)
+                            => WM.Geometry.Parse(element.Attribute("d")!.Value),
+                        "rect" => CreateRectGeometry(element),
+                        _ => null,
+                    };
+                    if (geometry is null)
+                        continue;
+
+                    string fillValue = AttributeValue(element, root, "fill", "none");
+                    string strokeValue = AttributeValue(element, root, "stroke", "none");
+                    WM.Brush? fill = fillValue.Equals("none", StringComparison.OrdinalIgnoreCase) ? null : iconBrush;
+                    WM.Pen? pen = null;
+                    if (!strokeValue.Equals("none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        double width = ParseDouble(AttributeValue(element, root, "stroke-width", "1"), 1);
+                        pen = new WM.Pen(iconBrush, width)
+                        {
+                            StartLineCap = WM.PenLineCap.Round,
+                            EndLineCap = WM.PenLineCap.Round,
+                            LineJoin = WM.PenLineJoin.Round,
+                        };
+                    }
+                    context.DrawGeometry(fill, pen, geometry);
+                }
                 context.Pop();
             }
 
@@ -485,16 +540,40 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
         catch (Exception ex)
         {
-            Log.Error("Save icon SVG could not be rendered", ex);
+            Log.Error($"Quick Access icon '{assetName}' could not be rendered", ex);
             return null;
         }
     }
 
-    private static void DrawFocus(SD.Graphics g, ActionButton button)
+    private static W.Rect ParseViewBox(string? value)
+    {
+        string[] parts = (value ?? "0 0 24 24").Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 4
+            ? new W.Rect(ParseDouble(parts[0], 0), ParseDouble(parts[1], 0), ParseDouble(parts[2], 24), ParseDouble(parts[3], 24))
+            : new W.Rect(0, 0, 24, 24);
+    }
+
+    private static WM.Geometry CreateRectGeometry(XElement element)
+    {
+        double x = ParseDouble(element.Attribute("x")?.Value, 0);
+        double y = ParseDouble(element.Attribute("y")?.Value, 0);
+        double width = ParseDouble(element.Attribute("width")?.Value, 0);
+        double height = ParseDouble(element.Attribute("height")?.Value, 0);
+        double radius = ParseDouble(element.Attribute("rx")?.Value, 0);
+        return new WM.RectangleGeometry(new W.Rect(x, y, width, height), radius, radius);
+    }
+
+    private static string AttributeValue(XElement element, XElement root, string name, string fallback)
+        => element.Attribute(name)?.Value ?? root.Attribute(name)?.Value ?? fallback;
+
+    private static double ParseDouble(string? value, double fallback)
+        => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback;
+
+    private void DrawFocus(SD.Graphics g, ActionButton button)
     {
         var bounds = SD.Rectangle.Inflate(button.Bounds, -2, -2);
-        using var pen = new SD.Pen(SD.Color.FromArgb(210, 36, 99, 180), 1) { DashStyle = DashStyle.Dot };
-        using var path = GdiPaths.RoundedRect(bounds, Math.Max(1, button.CornerRadius - 2));
+        using var pen = new SD.Pen(_visuals.FocusRing, 1) { DashStyle = DashStyle.Dot };
+        using var path = CreateButtonPath(bounds, button.Shape, Math.Max(1, button.CornerRadius - 2));
         g.DrawPath(pen, path);
     }
 
@@ -1008,7 +1087,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             int index = _buttons.FindIndex(b => b.Tip.StartsWith("Copy", StringComparison.Ordinal));
             if (index < 0) return;
 
-            _buttons[index].Glyph = "";
+            _buttons[index].Label = "Copied";
             Invalidate(_buttons[index].Bounds);
             var timer = new WF.Timer { Interval = 1200 };
             timer.Tick += (_, _) =>
@@ -1016,7 +1095,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 timer.Stop();
                 timer.Dispose();
                 if (_closed || IsDisposed) return;
-                _buttons[index].Glyph = "";
+                _buttons[index].Label = "Copy";
                 Invalidate(_buttons[index].Bounds);
             };
             timer.Start();
@@ -1087,28 +1166,35 @@ public sealed class FastQuickActionsWindow : WF.Form
     [DllImport("user32.dll")]
     private static extern int GetDpiForWindow(IntPtr hWnd);
 
+    private enum ActionButtonShape
+    {
+        Circle,
+        Pill,
+    }
+
     private sealed class ActionButton(
-        string glyph,
         string tip,
         string accessibleName,
         SD.Rectangle bounds,
         Action action,
-        SD.Font font,
-        int cornerRadius = 11) : IDisposable
+        ActionButtonShape shape,
+        int cornerRadius,
+        SD.Bitmap? icon)
+        : IDisposable
     {
-        public string Glyph { get; set; } = glyph;
         public string Tip { get; } = tip;
         public string AccessibleName { get; } = accessibleName;
         public SD.Rectangle Bounds { get; } = bounds;
         public Action Action { get; } = action;
-        public SD.Font Font { get; } = font;
+        public ActionButtonShape Shape { get; } = shape;
         public int CornerRadius { get; } = cornerRadius;
-        public bool IsPrimary { get; init; }
-        public SD.Bitmap? Icon { get; init; }
+        public string? Label { get; set; }
+        public SD.Font? LabelFont { get; init; }
+        public SD.Bitmap? Icon { get; } = icon;
 
         public void Dispose()
         {
-            Font.Dispose();
+            LabelFont?.Dispose();
             Icon?.Dispose();
         }
     }

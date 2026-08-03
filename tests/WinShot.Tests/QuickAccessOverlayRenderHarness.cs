@@ -31,11 +31,8 @@ public class QuickAccessOverlayRenderHarness
             {
                 using var source = CreateSyntheticCapture();
                 var settings = new SettingsService();
-                RenderState(source, settings, hovering: false, hoverButton: -1, Path.Combine(outDir, "idle.png"));
-                RenderState(source, settings, hovering: true, hoverButton: -1, Path.Combine(outDir, "hover.png"));
-                RenderState(source, settings, hovering: true, hoverButton: 3, Path.Combine(outDir, "hover-save.png"));
-                RenderState(source, settings, hovering: true, hoverButton: 4, Path.Combine(outDir, "hover-copy.png"));
-                RenderSaveIcon(Path.Combine(outDir, "save-icon-source-render.png"));
+                RenderTheme(source, settings, QuickAccessOverlayTheme.Dark, "dark", outDir);
+                RenderTheme(source, settings, QuickAccessOverlayTheme.Light, "light", outDir);
             }
             catch (Exception ex)
             {
@@ -47,26 +44,34 @@ public class QuickAccessOverlayRenderHarness
         thread.Join();
 
         Assert.Null(failure);
-        Assert.True(File.Exists(Path.Combine(outDir, "idle.png")));
-        Assert.True(File.Exists(Path.Combine(outDir, "hover.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "dark-idle.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "dark-hover.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "light-idle.png")));
+        Assert.True(File.Exists(Path.Combine(outDir, "light-hover.png")));
     }
 
-    private static void RenderSaveIcon(string path)
+    private static void RenderTheme(
+        SD.Bitmap source,
+        SettingsService settings,
+        QuickAccessOverlayTheme theme,
+        string prefix,
+        string outDir)
     {
-        var method = typeof(FastQuickActionsWindow)
-            .GetMethod("CreateSaveIcon", BindingFlags.Static | BindingFlags.NonPublic)!;
-        using var icon = (SD.Bitmap)method.Invoke(null, new object[] { 100 })!;
-        icon.Save(path, SD.Imaging.ImageFormat.Png);
+        RenderState(source, settings, theme, hovering: false, hoverButton: -1, Path.Combine(outDir, $"{prefix}-idle.png"));
+        RenderState(source, settings, theme, hovering: true, hoverButton: -1, Path.Combine(outDir, $"{prefix}-hover.png"));
+        RenderState(source, settings, theme, hovering: true, hoverButton: 3, Path.Combine(outDir, $"{prefix}-hover-save.png"));
+        RenderState(source, settings, theme, hovering: true, hoverButton: 4, Path.Combine(outDir, $"{prefix}-hover-copy.png"));
     }
 
     private static void RenderState(
         SD.Bitmap source,
         SettingsService settings,
+        QuickAccessOverlayTheme theme,
         bool hovering,
         int hoverButton,
         string path)
     {
-        using var overlay = new FastQuickActionsWindow(source, settings);
+        using var overlay = FastQuickActionsWindow.CreateForTheme(source, settings, theme);
         overlay.CreateControl();
         SetPreviewBitmaps(overlay, source);
         if (hovering)

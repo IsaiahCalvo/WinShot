@@ -14,14 +14,14 @@ public class QuickAccessOverlayLayoutTests
 
         Assert.Equal(new SD.Size(158, 110), layout.ClientSize);
         Assert.Equal(28, layout.IconSize);
-        Assert.Equal(36, layout.PillWidth);
-        Assert.Equal(32, layout.PillHeight);
+        Assert.Equal(82, layout.PillWidth);
+        Assert.Equal(34, layout.PillHeight);
     }
 
     [Theory]
-    [InlineData(96, 190, 120, 28, 32)]
-    [InlineData(144, 285, 180, 42, 48)]
-    [InlineData(192, 380, 241, 56, 64)]
+    [InlineData(96, 190, 120, 28, 34)]
+    [InlineData(144, 285, 180, 42, 51)]
+    [InlineData(192, 380, 241, 56, 68)]
     public void Layout_ScalesForHighDpi(int dpi, int expectedWidth, int expectedHeight, int icon, int pillHeight)
     {
         var layout = QuickAccessOverlayLayout.Calculate(new SD.Size(1200, 760), sizePercent: 50, dpi);
