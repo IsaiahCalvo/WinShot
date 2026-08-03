@@ -117,10 +117,28 @@ public class HistoryAcceptanceTests
         Assert.Contains("Property=\"IsKeyboardFocused\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Property=\"IsKeyboardFocusWithin\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding PinVisibility}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Delete\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SelectButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SelectionToolbar\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Scrolling\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnRestore\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnCopySelected\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnShareSelected\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnDeleteSelected\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"LoadMoreButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnLoadMore\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Shows the next 200 local history items", xaml, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("20260803-120000-000-scroll.png", true)]
+    [InlineData("20260803-120000-000.png", false)]
+    [InlineData("20260803-120000-000-scroll.mp4", false)]
+    public void ScrollingClassification_UsesExplicitHistoryTag(string fileName, bool expected)
+    {
+        var item = new HistoryItem(fileName);
+
+        Assert.Equal(expected, item.IsScrollingCapture);
+        Assert.Equal(expected ? Visibility.Visible : Visibility.Collapsed, item.ScrollingVisibility);
     }
 
     private static HistoryService CreateService(string dir)

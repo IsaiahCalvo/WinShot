@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -31,9 +32,11 @@ public partial class HistoryWindow : Window
     private readonly SettingsService _settings;
     private readonly HistoryIncrementalCollection _paging = new();
     private ObservableCollection<HistoryItem> _items => _paging.VisibleItems;
-    private readonly CollectionViewSource _itemsView = new();
     private CancellationTokenSource? _loadCts;
     private string _filter = "all";
+    private string _sort = "date";
+    private bool _sortDescending = true;
+    private bool _selectionMode;
     private HistoryItem? _previewItem;
     private FastQuickPreviewWindow? _preview;
     private bool _previewOpen;
@@ -46,6 +49,8 @@ public partial class HistoryWindow : Window
 
     public event Action<string>? EditRequested;
     public event Action<string>? PinRequested;
+    public event Action<string>? RestoreRequested;
+    public event Action<IReadOnlyList<string>>? MultiPinRequested;
 
     public HistoryWindow(HistoryService history, SettingsService settings)
     {
@@ -57,12 +62,7 @@ public partial class HistoryWindow : Window
         _history = history;
         _settings = settings;
 
-        // Grouped view over the filtered items: tiles are grouped under day headers
-        // ("Today", "Yesterday", weekday, or "MMM d") using the parsed capture time.
-        // Source order is already newest-first, so groups appear in that order too.
-        _itemsView.Source = _items;
-        _itemsView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(HistoryItem.DayGroup)));
-        ItemsList.ItemsSource = _itemsView.View;
+        ItemsList.ItemsSource = _items;
         ItemsList.SelectionChanged += OnSelectionChanged;
 
         Loaded += (_, _) =>
@@ -218,7 +218,12 @@ public partial class HistoryWindow : Window
                 }
                 return;
             case Key.Delete:
-                if (SelectedItem() is { } toDelete)
+                if (_selectionMode && ItemsList.SelectedItems.Count > 0)
+                {
+                    _ = DeleteSelectedItems();
+                    e.Handled = true;
+                }
+                else if (SelectedItem() is { } toDelete)
                 {
                     DeleteItem(toDelete);
                     e.Handled = true;
@@ -310,7 +315,8 @@ public partial class HistoryWindow : Window
                     newItems,
                     MatchesFilter,
                     selectedPath,
-                    cts.Token);
+                    cts.Token,
+                    CurrentComparer());
                 foreach (HistoryItem previous in previousItems)
                     previous.Thumbnail = null;
                 UpdateCollectionState();
@@ -462,7 +468,7 @@ public partial class HistoryWindow : Window
         IEnumerable<HistoryItem> items,
         CancellationToken cancellationToken)
     {
-        foreach (HistoryItem item in items.Where(item => item.IsImage && item.Thumbnail is null))
+        foreach (HistoryItem item in items.Where(item => (item.IsImage || item.IsGif) && item.Thumbnail is null))
         {
             cancellationToken.ThrowIfCancellationRequested();
             BitmapImage? thumbnail = await Task.Run(
@@ -499,6 +505,7 @@ public partial class HistoryWindow : Window
         _filter = (sender as FrameworkElement)?.Name switch
         {
             "ChipImages" => "images",
+            "ChipScrolling" => "scrolling",
             "ChipVideo" => "video",
             "ChipGif" => "gif",
             _ => "all",
@@ -509,7 +516,7 @@ public partial class HistoryWindow : Window
     private void ApplyFilter()
     {
         string? selectedPath = SelectedItem()?.FilePath;
-        HistoryItem? restored = _paging.ApplyFilter(MatchesFilter, selectedPath);
+        HistoryItem? restored = _paging.ApplyFilter(MatchesFilter, selectedPath, CurrentComparer());
         ItemsList.SelectedItem = restored ?? _items.FirstOrDefault();
         _previewItem = ItemsList.SelectedItem as HistoryItem;
         UpdateCollectionState();
@@ -522,17 +529,57 @@ public partial class HistoryWindow : Window
     private bool MatchesFilter(HistoryItem item) => _filter switch
     {
         "images" => item.IsImage,
+        "scrolling" => item.IsScrollingCapture,
         "video" => item.IsVideo,
         "gif" => item.IsGif,
         _ => true,
     };
+
+    private IComparer<HistoryItem> CurrentComparer() => Comparer<HistoryItem>.Create((left, right) =>
+    {
+        int result = _sort switch
+        {
+            "name" => StringComparer.CurrentCultureIgnoreCase.Compare(left.FileName, right.FileName),
+            "size" => left.FileSize.CompareTo(right.FileSize),
+            _ => left.CapturedAt.CompareTo(right.CapturedAt),
+        };
+        if (result == 0)
+            result = StringComparer.OrdinalIgnoreCase.Compare(left.FilePath, right.FilePath);
+        return _sortDescending ? -result : result;
+    });
+
+    private void OnSortFieldMenu(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenu"), PlacementTarget = SortFieldButton, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        foreach ((string label, string value) in new[] { ("Date", "date"), ("Name", "name"), ("Size", "size") })
+        {
+            var item = new MenuItem { Header = label, Tag = value, IsCheckable = true, IsChecked = _sort == value, Style = (Style)FindResource("DarkMenuItem") };
+            item.Click += (_, _) =>
+            {
+                _sort = value;
+                SortFieldText.Text = label;
+                ApplyFilter();
+            };
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
+
+    private void OnToggleSortDirection(object sender, RoutedEventArgs e)
+    {
+        _sortDescending = !_sortDescending;
+        SortDirectionGlyph.Text = _sortDescending ? "\uE74B" : "\uE74A";
+        SortDirectionButton.SetValue(System.Windows.Automation.AutomationProperties.NameProperty,
+            _sortDescending ? "Sort descending" : "Sort ascending");
+        ApplyFilter();
+    }
 
     private void UpdateCount()
     {
         string count = _paging.HasMore
             ? $"{_paging.VisibleCount:N0} of {_paging.FilteredCount:N0} items shown"
             : $"{_paging.FilteredCount:N0} item{(_paging.FilteredCount == 1 ? "" : "s")}";
-        CountText.Text = $"{count} (limit {_settings.Current.HistoryLimit:N0})";
+        CountText.Text = count;
         LoadMoreButton.Visibility = _paging.HasMore ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -540,6 +587,7 @@ public partial class HistoryWindow : Window
     {
         UpdateCount();
         UpdateEmptyState();
+        UpdateSelectionState();
     }
 
     // ---- Quick preview (Spacebar) ----
@@ -636,6 +684,138 @@ public partial class HistoryWindow : Window
         // Selection drives the spacebar preview target.
         if (SelectedItem() is { } item)
             _previewItem = item;
+        UpdateSelectionState();
+    }
+
+    private void OnToggleSelectionMode(object sender, RoutedEventArgs e)
+    {
+        _selectionMode = !_selectionMode;
+        ItemsList.Tag = _selectionMode;
+        ItemsList.SelectionMode = _selectionMode ? SelectionMode.Extended : SelectionMode.Single;
+        NormalToolbar.Visibility = _selectionMode ? Visibility.Collapsed : Visibility.Visible;
+        SelectionToolbar.Visibility = _selectionMode ? Visibility.Visible : Visibility.Collapsed;
+        if (!_selectionMode)
+        {
+            HistoryItem? anchor = ItemsList.SelectedItems.Cast<HistoryItem>().FirstOrDefault();
+            ItemsList.UnselectAll();
+            if (anchor is not null)
+                ItemsList.SelectedItem = anchor;
+        }
+        else
+        {
+            ItemsList.UnselectAll();
+        }
+        UpdateSelectionState();
+    }
+
+    private void UpdateSelectionState()
+    {
+        int count = _selectionMode ? ItemsList.SelectedItems.Count : 0;
+        long bytes = _selectionMode
+            ? ItemsList.SelectedItems.Cast<HistoryItem>().Sum(item => item.FileSize)
+            : 0;
+        SelectionCountText.Text = $"{count:N0} selected";
+        SelectionSummaryText.Text = count == 0 ? string.Empty : $"{count:N0} selected    {HistoryItem.FormatFileSize(bytes)}";
+        bool hasSelection = count > 0;
+        CopyToButton.IsEnabled = hasSelection;
+        ShareButton.IsEnabled = hasSelection;
+        DeleteSelectedButton.IsEnabled = hasSelection;
+        PinSelectedButton.IsEnabled = hasSelection && ItemsList.SelectedItems.Cast<HistoryItem>().Any(item => item.CanPin);
+    }
+
+    private void OnShowAllFromSelection(object sender, RoutedEventArgs e)
+    {
+        ChipAll.IsChecked = true;
+    }
+
+    private void OnSelectAll(object sender, RoutedEventArgs e)
+    {
+        if (!_selectionMode) return;
+        ItemsList.SelectAll();
+        UpdateSelectionState();
+    }
+
+    private IReadOnlyList<HistoryItem> SelectedItems() =>
+        ItemsList.SelectedItems.Cast<HistoryItem>().Where(item => File.Exists(item.FilePath)).ToList();
+
+    private void OnCopySelected(object sender, RoutedEventArgs e)
+    {
+        IReadOnlyList<HistoryItem> selected = SelectedItems();
+        if (selected.Count == 0) return;
+        try
+        {
+            var files = new StringCollection();
+            files.AddRange(selected.Select(item => item.FilePath).ToArray());
+            Clipboard.SetFileDropList(files);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to copy selected history files", ex);
+            MessageBox.Show(this, "WinShot could not copy the selected files to the clipboard.", "Copy failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void OnPinSelected(object sender, RoutedEventArgs e)
+    {
+        var paths = SelectedItems().Where(item => item.CanPin).Select(item => item.FilePath).ToList();
+        if (paths.Count > 0)
+            MultiPinRequested?.Invoke(paths);
+    }
+
+    private void OnShareSelected(object sender, RoutedEventArgs e)
+    {
+        IReadOnlyList<string> paths = SelectedItems().Select(item => item.FilePath).ToList();
+        if (paths.Count == 0) return;
+
+        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenu") };
+        if (HistoryShareService.IsBlipInstalled())
+        {
+            var blip = new MenuItem { Header = "Blip", Style = (Style)FindResource("DarkMenuItem") };
+            blip.Click += (_, _) => HistoryShareService.ShareWithBlip(paths);
+            menu.Items.Add(blip);
+        }
+
+        var windowsShare = new MenuItem
+        {
+            Header = "Windows Share...",
+            Style = (Style)FindResource("DarkMenuItem"),
+            IsEnabled = HistoryShareService.IsWindowsShareSupported(),
+        };
+        windowsShare.Click += (_, _) => HistoryShareService.ShowWindowsShare(this, paths, ex =>
+        {
+            Log.Error("Windows Share failed", ex);
+            Dispatcher.BeginInvoke(new Action(() => MessageBox.Show(this, "WinShot could not prepare these files for sharing.", "Share failed", MessageBoxButton.OK, MessageBoxImage.Warning)));
+        });
+        menu.Items.Add(windowsShare);
+        menu.PlacementTarget = ShareButton;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private async void OnDeleteSelected(object sender, RoutedEventArgs e) => await DeleteSelectedItems();
+
+    private async Task DeleteSelectedItems()
+    {
+        IReadOnlyList<HistoryItem> selected = SelectedItems();
+        if (selected.Count == 0) return;
+        if (MessageBox.Show(this, $"Delete {selected.Count:N0} selected history item{(selected.Count == 1 ? string.Empty : "s")}?\n\nThis removes only the local History copies.",
+                "Delete selected items", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        var failed = new List<string>();
+        foreach (HistoryItem item in selected)
+        {
+            HistoryDeleteResult result = await Task.Run(() => _history.Delete(item.FilePath));
+            if (result.Succeeded)
+                _paging.Remove(item);
+            else
+                failed.Add(item.FileName);
+        }
+        ItemsList.UnselectAll();
+        UpdateCollectionState();
+        _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
+        if (failed.Count > 0)
+            MessageBox.Show(this, $"WinShot could not delete {failed.Count:N0} selected item{(failed.Count == 1 ? string.Empty : "s")}.", "Delete incomplete", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     // ---- Tile actions ----
@@ -653,6 +833,11 @@ public partial class HistoryWindow : Window
     {
         if (GetItem(sender) is not { } item) return;
         _previewItem = item;
+        if (_selectionMode)
+        {
+            _dragItem = null;
+            return;
+        }
         if (e.ClickCount == 2)
         {
             _dragItem = null;
@@ -723,6 +908,12 @@ public partial class HistoryWindow : Window
     {
         if (GetItem(sender) is { CanPin: true } item)
             PinRequested?.Invoke(item.FilePath);
+    }
+
+    private void OnRestore(object sender, RoutedEventArgs e)
+    {
+        if (GetItem(sender) is { IsImage: true } item)
+            RestoreRequested?.Invoke(item.FilePath);
     }
 
     private void OnOpen(object sender, RoutedEventArgs e)
@@ -881,20 +1072,26 @@ public sealed class HistoryItem : INotifyPropertyChanged
         IsImage = ImageExtensions.Contains(ext);
         IsVideo = VideoExtensions.Contains(ext);
         IsGif = ext == ".gif";
+        IsScrollingCapture = IsImage && Path.GetFileNameWithoutExtension(filePath).EndsWith("-scroll", StringComparison.OrdinalIgnoreCase);
         ExtensionLabel = ext.TrimStart('.').ToUpperInvariant();
+        FileName = Path.GetFileName(filePath);
         CapturedAt = ParseCapturedAt(filePath);
         FileSize = TryGetFileSize(filePath);
         Caption = BuildCaption(CapturedAt, FileSize);
         RelativeTime = BuildRelativeTime(CapturedAt);
         DayGroup = BuildDayGroup(CapturedAt);
+        MetadataText = $"{CapturedAt:g}    {FormatFileSize(FileSize)}";
     }
 
     public string FilePath { get; }
     public bool IsImage { get; }
     public bool IsVideo { get; }
     public bool IsGif { get; }
+    public bool IsScrollingCapture { get; }
     public bool CanPin => IsImage;
     public string ExtensionLabel { get; }
+    public string FileName { get; }
+    public string MetadataText { get; }
 
     /// <summary>Capture time parsed from the file name ("yyyyMMdd-HHmmss-fff"),
     /// the same format HistoryService writes. Falls back to last-write time.</summary>
@@ -991,7 +1188,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
         return captured.ToString("MMM d", System.Globalization.CultureInfo.CurrentCulture);
     }
 
-    private static string FormatSize(long bytes)
+    public static string FormatFileSize(long bytes)
     {
         if (bytes <= 0) return string.Empty;
         if (bytes < 1024) return $"{bytes} B";
@@ -1001,10 +1198,18 @@ public sealed class HistoryItem : INotifyPropertyChanged
         return $"{mb:0.#} MB";
     }
 
+    private static string FormatSize(long bytes) => FormatFileSize(bytes);
+
     public Visibility ImageOnlyVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MediaOnlyVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
     public Visibility PinVisibility => CanPin ? Visibility.Visible : Visibility.Collapsed;
-    public string AccessibleName => $"{(IsImage ? "Screenshot" : ExtensionLabel)} captured {Caption}";
+    public Visibility ThumbnailVisibility => IsImage || IsGif ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility MediaFallbackVisibility => IsVideo ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility MissingThumbnailVisibility => (IsImage || IsGif) && Thumbnail is null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ScrollingVisibility => IsScrollingCapture ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility VideoBadgeVisibility => IsVideo ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility GifBadgeVisibility => IsGif ? Visibility.Visible : Visibility.Collapsed;
+    public string AccessibleName => $"{(IsScrollingCapture ? "Scrolling screenshot" : IsImage ? "Screenshot" : ExtensionLabel)} captured {Caption}";
     public string AccessibleHelpText =>
         CanPin
             ? "Press Enter to open, Space to preview, or Tab for Copy, Edit, Pin, and Delete actions."
@@ -1017,6 +1222,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
         {
             _thumbnail = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MissingThumbnailVisibility)));
         }
     }
 

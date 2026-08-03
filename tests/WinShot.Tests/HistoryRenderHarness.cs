@@ -27,7 +27,7 @@ public class HistoryRenderHarness
             Environment.GetEnvironmentVariable("WINSHOT_HISTORY_RENDER_COUNT"),
             out int requestedCount)
             ? Math.Clamp(requestedCount, 1, 5_000)
-            : 4;
+            : 12;
         string outputPrefix = Environment.GetEnvironmentVariable("WINSHOT_HISTORY_RENDER_PREFIX")
             ?? "history";
         string historyDir = Path.Combine(Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
@@ -71,6 +71,18 @@ public class HistoryRenderHarness
                 window.UpdateLayout();
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-keyboard-focus.png"));
 
+                var selectButton = (Button)window.FindName("SelectButton");
+                selectButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump();
+                for (int index = 0; index < Math.Min(3, list.Items.Count); index++)
+                {
+                    if (list.ItemContainerGenerator.ContainerFromIndex(index) is ListBoxItem item)
+                        item.IsSelected = true;
+                }
+                Pump();
+                window.UpdateLayout();
+                Render(window, Path.Combine(outputDir, $"{outputPrefix}-selection.png"));
+
                 if (fixtureCount > HistoryIncrementalCollection.DefaultPageSize)
                 {
                     var loadMore = (Button)window.FindName("LoadMoreButton");
@@ -98,32 +110,30 @@ public class HistoryRenderHarness
         Assert.Null(failure);
         Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-idle.png")));
         Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-keyboard-focus.png")));
+        Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-selection.png")));
         if (fixtureCount > HistoryIncrementalCollection.DefaultPageSize)
             Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-after-load-more.png")));
     }
 
     private static void WriteFixtures(string dir, int count)
     {
-        if (count > 4)
+        DateTime start = DateTime.Today.AddHours(16);
+        SD.Color[] colors =
         {
-            DateTime start = DateTime.Today.AddHours(16);
-            for (int index = 0; index < count; index++)
+            SD.Color.FromArgb(24, 91, 186), SD.Color.FromArgb(35, 42, 52), SD.Color.FromArgb(16, 123, 145),
+            SD.Color.FromArgb(96, 71, 140), SD.Color.FromArgb(176, 86, 67), SD.Color.FromArgb(43, 122, 89),
+        };
+        for (int index = 0; index < count; index++)
+        {
+            DateTime timestamp = start.AddMinutes(-12 * index);
+            if (index % 7 == 6)
             {
-                string extension = index % 12 == 0 ? ".gif" : ".mp4";
-                string name = $"{start.AddMinutes(-30 * index):yyyyMMdd-HHmmss-fff}{extension}";
-                File.WriteAllText(Path.Combine(dir, name), "sanitized local media fixture");
+                File.WriteAllText(Path.Combine(dir, $"{timestamp:yyyyMMdd-HHmmss-fff}.mp4"), "sanitized video fixture");
+                continue;
             }
-            return;
+            string suffix = index % 5 == 3 ? "-scroll" : string.Empty;
+            WriteImage(Path.Combine(dir, $"{timestamp:yyyyMMdd-HHmmss-fff}{suffix}.png"), colors[index % colors.Length], SD.Color.White);
         }
-
-        if (count >= 1)
-            WriteImage(Path.Combine(dir, "20260731-153000-000.png"), SD.Color.FromArgb(44, 122, 229), SD.Color.White);
-        if (count >= 2)
-            WriteImage(Path.Combine(dir, "20260731-141500-000.jpg"), SD.Color.FromArgb(33, 37, 45), SD.Color.CornflowerBlue);
-        if (count >= 3)
-            File.WriteAllText(Path.Combine(dir, "20260730-163000-000.mp4"), "sanitized video fixture");
-        if (count >= 4)
-            File.WriteAllText(Path.Combine(dir, "20260729-110000-000.gif"), "sanitized gif fixture");
     }
 
     private static void WriteImage(string path, SD.Color background, SD.Color foreground)

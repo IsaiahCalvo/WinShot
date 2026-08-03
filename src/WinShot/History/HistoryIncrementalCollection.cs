@@ -39,7 +39,8 @@ public sealed class HistoryIncrementalCollection
         IEnumerable<HistoryItem> items,
         Func<HistoryItem, bool> filter,
         string? selectedPath,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IComparer<HistoryItem>? comparer = null)
     {
         ArgumentNullException.ThrowIfNull(items);
         ArgumentNullException.ThrowIfNull(filter);
@@ -59,6 +60,9 @@ public sealed class HistoryIncrementalCollection
                 candidateFiltered.Add(item);
         }
 
+        if (comparer is not null)
+            candidateFiltered.Sort(comparer);
+
         cancellationToken.ThrowIfCancellationRequested();
         int targetCount = PageTarget(candidateFiltered, selectedPath, Math.Max(_pageSize, VisibleCount));
 
@@ -69,10 +73,15 @@ public sealed class HistoryIncrementalCollection
     }
 
     /// <summary>Applies a local filter without expanding beyond the current page depth.</summary>
-    public HistoryItem? ApplyFilter(Func<HistoryItem, bool> filter, string? selectedPath)
+    public HistoryItem? ApplyFilter(
+        Func<HistoryItem, bool> filter,
+        string? selectedPath,
+        IComparer<HistoryItem>? comparer = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
         _filteredItems = _allItems.Where(filter).ToList();
+        if (comparer is not null)
+            _filteredItems.Sort(comparer);
         int targetCount = PageTarget(_filteredItems, selectedPath, Math.Max(_pageSize, VisibleCount));
         ReplaceVisible(targetCount);
         return FindVisible(selectedPath);

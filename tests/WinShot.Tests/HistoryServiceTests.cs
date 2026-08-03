@@ -1,4 +1,5 @@
 using System.IO;
+using System.Drawing;
 using WinShot.Core;
 using Xunit;
 
@@ -6,6 +7,28 @@ namespace WinShot.Tests;
 
 public class HistoryServiceTests
 {
+    [Fact]
+    public void Add_ScrollingCapture_WritesDurableClassificationTag()
+    {
+        string historyDir = CreateTempDir();
+        try
+        {
+            var settings = new SettingsService();
+            settings.Current.HistoryLimit = 200;
+            var history = new HistoryService(settings, () => historyDir);
+            using var bitmap = new Bitmap(2, 2);
+
+            string path = history.Add(bitmap, HistoryCaptureKind.Scrolling);
+
+            Assert.EndsWith("-scroll.png", path, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(path));
+            Assert.True(new WinShot.History.HistoryItem(path).IsScrollingCapture);
+        }
+        finally
+        {
+            DeleteTempDir(historyDir);
+        }
+    }
     [Fact]
     public void AddFile_PrunesExpiredFilesWhenRetentionIsConfigured()
     {

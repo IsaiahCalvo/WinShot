@@ -24,13 +24,14 @@ public class HistoryService
     public static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinShot", "History");
 
-    public string Add(Bitmap bmp)
+    public string Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular)
     {
         lock (_gate)
         {
             string dir = _directoryProvider();
             Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}.png");
+            string suffix = kind == HistoryCaptureKind.Scrolling ? "-scroll" : string.Empty;
+            string path = Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}{suffix}.png");
             bmp.Save(path, ImageFormat.Png);
             PruneCore();
             PruneByAgeCore(_settings.Current.HistoryRetentionDays);
@@ -151,6 +152,12 @@ public class HistoryService
             catch (Exception ex) { Log.Error($"Failed to delete history item {stale}", ex); }
         }
     }
+}
+
+public enum HistoryCaptureKind
+{
+    Regular,
+    Scrolling,
 }
 
 public readonly record struct HistoryDeleteResult(bool Succeeded, string? ErrorMessage)

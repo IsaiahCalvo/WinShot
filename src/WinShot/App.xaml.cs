@@ -439,7 +439,7 @@ public partial class App : Application
 
             var stitched = await ScrollingStatusWindow.Run(new SD.Rectangle(x, y, w, h), null, autoStart: auto, autoStop: stop);
             if (stitched is not null)
-                HandleCapture(stitched, save ? PostCaptureAction.Save : null);
+                HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling);
             else
                 ShowBalloon("Scrolling capture", "Nothing captured.");
         });
@@ -639,7 +639,7 @@ public partial class App : Application
                     region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
                     var stitched = await ScrollingStatusWindow.Run(region);
                     if (stitched is not null)
-                        HandleCapture(stitched);
+                        HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
                     else
                         ShowBalloon("Scrolling capture", "Nothing captured.");
                     break;
@@ -722,7 +722,10 @@ public partial class App : Application
             TaskScheduler.Default);
 
     /// <summary>Every captured bitmap funnels through here: optional downscale, history, then the post-capture action.</summary>
-    private void HandleCapture(SD.Bitmap bmp, string? postCaptureActionOverride = null)
+    private void HandleCapture(
+        SD.Bitmap bmp,
+        string? postCaptureActionOverride = null,
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
     {
         if (_settings.Current.DownscaleHiDpi)
         {
@@ -741,14 +744,15 @@ public partial class App : Application
         string action = PostCaptureAction.Normalize(postCaptureActionOverride ?? _settings.Current.PostCaptureAction);
         if (!PostCaptureAction.IsDirectAction(action))
         {
-            try { ShowOverlayWithDeferredCaptureWork(bmp, autoCopy: _settings.Current.AutoCopyToClipboard); }
+            try { ShowOverlayWithDeferredCaptureWork(bmp, autoCopy: _settings.Current.AutoCopyToClipboard, historyKind); }
             catch { bmp.Dispose(); throw; }
             return;
         }
 
         _ = AddHistoryAsync(
             bmp,
-            cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action));
+            cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action),
+            historyKind);
         if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
             QueueAutoClipboardCopy(bmp);
 
@@ -792,13 +796,16 @@ public partial class App : Application
         }
     }
 
-    private Task<string?> AddHistoryAsync(SD.Bitmap bmp, bool cloneOnCallerThread)
+    private Task<string?> AddHistoryAsync(
+        SD.Bitmap bmp,
+        bool cloneOnCallerThread,
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
     {
         if (cloneOnCallerThread)
         {
             try
             {
-                return AddHistoryCopyAsync(CaptureService.CloneBitmap(bmp));
+                return AddHistoryCopyAsync(CaptureService.CloneBitmap(bmp), historyKind);
             }
             catch (Exception ex)
             {
@@ -812,7 +819,7 @@ public partial class App : Application
             try
             {
                 using var copy = CaptureService.CloneBitmap(bmp);
-                return _history.Add(copy);
+                return _history.Add(copy, historyKind);
             }
             catch (Exception ex)
             {
@@ -822,13 +829,15 @@ public partial class App : Application
         });
     }
 
-    private Task<string?> AddHistoryCopyAsync(SD.Bitmap copy)
+    private Task<string?> AddHistoryCopyAsync(
+        SD.Bitmap copy,
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
     {
         return Task.Run(() =>
         {
             using (copy)
             {
-                try { return _history.Add(copy); }
+                try { return _history.Add(copy, historyKind); }
                 catch (Exception ex)
                 {
                     Log.Error("Failed to add capture to history", ex);
@@ -910,7 +919,10 @@ public partial class App : Application
         }
     }
 
-    private void ShowOverlayWithDeferredCaptureWork(SD.Bitmap bmp, bool autoCopy)
+    private void ShowOverlayWithDeferredCaptureWork(
+        SD.Bitmap bmp,
+        bool autoCopy,
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
     {
         var sw = Stopwatch.StartNew();
         var historyPathSource = new TaskCompletionSource<string?>(
@@ -930,7 +942,7 @@ public partial class App : Application
             if (started) return;
             started = true;
             overlay.BeginInvoke(new Action(() =>
-                _ = RunDeferredOverlayCaptureWorkAsync(bmp, historyPathSource, captureWorkComplete, autoCopy)));
+                _ = RunDeferredOverlayCaptureWorkAsync(bmp, historyPathSource, captureWorkComplete, autoCopy, historyKind)));
         };
         WireOverlay(overlay);
         long wireMs = sw.ElapsedMilliseconds - createMs;
@@ -943,7 +955,8 @@ public partial class App : Application
         SD.Bitmap bmp,
         TaskCompletionSource<string?> historyPathCompletion,
         TaskCompletionSource<object?> captureWorkCompletion,
-        bool autoCopy)
+        bool autoCopy,
+        HistoryCaptureKind historyKind)
     {
         try
         {
@@ -952,7 +965,7 @@ public partial class App : Application
                 try
                 {
                     using var copy = CaptureService.CloneBitmap(bmp);
-                    return _history.Add(copy);
+                    return _history.Add(copy, historyKind);
                 }
                 catch (Exception ex)
                 {
@@ -1148,7 +1161,7 @@ public partial class App : Application
             region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
             var stitched = await ScrollingStatusWindow.Run(region, direction);
             if (stitched is not null)
-                HandleCapture(stitched);
+                HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
             else
                 ShowBalloon("Scrolling capture", "Nothing captured.");
         });
@@ -1174,6 +1187,10 @@ public partial class App : Application
         win.EditRequested += EditFromHistory;
         win.PinRequested -= PinFromHistory;
         win.PinRequested += PinFromHistory;
+        win.RestoreRequested -= RestoreFromHistory;
+        win.RestoreRequested += RestoreFromHistory;
+        win.MultiPinRequested -= PinMultipleFromHistory;
+        win.MultiPinRequested += PinMultipleFromHistory;
     }
 
     private void OpenSettings()
@@ -1239,6 +1256,25 @@ public partial class App : Application
         {
             var win = new FastPinWindow(bmp, _settings);
             PerfLog.TrackFirstShown(win, "pin window");
+            win.Show();
+        }
+    }
+
+    private async void RestoreFromHistory(string path)
+    {
+        if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
+            ShowOverlay(bmp, path);
+    }
+
+    private async void PinMultipleFromHistory(IReadOnlyList<string> paths)
+    {
+        foreach (string path in paths)
+        {
+            if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
+                continue;
+
+            var win = new FastPinWindow(bmp, _settings);
+            PerfLog.TrackFirstShown(win, "history pin window");
             win.Show();
         }
     }
