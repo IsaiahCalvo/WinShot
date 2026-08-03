@@ -27,12 +27,16 @@ frame capture; WinShot does not use debugger access or send page data to a servi
 
 ## Current support boundary
 
-The working vertical slice supports visible viewport, full page, dragged selection with
-edge auto-scroll, exact element selection, self-scrolling/nested panels, horizontal and
-vertical tiling, fixed/sticky suppression, dynamic extent growth, virtualized content,
-deep same-origin/cross-origin/nested frame capture, all-tab and URL-list batches, tile-backed
-captures beyond 32K, cancellation, watchdog restoration, and local export.
+The capture engine supports visible viewport, full page, dragged selection with edge auto-scroll,
+Ctrl-square and Alt-full-width selection, exact element selection, self-scrolling/nested panels,
+horizontal and vertical tiling, fixed/sticky handling, delayed capture, configurable safety limits,
+dynamic extent growth, virtualized content, exact deep-frame selection, visible/full all-tab and
+URL-list batches, one-click all-tabs PDF, tile-backed captures beyond 32K, cancellation, watchdog
+restoration, and local export. Browser-window capture is handed to the existing WinShot desktop
+capture command through the `winshot://` protocol.
 
-PDF export includes searchable text and working website links. DRM video can be blank by browser
-policy. Canvas/WebGL/video are captured as rendered pixels and explicitly warned when their motion
-can lower seam confidence. See `docs/capture-parity.md` for remaining gaps.
+PDF export includes single/multipage layout, standard or custom page sizes, searchable Unicode text,
+working website links, and optional headers, footers, and watermarks. DRM video can be blank by
+browser policy. Canvas/WebGL/video are captured as rendered pixels and explicitly warned when their
+motion can lower seam confidence. See `docs/fireshot-capture-matrix.md` for the FireShot comparison
+and `docs/capture-parity.md` for the support boundary.

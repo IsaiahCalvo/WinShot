@@ -1,28 +1,25 @@
 # Browser capture parity status
 
-## Verified in the current vertical slice
+## Verified capture surface
 
-- Visible viewport and ordinary full-page capture from the real MV3 popup.
-- Browser screenshot pixels through `captureVisibleTab`, throttled below two calls/second.
-- Drag selection with edge auto-scroll and restoration to the pre-picker position.
-- Ctrl-hover exact element selection; yellow marks hidden scrollable content.
-- Self-scrolling and nested panels, vertical/horizontal pages, sticky/fixed furniture.
-- Lazy content, virtualized recycled rows, changing extents, and explicit growth/tile/time limits.
-- DOM placement plus raster-overlap confidence; incomplete or low-confidence output is partial.
-- IndexedDB tile storage, preview, streamed PNG, bounded-canvas JPEG/WebP, and multipage PDF
-  with searchable text and working web links.
-- Cancellation, navigation failure, service-worker termination, watchdog cleanup, and restart recovery.
-- Tile-backed capture above 32,000 pixels without flattening to one browser canvas.
-- Same-origin, cross-origin, and nested frame documents where browser site access permits.
-- All-tab and URL-list batches with sequential capture, per-item results, and temporary-tab cleanup.
+- Visible viewport, full page, dragged selection, exact element, and independently scrolling-area capture.
+- Selection edge auto-scroll, Ctrl square selection, Alt full-page-width selection, and Ctrl-hover element selection.
+- Sticky/fixed-element handling, lazy content, virtualized rows, changing page extents, horizontal pages, and configurable delay and safety limits.
+- Same-origin, permitted cross-origin, nested, and duplicate-URL sibling frames using exact frame identity.
+- All-open-tab and URL-list batches in visible or full-page mode, plus one-click all-tabs-to-one-PDF.
+- Browser-window capture through the existing WinShot desktop `capture-window` command and `winshot://capture-window` bridge.
+- Tile-backed captures above 32,000 pixels, cancellation, navigation failure, service-worker recovery, and exact page restoration.
+- PNG, bounded-canvas JPEG/WebP, searchable linked PDF, single- or multipage PDF, standard/custom page sizes, headers, footers, and watermarks.
 
-## Honest remaining gaps
+These paths are covered by unit tests, packaged Manifest V3 end-to-end tests in disposable Chrome-for-Testing profiles, and Chrome/Edge fixture smoke tests. Desktop regressions are checked separately.
 
-- Infinite feeds stop at safety limits, but the popup does not yet expose per-capture limits.
-- JPEG/WebP intentionally fall back to PNG/PDF for very large dimensions.
-- PDF headers, footers, watermarks, and richer font/Unicode preservation are later work.
-- Duplicate sibling cross-origin frames with the exact same URL are rejected when the browser
-  does not expose enough identity to choose safely.
-- The optional WinShot native-messaging host and tiled desktop document UI are not implemented yet.
-- Store signing, Chrome/Edge store IDs, installer registration, and real installed-browser store smoke
-  remain release work and require explicit authorization. Automated tests do not touch personal profiles.
+See [fireshot-capture-matrix.md](fireshot-capture-matrix.md) for the feature-by-feature comparison.
+
+## Deliberate boundaries
+
+- Editing/annotation parity is a separate workstream, as requested.
+- FireShot's webpage JavaScript API is an automation/integration surface, not a capture mode. WinShot currently exposes browser commands and the desktop protocol; a public webpage API is not included here.
+- GIF/BMP, clipboard, email, printing, cloud upload, and store publishing are output/distribution features rather than capture-engine features.
+- Very large JPEG/WebP exports fall back to PNG/PDF because browsers cannot reliably allocate one giant canvas.
+- DRM/protected browser surfaces can be blank by browser policy. Restricted internal pages receive an explicit fallback instead of a false success.
+- Native editor handoff, store signing/IDs, installer registration, and installed-store-browser smoke remain release/integration work. Automated tests never use personal browser profiles.

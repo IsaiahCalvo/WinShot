@@ -1,5 +1,6 @@
 import { getRecord, getTiles } from "./store.js";
 import { exportJpeg, exportPdf, exportPng, exportWebp } from "./exporters.js";
+import { loadSettings, saveSettings } from "./settings.js";
 
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
@@ -12,6 +13,7 @@ const toast = document.querySelector("#toast");
 const buttons = [...document.querySelectorAll("header button")];
 let record;
 let tiles = [];
+let settings = await loadSettings();
 const objectUrls = [];
 
 function showToast(message) {
@@ -113,7 +115,46 @@ async function runExport(button, label, extension, exporter) {
 document.querySelector("#save-png").addEventListener("click", (event) => runExport(event.currentTarget, "PNG", "png", exportPng));
 document.querySelector("#save-jpeg").addEventListener("click", (event) => runExport(event.currentTarget, "JPEG", "jpg", exportJpeg));
 document.querySelector("#save-webp").addEventListener("click", (event) => runExport(event.currentTarget, "WebP", "webp", exportWebp));
-document.querySelector("#save-pdf").addEventListener("click", (event) => runExport(event.currentTarget, "PDF", "pdf", exportPdf));
+
+const pdfNodes = {
+  layout: document.querySelector("#pdf-layout"),
+  pageSize: document.querySelector("#pdf-page-size"),
+  customWidthIn: document.querySelector("#pdf-width"),
+  customHeightIn: document.querySelector("#pdf-height"),
+  header: document.querySelector("#pdf-header"),
+  footer: document.querySelector("#pdf-footer"),
+  watermark: document.querySelector("#pdf-watermark")
+};
+
+function showPdfSettings() {
+  for (const [key, node] of Object.entries(pdfNodes)) node.value = settings.pdf[key];
+}
+
+function readPdfSettings() {
+  return {
+    layout: pdfNodes.layout.value,
+    pageSize: pdfNodes.pageSize.value,
+    customWidthIn: Number(pdfNodes.customWidthIn.value),
+    customHeightIn: Number(pdfNodes.customHeightIn.value),
+    header: pdfNodes.header.value,
+    footer: pdfNodes.footer.value,
+    watermark: pdfNodes.watermark.value
+  };
+}
+
+showPdfSettings();
+for (const node of Object.values(pdfNodes)) {
+  node.addEventListener("change", async () => {
+    settings = await saveSettings({ ...settings, pdf: readPdfSettings() });
+    showPdfSettings();
+  });
+}
+
+document.querySelector("#save-pdf").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  settings = await saveSettings({ ...settings, pdf: readPdfSettings() });
+  await runExport(button, "PDF", "pdf", (capture, captureTiles, onProgress) => exportPdf(capture, captureTiles, onProgress, settings.pdf));
+});
 
 addEventListener("unload", () => objectUrls.forEach((url) => URL.revokeObjectURL(url)));
 

@@ -17,6 +17,12 @@ h2 { font-size:12px; margin:22px 0 6px; text-transform:uppercase; color:#a8b0bd;
 dl { display:grid; grid-template-columns:auto 1fr; gap:7px 10px; margin:18px 0; }
 dt { color:#929cab; } dd { margin:0; overflow-wrap:anywhere; }
 ul { margin:0; padding-left:18px; color:#f4c99c; }
+.privacy, details small { color:#8e98a7; font-size:11px; }
+details { margin-top:18px; padding:10px; border:1px solid #ffffff18; border-radius:8px; display:grid; gap:7px; }
+summary { cursor:pointer; color:#cbd2dc; }
+details label { color:#929cab; font-size:11px; }
+details input, details select { width:100%; border:1px solid #ffffff24; border-radius:6px; background:#20252e; color:inherit; padding:6px; }
+.custom-size { display:grid; grid-template-columns:1fr 1fr; gap:5px 8px; }
 .privacy { color:#8e98a7; font-size:11px; margin-top:24px; }
 .stage { min-width:0; overflow:auto; padding:28px; background:repeating-conic-gradient(#171a20 0 25%,#1a1e25 0 50%) 50%/20px 20px; }
 #preview { position:relative; transform-origin:top left; background:white; box-shadow:0 10px 40px #000a; }

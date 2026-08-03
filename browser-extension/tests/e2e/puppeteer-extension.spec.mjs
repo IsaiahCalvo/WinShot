@@ -8,6 +8,15 @@ import os from "node:os";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
 
+function pdfUtf16Hex(value) {
+  return [...value].map((character) => {
+    const codePoint = character.codePointAt(0);
+    if (codePoint <= 0xffff) return codePoint.toString(16).padStart(4, "0");
+    const adjusted = codePoint - 0x10000;
+    return `${(0xd800 + (adjusted >> 10)).toString(16).padStart(4, "0")}${(0xdc00 + (adjusted & 0x3ff)).toString(16).padStart(4, "0")}`;
+  }).join("").toUpperCase();
+}
+
 function removeOwnedDirectory(directory, prefix) {
   const resolved = path.resolve(directory);
   const temp = path.resolve(os.tmpdir());
@@ -194,15 +203,32 @@ test("exact MV3 popup captures the full page, exports PNG, and restores state", 
       expect(webp.subarray(8, 12).toString("ascii")).toBe("WEBP");
 
       await editor.waitForSelector("#save-pdf:not([disabled])");
+      await editor.select("#pdf-page-size", "custom");
+      await editor.$eval("#pdf-width", (node) => { node.value = "7"; node.dispatchEvent(new Event("change", { bubbles: true })); });
+      await editor.$eval("#pdf-height", (node) => { node.value = "9"; node.dispatchEvent(new Event("change", { bubbles: true })); });
+      await editor.$eval("#pdf-header", (node) => { node.value = "Header {title}"; node.dispatchEvent(new Event("change", { bubbles: true })); });
+      await editor.$eval("#pdf-footer", (node) => { node.value = "Page {page} of {pages}"; node.dispatchEvent(new Event("change", { bubbles: true })); });
+      await editor.$eval("#pdf-watermark", (node) => { node.value = "CONFIDENTIAL"; node.dispatchEvent(new Event("change", { bubbles: true })); });
       await editor.click("#save-pdf");
-      await expect.poll(() => fs.readdirSync(downloadRoot).find((value) => value.endsWith(".pdf")), { timeout: 30_000 }).toBeTruthy();
+      try {
+        await expect.poll(() => fs.readdirSync(downloadRoot).find((value) => value.endsWith(".pdf")), { timeout: 10_000 }).toBeTruthy();
+      } catch (error) {
+        const diagnostic = await editor.evaluate(() => ({ toast: document.querySelector("#toast").textContent, button: document.querySelector("#save-pdf").textContent, disabled: document.querySelector("#save-pdf").disabled }));
+        throw new Error(`PDF export failed: ${JSON.stringify(diagnostic)}; browser errors: ${run.errors.join(" | ")}; ${error.message}`);
+      }
       const pdf = fs.readFileSync(path.join(downloadRoot, fs.readdirSync(downloadRoot).find((value) => value.endsWith(".pdf"))));
       expect(pdf.subarray(0, 8).toString("ascii")).toBe("%PDF-1.7");
       expect(pdf.subarray(-5).toString("ascii")).toBe("%%EOF");
       const pdfText = pdf.toString("latin1");
-      expect(pdfText).toContain("SEARCHABLE WINSHOT DOCUMENT");
+      expect(pdfText).toContain(pdfUtf16Hex("SEARCHABLE WINSHOT DOCUMENT"));
+      expect(pdfText).toContain(pdfUtf16Hex("検索可能 مرحبا"));
+      expect(pdfText).toContain("/ToUnicode");
       expect(pdfText).toContain("/Subtype /Link");
       expect(pdfText).toContain("https://example.com/winshot-link");
+      expect(pdfText).toContain("/MediaBox [0 0 504.000 648.000]");
+      expect(pdfText).toContain("Header body");
+      expect(pdfText).toContain("Page 1 of");
+      expect(pdfText).toContain("CONFIDENTIAL");
     } finally {
       removeOwnedDirectory(downloadRoot, "winshot-download-e2e-");
     }
@@ -227,6 +253,7 @@ test("all-tabs batch captures each web tab and restores every captured page", as
 
     const allTabsSummaryTarget = batchTarget(run);
     const popup = await openPopup(run, first);
+    await popup.select("#batch-mode", "visible");
     await popup.click("#all-tabs");
     const allTabsSummary = await (await allTabsSummaryTarget).asPage();
     await allTabsSummary.waitForSelector(".item.complete");
@@ -237,8 +264,65 @@ test("all-tabs batch captures each web tab and restores every captured page", as
     expect(allTabsBatch.results).toHaveLength(2);
     expect(allTabsBatch.results.every((item) => item.state === "complete")).toBe(true);
     expect(allTabsBatch.results.every((item) => item.captureId)).toBe(true);
+    expect(allTabsBatch.mode).toBe("visible");
+    const batchRecords = await allTabsSummary.evaluate(async (results) => {
+      const store = await import(chrome.runtime.getURL("src/store.js"));
+      return await Promise.all(results.map((item) => store.getRecord(item.captureId)));
+    }, allTabsBatch.results);
+    expect(batchRecords.every((record) => record.report.mode === "visible" && record.report.tileCount === 1)).toBe(true);
     expect(await first.evaluate(() => scrollY)).toBeCloseTo(333, 0);
     expect(await second.$eval("#outer", (element) => element.scrollTop)).toBeCloseTo(75, 0);
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
+test("one-click all-tabs capture downloads one searchable PDF", async () => {
+  const run = await launchExactExtension();
+  const downloadRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-download-e2e-"));
+  try {
+    const first = await run.browser.newPage();
+    const second = await run.browser.newPage();
+    await first.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    await second.goto("http://127.0.0.1:4173/frame", { waitUntil: "networkidle0" });
+    await first.bringToFront();
+    const session = await first.createCDPSession();
+    await session.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: downloadRoot });
+    const summaryTarget = batchTarget(run);
+    const popup = await openPopup(run, first);
+    await popup.click("#all-tabs-pdf");
+    const summary = await (await summaryTarget).asPage();
+    await summary.waitForSelector(".item.complete");
+    await expect.poll(() => fs.readdirSync(downloadRoot).find((name) => name.endsWith(".pdf")), { timeout: 60_000 }).toBeTruthy();
+    const pdf = fs.readFileSync(path.join(downloadRoot, fs.readdirSync(downloadRoot).find((name) => name.endsWith(".pdf"))));
+    const pdfText = pdf.toString("latin1");
+    expect(pdf.subarray(0, 8).toString("ascii")).toBe("%PDF-1.7");
+    expect(pdfText).toContain("/Count 2");
+    expect(pdfText).toContain(pdfUtf16Hex("SEARCHABLE WINSHOT DOCUMENT"));
+    expect(pdfText).toContain("/ToUnicode");
+    expect(run.errors).toEqual([]);
+  } finally {
+    removeOwnedDirectory(downloadRoot, "winshot-download-e2e-");
+    await closeExactExtension(run);
+  }
+});
+
+test("delayed capture preserves its original tab and filename template", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    const waitingEditor = editorTarget(run);
+    const popup = await openPopup(run, page);
+    await popup.select("#capture-delay", "3000");
+    await popup.$eval("#filename-template", (node) => { node.value = "parity-{mode}-{host}"; node.dispatchEvent(new Event("change", { bubbles: true })); });
+    const started = Date.now();
+    await popup.click("[data-mode='visible']");
+    const { record } = await recordFromEditorTarget(await waitingEditor);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(2800);
+    expect(record).toMatchObject({ state: "complete", fileName: "parity-visible-127.0.0.1" });
+    expect(record.report.tileCount).toBe(1);
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);
@@ -348,6 +432,43 @@ test("drag selection auto-scrolls at the edge and restores the pre-picker page s
   }
 });
 
+test("selection modifiers lock a square and capture the full page width", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    let waitingEditor = editorTarget(run);
+    await startPicker(run, page, "region");
+    await page.keyboard.down("Control");
+    await page.mouse.move(100, 180);
+    await page.mouse.down();
+    await page.mouse.move(300, 280);
+    await page.mouse.up();
+    await page.keyboard.up("Control");
+    const square = await recordFromEditorTarget(await waitingEditor);
+    expect(square.record.state).toBe("complete");
+    expect(square.record.report.dimensionsCss.width).toBeCloseTo(square.record.report.dimensionsCss.height, 0);
+
+    await page.goto("http://127.0.0.1:4173/horizontal", { waitUntil: "networkidle0" });
+    waitingEditor = editorTarget(run);
+    await startPicker(run, page, "region");
+    await page.keyboard.down("Alt");
+    await page.mouse.move(100, 180);
+    await page.mouse.down();
+    await page.mouse.move(300, 480);
+    await page.mouse.up();
+    await page.keyboard.up("Alt");
+    const fullWidth = await recordFromEditorTarget(await waitingEditor);
+    expect(fullWidth.record.state).toBe("complete");
+    expect(fullWidth.record.report.dimensionsCss.width).toBe(5400);
+    expect(fullWidth.record.report.dimensionsCss.height).toBeCloseTo(300, 0);
+    expect(fullWidth.record.report.coverage.complete).toBe(true);
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
 test("tile-backed capture exceeds 32K without a single giant canvas", async () => {
   const run = await launchExactExtension();
   try {
@@ -369,6 +490,14 @@ test("tile-backed capture exceeds 32K without a single giant canvas", async () =
       const bytes = fs.readFileSync(path.join(downloadRoot, name));
       expect(bytes.readUInt32BE(20)).toBe(record.report.dimensionsPx.height);
       expect(bytes.readUInt32BE(20)).toBeGreaterThan(32_000);
+      await editor.select("#pdf-layout", "single");
+      await editor.select("#pdf-page-size", "auto");
+      await editor.click("#save-pdf");
+      await expect.poll(() => fs.readdirSync(downloadRoot).find((value) => value.endsWith(".pdf")), { timeout: 60_000 }).toBeTruthy();
+      const pdf = fs.readFileSync(path.join(downloadRoot, fs.readdirSync(downloadRoot).find((value) => value.endsWith(".pdf"))));
+      const pdfText = pdf.toString("latin1");
+      expect(pdfText).toContain("/Count 1");
+      expect(pdfText).toContain("/UserUnit");
     } finally {
       removeOwnedDirectory(downloadRoot, "winshot-download-e2e-");
     }
@@ -593,6 +722,33 @@ test("same-origin and permitted cross-origin frames scroll deeply and restore st
     expect(nestedCrossRecord.report.coverage.complete).toBe(true);
     expect(await nestedCrossFrame.evaluate(() => scrollY)).toBeCloseTo(420, 0);
     expect(await page.evaluate(() => scrollY)).toBeCloseTo(nestedCrossSelectionTop, 0);
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
+test("duplicate sibling cross-origin frames are selected by exact frame identity", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/duplicate-frames", { waitUntil: "networkidle0" });
+    const firstElement = await page.$("iframe[data-copy='first']");
+    const secondElement = await page.$("iframe[data-copy='second']");
+    const firstFrame = await firstElement.contentFrame();
+    const secondFrame = await secondElement.contentFrame();
+    await firstFrame.evaluate(() => scrollTo(0, 100));
+    await secondFrame.evaluate(() => scrollTo(0, 420));
+    const waitingEditor = editorTarget(run);
+    await startPicker(run, page, "frame");
+    const box = await secondElement.boundingBox();
+    await page.mouse.click(box.x + 40, box.y + 40);
+    const { record } = await recordFromEditorTarget(await waitingEditor);
+    expect(record, record.error).toMatchObject({ state: "complete", frameUrl: "http://127.0.0.1:4174/frame" });
+    expect(record.report.dimensionsCss.height).toBe(1680);
+    expect(record.report.coverage.complete).toBe(true);
+    expect(await firstFrame.evaluate(() => scrollY)).toBeCloseTo(100, 0);
+    expect(await secondFrame.evaluate(() => scrollY)).toBeCloseTo(420, 0);
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);

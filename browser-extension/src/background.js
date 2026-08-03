@@ -8,9 +8,11 @@ import {
   validateCoverage
 } from "./contract.js";
 import { listRecords, putRecord, putTile } from "./store.js";
+import { captureLimits, loadSettings, normalizeSettings, renderFileName } from "./settings.js";
 
 const activeCaptures = new Map();
 const pickerFrames = new Map();
+const pickerSettings = new Map();
 let activeBatch = null;
 let lastScreenshotAt = 0;
 
@@ -86,10 +88,13 @@ async function locateFrameChain(session) {
   try {
     for (const edge of edges) {
       await injectCaptureScript(session.tabId, edge.parentFrameId);
+      await injectCaptureScript(session.tabId, edge.child.frameId);
+      const frameToken = crypto.randomUUID();
+      await sendToTab(session.tabId, { type: "WINSHOT_ANNOUNCE_FRAME", frameToken }, edge.child.frameId);
       const located = await sendToTab(session.tabId, {
         type: "WINSHOT_LOCATE_FRAME",
         sessionId: session.id,
-        frameUrl: edge.child.url
+        frameToken
       }, edge.parentFrameId);
       preparedFrameIds.push(edge.parentFrameId);
       left += located.left;
@@ -463,10 +468,11 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   if (!tab.id) throw new Error("No active tab.");
   if (activeCaptures.has(tab.id)) throw new Error("A WinShot capture is already running in this tab.");
 
-  const session = createSession({ id: captureId(), mode, tab, target });
+  const settings = normalizeSettings(options.settings || await loadSettings());
+  const session = createSession({ id: captureId(), mode, tab, target, limits: options.limits || captureLimits(settings) });
   session.frameId = target?.frameId || 0;
   session.frameUrl = target?.frameUrl || null;
-  session.fileName = `${fileSafeTitle(tab.title)}-${mode}`;
+  session.fileName = renderFileName(settings.fileNameTemplate, session);
   const controller = new AbortController();
   const activeEntry = { session, controller, failureReason: null };
   activeCaptures.set(tab.id, activeEntry);
@@ -527,17 +533,17 @@ async function waitForTabComplete(tabId, signal, timeoutMs = 30000) {
   });
 }
 
-async function captureBatchTab(tab, controller) {
+async function captureBatchTab(tab, controller, mode, settings) {
   throwIfAborted(controller.signal);
   await chrome.tabs.update(tab.id, { active: true });
   const ready = await waitForTabComplete(tab.id, controller.signal);
   await new Promise((resolve) => setTimeout(resolve, 250));
   throwIfAborted(controller.signal);
-  const result = await runCapture(CaptureMode.FULL_PAGE, null, ready, { openEditor: false });
+  const result = await runCapture(mode, null, ready, { openEditor: false, settings, limits: captureLimits(settings) });
   return { tabId: tab.id, title: ready.title || tab.title || ready.url, url: ready.url, ...result };
 }
 
-async function runBatch(kind, urls = []) {
+async function runBatch(kind, urls = [], batchOptions = {}) {
   if (activeBatch) throw new Error("A WinShot batch is already running.");
   const original = await activeTab();
   const controller = new AbortController();
@@ -545,6 +551,8 @@ async function runBatch(kind, urls = []) {
   const batchId = captureId();
   const results = [];
   const skipped = [];
+  const settings = normalizeSettings(batchOptions.settings || await loadSettings());
+  const mode = settings.batchMode;
   activeBatch = { id: batchId, controller, currentTabId: null };
 
   try {
@@ -579,7 +587,7 @@ async function runBatch(kind, urls = []) {
       activeBatch.currentTabId = tab.id;
       progress({ id: batchId, state: SessionState.CAPTURING, report: { tileCount: index } }, `Batch ${index + 1} of ${tabs.length}: ${tab.title || tab.url}`);
       try {
-        results.push(await captureBatchTab(tab, controller));
+        results.push(await captureBatchTab(tab, controller, mode, settings));
       } catch (error) {
         if (error?.name === "AbortError") throw error;
         results.push({ tabId: tab.id, title: tab.title || tab.url, url: tab.url, state: SessionState.FAILED, error: friendlyError(error) });
@@ -593,7 +601,7 @@ async function runBatch(kind, urls = []) {
     activeBatch = null;
   }
 
-  const summary = { id: batchId, kind, createdAt: new Date().toISOString(), results, skipped };
+  const summary = { id: batchId, kind, mode, combinePdf: Boolean(batchOptions.combinePdf), createdAt: new Date().toISOString(), results, skipped };
   await chrome.storage.local.set({ [`batch:${batchId}`]: summary });
   await chrome.tabs.create({ url: chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`) });
   return {
@@ -604,18 +612,36 @@ async function runBatch(kind, urls = []) {
   };
 }
 
-async function startPicker(mode) {
-  const tab = await activeTab();
+async function waitCaptureDelay(tab, delayMs) {
+  if (!delayMs) return;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  const current = await chrome.tabs.get(tab.id);
+  if (!current?.id || current.url !== tab.url) throw new Error("The page changed during the capture delay.");
+}
+
+async function runConfiguredCapture(mode, target = null, tabOverride = null, suppliedSettings = null) {
+  const tab = tabOverride || await activeTab();
+  const settings = normalizeSettings(suppliedSettings || await loadSettings());
+  await waitCaptureDelay(tab, settings.delayMs);
+  return await runCapture(mode, target, tab, { settings, limits: captureLimits(settings) });
+}
+
+async function startPicker(mode, tabOverride = null, suppliedSettings = null) {
+  const tab = tabOverride || await activeTab();
+  const settings = normalizeSettings(suppliedSettings || await loadSettings());
+  await waitCaptureDelay(tab, settings.delayMs);
   try {
     const injected = await injectCaptureScript(tab.id, 0, true);
     const frameIds = [...new Set(injected.map((result) => result.frameId))];
     pickerFrames.set(tab.id, frameIds);
+    pickerSettings.set(tab.id, settings);
     const started = await Promise.allSettled(frameIds.map((frameId) =>
       sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode }, frameId)));
     if (!started.some((result) => result.status === "fulfilled")) throw new Error("The picker could not start in any accessible frame.");
     return { started: true, frameCount: frameIds.length };
   } catch (error) {
     pickerFrames.delete(tab.id);
+    pickerSettings.delete(tab.id);
     throw new Error(`${restrictedPageReason(tab.url)} (${friendlyError(error)})`);
   }
 }
@@ -640,15 +666,17 @@ async function cancelActiveCapture() {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
-    if (message.type === "WINSHOT_START_CAPTURE") return await runCapture(message.mode, message.target || null);
-    if (message.type === "WINSHOT_START_PICKER") return await startPicker(message.mode);
-    if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || []);
+    if (message.type === "WINSHOT_START_CAPTURE") return await runConfiguredCapture(message.mode, message.target || null, null, message.settings);
+    if (message.type === "WINSHOT_START_PICKER") return await startPicker(message.mode, null, message.settings);
+    if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || [], { settings: message.settings, combinePdf: message.combinePdf });
     if (message.type === "WINSHOT_CANCEL_CAPTURE") {
       return await cancelActiveCapture();
     }
     if (message.type === "WINSHOT_PICK_RESULT") {
       const tab = sender.tab;
       if (!tab?.id) throw new Error("The picker tab is no longer available.");
+      const settings = pickerSettings.get(tab.id) || await loadSettings();
+      pickerSettings.delete(tab.id);
       await stopPickers(tab.id, sender.frameId || 0);
       if (message.cancelled) return { cancelled: true };
       const target = {
@@ -656,7 +684,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         frameId: sender.frameId || 0,
         frameUrl: sender.url || tab.url
       };
-      runCapture(message.mode, target, tab).catch(() => {});
+      runCapture(message.mode, target, tab, { settings, limits: captureLimits(settings) }).catch(() => {});
       return { started: true };
     }
     return undefined;
@@ -666,8 +694,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function handleCommand(command) {
-  if (command === "capture-visible") return await runCapture(CaptureMode.VISIBLE);
-  if (command === "capture-full-page") return await runCapture(CaptureMode.FULL_PAGE);
+  if (command === "capture-visible") return await runConfiguredCapture(CaptureMode.VISIBLE);
+  if (command === "capture-full-page") return await runConfiguredCapture(CaptureMode.FULL_PAGE);
   return undefined;
 }
 

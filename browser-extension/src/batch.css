@@ -9,3 +9,6 @@ h1 { margin-bottom: 4px; }
 .complete { border-left: 4px solid #33c89b; }
 .failed { border-left: 4px solid #ff7676; }
 a { color: #5ca8ff; }
+button { border:1px solid #ffffff24; border-radius:7px; background:#20252e; color:inherit; padding:9px 12px; cursor:pointer; }
+button:disabled { opacity:.45; cursor:not-allowed; }
+#pdf-status { color:#aab2c0; min-height:1.4em; }

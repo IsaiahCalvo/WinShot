@@ -8,6 +8,7 @@
   let frameHostSession = null;
   let pickerCleanup = null;
   let pendingPickerState = null;
+  const announcedFrames = new Map();
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const nextPaint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -187,15 +188,25 @@
     return { restored: true };
   }
 
+  addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || data.source !== "winshot-frame" || typeof data.token !== "string") return;
+    const frame = [...document.querySelectorAll("iframe,frame")].find((candidate) => candidate.contentWindow === event.source);
+    if (!frame) return;
+    announcedFrames.set(data.token, frame);
+    setTimeout(() => announcedFrames.delete(data.token), 5000);
+  });
+
   async function locateFrameHost(request) {
     restoreFrameHost();
-    const candidates = [...document.querySelectorAll("iframe,frame")].filter((frame) => {
-      try { return new URL(frame.src, location.href).href === request.frameUrl; } catch { return false; }
-    });
-    if (candidates.length !== 1) {
-      throw new Error(candidates.length ? "More than one matching frame is present; WinShot cannot safely choose one." : "The selected frame is nested or no longer present in the top page.");
+    let frame = null;
+    const deadline = performance.now() + 1500;
+    while (!frame && performance.now() < deadline) {
+      frame = announcedFrames.get(request.frameToken) || null;
+      if (!frame) await sleep(25);
     }
-    const frame = candidates[0];
+    announcedFrames.delete(request.frameToken);
+    if (!frame) throw new Error("The selected frame could not be matched to its exact browser frame identity.");
     frameHostSession = {
       id: request.sessionId,
       scroll: { left: window.scrollX, top: window.scrollY },
@@ -701,25 +712,41 @@
   }
 
   function startRegionPicker() {
-    const { outline, tip } = pickerChrome("Drag a rectangle · Move to an edge to auto-scroll · Esc cancels");
+    const { outline, tip } = pickerChrome("Drag a rectangle · Alt captures full page width · Ctrl locks a square · Move to an edge to auto-scroll · Esc cancels");
     let dragging = false;
     let start = null;
     let currentClient = null;
+    let currentModifiers = { altKey: false, ctrlKey: false };
     let autoTimer = 0;
 
     const documentPoint = (event) => ({ x: event.clientX + window.scrollX, y: event.clientY + window.scrollY });
+    const selectionRect = (end, modifiers) => {
+      let deltaX = end.x - start.x;
+      let deltaY = end.y - start.y;
+      if (modifiers.ctrlKey && !modifiers.altKey) {
+        const edge = Math.max(Math.abs(deltaX), Math.abs(deltaY));
+        deltaX = Math.sign(deltaX || 1) * edge;
+        deltaY = Math.sign(deltaY || 1) * edge;
+      }
+      let left = Math.min(start.x, start.x + deltaX);
+      let right = Math.max(start.x, start.x + deltaX);
+      if (modifiers.altKey) {
+        left = 0;
+        right = Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0, innerWidth);
+      }
+      const top = Math.min(start.y, start.y + deltaY);
+      const bottom = Math.max(start.y, start.y + deltaY);
+      return { left, top, width: right - left, height: bottom - top };
+    };
     const update = () => {
       if (!dragging || !currentClient) return;
       const now = { x: currentClient.x + window.scrollX, y: currentClient.y + window.scrollY };
-      const left = Math.min(start.x, now.x);
-      const top = Math.min(start.y, now.y);
-      const right = Math.max(start.x, now.x);
-      const bottom = Math.max(start.y, now.y);
+      const rect = selectionRect(now, currentModifiers);
       outline.style.display = "block";
-      outline.style.left = `${left - window.scrollX}px`;
-      outline.style.top = `${top - window.scrollY}px`;
-      outline.style.width = `${right - left}px`;
-      outline.style.height = `${bottom - top}px`;
+      outline.style.left = `${rect.left - window.scrollX}px`;
+      outline.style.top = `${rect.top - window.scrollY}px`;
+      outline.style.width = `${rect.width}px`;
+      outline.style.height = `${rect.height}px`;
     };
     const down = (event) => {
       if (event.button !== 0) return;
@@ -727,6 +754,7 @@
       dragging = true;
       start = documentPoint(event);
       currentClient = { x: event.clientX, y: event.clientY };
+      currentModifiers = { altKey: event.altKey, ctrlKey: event.ctrlKey };
       autoTimer = setInterval(() => {
         if (!dragging || !currentClient) return;
         const margin = 40;
@@ -742,16 +770,17 @@
       if (!dragging) return;
       event.preventDefault(); event.stopPropagation();
       currentClient = { x: event.clientX, y: event.clientY };
+      currentModifiers = { altKey: event.altKey, ctrlKey: event.ctrlKey };
       update();
     };
     const up = (event) => {
       if (!dragging) return;
       event.preventDefault(); event.stopPropagation();
       const end = documentPoint(event);
-      const rect = {
-        left: Math.min(start.x, end.x), top: Math.min(start.y, end.y),
-        width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y)
-      };
+      const rect = selectionRect(end, {
+        altKey: event.altKey || currentModifiers.altKey,
+        ctrlKey: event.ctrlKey || currentModifiers.ctrlKey
+      });
       cleanup();
       if (rect.width < 4 || rect.height < 4) { restorePickerState(); sendPickerResult({ cancelled: true }); }
       else sendPickerResult({ mode: "region", target: { rect } });
@@ -786,6 +815,10 @@
           return { alive: Boolean(session) };
         case "WINSHOT_RESTORE": return restore(request.reason || "complete");
         case "WINSHOT_LOCATE_FRAME": return await locateFrameHost(request);
+        case "WINSHOT_ANNOUNCE_FRAME":
+          if (window === top) throw new Error("The top page cannot announce itself as a child frame.");
+          parent.postMessage({ source: "winshot-frame", token: request.frameToken }, "*");
+          return { announced: true };
         case "WINSHOT_RESTORE_FRAME_HOST": return restoreFrameHost();
         case "WINSHOT_HEARTBEAT_FRAME_HOST":
           if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();

@@ -7,6 +7,7 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "../../src/contract.js";
+import { normalizeSettings, renderFileName, renderPdfTemplate } from "../../src/settings.js";
 
 test("axis positions finish exactly at the final reachable scroll offset", () => {
   assert.deepEqual(axisPositions(2500, 1000, 100), [0, 900, 1500]);
@@ -51,4 +52,24 @@ test("session contract has bounded local-first defaults", () => {
 test("restricted browser pages receive an honest fallback", () => {
   assert.match(restrictedPageReason("chrome://settings"), /visible page/i);
   assert.match(restrictedPageReason("file:///fixture.html"), /file URLs/i);
+});
+
+test("capture and PDF settings are bounded and filename templates are safe", () => {
+  const settings = normalizeSettings({
+    delayMs: 999999,
+    maxDurationMs: 1,
+    maxTiles: 99999,
+    maxHeightCss: 9,
+    batchMode: "visible",
+    fileNameTemplate: "{title}:{mode}:{host}",
+    pdf: { layout: "single", pageSize: "custom", customWidthIn: 0, customHeightIn: 500 }
+  });
+  assert.equal(settings.delayMs, 30000);
+  assert.equal(settings.maxDurationMs, 30000);
+  assert.equal(settings.maxTiles, 2000);
+  assert.equal(settings.maxHeightCss, 1000);
+  assert.equal(settings.batchMode, "visible");
+  assert.deepEqual([settings.pdf.layout, settings.pdf.pageSize, settings.pdf.customWidthIn, settings.pdf.customHeightIn], ["single", "custom", 1, 200]);
+  assert.equal(renderFileName(settings.fileNameTemplate, { sourceTitle: "Bad / title", sourceUrl: "https://example.test/path", mode: "visible" }), "Bad - title-visible-example.test");
+  assert.equal(renderPdfTemplate("{title} {page}/{pages}", { title: "Fixture", page: 2, pages: 4 }), "Fixture 2/4");
 });

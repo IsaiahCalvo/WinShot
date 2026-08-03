@@ -14,10 +14,37 @@
   <main>
     <button data-mode="full-page"><span>Entire page</span><kbd>Alt Shift F</kbd></button>
     <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift V</kbd></button>
+    <button id="browser-window"><span>Browser window</span><small>Uses WinShot desktop window capture</small></button>
     <button data-picker="region"><span>Drag a selection</span><small>Auto-scrolls at page edges</small></button>
     <button data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
     <button data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
-    <button id="all-tabs"><span>Capture all web tabs</span><small>Requests optional access; maximum 20 tabs</small></button>
+    <details>
+      <summary>Capture settings</summary>
+      <label for="capture-delay">Delay before capture</label>
+      <select id="capture-delay">
+        <option value="0">No delay</option>
+        <option value="3000">3 seconds</option>
+        <option value="5000">5 seconds</option>
+        <option value="10000">10 seconds</option>
+      </select>
+      <label class="check"><input id="capture-infinite" type="checkbox"> Follow growing or infinite pages</label>
+      <label for="capture-timeout">Capture time limit (minutes)</label>
+      <input id="capture-timeout" type="number" min="0.5" max="60" step="0.5">
+      <label for="capture-height">Maximum page height (CSS pixels)</label>
+      <input id="capture-height" type="number" min="1000" max="2000000" step="1000">
+      <label for="capture-tiles">Maximum captured tiles</label>
+      <input id="capture-tiles" type="number" min="1" max="2000" step="1">
+      <label for="filename-template">Filename template</label>
+      <input id="filename-template" maxlength="160" placeholder="{title}-{date}-{time}">
+      <small>Safety limits prevent a runaway page from exhausting memory. Available filename fields: {title}, {host}, {date}, {time}, {mode}</small>
+    </details>
+    <label for="batch-mode">Batch capture area</label>
+    <select id="batch-mode">
+      <option value="full-page">Entire page</option>
+      <option value="visible">Visible viewport</option>
+    </select>
+    <button id="all-tabs"><span>Capture all web tabs</span><small>Maximum 20 tabs</small></button>
+    <button id="all-tabs-pdf"><span>All tabs to one PDF</span><small>Captures and downloads one searchable PDF</small></button>
     <label for="batch-urls">Capture a URL list</label>
     <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
     <button id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>

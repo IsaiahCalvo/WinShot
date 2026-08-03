@@ -1,3 +1,5 @@
+import { DEFAULT_SETTINGS, normalizeSettings, renderPdfTemplate } from "./settings.js";
+
 const textEncoder = new TextEncoder();
 const MAX_CANVAS_EDGE = 16384;
 const MAX_CANVAS_PIXELS = 120_000_000;
@@ -186,71 +188,226 @@ function pdfLiteral(value) {
     .replace(/[()\\]/g, (character) => `\\${character}`);
 }
 
-function buildPdf(images, title, record) {
-  const cssWidth = Math.max(1, record.report.dimensionsCss?.width || record.report.dimensionsPx.width);
-  const sourceWidth = Math.max(1, record.report.dimensionsPx.width);
-  const cssToSource = sourceWidth / cssWidth;
-  const allText = record.semantics?.text || [];
-  const allLinks = record.semantics?.links || [];
-  const objects = [null, null, null];
-  const pages = [];
-  let nextId = 3;
+function pdfHexUnicode(value) {
+  let result = "";
+  for (const character of String(value || "").slice(0, 1000)) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint <= 0xffff) {
+      result += codePoint.toString(16).padStart(4, "0");
+    } else {
+      const adjusted = codePoint - 0x10000;
+      result += (0xd800 + (adjusted >> 10)).toString(16).padStart(4, "0");
+      result += (0xdc00 + (adjusted & 0x3ff)).toString(16).padStart(4, "0");
+    }
+  }
+  return result.toUpperCase();
+}
 
-  for (const image of images) {
-    const pageTopCss = image.sourceTop / cssToSource;
-    const pageBottomCss = (image.sourceTop + image.sourceHeight) / cssToSource;
-    const textEntries = allText.filter((entry) => entry.y < pageBottomCss && entry.y + entry.height > pageTopCss);
-    const linkEntries = allLinks.filter((entry) => entry.y < pageBottomCss && entry.y + entry.height > pageTopCss);
-    pages.push({
+function pageSizePoints(options) {
+  if (options.pageSize === "a4") return { width: 595.28, height: 841.89 };
+  if (options.pageSize === "letter") return { width: 612, height: 792 };
+  if (options.pageSize === "legal") return { width: 612, height: 1008 };
+  if (options.pageSize === "custom") return { width: options.customWidthIn * 72, height: options.customHeightIn * 72 };
+  return null;
+}
+
+function pdfContext(record, page, pages) {
+  const date = new Date(record.startedAt || Date.now());
+  return {
+    title: record.sourceTitle || "WinShot Capture",
+    url: record.sourceUrl || "",
+    date: date.toISOString().slice(0, 10),
+    time: date.toTimeString().slice(0, 8),
+    page,
+    pages
+  };
+}
+
+function pageFurniture(options, record, pageNumber, totalPages, pageWidth, pageHeight) {
+  const context = pdfContext(record, pageNumber, totalPages);
+  const header = renderPdfTemplate(options.header, context);
+  const footer = renderPdfTemplate(options.footer, context);
+  const watermark = renderPdfTemplate(options.watermark, context);
+  const margin = options.pageSize === "auto" && !header && !footer ? 0 : 24;
+  const headerSpace = header ? 24 : 0;
+  const footerSpace = footer ? 24 : 0;
+  return {
+    header,
+    footer,
+    watermark,
+    margin,
+    headerSpace,
+    footerSpace,
+    left: margin,
+    bottom: margin + footerSpace,
+    width: Math.max(1, pageWidth - margin * 2),
+    height: Math.max(1, pageHeight - margin * 2 - headerSpace - footerSpace)
+  };
+}
+
+function imagePage(image, options, pageNumber, totalPages) {
+  const record = image.record;
+  const fixed = pageSizePoints(options);
+  let pageWidth = fixed?.width || image.width * 0.75;
+  let pageHeight = fixed?.height || image.height * 0.75;
+  let furniture = pageFurniture(options, record, pageNumber, totalPages, pageWidth, pageHeight);
+  if (!fixed && (furniture.header || furniture.footer)) {
+    pageWidth += furniture.margin * 2;
+    pageHeight += furniture.margin * 2 + furniture.headerSpace + furniture.footerSpace;
+    furniture = pageFurniture(options, record, pageNumber, totalPages, pageWidth, pageHeight);
+  }
+  const scale = Math.min(furniture.width / image.width, furniture.height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const drawX = furniture.left + (furniture.width - drawWidth) / 2;
+  const drawY = furniture.bottom + furniture.height - drawHeight;
+  const cssWidth = Math.max(1, record.report.dimensionsCss?.width || record.report.dimensionsPx.width);
+  const sourceScale = record.report.dimensionsPx.width / cssWidth;
+  const pageTopCss = image.sourceTop / sourceScale;
+  const pageBottomCss = (image.sourceTop + image.sourceHeight) / sourceScale;
+  return {
+    record,
+    pageWidth,
+    pageHeight,
+    userUnit: 1,
+    furniture,
+    images: [{ image, name: "Im0", drawX, drawY, drawWidth, drawHeight }],
+    textEntries: (record.semantics?.text || []).filter((entry) => entry.y < pageBottomCss && entry.y + entry.height > pageTopCss),
+    linkEntries: (record.semantics?.links || []).filter((entry) => entry.y < pageBottomCss && entry.y + entry.height > pageTopCss),
+    sourceTopCss: pageTopCss,
+    sourceHeightCss: Math.max(1, pageBottomCss - pageTopCss),
+    drawX,
+    drawY,
+    drawWidth,
+    drawHeight,
+    cssWidth
+  };
+}
+
+function singleImagePage(images, options, pageNumber, totalPages) {
+  const record = images[0].record;
+  const sourceWidth = record.report.dimensionsPx.width;
+  const sourceHeight = record.report.dimensionsPx.height;
+  const fixed = pageSizePoints(options);
+  const naturalWidth = sourceWidth * 0.75;
+  const naturalHeight = sourceHeight * 0.75;
+  const userUnit = fixed ? 1 : Math.max(1, naturalWidth / 14000, naturalHeight / 14000);
+  let pageWidth = fixed?.width || naturalWidth / userUnit;
+  let pageHeight = fixed?.height || naturalHeight / userUnit;
+  let furniture = pageFurniture(options, record, pageNumber, totalPages, pageWidth, pageHeight);
+  if (!fixed && (furniture.header || furniture.footer)) {
+    pageWidth += furniture.margin * 2;
+    pageHeight += furniture.margin * 2 + furniture.headerSpace + furniture.footerSpace;
+    furniture = pageFurniture(options, record, pageNumber, totalPages, pageWidth, pageHeight);
+  }
+  const scale = Math.min(furniture.width / sourceWidth, furniture.height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  const drawX = furniture.left + (furniture.width - drawWidth) / 2;
+  const drawY = furniture.bottom + furniture.height - drawHeight;
+  const cssWidth = Math.max(1, record.report.dimensionsCss?.width || sourceWidth);
+  return {
+    record,
+    pageWidth,
+    pageHeight,
+    userUnit,
+    furniture,
+    images: images.map((image, index) => ({
       image,
-      pageTopCss,
-      textEntries,
-      linkEntries,
-      pageId: nextId++,
-      contentId: nextId++,
-      imageId: nextId++,
-      annotationIds: linkEntries.map(() => nextId++)
-    });
+      name: `Im${index}`,
+      drawX,
+      drawY: drawY + drawHeight - ((image.sourceTop + image.sourceHeight) / sourceHeight) * drawHeight,
+      drawWidth,
+      drawHeight: (image.sourceHeight / sourceHeight) * drawHeight
+    })),
+    textEntries: record.semantics?.text || [],
+    linkEntries: record.semantics?.links || [],
+    sourceTopCss: 0,
+    sourceHeightCss: Math.max(1, record.report.dimensionsCss?.height || sourceHeight),
+    drawX,
+    drawY,
+    drawWidth,
+    drawHeight,
+    cssWidth
+  };
+}
+
+function buildPdf(images, title, options = {}) {
+  const normalized = normalizeSettings({ pdf: { ...DEFAULT_SETTINGS.pdf, ...options } }).pdf;
+  const groups = [];
+  if (normalized.layout === "single") {
+    const byRecord = new Map();
+    for (const image of images) {
+      const list = byRecord.get(image.record.id) || [];
+      list.push(image);
+      byRecord.set(image.record.id, list);
+    }
+    const entries = [...byRecord.values()];
+    for (let index = 0; index < entries.length; index++) groups.push(singleImagePage(entries[index], normalized, index + 1, entries.length));
+  } else {
+    for (let index = 0; index < images.length; index++) groups.push(imagePage(images[index], normalized, index + 1, images.length));
   }
 
+  const objects = [null, null, null];
+  let nextId = 3;
+  const unicodeFontId = nextId++;
+  const cidFontId = nextId++;
+  const fontDescriptorId = nextId++;
+  const toUnicodeId = nextId++;
+  for (const page of groups) {
+    page.pageId = nextId++;
+    page.contentId = nextId++;
+    for (const image of page.images) image.objectId = nextId++;
+    page.annotationIds = page.linkEntries.map(() => nextId++);
+  }
   const objectCount = nextId - 1;
   objects.length = objectCount + 1;
-  const pageRefs = pages.map((page) => page.pageId);
   objects[1] = [ascii("<< /Type /Catalog /Pages 2 0 R >>")];
-  objects[2] = [ascii(`<< /Type /Pages /Count ${images.length} /Kids [${pageRefs.map((id) => `${id} 0 R`).join(" ")}] >>`)];
+  objects[2] = [ascii(`<< /Type /Pages /Count ${groups.length} /Kids [${groups.map((page) => `${page.pageId} 0 R`).join(" ")}] >>`)];
+  const toUnicode = ascii(`/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /WinShotUnicode def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend`);
+  objects[unicodeFontId] = [ascii(`<< /Type /Font /Subtype /Type0 /BaseFont /WinShotUnicode /Encoding /Identity-H /DescendantFonts [${cidFontId} 0 R] /ToUnicode ${toUnicodeId} 0 R >>`)];
+  objects[cidFontId] = [ascii(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /WinShotUnicode /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${fontDescriptorId} 0 R /DW 500 /CIDToGIDMap /Identity >>`)];
+  objects[fontDescriptorId] = [ascii("<< /Type /FontDescriptor /FontName /WinShotUnicode /Flags 4 /FontBBox [0 -250 1000 1000] /ItalicAngle 0 /Ascent 880 /Descent -220 /CapHeight 700 /StemV 80 >>")];
+  objects[toUnicodeId] = [ascii(`<< /Length ${toUnicode.length} >>\nstream\n`), toUnicode, ascii("\nendstream")];
 
-  for (const page of pages) {
-    const { image, pageId, contentId, imageId } = page;
-    const pageWidth = image.width * 0.75;
-    const pageHeight = image.height * 0.75;
-    const pointsPerCss = pageWidth / cssWidth;
-    const commandLines = [`q\n${pageWidth} 0 0 ${pageHeight} 0 0 cm\n/Im0 Do\nQ`];
+  for (let pageIndex = 0; pageIndex < groups.length; pageIndex++) {
+    const page = groups[pageIndex];
+    const lines = [];
+    for (const entry of page.images) lines.push(`q\n${entry.drawWidth.toFixed(3)} 0 0 ${entry.drawHeight.toFixed(3)} ${entry.drawX.toFixed(3)} ${entry.drawY.toFixed(3)} cm\n/${entry.name} Do\nQ`);
+    const xScale = page.drawWidth / page.cssWidth;
+    const yScale = page.drawHeight / page.sourceHeightCss;
     for (const entry of page.textEntries) {
-      const value = pdfLiteral(entry.text).slice(0, 1000);
+      const value = pdfHexUnicode(entry.text);
       if (!value) continue;
-      const x = Math.max(0, entry.x * pointsPerCss);
-      const y = Math.max(0, pageHeight - (entry.y - page.pageTopCss + entry.height) * pointsPerCss);
-      const fontSize = Math.max(4, Math.min(200, entry.fontSize * pointsPerCss));
-      commandLines.push(`BT /F1 ${fontSize.toFixed(2)} Tf 3 Tr 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${value}) Tj ET`);
+      const x = page.drawX + entry.x * xScale;
+      const y = page.drawY + page.drawHeight - (entry.y - page.sourceTopCss + entry.height) * yScale;
+      const fontSize = Math.max(4, Math.min(200, entry.fontSize * Math.min(xScale, yScale)));
+      lines.push(`BT /F2 ${fontSize.toFixed(2)} Tf 3 Tr 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm <${value}> Tj ET`);
     }
-    const commands = ascii(`${commandLines.join("\n")}\n`);
-    const annotations = page.annotationIds.length
-      ? ` /Annots [${page.annotationIds.map((id) => `${id} 0 R`).join(" ")}]`
-      : "";
-    objects[pageId] = [ascii(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 ${imageId} 0 R >> /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents ${contentId} 0 R${annotations} >>`)];
-    objects[contentId] = [ascii(`<< /Length ${commands.length} >>\nstream\n`), commands, ascii("endstream")];
-    objects[imageId] = [
-      ascii(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>\nstream\n`),
-      image.bytes,
-      ascii("\nendstream")
-    ];
-    for (let i = 0; i < page.linkEntries.length; i++) {
-      const entry = page.linkEntries[i];
-      const left = Math.max(0, entry.x * pointsPerCss);
-      const right = Math.min(pageWidth, (entry.x + entry.width) * pointsPerCss);
-      const top = Math.min(pageHeight, pageHeight - (entry.y - page.pageTopCss) * pointsPerCss);
-      const bottom = Math.max(0, pageHeight - (entry.y - page.pageTopCss + entry.height) * pointsPerCss);
-      objects[page.annotationIds[i]] = [ascii(`<< /Type /Annot /Subtype /Link /Rect [${left.toFixed(2)} ${bottom.toFixed(2)} ${right.toFixed(2)} ${top.toFixed(2)}] /Border [0 0 0] /A << /S /URI /URI (${pdfLiteral(entry.url)}) >> >>`)];
+    const furniture = page.furniture;
+    if (furniture.header) lines.push(`BT /F1 10 Tf 0 Tr 0 g 1 0 0 1 ${furniture.left.toFixed(2)} ${(page.pageHeight - furniture.margin - 10).toFixed(2)} Tm (${pdfLiteral(furniture.header)}) Tj ET`);
+    if (furniture.footer) lines.push(`BT /F1 10 Tf 0 Tr 0 g 1 0 0 1 ${furniture.left.toFixed(2)} ${Math.max(4, furniture.margin - 4).toFixed(2)} Tm (${pdfLiteral(furniture.footer)}) Tj ET`);
+    if (furniture.watermark) {
+      const text = pdfLiteral(furniture.watermark).slice(0, 300);
+      lines.push(`q 0.75 g BT /F1 34 Tf 0 Tr 0.707 0.707 -0.707 0.707 ${(page.pageWidth * 0.25).toFixed(2)} ${(page.pageHeight * 0.35).toFixed(2)} Tm (${text}) Tj ET Q`);
+    }
+    const commands = ascii(`${lines.join("\n")}\n`);
+    const xObjects = page.images.map((entry) => `/${entry.name} ${entry.objectId} 0 R`).join(" ");
+    const annotations = page.annotationIds.length ? ` /Annots [${page.annotationIds.map((id) => `${id} 0 R`).join(" ")}]` : "";
+    const userUnit = page.userUnit > 1 ? ` /UserUnit ${page.userUnit.toFixed(6)}` : "";
+    objects[page.pageId] = [ascii(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.pageWidth.toFixed(3)} ${page.pageHeight.toFixed(3)}]${userUnit} /Resources << /XObject << ${xObjects} >> /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 ${unicodeFontId} 0 R >> >> /Contents ${page.contentId} 0 R${annotations} >>`)];
+    objects[page.contentId] = [ascii(`<< /Length ${commands.length} >>\nstream\n`), commands, ascii("endstream")];
+    for (const entry of page.images) {
+      const image = entry.image;
+      objects[entry.objectId] = [ascii(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>\nstream\n`), image.bytes, ascii("\nendstream")];
+    }
+    for (let index = 0; index < page.linkEntries.length; index++) {
+      const entry = page.linkEntries[index];
+      const left = Math.max(0, page.drawX + entry.x * xScale);
+      const right = Math.min(page.pageWidth, page.drawX + (entry.x + entry.width) * xScale);
+      const top = Math.min(page.pageHeight, page.drawY + page.drawHeight - (entry.y - page.sourceTopCss) * yScale);
+      const bottom = Math.max(0, page.drawY + page.drawHeight - (entry.y - page.sourceTopCss + entry.height) * yScale);
+      objects[page.annotationIds[index]] = [ascii(`<< /Type /Annot /Subtype /Link /Rect [${left.toFixed(2)} ${bottom.toFixed(2)} ${right.toFixed(2)} ${top.toFixed(2)}] /Border [0 0 0] /A << /S /URI /URI (${pdfLiteral(entry.url)}) >> >>`)];
     }
   }
 
@@ -273,14 +430,37 @@ function buildPdf(images, title, record) {
   return new Blob(parts, { type: "application/pdf" });
 }
 
-export async function exportPdf(record, tiles, onProgress = () => {}) {
+async function recordPdfImages(record, tiles, options, onProgress, progressStart = 0, progressSpan = 1) {
   const { width, height } = record.report.dimensionsPx;
   const outputWidth = Math.min(12000, width);
-  const sourcePageHeight = Math.max(1, Math.floor(8000 * width / outputWidth));
+  const fixed = pageSizePoints(options);
+  const furniture = fixed ? pageFurniture(options, record, 1, 1, fixed.width, fixed.height) : null;
+  const sourcePageHeight = options.layout === "single" || !fixed
+    ? Math.max(1, Math.floor(8000 * width / outputWidth))
+    : Math.max(1, Math.floor(width * furniture.height / furniture.width));
   const images = [];
   for (let top = 0; top < height; top += sourcePageHeight) {
-    images.push(await pdfPageJpeg(record, tiles, top, Math.min(sourcePageHeight, height - top), outputWidth));
-    onProgress(Math.min(1, (top + sourcePageHeight) / height));
+    const image = await pdfPageJpeg(record, tiles, top, Math.min(sourcePageHeight, height - top), outputWidth);
+    image.record = record;
+    images.push(image);
+    onProgress(progressStart + progressSpan * Math.min(1, (top + sourcePageHeight) / height));
   }
-  return buildPdf(images, record.sourceTitle, record);
+  return images;
+}
+
+export async function exportPdf(record, tiles, onProgress = () => {}, options = DEFAULT_SETTINGS.pdf) {
+  const normalized = normalizeSettings({ pdf: options }).pdf;
+  const images = await recordPdfImages(record, tiles, normalized, onProgress);
+  return buildPdf(images, record.sourceTitle, normalized);
+}
+
+export async function exportBatchPdf(entries, onProgress = () => {}, options = DEFAULT_SETTINGS.pdf) {
+  if (!entries.length) throw new Error("No completed captures are available for the PDF.");
+  const normalized = normalizeSettings({ pdf: { ...options, layout: options.layout || "multipage" } }).pdf;
+  const images = [];
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
+    images.push(...await recordPdfImages(entry.record, entry.tiles, normalized, onProgress, index / entries.length, 1 / entries.length));
+  }
+  return buildPdf(images, `WinShot batch ${new Date().toISOString().slice(0, 10)}`, normalized);
 }

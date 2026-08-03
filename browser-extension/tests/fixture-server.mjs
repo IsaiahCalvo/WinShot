@@ -17,7 +17,7 @@ function rows(count, prefix = "ROW") {
 function fixture(name, crossPort) {
   switch (name) {
     case "body":
-      return shell("body-scroll", `<h1>SEARCHABLE WINSHOT DOCUMENT</h1><a href="https://example.com/winshot-link">WORKING PDF LINK</a><input id="state" value="focus-restoration"><div id="rows">${rows(28)}</div>`, "");
+      return shell("body-scroll", `<h1>SEARCHABLE WINSHOT DOCUMENT</h1><p>検索可能 مرحبا</p><a href="https://example.com/winshot-link">WORKING PDF LINK</a><input id="state" value="focus-restoration"><div id="rows">${rows(28)}</div>`, "");
     case "horizontal":
       return shell("horizontal-scroll", `<div class="wide">${Array.from({length:18},(_,i)=>`<span>COL ${i}</span>`).join("")}</div>`, "", ".wide{display:flex;width:5400px;height:900px}.wide span{flex:0 0 300px;border-right:2px solid #172033;padding:30px}");
     case "nested":
@@ -37,6 +37,8 @@ function fixture(name, crossPort) {
       return shell("shadow-dom", `<fixture-list></fixture-list>`, `customElements.define('fixture-list',class extends HTMLElement{connectedCallback(){const root=this.attachShadow({mode:'open'});root.innerHTML='<style>.item{height:130px;border-bottom:1px solid #1687ff;padding:20px}</style>'+Array.from({length:30},(_,i)=>'<div class="item">SHADOW '+i+'</div>').join('')}})`);
     case "iframes":
       return shell("frames", `<h1>Frames</h1><iframe src="/frame"></iframe><iframe src="http://${host}:${crossPort}/frame"></iframe><iframe src="/nested-frame-host"></iframe><iframe src="/nested-cross-frame-host"></iframe>${rows(12)}`, "", "iframe{width:90%;height:350px;margin:20px;border:4px solid #1687ff}");
+    case "duplicate-frames":
+      return shell("duplicate-frames", `<h1>Duplicate frames</h1><iframe data-copy="first" src="http://${host}:${crossPort}/frame"></iframe><iframe data-copy="second" src="http://${host}:${crossPort}/frame"></iframe>`, "", "iframe{display:block;width:900px;height:350px;margin:20px;border:4px solid #1687ff}");
     case "nested-frame-host":
       return shell("nested-frame-host", `<iframe src="/frame"></iframe>`, "", "iframe{width:900px;height:300px;margin:20px;border:4px solid #f4bd00}");
     case "nested-cross-frame-host":
@@ -57,7 +59,7 @@ function fixture(name, crossPort) {
     case "recovery":
       return shell("recovery", `<input id="focus" value="original"><div id="snap" style="scroll-snap-type:y mandatory;height:500px;overflow:auto">${rows(20,"RECOVERY")}</div>`);
     default:
-      return shell("fixture-index", `<h1>WinShot fixture corpus</h1><ul>${["body","horizontal","nested","sticky","lazy","animated","repetitive","shadow","iframes","long","infinite","virtual","media","recovery"].map(value=>`<li><a href="/${value}">${value}</a></li>`).join("")}</ul>`);
+      return shell("fixture-index", `<h1>WinShot fixture corpus</h1><ul>${["body","horizontal","nested","sticky","lazy","animated","repetitive","shadow","iframes","duplicate-frames","long","infinite","virtual","media","recovery"].map(value=>`<li><a href="/${value}">${value}</a></li>`).join("")}</ul>`);
   }
 }
 
