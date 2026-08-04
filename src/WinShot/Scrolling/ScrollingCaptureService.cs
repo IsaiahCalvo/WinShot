@@ -148,6 +148,8 @@ public static class ScrollingCaptureService
 
         private int _runningHeader;
         private int _runningFooter;
+        private int _runningVerticalLeftBand;
+        private int _runningVerticalRightBand;
         private int _runningLeftBand;
         private int _runningRightBand;
         private int _stitchedFrames;
@@ -270,16 +272,23 @@ public static class ScrollingCaptureService
                 return null;
             }
 
-            _lastFrame?.Dispose();
             _strip?.Dispose();
             _horizontalStrip?.Dispose();
             if (_direction == ScrollDirection.Horizontal)
             {
+                _lastFrame?.Dispose();
                 _stitch.Dispose();
                 return _horizontal.Take();
             }
             _horizontal.Dispose();
-            return _stitch.Take();
+            var vertical = _stitch.Take();
+            if (vertical is not null && _lastFrame is not null)
+            {
+                StationaryViewportCompositor.RemoveRepeatedSidebars(vertical, _lastFrame,
+                    _region.Height, _runningVerticalLeftBand, _runningVerticalRightBand);
+            }
+            _lastFrame?.Dispose();
+            return vertical;
         }
 
         // ------------------------------------------------------------ frames
@@ -353,10 +362,25 @@ public static class ScrollingCaptureService
             }
             _identicalStreak = 0;
 
-            // Fixed edge bands are inferred from mostly-stationary pixels. Same-position
-            // results are provisional only; running bands grow only after shifted comparison.
-            // The legacy exact footer is likewise only a provisional alignment hint.
-            int matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig, _runningHeader, _runningFooter);
+            // Sidebars can dominate row matching even though the document beneath them moves.
+            // Same-position evidence is only a provisional crop; a measured vertical shift
+            // must confirm a stationary region before it becomes part of the running layout.
+            StationaryViewportRegions provisionalRegions = _lastFrame is null
+                ? default
+                : StationaryViewportDetector.Detect(_lastFrame, frame);
+            int provisionalLeft = Math.Max(_runningVerticalLeftBand, provisionalRegions.LeftSide);
+            int provisionalRight = Math.Max(_runningVerticalRightBand, provisionalRegions.RightSide);
+            FrameSignature previousMatch = _prevSig;
+            FrameSignature currentMatch = sig;
+            if (_lastFrame is not null &&
+                (provisionalLeft > FrameSignature.SideMargin(sig.Width) ||
+                 provisionalRight > FrameSignature.SideMargin(sig.Width)))
+            {
+                previousMatch = FrameSignature.Build(_lastFrame, provisionalLeft, provisionalRight);
+                currentMatch = FrameSignature.Build(frame, provisionalLeft, provisionalRight);
+            }
+            int matchedOffset = ScrollMatcher.FindOffset(previousMatch, currentMatch,
+                _runningHeader, _runningFooter);
             if (matchedOffset == 0 && _lastFrame is not null)
             {
                 FixedBands provisional = FixedRegionDetector.DetectVertical(_lastFrame, frame);
@@ -366,8 +390,9 @@ public static class ScrollingCaptureService
                     legacyFooter = 0;
                 int provisionalHeader = Math.Min(Math.Max(_runningHeader, provisional.Leading), sig.Height / 3);
                 int provisionalFooter = Math.Min(Math.Max(_runningFooter,
-                    Math.Max(provisional.Trailing, legacyFooter)), sig.Height / 3);
-                matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig,
+                    Math.Max(Math.Max(provisional.Trailing, legacyFooter), provisionalRegions.BottomOverlay)),
+                    sig.Height / 3);
+                matchedOffset = ScrollMatcher.FindOffset(previousMatch, currentMatch,
                     provisionalHeader, provisionalFooter);
             }
             int header = _runningHeader;
@@ -375,9 +400,31 @@ public static class ScrollingCaptureService
             if (matchedOffset > 0 && _lastFrame is not null)
             {
                 FixedBands refined = FixedRegionDetector.DetectVertical(_lastFrame, frame, matchedOffset);
-                header = Math.Min(Math.Max(_runningHeader, refined.Leading), sig.Height / 3);
-                footer = Math.Min(Math.Max(_runningFooter, refined.Trailing), sig.Height / 3);
-                matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig, header, footer);
+                StationaryViewportRegions refinedRegions = StationaryViewportDetector.Detect(
+                    _lastFrame, frame, matchedOffset);
+                int candidateHeader = Math.Min(Math.Max(_runningHeader, refined.Leading), sig.Height / 3);
+                int candidateFooter = Math.Min(Math.Max(_runningFooter,
+                    Math.Max(refined.Trailing, refinedRegions.BottomOverlay)), sig.Height / 3);
+                int candidateLeft = Math.Max(_runningVerticalLeftBand, refinedRegions.LeftSide);
+                int candidateRight = Math.Max(_runningVerticalRightBand, refinedRegions.RightSide);
+                FrameSignature refinedPrevious = _prevSig;
+                FrameSignature refinedCurrent = sig;
+                if (candidateLeft > FrameSignature.SideMargin(sig.Width) ||
+                    candidateRight > FrameSignature.SideMargin(sig.Width))
+                {
+                    refinedPrevious = FrameSignature.Build(_lastFrame, candidateLeft, candidateRight);
+                    refinedCurrent = FrameSignature.Build(frame, candidateLeft, candidateRight);
+                }
+                int verifiedOffset = ScrollMatcher.FindOffset(refinedPrevious, refinedCurrent,
+                    candidateHeader, candidateFooter);
+                if (verifiedOffset > 0)
+                {
+                    matchedOffset = verifiedOffset;
+                    header = candidateHeader;
+                    footer = candidateFooter;
+                    _runningVerticalLeftBand = candidateLeft;
+                    _runningVerticalRightBand = candidateRight;
+                }
             }
             _runningHeader = header;
 

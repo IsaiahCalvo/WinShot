@@ -46,11 +46,19 @@ public sealed class FrameSignature
     /// to cover a scrollbar even on narrow regions.</summary>
     public static int SideMargin(int width) => Math.Min(Math.Max(50, width / 20), width / 3);
 
-    public static FrameSignature Build(SD.Bitmap bmp)
+    public static FrameSignature Build(SD.Bitmap bmp) => Build(bmp, 0, 0);
+
+    /// <summary>
+    /// Builds a signature while excluding confirmed viewport-fixed side regions. The normal
+    /// scrollbar margin is still respected. This keeps a stationary inspector/sidebar from
+    /// dominating vertical motion matching without changing the full-width stitched pixels.
+    /// </summary>
+    public static FrameSignature Build(SD.Bitmap bmp, int leftInset, int rightInset)
     {
         int width = bmp.Width, height = bmp.Height;
         int margin = SideMargin(width);
-        int startX = margin, endX = width - margin;
+        int startX = Math.Max(margin, Math.Clamp(leftInset, 0, width));
+        int endX = Math.Min(width - margin, width - Math.Clamp(rightInset, 0, width));
         if (endX <= startX) { startX = 0; endX = width; }
         int span = endX - startX;
         int stripLen = Math.Max(1, span / Strips);
