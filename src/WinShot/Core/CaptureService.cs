@@ -682,121 +682,137 @@ public static class CaptureService
         Func<BitmapSource> Convert,
         TaskCompletionSource<BitmapSource> Completion);
 
-    /// <summary>Puts the image on the clipboard. Manual copy includes PNG for apps that prefer it.</summary>
+    /// <summary>
+    /// Puts a fully materialized native image on the clipboard. CF_DIB is always present;
+    /// manual copies also include the registered PNG format. No WPF DataObject or delayed
+    /// rendering callback survives this call.
+    /// </summary>
     public static void CopyToClipboard(Bitmap bmp, bool includePng = true)
     {
-        if (!includePng)
+        using NativeImageClipboardPayload payload = CreateNativeImageClipboardPayload(bmp, includePng);
+        uint pngFormat = payload.HasPng ? GetPngClipboardFormat() : 0;
+        using var owner = new ClipboardOwnerWindow();
+        Win32Exception? lastError = null;
+        const int maxAttempts = 4;
+        const int retryDelayMs = 60;
+
+        for (int attempt = 0; ; attempt++)
         {
-            CopyDibToClipboard(bmp);
-            return;
-        }
-
-        CopyWpfImageToClipboard(bmp);
-    }
-
-    private static void CopyWpfImageToClipboard(Bitmap bmp)
-    {
-        var data = new DataObject();
-        data.SetImage(ToBitmapSource(bmp));
-        MemoryStream? pngStream = null;
-        try
-        {
-            pngStream = new MemoryStream();
-            bmp.Save(pngStream, ImageFormat.Png);
-            pngStream.Position = 0;
-            data.SetData("PNG", pngStream, autoConvert: false);
-
-            const int maxAttempts = 9;
-            const int retryDelayMs = 75;
-
-            // The clipboard can be transiently locked by another process; retry briefly.
-            for (int attempt = 0; ; attempt++)
+            if (OpenClipboard(owner.Handle))
             {
                 try
                 {
-                    Clipboard.SetDataObject(data, copy: true);
-                    Clipboard.Flush();
+                    if (!EmptyClipboard())
+                        throw ClipboardWin32Exception("EmptyClipboard failed");
+
+                    payload.TransferDibToClipboard();
+                    if (payload.HasPng)
+                        payload.TransferPngToClipboard(pngFormat);
                     return;
                 }
-                catch (COMException) when (attempt < maxAttempts)
+                catch (Win32Exception ex) when (
+                    !payload.AnyHandleTransferred &&
+                    attempt < maxAttempts &&
+                    IsTransientClipboardError(ex))
                 {
-                    Thread.Sleep(retryDelayMs);
+                    lastError = ex;
+                }
+                finally
+                {
+                    CloseClipboard();
                 }
             }
-        }
-        finally
-        {
-            pngStream?.Dispose();
-        }
-    }
-
-    private static void CopyDibToClipboard(Bitmap bmp)
-    {
-        IntPtr dibHandle = CreateDibGlobalMemory(bmp);
-        bool transferred = false;
-        Win32Exception? lastError = null;
-        try
-        {
-            const int maxAttempts = 4;
-            const int retryDelayMs = 60;
-            for (int attempt = 0; ; attempt++)
+            else
             {
-                if (OpenClipboard(IntPtr.Zero))
-                {
-                    try
-                    {
-                        if (!EmptyClipboard())
-                            throw new Win32Exception(Marshal.GetLastWin32Error());
-
-                        if (SetClipboardData(ClipboardFormatDib, dibHandle) == IntPtr.Zero)
-                            throw new Win32Exception(Marshal.GetLastWin32Error());
-
-                        transferred = true;
-                        return;
-                    }
-                    catch (Win32Exception ex) when (attempt < maxAttempts && IsTransientClipboardError(ex))
-                    {
-                        lastError = ex;
-                    }
-                    finally
-                    {
-                        CloseClipboard();
-                    }
-                }
-                else
-                {
-                    int error = Marshal.GetLastWin32Error();
-                    lastError = error != 0
-                        ? new Win32Exception(error)
-                        : new Win32Exception("Clipboard is busy.");
-                }
-
-                if (attempt >= maxAttempts)
-                    throw lastError ?? new Win32Exception("Clipboard is busy.");
-
-                Thread.Sleep(retryDelayMs);
+                lastError = ClipboardWin32Exception("OpenClipboard failed");
             }
-        }
-        finally
-        {
-            if (!transferred && dibHandle != IntPtr.Zero)
-                GlobalFree(dibHandle);
+
+            if (attempt >= maxAttempts)
+                throw lastError ?? new Win32Exception("Clipboard is busy.");
+
+            Thread.Sleep(retryDelayMs);
         }
     }
 
     private static bool IsTransientClipboardError(Win32Exception ex) =>
         ex.NativeErrorCode is 0 or 5 or 1418;
 
-    private static IntPtr CreateDibGlobalMemory(Bitmap bmp)
+    private static NativeImageClipboardPayload CreateNativeImageClipboardPayload(Bitmap bmp, bool includePng)
+    {
+        IntPtr dib = IntPtr.Zero;
+        IntPtr png = IntPtr.Zero;
+        try
+        {
+            lock (bmp)
+            {
+                dib = CreateDibGlobalMemory(bmp, out int dibLength);
+                int pngLength = 0;
+                if (includePng)
+                    png = CreatePngGlobalMemory(bmp, out pngLength);
+                return new NativeImageClipboardPayload(dib, dibLength, png, pngLength);
+            }
+        }
+        catch
+        {
+            if (dib != IntPtr.Zero) GlobalFree(dib);
+            if (png != IntPtr.Zero) GlobalFree(png);
+            throw;
+        }
+    }
+
+    internal static NativeImageClipboardPayload CreateNativeImageClipboardPayloadForTest(
+        Bitmap bmp,
+        bool includePng = true) =>
+        CreateNativeImageClipboardPayload(bmp, includePng);
+
+    private static IntPtr CreateDibGlobalMemory(Bitmap bmp, out int byteLength)
     {
         lock (bmp)
         {
             if (bmp.PixelFormat is PixelFormat.Format32bppArgb or PixelFormat.Format32bppPArgb or PixelFormat.Format32bppRgb)
-                return CreateDibGlobalMemoryFromLocked32Bpp(bmp);
+                return CreateDibGlobalMemoryFromLocked32Bpp(bmp, out byteLength);
 
             using var copy = ConvertTo32BppSnapshot(bmp);
-            return CreateDibGlobalMemoryFromLocked32Bpp(copy);
+            return CreateDibGlobalMemoryFromLocked32Bpp(copy, out byteLength);
         }
+    }
+
+    private static IntPtr CreatePngGlobalMemory(Bitmap bmp, out int byteLength)
+    {
+        using var stream = new MemoryStream();
+        lock (bmp)
+            bmp.Save(stream, ImageFormat.Png);
+        byte[] bytes = stream.ToArray();
+        byteLength = bytes.Length;
+        return CreateGlobalMemory(bytes);
+    }
+
+    private static IntPtr CreateGlobalMemory(byte[] bytes)
+    {
+        IntPtr memory = GlobalAlloc(GlobalMoveable | GlobalZeroInit, (UIntPtr)bytes.Length);
+        if (memory == IntPtr.Zero)
+            throw ClipboardWin32Exception("GlobalAlloc failed");
+
+        IntPtr pointer = GlobalLock(memory);
+        if (pointer == IntPtr.Zero)
+        {
+            GlobalFree(memory);
+            throw ClipboardWin32Exception("GlobalLock failed");
+        }
+
+        bool success = false;
+        try
+        {
+            Marshal.Copy(bytes, 0, pointer, bytes.Length);
+            success = true;
+        }
+        finally
+        {
+            GlobalUnlock(memory);
+            if (!success)
+                GlobalFree(memory);
+        }
+        return memory;
     }
 
     private static Bitmap ConvertTo32BppSnapshot(Bitmap bmp)
@@ -813,7 +829,7 @@ public static class CaptureService
         return copy;
     }
 
-    private static IntPtr CreateDibGlobalMemoryFromLocked32Bpp(Bitmap bmp)
+    private static IntPtr CreateDibGlobalMemoryFromLocked32Bpp(Bitmap bmp, out int byteLength)
     {
         var rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
         BitmapData? sourceData = null;
@@ -827,6 +843,7 @@ public static class CaptureService
             int rowBytes = checked(bmp.Width * 4);
             int imageBytes = checked(rowBytes * bmp.Height);
             int totalBytes = checked(BitmapInfoHeaderSize + imageBytes);
+            byteLength = totalBytes;
 
             memory = GlobalAlloc(GlobalMoveable | GlobalZeroInit, (UIntPtr)totalBytes);
             if (memory == IntPtr.Zero)
@@ -869,6 +886,20 @@ public static class CaptureService
             if (releaseMemory && memory != IntPtr.Zero)
                 GlobalFree(memory);
         }
+    }
+
+    private static uint GetPngClipboardFormat()
+    {
+        uint format = RegisterClipboardFormat("PNG");
+        if (format == 0)
+            throw ClipboardWin32Exception("RegisterClipboardFormat(PNG) failed");
+        return format;
+    }
+
+    private static Win32Exception ClipboardWin32Exception(string operation)
+    {
+        int error = Marshal.GetLastWin32Error();
+        return error == 0 ? new Win32Exception(operation) : new Win32Exception(error, operation);
     }
 
     private static IntPtr GetBitmapRowPointer(BitmapData data, int y, int height)
@@ -1017,6 +1048,108 @@ public static class CaptureService
     public static string DefaultFileName(string extension) =>
         $"WinShot {DateTime.Now:yyyy-MM-dd 'at' HH.mm.ss}.{extension}";
 
+    internal sealed class NativeImageClipboardPayload : IDisposable
+    {
+        private IntPtr _dibHandle;
+        private IntPtr _pngHandle;
+
+        internal NativeImageClipboardPayload(
+            IntPtr dibHandle,
+            int dibLength,
+            IntPtr pngHandle,
+            int pngLength)
+        {
+            _dibHandle = dibHandle;
+            _pngHandle = pngHandle;
+            DibLength = dibLength;
+            PngLength = pngLength;
+        }
+
+        internal int DibLength { get; }
+        internal int PngLength { get; }
+        internal bool HasPng => _pngHandle != IntPtr.Zero;
+        internal bool AnyHandleTransferred { get; private set; }
+
+        internal byte[] CopyDibBytesForTest() => CopyGlobalMemory(_dibHandle, DibLength);
+        internal byte[] CopyPngBytesForTest() => CopyGlobalMemory(_pngHandle, PngLength);
+
+        internal void TransferDibToClipboard() =>
+            TransferToClipboard(ref _dibHandle, ClipboardFormatDib, "CF_DIB");
+
+        internal void TransferPngToClipboard(uint format) =>
+            TransferToClipboard(ref _pngHandle, format, "PNG");
+
+        private void TransferToClipboard(ref IntPtr handle, uint format, string name)
+        {
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException($"The {name} clipboard payload is unavailable.");
+            if (SetClipboardData(format, handle) == IntPtr.Zero)
+                throw ClipboardWin32Exception($"SetClipboardData({name}) failed");
+
+            handle = IntPtr.Zero; // Windows owns the HGLOBAL after successful SetClipboardData.
+            AnyHandleTransferred = true;
+        }
+
+        public void Dispose()
+        {
+            IntPtr dib = Interlocked.Exchange(ref _dibHandle, IntPtr.Zero);
+            IntPtr png = Interlocked.Exchange(ref _pngHandle, IntPtr.Zero);
+            if (dib != IntPtr.Zero) GlobalFree(dib);
+            if (png != IntPtr.Zero) GlobalFree(png);
+        }
+
+        private static byte[] CopyGlobalMemory(IntPtr handle, int length)
+        {
+            if (handle == IntPtr.Zero || length < 1)
+                return [];
+
+            IntPtr pointer = GlobalLock(handle);
+            if (pointer == IntPtr.Zero)
+                throw ClipboardWin32Exception("GlobalLock failed");
+            try
+            {
+                var bytes = new byte[length];
+                Marshal.Copy(pointer, bytes, 0, length);
+                return bytes;
+            }
+            finally
+            {
+                GlobalUnlock(handle);
+            }
+        }
+    }
+
+    private sealed class ClipboardOwnerWindow : IDisposable
+    {
+        private static readonly IntPtr MessageOnlyWindow = new(-3);
+
+        public ClipboardOwnerWindow()
+        {
+            Handle = CreateWindowEx(
+                0,
+                "STATIC",
+                "WinShot clipboard owner",
+                0,
+                0, 0, 0, 0,
+                MessageOnlyWindow,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                IntPtr.Zero);
+            if (Handle == IntPtr.Zero)
+                throw ClipboardWin32Exception("Creating the clipboard owner window failed");
+        }
+
+        public IntPtr Handle { get; private set; }
+
+        public void Dispose()
+        {
+            IntPtr handle = Handle;
+            Handle = IntPtr.Zero;
+            if (handle != IntPtr.Zero)
+                DestroyWindow(handle);
+        }
+    }
+
     [DllImport("gdi32.dll")]
     private static extern bool DeleteObject(IntPtr hObject);
 
@@ -1037,6 +1170,27 @@ public static class CaptureService
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetClipboardData(uint format, IntPtr memory);
+
+    [DllImport("user32.dll", EntryPoint = "RegisterClipboardFormatW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RegisterClipboardFormat(string format);
+
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowEx(
+        uint extendedStyle,
+        string className,
+        string windowName,
+        uint style,
+        int x,
+        int y,
+        int width,
+        int height,
+        IntPtr parent,
+        IntPtr menu,
+        IntPtr instance,
+        IntPtr parameter);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     private static extern bool CloseClipboard();
