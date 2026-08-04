@@ -146,7 +146,10 @@ public static class ScrollingCaptureService
         private int _reviewPos = -1;
         private int _horizontalReviewPos = -1;
 
+        private int _runningHeader;
         private int _runningFooter;
+        private int _runningLeftBand;
+        private int _runningRightBand;
         private int _stitchedFrames;
         private double _pxPerNotch;
         private int _notches = 1; // start with one notch to calibrate px-per-notch
@@ -250,11 +253,12 @@ public static class ScrollingCaptureService
             finally
             {
                 if (!discard)
-                    AttachFooterOnce();
+                    AttachTrailingBandOnce();
             }
 
             Log.Info($"Scroll: finished — {( _direction == ScrollDirection.Horizontal ? $"{_horizontal.Width}px wide" : $"{_stitch.Height}px tall")} " +
-                     $"frames={_stitchedFrames} seen={_framesSeen} footer={_runningFooter} method={_method} state={_state}{(discard ? " (discarded)" : "")}");
+                     $"frames={_stitchedFrames} seen={_framesSeen} bands={_runningHeader}/{_runningFooter}/" +
+                     $"{_runningLeftBand}/{_runningRightBand} method={_method} state={_state}{(discard ? " (discarded)" : "")}");
 
             if (discard)
             {
@@ -349,14 +353,24 @@ public static class ScrollingCaptureService
             }
             _identicalStreak = 0;
 
-            // Sticky-footer band: rows byte-identical between differing frames. Require the
-            // band to carry visual information — a run of blank rows at the bottom of two
-            // frames is scrolling whitespace, not a pinned footer, and must not lock in a
-            // permanent exclusion band.
-            int detected = ImageStitcher.DetectConstantBottomBandFromHashes(_prevSig.RowHash, sig.RowHash);
-            if (detected > 0 && !BandHasContent(sig, detected))
-                detected = 0;
-            int footer = Math.Min(Math.Max(_runningFooter, detected), sig.Height / 3);
+            // Fixed edge bands are inferred from mostly-stationary pixels. Keep the legacy
+            // exact-footer result as a conservative fallback for simple solid native chrome.
+            FixedBands fixedBands = _lastFrame is null ? default :
+                FixedRegionDetector.DetectVertical(_lastFrame, frame);
+            int legacyFooter = ImageStitcher.DetectConstantBottomBandFromHashes(_prevSig.RowHash, sig.RowHash);
+            if (legacyFooter > 0 && !BandHasContent(sig, legacyFooter))
+                legacyFooter = 0;
+            int header = Math.Min(Math.Max(_runningHeader, fixedBands.Leading), sig.Height / 3);
+            int footer = Math.Min(Math.Max(_runningFooter, Math.Max(fixedBands.Trailing, legacyFooter)), sig.Height / 3);
+            int matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig, header, footer);
+            if (matchedOffset > 0 && _lastFrame is not null)
+            {
+                FixedBands refined = FixedRegionDetector.DetectVertical(_lastFrame, frame, matchedOffset);
+                header = Math.Min(Math.Max(header, refined.Leading), sig.Height / 3);
+                footer = Math.Min(Math.Max(footer, refined.Trailing), sig.Height / 3);
+                matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig, header, footer);
+            }
+            _runningHeader = header;
 
             // A footer can only be DETECTED from the second frame on, so the rows appended
             // before detection (frame 1's bottom, or any append made with a smaller band)
@@ -367,6 +381,7 @@ public static class ScrollingCaptureService
                 int delta = Math.Min(footer - _runningFooter, _stitch.Height - 1);
                 _stitch.Retract(delta);
                 _canvas.Retract(delta);
+                _strip?.Retract(delta);
                 _runningFooter = footer; // recorded now so a failed match can't re-retract
             }
 
@@ -374,18 +389,20 @@ public static class ScrollingCaptureService
             // that won't align vertically but aligns horizontally locks horizontal mode.
             if (_direction is null && _stitchedFrames <= 1 && _lastFrame is not null)
             {
-                int dv = ScrollMatcher.FindOffset(_prevSig, sig, footer);
+                int dv = matchedOffset;
                 if (dv > 0)
                 {
                     _direction = ScrollDirection.Vertical;
                     // Locate against the canvas (frame 1) rather than blindly appending: if
                     // frames scrolled past without aligning while direction was unknown, a
                     // prev-frame append here would stitch across a content gap.
-                    RelockAgainstCanvas(sig, frame, footer);
+                    RelockAgainstCanvas(sig, frame, header, footer);
                     FinishVerticalFrame(frame, sig);
                     return _stitch.Height < _verticalLimit || EndAtCap();
                 }
-                int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame, frame);
+                FixedBands horizontalBands = FixedRegionDetector.DetectHorizontal(_lastFrame, frame);
+                int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame, frame,
+                    horizontalBands.Leading, horizontalBands.Trailing);
                 if (dh > 0)
                 {
                     _direction = ScrollDirection.Horizontal;
@@ -400,30 +417,30 @@ public static class ScrollingCaptureService
             switch (_state)
             {
                 case Track.Tracking:
-                    int d = ScrollMatcher.FindOffset(_prevSig, sig, footer);
+                    int d = matchedOffset;
                     if (d > 0)
                     {
-                        AppendVertical(frame, sig, d, footer);
+                        AppendVertical(frame, sig, d, header, footer);
                         if (auto)
                             Recalibrate(d);
                     }
                     else if (auto)
                     {
-                        if (!HandleAutoMiss(frame, sig, footer))
+                        if (!HandleAutoMiss(frame, sig, header, footer))
                             return false;
                     }
                     else
                     {
-                        RelockAgainstCanvas(sig, frame, footer);
+                        RelockAgainstCanvas(sig, frame, header, footer);
                     }
                     break;
 
                 case Track.Reviewing:
-                    ProcessReviewing(frame, sig, footer, auto);
+                    ProcessReviewing(frame, sig, header, footer, auto);
                     break;
 
                 case Track.Lost:
-                    RelockAgainstCanvas(sig, frame, footer);
+                    RelockAgainstCanvas(sig, frame, header, footer);
                     break;
             }
 
@@ -453,7 +470,7 @@ public static class ScrollingCaptureService
             PushPreview(force: false);
         }
 
-        private void AppendVertical(SD.Bitmap frame, FrameSignature sig, int offset, int footer)
+        private void AppendVertical(SD.Bitmap frame, FrameSignature sig, int offset, int header, int footer)
         {
             // The newly revealed span is [h-footer-offset, h-footer). When the 32000px cap
             // clamps the row count, take rows from the TOP of that span (seam-adjacent) so
@@ -461,7 +478,7 @@ public static class ScrollingCaptureService
             int newRows = Math.Min(offset, _verticalLimit - _stitch.Height);
             if (newRows <= 0)
                 return;
-            int srcStart = sig.Height - footer - offset;
+            int srcStart = Math.Max(header, sig.Height - footer - offset);
             _stitch.Append(frame, srcStart, newRows);
             _canvas.Append(sig, srcStart, newRows);
             _strip?.Append(frame, srcStart, newRows);
@@ -511,13 +528,13 @@ public static class ScrollingCaptureService
         /// overhang); fully inside = the user scrolled back up (append nothing, tell them);
         /// nowhere = lost, ask them to scroll back so a future frame re-locks.
         /// </summary>
-        private void RelockAgainstCanvas(FrameSignature sig, SD.Bitmap frame, int footer)
+        private void RelockAgainstCanvas(FrameSignature sig, SD.Bitmap frame, int header, int footer)
         {
-            var l = ScrollMatcher.LocateInCanvas(_canvas, sig, int.MaxValue, footer);
+            var l = ScrollMatcher.LocateInCanvas(_canvas, sig, int.MaxValue, header, footer);
             if (l is { NewRows: > 0 } overhang)
             {
                 Log.Info($"Scroll: re-locked at canvas row {overhang.Position} (+{overhang.NewRows}px recovered)");
-                AppendVertical(frame, sig, overhang.NewRows, footer);
+                AppendVertical(frame, sig, overhang.NewRows, header, footer);
             }
             else if (l is not null)
             {
@@ -546,14 +563,14 @@ public static class ScrollingCaptureService
         /// verify anything. The moment the tracked position passes the canvas end, append
         /// the overhang and resume normal tracking.
         /// </summary>
-        private void ProcessReviewing(SD.Bitmap frame, FrameSignature sig, int footer, bool auto)
+        private void ProcessReviewing(SD.Bitmap frame, FrameSignature sig, int header, int footer, bool auto)
         {
-            int d = _reviewPos >= 0 ? ScrollMatcher.FindOffset(_prevSig!, sig, footer) : 0;
+            int d = _reviewPos >= 0 ? ScrollMatcher.FindOffset(_prevSig!, sig, header, footer) : 0;
             if (d > 0)
             {
                 _reviewPos += d;
                 _healSteps = 0; // verified progress — never time out mid-traversal
-                if (!TryFinishReview(frame, sig, footer))
+                if (!TryFinishReview(frame, sig, header, footer))
                     SetHint(ScrollHint.AlreadyCaptured);
                 return;
             }
@@ -567,28 +584,28 @@ public static class ScrollingCaptureService
                 // blank stretch (invisible), and verified matches re-anchor as soon as
                 // shared content returns.
                 _reviewPos += (int)Math.Round(_pxPerNotch * _lastSentNotches);
-                TryFinishReview(frame, sig, footer);
+                TryFinishReview(frame, sig, header, footer);
                 return;
             }
 
-            RelockAgainstCanvas(sig, frame, footer); // refresh the absolute lock / degrade honestly
+            RelockAgainstCanvas(sig, frame, header, footer); // refresh the absolute lock / degrade honestly
         }
 
         /// <summary>Appends the overhang and resumes tracking once the dead-reckoned review
         /// position passes the canvas end. True when review finished.</summary>
-        private bool TryFinishReview(SD.Bitmap frame, FrameSignature sig, int footer)
+        private bool TryFinishReview(SD.Bitmap frame, FrameSignature sig, int header, int footer)
         {
-            int frameRows = sig.Height - footer;
-            int overhang = _reviewPos + frameRows - _canvas.Height;
+            int frameRows = sig.Height - header - footer;
+            int overhang = _reviewPos + header + frameRows - _canvas.Height;
             if (overhang <= 0)
                 return false;
             Log.Info($"Scroll: review reached the capture end (pos {_reviewPos}) — appending {overhang}px");
-            AppendVertical(frame, sig, Math.Min(overhang, frameRows), footer);
+            AppendVertical(frame, sig, Math.Min(overhang, frameRows), header, footer);
             _reviewPos = -1;
             return true;
         }
 
-        private bool HandleAutoMiss(SD.Bitmap frame, FrameSignature sig, int footer)
+        private bool HandleAutoMiss(SD.Bitmap frame, FrameSignature sig, int header, int footer)
         {
             if ((ScrollMatcher.IsLowInformation(sig) || ScrollMatcher.IsLowInformation(_prevSig!)) && _pxPerNotch > 0)
             {
@@ -596,9 +613,9 @@ public static class ScrollingCaptureService
                 // but we injected a known number of wheel notches and know px-per-notch from
                 // calibration. Appending the estimate is visually exact on uniform content.
                 int est = (int)Math.Round(_pxPerNotch * _notches);
-                est = Math.Clamp(est, 1, Math.Max(1, sig.Height - footer - 24));
+                est = Math.Clamp(est, 1, Math.Max(1, sig.Height - header - footer - 24));
                 Log.Info($"Scroll: blank stretch — appending calibrated estimate of {est}px");
-                AppendVertical(frame, sig, est, footer);
+                AppendVertical(frame, sig, est, header, footer);
                 _status($"{_stitchedFrames} frames — {_stitch.Height}px (blank stretch)");
                 return true;
             }
@@ -607,7 +624,7 @@ public static class ScrollingCaptureService
             // repairs the case where the PREVIOUS step's motion couldn't be verified (e.g.
             // sampled mid-animation): the previous frame became the match anchor without
             // its rows being appended, so a naive prev-frame append would leave a hole.
-            RelockAgainstCanvas(sig, frame, footer);
+            RelockAgainstCanvas(sig, frame, header, footer);
             if (_state == Track.Tracking)
                 return true; // recovered — the overhang was appended, nothing lost
 
@@ -640,10 +657,19 @@ public static class ScrollingCaptureService
             return false;
         }
 
-        /// <summary>Sticky footer rows were excluded from every seam; put them back exactly once.</summary>
-        private void AttachFooterOnce()
+        /// <summary>Trailing fixed chrome was excluded from every seam; put it back exactly once.</summary>
+        private void AttachTrailingBandOnce()
         {
-            if (_direction == ScrollDirection.Horizontal || _runningFooter <= 0 || _lastFrame is null)
+            if (_lastFrame is null)
+                return;
+            if (_direction == ScrollDirection.Horizontal)
+            {
+                if (_runningRightBand <= 0 || _horizontal.Width + _runningRightBand > _horizontalLimit)
+                    return;
+                _horizontal.Append(_lastFrame, _lastFrame.Width - _runningRightBand, _runningRightBand);
+                return;
+            }
+            if (_runningFooter <= 0)
                 return;
             if (_stitch.Height + _runningFooter > _verticalLimit)
                 return;
@@ -692,20 +718,39 @@ public static class ScrollingCaptureService
             }
             _identicalStreak = 0;
 
-            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame);
+            FixedBands bands = FixedRegionDetector.DetectHorizontal(_lastFrame!, frame);
+            int left = Math.Min(Math.Max(_runningLeftBand, bands.Leading), frame.Width / 3);
+            int right = Math.Min(Math.Max(_runningRightBand, bands.Trailing), frame.Width / 3);
+            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame, left, right);
+            if (offset > 0)
+            {
+                FixedBands refined = FixedRegionDetector.DetectHorizontal(_lastFrame!, frame, offset);
+                left = Math.Min(Math.Max(left, refined.Leading), frame.Width / 3);
+                right = Math.Min(Math.Max(right, refined.Trailing), frame.Width / 3);
+                offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame, left, right);
+            }
+            _runningLeftBand = left;
+            if (right > _runningRightBand && _horizontal.Width > 1)
+            {
+                int delta = Math.Min(right - _runningRightBand, _horizontal.Width - 1);
+                _horizontal.Retract(delta);
+                _horizontalCanvas.Retract(delta);
+                _horizontalStrip?.Retract(delta);
+                _runningRightBand = right;
+            }
             if (_state == Track.Tracking && offset > 0)
             {
-                AppendHorizontal(frame, columns, offset);
+                AppendHorizontal(frame, columns, offset, left, right);
                 if (auto)
                     RecalibrateHorizontal(offset);
             }
             else if (_state == Track.Reviewing)
             {
-                ProcessHorizontalReviewing(frame, columns, auto);
+                ProcessHorizontalReviewing(frame, columns, left, right, auto);
             }
             else
             {
-                RelockHorizontal(frame, columns);
+                RelockHorizontal(frame, columns, left, right);
                 if (auto && _state != Track.Tracking)
                 {
                     _autoMisses++;
@@ -738,11 +783,11 @@ public static class ScrollingCaptureService
             _status($"1 frame — {_horizontal.Width}px wide");
         }
 
-        private void AppendHorizontal(SD.Bitmap frame, ulong[] columns, int offset)
+        private void AppendHorizontal(SD.Bitmap frame, ulong[] columns, int offset, int left, int right)
         {
             int newColumns = Math.Min(offset, _horizontalLimit - _horizontal.Width);
             if (newColumns <= 0) return;
-            int sourceX = frame.Width - offset;
+            int sourceX = Math.Max(left, frame.Width - right - offset);
             _horizontal.Append(frame, sourceX, newColumns);
             _horizontalCanvas.Append(columns, sourceX, newColumns);
             _horizontalStrip?.Append(frame, sourceX, newColumns);
@@ -763,13 +808,13 @@ public static class ScrollingCaptureService
             _status($"{_stitchedFrames} frames — {_horizontal.Width}px wide{large}");
         }
 
-        private void RelockHorizontal(SD.Bitmap frame, ulong[] columns)
+        private void RelockHorizontal(SD.Bitmap frame, ulong[] columns, int left, int right)
         {
-            var location = _horizontalCanvas.Locate(columns);
+            var location = _horizontalCanvas.Locate(columns, left, right);
             if (location is { NewColumns: > 0 } overhang)
             {
                 Log.Info($"Scroll horizontal: re-locked at column {overhang.Position} (+{overhang.NewColumns}px)");
-                AppendHorizontal(frame, columns, overhang.NewColumns);
+                AppendHorizontal(frame, columns, overhang.NewColumns, left, right);
             }
             else if (location is not null)
             {
@@ -786,14 +831,14 @@ public static class ScrollingCaptureService
             }
         }
 
-        private void ProcessHorizontalReviewing(SD.Bitmap frame, ulong[] columns, bool auto)
+        private void ProcessHorizontalReviewing(SD.Bitmap frame, ulong[] columns, int left, int right, bool auto)
         {
-            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame);
+            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame, left, right);
             if (offset > 0 && _horizontalReviewPos >= 0)
             {
                 _horizontalReviewPos += offset;
                 _healSteps = 0;
-                if (!TryFinishHorizontalReview(frame, columns))
+                if (!TryFinishHorizontalReview(frame, columns, left, right))
                     SetHint(ScrollHint.AlreadyCaptured);
                 return;
             }
@@ -801,17 +846,18 @@ public static class ScrollingCaptureService
             if (auto && _horizontalReviewPos >= 0 && _pxPerNotch > 0 && _lastSentNotches > 0)
             {
                 _horizontalReviewPos += (int)Math.Round(_pxPerNotch * _lastSentNotches);
-                TryFinishHorizontalReview(frame, columns);
+                TryFinishHorizontalReview(frame, columns, left, right);
                 return;
             }
-            RelockHorizontal(frame, columns);
+            RelockHorizontal(frame, columns, left, right);
         }
 
-        private bool TryFinishHorizontalReview(SD.Bitmap frame, ulong[] columns)
+        private bool TryFinishHorizontalReview(SD.Bitmap frame, ulong[] columns, int left, int right)
         {
-            int overhang = _horizontalReviewPos + columns.Length - _horizontalCanvas.Width;
+            int bodyColumns = columns.Length - left - right;
+            int overhang = _horizontalReviewPos + left + bodyColumns - _horizontalCanvas.Width;
             if (overhang <= 0) return false;
-            AppendHorizontal(frame, columns, Math.Min(overhang, columns.Length));
+            AppendHorizontal(frame, columns, Math.Min(overhang, bodyColumns), left, right);
             _horizontalReviewPos = -1;
             return true;
         }
@@ -1109,21 +1155,30 @@ public static class ScrollingCaptureService
                 _columns.Add(source[x]);
         }
 
-        public HorizontalLocation? Locate(ulong[] frame)
+        public void Retract(int columns)
         {
-            if (frame.Length < MinimumOverlap || Width < MinimumOverlap)
+            int remove = Math.Min(Math.Max(0, columns), _columns.Count);
+            if (remove > 0)
+                _columns.RemoveRange(_columns.Count - remove, remove);
+        }
+
+        public HorizontalLocation? Locate(ulong[] frame, int leftBand, int rightBand)
+        {
+            int bodyLength = frame.Length - leftBand - rightBand;
+            if (bodyLength < MinimumOverlap || Width < MinimumOverlap)
                 return null;
 
             // First seek an overlap at the right edge. This is the only kind of match that
             // can safely extend the image after a missed intermediate frame.
-            int firstTail = Math.Max(0, Width - frame.Length + 1);
+            int firstTail = Math.Max(0, Width - leftBand - bodyLength + 1);
             HorizontalLocation? tail = null;
             int bestTailOverlap = 0;
-            for (int position = firstTail; position <= Width - MinimumOverlap; position++)
+            for (int position = firstTail; position + leftBand <= Width - MinimumOverlap; position++)
             {
-                int overlap = Width - position;
-                if (overlap <= bestTailOverlap || !Matches(frame, position, overlap)) continue;
-                tail = new HorizontalLocation(position, frame.Length - overlap);
+                int overlap = Width - (position + leftBand);
+                if (overlap <= bestTailOverlap || overlap > bodyLength ||
+                    !Matches(frame, leftBand, position + leftBand, overlap)) continue;
+                tail = new HorizontalLocation(position, bodyLength - overlap);
                 bestTailOverlap = overlap;
             }
             if (tail is not null)
@@ -1131,22 +1186,23 @@ public static class ScrollingCaptureService
 
             // Otherwise the frame is wholly inside captured content. Search from the newest
             // edge backwards so repeated spreadsheet bands do not jump to an older copy.
-            int latest = Width - frame.Length;
+            int latest = Width - leftBand - bodyLength;
             for (int position = latest; position >= 0; position--)
             {
-                if (Matches(frame, position, frame.Length))
+                if (Matches(frame, leftBand, position + leftBand, bodyLength))
                     return new HorizontalLocation(position, 0);
             }
             return null;
         }
 
-        private bool Matches(ulong[] frame, int canvasX, int count)
+        private bool Matches(ulong[] frame, int frameX, int canvasX, int count)
         {
-            if (canvasX < 0 || count < MinimumOverlap || canvasX + count > Width || count > frame.Length)
+            if (frameX < 0 || canvasX < 0 || count < MinimumOverlap ||
+                canvasX + count > Width || frameX + count > frame.Length)
                 return false;
             for (int x = 0; x < count; x++)
             {
-                if (_columns[canvasX + x] != frame[x])
+                if (_columns[canvasX + x] != frame[frameX + x])
                     return false;
             }
             return true;
@@ -1178,6 +1234,8 @@ public static class ScrollingCaptureService
             ImageStitcher.CopyColumnsInto(frame, sourceX, columns, _buffer!, Width);
             Width += columns;
         }
+
+        public void Retract(int columns) => Width = Math.Max(0, Width - columns);
 
         public SD.Bitmap? Take()
         {
@@ -1246,6 +1304,12 @@ public static class ScrollingCaptureService
                 new SD.Rectangle(sourceX, 0, columns, frame.Height),
                 SD.GraphicsUnit.Pixel);
             _used += scaled;
+        }
+
+        public void Retract(int sourceColumns)
+        {
+            int scaled = Math.Max(1, (int)Math.Round(sourceColumns * _scale));
+            _used = Math.Max(0, _used - scaled);
         }
 
         public SD.Bitmap? SnapshotWhole()
@@ -1321,6 +1385,12 @@ public static class ScrollingCaptureService
                 new SD.Rectangle(0, srcY, frame.Width, rows),
                 SD.GraphicsUnit.Pixel);
             _used += scaled;
+        }
+
+        public void Retract(int sourceRows)
+        {
+            int scaled = Math.Max(1, (int)Math.Round(sourceRows * _scale));
+            _used = Math.Max(0, _used - scaled);
         }
 
         /// <summary>The WHOLE growing capture, downscaled to fit the preview box — CleanShot

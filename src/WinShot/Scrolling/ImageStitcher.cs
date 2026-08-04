@@ -189,6 +189,10 @@ public static class ImageStitcher
     /// horizontal scrollbars live.
     /// </summary>
     public static int FindScrollOffsetHorizontal(SD.Bitmap previous, SD.Bitmap current)
+        => FindScrollOffsetHorizontal(previous, current, 0, 0);
+
+    /// <summary>Horizontal matcher that excludes fixed left/right viewport bands.</summary>
+    public static int FindScrollOffsetHorizontal(SD.Bitmap previous, SD.Bitmap current, int leftBand, int rightBand)
     {
         if (previous.Width != current.Width || previous.Height != current.Height)
             return 0;
@@ -199,7 +203,7 @@ public static class ImageStitcher
         ulong[] prevHashes = ComputeColumnHashes(previous);
         ulong[] currHashes = ComputeColumnHashes(current);
         // Same run-based selection as vertical; columns play the role of rows.
-        return FindScrollOffsetFromHashes(prevHashes, currHashes, 0, 0);
+        return FindScrollOffsetFromHashes(prevHashes, currHashes, leftBand, rightBand);
     }
 
     /// <summary>

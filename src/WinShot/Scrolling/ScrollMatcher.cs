@@ -224,27 +224,34 @@ public static class ScrollMatcher
     /// <summary>
     /// How many pixels the content moved up between <paramref name="previous"/> and
     /// <paramref name="current"/>; 0 when no verifiable movement was found. The bottom
-    /// <paramref name="bottomBand"/> rows (sticky footer) are excluded from all comparisons.
+    /// <paramref name="bottomBand"/> rows (fixed footer) are excluded from all comparisons.
     /// Runs the exact tier first, then the correlation tier.
     /// </summary>
     public static int FindOffset(FrameSignature previous, FrameSignature current, int bottomBand = 0)
+        => FindOffset(previous, current, 0, bottomBand);
+
+    /// <summary>Band-aware overload that excludes fixed chrome at both viewport edges.</summary>
+    public static int FindOffset(FrameSignature previous, FrameSignature current, int topBand, int bottomBand)
     {
         if (previous.Height != current.Height || previous.Width != current.Width)
             return 0;
 
-        int exact = ImageStitcher.FindScrollOffsetFromHashes(previous.RowHash, current.RowHash, 0, bottomBand);
+        int exact = ImageStitcher.FindScrollOffsetFromHashes(previous.RowHash, current.RowHash, topBand, bottomBand);
         if (exact > 0)
             return exact;
 
-        return FindOffsetByCorrelation(previous, current, bottomBand);
+        return FindOffsetByCorrelation(previous, current, topBand, bottomBand);
     }
 
-    private static int FindOffsetByCorrelation(FrameSignature prev, FrameSignature curr, int bottomBand)
+    private static int FindOffsetByCorrelation(FrameSignature prev, FrameSignature curr, int topBand, int bottomBand)
     {
         int height = curr.Height;
+        int start = Math.Clamp(topBand, 0, height / 2);
         int end = height - Math.Clamp(bottomBand, 0, height / 2);
+        if (end - start < MinInformativeRows * 2)
+            return 0;
         // Candidate d: current row y aligns with previous row y+d.
-        int maxOffset = end - MinInformativeRows * 2;
+        int maxOffset = end - start - MinInformativeRows * 2;
         if (maxOffset < 1)
             return 0;
 
@@ -252,12 +259,12 @@ public static class ScrollMatcher
         int bestOffset = 0;
         for (int d = 1; d < maxOffset; d++)
         {
-            int overlap = end - d;
-            if (CountInformative(curr.Energy, 0, overlap) < MinInformativeRows ||
-                CountInformative(prev.Energy, d, overlap) < MinInformativeRows)
+            int overlap = end - start - d;
+            if (CountInformative(curr.Energy, start, overlap) < MinInformativeRows ||
+                CountInformative(prev.Energy, start + d, overlap) < MinInformativeRows)
                 continue;
 
-            float score = Ncc(curr.Energy, 0, prev.Energy, d, overlap);
+            float score = Ncc(curr.Energy, start, prev.Energy, start + d, overlap);
             if (score > bestScore)
             {
                 if (Math.Abs(d - bestOffset) > PeakExclusionZone)
@@ -276,10 +283,10 @@ public static class ScrollMatcher
         if (secondScore > float.MinValue && bestScore - secondScore < PeakMargin)
             return 0; // repetitive content: several offsets look alike — refuse to guess
 
-        int overlapLen = end - bestOffset;
-        if (!MeanConfirms(curr.Mean, 0, prev.Mean, bestOffset, overlapLen))
+        int overlapLen = end - start - bestOffset;
+        if (!MeanConfirms(curr.Mean, start, prev.Mean, start + bestOffset, overlapLen))
             return 0;
-        if (!StripsAgree(curr, prev, bestOffset, overlapLen))
+        if (!StripsAgree(curr, prev, start, bestOffset, overlapLen))
             return 0;
         return bestOffset;
     }
@@ -290,30 +297,38 @@ public static class ScrollMatcher
     /// Used to re-lock after a too-fast scroll ("scroll back up") and to recognize
     /// already-captured content so scrolling back never duplicates rows. Returns null
     /// unless a verified unique alignment exists. The frame's bottom
-    /// <paramref name="bottomBand"/> rows are ignored (sticky footer).
+    /// <paramref name="bottomBand"/> rows are ignored (fixed footer).
     /// </summary>
     public static CanvasLock? LocateInCanvas(CanvasProfile canvas, FrameSignature frame,
         int searchWindow = int.MaxValue, int bottomBand = 0)
+        => LocateInCanvas(canvas, frame, searchWindow, 0, bottomBand);
+
+    /// <summary>Band-aware canvas lookup that ignores fixed leading and trailing chrome.</summary>
+    public static CanvasLock? LocateInCanvas(CanvasProfile canvas, FrameSignature frame,
+        int searchWindow, int topBand, int bottomBand)
     {
-        int frameRows = frame.Height - Math.Clamp(bottomBand, 0, frame.Height / 2);
+        int top = Math.Clamp(topBand, 0, frame.Height / 2);
+        int bottom = Math.Clamp(bottomBand, 0, frame.Height / 2);
+        int frameRows = frame.Height - top - bottom;
         if (canvas.Height < MinInformativeRows * 2 || frameRows < MinInformativeRows * 2)
             return null;
 
         int windowStart = Math.Max(0, canvas.Height - Math.Min(searchWindow, canvas.Height));
         // p = canvas row where frame row 0 sits. The frame may overhang the canvas bottom by
         // up to frameRows - MinInformativeRows*2 rows (we still need a meaningful overlap).
-        int pMax = canvas.Height - MinInformativeRows * 2;
+        int pMax = canvas.Height - top - MinInformativeRows * 2;
 
         float bestScore = float.MinValue, secondScore = float.MinValue;
         int bestPos = -1;
         for (int p = windowStart; p <= pMax; p++)
         {
-            int overlap = Math.Min(frameRows, canvas.Height - p);
-            if (CountInformative(frame.Energy, 0, overlap) < MinInformativeRows ||
-                CountInformative(canvas.Energy, p, overlap) < MinInformativeRows)
+            int canvasStart = p + top;
+            int overlap = Math.Min(frameRows, canvas.Height - canvasStart);
+            if (CountInformative(frame.Energy, top, overlap) < MinInformativeRows ||
+                CountInformative(canvas.Energy, canvasStart, overlap) < MinInformativeRows)
                 continue;
 
-            float score = Ncc(frame.Energy, 0, canvas.Energy, p, overlap);
+            float score = Ncc(frame.Energy, top, canvas.Energy, canvasStart, overlap);
             if (score > bestScore)
             {
                 if (bestPos >= 0 && Math.Abs(p - bestPos) > PeakExclusionZone)
@@ -332,11 +347,11 @@ public static class ScrollMatcher
         if (secondScore > float.MinValue && bestScore - secondScore < PeakMargin)
             return null;
 
-        int overlapLen = Math.Min(frameRows, canvas.Height - bestPos);
-        if (!MeanConfirms(frame.Mean, 0, canvas.Mean, bestPos, overlapLen))
+        int overlapLen = Math.Min(frameRows, canvas.Height - (bestPos + top));
+        if (!MeanConfirms(frame.Mean, top, canvas.Mean, bestPos + top, overlapLen))
             return null;
 
-        int newRows = Math.Max(0, bestPos + frameRows - canvas.Height);
+        int newRows = Math.Max(0, bestPos + top + frameRows - canvas.Height);
         return new CanvasLock(bestPos, newRows);
     }
 
@@ -436,15 +451,15 @@ public static class ScrollMatcher
         return sum / len <= MeanConfirmTolerance;
     }
 
-    private static bool StripsAgree(FrameSignature curr, FrameSignature prev, int offset, int len)
+    private static bool StripsAgree(FrameSignature curr, FrameSignature prev, int start, int offset, int len)
     {
         int votes = 0, informative = 0;
         for (int s = 0; s < FrameSignature.Strips; s++)
         {
-            if (CountInformative(curr.StripEnergy[s], 0, len) < MinInformativeRows)
+            if (CountInformative(curr.StripEnergy[s], start, len) < MinInformativeRows)
                 continue; // blank strip abstains
             informative++;
-            if (Ncc(curr.StripEnergy[s], 0, prev.StripEnergy[s], offset, len) >= StripVoteScore)
+            if (Ncc(curr.StripEnergy[s], start, prev.StripEnergy[s], start + offset, len) >= StripVoteScore)
                 votes++;
         }
         // With ≤1 informative strip the full-span score already told the story.
