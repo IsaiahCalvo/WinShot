@@ -128,6 +128,15 @@
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Delete"/></StackPanel>
                     </Button>
                 </StackPanel>
+
+                <StackPanel x:Name="SortControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Button x:Name="SortFieldButton" Style="{StaticResource ToolbarButton}" Click="OnSortFieldMenu" Background="{StaticResource SurfaceBrush}" Padding="12,7">
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="12,2,0,0"/></StackPanel>
+                    </Button>
+                    <Button x:Name="SortDirectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSortDirection" Margin="4,0,0,0"
+                            AutomationProperties.Name="Sort descending"><TextBlock x:Name="SortDirectionGlyph" Text="&#xE74B;" FontFamily="{StaticResource IconFont}" FontSize="16"/></Button>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -139,14 +148,6 @@
                     <RadioButton x:Name="ChipScrolling" Content="Scrolling" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                     <RadioButton x:Name="ChipVideo" Content="Videos" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                     <RadioButton x:Name="ChipGif" Content="GIFs" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <Button x:Name="SortFieldButton" Style="{StaticResource ToolbarButton}" Click="OnSortFieldMenu" Background="{StaticResource SurfaceBrush}" Padding="12,7">
-                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="12,2,0,0"/></StackPanel>
-                    </Button>
-                    <Button x:Name="SortDirectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSortDirection" Margin="4,0,0,0"
-                            AutomationProperties.Name="Sort descending"><TextBlock x:Name="SortDirectionGlyph" Text="&#xE74B;" FontFamily="{StaticResource IconFont}" FontSize="16"/></Button>
                 </StackPanel>
             </Grid>
         </Border>
