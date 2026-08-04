@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using WinShot.Scrolling;
 using Xunit;
@@ -87,6 +88,19 @@ public class StationaryViewportDetectorTests
         Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
         int firstArrow = FindFirstRedRow(stitched);
         Assert.InRange(firstArrow, stitched.Height - 48, stitched.Height - 1);
+
+        string? evidenceDirectory = Environment.GetEnvironmentVariable(
+            "WINSHOT_STATIONARY_SCROLL_EVIDENCE_DIR");
+        if (!string.IsNullOrWhiteSpace(evidenceDirectory))
+        {
+            Directory.CreateDirectory(evidenceDirectory);
+            using var first = MakeFrame(positions[0]);
+            using var final = MakeFrame(positions[^1]);
+            first.Save(Path.Combine(evidenceDirectory, "frame-first.png"), ImageFormat.Png);
+            final.Save(Path.Combine(evidenceDirectory, "frame-final.png"), ImageFormat.Png);
+            stitched.Save(Path.Combine(evidenceDirectory, "stitched-fixed-regions-once.png"),
+                ImageFormat.Png);
+        }
     }
 
     [Fact]
