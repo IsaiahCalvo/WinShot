@@ -41,11 +41,11 @@ public class PostCaptureActionTests
     [Theory]
     [InlineData("copy", true)]
     [InlineData("save", true)]
-    [InlineData("edit", false)]
+    [InlineData("edit", true)]
     [InlineData("pin", false)]
     [InlineData("background", false)]
     [InlineData("overlay", false)]
-    public void NeedsCallerThreadHistoryClone_IsLimitedToActionsThatTakeOwnership(string value, bool expected)
+    public void NeedsCallerThreadHistoryClone_IsTrueWhenTheActionKeepsUsingTheCapture(string value, bool expected)
     {
         Assert.Equal(expected, PostCaptureAction.NeedsCallerThreadHistoryClone(value));
     }

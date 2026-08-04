@@ -337,12 +337,7 @@ public static class CaptureService
     }
 
     public static Task<BitmapSource> ToBitmapSourceSnapshotAsync(Bitmap bmp)
-        => RunBitmapSourceConversion(() =>
-        {
-            Bitmap copy = CloneBitmap(bmp);
-            using (copy)
-                return ToBitmapSource(copy);
-        });
+        => ConvertOwnedBitmapSnapshotAsync(CloneBitmap(bmp));
 
     public static Bitmap CloneBitmap(Bitmap bmp)
     {
@@ -401,12 +396,29 @@ public static class CaptureService
     }
 
     public static Task<BitmapSource> ToBitmapSourceSnapshotAsync(Bitmap bmp, int maxPixelWidth, int maxPixelHeight)
-        => RunBitmapSourceConversion(() =>
+        => ConvertOwnedBitmapSnapshotAsync(CreateBitmapSnapshot(bmp, maxPixelWidth, maxPixelHeight));
+
+    /// <summary>
+    /// Queues only an already-detached bitmap. Snapshot methods must finish reading their
+    /// caller-owned GDI bitmap before they return, otherwise UI layout, History, clipboard,
+    /// or window disposal can touch that bitmap while this worker has it locked.
+    /// </summary>
+    private static Task<BitmapSource> ConvertOwnedBitmapSnapshotAsync(Bitmap snapshot)
+    {
+        try
         {
-            Bitmap copy = CreateBitmapSnapshot(bmp, maxPixelWidth, maxPixelHeight);
-            using (copy)
-                return ToBitmapSource(copy);
-        });
+            return RunBitmapSourceConversion(() =>
+            {
+                using (snapshot)
+                    return ToBitmapSource(snapshot);
+            });
+        }
+        catch
+        {
+            snapshot.Dispose();
+            throw;
+        }
+    }
 
     private static Task<BitmapSource> RunBitmapSourceConversion(Func<BitmapSource> convert)
     {

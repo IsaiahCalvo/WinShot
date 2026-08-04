@@ -754,7 +754,7 @@ public partial class App : Application
             cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action),
             historyKind);
         if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
-            QueueAutoClipboardCopy(bmp);
+            QueueAutoClipboardCopy(bmp, detachOnCallerThread: action == PostCaptureAction.Edit);
 
         switch (action)
         {
@@ -868,7 +868,7 @@ public partial class App : Application
             : $"WinShot — Recording {(int)elapsed.Value.TotalMinutes:00}:{elapsed.Value.Seconds:00}";
     }
 
-    private void QueueAutoClipboardCopy(SD.Bitmap bmp)
+    private void QueueAutoClipboardCopy(SD.Bitmap bmp, bool detachOnCallerThread = false)
     {
         if (Environment.TickCount64 < Interlocked.Read(ref _autoCopySuppressedUntilTick))
         {
@@ -876,9 +876,24 @@ public partial class App : Application
             return;
         }
 
+        bool takeOwnership = false;
+        if (detachOnCallerThread)
+        {
+            try
+            {
+                bmp = CaptureService.CloneBitmap(bmp);
+                takeOwnership = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"Auto-copy to clipboard skipped: {ex.Message}");
+                return;
+            }
+        }
+
         _ = CopyToClipboardAndNotifyAsync(
             bmp,
-            takeOwnership: false,
+            takeOwnership,
             showSuccess: false,
             showFailure: false,
             includePng: false,

@@ -1,6 +1,8 @@
 using WinShot.Core;
 using Xunit;
 using SD = System.Drawing;
+using System.Reflection;
+using System.Windows.Media.Imaging;
 
 namespace WinShot.Tests;
 
@@ -57,5 +59,56 @@ public class CaptureServiceTests
         Assert.True(snapshot.IsFrozen);
         Assert.Equal(100, snapshot.PixelWidth);
         Assert.Equal(50, snapshot.PixelHeight);
+    }
+
+    [Fact]
+    public async Task ToBitmapSourceSnapshotAsync_DetachesBeforeQueuedConversion()
+    {
+        using var workerStarted = new ManualResetEventSlim();
+        using var releaseWorker = new ManualResetEventSlim();
+        var enqueue = typeof(CaptureService).GetMethod(
+            "RunBitmapSourceConversion",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+
+        Func<BitmapSource> blocker = () =>
+        {
+            workerStarted.Set();
+            if (!releaseWorker.Wait(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("Bitmap conversion worker was not released.");
+
+            var pixel = BitmapSource.Create(
+                1, 1, 96, 96,
+                System.Windows.Media.PixelFormats.Bgra32,
+                palette: null,
+                pixels: new byte[4],
+                stride: 4);
+            pixel.Freeze();
+            return pixel;
+        };
+
+        var blockerTask = (Task<BitmapSource>)enqueue.Invoke(null, [blocker])!;
+        Assert.True(workerStarted.Wait(TimeSpan.FromSeconds(5)), "Bitmap conversion worker did not start.");
+
+        var source = new SD.Bitmap(320, 6000, SD.Imaging.PixelFormat.Format32bppArgb);
+        using (var graphics = SD.Graphics.FromImage(source))
+            graphics.Clear(SD.Color.CornflowerBlue);
+
+        Task<BitmapSource> snapshotTask;
+        try
+        {
+            snapshotTask = CaptureService.ToBitmapSourceSnapshotAsync(source);
+            source.Dispose();
+        }
+        finally
+        {
+            releaseWorker.Set();
+        }
+
+        await blockerTask;
+        BitmapSource snapshot = await snapshotTask;
+
+        Assert.True(snapshot.IsFrozen);
+        Assert.Equal(320, snapshot.PixelWidth);
+        Assert.Equal(6000, snapshot.PixelHeight);
     }
 }
