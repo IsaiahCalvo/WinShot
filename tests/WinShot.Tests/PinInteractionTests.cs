@@ -161,6 +161,37 @@ public class PinInteractionTests
     }
 
     [Fact]
+    public void RoundedPinRegion_TracksOffscreenResizes()
+    {
+        RunSta(() =>
+        {
+            var settings = new SettingsService();
+            settings.Current.PinnedRoundedCorners = true;
+
+            using var bitmap = new SD.Bitmap(320, 180);
+            using var pin = new FastPinWindow(bitmap, settings);
+            pin.CreateControl();
+
+            foreach (SD.Size size in new[]
+                     {
+                         new SD.Size(320, 180),
+                         new SD.Size(701, 141),
+                         new SD.Size(141, 701),
+                         new SD.Size(47, 31),
+                     })
+            {
+                pin.ClientSize = size;
+                Assert.NotNull(pin.Region);
+                Assert.False(pin.Region!.IsVisible(0, 0));
+                Assert.False(pin.Region.IsVisible(size.Width - 1, 0));
+                Assert.False(pin.Region.IsVisible(0, size.Height - 1));
+                Assert.False(pin.Region.IsVisible(size.Width - 1, size.Height - 1));
+                Assert.True(pin.Region.IsVisible(size.Width / 2, size.Height / 2));
+            }
+        });
+    }
+
+    [Fact]
     public void MiddleClick_ClosesPin()
     {
         RunSta(() =>

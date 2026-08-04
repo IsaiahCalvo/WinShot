@@ -42,7 +42,6 @@ public sealed class FastPinWindow : WF.Form
     private const int ToolbarButtonGapLogical = 4;
     private const int ToolbarPadLogical = 6;
     private const int ToolbarTopLogical = 4;
-    private const int PinCornerRadiusLogical = 10;
     private const int CascadeOffsetLogical = 24;
     private const int ReadoutDurationMs = 800;
 
@@ -205,13 +204,13 @@ public sealed class FastPinWindow : WF.Form
         if (_border)
         {
             using var border = new SD.Pen(ThemePalette.BorderStrong, Ui(1));
-            e.Graphics.DrawRectangle(border, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+            DrawWindowBorder(e.Graphics, border);
         }
 
         if (ToolbarVisible)
         {
             using var pen = new SD.Pen(ThemePalette.Accent, Ui(1));
-            e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+            DrawWindowBorder(e.Graphics, pen);
             DrawToolbar(e.Graphics);
         }
 
@@ -715,9 +714,7 @@ public sealed class FastPinWindow : WF.Form
         SD.Region? next = null;
         if (_roundedCorners && ClientSize.Width > 0 && ClientSize.Height > 0)
         {
-            using var path = GdiPaths.RoundedRect(
-                new SD.Rectangle(0, 0, ClientSize.Width, ClientSize.Height),
-                Ui(PinCornerRadiusLogical));
+            using var path = PinWindowGeometry.RoundedClipPath(ClientSize, DeviceDpi);
             next = new SD.Region(path);
         }
 
@@ -725,6 +722,14 @@ public sealed class FastPinWindow : WF.Form
         Region = next;
         previous?.Dispose();
     }
+
+    private void DrawWindowBorder(SD.Graphics graphics, SD.Pen pen) =>
+        PinWindowGeometry.DrawBorder(
+            graphics,
+            pen,
+            ClientSize,
+            DeviceDpi,
+            _roundedCorners);
 
     // ----- Actions (reused by toolbar + context menu) ------------------------
 
