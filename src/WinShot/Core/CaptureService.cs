@@ -414,7 +414,8 @@ public static class CaptureService
     /// keep the bitmap alive and must not read, mutate, or dispose it until the task completes.
     /// A 32-bit source uses one tile-sized pooled scratch buffer. Other formats add one
     /// tile-sized conversion bitmap. No full-resolution GDI clone or intermediate full-size
-    /// BitmapSource is created.
+    /// BitmapSource is created. Tiles are normalized to 96 DPI so one WPF unit remains one
+    /// source pixel on the editor's pixel-sized surface, regardless of bitmap metadata.
     /// </summary>
     public static Task<IReadOnlyList<BitmapSource>> ToBitmapSourceTilesBorrowedAsync(Bitmap bmp, int tileHeight)
         => Task.Run<IReadOnlyList<BitmapSource>>(() =>
@@ -430,8 +431,6 @@ public static class CaptureService
                     return [];
 
                 PixelFormat pixelFormat = bmp.PixelFormat;
-                double dpiX = bmp.HorizontalResolution;
-                double dpiY = bmp.VerticalResolution;
                 int stride = checked(width * 4);
                 int scratchRows = Math.Min(tileHeight, height);
                 byte[] scratch = ArrayPool<byte>.Shared.Rent(checked(stride * scratchRows));
@@ -439,7 +438,7 @@ public static class CaptureService
                 try
                 {
                     if (pixelFormat is not (PixelFormat.Format32bppArgb or PixelFormat.Format32bppPArgb or PixelFormat.Format32bppRgb))
-                        return CreateConvertedTiles(bmp, tileHeight, dpiX, dpiY, stride, scratch);
+                        return CreateConvertedTiles(bmp, tileHeight, stride, scratch);
 
                     data = bmp.LockBits(
                         new Rectangle(0, 0, width, height),
@@ -474,7 +473,7 @@ public static class CaptureService
                         }
 
                         var tile = BitmapSource.Create(
-                            width, rows, dpiX, dpiY, format, palette: null, scratch, stride);
+                            width, rows, 96, 96, format, palette: null, scratch, stride);
                         tile.Freeze();
                         tiles.Add(tile);
                     }
@@ -493,8 +492,6 @@ public static class CaptureService
     private static IReadOnlyList<BitmapSource> CreateConvertedTiles(
         Bitmap source,
         int tileHeight,
-        double dpiX,
-        double dpiY,
         int stride,
         byte[] scratch)
     {
@@ -505,7 +502,7 @@ public static class CaptureService
         {
             int rows = Math.Min(tileHeight, height - y);
             using var converted = new Bitmap(width, rows, PixelFormat.Format32bppPArgb);
-            converted.SetResolution((float)dpiX, (float)dpiY);
+            converted.SetResolution(96, 96);
             using (Graphics graphics = Graphics.FromImage(converted))
             {
                 graphics.CompositingMode = CompositingMode.SourceCopy;
@@ -539,7 +536,7 @@ public static class CaptureService
                 }
 
                 var tile = BitmapSource.Create(
-                    width, rows, dpiX, dpiY,
+                    width, rows, 96, 96,
                     System.Windows.Media.PixelFormats.Pbgra32,
                     palette: null,
                     scratch,

@@ -91,6 +91,28 @@ public class CaptureServiceTests
         Assert.All(tiles, tile => Assert.True(tile.IsFrozen));
     }
 
+    [Theory]
+    [InlineData(120f)]
+    [InlineData(144f)]
+    [InlineData(192f)]
+    public async Task ToBitmapSourceTilesBorrowedAsync_NormalizesDpiToPixelSizedWpfUnits(float sourceDpi)
+    {
+        using var source = new SD.Bitmap(300, 4500, SD.Imaging.PixelFormat.Format32bppArgb);
+        source.SetResolution(sourceDpi, sourceDpi);
+
+        var tiles = await CaptureService.ToBitmapSourceTilesBorrowedAsync(source, tileHeight: 2048);
+
+        Assert.Equal(4500, tiles.Sum(tile => tile.PixelHeight));
+        Assert.All(tiles, tile =>
+        {
+            Assert.Equal(300, tile.PixelWidth);
+            Assert.Equal(96, tile.DpiX);
+            Assert.Equal(96, tile.DpiY);
+            Assert.Equal(tile.PixelWidth, tile.Width);
+            Assert.Equal(tile.PixelHeight, tile.Height);
+        });
+    }
+
     [Fact]
     public void EstimateEditorCaptureMemory_HasNoFullResolutionCloneFanOut()
     {

@@ -176,6 +176,7 @@ public partial class EditorWindow : Window
             if (_owned.Remove(backup)) backup.Dispose();
             return;
         }
+        if (_closed) return;
 
         Push(new EditorAction(
             undo: async () =>
@@ -220,6 +221,7 @@ public partial class EditorWindow : Window
             if (_owned.Remove(backup)) backup.Dispose();
             return;
         }
+        if (_closed) return;
 
         Push(new EditorAction(
             undo: async () =>
@@ -242,6 +244,7 @@ public partial class EditorWindow : Window
 
     private async Task<bool> ApplySourceRegionEffectAsync(Action effect, string logContext)
     {
+        using IDisposable sourceOperation = _sourceLifetime.Acquire();
         _sourceOperationActive = true;
         Cursor = Cursors.Wait;
         try
@@ -258,7 +261,8 @@ public partial class EditorWindow : Window
         finally
         {
             _sourceOperationActive = false;
-            UpdateCursor();
+            if (!_closed)
+                UpdateCursor();
         }
     }
 
@@ -292,6 +296,7 @@ public partial class EditorWindow : Window
         // RefreshImageAsync -> the UI thread blocks waiting on itself -> deadlock.
         _source = after;
         await OnSourceReplacedAsync();
+        if (_closed) return;
         ShiftAnnotations(-region.X, -region.Y);
 
         Push(new EditorAction(
@@ -313,6 +318,7 @@ public partial class EditorWindow : Window
 
     private async Task OnSourceReplacedAsync()
     {
+        using IDisposable sourceOperation = _sourceLifetime.Acquire();
         _sourceOperationActive = true;
         Cursor = Cursors.Wait;
         try
@@ -322,8 +328,11 @@ public partial class EditorWindow : Window
         finally
         {
             _sourceOperationActive = false;
-            UpdateCursor();
+            if (!_closed)
+                UpdateCursor();
         }
+        if (_closed)
+            return;
         SetSurfaceSize(_source.Width, _source.Height);
         Select(null);
         FitToView();

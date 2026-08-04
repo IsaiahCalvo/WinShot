@@ -65,6 +65,7 @@ public partial class EditorWindow : Window
     private async void ApplySourceTransform(Func<SD.Bitmap, SD.Bitmap> transform)
     {
         if (_sourceOperationActive) return;
+        using IDisposable sourceOperation = _sourceLifetime.Acquire();
         CommitText();
         CommitPendingCurve();
         ClearCropPreview();
@@ -95,8 +96,14 @@ public partial class EditorWindow : Window
         finally
         {
             _sourceOperationActive = false;
-            UpdateCursor();
+            if (!_closed)
+                UpdateCursor();
             if (!ReferenceEquals(flat, before)) flat.Dispose(); // temp flatten only
+        }
+        if (_closed)
+        {
+            after.Dispose();
+            return;
         }
         _owned.Add(after);
 
@@ -104,6 +111,7 @@ public partial class EditorWindow : Window
             AnnotationCanvas.Children.Remove(el);
         _source = after;
         await OnSourceReplacedAsync();
+        if (_closed) return;
 
         Push(new EditorAction(
             undo: async () =>

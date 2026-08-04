@@ -186,6 +186,14 @@ public class ScrollingEditorHandoffTests
                 RenderTargetBitmap historyRender = RenderEditor(historyEditor);
                 AssertContainsCaptureBands(historyRender);
                 SaveEvidence(historyRender, "history-edit.png");
+                historyEditor.Close();
+                historyEditor = null;
+                PumpDispatcherOnce();
+
+                ValidateNon96DpiEditors(settings, history);
+                TraceStep("120/144/192 DPI editor layouts validated");
+                ValidateCloseDuringRefresh(settings, history);
+                TraceStep("Close-during-refresh lifetime validated");
 
                 WriteMeasurements(
                     privateBeforeSource,
@@ -257,6 +265,160 @@ public class ScrollingEditorHandoffTests
         Assert.NotEqual(before.ToArgb(), after.ToArgb());
         object undoStack = typeof(EditorWindow).GetField("_undoStack", PrivateInstance)!.GetValue(editor)!;
         Assert.Equal(1, (int)undoStack.GetType().GetProperty("Count")!.GetValue(undoStack)!);
+    }
+
+    private static void ValidateNon96DpiEditors(SettingsService settings, HistoryService history)
+    {
+        foreach (float dpi in new[] { 120f, 144f, 192f })
+        {
+            SD.Bitmap? source = CreateDpiPattern(dpi);
+            EditorWindow? editor = null;
+            try
+            {
+                editor = EditorWindow.CreateForCapture(source, settings, history);
+                source = null; // editor owns it
+                ConfigureOffScreen(editor);
+                editor.Show();
+                WaitUntilEditorReady(editor, TimeSpan.FromSeconds(15));
+                editor.UpdateLayout();
+                PumpDispatcherOnce();
+
+                var baseTiles = (Panel)editor.FindName("BaseTiles");
+                var canvasHost = (FrameworkElement)editor.FindName("CanvasHost");
+                var annotationCanvas = (Canvas)editor.FindName("AnnotationCanvas");
+                Assert.Equal(3, baseTiles.Children.Count);
+                Assert.Equal(320, baseTiles.ActualWidth, precision: 3);
+                Assert.Equal(4608, baseTiles.ActualHeight, precision: 3);
+                Assert.Equal(320, canvasHost.ActualWidth, precision: 3);
+                Assert.Equal(4608, canvasHost.ActualHeight, precision: 3);
+                Assert.Equal(320, annotationCanvas.ActualWidth, precision: 3);
+                Assert.Equal(4608, annotationCanvas.ActualHeight, precision: 3);
+
+                Assert.All(baseTiles.Children.Cast<System.Windows.Controls.Image>(), image =>
+                {
+                    var tile = Assert.IsAssignableFrom<BitmapSource>(image.Source);
+                    Assert.Equal(96, tile.DpiX);
+                    Assert.Equal(96, tile.DpiY);
+                    Assert.Equal(tile.PixelWidth, image.ActualWidth, precision: 3);
+                    Assert.Equal(tile.PixelHeight, image.ActualHeight, precision: 3);
+                });
+
+                var annotation = new System.Windows.Shapes.Rectangle
+                {
+                    Width = 16,
+                    Height = 16,
+                    Fill = Brushes.Magenta,
+                };
+                Canvas.SetLeft(annotation, 73);
+                Canvas.SetTop(annotation, 97);
+                annotationCanvas.Children.Add(annotation);
+                editor.UpdateLayout();
+
+                RenderTargetBitmap render = RenderElement(canvasHost, 320, 4608);
+                AssertPixel(render, 10, 10, SD.Color.Red);          // top is not cropped
+                AssertPixel(render, 10, 1024, SD.Color.RoyalBlue); // no scaling
+                AssertPixel(render, 10, 2047, SD.Color.Red);       // first tile bottom
+                AssertPixel(render, 10, 2048, SD.Color.Lime);      // second tile top, no gap
+                AssertPixel(render, 10, 4095, SD.Color.Gold);      // second tile bottom
+                AssertPixel(render, 10, 4096, SD.Color.Cyan);      // third tile top, no gap
+                AssertPixel(render, 10, 4598, SD.Color.Green);     // bottom is not cropped
+                AssertPixel(render, 80, 104, SD.Color.Magenta);    // annotation coordinates align
+                SaveEvidence(render, $"dpi-{dpi:0}.png");
+            }
+            finally
+            {
+                try { editor?.Close(); } catch { }
+                source?.Dispose();
+                PumpDispatcherOnce();
+            }
+        }
+    }
+
+    private static void ValidateCloseDuringRefresh(SettingsService settings, HistoryService history)
+    {
+        var source = new SD.Bitmap(640, 6000, SD.Imaging.PixelFormat.Format32bppArgb);
+        using (var graphics = SD.Graphics.FromImage(source))
+            graphics.Clear(SD.Color.SteelBlue);
+
+        EditorWindow? editor = null;
+        var conversionEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseConversion = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Exception? conversionFailure = null;
+        try
+        {
+            editor = EditorWindow.CreateForCapture(source, settings, history);
+            ConfigureOffScreen(editor);
+            editor.Show();
+            WaitUntilEditorReady(editor, TimeSpan.FromSeconds(15));
+
+            editor.SourceTileConverterForTest = async (borrowed, tileHeight) =>
+            {
+                conversionEntered.TrySetResult(null);
+                await releaseConversion.Task.ConfigureAwait(false);
+                try
+                {
+                    return await CaptureService.ToBitmapSourceTilesBorrowedAsync(borrowed, tileHeight)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    conversionFailure = ex;
+                    throw;
+                }
+            };
+
+            FieldInfo activeField = typeof(EditorWindow).GetField("_sourceOperationActive", PrivateInstance)!;
+            MethodInfo applyBlur = typeof(EditorWindow).GetMethod("ApplyBlur", PrivateInstance)!;
+            applyBlur.Invoke(editor, [new SD.Rectangle(20, 20, 128, 128)]);
+            WaitForTask(conversionEntered.Task, TimeSpan.FromSeconds(5));
+            editor.Close();
+            PumpDispatcherOnce();
+
+            Assert.False(IsBitmapDisposed(source),
+                "Close disposed the source while a post-initial refresh still held a lease.");
+            releaseConversion.TrySetResult(null);
+            WaitUntil(() => !(bool)activeField.GetValue(editor)!, TimeSpan.FromSeconds(15));
+            WaitUntil(() => IsBitmapDisposed(source), TimeSpan.FromSeconds(5));
+            Assert.Null(conversionFailure);
+        }
+        finally
+        {
+            releaseConversion.TrySetResult(null);
+            try { editor?.Close(); } catch { }
+            if (!IsBitmapDisposed(source))
+                source.Dispose();
+            PumpDispatcherOnce();
+        }
+    }
+
+    private static SD.Bitmap CreateDpiPattern(float dpi)
+    {
+        var bitmap = new SD.Bitmap(320, 4608, SD.Imaging.PixelFormat.Format32bppArgb);
+        bitmap.SetResolution(dpi, dpi);
+        using var graphics = SD.Graphics.FromImage(bitmap);
+        graphics.Clear(SD.Color.RoyalBlue);
+        graphics.FillRectangle(SD.Brushes.Red, 0, 0, 320, 40);
+        graphics.FillRectangle(SD.Brushes.Red, 0, 2046, 320, 2);
+        graphics.FillRectangle(SD.Brushes.Lime, 0, 2048, 320, 2);
+        graphics.FillRectangle(SD.Brushes.Gold, 0, 4094, 320, 2);
+        graphics.FillRectangle(SD.Brushes.Cyan, 0, 4096, 320, 2);
+        graphics.FillRectangle(SD.Brushes.Green, 0, 4568, 320, 40);
+        return bitmap;
+    }
+
+    private static bool IsBitmapDisposed(SD.Bitmap bitmap)
+    {
+        try
+        {
+            _ = bitmap.Width;
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
     }
 
     private static SD.Bitmap CreateTallScrollingBitmap()
@@ -399,6 +561,23 @@ public class ScrollingEditorHandoffTests
         var render = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         render.Render(window);
         return render;
+    }
+
+    private static RenderTargetBitmap RenderElement(Visual visual, int pixelWidth, int pixelHeight)
+    {
+        var render = new RenderTargetBitmap(pixelWidth, pixelHeight, 96, 96, PixelFormats.Pbgra32);
+        render.Render(visual);
+        return render;
+    }
+
+    private static void AssertPixel(BitmapSource source, int x, int y, SD.Color expected)
+    {
+        var pixel = new byte[4];
+        source.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
+        Assert.InRange(pixel[0], (byte)Math.Max(0, expected.B - 2), (byte)Math.Min(255, expected.B + 2));
+        Assert.InRange(pixel[1], (byte)Math.Max(0, expected.G - 2), (byte)Math.Min(255, expected.G + 2));
+        Assert.InRange(pixel[2], (byte)Math.Max(0, expected.R - 2), (byte)Math.Min(255, expected.R + 2));
+        Assert.Equal(255, pixel[3]);
     }
 
     private static void AssertContainsCaptureBands(BitmapSource render)

@@ -39,10 +39,12 @@ public partial class EditorWindow : Window
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<object?> _initialCaptureReady = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly EditorSourceOperationLifetime _sourceLifetime = new();
     private bool _initialLoadStarted;
     private bool _closed;
     private double _sourceWidth;
     private double _sourceHeight;
+    internal Func<SD.Bitmap, int, Task<IReadOnlyList<BitmapSource>>>? SourceTileConverterForTest { get; set; }
 
     /// <summary>Current source bitmap; swapped out by crop. Everything in _owned is disposed on close.</summary>
     private SD.Bitmap _source;
@@ -185,16 +187,19 @@ public partial class EditorWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            Task sourceOperationsDrained = _sourceLifetime.BeginClose();
             SD.Bitmap[] owned = _owned.ToArray();
             _owned.Clear();
-            if (_initialLoadStarted && !_initialCaptureReady.Task.IsCompleted)
-                _ = DisposeOwnedAfterAsync(_initialCaptureReady.Task, owned);
-            else
+            if (!_initialLoadStarted)
             {
                 _initialPreviewReady.TrySetResult(null);
                 _initialCaptureReady.TrySetResult(null);
-                DisposeOwned(owned);
             }
+
+            if (sourceOperationsDrained.IsCompletedSuccessfully)
+                DisposeOwned(owned);
+            else
+                _ = DisposeOwnedAfterAsync(sourceOperationsDrained, owned);
             MemoryCleanup.Request();
         };
         UpdateCursor();
@@ -242,9 +247,9 @@ public partial class EditorWindow : Window
     internal Task InitialPreviewReady => _initialPreviewReady.Task;
     internal Task InitialCaptureReady => _initialCaptureReady.Task;
 
-    private static async Task DisposeOwnedAfterAsync(Task initialization, IReadOnlyList<SD.Bitmap> owned)
+    private static async Task DisposeOwnedAfterAsync(Task operationsDrained, IReadOnlyList<SD.Bitmap> owned)
     {
-        try { await initialization.ConfigureAwait(false); }
+        try { await operationsDrained.ConfigureAwait(false); }
         catch { }
         DisposeOwned(owned);
         MemoryCleanup.Request();
@@ -259,6 +264,7 @@ public partial class EditorWindow : Window
     private async Task LoadInitialSourceImageAsync()
     {
         _initialLoadStarted = true;
+        using IDisposable sourceOperation = _sourceLifetime.Acquire();
         try
         {
             await RefreshImageAsync();
@@ -285,7 +291,8 @@ public partial class EditorWindow : Window
         {
             _sourceOperationActive = false;
             _initialCaptureReady.TrySetResult(null);
-            UpdateCursor();
+            if (!_closed)
+                UpdateCursor();
         }
     }
 
@@ -295,9 +302,19 @@ public partial class EditorWindow : Window
 
     private async Task RefreshImageAsync()
     {
-        IReadOnlyList<BitmapSource> tiles = await CaptureService.ToBitmapSourceTilesBorrowedAsync(
-            _source, BaseTileHeight);
-        await Dispatcher.InvokeAsync(() => SetBaseTiles(tiles));
+        using IDisposable sourceOperation = _sourceLifetime.AcquireNested();
+        SD.Bitmap source = _source;
+        Func<SD.Bitmap, int, Task<IReadOnlyList<BitmapSource>>> converter =
+            SourceTileConverterForTest ?? CaptureService.ToBitmapSourceTilesBorrowedAsync;
+        IReadOnlyList<BitmapSource> tiles = await converter(source, BaseTileHeight);
+        if (_closed)
+            return;
+
+        await Dispatcher.InvokeAsync(() =>
+        {
+            if (!_closed)
+                SetBaseTiles(tiles);
+        });
     }
 
     private void SetBaseTiles(IReadOnlyList<BitmapSource> tiles)
@@ -305,7 +322,14 @@ public partial class EditorWindow : Window
         BaseTiles.Children.Clear();
         foreach (var t in tiles)
         {
-            var img = new System.Windows.Controls.Image { Source = t, Stretch = Stretch.None };
+            var img = new System.Windows.Controls.Image
+            {
+                Source = t,
+                Width = t.PixelWidth,
+                Height = t.PixelHeight,
+                Stretch = Stretch.Fill,
+                SnapsToDevicePixels = true,
+            };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
             BaseTiles.Children.Add(img);
         }
