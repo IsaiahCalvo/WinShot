@@ -671,6 +671,22 @@ public static class ScrollingCaptureService
             if (newRows <= 0)
                 return;
             int srcStart = Math.Max(header, sig.Height - footer - offset);
+
+            // Heal floating bottom chrome (pinned input bars, scroll-to-bottom buttons —
+            // static elements ABOVE the contiguous footer band, which the footer model cannot
+            // represent): earlier appends stamped them just above the seam; this frame has
+            // TRUE content at that alignment, so overwrite the bottom of the overlap with it.
+            // Scroll is top-down, so only the final frame's stamp survives — once, at the
+            // true bottom. Top rows stay append-only: that is what keeps sticky headers out.
+            // ponytail: fixed bottom-quarter heal zone; a pixel-static mask is the upgrade
+            // path if floating chrome ever sits above H/4.
+            int heal = Math.Min(Math.Min(srcStart - header, sig.Height / 4), _stitch.Height);
+            if (heal > 0)
+            {
+                _stitch.Overwrite(frame, srcStart - heal, heal, _stitch.Height - heal);
+                _canvas.Overwrite(sig, srcStart - heal, heal, _stitch.Height - heal);
+            }
+
             _stitch.Append(frame, srcStart, newRows);
             _canvas.Append(sig, srcStart, newRows);
             _strip?.Append(frame, srcStart, newRows);
@@ -1302,6 +1318,15 @@ public static class ScrollingCaptureService
         /// <summary>Drops the bottom rows (a newly detected sticky footer that was appended
         /// as body before it could be detected). The buffer rows are simply overwritten later.</summary>
         public void Retract(int rows) => Height = Math.Max(0, Height - rows);
+
+        /// <summary>Overwrites already-appended rows [destY, destY+rows) with frame rows
+        /// [srcY, srcY+rows) — heals floating bottom chrome stamped by earlier appends.</summary>
+        public void Overwrite(SD.Bitmap frame, int srcY, int rows, int destY)
+        {
+            if (rows <= 0 || _buffer is null || destY < 0 || destY + rows > Height)
+                return;
+            ImageStitcher.CopyRowsInto(frame, srcY, rows, _buffer, destY);
+        }
 
         /// <summary>Returns the stitched image trimmed to its used rows (ownership transfers)
         /// or null when nothing was appended.</summary>

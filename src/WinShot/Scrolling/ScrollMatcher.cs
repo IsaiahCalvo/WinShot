@@ -178,6 +178,23 @@ public sealed class CanvasProfile
     /// <summary>Drops the bottom rows, mirroring a stitch retraction (newly detected footer).</summary>
     public void Retract(int rows) => Height = Math.Max(0, Height - rows);
 
+    /// <summary>Overwrites profile rows [destStart, destStart+count) with rows
+    /// [srcStart, srcStart+count) of <paramref name="sig"/> — keeps the profile in lockstep
+    /// with a stitch whose seam zone was overwritten (floating-chrome healing).</summary>
+    public void Overwrite(FrameSignature sig, int srcStart, int count, int destStart)
+    {
+        if (count <= 0 || destStart < 0 || destStart + count > Height)
+            return;
+        Array.Copy(sig.RowHash, srcStart, _rowHash, destStart, count);
+        Array.Copy(sig.Mean, srcStart, _mean, destStart, count);
+        Array.Copy(sig.Energy, srcStart, _energy, destStart, count);
+        for (int s = 0; s < FrameSignature.Strips; s++)
+        {
+            Array.Copy(sig.StripMean[s], srcStart, _stripMean[s], destStart, count);
+            Array.Copy(sig.StripEnergy[s], srcStart, _stripEnergy[s], destStart, count);
+        }
+    }
+
     /// <summary>Appends rows [start, start+count) of <paramref name="sig"/>'s profiles.</summary>
     public void Append(FrameSignature sig, int start, int count)
     {
