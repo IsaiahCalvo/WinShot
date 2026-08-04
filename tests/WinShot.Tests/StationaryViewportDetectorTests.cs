@@ -62,22 +62,7 @@ public class StationaryViewportDetectorTests
     public async Task CaptureStitchesMovingDocumentAndPlacesFixedRegionsOnce()
     {
         int[] positions = { 0, 73, 151, 233, 320 };
-        using var cancellation = new CancellationTokenSource();
-        int index = 0;
-        SD.Bitmap Grab(SD.Rectangle _)
-        {
-            if (index >= positions.Length)
-            {
-                cancellation.Cancel();
-                return MakeFrame(positions[^1]);
-            }
-            return MakeFrame(positions[index++]);
-        }
-
-        using var stitched = await ScrollingCaptureService.RunAsync(
-            new SD.Rectangle(0, 0, Width, Height), ScrollDirection.Vertical,
-            () => false, _ => { }, _ => { }, cancellation.Token,
-            preview: null, frameSource: Grab);
+        using var stitched = await RunCapture(positions);
 
         Assert.NotNull(stitched);
         Assert.Equal(positions[^1] + Height, stitched!.Height);
@@ -100,6 +85,24 @@ public class StationaryViewportDetectorTests
             final.Save(Path.Combine(evidenceDirectory, "frame-final.png"), ImageFormat.Png);
             stitched.Save(Path.Combine(evidenceDirectory, "stitched-fixed-regions-once.png"),
                 ImageFormat.Png);
+        }
+    }
+
+    [Fact]
+    public async Task RepeatedIrregularCapturesDoNotDuplicateStationaryRegions()
+    {
+        for (int run = 0; run < 10; run++)
+        {
+            int a = 51 + run * 2;
+            int b = a + 67 + run;
+            int c = b + 59 + run * 3;
+            int d = c + 81 - run;
+            int[] positions = { 0, a, b, c, d };
+            using var stitched = await RunCapture(positions);
+
+            Assert.Equal(d + Height, stitched.Height);
+            Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+            Assert.InRange(FindFirstRedRow(stitched), stitched.Height - 48, stitched.Height - 1);
         }
     }
 
@@ -140,6 +143,26 @@ public class StationaryViewportDetectorTests
                 return y;
         }
         return -1;
+    }
+
+    private static async Task<SD.Bitmap> RunCapture(IReadOnlyList<int> positions)
+    {
+        using var cancellation = new CancellationTokenSource();
+        int index = 0;
+        SD.Bitmap Grab(SD.Rectangle _)
+        {
+            if (index >= positions.Count)
+            {
+                cancellation.Cancel();
+                return MakeFrame(positions[^1]);
+            }
+            return MakeFrame(positions[index++]);
+        }
+
+        return (await ScrollingCaptureService.RunAsync(
+            new SD.Rectangle(0, 0, Width, Height), ScrollDirection.Vertical,
+            () => false, _ => { }, _ => { }, cancellation.Token,
+            preview: null, frameSource: Grab))!;
     }
 
     private static SD.Bitmap MakeFrame(int top, int width = Width, int height = Height, int sidebar = Sidebar)
