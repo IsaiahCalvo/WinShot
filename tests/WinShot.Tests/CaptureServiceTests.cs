@@ -1,8 +1,6 @@
 using WinShot.Core;
 using Xunit;
 using SD = System.Drawing;
-using System.Reflection;
-using System.Windows.Media.Imaging;
 
 namespace WinShot.Tests;
 
@@ -62,53 +60,48 @@ public class CaptureServiceTests
     }
 
     [Fact]
-    public async Task ToBitmapSourceSnapshotAsync_DetachesBeforeQueuedConversion()
+    public async Task ToBitmapSourceTilesBorrowedAsync_CopiesTallSourceIntoFrozenTiles()
     {
-        using var workerStarted = new ManualResetEventSlim();
-        using var releaseWorker = new ManualResetEventSlim();
-        var enqueue = typeof(CaptureService).GetMethod(
-            "RunBitmapSourceConversion",
-            BindingFlags.Static | BindingFlags.NonPublic)!;
-
-        Func<BitmapSource> blocker = () =>
-        {
-            workerStarted.Set();
-            if (!releaseWorker.Wait(TimeSpan.FromSeconds(5)))
-                throw new TimeoutException("Bitmap conversion worker was not released.");
-
-            var pixel = BitmapSource.Create(
-                1, 1, 96, 96,
-                System.Windows.Media.PixelFormats.Bgra32,
-                palette: null,
-                pixels: new byte[4],
-                stride: 4);
-            pixel.Freeze();
-            return pixel;
-        };
-
-        var blockerTask = (Task<BitmapSource>)enqueue.Invoke(null, [blocker])!;
-        Assert.True(workerStarted.Wait(TimeSpan.FromSeconds(5)), "Bitmap conversion worker did not start.");
-
         var source = new SD.Bitmap(320, 6000, SD.Imaging.PixelFormat.Format32bppArgb);
         using (var graphics = SD.Graphics.FromImage(source))
             graphics.Clear(SD.Color.CornflowerBlue);
 
-        Task<BitmapSource> snapshotTask;
-        try
-        {
-            snapshotTask = CaptureService.ToBitmapSourceSnapshotAsync(source);
-            source.Dispose();
-        }
-        finally
-        {
-            releaseWorker.Set();
-        }
+        var tiles = await CaptureService.ToBitmapSourceTilesBorrowedAsync(source, tileHeight: 2048);
+        source.Dispose();
 
-        await blockerTask;
-        BitmapSource snapshot = await snapshotTask;
+        Assert.Equal(3, tiles.Count);
+        Assert.Equal(6000, tiles.Sum(tile => tile.PixelHeight));
+        Assert.All(tiles, tile => Assert.True(tile.IsFrozen));
+        var pixel = new byte[4];
+        tiles[0].CopyPixels(new System.Windows.Int32Rect(0, 0, 1, 1), pixel, 4, 0);
+        Assert.Equal([237, 149, 100, 255], pixel);
+    }
 
-        Assert.True(snapshot.IsFrozen);
-        Assert.Equal(320, snapshot.PixelWidth);
-        Assert.Equal(6000, snapshot.PixelHeight);
+    [Fact]
+    public async Task ToBitmapSourceTilesBorrowedAsync_UsesBoundedTilesForNon32BitSource()
+    {
+        using var source = new SD.Bitmap(240, 3000, SD.Imaging.PixelFormat.Format24bppRgb);
+        using (var graphics = SD.Graphics.FromImage(source))
+            graphics.Clear(SD.Color.Orchid);
+
+        var tiles = await CaptureService.ToBitmapSourceTilesBorrowedAsync(source, tileHeight: 2048);
+
+        Assert.Equal(2, tiles.Count);
+        Assert.Equal(3000, tiles.Sum(tile => tile.PixelHeight));
+        Assert.All(tiles, tile => Assert.True(tile.IsFrozen));
+    }
+
+    [Fact]
+    public void EstimateEditorCaptureMemory_HasNoFullResolutionCloneFanOut()
+    {
+        const int width = 4096;
+        const int height = 32768; // exactly 512 MiB at 32 bpp
+        EditorCaptureMemoryBudget budget = CaptureService.EstimateEditorCaptureMemory(
+            width, height, tileHeight: 2048);
+
+        Assert.Equal(512L * 1024 * 1024, budget.SourceBytes);
+        Assert.Equal(0, budget.FullResolutionCloneCount);
+        Assert.True(budget.PeakPixelBytesWithoutAutoCopy < 1100L * 1024 * 1024);
+        Assert.Equal(1536L * 1024 * 1024, budget.PeakPixelBytesWithAutoCopy);
     }
 }

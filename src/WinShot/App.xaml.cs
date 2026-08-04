@@ -36,6 +36,8 @@ public partial class App : Application
     private string? _pendingCaptureCommand;
     private bool _pendingCaptureDrainActive;
     private long _autoCopySuppressedUntilTick;
+    internal DirectEditCaptureTestHooks? DirectEditTestHooks { get; set; }
+    internal SettingsService SettingsForTest => _settings;
 
     private WF.ToolStripMenuItem? _updateMenuItem;
     private UpdateCheckResult? _pendingUpdate;
@@ -749,12 +751,18 @@ public partial class App : Application
             return;
         }
 
+        if (action == PostCaptureAction.Edit)
+        {
+            OpenDirectEditCapture(bmp, historyKind);
+            return;
+        }
+
         _ = AddHistoryAsync(
             bmp,
             cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action),
             historyKind);
         if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
-            QueueAutoClipboardCopy(bmp, detachOnCallerThread: action == PostCaptureAction.Edit);
+            QueueAutoClipboardCopy(bmp);
 
         switch (action)
         {
@@ -763,17 +771,6 @@ public partial class App : Application
                 break;
             case PostCaptureAction.Save:
                 SaveSilently(bmp); // takes ownership
-                break;
-            case PostCaptureAction.Edit:
-                // The window takes ownership and disposes on close — but its ctor
-                // touches GDI before wiring that up, so dispose here if it throws.
-                try
-                {
-                    var win = EditorWindow.CreateForCapture(bmp, _settings, _history);
-                    TrackFirstRender(win, "editor window");
-                    win.Show();
-                }
-                catch { bmp.Dispose(); throw; }
                 break;
             case PostCaptureAction.Pin:
                 try
@@ -795,6 +792,43 @@ public partial class App : Application
                 break;
         }
     }
+
+    private void OpenDirectEditCapture(SD.Bitmap bmp, HistoryCaptureKind historyKind)
+    {
+        DirectEditCaptureTestHooks? hooks = DirectEditTestHooks;
+        Func<SD.Bitmap, Task> historyWork = hooks?.HistoryWork ?? (source =>
+            Task.Run(() =>
+            {
+                try { _history.Add(source, historyKind); }
+                catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
+            }));
+        Func<SD.Bitmap, Task>? autoCopyWork = _settings.Current.AutoCopyToClipboard
+            ? hooks?.AutoCopyWork ?? CopyBorrowedCaptureToClipboardAsync
+            : null;
+        var handoff = new DirectEditCaptureHandoff(bmp, historyWork, autoCopyWork);
+
+        try
+        {
+            var win = EditorWindow.CreateForDirectCapture(bmp, _settings, _history, handoff.RunAsync);
+            hooks?.ConfigureEditor?.Invoke(win);
+            TrackFirstRender(win, "editor window");
+            win.Show();
+            hooks?.EditorShown?.Invoke(win);
+        }
+        catch
+        {
+            bmp.Dispose();
+            throw;
+        }
+    }
+
+    internal void HandleCaptureForTest(
+        SD.Bitmap bmp,
+        string? postCaptureActionOverride = null,
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular) =>
+        HandleCapture(bmp, postCaptureActionOverride, historyKind);
+
+    internal void SetHistoryForTest(HistoryService history) => _history = history;
 
     private Task<string?> AddHistoryAsync(
         SD.Bitmap bmp,
@@ -868,7 +902,7 @@ public partial class App : Application
             : $"WinShot — Recording {(int)elapsed.Value.TotalMinutes:00}:{elapsed.Value.Seconds:00}";
     }
 
-    private void QueueAutoClipboardCopy(SD.Bitmap bmp, bool detachOnCallerThread = false)
+    private void QueueAutoClipboardCopy(SD.Bitmap bmp)
     {
         if (Environment.TickCount64 < Interlocked.Read(ref _autoCopySuppressedUntilTick))
         {
@@ -876,29 +910,35 @@ public partial class App : Application
             return;
         }
 
-        bool takeOwnership = false;
-        if (detachOnCallerThread)
-        {
-            try
-            {
-                bmp = CaptureService.CloneBitmap(bmp);
-                takeOwnership = true;
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"Auto-copy to clipboard skipped: {ex.Message}");
-                return;
-            }
-        }
-
         _ = CopyToClipboardAndNotifyAsync(
             bmp,
-            takeOwnership,
+            takeOwnership: false,
             showSuccess: false,
             showFailure: false,
             includePng: false,
             failureContext: "Auto-copy to clipboard skipped",
             isAutoCopy: true);
+    }
+
+    private async Task CopyBorrowedCaptureToClipboardAsync(SD.Bitmap bmp)
+    {
+        if (Environment.TickCount64 < Interlocked.Read(ref _autoCopySuppressedUntilTick))
+        {
+            Log.Info("Auto-copy to clipboard skipped: clipboard temporarily unavailable.");
+            return;
+        }
+
+        try
+        {
+            await CaptureService.CopyToClipboardBorrowedAsync(bmp, includePng: false);
+        }
+        catch (Exception ex)
+        {
+            Interlocked.Exchange(
+                ref _autoCopySuppressedUntilTick,
+                Environment.TickCount64 + AutoCopyFailureCooldownMs);
+            Log.Info($"Auto-copy to clipboard skipped: {ex.Message}");
+        }
     }
 
     private async Task CopyToClipboardAndNotifyAsync(
@@ -1394,4 +1434,12 @@ public partial class App : Application
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForSystem();
+}
+
+internal sealed class DirectEditCaptureTestHooks
+{
+    public Action<EditorWindow>? ConfigureEditor { get; init; }
+    public Action<EditorWindow>? EditorShown { get; init; }
+    public Func<SD.Bitmap, Task>? HistoryWork { get; init; }
+    public Func<SD.Bitmap, Task>? AutoCopyWork { get; init; }
 }

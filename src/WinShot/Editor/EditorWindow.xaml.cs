@@ -34,6 +34,15 @@ public partial class EditorWindow : Window
 
     private readonly SettingsService _settings;
     private readonly HistoryService _history;
+    private readonly Func<Task>? _afterInitialPreview;
+    private readonly TaskCompletionSource<object?> _initialPreviewReady = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<object?> _initialCaptureReady = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private bool _initialLoadStarted;
+    private bool _closed;
+    private double _sourceWidth;
+    private double _sourceHeight;
 
     /// <summary>Current source bitmap; swapped out by crop. Everything in _owned is disposed on close.</summary>
     private SD.Bitmap _source;
@@ -119,6 +128,15 @@ public partial class EditorWindow : Window
     private bool _adjustingCrop;              // a handle drag is editing the pending crop rect, not an annotation
 
     public EditorWindow(SD.Bitmap source, SettingsService settings, HistoryService history)
+        : this(source, settings, history, afterInitialPreview: null)
+    {
+    }
+
+    private EditorWindow(
+        SD.Bitmap source,
+        SettingsService settings,
+        HistoryService history,
+        Func<Task>? afterInitialPreview)
     {
         ThemeResources.EnsureLoaded();
         InitializeComponent();
@@ -127,6 +145,7 @@ public partial class EditorWindow : Window
         _pendingInitialFit = true;
         _settings = settings;
         _history = history;
+        _afterInitialPreview = afterInitialPreview;
 
         SetSurfaceSize(source.Width, source.Height);
         _sourceOperationActive = true;
@@ -165,8 +184,17 @@ public partial class EditorWindow : Window
         };
         Closed += (_, _) =>
         {
-            foreach (var bmp in _owned) bmp.Dispose();
+            _closed = true;
+            SD.Bitmap[] owned = _owned.ToArray();
             _owned.Clear();
+            if (_initialLoadStarted && !_initialCaptureReady.Task.IsCompleted)
+                _ = DisposeOwnedAfterAsync(_initialCaptureReady.Task, owned);
+            else
+            {
+                _initialPreviewReady.TrySetResult(null);
+                _initialCaptureReady.TrySetResult(null);
+                DisposeOwned(owned);
+            }
             MemoryCleanup.Request();
         };
         UpdateCursor();
@@ -178,7 +206,11 @@ public partial class EditorWindow : Window
         ContentRendered -= OnInitialContentRendered;
         Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
-            new Action(() => _ = LoadInitialSourceImageAsync()));
+            new Action(() =>
+            {
+                if (!_closed)
+                    _ = LoadInitialSourceImageAsync();
+            }));
     }
 
     private void OnChromeContentRendered(object? sender, EventArgs e)
@@ -198,8 +230,35 @@ public partial class EditorWindow : Window
         return new EditorWindow(source, settings, history);
     }
 
+    internal static EditorWindow CreateForDirectCapture(
+        SD.Bitmap source,
+        SettingsService settings,
+        HistoryService history,
+        Func<Task> afterInitialPreview)
+    {
+        return new EditorWindow(source, settings, history, afterInitialPreview);
+    }
+
+    internal Task InitialPreviewReady => _initialPreviewReady.Task;
+    internal Task InitialCaptureReady => _initialCaptureReady.Task;
+
+    private static async Task DisposeOwnedAfterAsync(Task initialization, IReadOnlyList<SD.Bitmap> owned)
+    {
+        try { await initialization.ConfigureAwait(false); }
+        catch { }
+        DisposeOwned(owned);
+        MemoryCleanup.Request();
+    }
+
+    private static void DisposeOwned(IEnumerable<SD.Bitmap> owned)
+    {
+        foreach (SD.Bitmap bmp in owned)
+            bmp.Dispose();
+    }
+
     private async Task LoadInitialSourceImageAsync()
     {
+        _initialLoadStarted = true;
         try
         {
             await RefreshImageAsync();
@@ -210,7 +269,22 @@ public partial class EditorWindow : Window
         }
         finally
         {
+            _initialPreviewReady.TrySetResult(null);
+        }
+
+        try
+        {
+            if (_afterInitialPreview is not null)
+                await _afterInitialPreview();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Direct Edit post-capture work failed", ex);
+        }
+        finally
+        {
             _sourceOperationActive = false;
+            _initialCaptureReady.TrySetResult(null);
             UpdateCursor();
         }
     }
@@ -221,29 +295,9 @@ public partial class EditorWindow : Window
 
     private async Task RefreshImageAsync()
     {
-        var source = await CaptureService.ToBitmapSourceSnapshotAsync(_source);
-        var tiles = await Task.Run(() => SliceVertical(source, BaseTileHeight));
+        IReadOnlyList<BitmapSource> tiles = await CaptureService.ToBitmapSourceTilesBorrowedAsync(
+            _source, BaseTileHeight);
         await Dispatcher.InvokeAsync(() => SetBaseTiles(tiles));
-    }
-
-    /// <summary>Slices a tall <see cref="BitmapSource"/> into ≤<paramref name="tileHeight"/>px frozen
-    /// tiles via CopyPixels (avoids CroppedBitmap's large-source crash). Tile pixel heights sum
-    /// exactly to the source height, so the stacked tiles are seamless.</summary>
-    private static List<BitmapSource> SliceVertical(BitmapSource src, int tileHeight)
-    {
-        var tiles = new List<BitmapSource>();
-        int w = src.PixelWidth, h = src.PixelHeight;
-        int stride = (w * src.Format.BitsPerPixel + 7) / 8;
-        for (int y = 0; y < h; y += tileHeight)
-        {
-            int th = Math.Min(tileHeight, h - y);
-            var buf = new byte[stride * th];
-            src.CopyPixels(new Int32Rect(0, y, w, th), buf, stride, 0);
-            var tile = BitmapSource.Create(w, th, src.DpiX, src.DpiY, src.Format, src.Palette, buf, stride);
-            tile.Freeze();
-            tiles.Add(tile);
-        }
-        return tiles;
     }
 
     private void SetBaseTiles(IReadOnlyList<BitmapSource> tiles)
@@ -259,6 +313,8 @@ public partial class EditorWindow : Window
 
     private void SetSurfaceSize(double w, double h)
     {
+        _sourceWidth = w;
+        _sourceHeight = h;
         EditorSurface.Width = w;
         EditorSurface.Height = h;
         CanvasHost.Width = w;
@@ -282,22 +338,22 @@ public partial class EditorWindow : Window
     private void FitToView()
     {
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
-        if (vw < 1 || vh < 1 || _source.Width < 1 || _source.Height < 1) return; // viewport not ready; retry on next trigger
+        if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return; // viewport not ready; retry on next trigger
 
         const double margin = 24;
-        double fit = Math.Min((vw - margin * 2) / _source.Width, (vh - margin * 2) / _source.Height);
+        double fit = Math.Min((vw - margin * 2) / _sourceWidth, (vh - margin * 2) / _sourceHeight);
         // Fit may legitimately need to go below MinZoom (a 32000px scroll capture in a 650px
         // viewport fits at ~0.02) — clamping it to MinZoom left only the middle band visible,
         // which read as "the editor clipped my capture". MinZoom still floors user zooming.
         _zoom = Math.Clamp(Math.Min(fit, 1.0), Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-        ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
-        ViewTranslate.Y = Math.Round((vh - _source.Height * _zoom) / 2);
+        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
+        ViewTranslate.Y = Math.Round((vh - _sourceHeight * _zoom) / 2);
         // Do NOT clear _pendingInitialFit here: the viewport keeps resizing as toolbars/the zoom
         // bar lay out after open, and an early fit computed against a too-large viewport leaves the
         // image too zoomed-in (bottom clipped). Keep re-fitting on every SizeChanged until the user
         // actually takes control of the view (clicks/scrolls/zooms/pans — those clear the flag).
-        Log.Info($"Editor fit: src={_source.Width}x{_source.Height} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
+        Log.Info($"Editor fit: src={_sourceWidth}x{_sourceHeight} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
         OnViewChanged();
     }
 
@@ -306,14 +362,14 @@ public partial class EditorWindow : Window
     private void FitToWidth()
     {
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
-        if (vw < 1 || vh < 1 || _source.Width < 1 || _source.Height < 1) return;
+        if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
 
         const double margin = 24;
-        double fitW = (vw - margin * 2) / _source.Width;
+        double fitW = (vw - margin * 2) / _sourceWidth;
         // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
         _zoom = Math.Clamp(Math.Min(fitW, 1.0), Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-        ViewTranslate.X = Math.Round((vw - _source.Width * _zoom) / 2);
+        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
         ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
         _pendingInitialFit = false; // explicit manual choice; SizeChanged would otherwise snap to fit-whole
         OnViewChanged();

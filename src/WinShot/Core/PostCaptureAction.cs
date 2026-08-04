@@ -26,5 +26,5 @@ public static class PostCaptureAction
         Normalize(action) is not Overlay;
 
     public static bool NeedsCallerThreadHistoryClone(string? action) =>
-        Normalize(action) is Copy or Save or Edit;
+        Normalize(action) is Copy or Save;
 }

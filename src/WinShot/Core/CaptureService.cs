@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -337,7 +338,12 @@ public static class CaptureService
     }
 
     public static Task<BitmapSource> ToBitmapSourceSnapshotAsync(Bitmap bmp)
-        => ConvertOwnedBitmapSnapshotAsync(CloneBitmap(bmp));
+        => RunBitmapSourceConversion(() =>
+        {
+            Bitmap copy = CloneBitmap(bmp);
+            using (copy)
+                return ToBitmapSource(copy);
+        });
 
     public static Bitmap CloneBitmap(Bitmap bmp)
     {
@@ -396,28 +402,166 @@ public static class CaptureService
     }
 
     public static Task<BitmapSource> ToBitmapSourceSnapshotAsync(Bitmap bmp, int maxPixelWidth, int maxPixelHeight)
-        => ConvertOwnedBitmapSnapshotAsync(CreateBitmapSnapshot(bmp, maxPixelWidth, maxPixelHeight));
+        => RunBitmapSourceConversion(() =>
+        {
+            Bitmap copy = CreateBitmapSnapshot(bmp, maxPixelWidth, maxPixelHeight);
+            using (copy)
+                return ToBitmapSource(copy);
+        });
 
     /// <summary>
-    /// Queues only an already-detached bitmap. Snapshot methods must finish reading their
-    /// caller-owned GDI bitmap before they return, otherwise UI layout, History, clipboard,
-    /// or window disposal can touch that bitmap while this worker has it locked.
+    /// Builds frozen WPF tiles directly from a borrowed GDI bitmap. The caller must
+    /// keep the bitmap alive and must not read, mutate, or dispose it until the task completes.
+    /// A 32-bit source uses one tile-sized pooled scratch buffer. Other formats add one
+    /// tile-sized conversion bitmap. No full-resolution GDI clone or intermediate full-size
+    /// BitmapSource is created.
     /// </summary>
-    private static Task<BitmapSource> ConvertOwnedBitmapSnapshotAsync(Bitmap snapshot)
-    {
-        try
+    public static Task<IReadOnlyList<BitmapSource>> ToBitmapSourceTilesBorrowedAsync(Bitmap bmp, int tileHeight)
+        => Task.Run<IReadOnlyList<BitmapSource>>(() =>
         {
-            return RunBitmapSourceConversion(() =>
+            if (tileHeight < 1)
+                throw new ArgumentOutOfRangeException(nameof(tileHeight));
+
+            lock (bmp)
             {
-                using (snapshot)
-                    return ToBitmapSource(snapshot);
-            });
-        }
-        catch
+                int width = bmp.Width;
+                int height = bmp.Height;
+                if (width < 1 || height < 1)
+                    return [];
+
+                PixelFormat pixelFormat = bmp.PixelFormat;
+                double dpiX = bmp.HorizontalResolution;
+                double dpiY = bmp.VerticalResolution;
+                int stride = checked(width * 4);
+                int scratchRows = Math.Min(tileHeight, height);
+                byte[] scratch = ArrayPool<byte>.Shared.Rent(checked(stride * scratchRows));
+                BitmapData? data = null;
+                try
+                {
+                    if (pixelFormat is not (PixelFormat.Format32bppArgb or PixelFormat.Format32bppPArgb or PixelFormat.Format32bppRgb))
+                        return CreateConvertedTiles(bmp, tileHeight, dpiX, dpiY, stride, scratch);
+
+                    data = bmp.LockBits(
+                        new Rectangle(0, 0, width, height),
+                        ImageLockMode.ReadOnly,
+                        pixelFormat);
+                    var tiles = new List<BitmapSource>((height + tileHeight - 1) / tileHeight);
+                    var format = pixelFormat == PixelFormat.Format32bppPArgb
+                        ? System.Windows.Media.PixelFormats.Pbgra32
+                        : System.Windows.Media.PixelFormats.Bgra32;
+
+                    for (int y = 0; y < height; y += tileHeight)
+                    {
+                        int rows = Math.Min(tileHeight, height - y);
+                        if (data.Stride == stride)
+                        {
+                            // A 32-bit GDI bitmap normally has a tightly packed positive stride.
+                            // Copy a whole tile at once: thousands of per-row interop calls made
+                            // tall initial previews needlessly slow despite running off the UI thread.
+                            Marshal.Copy(
+                                IntPtr.Add(data.Scan0, y * stride),
+                                scratch,
+                                0,
+                                checked(rows * stride));
+                        }
+                        else
+                        {
+                            for (int row = 0; row < rows; row++)
+                            {
+                                IntPtr sourceRow = GetBitmapRowPointer(data, y + row, height);
+                                Marshal.Copy(sourceRow, scratch, row * stride, stride);
+                            }
+                        }
+
+                        var tile = BitmapSource.Create(
+                            width, rows, dpiX, dpiY, format, palette: null, scratch, stride);
+                        tile.Freeze();
+                        tiles.Add(tile);
+                    }
+
+                    return tiles;
+                }
+                finally
+                {
+                    if (data is not null)
+                        bmp.UnlockBits(data);
+                    ArrayPool<byte>.Shared.Return(scratch);
+                }
+            }
+        });
+
+    private static IReadOnlyList<BitmapSource> CreateConvertedTiles(
+        Bitmap source,
+        int tileHeight,
+        double dpiX,
+        double dpiY,
+        int stride,
+        byte[] scratch)
+    {
+        int width = source.Width;
+        int height = source.Height;
+        var tiles = new List<BitmapSource>((height + tileHeight - 1) / tileHeight);
+        for (int y = 0; y < height; y += tileHeight)
         {
-            snapshot.Dispose();
-            throw;
+            int rows = Math.Min(tileHeight, height - y);
+            using var converted = new Bitmap(width, rows, PixelFormat.Format32bppPArgb);
+            converted.SetResolution((float)dpiX, (float)dpiY);
+            using (Graphics graphics = Graphics.FromImage(converted))
+            {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.CompositingQuality = CompositingQuality.HighSpeed;
+                graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;
+                graphics.SmoothingMode = SmoothingMode.None;
+                graphics.DrawImage(
+                    source,
+                    new Rectangle(0, 0, width, rows),
+                    new Rectangle(0, y, width, rows),
+                    GraphicsUnit.Pixel);
+            }
+
+            BitmapData? data = null;
+            try
+            {
+                data = converted.LockBits(
+                    new Rectangle(0, 0, width, rows),
+                    ImageLockMode.ReadOnly,
+                    PixelFormat.Format32bppPArgb);
+                if (data.Stride == stride)
+                    Marshal.Copy(data.Scan0, scratch, 0, checked(rows * stride));
+                else
+                {
+                    for (int row = 0; row < rows; row++)
+                    {
+                        IntPtr sourceRow = GetBitmapRowPointer(data, row, rows);
+                        Marshal.Copy(sourceRow, scratch, row * stride, stride);
+                    }
+                }
+
+                var tile = BitmapSource.Create(
+                    width, rows, dpiX, dpiY,
+                    System.Windows.Media.PixelFormats.Pbgra32,
+                    palette: null,
+                    scratch,
+                    stride);
+                tile.Freeze();
+                tiles.Add(tile);
+            }
+            finally
+            {
+                if (data is not null)
+                    converted.UnlockBits(data);
+            }
         }
+
+        return tiles;
+    }
+
+    public static EditorCaptureMemoryBudget EstimateEditorCaptureMemory(int width, int height, int tileHeight)
+    {
+        long sourceBytes = checked((long)width * height * 4);
+        long tileScratchBytes = checked((long)width * Math.Min(height, tileHeight) * 4);
+        return new EditorCaptureMemoryBudget(sourceBytes, sourceBytes, tileScratchBytes);
     }
 
     private static Task<BitmapSource> RunBitmapSourceConversion(Func<BitmapSource> convert)
@@ -788,6 +932,46 @@ public static class CaptureService
         return completion.Task;
     }
 
+    /// <summary>
+    /// Copies a borrowed bitmap without cloning or disposing it. The caller must keep exclusive
+    /// ownership until the returned task completes. Used by direct Edit after its preview has
+    /// detached, so auto-copy does not require another full-resolution GDI bitmap.
+    /// </summary>
+    internal static Task CopyToClipboardBorrowedAsync(Bitmap bmp, bool includePng = false)
+    {
+        var completion = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                ClipboardGate.Wait();
+                try
+                {
+                    CopyToClipboard(bmp, includePng);
+                }
+                finally
+                {
+                    ClipboardGate.Release();
+                }
+                completion.SetResult(null);
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "WinShot Borrowed Clipboard Copy",
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+
+        try { thread.Start(); }
+        catch (Exception ex) { completion.SetException(ex); }
+        return completion.Task;
+    }
+
     public static Task SetTextToClipboardAsync(string text)
     {
         var completion = new TaskCompletionSource<object?>(
@@ -892,4 +1076,19 @@ public static class CaptureService
 
     [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
     private static extern void CopyMemory(IntPtr destination, IntPtr source, nuint length);
+}
+
+/// <summary>
+/// Pixel-buffer budget for direct Edit. History streams from the owned source and does not
+/// add a full-resolution clone. Auto-copy's DIB is one unavoidable transient source-sized
+/// buffer; encoder and WPF object overhead are intentionally not included.
+/// </summary>
+public readonly record struct EditorCaptureMemoryBudget(
+    long SourceBytes,
+    long FrozenTileBytes,
+    long TileScratchBytes)
+{
+    public int FullResolutionCloneCount => 0;
+    public long PeakPixelBytesWithoutAutoCopy => SourceBytes + FrozenTileBytes + TileScratchBytes;
+    public long PeakPixelBytesWithAutoCopy => SourceBytes + FrozenTileBytes + SourceBytes;
 }
