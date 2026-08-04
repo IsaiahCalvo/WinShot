@@ -46,8 +46,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     private SD.Rectangle _thumbRect;   // fixed-ratio, center-cropped capture preview
     private int _cornerRadius;
     private int _dpi = 96;
+    private readonly object _previewSync = new();
     private SD.Bitmap? _preview;
     private SD.Bitmap? _blurredPreview;
+    private bool _previewClosed;
     private Task? _previewTask;
     private Task? _copyTask;
     private Task<string>? _dragFileTask;
@@ -141,10 +143,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         Shown += (_, _) => QueuePreviewLoad();
         FormClosed += (_, _) =>
         {
+            _closed = true;
+            ClosePreviewPipeline();
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
             HideActionTooltip();
-            _closed = true;
             if (_historyPath is not null)
                 PushRecentlyClosed(_historyPath);
             DisposeImageWhenUnused();
@@ -252,14 +255,21 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private void QueuePreviewLoad()
     {
-        if (!_loadPreview || _closed || IsDisposed)
+        if (!_loadPreview || _closed || IsDisposed || PreviewPipelineClosed())
             return;
 
-        BeginInvoke(new Action(() =>
+        try
         {
-            if (!_closed && !IsDisposed)
-                _previewTask ??= LoadPreviewAsync();
-        }));
+            BeginInvoke(new Action(() =>
+            {
+                if (!_closed && !IsDisposed && !PreviewPipelineClosed())
+                    _previewTask ??= LoadPreviewAsync();
+            }));
+        }
+        catch (InvalidOperationException) when (_closed || IsDisposed || PreviewPipelineClosed())
+        {
+            // A Shown/Visible callback raced the native handle being torn down.
+        }
     }
 
     private void SetHovering(bool hovering)
@@ -318,8 +328,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             bool removed = OpenWindows.Remove(this);
             _closed = true;
-            _preview?.Dispose();
-            _blurredPreview?.Dispose();
+            ClosePreviewPipeline();
             StopExitMotionTimer();
             StopStackMotionTimer();
             StopAutoCloseTimer();
@@ -405,26 +414,29 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private void DrawThumbnail(SD.Graphics g, bool blurred)
     {
-        SD.Bitmap? bmp = blurred ? (_blurredPreview ?? _preview) : _preview;
-        if (bmp is null)
-            return;
+        lock (_previewSync)
+        {
+            SD.Bitmap? bmp = blurred ? (_blurredPreview ?? _preview) : _preview;
+            if (_previewClosed || bmp is null)
+                return;
 
-        using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
-        var oldClip = g.Clip;
-        var oldInterp = g.InterpolationMode;
-        var oldOffset = g.PixelOffsetMode;
-        try
-        {
-            g.SetClip(clip, CombineMode.Intersect);
-            g.InterpolationMode = blurred ? InterpolationMode.HighQualityBilinear : InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(bmp, _thumbRect);
-        }
-        finally
-        {
-            g.Clip = oldClip;
-            g.InterpolationMode = oldInterp;
-            g.PixelOffsetMode = oldOffset;
+            using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
+            var oldClip = g.Clip;
+            var oldInterp = g.InterpolationMode;
+            var oldOffset = g.PixelOffsetMode;
+            try
+            {
+                g.SetClip(clip, CombineMode.Intersect);
+                g.InterpolationMode = blurred ? InterpolationMode.HighQualityBilinear : InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(bmp, _thumbRect);
+            }
+            finally
+            {
+                g.Clip = oldClip;
+                g.InterpolationMode = oldInterp;
+                g.PixelOffsetMode = oldOffset;
+            }
         }
     }
 
@@ -973,46 +985,97 @@ public sealed class FastQuickActionsWindow : WF.Form
             MemoryCleanup.Request();
     }
 
+    private bool PreviewPipelineClosed()
+    {
+        lock (_previewSync)
+            return _previewClosed;
+    }
+
+    private void ClosePreviewPipeline()
+    {
+        SD.Bitmap? preview;
+        SD.Bitmap? blurred;
+        lock (_previewSync)
+        {
+            _previewClosed = true;
+            preview = _preview;
+            blurred = _blurredPreview;
+            _preview = null;
+            _blurredPreview = null;
+        }
+
+        DisposePreviewPair(preview, blurred);
+    }
+
+    private void InstallPreviewBitmaps(SD.Bitmap preview, SD.Bitmap blurred)
+    {
+        SD.Bitmap? oldPreview = null;
+        SD.Bitmap? oldBlurred = null;
+        bool accepted;
+        lock (_previewSync)
+        {
+            accepted = !_previewClosed && !_closed && !IsDisposed;
+            if (accepted)
+            {
+                oldPreview = _preview;
+                oldBlurred = _blurredPreview;
+                _preview = preview;
+                _blurredPreview = blurred;
+            }
+        }
+
+        if (!accepted)
+        {
+            DisposePreviewPair(preview, blurred);
+            return;
+        }
+
+        DisposePreviewPair(oldPreview, oldBlurred);
+        if (!_closed && !IsDisposed)
+            Invalidate();
+    }
+
+    private static void DisposePreviewPair(SD.Bitmap? preview, SD.Bitmap? blurred)
+    {
+        preview?.Dispose();
+        if (!ReferenceEquals(blurred, preview))
+            blurred?.Dispose();
+    }
+
     private async Task LoadPreviewAsync()
     {
+        SD.Bitmap? preview = null;
+        SD.Bitmap? blurred = null;
         try
         {
             int w = _thumbRect.Width, h = _thumbRect.Height;
-            var (preview, blurred) = await Task.Run(() =>
+            (preview, blurred) = await Task.Run(() =>
             {
                 var p = CreatePreviewBitmap(_image, w, h);
                 var b = CreateBlurred(p);
                 return (p, b);
             }).ConfigureAwait(false);
 
-            if (_closed || IsDisposed)
+            if (_closed || IsDisposed || PreviewPipelineClosed())
             {
-                preview.Dispose();
-                blurred.Dispose();
                 return;
             }
 
-            BeginInvoke(new Action(() =>
-            {
-                if (_closed || IsDisposed)
-                {
-                    preview.Dispose();
-                    blurred.Dispose();
-                    return;
-                }
-
-                var oldP = _preview;
-                var oldB = _blurredPreview;
-                _preview = preview;
-                _blurredPreview = blurred;
-                oldP?.Dispose();
-                oldB?.Dispose();
-                Invalidate();
-            }));
+            Invoke(new Action(() => InstallPreviewBitmaps(preview, blurred)));
+            preview = null;
+            blurred = null;
+        }
+        catch (Exception) when (_closed || IsDisposed || PreviewPipelineClosed())
+        {
+            // Closing the window can destroy its handle while the background render completes.
         }
         catch (Exception ex)
         {
             Log.Error("Failed to load fast overlay thumbnail", ex);
+        }
+        finally
+        {
+            DisposePreviewPair(preview, blurred);
         }
     }
 

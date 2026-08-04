@@ -111,6 +111,61 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
+    public void DisposedOverlayClearsPreviewReferencesBeforeLateOffscreenPaint()
+    {
+        RunSta(() =>
+        {
+            using var source = new SD.Bitmap(400, 240);
+            var overlay = FastQuickActionsWindow.CreateForTheme(
+                source,
+                new SettingsService(),
+                QuickAccessOverlayTheme.Dark);
+            var type = typeof(FastQuickActionsWindow);
+            var previewField = type.GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var blurredField = type.GetField("_blurredPreview", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            previewField.SetValue(overlay, new SD.Bitmap(192, 120));
+            blurredField.SetValue(overlay, new SD.Bitmap(192, 120));
+
+            overlay.Dispose();
+
+            using var surface = new SD.Bitmap(overlay.ClientSize.Width, overlay.ClientSize.Height);
+            using var graphics = SD.Graphics.FromImage(surface);
+            using var args = new WF.PaintEventArgs(graphics, new SD.Rectangle(SD.Point.Empty, surface.Size));
+            type.GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(overlay, new object[] { args });
+            Assert.Null(previewField.GetValue(overlay));
+            Assert.Null(blurredField.GetValue(overlay));
+        });
+    }
+
+    [Fact]
+    public void LatePreviewLoadAfterDisposeCannotReattachDisposedWindowImages()
+    {
+        RunSta(() =>
+        {
+            using var source = new SD.Bitmap(400, 240);
+            var overlay = FastQuickActionsWindow.CreateForTheme(
+                source,
+                new SettingsService(),
+                QuickAccessOverlayTheme.Dark);
+            var type = typeof(FastQuickActionsWindow);
+            var previewField = type.GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var blurredField = type.GetField("_blurredPreview", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var latePreview = new SD.Bitmap(192, 120);
+            var lateBlurred = new SD.Bitmap(192, 120);
+
+            overlay.Dispose();
+            type.GetMethod("InstallPreviewBitmaps", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(overlay, new object[] { latePreview, lateBlurred });
+
+            Assert.Null(previewField.GetValue(overlay));
+            Assert.Null(blurredField.GetValue(overlay));
+            Assert.Throws<ArgumentException>(() => _ = latePreview.RawFormat);
+            Assert.Throws<ArgumentException>(() => _ = lateBlurred.RawFormat);
+        });
+    }
+
+    [Fact]
     public void OverflowKeepsOcrAndBackgroundWithoutCloud()
     {
         RunSta(() =>
