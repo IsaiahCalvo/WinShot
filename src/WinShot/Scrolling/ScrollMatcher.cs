@@ -29,9 +29,13 @@ public sealed class FrameSignature
     /// of the trimmed span), for the multi-strip consensus vote.</summary>
     public float[][] StripMean { get; }
     public float[][] StripEnergy { get; }
+    /// <summary>Exact FNV-1a hash per row per strip. Lets the matcher spot a strip that is
+    /// byte-identical IN PLACE between two frames (a stationary sidebar) — the one signal
+    /// that cleanly separates "this pane moved" from "this pane never moves".</summary>
+    public ulong[][] StripHash { get; }
 
     private FrameSignature(int width, int height, ulong[] rowHash, float[] mean, float[] energy,
-        float[][] stripMean, float[][] stripEnergy)
+        float[][] stripMean, float[][] stripEnergy, ulong[][] stripHash)
     {
         Width = width;
         Height = height;
@@ -40,6 +44,7 @@ public sealed class FrameSignature
         Energy = energy;
         StripMean = stripMean;
         StripEnergy = stripEnergy;
+        StripHash = stripHash;
     }
 
     /// <summary>Side margin excluded from all row math — same formula ShareX uses; wide enough
@@ -68,10 +73,12 @@ public sealed class FrameSignature
         var energy = new float[height];
         var stripMean = new float[Strips][];
         var stripEnergy = new float[Strips][];
+        var stripHash = new ulong[Strips][];
         for (int s = 0; s < Strips; s++)
         {
             stripMean[s] = new float[height];
             stripEnergy[s] = new float[height];
+            stripHash[s] = new ulong[height];
         }
 
         var data = bmp.LockBits(new SD.Rectangle(0, 0, width, height),
@@ -92,6 +99,8 @@ public sealed class FrameSignature
 
                 long[] sum = new long[Strips];
                 long[] grad = new long[Strips];
+                Span<ulong> hs = stackalloc ulong[Strips];
+                hs.Fill(ImageStitcher.FnvOffsetBasis);
                 for (int x = 0; x < span; x++)
                 {
                     int i = (startX + x) * 4;
@@ -102,7 +111,14 @@ public sealed class FrameSignature
                     sum[s] += l;
                     if (y > 0)
                         grad[s] += Math.Abs(l - prevLuma[x]);
+                    ulong h = hs[s];
+                    h = (h ^ row[i]) * ImageStitcher.FnvPrime;
+                    h = (h ^ row[i + 1]) * ImageStitcher.FnvPrime;
+                    h = (h ^ row[i + 2]) * ImageStitcher.FnvPrime;
+                    hs[s] = h;
                 }
+                for (int s = 0; s < Strips; s++)
+                    stripHash[s][y] = hs[s];
 
                 long totalSum = 0, totalGrad = 0;
                 for (int s = 0; s < Strips; s++)
@@ -123,7 +139,7 @@ public sealed class FrameSignature
         {
             bmp.UnlockBits(data);
         }
-        return new FrameSignature(width, height, rowHash, mean, energy, stripMean, stripEnergy);
+        return new FrameSignature(width, height, rowHash, mean, energy, stripMean, stripEnergy, stripHash);
     }
 }
 
@@ -267,16 +283,44 @@ public static class ScrollMatcher
         if (maxOffset < 1)
             return 0;
 
+        // A strip that is byte-identical IN PLACE between the two frames is a stationary
+        // region (sidebar, inspector pane). Its autocorrelation peaks at tiny lags and it
+        // actively vetoes the true offset in the mean gate — so when at least one strip
+        // moved, search and confirm on the moving strips only.
+        Span<bool> stripStatic = stackalloc bool[FrameSignature.Strips];
+        int staticStrips = 0;
+        for (int s = 0; s < FrameSignature.Strips; s++)
+        {
+            if (StripIsStatic(prev, curr, s, start, end))
+            {
+                stripStatic[s] = true;
+                staticStrips++;
+            }
+        }
+        float[] currEnergy = curr.Energy, prevEnergy = prev.Energy;
+        float[] currMean = curr.Mean, prevMean = prev.Mean;
+        if (staticStrips > 0 && staticStrips < FrameSignature.Strips)
+        {
+            currEnergy = CombineMovingStrips(curr.StripEnergy, stripStatic, height);
+            prevEnergy = CombineMovingStrips(prev.StripEnergy, stripStatic, height);
+            currMean = CombineMovingStrips(curr.StripMean, stripStatic, height);
+            prevMean = CombineMovingStrips(prev.StripMean, stripStatic, height);
+        }
+        else if (staticStrips == FrameSignature.Strips)
+        {
+            return 0; // nothing in the region moved
+        }
+
         float bestScore = float.MinValue, secondScore = float.MinValue;
         int bestOffset = 0;
         for (int d = 1; d < maxOffset; d++)
         {
             int overlap = end - start - d;
-            if (CountInformative(curr.Energy, start, overlap) < MinInformativeRows ||
-                CountInformative(prev.Energy, start + d, overlap) < MinInformativeRows)
+            if (CountInformative(currEnergy, start, overlap) < MinInformativeRows ||
+                CountInformative(prevEnergy, start + d, overlap) < MinInformativeRows)
                 continue;
 
-            float score = Ncc(curr.Energy, start, prev.Energy, start + d, overlap);
+            float score = Ncc(currEnergy, start, prevEnergy, start + d, overlap);
             if (score > bestScore)
             {
                 if (Math.Abs(d - bestOffset) > PeakExclusionZone)
@@ -296,11 +340,55 @@ public static class ScrollMatcher
             return 0; // repetitive content: several offsets look alike — refuse to guess
 
         int overlapLen = end - start - bestOffset;
-        if (!MeanConfirms(curr.Mean, start, prev.Mean, start + bestOffset, overlapLen))
+        if (!MeanConfirms(currMean, start, prevMean, start + bestOffset, overlapLen))
             return 0;
-        if (!StripsAgree(curr, prev, start, bestOffset, overlapLen))
+        if (!StripsAgree(curr, prev, stripStatic, start, bestOffset, overlapLen))
             return 0;
         return bestOffset;
+    }
+
+    /// <summary>Ratio of rows in [start, end) that must be byte-identical in place for a strip
+    /// to count as stationary. Below 100% so a blinking caret or spinner can't hide a truly
+    /// static pane.</summary>
+    private const float StaticStripRatio = 0.95f;
+
+    private static bool StripIsStatic(FrameSignature prev, FrameSignature curr, int strip, int start, int end)
+    {
+        int len = end - start;
+        if (len <= 0)
+            return false;
+        int same = 0;
+        ulong[] a = prev.StripHash[strip], b = curr.StripHash[strip];
+        for (int y = start; y < end; y++)
+        {
+            if (a[y] == b[y])
+                same++;
+        }
+        return same >= (int)(len * StaticStripRatio);
+    }
+
+    /// <summary>Averages the per-strip profiles of the non-static strips into one profile.
+    /// Strips are equal width (the last one within a pixel or two), so a plain average is a
+    /// faithful stand-in for recomputing the profile over the moving span.</summary>
+    private static float[] CombineMovingStrips(float[][] strips, ReadOnlySpan<bool> stripStatic, int height)
+    {
+        var combined = new float[height];
+        int moving = 0;
+        for (int s = 0; s < FrameSignature.Strips; s++)
+        {
+            if (stripStatic[s])
+                continue;
+            moving++;
+            float[] src = strips[s];
+            for (int y = 0; y < height; y++)
+                combined[y] += src[y];
+        }
+        if (moving > 1)
+        {
+            for (int y = 0; y < height; y++)
+                combined[y] /= moving;
+        }
+        return combined;
     }
 
     /// <summary>
@@ -503,18 +591,36 @@ public static class ScrollMatcher
         return sum / len <= MeanConfirmTolerance;
     }
 
-    private static bool StripsAgree(FrameSignature curr, FrameSignature prev, int start, int offset, int len)
+    private static bool StripsAgree(FrameSignature curr, FrameSignature prev,
+        ReadOnlySpan<bool> stripStatic, int start, int offset, int len)
     {
         int votes = 0, informative = 0;
+        bool anyStatic = false;
         for (int s = 0; s < FrameSignature.Strips; s++)
         {
+            if (stripStatic[s])
+            {
+                // A stationary strip is not evidence for ANY offset — it must neither vote
+                // nor count as informative, or it drags the consensus toward lag 0.
+                anyStatic = true;
+                continue;
+            }
             if (CountInformative(curr.StripEnergy[s], start, len) < MinInformativeRows)
                 continue; // blank strip abstains
             informative++;
             if (Ncc(curr.StripEnergy[s], start, prev.StripEnergy[s], start + offset, len) >= StripVoteScore)
                 votes++;
         }
-        // With ≤1 informative strip the full-span score already told the story.
-        return informative <= 1 || votes >= Math.Min(MinStripVotes, informative);
+        if (informative == 0)
+        {
+            // With no static strip, sparse content already passed the full-span gates and the
+            // strip vote has nothing to add. But when a static strip exists and NO moving
+            // strip is informative, the full-span score was carried by the static strip alone
+            // — the exact hole that admitted sidebar micro-offsets. Refuse.
+            return !anyStatic;
+        }
+        if (informative == 1)
+            return votes >= 1;
+        return votes >= Math.Min(MinStripVotes, informative);
     }
 }

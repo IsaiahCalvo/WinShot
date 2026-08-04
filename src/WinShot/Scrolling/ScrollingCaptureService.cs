@@ -151,6 +151,14 @@ public static class ScrollingCaptureService
 
         private int _runningHeader;
         private int _runningFooter;
+        // Footer growth stabilizer: a single coincidental detection spike must not permanently
+        // shrink the matchable area (observed creep 73→334px on a 1005px region — a third of
+        // every frame written off as "footer"). Grow only on agreement across consecutive
+        // differing pairs; decay back when detections run consistently lower.
+        private int _footerGrowCandidate;
+        private int _footerGrowStreak;
+        private int _footerShrinkStreak;
+        private int _footerShrinkMax;
         private int _runningVerticalLeftBand;
         private int _runningVerticalRightBand;
         private int _verticalLeftMatchInset;
@@ -412,20 +420,26 @@ public static class ScrollingCaptureService
                 StationaryViewportRegions refinedRegions = StationaryViewportDetector.Detect(
                     _lastFrame, frame, matchedOffset);
                 int candidateHeader = Math.Min(Math.Max(_runningHeader, refined.Leading), sig.Height / 3);
-                int candidateFooter = Math.Min(Math.Max(_runningFooter,
-                    Math.Max(refined.Trailing, refinedRegions.BottomOverlay)), sig.Height / 3);
+                int candidateFooter = StabilizedFooter(
+                    Math.Max(refined.Trailing, refinedRegions.BottomOverlay), sig.Height / 3);
+                // A canvas re-lock or a few polluted early pairs can push the first verified
+                // offset past frame 1 (seen live: re-lock on frame 2 meant the sidebar never
+                // locked and kept hijacking the matcher). Allow the lock on any early frame;
+                // only the frame-1 case can also rebuild the canvas profile.
+                bool canLockSidebars = _stitchedFrames <= SidebarLockMaxFrames &&
+                    _runningVerticalLeftBand == 0 && _runningVerticalRightBand == 0;
                 int candidateLeft = _runningVerticalLeftBand > 0
                     ? _runningVerticalLeftBand
-                    : _stitchedFrames == 1 ? refinedRegions.LeftSide : 0;
+                    : canLockSidebars ? refinedRegions.LeftSide : 0;
                 int candidateRight = _runningVerticalRightBand > 0
                     ? _runningVerticalRightBand
-                    : _stitchedFrames == 1 ? refinedRegions.RightSide : 0;
+                    : canLockSidebars ? refinedRegions.RightSide : 0;
                 int candidateLeftMatch = _verticalLeftMatchInset > 0
                     ? _verticalLeftMatchInset
-                    : _stitchedFrames == 1 ? refinedRegions.LeftMatchInset : 0;
+                    : canLockSidebars ? refinedRegions.LeftMatchInset : 0;
                 int candidateRightMatch = _verticalRightMatchInset > 0
                     ? _verticalRightMatchInset
-                    : _stitchedFrames == 1 ? refinedRegions.RightMatchInset : 0;
+                    : canLockSidebars ? refinedRegions.RightMatchInset : 0;
                 FrameSignature refinedPrevious = _prevSig;
                 FrameSignature refinedCurrent = sig;
                 if (candidateLeftMatch > FrameSignature.SideMargin(sig.Width) ||
@@ -443,16 +457,25 @@ public static class ScrollingCaptureService
                     matchedOffset = verifiedOffset;
                     header = candidateHeader;
                     footer = candidateFooter;
-                    if (_stitchedFrames == 1 &&
-                        (_runningVerticalLeftBand != candidateLeft ||
-                         _runningVerticalRightBand != candidateRight ||
-                         _verticalLeftMatchInset != candidateLeftMatch ||
-                         _verticalRightMatchInset != candidateRightMatch))
+                    bool sidebarLockChanged =
+                        _runningVerticalLeftBand != candidateLeft ||
+                        _runningVerticalRightBand != candidateRight ||
+                        _verticalLeftMatchInset != candidateLeftMatch ||
+                        _verticalRightMatchInset != candidateRightMatch;
+                    if (_stitchedFrames == 1 && sidebarLockChanged)
                     {
                         _canvas.Retract(_canvas.Height);
                         _canvas.Append(refinedPrevious, 0, refinedPrevious.Height);
                         _prevMatchSig = refinedPrevious;
                         CaptureSidebarSnapshots(_lastFrame, candidateLeft, candidateRight);
+                    }
+                    else if (sidebarLockChanged && (candidateLeft > 0 || candidateRight > 0))
+                    {
+                        // Late lock: the canvas profile keeps its full-width early rows
+                        // (slightly degraded re-lock there is fine); matching and the final
+                        // sidebar de-duplication adopt the lock from here on.
+                        CaptureSidebarSnapshots(_lastFrame, candidateLeft, candidateRight);
+                        Log.Info($"Scroll: sidebar lock at frame {_stitchedFrames} (left={candidateLeft} right={candidateRight})");
                     }
                     _runningVerticalLeftBand = candidateLeft;
                     _runningVerticalRightBand = candidateRight;
@@ -591,6 +614,52 @@ public static class ScrollingCaptureService
             _firstRightSidebar?.Dispose();
             _firstLeftSidebar = null;
             _firstRightSidebar = null;
+        }
+
+        private const int FooterSlack = 5;
+        /// <summary>Latest stitched frame at which a stationary sidebar may still lock.
+        /// ponytail: fixed small window — past this the stitch has too much full-width
+        /// history for a lock to leave the output consistent.</summary>
+        private const int SidebarLockMaxFrames = 6;
+
+        /// <summary>
+        /// Footer band update with hysteresis. Growth needs the same detected value (±slack)
+        /// on two consecutive differing pairs; a run of clearly-lower detections shrinks the
+        /// band back (shrinking just widens future matching — no retraction needed).
+        /// </summary>
+        private int StabilizedFooter(int detected, int cap)
+        {
+            detected = Math.Min(detected, cap);
+            // Initial adoption is immediate: the tail retract heals frame 1's misclassified
+            // rows only while they are still the stitch tail. Hysteresis applies to GROWTH
+            // beyond an established footer — that is where the runaway creep lived.
+            if (_runningFooter == 0)
+                return detected;
+            if (detected > _runningFooter + FooterSlack)
+            {
+                _footerShrinkStreak = 0;
+                if (_footerGrowStreak >= 1 && Math.Abs(detected - _footerGrowCandidate) <= FooterSlack)
+                {
+                    _footerGrowStreak = 0;
+                    return detected;
+                }
+                _footerGrowCandidate = detected;
+                _footerGrowStreak = 1;
+                return _runningFooter;
+            }
+            _footerGrowStreak = 0;
+            if (detected < _runningFooter - FooterSlack)
+            {
+                _footerShrinkMax = _footerShrinkStreak == 0 ? detected : Math.Max(_footerShrinkMax, detected);
+                if (++_footerShrinkStreak >= 3)
+                {
+                    _footerShrinkStreak = 0;
+                    return _footerShrinkMax;
+                }
+                return _runningFooter;
+            }
+            _footerShrinkStreak = 0;
+            return Math.Max(_runningFooter, detected);
         }
 
         private void AppendVertical(SD.Bitmap frame, FrameSignature sig, int offset, int header, int footer)
