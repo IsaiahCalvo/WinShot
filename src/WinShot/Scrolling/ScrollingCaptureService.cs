@@ -153,6 +153,8 @@ public static class ScrollingCaptureService
         private int _runningFooter;
         private int _runningVerticalLeftBand;
         private int _runningVerticalRightBand;
+        private int _verticalLeftMatchInset;
+        private int _verticalRightMatchInset;
         private int _runningLeftBand;
         private int _runningRightBand;
         private int _stitchedFrames;
@@ -375,8 +377,8 @@ public static class ScrollingCaptureService
             StationaryViewportRegions provisionalRegions = _lastFrame is null
                 ? default
                 : StationaryViewportDetector.Detect(_lastFrame, frame);
-            int provisionalLeft = Math.Max(_runningVerticalLeftBand, provisionalRegions.LeftSide);
-            int provisionalRight = Math.Max(_runningVerticalRightBand, provisionalRegions.RightSide);
+            int provisionalLeft = Math.Max(_verticalLeftMatchInset, provisionalRegions.LeftMatchInset);
+            int provisionalRight = Math.Max(_verticalRightMatchInset, provisionalRegions.RightMatchInset);
             FrameSignature previousMatch = _prevSig;
             FrameSignature currentMatch = sig;
             if (_lastFrame is not null &&
@@ -418,13 +420,21 @@ public static class ScrollingCaptureService
                 int candidateRight = _runningVerticalRightBand > 0
                     ? _runningVerticalRightBand
                     : _stitchedFrames == 1 ? refinedRegions.RightSide : 0;
+                int candidateLeftMatch = _verticalLeftMatchInset > 0
+                    ? _verticalLeftMatchInset
+                    : _stitchedFrames == 1 ? refinedRegions.LeftMatchInset : 0;
+                int candidateRightMatch = _verticalRightMatchInset > 0
+                    ? _verticalRightMatchInset
+                    : _stitchedFrames == 1 ? refinedRegions.RightMatchInset : 0;
                 FrameSignature refinedPrevious = _prevSig;
                 FrameSignature refinedCurrent = sig;
-                if (candidateLeft > FrameSignature.SideMargin(sig.Width) ||
-                    candidateRight > FrameSignature.SideMargin(sig.Width))
+                if (candidateLeftMatch > FrameSignature.SideMargin(sig.Width) ||
+                    candidateRightMatch > FrameSignature.SideMargin(sig.Width))
                 {
-                    refinedPrevious = FrameSignature.Build(_lastFrame, candidateLeft, candidateRight);
-                    refinedCurrent = FrameSignature.Build(frame, candidateLeft, candidateRight);
+                    refinedPrevious = FrameSignature.Build(_lastFrame,
+                        candidateLeftMatch, candidateRightMatch);
+                    refinedCurrent = FrameSignature.Build(frame,
+                        candidateLeftMatch, candidateRightMatch);
                 }
                 int verifiedOffset = ScrollMatcher.FindOffset(refinedPrevious, refinedCurrent,
                     candidateHeader, candidateFooter);
@@ -435,7 +445,9 @@ public static class ScrollingCaptureService
                     footer = candidateFooter;
                     if (_stitchedFrames == 1 &&
                         (_runningVerticalLeftBand != candidateLeft ||
-                         _runningVerticalRightBand != candidateRight))
+                         _runningVerticalRightBand != candidateRight ||
+                         _verticalLeftMatchInset != candidateLeftMatch ||
+                         _verticalRightMatchInset != candidateRightMatch))
                     {
                         _canvas.Retract(_canvas.Height);
                         _canvas.Append(refinedPrevious, 0, refinedPrevious.Height);
@@ -444,16 +456,18 @@ public static class ScrollingCaptureService
                     }
                     _runningVerticalLeftBand = candidateLeft;
                     _runningVerticalRightBand = candidateRight;
+                    _verticalLeftMatchInset = candidateLeftMatch;
+                    _verticalRightMatchInset = candidateRightMatch;
                     matchSig = refinedCurrent;
                 }
             }
             if (matchSig == sig &&
-                (_runningVerticalLeftBand > FrameSignature.SideMargin(sig.Width) ||
-                 _runningVerticalRightBand > FrameSignature.SideMargin(sig.Width)) &&
+                (_verticalLeftMatchInset > FrameSignature.SideMargin(sig.Width) ||
+                 _verticalRightMatchInset > FrameSignature.SideMargin(sig.Width)) &&
                 _lastFrame is not null)
             {
                 matchSig = FrameSignature.Build(frame,
-                    _runningVerticalLeftBand, _runningVerticalRightBand);
+                    _verticalLeftMatchInset, _verticalRightMatchInset);
             }
             _runningHeader = header;
 

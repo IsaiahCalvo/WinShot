@@ -5,7 +5,12 @@ using SD = System.Drawing;
 namespace WinShot.Scrolling;
 
 /// <summary>Stationary regions that are not necessarily full-width header/footer bands.</summary>
-internal readonly record struct StationaryViewportRegions(int LeftSide, int RightSide, int BottomOverlay);
+internal readonly record struct StationaryViewportRegions(
+    int LeftSide,
+    int RightSide,
+    int BottomOverlay,
+    int LeftMatchInset,
+    int RightMatchInset);
 
 /// <summary>
 /// Separates viewport-fixed pixels from vertically moving document pixels. A region is only
@@ -89,14 +94,15 @@ internal static class StationaryViewportDetector
         }
 
         bool confirmed = scrollOffset > 0;
-        int left = FindSide(side, width, fromLeft: true, confirmed);
-        int right = FindSide(side, width, fromLeft: false, confirmed);
+        SideRegion left = FindSide(side, width, fromLeft: true, confirmed);
+        SideRegion right = FindSide(side, width, fromLeft: false, confirmed);
         int bottom = FindBottomOverlay(tiles, tileColumns, tileRows, width, height,
-            left, right, confirmed);
-        return new StationaryViewportRegions(left, right, bottom);
+            left.Exact, right.Exact, confirmed);
+        return new StationaryViewportRegions(left.Exact, right.Exact, bottom,
+            left.MatchInset, right.MatchInset);
     }
 
-    private static int FindSide(Evidence[] evidence, int width, bool fromLeft, bool confirmed)
+    private static SideRegion FindSide(Evidence[] evidence, int width, bool fromLeft, bool confirmed)
     {
         int outerBlocks = Math.Max(1, (int)Math.Ceiling(evidence.Length * 0.42));
         int first = fromLeft ? 0 : evidence.Length - outerBlocks;
@@ -111,12 +117,37 @@ internal static class StationaryViewportDetector
         // A real fixed sidebar has evidence spread across several columns. A lone fixed
         // button near an edge must not crop a large part of the document.
         if (matches.Count < 4 || (matches[^1] - matches[0] + 1) * SideBlockWidth < 24)
-            return 0;
+            return default;
 
-        int inset = fromLeft
-            ? Math.Min(width, (matches[^1] + 4) * SideBlockWidth)
-            : Math.Min(width, width - Math.Max(0, (matches[0] - 3) * SideBlockWidth));
-        return Math.Min(inset, (int)(width * 0.45));
+        // Confirmed structured pixels prove that this edge owns a stationary component.
+        // Expand through same-position-stable background blocks to find its real boundary.
+        // Matching may safely crop two extra blocks, but compositing must never use padding.
+        int lastStable = fromLeft ? -1 : evidence.Length;
+        int unstableRun = 0;
+        for (int distance = 0; distance < outerBlocks; distance++)
+        {
+            int i = fromLeft ? distance : evidence.Length - 1 - distance;
+            bool stableAtViewport = evidence[i].Samples > 0 &&
+                evidence[i].Same / (double)evidence[i].Samples >= StableRatio;
+            if (stableAtViewport)
+            {
+                lastStable = i;
+                unstableRun = 0;
+            }
+            else if (++unstableRun >= 2)
+            {
+                break;
+            }
+        }
+        if (lastStable < 0 || lastStable >= evidence.Length)
+            return default;
+
+        int exact = fromLeft
+            ? (lastStable + 1) * SideBlockWidth
+            : width - lastStable * SideBlockWidth;
+        exact = Math.Min(exact, (int)(width * 0.45));
+        int matchInset = Math.Min((int)(width * 0.45), exact + SideBlockWidth * 2);
+        return new SideRegion(exact, matchInset);
     }
 
     private static int FindBottomOverlay(Evidence[] evidence, int columns, int rows,
@@ -226,6 +257,8 @@ internal static class StationaryViewportDetector
             if (structured) Structured++;
         }
     }
+
+    private readonly record struct SideRegion(int Exact, int MatchInset);
 }
 
 /// <summary>Removes repeated copies of a fixed sidebar below its first viewport instance.</summary>

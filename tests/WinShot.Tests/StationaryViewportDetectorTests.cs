@@ -25,7 +25,8 @@ public class StationaryViewportDetectorTests
             StationaryViewportRegions regions = StationaryViewportDetector.Detect(previous, current, offset);
 
             Assert.Equal(0, regions.LeftSide);
-            Assert.InRange(regions.RightSide, Sidebar - 24, Sidebar + 24);
+            Assert.Equal(Sidebar, regions.RightSide);
+            Assert.True(regions.RightMatchInset > regions.RightSide);
             Assert.InRange(regions.BottomOverlay, 20, 64);
         }
     }
@@ -38,8 +39,10 @@ public class StationaryViewportDetectorTests
         StationaryViewportRegions provisional = StationaryViewportDetector.Detect(previous, current);
         Assert.True(provisional.RightSide >= Sidebar - 24, $"right={provisional.RightSide}");
 
-        FrameSignature a = FrameSignature.Build(previous, provisional.LeftSide, provisional.RightSide);
-        FrameSignature b = FrameSignature.Build(current, provisional.LeftSide, provisional.RightSide);
+        FrameSignature a = FrameSignature.Build(previous,
+            provisional.LeftMatchInset, provisional.RightMatchInset);
+        FrameSignature b = FrameSignature.Build(current,
+            provisional.LeftMatchInset, provisional.RightMatchInset);
         Assert.Equal(73, ScrollMatcher.FindOffset(a, b, 0, 52));
     }
 
@@ -112,6 +115,7 @@ public class StationaryViewportDetectorTests
         Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
         using (var first = MakeFrame(positions[0]))
             AssertSidebarEquals(first, stitched);
+        AssertAdjacentMovingStrip(stitched);
         int firstArrow = FindFirstRedRow(stitched);
         Assert.InRange(firstArrow, stitched.Height - 48, stitched.Height - 1);
 
@@ -156,6 +160,7 @@ public class StationaryViewportDetectorTests
 
         Assert.Equal(320 + Height, stitched.Height);
         AssertSidebarEquals(first, stitched);
+        AssertAdjacentMovingStrip(stitched);
         Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
         for (int y = 0; y < stitched.Height - 48; y += 37)
             Assert.Equal(DocumentColor(101, y).ToArgb(), stitched.GetPixel(101, y).ToArgb());
@@ -194,6 +199,13 @@ public class StationaryViewportDetectorTests
         for (int y = 0; y < Height; y++)
         for (int x = Width - Sidebar; x < Width; x++)
             Assert.Equal(expectedFrame.GetPixel(x, y).ToArgb(), actual.GetPixel(x, y).ToArgb());
+    }
+
+    private static void AssertAdjacentMovingStrip(SD.Bitmap actual)
+    {
+        for (int y = Height + 11; y < actual.Height - 64; y += 31)
+        for (int x = Width - Sidebar - 24; x < Width - Sidebar; x += 7)
+            Assert.Equal(DocumentColor(x, y).ToArgb(), actual.GetPixel(x, y).ToArgb());
     }
 
     private static int FindFirstRedRow(SD.Bitmap bitmap)
