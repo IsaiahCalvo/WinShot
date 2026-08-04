@@ -135,12 +135,14 @@ public sealed class FrameSignature
 /// </summary>
 public sealed class CanvasProfile
 {
+    private ulong[] _rowHash = new ulong[4096];
     private float[] _mean = new float[4096];
     private float[] _energy = new float[4096];
     private readonly float[][] _stripMean;
     private readonly float[][] _stripEnergy;
 
     public int Height { get; private set; }
+    public ulong[] RowHash => _rowHash;
     public float[] Mean => _mean;
     public float[] Energy => _energy;
     public float[][] StripMean => _stripMean;
@@ -164,6 +166,7 @@ public sealed class CanvasProfile
     public void Append(FrameSignature sig, int start, int count)
     {
         EnsureCapacity(Height + count);
+        Array.Copy(sig.RowHash, start, _rowHash, Height, count);
         Array.Copy(sig.Mean, start, _mean, Height, count);
         Array.Copy(sig.Energy, start, _energy, Height, count);
         for (int s = 0; s < FrameSignature.Strips; s++)
@@ -178,6 +181,7 @@ public sealed class CanvasProfile
     {
         if (needed <= _mean.Length) return;
         int cap = Math.Max(needed, _mean.Length * 2);
+        Array.Resize(ref _rowHash, cap);
         Array.Resize(ref _mean, cap);
         Array.Resize(ref _energy, cap);
         for (int s = 0; s < FrameSignature.Strips; s++)
@@ -325,6 +329,46 @@ public static class ScrollMatcher
         // p = canvas row where frame row 0 sits. The frame may overhang the canvas bottom by
         // up to frameRows - MinInformativeRows*2 rows (we still need a meaningful overlap).
         int pMax = canvas.Height - top - MinInformativeRows * 2;
+
+        // Native/GDI content often preserves exact rows. Use that strongest evidence first;
+        // it also makes recovery immune to a stationary sidebar once both profiles use the
+        // same side crop. Repetitive exact matches remain ambiguous and fall through to NCC.
+        int exactBestPosition = -1, exactBestRun = 0, exactSecondRun = 0;
+        for (int p = windowStart; p <= pMax; p++)
+        {
+            int canvasStart = p + top;
+            int overlap = Math.Min(frameRows, canvas.Height - canvasStart);
+            int run = 0, longest = 0;
+            for (int i = 0; i < overlap; i++)
+            {
+                if (frame.RowHash[top + i] == canvas.RowHash[canvasStart + i])
+                {
+                    run++;
+                    longest = Math.Max(longest, run);
+                }
+                else
+                {
+                    run = 0;
+                }
+            }
+            if (longest > exactBestRun)
+            {
+                exactSecondRun = exactBestRun;
+                exactBestRun = longest;
+                exactBestPosition = p;
+            }
+            else if (longest > exactSecondRun)
+            {
+                exactSecondRun = longest;
+            }
+        }
+        if (exactBestPosition >= 0 && exactBestRun >= MinInformativeRows &&
+            exactBestRun - exactSecondRun >= 2)
+        {
+            int exactNewRows = Math.Max(0,
+                exactBestPosition + top + frameRows - canvas.Height);
+            return new CanvasLock(exactBestPosition, exactNewRows);
+        }
 
         float bestScore = float.MinValue, secondScore = float.MinValue;
         int bestPos = -1;

@@ -20,7 +20,7 @@ internal static class StationaryViewportDetector
     private const int TileHeight = 8;
     private const int Tolerance = 12;
     private const double StableRatio = 0.86;
-    private const double ShiftAdvantage = 0.10;
+    private const double ShiftAdvantage = 0.04;
 
     public static StationaryViewportRegions Detect(SD.Bitmap previous, SD.Bitmap current, int scrollOffset = 0)
     {
@@ -114,8 +114,8 @@ internal static class StationaryViewportDetector
             return 0;
 
         int inset = fromLeft
-            ? Math.Min(width, (matches[^1] + 2) * SideBlockWidth)
-            : Math.Min(width, width - Math.Max(0, (matches[0] - 1) * SideBlockWidth));
+            ? Math.Min(width, (matches[^1] + 4) * SideBlockWidth)
+            : Math.Min(width, width - Math.Max(0, (matches[0] - 3) * SideBlockWidth));
         return Math.Min(inset, (int)(width * 0.45));
     }
 
@@ -231,35 +231,45 @@ internal static class StationaryViewportDetector
 /// <summary>Removes repeated copies of a fixed sidebar below its first viewport instance.</summary>
 internal static class StationaryViewportCompositor
 {
-    public static void RemoveRepeatedSidebars(SD.Bitmap stitched, SD.Bitmap reference,
-        int firstViewportHeight, int leftSide, int rightSide)
+    public static void RemoveRepeatedSidebars(SD.Bitmap stitched, SD.Bitmap? leftSidebar,
+        SD.Bitmap? rightSidebar, int firstViewportHeight)
     {
-        if (stitched.Height <= firstViewportHeight)
+        if (leftSidebar is null && rightSidebar is null)
             return;
         using var graphics = SD.Graphics.FromImage(stitched);
         graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-        if (leftSide > 0)
+        int fillStart = Math.Min(firstViewportHeight, stitched.Height);
+        if (leftSidebar is not null)
         {
-            using var brush = new SD.SolidBrush(DominantColor(reference,
-                new SD.Rectangle(0, 0, Math.Min(leftSide, reference.Width), reference.Height)));
-            graphics.FillRectangle(brush, 0, firstViewportHeight, leftSide,
-                stitched.Height - firstViewportHeight);
+            using var brush = new SD.SolidBrush(DominantColor(leftSidebar));
+            graphics.FillRectangle(brush, 0, fillStart, leftSidebar.Width,
+                stitched.Height - fillStart);
+            DrawSidebarOnce(graphics, leftSidebar, 0, stitched.Height);
         }
-        if (rightSide > 0)
+        if (rightSidebar is not null)
         {
-            int x = Math.Max(0, stitched.Width - rightSide);
-            using var brush = new SD.SolidBrush(DominantColor(reference,
-                new SD.Rectangle(x, 0, stitched.Width - x, reference.Height)));
-            graphics.FillRectangle(brush, x, firstViewportHeight, stitched.Width - x,
-                stitched.Height - firstViewportHeight);
+            int x = Math.Max(0, stitched.Width - rightSidebar.Width);
+            using var brush = new SD.SolidBrush(DominantColor(rightSidebar));
+            graphics.FillRectangle(brush, x, fillStart, rightSidebar.Width,
+                stitched.Height - fillStart);
+            DrawSidebarOnce(graphics, rightSidebar, x, stitched.Height);
         }
     }
 
-    private static SD.Color DominantColor(SD.Bitmap bitmap, SD.Rectangle area)
+    private static void DrawSidebarOnce(SD.Graphics graphics, SD.Bitmap sidebar, int x, int canvasHeight)
+    {
+        int height = Math.Min(sidebar.Height, canvasHeight);
+        graphics.DrawImage(sidebar,
+            new SD.Rectangle(x, 0, sidebar.Width, height),
+            new SD.Rectangle(0, 0, sidebar.Width, height),
+            SD.GraphicsUnit.Pixel);
+    }
+
+    private static SD.Color DominantColor(SD.Bitmap bitmap)
     {
         var histogram = new Dictionary<int, int>();
-        for (int y = area.Top; y < area.Bottom; y += 4)
-        for (int x = area.Left; x < area.Right; x += 4)
+        for (int y = 0; y < bitmap.Height; y += 4)
+        for (int x = 0; x < bitmap.Width; x += 4)
         {
             SD.Color color = bitmap.GetPixel(x, y);
             int key = ((color.R >> 3) << 10) | ((color.G >> 3) << 5) | (color.B >> 3);

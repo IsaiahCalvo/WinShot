@@ -134,7 +134,10 @@ public static class ScrollingCaptureService
         private readonly System.Diagnostics.Stopwatch _previewClock = System.Diagnostics.Stopwatch.StartNew();
 
         private FrameSignature? _prevSig;
+        private FrameSignature? _prevMatchSig;
         private SD.Bitmap? _lastFrame;      // most recent frame, kept for the final footer strip
+        private SD.Bitmap? _firstLeftSidebar;
+        private SD.Bitmap? _firstRightSidebar;
 
         private enum Track { Tracking, Reviewing, Lost }
         private Track _state = Track.Tracking;
@@ -265,6 +268,7 @@ public static class ScrollingCaptureService
             if (discard)
             {
                 _lastFrame?.Dispose();
+                DisposeSidebarSnapshots();
                 _horizontal.Dispose();
                 _stitch.Dispose();
                 _strip?.Dispose();
@@ -277,17 +281,19 @@ public static class ScrollingCaptureService
             if (_direction == ScrollDirection.Horizontal)
             {
                 _lastFrame?.Dispose();
+                DisposeSidebarSnapshots();
                 _stitch.Dispose();
                 return _horizontal.Take();
             }
             _horizontal.Dispose();
             var vertical = _stitch.Take();
-            if (vertical is not null && _lastFrame is not null)
+            if (vertical is not null)
             {
-                StationaryViewportCompositor.RemoveRepeatedSidebars(vertical, _lastFrame,
-                    _region.Height, _runningVerticalLeftBand, _runningVerticalRightBand);
+                StationaryViewportCompositor.RemoveRepeatedSidebars(vertical,
+                    _firstLeftSidebar, _firstRightSidebar, _region.Height);
             }
             _lastFrame?.Dispose();
+            DisposeSidebarSnapshots();
             return vertical;
         }
 
@@ -321,6 +327,7 @@ public static class ScrollingCaptureService
         {
             _framesSeen++;
             var sig = FrameSignature.Build(frame);
+            FrameSignature matchSig = sig;
             bool auto = _scrolledBeforeFrame;
 
             if (_prevSig is null)
@@ -405,8 +412,12 @@ public static class ScrollingCaptureService
                 int candidateHeader = Math.Min(Math.Max(_runningHeader, refined.Leading), sig.Height / 3);
                 int candidateFooter = Math.Min(Math.Max(_runningFooter,
                     Math.Max(refined.Trailing, refinedRegions.BottomOverlay)), sig.Height / 3);
-                int candidateLeft = Math.Max(_runningVerticalLeftBand, refinedRegions.LeftSide);
-                int candidateRight = Math.Max(_runningVerticalRightBand, refinedRegions.RightSide);
+                int candidateLeft = _runningVerticalLeftBand > 0
+                    ? _runningVerticalLeftBand
+                    : _stitchedFrames == 1 ? refinedRegions.LeftSide : 0;
+                int candidateRight = _runningVerticalRightBand > 0
+                    ? _runningVerticalRightBand
+                    : _stitchedFrames == 1 ? refinedRegions.RightSide : 0;
                 FrameSignature refinedPrevious = _prevSig;
                 FrameSignature refinedCurrent = sig;
                 if (candidateLeft > FrameSignature.SideMargin(sig.Width) ||
@@ -422,9 +433,27 @@ public static class ScrollingCaptureService
                     matchedOffset = verifiedOffset;
                     header = candidateHeader;
                     footer = candidateFooter;
+                    if (_stitchedFrames == 1 &&
+                        (_runningVerticalLeftBand != candidateLeft ||
+                         _runningVerticalRightBand != candidateRight))
+                    {
+                        _canvas.Retract(_canvas.Height);
+                        _canvas.Append(refinedPrevious, 0, refinedPrevious.Height);
+                        _prevMatchSig = refinedPrevious;
+                        CaptureSidebarSnapshots(_lastFrame, candidateLeft, candidateRight);
+                    }
                     _runningVerticalLeftBand = candidateLeft;
                     _runningVerticalRightBand = candidateRight;
+                    matchSig = refinedCurrent;
                 }
+            }
+            if (matchSig == sig &&
+                (_runningVerticalLeftBand > FrameSignature.SideMargin(sig.Width) ||
+                 _runningVerticalRightBand > FrameSignature.SideMargin(sig.Width)) &&
+                _lastFrame is not null)
+            {
+                matchSig = FrameSignature.Build(frame,
+                    _runningVerticalLeftBand, _runningVerticalRightBand);
             }
             _runningHeader = header;
 
@@ -452,8 +481,8 @@ public static class ScrollingCaptureService
                     // Locate against the canvas (frame 1) rather than blindly appending: if
                     // frames scrolled past without aligning while direction was unknown, a
                     // prev-frame append here would stitch across a content gap.
-                    RelockAgainstCanvas(sig, frame, header, footer);
-                    FinishVerticalFrame(frame, sig);
+                    RelockAgainstCanvas(matchSig, frame, header, footer);
+                    FinishVerticalFrame(frame, sig, matchSig);
                     return _stitch.Height < _verticalLimit || EndAtCap();
                 }
                 FixedBands horizontalBands = FixedRegionDetector.DetectHorizontal(_lastFrame, frame);
@@ -466,7 +495,7 @@ public static class ScrollingCaptureService
                     _stitch.Dispose();
                     return ProcessHorizontal(frame);
                 }
-                FinishVerticalFrame(frame, sig);
+                FinishVerticalFrame(frame, sig, matchSig);
                 return true; // keep watching; direction still unknown
             }
 
@@ -476,31 +505,31 @@ public static class ScrollingCaptureService
                     int d = matchedOffset;
                     if (d > 0)
                     {
-                        AppendVertical(frame, sig, d, header, footer);
+                        AppendVertical(frame, matchSig, d, header, footer);
                         if (auto)
                             Recalibrate(d);
                     }
                     else if (auto)
                     {
-                        if (!HandleAutoMiss(frame, sig, header, footer))
+                        if (!HandleAutoMiss(frame, matchSig, header, footer))
                             return false;
                     }
                     else
                     {
-                        RelockAgainstCanvas(sig, frame, header, footer);
+                        RelockAgainstCanvas(matchSig, frame, header, footer);
                     }
                     break;
 
                 case Track.Reviewing:
-                    ProcessReviewing(frame, sig, header, footer, auto);
+                    ProcessReviewing(frame, matchSig, header, footer, auto);
                     break;
 
                 case Track.Lost:
-                    RelockAgainstCanvas(sig, frame, header, footer);
+                    RelockAgainstCanvas(matchSig, frame, header, footer);
                     break;
             }
 
-            FinishVerticalFrame(frame, sig);
+            FinishVerticalFrame(frame, sig, matchSig);
             if (_stitch.Height >= _verticalLimit)
                 return EndAtCap();
             return true;
@@ -513,17 +542,41 @@ public static class ScrollingCaptureService
             _strip?.Append(frame, 0, frame.Height);
             _stitchedFrames = 1;
             _prevSig = sig;
+            _prevMatchSig = sig;
             _lastFrame = frame; // owned; disposed when replaced
             PushPreview(force: true);
             _status($"1 frame — {_stitch.Height}px");
         }
 
-        private void FinishVerticalFrame(SD.Bitmap frame, FrameSignature sig)
+        private void FinishVerticalFrame(SD.Bitmap frame, FrameSignature sig, FrameSignature matchSig)
         {
             _prevSig = sig;
+            _prevMatchSig = matchSig;
             _lastFrame?.Dispose();
             _lastFrame = frame;
             PushPreview(force: false);
+        }
+
+        private void CaptureSidebarSnapshots(SD.Bitmap firstFrame, int leftSide, int rightSide)
+        {
+            _firstLeftSidebar?.Dispose();
+            _firstRightSidebar?.Dispose();
+            _firstLeftSidebar = leftSide > 0
+                ? firstFrame.Clone(new SD.Rectangle(0, 0, leftSide, firstFrame.Height),
+                    System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+                : null;
+            _firstRightSidebar = rightSide > 0
+                ? firstFrame.Clone(new SD.Rectangle(firstFrame.Width - rightSide, 0,
+                    rightSide, firstFrame.Height), System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+                : null;
+        }
+
+        private void DisposeSidebarSnapshots()
+        {
+            _firstLeftSidebar?.Dispose();
+            _firstRightSidebar?.Dispose();
+            _firstLeftSidebar = null;
+            _firstRightSidebar = null;
         }
 
         private void AppendVertical(SD.Bitmap frame, FrameSignature sig, int offset, int header, int footer)
@@ -621,7 +674,7 @@ public static class ScrollingCaptureService
         /// </summary>
         private void ProcessReviewing(SD.Bitmap frame, FrameSignature sig, int header, int footer, bool auto)
         {
-            int d = _reviewPos >= 0 ? ScrollMatcher.FindOffset(_prevSig!, sig, header, footer) : 0;
+            int d = _reviewPos >= 0 ? ScrollMatcher.FindOffset(_prevMatchSig!, sig, header, footer) : 0;
             if (d > 0)
             {
                 _reviewPos += d;
@@ -663,7 +716,7 @@ public static class ScrollingCaptureService
 
         private bool HandleAutoMiss(SD.Bitmap frame, FrameSignature sig, int header, int footer)
         {
-            if ((ScrollMatcher.IsLowInformation(sig) || ScrollMatcher.IsLowInformation(_prevSig!)) && _pxPerNotch > 0)
+            if ((ScrollMatcher.IsLowInformation(sig) || ScrollMatcher.IsLowInformation(_prevMatchSig!)) && _pxPerNotch > 0)
             {
                 // A blank stretch (whitespace page section): pixels can't measure the motion,
                 // but we injected a known number of wheel notches and know px-per-notch from

@@ -18,14 +18,16 @@ public class StationaryViewportDetectorTests
     [Fact]
     public void DetectsFixedRightPanelAndInteriorBottomArrow()
     {
-        using var previous = MakeFrame(0);
-        using var current = MakeFrame(73);
+        foreach (int offset in new[] { 51, 59, 73, 87 })
+        {
+            using var previous = MakeFrame(0);
+            using var current = MakeFrame(offset);
+            StationaryViewportRegions regions = StationaryViewportDetector.Detect(previous, current, offset);
 
-        StationaryViewportRegions regions = StationaryViewportDetector.Detect(previous, current, 73);
-
-        Assert.Equal(0, regions.LeftSide);
-        Assert.InRange(regions.RightSide, Sidebar - 24, Sidebar + 24);
-        Assert.InRange(regions.BottomOverlay, 20, 64);
+            Assert.Equal(0, regions.LeftSide);
+            Assert.InRange(regions.RightSide, Sidebar - 24, Sidebar + 24);
+            Assert.InRange(regions.BottomOverlay, 20, 64);
+        }
     }
 
     [Fact]
@@ -42,6 +44,39 @@ public class StationaryViewportDetectorTests
     }
 
     [Fact]
+    public void MovingDocumentEdgesAreNotMisclassifiedAsSidebars()
+    {
+        foreach (int offset in new[] { 37, 51, 73, 111 })
+        {
+            using var previous = MakeFrame(0, sidebar: 0);
+            using var current = MakeFrame(offset, sidebar: 0);
+            StationaryViewportRegions regions = StationaryViewportDetector.Detect(previous, current, offset);
+            Assert.Equal(0, regions.LeftSide);
+            Assert.Equal(0, regions.RightSide);
+        }
+    }
+
+    [Fact]
+    public void CroppedCanvasProfileRelocksAfterAFrameJump()
+    {
+        const int footer = 36;
+        using var first = MakeFrame(0);
+        using var second = MakeFrame(73);
+        using var jumpedBack = MakeFrame(20);
+        FrameSignature a = FrameSignature.Build(first, 0, Sidebar);
+        FrameSignature b = FrameSignature.Build(second, 0, Sidebar);
+        FrameSignature c = FrameSignature.Build(jumpedBack, 0, Sidebar);
+        var canvas = new CanvasProfile();
+        canvas.Append(a, 0, Height - footer);
+        canvas.Append(b, Height - footer - 73, 73);
+
+        CanvasLock? result = ScrollMatcher.LocateInCanvas(canvas, c, int.MaxValue, 0, footer);
+
+        Assert.NotNull(result);
+        Assert.Equal(20, result.Value.Position);
+    }
+
+    [Fact]
     public void CompositorKeepsSidebarOnceAndRemovesRepeatedCopiesBelowFirstViewport()
     {
         using var first = MakeFrame(0);
@@ -51,11 +86,15 @@ public class StationaryViewportDetectorTests
             graphics.DrawImageUnscaled(first, 0, 0);
             graphics.DrawImageUnscaled(first, 0, 220);
         }
+        using var rightSidebar = first.Clone(
+            new SD.Rectangle(Width - Sidebar, 0, Sidebar, Height),
+            PixelFormat.Format32bppArgb);
 
-        StationaryViewportCompositor.RemoveRepeatedSidebars(stitched, first, Height, 0, Sidebar);
+        StationaryViewportCompositor.RemoveRepeatedSidebars(stitched, null, rightSidebar, Height);
 
         Assert.True(CountMarkerPixels(stitched, 0, Height) > 20);
         Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+        AssertSidebarEquals(first, stitched);
     }
 
     [Fact]
@@ -71,6 +110,8 @@ public class StationaryViewportDetectorTests
 
         Assert.True(CountMarkerPixels(stitched, 0, Height) > 20);
         Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+        using (var first = MakeFrame(positions[0]))
+            AssertSidebarEquals(first, stitched);
         int firstArrow = FindFirstRedRow(stitched);
         Assert.InRange(firstArrow, stitched.Height - 48, stitched.Height - 1);
 
@@ -107,6 +148,21 @@ public class StationaryViewportDetectorTests
     }
 
     [Fact]
+    public async Task FixedSidebarRecoversAfterMissReverseAndRelock()
+    {
+        int[] positions = { 0, 73, 800, 20, 73, 151, 233, 320 };
+        using var stitched = await RunCapture(positions);
+        using var first = MakeFrame(0);
+
+        Assert.Equal(320 + Height, stitched.Height);
+        AssertSidebarEquals(first, stitched);
+        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+        for (int y = 0; y < stitched.Height - 48; y += 37)
+            Assert.Equal(DocumentColor(101, y).ToArgb(), stitched.GetPixel(101, y).ToArgb());
+        Assert.InRange(FindFirstRedRow(stitched), stitched.Height - 48, stitched.Height - 1);
+    }
+
+    [Fact]
     public void FullHdAnalysisStaysInteractive()
     {
         using var previous = MakeFrame(0, 1725, 712, 390);
@@ -131,6 +187,13 @@ public class StationaryViewportDetectorTests
                 count++;
         }
         return count;
+    }
+
+    private static void AssertSidebarEquals(SD.Bitmap expectedFrame, SD.Bitmap actual)
+    {
+        for (int y = 0; y < Height; y++)
+        for (int x = Width - Sidebar; x < Width; x++)
+            Assert.Equal(expectedFrame.GetPixel(x, y).ToArgb(), actual.GetPixel(x, y).ToArgb());
     }
 
     private static int FindFirstRedRow(SD.Bitmap bitmap)
