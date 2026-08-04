@@ -353,21 +353,30 @@ public static class ScrollingCaptureService
             }
             _identicalStreak = 0;
 
-            // Fixed edge bands are inferred from mostly-stationary pixels. Keep the legacy
-            // exact-footer result as a conservative fallback for simple solid native chrome.
-            FixedBands fixedBands = _lastFrame is null ? default :
-                FixedRegionDetector.DetectVertical(_lastFrame, frame);
-            int legacyFooter = ImageStitcher.DetectConstantBottomBandFromHashes(_prevSig.RowHash, sig.RowHash);
-            if (legacyFooter > 0 && !BandHasContent(sig, legacyFooter))
-                legacyFooter = 0;
-            int header = Math.Min(Math.Max(_runningHeader, fixedBands.Leading), sig.Height / 3);
-            int footer = Math.Min(Math.Max(_runningFooter, Math.Max(fixedBands.Trailing, legacyFooter)), sig.Height / 3);
-            int matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig, header, footer);
+            // Fixed edge bands are inferred from mostly-stationary pixels. Same-position
+            // results are provisional only; running bands grow only after shifted comparison.
+            // The legacy exact footer is likewise only a provisional alignment hint.
+            int matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig, _runningHeader, _runningFooter);
+            if (matchedOffset == 0 && _lastFrame is not null)
+            {
+                FixedBands provisional = FixedRegionDetector.DetectVertical(_lastFrame, frame);
+                int legacyFooter = ImageStitcher.DetectConstantBottomBandFromHashes(
+                    _prevSig.RowHash, sig.RowHash);
+                if (legacyFooter > 0 && !BandHasContent(sig, legacyFooter))
+                    legacyFooter = 0;
+                int provisionalHeader = Math.Min(Math.Max(_runningHeader, provisional.Leading), sig.Height / 3);
+                int provisionalFooter = Math.Min(Math.Max(_runningFooter,
+                    Math.Max(provisional.Trailing, legacyFooter)), sig.Height / 3);
+                matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig,
+                    provisionalHeader, provisionalFooter);
+            }
+            int header = _runningHeader;
+            int footer = _runningFooter;
             if (matchedOffset > 0 && _lastFrame is not null)
             {
                 FixedBands refined = FixedRegionDetector.DetectVertical(_lastFrame, frame, matchedOffset);
-                header = Math.Min(Math.Max(header, refined.Leading), sig.Height / 3);
-                footer = Math.Min(Math.Max(footer, refined.Trailing), sig.Height / 3);
+                header = Math.Min(Math.Max(_runningHeader, refined.Leading), sig.Height / 3);
+                footer = Math.Min(Math.Max(_runningFooter, refined.Trailing), sig.Height / 3);
                 matchedOffset = ScrollMatcher.FindOffset(_prevSig, sig, header, footer);
             }
             _runningHeader = header;
@@ -636,16 +645,17 @@ public static class ScrollingCaptureService
 
         private void Recalibrate(int measuredOffset)
         {
-            double perNotch = measuredOffset / (double)Math.Max(1, _notches);
-            _pxPerNotch = _pxPerNotch <= 0 ? perNotch : (_pxPerNotch + perNotch) / 2;
+            ScrollCalibrationResult calibration = ScrollCalibration.Update(_pxPerNotch,
+                measuredOffset, _notches, _region.Height, _runningHeader, _runningFooter);
+            _pxPerNotch = calibration.PixelsPerNotch;
             if (_method == ScrollMethod.PageKey)
             {
-                _notches = 1; // one PageDown per step; the page itself decides the distance
+                // One PageDown is the smallest key step; stop if its measured movement cannot
+                // preserve the matcher's required overlap.
+                _notches = calibration.CanPreserveOverlap ? 1 : 0;
                 return;
             }
-            // Aim each step at ~60% of the usable frame height: fast, with wide overlap.
-            int usable = Math.Max(64, _region.Height - _runningFooter);
-            _notches = Math.Clamp((int)Math.Round(0.6 * usable / Math.Max(1, _pxPerNotch)), 1, 8);
+            _notches = calibration.Notches;
         }
 
         private bool EndAtCap()
@@ -718,15 +728,23 @@ public static class ScrollingCaptureService
             }
             _identicalStreak = 0;
 
-            FixedBands bands = FixedRegionDetector.DetectHorizontal(_lastFrame!, frame);
-            int left = Math.Min(Math.Max(_runningLeftBand, bands.Leading), frame.Width / 3);
-            int right = Math.Min(Math.Max(_runningRightBand, bands.Trailing), frame.Width / 3);
-            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame, left, right);
+            int offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame,
+                _runningLeftBand, _runningRightBand);
+            if (offset == 0)
+            {
+                FixedBands provisional = FixedRegionDetector.DetectHorizontal(_lastFrame!, frame);
+                int provisionalLeft = Math.Min(Math.Max(_runningLeftBand, provisional.Leading), frame.Width / 3);
+                int provisionalRight = Math.Min(Math.Max(_runningRightBand, provisional.Trailing), frame.Width / 3);
+                offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame,
+                    provisionalLeft, provisionalRight);
+            }
+            int left = _runningLeftBand;
+            int right = _runningRightBand;
             if (offset > 0)
             {
                 FixedBands refined = FixedRegionDetector.DetectHorizontal(_lastFrame!, frame, offset);
-                left = Math.Min(Math.Max(left, refined.Leading), frame.Width / 3);
-                right = Math.Min(Math.Max(right, refined.Trailing), frame.Width / 3);
+                left = Math.Min(Math.Max(_runningLeftBand, refined.Leading), frame.Width / 3);
+                right = Math.Min(Math.Max(_runningRightBand, refined.Trailing), frame.Width / 3);
                 offset = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame, left, right);
             }
             _runningLeftBand = left;
@@ -864,9 +882,10 @@ public static class ScrollingCaptureService
 
         private void RecalibrateHorizontal(int measuredOffset)
         {
-            double perNotch = measuredOffset / (double)Math.Max(1, _notches);
-            _pxPerNotch = _pxPerNotch <= 0 ? perNotch : (_pxPerNotch + perNotch) / 2;
-            _notches = Math.Clamp((int)Math.Round(0.6 * _region.Width / Math.Max(1, _pxPerNotch)), 1, 8);
+            ScrollCalibrationResult calibration = ScrollCalibration.Update(_pxPerNotch,
+                measuredOffset, _notches, _region.Width, _runningLeftBand, _runningRightBand);
+            _pxPerNotch = calibration.PixelsPerNotch;
+            _notches = calibration.Notches;
         }
 
         private bool Fail(string message)
@@ -892,6 +911,12 @@ public static class ScrollingCaptureService
             {
                 if (_state == Track.Tracking)
                 {
+                    if (_notches <= 0)
+                    {
+                        Log.Info("Scroll: auto-scroll stopped because one notch would leave too little overlap");
+                        _status("Stopped — fixed UI leaves too little safe overlap for auto-scroll; continue manually");
+                        return false;
+                    }
                     SendScrollStep(up: false);
                 }
                 else

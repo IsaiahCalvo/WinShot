@@ -15,11 +15,22 @@ WinShot now builds a small change mask for every row (or column for horizontal c
 - Two to eight short changing lines are tolerated inside a band, so carets and spinners do
   not split it. At least two visually structured lines are required, and a band is capped at
   one third of the viewport to avoid consuming ordinary blank content.
+- Same-position bands are provisional only. They may help find an offset, but the running
+  band can grow only after at least two structured lines pass the shifted-advantage test.
+  Repetitive or blank edge content therefore cannot permanently crop the stitch.
 
 In plain English: document pixels match after moving them by the scroll distance; fixed UI
 matches without moving. That difference identifies the boundary. Fixed leading chrome is
 kept from the first frame, fixed trailing chrome is removed from intermediate slices and
 copied once from the final frame. The preview retracts the same pixels as the final stitch.
+
+Auto-scroll calibration also uses only the moving body:
+
+- `moving length = viewport - confirmed leading band - confirmed trailing band`
+- `maximum step = moving length - 24px required overlap`
+- The normal target is 60% of the moving length, capped at that maximum.
+- If even one measured wheel/PageDown step cannot preserve 24px of overlap, auto capture
+  stops safely instead of issuing an input that could create a gap.
 
 The overlap matcher remains deliberately lightweight:
 
@@ -33,6 +44,23 @@ The overlap matcher remains deliberately lightweight:
    verified boundary instead.
 
 No dependency, network path, upload, OCR, or persistent background work was added.
+
+## Measured detector cost
+
+`FixedRegionDetectorPerformanceTests.FullHdDetector_RemainsWithinTimingAndAllocationBudget`
+measures 12 warmed moving-frame passes per direction on synthetic 1920x1080 frames, excluding
+fixture creation. Steady frames use one refined scan; the discovery fallback uses a provisional
+scan plus the refined scan. Dell result on 2026-08-04:
+
+| Direction | Mean | Median | Maximum | Allocated/frame |
+|---|---:|---:|---:|---:|
+| Vertical steady frame | 10.106 ms | 9.862 ms | 12.248 ms | 65,568 bytes |
+| Horizontal steady frame | 11.885 ms | 11.694 ms | 13.958 ms | 98,328 bytes |
+| Vertical discovery frame | 20.690 ms | 20.599 ms | 24.965 ms | 131,136 bytes |
+| Horizontal discovery frame | 19.821 ms | 19.948 ms | 21.637 ms | 196,656 bytes |
+
+The regression budgets are 75 ms mean, 150 ms maximum, and 512 KiB per call. The JSON
+measurement is emitted by the opt-in harness via `WINSHOT_SCROLL_BENCHMARK_PATH`.
 
 ## Research used
 
@@ -69,6 +97,8 @@ No dependency, network path, upload, OCR, or persistent background work was adde
 | Animated video filling a fixed band | Partially handled | Small changing areas are tolerated; a mostly changing band is intentionally not classified as fixed. |
 | Repeated text, grids, or patterns | Safe refusal | Existing distinctive-run/unique-peak tests reject ambiguous offsets instead of guessing. |
 | Variable scroll distance | Handled | Scripted service tests use uneven 19-52 px steps and existing velocity tests cover 1,200-5,000 px/s. |
+| Auto-scroll with header + footer | Handled | Recalibration subtracts both bands and proves the planned step retains at least 24px of moving-body overlap. |
+| Auto-scroll with fixed left + right | Handled | Recalibration subtracts both bands; an unsafe minimum step produces zero notches and stops before input. |
 | Overscroll, bounce, reverse, then resume | Handled | Existing reverse/review and fast-flick recovery tests assert no duplicated rows or columns. |
 | Moving scrollbars | Handled | Side-trimmed matching plus `Detector_FindsAnimatedHeaderAndFooter_WithoutTreatingScrollbarAsChrome`. |
 | Fractional-DPI / browser re-rasterization | Handled within tolerance | `FractionalDpiStyleRerasterization_StillFindsTheOffset`; a frame-size change itself is unsupported. |
@@ -77,6 +107,8 @@ No dependency, network path, upload, OCR, or persistent background work was adde
 | Lazy-loaded content only in newly revealed rows | Handled | `LazyLoadedNewRows_DoNotDisturbTheExistingOverlap`. |
 | Reflow/change across the overlap | Safe refusal / partial | `ReflowAcrossTheOverlap_IsRejectedInsteadOfInventingASeam`; user must slow down or scroll back to re-lock. |
 | End-of-page no motion | Handled | Identical frames add nothing; auto mode keeps its existing multi-method end check. |
+| No fixed band | Handled | Refined detector returns 0/0; no running-band growth. |
+| Repetitive or blank viewport edge | Safe refusal | Shift-advantage and information gates reject provisional coincidences. |
 | Blank/whitespace stretch | Handled in calibrated auto mode; partial manual | Auto uses measured pixels-per-notch. Manual mode cannot infer motion from identical blank pixels. |
 | Arbitrary floating widget in the middle of the viewport | Unsupported removal | It can be ignored for alignment when other strips agree, but correct one-time 2-D compositing needs region segmentation or app/DOM metadata. |
 | Capture region changes size or DPI mid-run | Unsupported | Frames with different dimensions are rejected; restarting capture is safest. |

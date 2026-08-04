@@ -63,6 +63,7 @@ internal static class FixedRegionDetector
         }
 
         var fixedLine = new bool[axisLength];
+        var confirmedLine = new bool[axisLength];
         var structured = new bool[axisLength];
         var mean = new double[axisLength];
         for (int i = 0; i < axisLength; i++)
@@ -71,8 +72,10 @@ internal static class FixedRegionDetector
                 continue;
             double sameRatio = same[i] / (double)samples[i];
             double shiftedRatio = shiftedSamples[i] == 0 ? -1 : shifted[i] / (double)shiftedSamples[i];
+            confirmedLine[i] = scrollOffset > 0 && shiftedRatio >= 0 &&
+                sameRatio >= StableRatio && sameRatio - shiftedRatio >= ShiftAdvantage;
             fixedLine[i] = sameRatio >= StableRatio &&
-                (scrollOffset <= 0 || shiftedRatio < 0 || sameRatio - shiftedRatio >= ShiftAdvantage);
+                (scrollOffset <= 0 || shiftedRatio < 0 || confirmedLine[i]);
             mean[i] = lumaSum[i] / (double)samples[i];
             structured[i] = edgeSamples[i] >= Math.Max(1, samples[i] / 100);
         }
@@ -88,8 +91,11 @@ internal static class FixedRegionDetector
         }
 
         int maximum = axisLength / 3;
-        int leading = FindEdgeBand(fixedLine, structured, maximum, fromLeading: true);
-        int trailing = FindEdgeBand(fixedLine, structured, maximum, fromLeading: false);
+        bool requireConfirmation = scrollOffset > 0;
+        int leading = FindEdgeBand(fixedLine, confirmedLine, structured, maximum,
+            fromLeading: true, requireConfirmation);
+        int trailing = FindEdgeBand(fixedLine, confirmedLine, structured, maximum,
+            fromLeading: false, requireConfirmation);
         if (leading + trailing > axisLength - 24)
             return default; // too little scrollable content remains; classification is ambiguous
         return new FixedBands(leading, trailing);
@@ -158,11 +164,13 @@ internal static class FixedRegionDetector
         }
     }
 
-    private static int FindEdgeBand(bool[] fixedLine, bool[] structured, int maximum, bool fromLeading)
+    private static int FindEdgeBand(bool[] fixedLine, bool[] confirmedLine, bool[] structured,
+        int maximum, bool fromLeading, bool requireConfirmation)
     {
         int lastAccepted = 0;
         int unstableRun = 0;
         int structuredLines = 0;
+        int confirmedStructuredLines = 0;
         int allowedGap = Math.Clamp(maximum / 20, 2, 8);
         for (int distance = 0; distance < maximum; distance++)
         {
@@ -171,14 +179,19 @@ internal static class FixedRegionDetector
             {
                 unstableRun = 0;
                 lastAccepted = distance + 1;
-                if (structured[i]) structuredLines++;
+                if (structured[i])
+                {
+                    structuredLines++;
+                    if (confirmedLine[i]) confirmedStructuredLines++;
+                }
             }
             else if (++unstableRun > allowedGap)
             {
                 break;
             }
         }
-        return lastAccepted >= MinimumBand && structuredLines >= 2 ? lastAccepted : 0;
+        bool hasEvidence = requireConfirmation ? confirmedStructuredLines >= 2 : structuredLines >= 2;
+        return lastAccepted >= MinimumBand && hasEvidence ? lastAccepted : 0;
     }
 
     private static bool Similar(byte[] a, byte[] b, int i) => Similar(a, b, i, i);

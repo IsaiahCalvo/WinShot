@@ -52,6 +52,16 @@ public class ScrollingFixedRegionTests
     {
         const int leftBand = 26, rightBand = 48;
         int[] positions = { 0, 21, 49, 82, 121, 165 };
+        using (var first = MakeHorizontalFrame(positions[0], leftBand, rightBand, 0))
+        using (var second = MakeHorizontalFrame(positions[1], leftBand, rightBand, 1))
+        {
+            FixedBands provisional = FixedRegionDetector.DetectHorizontal(first, second);
+            int provisionalOffset = ImageStitcher.FindScrollOffsetHorizontal(first, second,
+                provisional.Leading, provisional.Trailing);
+            FixedBands refined = FixedRegionDetector.DetectHorizontal(first, second, provisionalOffset);
+            Assert.True(provisionalOffset > 0 && refined.Leading > 0 && refined.Trailing > 0,
+                $"provisional={provisional} offset={provisionalOffset} refined={refined}");
+        }
         using var stitched = RunHorizontal(positions, leftBand, rightBand);
 
         Assert.NotNull(stitched);
@@ -183,7 +193,7 @@ public class ScrollingFixedRegionTests
 
     private static SD.Color DocumentPixel(int x, int documentRow)
     {
-        int h = Mix(x / 9, documentRow, 71);
+        int h = Mix(x, documentRow, 71);
         return SD.Color.FromArgb(255, 35 + (h & 0x7F), 45 + ((h >> 8) & 0x7F), 55 + ((h >> 16) & 0x7F));
     }
 
