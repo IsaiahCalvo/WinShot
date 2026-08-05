@@ -159,10 +159,6 @@ public static class ScrollingCaptureService
         private int _footerGrowStreak;
         private int _footerShrinkStreak;
         private int _footerShrinkMax;
-        private int _leftBandGrowCandidate;
-        private int _leftBandGrowStreak;
-        private int _rightBandGrowCandidate;
-        private int _rightBandGrowStreak;
         private int _runningVerticalLeftBand;
         private int _runningVerticalRightBand;
         private int _verticalLeftMatchInset;
@@ -432,26 +428,28 @@ public static class ScrollingCaptureService
                 // only the frame-1 case can also rebuild the canvas profile.
                 bool canLockSidebars = _stitchedFrames <= SidebarLockMaxFrames &&
                     _runningVerticalLeftBand == 0 && _runningVerticalRightBand == 0;
-                // A locked band may be too narrow when the first pair's offset happened to
-                // align the sidebar's repeating items (lists repeat vertically!), costing
-                // shift-mismatch evidence. Later pairs re-measure; grow on two-pair agreement.
+                // Bands are immutable once locked. (A "grow on later agreement" variant
+                // ratcheted to 60% of the window live: while the user pauses, consecutive
+                // near-identical pairs measure everything as stationary — do NOT retry it.)
                 int candidateLeft = _runningVerticalLeftBand > 0
-                    ? GrownBand(_runningVerticalLeftBand, refinedRegions.LeftSide,
-                        ref _leftBandGrowCandidate, ref _leftBandGrowStreak)
+                    ? _runningVerticalLeftBand
                     : canLockSidebars ? refinedRegions.LeftSide : 0;
                 int candidateRight = _runningVerticalRightBand > 0
-                    ? GrownBand(_runningVerticalRightBand, refinedRegions.RightSide,
-                        ref _rightBandGrowCandidate, ref _rightBandGrowStreak)
+                    ? _runningVerticalRightBand
                     : canLockSidebars ? refinedRegions.RightSide : 0;
+                // Sanity: chrome flanking the document never spans half the window. A pair
+                // that measures that wide is a scroll pause misread; keep matching insets
+                // (excluding columns from hashing is harmless) but never composite with it.
+                if (candidateLeft + candidateRight > sig.Width * 9 / 20)
+                {
+                    candidateLeft = _runningVerticalLeftBand;
+                    candidateRight = _runningVerticalRightBand;
+                }
                 int candidateLeftMatch = _verticalLeftMatchInset > 0
-                    ? candidateLeft > _runningVerticalLeftBand
-                        ? Math.Max(_verticalLeftMatchInset, refinedRegions.LeftMatchInset)
-                        : _verticalLeftMatchInset
+                    ? _verticalLeftMatchInset
                     : canLockSidebars ? refinedRegions.LeftMatchInset : 0;
                 int candidateRightMatch = _verticalRightMatchInset > 0
-                    ? candidateRight > _runningVerticalRightBand
-                        ? Math.Max(_verticalRightMatchInset, refinedRegions.RightMatchInset)
-                        : _verticalRightMatchInset
+                    ? _verticalRightMatchInset
                     : canLockSidebars ? refinedRegions.RightMatchInset : 0;
                 FrameSignature refinedPrevious = _prevSig;
                 FrameSignature refinedCurrent = sig;
@@ -642,25 +640,6 @@ public static class ScrollingCaptureService
         /// on two consecutive differing pairs; a run of clearly-lower detections shrinks the
         /// band back (shrinking just widens future matching — no retraction needed).
         /// </summary>
-        /// <summary>Widens a locked sidebar band only when the same wider measurement (±8px)
-        /// arrives on two consecutive verified pairs — a single spike must not eat content.</summary>
-        private static int GrownBand(int current, int detected, ref int candidate, ref int streak)
-        {
-            if (detected <= current)
-            {
-                streak = 0;
-                return current;
-            }
-            if (streak >= 1 && Math.Abs(detected - candidate) <= 8)
-            {
-                streak = 0;
-                return detected;
-            }
-            candidate = detected;
-            streak = 1;
-            return current;
-        }
-
         private int StabilizedFooter(int detected, int cap)
         {
             detected = Math.Min(detected, cap);

@@ -150,12 +150,13 @@ internal static class StationaryViewportDetector
             lastStructured < 0 || lastStructured >= evidence.Length)
             return default;
 
-        // Two blocks of padding past the structured boundary cover the panel border and
-        // detection landing a block short on some frame pairs; any stable blank columns
-        // beyond that repeat invisibly (background over background).
+        // Three blocks of padding past the structured boundary cover the panel border and
+        // detection landing a block or two short when a scroll offset happens to align the
+        // sidebar's repeating items; any stable blank columns beyond that repeat invisibly
+        // (background over background).
         int exact = fromLeft
-            ? Math.Min(lastStructured + 3, lastStable + 1) * SideBlockWidth
-            : width - Math.Max(lastStructured - 2, lastStable) * SideBlockWidth;
+            ? Math.Min(lastStructured + 4, lastStable + 1) * SideBlockWidth
+            : width - Math.Max(lastStructured - 3, lastStable) * SideBlockWidth;
         exact = Math.Min(exact, (int)(width * 0.45));
         int stableEdge = fromLeft
             ? (lastStable + 1) * SideBlockWidth
