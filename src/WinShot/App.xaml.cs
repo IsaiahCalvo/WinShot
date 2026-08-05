@@ -1214,7 +1214,19 @@ public partial class App : Application
 
             await WaitForOverlayDismissAsync();
             region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
-            var stitched = await ScrollingStatusWindow.Run(region, direction);
+
+            // Pane scoping: a selection spanning several panes (chat + sidebar) breaks the
+            // stitcher, so before capturing, ask the OS which pane scrolls (Win32/UIA hint)
+            // and verify with a one-notch wheel probe — the capture then covers only the
+            // pane that actually moves. Any failure silently keeps the user's rect.
+            SD.Rectangle refined = await Task.Run(() =>
+            {
+                var center = new SD.Point(region.X + region.Width / 2, region.Y + region.Height / 2);
+                PaneInfo? hint = ScrollPaneDetector.FromPoint(center, TimeSpan.FromMilliseconds(700));
+                return ScrollProbe.Refine(region, hint);
+            });
+
+            var stitched = await ScrollingStatusWindow.Run(refined, direction);
             if (stitched is not null)
                 HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
             else
