@@ -84,7 +84,7 @@ public static class ScrollingCaptureService
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion,
         ScrollDirection? presetDirection, Func<bool> autoScroll, Action<string> status,
         Action<ScrollHint> hint, CancellationToken ct, Action<SD.Bitmap>? preview = null,
-        Func<SD.Rectangle, SD.Bitmap>? frameSource = null)
+        Func<SD.Rectangle, SD.Bitmap>? frameSource = null, bool paneScoped = false)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -98,7 +98,7 @@ public static class ScrollingCaptureService
         {
             try
             {
-                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource);
+                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource, paneScoped);
                 return loop.Run();
             }
             catch (Exception ex)
@@ -121,6 +121,12 @@ public static class ScrollingCaptureService
         private readonly Action<ScrollHint> _hint;
         private readonly Action<SD.Bitmap>? _preview;
         private readonly CancellationToken _ct;
+        /// <summary>The region was already narrowed to the scrolling pane by the wheel
+        /// probe — the sidebar band/compositor heuristics must stay OFF: inside a real
+        /// pane they misread wide blank margins and rails as "sidebars" and paint over
+        /// content (observed live 2026-08-05: left=64/right=568 claimed inside a clean
+        /// 1440px chat pane, gray-filling the right side).</summary>
+        private readonly bool _paneScoped;
 
         private ScrollDirection? _direction;
         private readonly StitchBuffer _stitch;
@@ -194,9 +200,10 @@ public static class ScrollingCaptureService
 
         public Loop(SD.Rectangle region, ScrollDirection? presetDirection, Func<bool> autoScroll,
             Action<string> status, Action<ScrollHint> hint, Action<SD.Bitmap>? preview,
-            CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource)
+            CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource, bool paneScoped = false)
         {
             _region = region;
+            _paneScoped = paneScoped;
             _direction = presetDirection;
             _autoScroll = autoScroll;
             _status = status;
@@ -426,7 +433,7 @@ public static class ScrollingCaptureService
                 // offset past frame 1 (seen live: re-lock on frame 2 meant the sidebar never
                 // locked and kept hijacking the matcher). Allow the lock on any early frame;
                 // only the frame-1 case can also rebuild the canvas profile.
-                bool canLockSidebars = _stitchedFrames <= SidebarLockMaxFrames &&
+                bool canLockSidebars = !_paneScoped && _stitchedFrames <= SidebarLockMaxFrames &&
                     _runningVerticalLeftBand == 0 && _runningVerticalRightBand == 0;
                 // Bands are immutable once locked. (A "grow on later agreement" variant
                 // ratcheted to 60% of the window live: while the user pauses, consecutive

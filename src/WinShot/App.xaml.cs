@@ -442,17 +442,20 @@ public partial class App : Application
             var region = new SD.Rectangle(x, y, w, h);
             // "probe" opts the rig into the same pane scoping the interactive flow gets;
             // default stays deterministic for the existing automated tests.
+            bool paneScoped = false;
             if (parts.Contains("probe", StringComparer.OrdinalIgnoreCase))
             {
+                var requested = region;
                 region = await Task.Run(() =>
                 {
                     var center = new SD.Point(region.X + region.Width / 2, region.Y + region.Height / 2);
                     PaneInfo? hint = ScrollPaneDetector.FromPoint(center, TimeSpan.FromMilliseconds(700));
                     return ScrollProbe.Refine(region, hint);
                 });
+                paneScoped = region != requested;
             }
 
-            var stitched = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop);
+            var stitched = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop, paneScoped: paneScoped);
             if (stitched is not null)
                 HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling);
             else
@@ -1240,7 +1243,7 @@ public partial class App : Application
                 return ScrollProbe.Refine(region, hint);
             });
 
-            var stitched = await ScrollingStatusWindow.Run(refined, direction);
+            var stitched = await ScrollingStatusWindow.Run(refined, direction, paneScoped: refined != region);
             if (stitched is not null)
                 HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
             else

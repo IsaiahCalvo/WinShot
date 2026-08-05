@@ -21,7 +21,7 @@ public static class ScrollingStatusWindow
     /// (the scroll-horizontal command); null auto-detects from the first movement.
     /// </summary>
     public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null,
-        bool autoStart = false, TimeSpan? autoStop = null)
+        bool autoStart = false, TimeSpan? autoStop = null, bool paneScoped = false)
     {
         using var cts = new CancellationTokenSource();
         bool cancelled = false;
@@ -88,7 +88,8 @@ public static class ScrollingStatusWindow
                 text => MarshalStatus(controls, preview, text),
                 hint => MarshalHint(controls, preview, hint),
                 cts.Token,
-                thumb => PushPreview(preview, thumb));
+                thumb => PushPreview(preview, thumb),
+                paneScoped: paneScoped);
 
             if (cancelled)
             {
