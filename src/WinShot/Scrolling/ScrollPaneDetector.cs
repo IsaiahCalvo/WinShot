@@ -75,6 +75,36 @@ public static class ScrollPaneDetector
         }
     }
 
+    /// <summary>
+    /// Hover-time lookup for the region selector: Tier 0 only (child-HWND scrollbars +
+    /// the Chromium render-widget rect), starting from a KNOWN root so the selector's own
+    /// full-screen overlay can't hijack the hit test. Synchronous and cheap (&lt;1ms) — no
+    /// UIA here; the full ladder (UIA + wheel probe) runs after the selection confirms,
+    /// once the overlay is gone.
+    /// </summary>
+    public static SD.Rectangle? QuickPaneRect(IntPtr root, SD.Point screenPx)
+    {
+        try
+        {
+            if (root == IntPtr.Zero)
+                return null;
+            if (Win32ScrollablePane(root, screenPx) is SD.Rectangle exact)
+                return exact;
+            IntPtr widget = FindWindowEx(root, IntPtr.Zero, "Chrome_RenderWidgetHostHWND", null);
+            if (widget != IntPtr.Zero && GetWindowRect(widget, out Rect wr))
+            {
+                var rect = SD.Rectangle.FromLTRB(wr.Left, wr.Top, wr.Right, wr.Bottom);
+                if (rect.Contains(screenPx))
+                    return rect;
+            }
+            return null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     // ---- Tier 0: Win32 ----
 
     private static IntPtr RootWindowFromPoint(SD.Point p)

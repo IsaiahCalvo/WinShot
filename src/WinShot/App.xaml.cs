@@ -1216,7 +1216,8 @@ public partial class App : Application
             PerfLog.TrackFirstShown(selector, "scrolling selector");
             try
             {
-                if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle r)
+                if (await selector.ShowAsync(paneHover: true) == WF.DialogResult.OK &&
+                    selector.SelectedRegionPx is SD.Rectangle r)
                     picked = r;
             }
             finally

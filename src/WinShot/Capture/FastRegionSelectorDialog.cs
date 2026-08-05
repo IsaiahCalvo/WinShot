@@ -32,6 +32,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SettingsService? _settings;
     private SelectorOptions _options;
     private SelectorMode _mode = SelectorMode.Area;
+    private bool _paneHover;
+    private SD.Rectangle? _hoverPane;
     private List<WindowInfo> _windows = new();
     private readonly List<SelectorPane> _panes = new();
     private SD.Point _dragStartScreen;     // physical screen px (GetCursorPos)
@@ -112,9 +114,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector.Dispose();
     }
 
-    public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area)
+    public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area, bool paneHover = false)
     {
         _mode = mode;
+        _paneHover = paneHover;
         _completion = new TaskCompletionSource<WF.DialogResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -163,6 +166,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _resizeHandle = -1;
         _movingPending = false;
         _hoverWindow = null;
+        _paneHover = false;
+        _hoverPane = null;
         SelectedRegionPx = null;
         DisposeFrozen();
         _capturedRegion?.Dispose();
@@ -468,6 +473,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
+        // Scrolling selector: highlight the scrollable pane under the cursor (Tier-0 Win32
+        // only — cheap and safe under our own overlay; UIA + wheel probe refine after
+        // confirm). A bare click accepts the pane; dragging still draws a manual marquee.
+        if (_paneHover && _pendingScreen is null && !_dragging)
+        {
+            WindowInfo? win = ResolveWindow(_currentScreen);
+            SD.Rectangle? pane = win is null
+                ? null
+                : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(win.Handle, _currentScreen)
+                    ?? win.Bounds;
+            if (pane != _hoverPane)
+            {
+                _hoverPane = pane;
+                InvalidateAllSurfaces();
+            }
+        }
+
         // Area mode, idle: keep the crosshair + loupe glued to the cursor. Repaint only the
         // old+new crosshair bands and loupe box (not the whole monitor), so a large external
         // display stays smooth. Skip while adjusting a pending rect (no crosshair then).
@@ -546,6 +568,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 _pendingScreen = rect;
             InvalidateAllSurfaces();
         }
+        else if (_paneHover && _pendingScreen is null && _hoverPane is SD.Rectangle pane)
+        {
+            // Bare click on the highlighted pane accepts it (CleanShot's scrolling flow).
+            Confirm(VirtualFromScreen(pane));
+        }
     }
 
     // ----------------------------------------------------------- painting (per surface)
@@ -586,6 +613,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         else if (_mode == SelectorMode.Window && _hoverWindow is not null)
         {
             brightScreen = _hoverWindow.Bounds;
+        }
+        else if (_paneHover && _hoverPane is SD.Rectangle hoverPane)
+        {
+            brightScreen = hoverPane;
         }
 
         if (brightScreen is SD.Rectangle bright)
