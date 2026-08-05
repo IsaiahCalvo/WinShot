@@ -121,8 +121,13 @@ internal static class StationaryViewportDetector
 
         // Confirmed structured pixels prove that this edge owns a stationary component.
         // Expand through same-position-stable background blocks to find its real boundary.
-        // Matching may safely crop two extra blocks, but compositing must never use padding.
+        // The RENDER width must stop at the last STRUCTURED stationary block: a blank gutter
+        // or the document's empty margin is same-in-place too, and extending the painted
+        // sidebar through it blanks real content (observed live: the compositor cropped the
+        // chat text's right edge). Matching may crop the stable background freely — excluding
+        // blank columns from row hashing loses nothing.
         int lastStable = fromLeft ? -1 : evidence.Length;
+        int lastStructured = fromLeft ? -1 : evidence.Length;
         int unstableRun = 0;
         for (int distance = 0; distance < outerBlocks; distance++)
         {
@@ -132,6 +137,8 @@ internal static class StationaryViewportDetector
             if (stableAtViewport)
             {
                 lastStable = i;
+                if (IsFixed(evidence[i], confirmed, strongStructure: false))
+                    lastStructured = i;
                 unstableRun = 0;
             }
             else if (++unstableRun >= 2)
@@ -139,14 +146,22 @@ internal static class StationaryViewportDetector
                 break;
             }
         }
-        if (lastStable < 0 || lastStable >= evidence.Length)
+        if (lastStable < 0 || lastStable >= evidence.Length ||
+            lastStructured < 0 || lastStructured >= evidence.Length)
             return default;
 
+        // Two blocks of padding past the structured boundary cover the panel border and
+        // detection landing a block short on some frame pairs; any stable blank columns
+        // beyond that repeat invisibly (background over background).
         int exact = fromLeft
+            ? Math.Min(lastStructured + 3, lastStable + 1) * SideBlockWidth
+            : width - Math.Max(lastStructured - 2, lastStable) * SideBlockWidth;
+        exact = Math.Min(exact, (int)(width * 0.45));
+        int stableEdge = fromLeft
             ? (lastStable + 1) * SideBlockWidth
             : width - lastStable * SideBlockWidth;
-        exact = Math.Min(exact, (int)(width * 0.45));
-        int matchInset = Math.Min((int)(width * 0.45), exact + SideBlockWidth * 2);
+        int matchInset = Math.Min((int)(width * 0.45),
+            Math.Max(exact, stableEdge) + SideBlockWidth * 2);
         return new SideRegion(exact, matchInset);
     }
 
