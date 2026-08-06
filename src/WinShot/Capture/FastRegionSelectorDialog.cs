@@ -66,6 +66,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     // shown — started in ShowAsync, stopped in Complete — so it adds no idle background work.
     private readonly WF.Timer _followTimer;
     private bool _lastCtrlDown;
+    private bool _lastAltDown;
 
     public FastRegionSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
@@ -479,16 +480,22 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        // Scrolling selector: highlight the scrollable pane under the cursor (Tier-0 Win32
-        // only — cheap and safe under our own overlay; UIA + wheel probe refine after
-        // confirm). A bare click accepts the pane; dragging still draws a manual marquee.
+        // Smart detection rides the Alt key: hold Alt to highlight the element/pane under
+        // the cursor (Tier-0 Win32 only — cheap and safe under our own overlay; UIA + wheel
+        // probe refine after confirm) and click to accept it. Without Alt the selector is a
+        // plain marquee — a drawn rect is never second-guessed.
         if (_paneHover && _pendingScreen is null && !_dragging)
         {
-            WindowInfo? win = ResolveWindow(_currentScreen);
-            SD.Rectangle? pane = win is null
-                ? null
-                : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(win.Handle, _currentScreen)
-                    ?? win.Bounds;
+            bool alt = (WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt;
+            SD.Rectangle? pane = null;
+            if (alt)
+            {
+                WindowInfo? win = ResolveWindow(_currentScreen);
+                pane = win is null
+                    ? null
+                    : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(win.Handle, _currentScreen)
+                        ?? win.Bounds;
+            }
             if (pane != _hoverPane)
             {
                 _hoverPane = pane;
@@ -517,9 +524,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             SD.Point p = CursorScreen();
             bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
-            if (p == _currentScreen && ctrl == _lastCtrlDown)
+            bool alt = (WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt;
+            if (p == _currentScreen && ctrl == _lastCtrlDown && alt == _lastAltDown)
                 return;
             _lastCtrlDown = ctrl;
+            _lastAltDown = alt;
             HandleMouseMove();
         }
         catch (Exception ex)

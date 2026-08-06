@@ -111,10 +111,10 @@ public class StationaryViewportDetectorTests
         for (int y = 0; y < stitched.Height - 48; y += 37)
             Assert.Equal(DocumentColor(101, y).ToArgb(), stitched.GetPixel(101, y).ToArgb());
 
+        // The sidebar compositor is gone (multi-pane selections are pane-scoped instead),
+        // so sidebar columns repeat naturally below the first viewport; what must hold is
+        // correct document geometry and the fixed arrow surviving once at the bottom.
         Assert.True(CountMarkerPixels(stitched, 0, Height) > 20);
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
-        using (var first = MakeFrame(positions[0]))
-            AssertSidebarEquals(first, stitched);
         AssertAdjacentMovingStrip(stitched);
         int firstArrow = FindFirstRedRow(stitched);
         Assert.InRange(firstArrow, stitched.Height - 48, stitched.Height - 1);
@@ -146,7 +146,6 @@ public class StationaryViewportDetectorTests
             using var stitched = await RunCapture(positions);
 
             Assert.Equal(d + Height, stitched.Height);
-            Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
             Assert.InRange(FindFirstRedRow(stitched), stitched.Height - 48, stitched.Height - 1);
         }
     }
@@ -159,9 +158,7 @@ public class StationaryViewportDetectorTests
         using var first = MakeFrame(0);
 
         Assert.Equal(320 + Height, stitched.Height);
-        AssertSidebarEquals(first, stitched);
         AssertAdjacentMovingStrip(stitched);
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
         for (int y = 0; y < stitched.Height - 48; y += 37)
             Assert.Equal(DocumentColor(101, y).ToArgb(), stitched.GetPixel(101, y).ToArgb());
         Assert.InRange(FindFirstRedRow(stitched), stitched.Height - 48, stitched.Height - 1);

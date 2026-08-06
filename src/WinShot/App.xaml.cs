@@ -544,7 +544,8 @@ public partial class App : Application
             PerfLog.TrackFirstShown(selector, mode == FastRegionSelectorDialog.SelectorMode.Window ? "capture-window selector" : "capture-area selector");
             try
             {
-                if (await selector.ShowAsync(mode) == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
+                if (await selector.ShowAsync(mode, paneHover: mode == FastRegionSelectorDialog.SelectorMode.Area) == WF.DialogResult.OK &&
+                    selector.SelectedRegionPx is SD.Rectangle region)
                 {
                     // Screen-freeze: the selector already cropped the result from its frozen
                     // snapshot, so use that (exact, no dismiss delay). Fall back to a live grab.

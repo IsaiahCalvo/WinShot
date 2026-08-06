@@ -46,9 +46,8 @@ public class ScrollingSidebarNccRegressionTests
         // one seam's slack of the true document height.
         Assert.InRange(stitched.Height, positions[^1] + Height - 48, positions[^1] + Height);
 
-        // The sidebar's green markers may appear in the first viewport only.
+        // (Sidebar de-duplication is pane-scoping's job now — the compositor is gone.)
         Assert.True(CountMarkerPixels(stitched, 0, Height) > 20, "sidebar missing from first viewport");
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
 
         // The floating arrow survives exactly once, near the true bottom.
         int firstArrow = FindFirstRedRow(stitched);
@@ -64,7 +63,6 @@ public class ScrollingSidebarNccRegressionTests
         using var stitched = await RunCapture(positions);
 
         Assert.InRange(stitched.Height, positions[^1] + Height - 48, positions[^1] + Height);
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
         Assert.InRange(FindFirstRedRow(stitched), stitched.Height - 64, stitched.Height - 1);
     }
 

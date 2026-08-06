@@ -142,8 +142,6 @@ public static class ScrollingCaptureService
         private FrameSignature? _prevSig;
         private FrameSignature? _prevMatchSig;
         private SD.Bitmap? _lastFrame;      // most recent frame, kept for the final footer strip
-        private SD.Bitmap? _firstLeftSidebar;
-        private SD.Bitmap? _firstRightSidebar;
 
         private enum Track { Tracking, Reviewing, Lost }
         private Track _state = Track.Tracking;
@@ -165,8 +163,6 @@ public static class ScrollingCaptureService
         private int _footerGrowStreak;
         private int _footerShrinkStreak;
         private int _footerShrinkMax;
-        private int _runningVerticalLeftBand;
-        private int _runningVerticalRightBand;
         private int _verticalLeftMatchInset;
         private int _verticalRightMatchInset;
         private int _runningLeftBand;
@@ -285,7 +281,6 @@ public static class ScrollingCaptureService
             if (discard)
             {
                 _lastFrame?.Dispose();
-                DisposeSidebarSnapshots();
                 _horizontal.Dispose();
                 _stitch.Dispose();
                 _strip?.Dispose();
@@ -298,19 +293,12 @@ public static class ScrollingCaptureService
             if (_direction == ScrollDirection.Horizontal)
             {
                 _lastFrame?.Dispose();
-                DisposeSidebarSnapshots();
                 _stitch.Dispose();
                 return _horizontal.Take();
             }
             _horizontal.Dispose();
             var vertical = _stitch.Take();
-            if (vertical is not null)
-            {
-                StationaryViewportCompositor.RemoveRepeatedSidebars(vertical,
-                    _firstLeftSidebar, _firstRightSidebar, _region.Height);
-            }
             _lastFrame?.Dispose();
-            DisposeSidebarSnapshots();
             return vertical;
         }
 
@@ -434,24 +422,15 @@ public static class ScrollingCaptureService
                 // locked and kept hijacking the matcher). Allow the lock on any early frame;
                 // only the frame-1 case can also rebuild the canvas profile.
                 bool canLockSidebars = !_paneScoped && _stitchedFrames <= SidebarLockMaxFrames &&
-                    _runningVerticalLeftBand == 0 && _runningVerticalRightBand == 0;
+                    _verticalLeftMatchInset == 0 && _verticalRightMatchInset == 0;
                 // Bands are immutable once locked. (A "grow on later agreement" variant
                 // ratcheted to 60% of the window live: while the user pauses, consecutive
                 // near-identical pairs measure everything as stationary — do NOT retry it.)
-                int candidateLeft = _runningVerticalLeftBand > 0
-                    ? _runningVerticalLeftBand
-                    : canLockSidebars ? refinedRegions.LeftSide : 0;
-                int candidateRight = _runningVerticalRightBand > 0
-                    ? _runningVerticalRightBand
-                    : canLockSidebars ? refinedRegions.RightSide : 0;
-                // Sanity: chrome flanking the document never spans half the window. A pair
-                // that measures that wide is a scroll pause misread; keep matching insets
-                // (excluding columns from hashing is harmless) but never composite with it.
-                if (candidateLeft + candidateRight > sig.Width * 9 / 20)
-                {
-                    candidateLeft = _runningVerticalLeftBand;
-                    candidateRight = _runningVerticalRightBand;
-                }
+                // Sidebar RENDER bands are gone for good: the compositor that repainted
+                // "stationary sidebars" misfired on every real capture it touched (gray
+                // fills over content, mid-panel slices). Multi-pane selections are handled
+                // by pane-scoping (Alt-click a pane); match INSETS below survive — they
+                // only exclude static columns from row hashing, never touch pixels.
                 int candidateLeftMatch = _verticalLeftMatchInset > 0
                     ? _verticalLeftMatchInset
                     : canLockSidebars ? refinedRegions.LeftMatchInset : 0;
@@ -475,30 +454,17 @@ public static class ScrollingCaptureService
                     matchedOffset = verifiedOffset;
                     header = candidateHeader;
                     footer = candidateFooter;
-                    bool sidebarLockChanged =
-                        _runningVerticalLeftBand != candidateLeft ||
-                        _runningVerticalRightBand != candidateRight ||
+                    bool insetsChanged =
                         _verticalLeftMatchInset != candidateLeftMatch ||
                         _verticalRightMatchInset != candidateRightMatch;
-                    if (_stitchedFrames == 1 && sidebarLockChanged)
+                    if (_stitchedFrames == 1 && insetsChanged)
                     {
+                        // Rebuild the one-frame canvas profile with the inset signature so
+                        // re-locking matches what future frames hash.
                         _canvas.Retract(_canvas.Height);
                         _canvas.Append(refinedPrevious, 0, refinedPrevious.Height);
                         _prevMatchSig = refinedPrevious;
-                        CaptureSidebarSnapshots(_lastFrame, candidateLeft, candidateRight);
-                        if (candidateLeft > 0 || candidateRight > 0)
-                            Log.Info($"Scroll: sidebar lock at frame 1 (left={candidateLeft} right={candidateRight})");
                     }
-                    else if (sidebarLockChanged && (candidateLeft > 0 || candidateRight > 0))
-                    {
-                        // Late lock: the canvas profile keeps its full-width early rows
-                        // (slightly degraded re-lock there is fine); matching and the final
-                        // sidebar de-duplication adopt the lock from here on.
-                        CaptureSidebarSnapshots(_lastFrame, candidateLeft, candidateRight);
-                        Log.Info($"Scroll: sidebar lock at frame {_stitchedFrames} (left={candidateLeft} right={candidateRight})");
-                    }
-                    _runningVerticalLeftBand = candidateLeft;
-                    _runningVerticalRightBand = candidateRight;
                     _verticalLeftMatchInset = candidateLeftMatch;
                     _verticalRightMatchInset = candidateRightMatch;
                     matchSig = refinedCurrent;
@@ -614,32 +580,10 @@ public static class ScrollingCaptureService
             PushPreview(force: false);
         }
 
-        private void CaptureSidebarSnapshots(SD.Bitmap firstFrame, int leftSide, int rightSide)
-        {
-            _firstLeftSidebar?.Dispose();
-            _firstRightSidebar?.Dispose();
-            _firstLeftSidebar = leftSide > 0
-                ? firstFrame.Clone(new SD.Rectangle(0, 0, leftSide, firstFrame.Height),
-                    System.Drawing.Imaging.PixelFormat.Format32bppArgb)
-                : null;
-            _firstRightSidebar = rightSide > 0
-                ? firstFrame.Clone(new SD.Rectangle(firstFrame.Width - rightSide, 0,
-                    rightSide, firstFrame.Height), System.Drawing.Imaging.PixelFormat.Format32bppArgb)
-                : null;
-        }
-
-        private void DisposeSidebarSnapshots()
-        {
-            _firstLeftSidebar?.Dispose();
-            _firstRightSidebar?.Dispose();
-            _firstLeftSidebar = null;
-            _firstRightSidebar = null;
-        }
-
         private const int FooterSlack = 5;
-        /// <summary>Latest stitched frame at which a stationary sidebar may still lock.
-        /// ponytail: fixed small window — past this the stitch has too much full-width
-        /// history for a lock to leave the output consistent.</summary>
+        /// <summary>Latest stitched frame at which stationary side match-insets may still
+        /// lock. ponytail: fixed small window — past this the stitch has too much
+        /// full-width history for an inset change to leave matching consistent.</summary>
         private const int SidebarLockMaxFrames = 6;
 
         /// <summary>
