@@ -127,6 +127,13 @@ public static class ScrollingCaptureService
         /// content (observed live 2026-08-05: left=64/right=568 claimed inside a clean
         /// 1440px chat pane, gray-filling the right side).</summary>
         private readonly bool _paneScoped;
+        /// <summary>Per-column "did this column ever change between consecutive accepted
+        /// frames" over the WHOLE capture. Whole-run evidence is what the old two-frame
+        /// sidebar detector lacked: a column that never changed across every scroll step
+        /// is a static rail (or blank margin) beyond doubt, so de-duplicating it at finish
+        /// cannot eat content the way per-pair guesses did.</summary>
+        private bool[]? _columnEverChanged;
+        private ulong[]? _prevColumnHashes;
 
         private ScrollDirection? _direction;
         private readonly StitchBuffer _stitch;
@@ -298,6 +305,8 @@ public static class ScrollingCaptureService
             }
             _horizontal.Dispose();
             var vertical = _stitch.Take();
+            if (vertical is not null)
+                DeduplicateStaticRails(vertical);
             _lastFrame?.Dispose();
             return vertical;
         }
@@ -580,6 +589,76 @@ public static class ScrollingCaptureService
             PushPreview(force: false);
         }
 
+        /// <summary>
+        /// Finish-time rail de-duplication on whole-run evidence: a contiguous edge cluster
+        /// of columns that never changed between ANY consecutive accepted frames is a static
+        /// side rail (or blank margin). It appears once (the stitch's first viewport already
+        /// has it) and the repeats below are painted over with its dominant color — the
+        /// CleanShot look. Content is safe by construction: scrolled content changes its
+        /// columns on every step, so its columns can never qualify.
+        /// </summary>
+        private void DeduplicateStaticRails(SD.Bitmap vertical)
+        {
+            if (_paneScoped || _columnEverChanged is null || _stitchedFrames < 3 ||
+                vertical.Height <= _region.Height)
+                return;
+            int width = _columnEverChanged.Length;
+            if (width != vertical.Width)
+                return;
+
+            // ponytail: tolerate up to 3 flickering columns inside a cluster (a rail's
+            // hover glow or a 1px separator line breathing) — beyond that it isn't static.
+            int right = EdgeStaticCluster(fromLeft: false);
+            int left = EdgeStaticCluster(fromLeft: true);
+            int cap = width * 2 / 5;
+            if (right < 64 || right > cap) right = 0;
+            if (left < 64 || left > cap) left = 0;
+            if (left == 0 && right == 0)
+                return;
+
+            SD.Bitmap? leftSnap = null, rightSnap = null;
+            try
+            {
+                int viewport = Math.Min(_region.Height, vertical.Height);
+                if (left > 0)
+                    leftSnap = vertical.Clone(new SD.Rectangle(0, 0, left, viewport),
+                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                if (right > 0)
+                    rightSnap = vertical.Clone(new SD.Rectangle(width - right, 0, right, viewport),
+                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                StationaryViewportCompositor.RemoveRepeatedSidebars(vertical, leftSnap, rightSnap, viewport);
+                Log.Info($"Scroll: static rails de-duplicated (left={left} right={right}, whole-run evidence)");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Static rail de-duplication failed (non-fatal)", ex);
+            }
+            finally
+            {
+                leftSnap?.Dispose();
+                rightSnap?.Dispose();
+            }
+        }
+
+        private int EdgeStaticCluster(bool fromLeft)
+        {
+            bool[] changed = _columnEverChanged!;
+            int width = changed.Length;
+            int flicker = 0, span = 0;
+            for (int i = 0; i < width; i++)
+            {
+                int x = fromLeft ? i : width - 1 - i;
+                if (changed[x])
+                {
+                    if (++flicker > 3)
+                        break;
+                    continue; // may bridge interior flicker, but never ends the cluster
+                }
+                span = i + 1;
+            }
+            return span;
+        }
+
         private const int FooterSlack = 5;
         /// <summary>Latest stitched frame at which stationary side match-insets may still
         /// lock. ponytail: fixed small window — past this the stitch has too much
@@ -654,6 +733,20 @@ public static class ScrollingCaptureService
             _stitch.Append(frame, srcStart, newRows);
             _canvas.Append(sig, srcStart, newRows);
             _strip?.Append(frame, srcStart, newRows);
+            if (!_paneScoped)
+            {
+                ulong[] cols = ImageStitcher.ComputeColumnHashes(frame);
+                if (_prevColumnHashes is not null && _prevColumnHashes.Length == cols.Length)
+                {
+                    _columnEverChanged ??= new bool[cols.Length];
+                    for (int x = 0; x < cols.Length; x++)
+                    {
+                        if (cols[x] != _prevColumnHashes[x])
+                            _columnEverChanged[x] = true;
+                    }
+                }
+                _prevColumnHashes = cols;
+            }
             _stitchedFrames++;
             _runningFooter = footer;
             _state = Track.Tracking;
