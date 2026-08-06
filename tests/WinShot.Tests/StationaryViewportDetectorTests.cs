@@ -111,10 +111,9 @@ public class StationaryViewportDetectorTests
         for (int y = 0; y < stitched.Height - 48; y += 37)
             Assert.Equal(DocumentColor(101, y).ToArgb(), stitched.GetPixel(101, y).ToArgb());
 
-        // Whole-run rail de-duplication: the sidebar appears once (first viewport) and its
-        // repeats below are painted over — driven by never-changed-across-the-run columns.
-        Assert.True(CountMarkerPixels(stitched, 0, Height) > 20);
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+        // The byte-static sidebar is cropped out by whole-run evidence (CleanShot
+        // behavior); document geometry and the fixed arrow must survive.
+        Assert.Equal(Width - Sidebar, stitched.Width);
         AssertAdjacentMovingStrip(stitched);
         int firstArrow = FindFirstRedRow(stitched);
         Assert.InRange(firstArrow, stitched.Height - 48, stitched.Height - 1);

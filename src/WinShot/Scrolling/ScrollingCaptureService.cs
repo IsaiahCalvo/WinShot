@@ -307,7 +307,7 @@ public static class ScrollingCaptureService
             _horizontal.Dispose();
             var vertical = _stitch.Take();
             if (vertical is not null)
-                DeduplicateStaticRails(vertical);
+                vertical = DeduplicateStaticRails(vertical);
             _lastFrame?.Dispose();
             return vertical;
         }
@@ -598,27 +598,48 @@ public static class ScrollingCaptureService
         /// CleanShot look. Content is safe by construction: scrolled content changes its
         /// columns on every step, so its columns can never qualify.
         /// </summary>
-        private void DeduplicateStaticRails(SD.Bitmap vertical)
+        private SD.Bitmap DeduplicateStaticRails(SD.Bitmap vertical)
         {
             if (_paneScoped || _columnChangeCounts is null || _stitchedFrames < 3 ||
                 _columnPairs < 3 || vertical.Height <= _region.Height)
-                return;
+                return vertical;
             int width = _columnChangeCounts.Length;
             if (width != vertical.Width)
-                return;
-
-            // ponytail: tolerate up to 3 flickering columns inside a cluster (a rail's
-            // hover glow or a 1px separator line breathing) — beyond that it isn't static.
-            int right = EdgeStaticCluster(fromLeft: false);
-            int left = EdgeStaticCluster(fromLeft: true);
+                return vertical;
             int cap = width * 2 / 5;
-            if (right < 64 || right > cap) right = 0;
-            if (left < 64 || left > cap) left = 0;
-            if (left == 0 && right == 0)
-                return;
 
             try
             {
+                // Tier 1 — CROP: an edge strip that (almost) never changed the whole run is
+                // a static rail; the honest output simply doesn't include it (CleanShot's
+                // behavior). Strict ceiling so a sparse content margin — rare long lines DO
+                // change it more often — is never cropped.
+                int cropLeft = EdgeStaticCluster(true, Math.Max(1, _columnPairs / 10));
+                int cropRight = EdgeStaticCluster(false, Math.Max(1, _columnPairs / 10));
+                if (cropLeft < 64 || cropLeft > cap) cropLeft = 0;
+                if (cropRight < 64 || cropRight > cap) cropRight = 0;
+                if (cropLeft > 0 || cropRight > 0)
+                {
+                    var cropped = vertical.Clone(
+                        new SD.Rectangle(cropLeft, 0, width - cropLeft - cropRight, vertical.Height),
+                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                    vertical.Dispose();
+                    Log.Info($"Scroll: static rail cropped (left={cropLeft} right={cropRight})");
+                    return cropped;
+                }
+
+                // Tier 2 — row-level erase for semi-static rails (content refreshed a few
+                // times mid-run): repeated band rows are erased, unique rows survive. A rail
+                // that updates CONTINUOUSLY during capture (live streaming panel) is
+                // indistinguishable from content by any within-image evidence — that case
+                // needs the pane pick (Alt-click).
+                int right = EdgeStaticCluster(false, Math.Max(1, _columnPairs / 5));
+                int left = EdgeStaticCluster(true, Math.Max(1, _columnPairs / 5));
+                if (right < 64 || right > cap) right = 0;
+                if (left < 64 || left > cap) left = 0;
+                if (left == 0 && right == 0)
+                    return vertical;
+
                 int viewport = Math.Min(_region.Height, vertical.Height);
                 int erasedLeft = left > 0
                     ? StationaryViewportCompositor.EraseRepeatedBandRows(vertical, 0, left, viewport)
@@ -633,9 +654,10 @@ public static class ScrollingCaptureService
             {
                 Log.Error("Static rail de-duplication failed (non-fatal)", ex);
             }
+            return vertical;
         }
 
-        private int EdgeStaticCluster(bool fromLeft)
+        private int EdgeStaticCluster(bool fromLeft, int staticCeiling)
         {
             int[] counts = _columnChangeCounts!;
             int width = counts.Length;
@@ -643,7 +665,8 @@ public static class ScrollingCaptureService
             // states, contextual panels updating as the chat streams); scrolled content's
             // columns change on essentially every step. Frequency separates them where the
             // old "never changed" rule refused rails that blinked even once.
-            int staticCeiling = Math.Max(1, _columnPairs / 5);
+            // ponytail: tolerate up to 3 flickering columns inside a cluster (a rail's
+            // hover glow or a 1px separator line breathing) — beyond that it isn't static.
             int flicker = 0, span = 0;
             for (int i = 0; i < width; i++)
             {
