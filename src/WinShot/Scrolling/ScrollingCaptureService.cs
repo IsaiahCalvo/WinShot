@@ -617,27 +617,21 @@ public static class ScrollingCaptureService
             if (left == 0 && right == 0)
                 return;
 
-            SD.Bitmap? leftSnap = null, rightSnap = null;
             try
             {
                 int viewport = Math.Min(_region.Height, vertical.Height);
-                if (left > 0)
-                    leftSnap = vertical.Clone(new SD.Rectangle(0, 0, left, viewport),
-                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                if (right > 0)
-                    rightSnap = vertical.Clone(new SD.Rectangle(width - right, 0, right, viewport),
-                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                StationaryViewportCompositor.RemoveRepeatedSidebars(vertical, leftSnap, rightSnap, viewport);
-                Log.Info($"Scroll: static rails de-duplicated (left={left} right={right}, whole-run evidence)");
+                int erasedLeft = left > 0
+                    ? StationaryViewportCompositor.EraseRepeatedBandRows(vertical, 0, left, viewport)
+                    : 0;
+                int erasedRight = right > 0
+                    ? StationaryViewportCompositor.EraseRepeatedBandRows(vertical, width - right, right, viewport)
+                    : 0;
+                Log.Info($"Scroll: static rails de-duplicated (left={left} right={right}, " +
+                    $"rows erased={erasedLeft}/{erasedRight})");
             }
             catch (Exception ex)
             {
                 Log.Error("Static rail de-duplication failed (non-fatal)", ex);
-            }
-            finally
-            {
-                leftSnap?.Dispose();
-                rightSnap?.Dispose();
             }
         }
 

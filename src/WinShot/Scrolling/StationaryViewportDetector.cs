@@ -280,6 +280,71 @@ internal static class StationaryViewportDetector
 /// <summary>Removes repeated copies of a fixed sidebar below its first viewport instance.</summary>
 internal static class StationaryViewportCompositor
 {
+    /// <summary>
+    /// Row-level rail cleanup: within the band's columns, a stitched row BELOW the first
+    /// viewport is erased only when its band pixels are a REPEAT — the same band-row hash
+    /// occurs at three or more stitch rows. Stamps of a static rail repeat by construction
+    /// (every append re-copies the same viewport rows); real content rows are unique, so a
+    /// chat line crossing an over-wide band survives. Blank rows repeat massively and get
+    /// filled with the band's dominant color — background over background. Returns the
+    /// number of rows erased.
+    /// </summary>
+    public static int EraseRepeatedBandRows(SD.Bitmap stitched, int bandX, int bandWidth, int firstViewportHeight)
+    {
+        int height = stitched.Height;
+        var hashes = new ulong[height];
+        var data = stitched.LockBits(new SD.Rectangle(bandX, 0, bandWidth, height),
+            System.Drawing.Imaging.ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            var row = new byte[bandWidth * 4];
+            for (int y = 0; y < height; y++)
+            {
+                Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
+                ulong h = 14695981039346656037UL;
+                for (int i = 0; i < row.Length; i += 4)
+                {
+                    h = (h ^ row[i]) * 1099511628211UL;
+                    h = (h ^ row[i + 1]) * 1099511628211UL;
+                    h = (h ^ row[i + 2]) * 1099511628211UL;
+                }
+                hashes[y] = h;
+            }
+        }
+        finally
+        {
+            stitched.UnlockBits(data);
+        }
+
+        var counts = new Dictionary<ulong, int>(height);
+        foreach (ulong h in hashes)
+            counts[h] = counts.GetValueOrDefault(h) + 1;
+
+        using var band = stitched.Clone(
+            new SD.Rectangle(bandX, 0, bandWidth, Math.Min(firstViewportHeight, height)),
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        SD.Color fill = DominantColor(band);
+        int erased = 0;
+        using var graphics = SD.Graphics.FromImage(stitched);
+        graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+        using var brush = new SD.SolidBrush(fill);
+        int runStart = -1;
+        for (int y = firstViewportHeight; y <= height; y++)
+        {
+            bool erase = y < height && counts[hashes[y]] >= 3;
+            if (erase && runStart < 0)
+                runStart = y;
+            if (!erase && runStart >= 0)
+            {
+                graphics.FillRectangle(brush, bandX, runStart, bandWidth, y - runStart);
+                erased += y - runStart;
+                runStart = -1;
+            }
+        }
+        return erased;
+    }
+
     public static void RemoveRepeatedSidebars(SD.Bitmap stitched, SD.Bitmap? leftSidebar,
         SD.Bitmap? rightSidebar, int firstViewportHeight)
     {
