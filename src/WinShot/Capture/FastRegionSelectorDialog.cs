@@ -39,6 +39,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SD.Rectangle? _hoverPane;
     private bool _elementLookupBusy;
     private SD.Point _elementLookupPoint;
+    private SD.Point _lastVisualPoint = new(-9999, -9999);
     /// <summary>True when the selection came from clicking the highlighted pane rather than
     /// a hand-drawn marquee — only pane clicks opt into probe refinement downstream; a rect
     /// the user deliberately drew is captured exactly as drawn.</summary>
@@ -827,18 +828,31 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     private void KickElementLookup(SD.Point point)
     {
-        // Seed instantly with the coarse pane/window rect so Alt feels immediate, then let
-        // the element walk refine it.
-        if (_hoverPane is null)
+        // Instant tier: pixel-edge detection on the frozen snapshot (works even when the
+        // app's accessibility tree is disabled — Claude/Codex desktop apps ship that way),
+        // falling back to the pane/window rect. The UIA walk below refines asynchronously
+        // where a real element tree exists.
+        if (Distance(point, _lastVisualPoint) < 4)
+            return; // scanning megapixels at follow-tick rate would jank the selector
+        _lastVisualPoint = point;
+        WindowInfo? seed = ResolveWindow(point);
+        SD.Rectangle? visual = null;
+        if (_frozen is not null && seed is not null)
         {
-            WindowInfo? seed = ResolveWindow(point);
-            if (seed is not null)
-            {
-                _hoverPane = WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point)
-                    ?? seed.Bounds;
-                Log.Info($"Alt hover: seed {_hoverPane}");
-                InvalidateAllSurfaces();
-            }
+            var vp = new SD.Point(point.X - _vs.X, point.Y - _vs.Y);
+            visual = VisualElementDetector.Find(_frozen, vp, VirtualFromScreen(seed.Bounds));
+            if (visual is SD.Rectangle v)
+                visual = new SD.Rectangle(v.X + _vs.X, v.Y + _vs.Y, v.Width, v.Height);
+        }
+        SD.Rectangle? instant = visual ??
+            (seed is null
+                ? null
+                : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point) ?? seed.Bounds);
+        if (instant is not null && instant != _hoverPane)
+        {
+            _hoverPane = instant;
+            Log.Info($"Alt hover: {(visual is not null ? "visual" : "seed")} {instant}");
+            InvalidateAllSurfaces();
         }
         if (_elementLookupBusy)
             return; // one in flight; the next mouse move re-kicks with the fresh point
@@ -859,8 +873,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
                         return;
                     // Only adopt if the cursor is still near where we asked (stale answers
                     // for old points would make the highlight lag-jump).
+                    // A UIA answer only replaces the current highlight when it is more
+                    // specific — a full-window "element" must not undo a good visual rect.
+                    long currentArea = _hoverPane is SD.Rectangle cur
+                        ? (long)cur.Width * cur.Height : long.MaxValue;
                     if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
-                        r != _hoverPane)
+                        r != _hoverPane && (long)r.Width * r.Height < currentArea)
                     {
                         _hoverPane = r;
                         Log.Info($"Alt hover: element {r}");
