@@ -153,24 +153,52 @@ public static class ScrollProbe
         return new Changed(cols, rows);
     }
 
+    /// <summary>Columns further apart than this with nothing moving between them belong to
+    /// different panes (a chat pane and a side rail), not one pane with a text gap.</summary>
+    private const int ColumnGapPx = 96;
+
     private static SD.Rectangle BoundingRect(Changed moved, Changed animation, SD.Rectangle region)
     {
-        int left = -1, right = -1, top = -1, bottom = -1;
-        for (int x = 0; x < moved.Columns.Length; x++)
+        // Cluster moved columns: runs separated by less than ColumnGapPx of static columns
+        // merge; the biggest cluster is the scrolling pane. A neighbouring static rail whose
+        // scrollbar or hover state flickered is a small, far-away island — dropped here
+        // instead of dragging the pane edge across the gutter into it.
+        int bestLeft = -1, bestRight = -1, bestCount = 0;
+        int runLeft = -1, runRight = -1, runCount = 0;
+        for (int x = 0; x <= moved.Columns.Length; x++)
         {
-            if (!moved.Columns[x] || animation.Columns[x]) continue;
-            if (left < 0) left = x;
-            right = x;
+            bool hit = x < moved.Columns.Length && moved.Columns[x] && !animation.Columns[x];
+            if (hit)
+            {
+                if (runLeft < 0 || x - runRight > ColumnGapPx)
+                {
+                    if (runCount > bestCount)
+                    {
+                        bestLeft = runLeft; bestRight = runRight; bestCount = runCount;
+                    }
+                    runLeft = x;
+                    runCount = 0;
+                }
+                runRight = x;
+                runCount++;
+            }
         }
+        if (runCount > bestCount)
+        {
+            bestLeft = runLeft; bestRight = runRight; bestCount = runCount;
+        }
+
+        int top = -1, bottom = -1;
         for (int y = 0; y < moved.Rows.Length; y++)
         {
             if (!moved.Rows[y] || animation.Rows[y]) continue;
             if (top < 0) top = y;
             bottom = y;
         }
-        if (left < 0 || top < 0)
+        if (bestLeft < 0 || top < 0)
             return SD.Rectangle.Empty;
-        return new SD.Rectangle(region.X + left, region.Y + top, right - left + 1, bottom - top + 1);
+        return new SD.Rectangle(region.X + bestLeft, region.Y + top,
+            bestRight - bestLeft + 1, bottom - top + 1);
     }
 
     private const int Pad = 16;
@@ -194,11 +222,24 @@ public static class ScrollProbe
         }
         else
         {
+            // A hint edge may only pull a probe edge outward a bounded distance — unless
+            // the hint source is trusted (a real Win32 scrollbar or first-party UIA pane,
+            // whose rect IS the pane border). An unverified Chromium hint can be the whole
+            // web area, and adopting its border would drag the pane edge across a static
+            // gutter into a neighbouring rail (observed live: the Outputs/Sources rail
+            // sliced into a chat capture).
+            bool trusted = hint is PaneInfo t &&
+                t.Source is PaneSource.Win32Exact or PaneSource.UiaVerified;
+            int reach = trusted ? int.MaxValue : Math.Max(SnapPx * 4, region.Width / 8);
             result = SD.Rectangle.FromLTRB(
-                raw.Left < h.Left - SnapPx ? raw.Left - Pad : h.Left,
-                raw.Top < h.Top - SnapPx ? raw.Top - Pad : h.Top,
-                raw.Right > h.Right + SnapPx ? raw.Right + Pad : h.Right,
-                raw.Bottom > h.Bottom + SnapPx ? raw.Bottom + Pad : h.Bottom);
+                raw.Left < h.Left - SnapPx ? raw.Left - Pad
+                    : raw.Left - h.Left <= reach ? h.Left : raw.Left - Pad,
+                raw.Top < h.Top - SnapPx ? raw.Top - Pad
+                    : raw.Top - h.Top <= reach ? h.Top : raw.Top - Pad,
+                raw.Right > h.Right + SnapPx ? raw.Right + Pad
+                    : h.Right - raw.Right <= reach ? h.Right : raw.Right + Pad,
+                raw.Bottom > h.Bottom + SnapPx ? raw.Bottom + Pad
+                    : h.Bottom - raw.Bottom <= reach ? h.Bottom : raw.Bottom + Pad);
         }
         result.Intersect(region);
         return result;

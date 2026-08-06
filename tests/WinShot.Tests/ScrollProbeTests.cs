@@ -54,6 +54,30 @@ public class ScrollProbeTests
     }
 
     [Fact]
+    public void MovedIslandAcrossAGap_DoesNotDragThePaneEdge()
+    {
+        // A static side rail whose pixels shift slightly WITH the wheel (scrollbar thumb,
+        // hover flicker) is a moved island across a wide static gutter — it must not pull
+        // the pane's right edge across the gap (live: Outputs/Sources rail sliced into a
+        // chat capture).
+        var rail = new SD.Rectangle(W - 60, 200, 40, 240);
+        int offset = 0;
+        SD.Bitmap Grab(SD.Rectangle r)
+        {
+            SD.Bitmap bmp = Render(r, offset, animationPhase: 0, withVideo: false);
+            for (int y = rail.Top; y < rail.Bottom; y++)
+            for (int x = rail.Left; x < rail.Right; x++)
+                bmp.SetPixel(x - r.X, y - r.Y, SD.Color.FromArgb(255, 90 + (offset / 10 + x + y) % 40, 80, 80));
+            return bmp;
+        }
+        void Wheel(int delta) => offset += delta < 0 ? 150 : -150;
+
+        SD.Rectangle refined = ScrollProbe.Refine(Region, hint: null, Grab, Wheel, sleep: _ => { });
+
+        Assert.True(refined.Right <= Pane.Right + 24, $"refined {refined} crossed the gutter toward the rail");
+    }
+
+    [Fact]
     public void NothingMoves_KeepsTheUserRect()
     {
         SD.Bitmap Grab(SD.Rectangle r) => Render(r, 0, animationPhase: 0, withVideo: false);
