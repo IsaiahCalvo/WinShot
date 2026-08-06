@@ -120,7 +120,16 @@ public static class ScrollPaneDetector
                 return null;
             bool chromium = IsChromiumFamily(root, out IntPtr renderWidget);
             if (chromium && renderWidget != IntPtr.Zero)
+            {
+                // Chromium/Electron: managed UIA only sees the lossy MSAA→UIA proxy on
+                // pre-138 engines (sparse tree, huge boxes). The MSAA tree is the real
+                // one — NVDA's path — and resolving OBJID_CLIENT materializes it.
                 WakeChromiumAccessibility(renderWidget);
+                var msaa = Task.Run(() => WinShot.Capture.MsaaElementDetector
+                    .ElementRectFromPoint(renderWidget, p, timeout));
+                if (msaa.Wait(timeout) && msaa.Result is SD.Rectangle fromMsaa)
+                    return fromMsaa;
+            }
             var task = Task.Run(() =>
             {
                 // The tree materializes asynchronously after a Chromium wake — retry.

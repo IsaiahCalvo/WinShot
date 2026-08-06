@@ -114,6 +114,9 @@ public partial class App : Application
         SetupTray();
         _hotkeys = new HotkeyManager();
         RegisterHotkeys();
+        // Electron apps keep renderer accessibility enabled while this mutex exists —
+        // required for Alt-hover element detection to see their full element tree.
+        WinShot.Capture.MsaaElementDetector.HoldScreenReaderMutex();
         Log.Info("WinShot started");
 
         if (_settings.Current.CheckForUpdatesOnStartup)
