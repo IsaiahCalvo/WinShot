@@ -1215,13 +1215,17 @@ public partial class App : Application
         "Scrolling capture failed", "Scrolling capture failed", async () =>
         {
             SD.Rectangle? picked = null;
+            bool paneClick = false;
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
             PerfLog.TrackFirstShown(selector, "scrolling selector");
             try
             {
                 if (await selector.ShowAsync(paneHover: true) == WF.DialogResult.OK &&
                     selector.SelectedRegionPx is SD.Rectangle r)
+                {
                     picked = r;
+                    paneClick = selector.SelectedByPaneClick;
+                }
             }
             finally
             {
@@ -1232,18 +1236,21 @@ public partial class App : Application
             await WaitForOverlayDismissAsync();
             region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
 
-            // Pane scoping: a selection spanning several panes (chat + sidebar) breaks the
-            // stitcher, so before capturing, ask the OS which pane scrolls (Win32/UIA hint)
-            // and verify with a one-notch wheel probe — the capture then covers only the
-            // pane that actually moves. Any failure silently keeps the user's rect.
-            SD.Rectangle refined = await Task.Run(() =>
+            // Pane scoping runs ONLY for pane clicks: the highlighted-pane rect is a hint,
+            // so the wheel probe verifies and tightens it. A hand-drawn marquee is an
+            // explicit instruction — captured exactly as drawn, no second-guessing.
+            SD.Rectangle refined = region;
+            if (paneClick)
             {
-                var center = new SD.Point(region.X + region.Width / 2, region.Y + region.Height / 2);
-                PaneInfo? hint = ScrollPaneDetector.FromPoint(center, TimeSpan.FromMilliseconds(700));
-                return ScrollProbe.Refine(region, hint);
-            });
+                refined = await Task.Run(() =>
+                {
+                    var center = new SD.Point(region.X + region.Width / 2, region.Y + region.Height / 2);
+                    PaneInfo? hint = ScrollPaneDetector.FromPoint(center, TimeSpan.FromMilliseconds(700));
+                    return ScrollProbe.Refine(region, hint);
+                });
+            }
 
-            var stitched = await ScrollingStatusWindow.Run(refined, direction, paneScoped: refined != region);
+            var stitched = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick);
             if (stitched is not null)
                 HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
             else

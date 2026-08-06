@@ -34,6 +34,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SelectorMode _mode = SelectorMode.Area;
     private bool _paneHover;
     private SD.Rectangle? _hoverPane;
+    /// <summary>True when the selection came from clicking the highlighted pane rather than
+    /// a hand-drawn marquee — only pane clicks opt into probe refinement downstream; a rect
+    /// the user deliberately drew is captured exactly as drawn.</summary>
+    public bool SelectedByPaneClick { get; private set; }
     private List<WindowInfo> _windows = new();
     private readonly List<SelectorPane> _panes = new();
     private SD.Point _dragStartScreen;     // physical screen px (GetCursorPos)
@@ -118,6 +122,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         _mode = mode;
         _paneHover = paneHover;
+        SelectedByPaneClick = false;
         _completion = new TaskCompletionSource<WF.DialogResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -168,6 +173,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hoverWindow = null;
         _paneHover = false;
         _hoverPane = null;
+        SelectedByPaneClick = false;
         SelectedRegionPx = null;
         DisposeFrozen();
         _capturedRegion?.Dispose();
@@ -571,6 +577,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         else if (_paneHover && _pendingScreen is null && _hoverPane is SD.Rectangle pane)
         {
             // Bare click on the highlighted pane accepts it (CleanShot's scrolling flow).
+            SelectedByPaneClick = true;
             Confirm(VirtualFromScreen(pane));
         }
     }
