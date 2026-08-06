@@ -850,6 +850,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point) ?? seed.Bounds);
         if (instant is not null && instant != _hoverPane)
         {
+            // Hysteresis: a near-identical re-detection (sub-cell wobble) keeps the current
+            // rect so the highlight sits still while the cursor roams inside one element.
+            if (_hoverPane is SD.Rectangle old && instant is SD.Rectangle now)
+            {
+                SD.Rectangle overlap = SD.Rectangle.Intersect(old, now);
+                long union = (long)old.Width * old.Height + (long)now.Width * now.Height
+                    - (long)overlap.Width * overlap.Height;
+                if (union > 0 && (long)overlap.Width * overlap.Height * 100 / union >= 80)
+                    return;
+            }
             _hoverPane = instant;
             Log.Info($"Alt hover: {(visual is not null ? "visual" : "seed")} {instant}");
             InvalidateAllSurfaces();

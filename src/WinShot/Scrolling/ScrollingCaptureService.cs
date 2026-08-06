@@ -132,7 +132,8 @@ public static class ScrollingCaptureService
         /// sidebar detector lacked: a column that never changed across every scroll step
         /// is a static rail (or blank margin) beyond doubt, so de-duplicating it at finish
         /// cannot eat content the way per-pair guesses did.</summary>
-        private bool[]? _columnEverChanged;
+        private int[]? _columnChangeCounts;
+        private int _columnPairs;
         private ulong[]? _prevColumnHashes;
 
         private ScrollDirection? _direction;
@@ -599,10 +600,10 @@ public static class ScrollingCaptureService
         /// </summary>
         private void DeduplicateStaticRails(SD.Bitmap vertical)
         {
-            if (_paneScoped || _columnEverChanged is null || _stitchedFrames < 3 ||
-                vertical.Height <= _region.Height)
+            if (_paneScoped || _columnChangeCounts is null || _stitchedFrames < 3 ||
+                _columnPairs < 3 || vertical.Height <= _region.Height)
                 return;
-            int width = _columnEverChanged.Length;
+            int width = _columnChangeCounts.Length;
             if (width != vertical.Width)
                 return;
 
@@ -642,17 +643,22 @@ public static class ScrollingCaptureService
 
         private int EdgeStaticCluster(bool fromLeft)
         {
-            bool[] changed = _columnEverChanged!;
-            int width = changed.Length;
+            int[] counts = _columnChangeCounts!;
+            int width = counts.Length;
+            // A rail's columns change RARELY (its content refreshes a few times — hover
+            // states, contextual panels updating as the chat streams); scrolled content's
+            // columns change on essentially every step. Frequency separates them where the
+            // old "never changed" rule refused rails that blinked even once.
+            int staticCeiling = Math.Max(1, _columnPairs / 5);
             int flicker = 0, span = 0;
             for (int i = 0; i < width; i++)
             {
                 int x = fromLeft ? i : width - 1 - i;
-                if (changed[x])
+                if (counts[x] > staticCeiling)
                 {
                     if (++flicker > 3)
                         break;
-                    continue; // may bridge interior flicker, but never ends the cluster
+                    continue; // may bridge interior busy columns, but never ends the cluster
                 }
                 span = i + 1;
             }
@@ -738,11 +744,12 @@ public static class ScrollingCaptureService
                 ulong[] cols = ImageStitcher.ComputeColumnHashes(frame);
                 if (_prevColumnHashes is not null && _prevColumnHashes.Length == cols.Length)
                 {
-                    _columnEverChanged ??= new bool[cols.Length];
+                    _columnChangeCounts ??= new int[cols.Length];
+                    _columnPairs++;
                     for (int x = 0; x < cols.Length; x++)
                     {
                         if (cols[x] != _prevColumnHashes[x])
-                            _columnEverChanged[x] = true;
+                            _columnChangeCounts[x]++;
                     }
                 }
                 _prevColumnHashes = cols;
