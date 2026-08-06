@@ -33,7 +33,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SelectorOptions _options;
     private SelectorMode _mode = SelectorMode.Area;
     private bool _paneHover;
+    /// <summary>Alt-hover resolves the deepest UIA ELEMENT (normal captures) instead of the
+    /// scrollable pane (scrolling captures).</summary>
+    private bool _elementGranularity;
     private SD.Rectangle? _hoverPane;
+    private bool _elementLookupBusy;
+    private SD.Point _elementLookupPoint;
     /// <summary>True when the selection came from clicking the highlighted pane rather than
     /// a hand-drawn marquee — only pane clicks opt into probe refinement downstream; a rect
     /// the user deliberately drew is captured exactly as drawn.</summary>
@@ -119,10 +124,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector.Dispose();
     }
 
-    public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area, bool paneHover = false)
+    public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area,
+        bool paneHover = false, bool elementHover = false)
     {
         _mode = mode;
-        _paneHover = paneHover;
+        _paneHover = paneHover || elementHover;
+        _elementGranularity = elementHover;
         SelectedByPaneClick = false;
         _completion = new TaskCompletionSource<WF.DialogResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -173,7 +180,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _movingPending = false;
         _hoverWindow = null;
         _paneHover = false;
+        _elementGranularity = false;
         _hoverPane = null;
+        _elementLookupBusy = false;
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
         DisposeFrozen();
@@ -487,19 +496,33 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_paneHover && _pendingScreen is null && !_dragging)
         {
             bool alt = (WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt;
-            SD.Rectangle? pane = null;
-            if (alt)
+            if (!alt)
+            {
+                if (_hoverPane is not null)
+                {
+                    _hoverPane = null;
+                    InvalidateAllSurfaces();
+                }
+            }
+            else if (_elementGranularity)
+            {
+                // Element rects come from a UIA walk (slow, cross-process): resolve on a
+                // worker, marshal back, drop stale answers. The synchronous pane path below
+                // seeds an instant fallback so Alt always shows SOMETHING immediately.
+                KickElementLookup(_currentScreen);
+            }
+            else
             {
                 WindowInfo? win = ResolveWindow(_currentScreen);
-                pane = win is null
+                SD.Rectangle? pane = win is null
                     ? null
                     : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(win.Handle, _currentScreen)
                         ?? win.Bounds;
-            }
-            if (pane != _hoverPane)
-            {
-                _hoverPane = pane;
-                InvalidateAllSurfaces();
+                if (pane != _hoverPane)
+                {
+                    _hoverPane = pane;
+                    InvalidateAllSurfaces();
+                }
             }
         }
 
@@ -801,6 +824,59 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         return _windows.FirstOrDefault(w => w.Bounds.Contains(screenPoint));
     }
+
+    private void KickElementLookup(SD.Point point)
+    {
+        // Seed instantly with the coarse pane/window rect so Alt feels immediate, then let
+        // the element walk refine it.
+        if (_hoverPane is null)
+        {
+            WindowInfo? seed = ResolveWindow(point);
+            if (seed is not null)
+            {
+                _hoverPane = WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point)
+                    ?? seed.Bounds;
+                Log.Info($"Alt hover: seed {_hoverPane}");
+                InvalidateAllSurfaces();
+            }
+        }
+        if (_elementLookupBusy)
+            return; // one in flight; the next mouse move re-kicks with the fresh point
+        _elementLookupBusy = true;
+        _elementLookupPoint = point;
+        WindowInfo? win = ResolveWindow(point);
+        IntPtr root = win?.Handle ?? IntPtr.Zero;
+        Task.Run(() =>
+        {
+            SD.Rectangle? rect = WinShot.Scrolling.ScrollPaneDetector.ElementRectFromPoint(
+                root, point, TimeSpan.FromMilliseconds(450));
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    _elementLookupBusy = false;
+                    if (IsDisposed || !_paneHover)
+                        return;
+                    // Only adopt if the cursor is still near where we asked (stale answers
+                    // for old points would make the highlight lag-jump).
+                    if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
+                        r != _hoverPane)
+                    {
+                        _hoverPane = r;
+                        Log.Info($"Alt hover: element {r}");
+                        InvalidateAllSurfaces();
+                    }
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+                // Selector torn down mid-lookup — nothing to update.
+            }
+        });
+    }
+
+    private static int Distance(SD.Point a, SD.Point b) =>
+        Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
 
     private bool IsPaneHandle(IntPtr handle)
     {

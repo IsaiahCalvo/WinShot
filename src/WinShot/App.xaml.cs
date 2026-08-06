@@ -544,7 +544,7 @@ public partial class App : Application
             PerfLog.TrackFirstShown(selector, mode == FastRegionSelectorDialog.SelectorMode.Window ? "capture-window selector" : "capture-area selector");
             try
             {
-                if (await selector.ShowAsync(mode, paneHover: mode == FastRegionSelectorDialog.SelectorMode.Area) == WF.DialogResult.OK &&
+                if (await selector.ShowAsync(mode, elementHover: mode == FastRegionSelectorDialog.SelectorMode.Area) == WF.DialogResult.OK &&
                     selector.SelectedRegionPx is SD.Rectangle region)
                 {
                     // Screen-freeze: the selector already cropped the result from its frozen

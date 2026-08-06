@@ -105,6 +105,96 @@ public static class ScrollPaneDetector
         }
     }
 
+    /// <summary>
+    /// Element-level lookup for Alt-hover in the region selector: the deepest UIA element
+    /// whose bounds contain the point, found by GEOMETRIC descent from the window root
+    /// (child-contains-point at each level). No ElementFromPoint — hit-testing would land
+    /// on the selector's own overlay; geometry works against the frozen screen. Blocking;
+    /// call from a worker thread.
+    /// </summary>
+    public static SD.Rectangle? ElementRectFromPoint(IntPtr root, SD.Point p, TimeSpan timeout)
+    {
+        try
+        {
+            if (root == IntPtr.Zero)
+                return null;
+            bool chromium = IsChromiumFamily(root, out IntPtr renderWidget);
+            if (chromium && renderWidget != IntPtr.Zero)
+                WakeChromiumAccessibility(renderWidget);
+            var task = Task.Run(() =>
+            {
+                // The tree materializes asynchronously after a Chromium wake — retry.
+                int[] delays = chromium ? new[] { 0, 160, 350 } : new[] { 0 };
+                foreach (int delay in delays)
+                {
+                    if (delay > 0)
+                        Thread.Sleep(delay);
+                    if (DescendToElement(root, p) is SD.Rectangle found)
+                        return (SD.Rectangle?)found;
+                }
+                return null;
+            });
+            return task.Wait(timeout) ? task.Result : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static SD.Rectangle? DescendToElement(IntPtr root, SD.Point p)
+    {
+        AutomationElement? current;
+        try
+        {
+            current = AutomationElement.FromHandle(root);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        var walker = TreeWalker.ControlViewWalker;
+        SD.Rectangle? best = null;
+        int siblingBudget = 600; // total cross-process rect reads we are willing to pay
+        for (int depth = 0; depth < 24 && current is not null && siblingBudget > 0; depth++)
+        {
+            AutomationElement? child;
+            try
+            {
+                child = walker.GetFirstChild(current);
+            }
+            catch (Exception)
+            {
+                break;
+            }
+            AutomationElement? hit = null;
+            while (child is not null && --siblingBudget > 0)
+            {
+                try
+                {
+                    System.Windows.Rect r = child.Current.BoundingRectangle;
+                    if (!r.IsEmpty && r.Width >= 8 && r.Height >= 8 &&
+                        p.X >= r.X && p.X < r.X + r.Width && p.Y >= r.Y && p.Y < r.Y + r.Height)
+                    {
+                        hit = child;
+                        best = new SD.Rectangle((int)r.X, (int)r.Y, (int)r.Width, (int)r.Height);
+                        break; // descend into the first containing child (documents nest cleanly)
+                    }
+                    child = walker.GetNextSibling(child);
+                }
+                catch (Exception)
+                {
+                    break;
+                }
+            }
+            if (hit is null)
+                break;
+            current = hit;
+        }
+        return best;
+    }
+
     // ---- Tier 0: Win32 ----
 
     private static IntPtr RootWindowFromPoint(SD.Point p)
