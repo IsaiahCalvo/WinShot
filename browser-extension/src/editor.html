@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WinShot Capture</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="mark" aria-hidden="true"></span><strong>WinShot Capture</strong></div>
+    <div class="actions">
+      <button id="save-png">Save PNG</button>
+      <button id="save-jpeg">Save JPEG</button>
+      <button id="save-webp">Save WebP</button>
+      <button id="save-pdf">Save PDF</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <h1 id="title">Loading capture…</h1>
+      <div id="state" class="pill">Loading</div>
+      <dl id="report"></dl>
+      <section id="warnings" hidden><h2>Warnings</h2><ul></ul></section>
+      <details id="pdf-options">
+        <summary>PDF capture options</summary>
+        <label for="pdf-layout">Layout</label>
+        <select id="pdf-layout">
+          <option value="multipage">Multiple pages</option>
+          <option value="single">One continuous page</option>
+        </select>
+        <label for="pdf-page-size">Page size</label>
+        <select id="pdf-page-size">
+          <option value="auto">Match capture</option>
+          <option value="a4">A4</option>
+          <option value="letter">Letter</option>
+          <option value="legal">Legal</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div class="custom-size">
+          <label for="pdf-width">Width (in)</label><input id="pdf-width" type="number" min="1" max="200" step="0.1">
+          <label for="pdf-height">Height (in)</label><input id="pdf-height" type="number" min="1" max="200" step="0.1">
+        </div>
+        <label for="pdf-header">Header</label><input id="pdf-header" maxlength="500" placeholder="{title}">
+        <label for="pdf-footer">Footer</label><input id="pdf-footer" maxlength="500" placeholder="Page {page} of {pages}">
+        <label for="pdf-watermark">Watermark</label><input id="pdf-watermark" maxlength="500">
+        <small>Templates: {title}, {url}, {date}, {time}, {page}, {pages}</small>
+      </details>
+      <p class="privacy">All rendering and exports happen locally in your browser.</p>
+    </aside>
+    <section class="stage" aria-label="Capture preview">
+      <div id="preview"></div>
+    </section>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="editor.js"></script>
+</body>
+</html>
