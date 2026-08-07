@@ -786,38 +786,47 @@ public static class ScrollingCaptureService
             int[] moved = _columnMovedEvidence;
             int[] unmoved = _columnUnmovedStructured;
             int width = moved.Length;
-            // moved<=2 and a wider flicker bridge: a rail's own scrollbar or a hover pass
-            // can give a handful of its columns a couple of coincidental matches without
-            // making it content (content columns match on nearly every pair).
-            int flicker = 0, deepestUnmoved = -1, unmovedColumns = 0;
+            int flicker = 0, unmovedColumns = 0;
+            var candidates = new List<int>();
             for (int i = 0; i < width; i++)
             {
                 int x = fromLeft ? i : width - 1 - i;
-                if (moved[x] > 2)
+                if (moved[x] > 1)
                 {
-                    if (++flicker > 8)
+                    if (++flicker > 3)
                         break;
                     continue;
                 }
                 if (unmoved[x] > 1)
                 {
-                    deepestUnmoved = i;
+                    candidates.Add(i);
                     unmovedColumns++;
                 }
             }
-            if (deepestUnmoved < 0 || unmovedColumns < 48)
+            if (candidates.Count == 0 || unmovedColumns < 48)
                 return 0;
-            // Pad past the rail's last structured column only through columns that never
-            // moved — the pad must not paint over provably-scrolling content.
-            int band = deepestUnmoved + 1;
-            for (int i = deepestUnmoved + 1; i < Math.Min(deepestUnmoved + 9, width); i++)
+
+            // A rail's inner edge is followed by a clean GUTTER; a sparse content edge is
+            // not (its neighbours scroll). Take the deepest structured-unmoved column whose
+            // next 24 inward columns are all non-moving — this stops the band from
+            // swallowing the first letters of sparse text (live regression 2026-08-07).
+            for (int c = candidates.Count - 1; c >= 0; c--)
             {
-                int x = fromLeft ? i : width - 1 - i;
-                if (moved[x] > 1)
-                    break;
-                band = i + 1;
+                int start = candidates[c] + 1;
+                bool gutter = true;
+                for (int i = start; i < Math.Min(start + 24, width); i++)
+                {
+                    int x = fromLeft ? i : width - 1 - i;
+                    if (moved[x] > 1)
+                    {
+                        gutter = false;
+                        break;
+                    }
+                }
+                if (gutter)
+                    return candidates[c] + 1 + 8;
             }
-            return band;
+            return 0;
         }
 
         private const int FooterSlack = 5;

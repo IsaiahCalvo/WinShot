@@ -25,7 +25,7 @@ public class StationaryViewportDetectorTests
             StationaryViewportRegions regions = StationaryViewportDetector.Detect(previous, current, offset);
 
             Assert.Equal(0, regions.LeftSide);
-            Assert.Equal(Sidebar, regions.RightSide);
+            Assert.InRange(regions.RightSide, Sidebar, Sidebar + 24); // static gutter may join the panel
             Assert.True(regions.RightMatchInset > regions.RightSide);
             Assert.InRange(regions.BottomOverlay, 20, 64);
         }
@@ -204,7 +204,7 @@ public class StationaryViewportDetectorTests
     {
         // The static sidebar (and its pad) may be cropped from the output — verify the
         // document columns adjacent to whatever the output's right edge now is.
-        int edge = Math.Min(actual.Width, Width - Sidebar);
+        int edge = Math.Min(actual.Width, Width - Sidebar - 20); // stop before the padding gutter (band may own it)
         for (int y = Height + 11; y < actual.Height - 64; y += 31)
         for (int x = edge - 24; x < edge; x += 7)
             Assert.Equal(DocumentColor(x, y).ToArgb(), actual.GetPixel(x, y).ToArgb());
@@ -295,6 +295,10 @@ public class StationaryViewportDetectorTests
 
     private static SD.Color DocumentColor(int x, int documentY)
     {
+        // Real content keeps a padding gutter before a side panel; the rail-band gutter
+        // rule depends on it, so the fixture models it too.
+        if (x >= Width - Sidebar - 20)
+            return SD.Color.FromArgb(255, 22, 25, 30);
         int hash = Mix(x, documentY);
         if (documentY % 29 is >= 3 and <= 6 && x % 113 < 74)
             return SD.Color.FromArgb(255, 150, 154, 162);
