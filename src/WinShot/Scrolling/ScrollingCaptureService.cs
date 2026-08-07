@@ -167,6 +167,7 @@ public static class ScrollingCaptureService
         // shrink the matchable area (observed creep 73→334px on a 1005px region — a third of
         // every frame written off as "footer"). Grow only on agreement across consecutive
         // differing pairs; decay back when detections run consistently lower.
+        private int _midAnimationSkips;
         private int _footerGrowCandidate;
         private int _footerGrowStreak;
         private int _footerShrinkStreak;
@@ -401,8 +402,13 @@ public static class ScrollingCaptureService
                 previousMatch = FrameSignature.Build(_lastFrame, provisionalLeft, provisionalRight);
                 currentMatch = FrameSignature.Build(frame, provisionalLeft, provisionalRight);
             }
+            // Calibration prior for repetitive content (auto mode only): we injected a
+            // known number of wheel notches, so the expected offset breaks NCC peak ties.
+            int expectedOffset = auto && _pxPerNotch > 0 && _lastSentNotches > 0
+                ? (int)Math.Round(_lastSentNotches * _pxPerNotch)
+                : 0;
             int matchedOffset = ScrollMatcher.FindOffset(previousMatch, currentMatch,
-                _runningHeader, _runningFooter);
+                _runningHeader, _runningFooter, expectedOffset);
             if (matchedOffset == 0 && _lastFrame is not null)
             {
                 FixedBands provisional = FixedRegionDetector.DetectVertical(_lastFrame, frame);
@@ -415,7 +421,7 @@ public static class ScrollingCaptureService
                     Math.Max(Math.Max(provisional.Trailing, legacyFooter), provisionalRegions.BottomOverlay)),
                     sig.Height / 3);
                 matchedOffset = ScrollMatcher.FindOffset(previousMatch, currentMatch,
-                    provisionalHeader, provisionalFooter);
+                    provisionalHeader, provisionalFooter, expectedOffset);
             }
             int header = _runningHeader;
             int footer = _runningFooter;
@@ -458,7 +464,7 @@ public static class ScrollingCaptureService
                         candidateLeftMatch, candidateRightMatch);
                 }
                 int verifiedOffset = ScrollMatcher.FindOffset(refinedPrevious, refinedCurrent,
-                    candidateHeader, candidateFooter);
+                    candidateHeader, candidateFooter, expectedOffset);
                 if (verifiedOffset > 0)
                 {
                     matchedOffset = verifiedOffset;
@@ -532,12 +538,25 @@ public static class ScrollingCaptureService
                 return true; // keep watching; direction still unknown
             }
 
+            // A large fractional NCC peak means this frame was grabbed MID smooth-scroll
+            // animation — appending it would tear the join by the sub-pixel drift. Skip it
+            // once; the next poll grabs the settled frame. (Exact-tier matches never flag.)
+            if (matchedOffset > 0 && _state == Track.Tracking &&
+                ScrollMatcher.LastPeakFraction > 0.25f && _midAnimationSkips < 2)
+            {
+                _midAnimationSkips++;
+                Log.Info($"Scroll: mid-animation frame (peak fraction {ScrollMatcher.LastPeakFraction:0.00}) — re-grabbing");
+                frame.Dispose();
+                return true;
+            }
+
             switch (_state)
             {
                 case Track.Tracking:
                     int d = matchedOffset;
                     if (d > 0)
                     {
+                        _midAnimationSkips = 0;
                         AppendVertical(frame, matchSig, d, header, footer);
                         if (auto)
                             Recalibrate(d);
@@ -744,9 +763,32 @@ public static class ScrollingCaptureService
             // TRUE content at that alignment, so overwrite the bottom of the overlap with it.
             // Scroll is top-down, so only the final frame's stamp survives — once, at the
             // true bottom. Top rows stay append-only: that is what keeps sticky headers out.
-            // ponytail: fixed bottom-quarter heal zone; a pixel-static mask is the upgrade
-            // path if floating chrome ever sits above H/4.
-            int heal = Math.Min(Math.Min(srcStart - header, sig.Height / 4), _stitch.Height);
+            int overlapAbove = srcStart - header;
+            int heal = Math.Min(Math.Min(overlapAbove, sig.Height / 4), _stitch.Height);
+            // Adaptive seam: extend the heal zone upward through rows where the canvas
+            // DISAGREES with this frame (a ghost stamped above the fixed quarter), placing
+            // the effective seam at a run of agreeing rows instead of a blind height/4 —
+            // the scrollshot min-difference-cut idea on data we already have.
+            int maxHeal = Math.Min(Math.Min(overlapAbove, sig.Height / 2), _stitch.Height);
+            int agreeRun = 0;
+            for (int h = heal + 1; h <= maxHeal && agreeRun < 8; h++)
+            {
+                int frameRow = srcStart - h;
+                int canvasRow = _stitch.Height - h;
+                if (frameRow < 0 || canvasRow < 0)
+                    break;
+                float disagree = Math.Abs(sig.Mean[frameRow] - _canvas.Mean[canvasRow]) +
+                    Math.Abs(sig.Energy[frameRow] - _canvas.Energy[canvasRow]);
+                if (disagree > 6f)
+                {
+                    heal = h;
+                    agreeRun = 0;
+                }
+                else
+                {
+                    agreeRun++;
+                }
+            }
             if (heal > 0)
             {
                 _stitch.Overwrite(frame, srcStart - heal, heal, _stitch.Height - heal);

@@ -275,9 +275,24 @@ public static class ScrollMatcher
     public static int FindOffset(FrameSignature previous, FrameSignature current, int bottomBand = 0)
         => FindOffset(previous, current, 0, bottomBand);
 
-    /// <summary>Band-aware overload that excludes fixed chrome at both viewport edges.</summary>
-    public static int FindOffset(FrameSignature previous, FrameSignature current, int topBand, int bottomBand)
+    /// <summary>
+    /// Fractional part of the last correlation peak (parabolic fit over the three NCC
+    /// scores around the winner). Near 0 = the content sat on an integer row boundary;
+    /// above ~0.2 = the frame was grabbed MID smooth-scroll animation and stitching it
+    /// would tear the join by a sub-pixel drift. Exact-tier matches always reset it to 0.
+    /// The capture loop is single-threaded per capture; thread-static keeps tests isolated.
+    /// </summary>
+    [ThreadStatic] public static float LastPeakFraction;
+
+    /// <summary>Band-aware overload that excludes fixed chrome at both viewport edges.
+    /// <paramref name="expectedOffset"/> (0 = none) is a calibration prior: when the
+    /// unique-peak gate would refuse because repetitive content produced rival peaks, a
+    /// winner within a few px of the prediction is accepted anyway — the prior only ever
+    /// DISAMBIGUATES between found peaks, it never searches (the tolerant-matching lesson).</summary>
+    public static int FindOffset(FrameSignature previous, FrameSignature current, int topBand, int bottomBand,
+        int expectedOffset = 0)
     {
+        LastPeakFraction = 0f;
         if (previous.Height != current.Height || previous.Width != current.Width)
             return 0;
 
@@ -285,10 +300,11 @@ public static class ScrollMatcher
         if (exact > 0)
             return exact;
 
-        return FindOffsetByCorrelation(previous, current, topBand, bottomBand);
+        return FindOffsetByCorrelation(previous, current, topBand, bottomBand, expectedOffset);
     }
 
-    private static int FindOffsetByCorrelation(FrameSignature prev, FrameSignature curr, int topBand, int bottomBand)
+    private static int FindOffsetByCorrelation(FrameSignature prev, FrameSignature curr, int topBand, int bottomBand,
+        int expectedOffset = 0)
     {
         int height = curr.Height;
         int start = Math.Clamp(topBand, 0, height / 2);
@@ -353,14 +369,34 @@ public static class ScrollMatcher
 
         if (bestOffset == 0 || bestScore < MinScore)
             return 0;
-        if (secondScore > float.MinValue && bestScore - secondScore < PeakMargin)
-            return 0; // repetitive content: several offsets look alike — refuse to guess
+        if (secondScore > float.MinValue && bestScore - secondScore < PeakMargin &&
+            (expectedOffset <= 0 || Math.Abs(bestOffset - expectedOffset) > 8))
+        {
+            // Repetitive content: several offsets look alike — refuse to guess, UNLESS the
+            // winner agrees with the wheel calibration prediction (we injected a known
+            // number of notches); the prior breaks the tie but never overrides the gates.
+            return 0;
+        }
 
         int overlapLen = end - start - bestOffset;
         if (!MeanConfirms(currMean, start, prevMean, start + bestOffset, overlapLen))
             return 0;
         if (!StripsAgree(curr, prev, stripStatic, start, bestOffset, overlapLen))
             return 0;
+
+        // Sub-pixel peak fit (3-point parabola): a large fractional part means the frame
+        // was grabbed mid smooth-scroll animation — the caller can re-grab instead of
+        // stitching a torn join.
+        if (bestOffset > 1 && bestOffset < maxOffset - 1)
+        {
+            int overlapM = end - start - (bestOffset - 1);
+            int overlapP = end - start - (bestOffset + 1);
+            float sm = Ncc(currEnergy, start, prevEnergy, start + bestOffset - 1, overlapM);
+            float sp = Ncc(currEnergy, start, prevEnergy, start + bestOffset + 1, overlapP);
+            float denom = sm - 2f * bestScore + sp;
+            if (Math.Abs(denom) > 1e-6f)
+                LastPeakFraction = Math.Abs(0.5f * (sm - sp) / denom);
+        }
         return bestOffset;
     }
 
