@@ -133,6 +133,15 @@ public static class ScrollingCaptureService
         /// is a static rail (or blank margin) beyond doubt, so de-duplicating it at finish
         /// cannot eat content the way per-pair guesses did.</summary>
         private int[]? _columnChangeCounts;
+        /// <summary>Per column: pairs in which its pixels MATCHED at the accepted scroll
+        /// offset. Content scrolls (matches at d); a contextual side rail that re-renders as
+        /// the view moves changes WITHOUT moving — zero moved-evidence forever. This is the
+        /// discriminator change-frequency can't provide.</summary>
+        private int[]? _columnMovedEvidence;
+        /// <summary>Per column: pairs where its STRUCTURED pixels failed to match at the
+        /// scroll offset — the positive signature of a rail (contextual or static). Flat
+        /// columns count in neither array.</summary>
+        private int[]? _columnUnmovedStructured;
         private int _columnPairs;
         private ulong[]? _prevColumnHashes;
 
@@ -617,6 +626,79 @@ public static class ScrollingCaptureService
         /// CleanShot look. Content is safe by construction: scrolled content changes its
         /// columns on every step, so its columns can never qualify.
         /// </summary>
+        /// <summary>
+        /// Per column, sampled: did this column's pixels MATCH at the accepted scroll offset
+        /// (current[y] ≈ previous[y+d])? Content scrolls, so it matches; a contextual rail
+        /// that re-renders as the view moves changes WITHOUT matching. Blank columns match
+        /// trivially and accumulate evidence — correct, blank margins must never be cropped.
+        /// </summary>
+        private void AccumulateMovedEvidence(SD.Bitmap previous, SD.Bitmap current, int offset, int header, int footer)
+        {
+            int width = current.Width, height = current.Height;
+            int yStart = header + 4;
+            int yEnd = height - footer - offset - 4;
+            if (yEnd - yStart < 40)
+                return;
+            _columnMovedEvidence ??= new int[width];
+            var prevData = previous.LockBits(new SD.Rectangle(0, 0, width, height),
+                System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            var currData = current.LockBits(new SD.Rectangle(0, 0, width, height),
+                System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            try
+            {
+                var rowC = new byte[width * 4];
+                var rowP = new byte[width * 4];
+                var prevSampled = new int[width]; // luma of the previous SAMPLED row
+                var matchInf = new int[width];
+                var informative = new int[width];
+                bool havePrevSampled = false;
+                for (int y = yStart; y < yEnd; y += 4)
+                {
+                    Marshal.Copy(currData.Scan0 + y * currData.Stride, rowC, 0, rowC.Length);
+                    Marshal.Copy(prevData.Scan0 + (y + offset) * prevData.Stride, rowP, 0, rowP.Length);
+                    for (int x = 0; x < width; x += 4)
+                    {
+                        int i = x * 4;
+                        int luma = (rowC[i + 2] * 77 + rowC[i + 1] * 151 + rowC[i] * 28) >> 8;
+                        // Only STRUCTURED samples vote: a flat rail background matches itself
+                        // at any offset exactly like blank content margins do — neither may
+                        // count as scroll evidence.
+                        if (havePrevSampled && Math.Abs(luma - prevSampled[x]) > 10)
+                        {
+                            informative[x]++;
+                            if (Math.Abs(rowC[i] - rowP[i]) <= 12 &&
+                                Math.Abs(rowC[i + 1] - rowP[i + 1]) <= 12 &&
+                                Math.Abs(rowC[i + 2] - rowP[i + 2]) <= 12)
+                                matchInf[x]++;
+                        }
+                        prevSampled[x] = luma;
+                    }
+                    havePrevSampled = true;
+                }
+                _columnUnmovedStructured ??= new int[width];
+                for (int x = 0; x < width; x += 4)
+                {
+                    if (informative[x] < 5)
+                        continue; // flat column — neutral, votes for nothing
+                    bool moved = matchInf[x] >= informative[x] * 85 / 100;
+                    for (int k = x; k < Math.Min(width, x + 4); k++)
+                    {
+                        if (moved)
+                            _columnMovedEvidence[k]++;
+                        else
+                            _columnUnmovedStructured[k]++;
+                    }
+                }
+            }
+            finally
+            {
+                previous.UnlockBits(prevData);
+                current.UnlockBits(currData);
+            }
+        }
+
         private SD.Bitmap DeduplicateStaticRails(SD.Bitmap vertical)
         {
             if (_paneScoped || _columnChangeCounts is null || _stitchedFrames < 3 ||
@@ -629,14 +711,18 @@ public static class ScrollingCaptureService
 
             try
             {
-                // Tier 1 — CROP: an edge strip that (almost) never changed the whole run is
-                // a static rail; the honest output simply doesn't include it (CleanShot's
-                // behavior). Strict ceiling so a sparse content margin — rare long lines DO
-                // change it more often — is never cropped.
-                int cropLeft = EdgeStaticCluster(true, Math.Max(1, _columnPairs / 10));
-                int cropRight = EdgeStaticCluster(false, Math.Max(1, _columnPairs / 10));
-                if (cropLeft < 64 || cropLeft > cap) cropLeft = 0;
-                if (cropRight < 64 || cropRight > cap) cropRight = 0;
+                // Tier 1 — CROP: an edge strip whose columns NEVER MOVED WITH THE SCROLL is
+                // a rail, no matter how often it changed — a contextual side panel re-renders
+                // as the view moves but its pixels never match at the scroll offset, while
+                // content always does and blank margins match trivially (and are kept). This
+                // is the discriminator change-frequency can't provide.
+                int cropLeft = EdgeUnmovedCluster(true);
+                int cropRight = EdgeUnmovedCluster(false);
+                // Flat rail backgrounds and blank margins are both evidence-neutral, so the
+                // cluster may legitimately span rail + gutter — allow up to 60% of width.
+                int cropCap = width * 3 / 5;
+                if (cropLeft < 64 || cropLeft > cropCap) cropLeft = 0;
+                if (cropRight < 64 || cropRight > cropCap) cropRight = 0;
                 if (cropLeft > 0 || cropRight > 0)
                 {
                     var cropped = vertical.Clone(
@@ -674,6 +760,41 @@ public static class ScrollingCaptureService
                 Log.Error("Static rail de-duplication failed (non-fatal)", ex);
             }
             return vertical;
+        }
+
+        /// <summary>
+        /// Crop span from the edge: walk inward over columns that never moved with the
+        /// scroll (structured-unmoved or flat), and crop only to the INNERMOST
+        /// structured-unmoved column (+pad). Neutral blank runs never extend a crop past
+        /// the rail's real content — blank content margins must survive — and a cluster
+        /// with too little structured-unmoved anchor is no rail at all.
+        /// </summary>
+        private int EdgeUnmovedCluster(bool fromLeft)
+        {
+            if (_columnMovedEvidence is null || _columnUnmovedStructured is null)
+                return 0;
+            int[] moved = _columnMovedEvidence;
+            int[] unmoved = _columnUnmovedStructured;
+            int width = moved.Length;
+            int flicker = 0, deepestUnmoved = -1, unmovedColumns = 0;
+            for (int i = 0; i < width; i++)
+            {
+                int x = fromLeft ? i : width - 1 - i;
+                if (moved[x] > 1)
+                {
+                    if (++flicker > 3)
+                        break;
+                    continue;
+                }
+                if (unmoved[x] > 1)
+                {
+                    deepestUnmoved = i;
+                    unmovedColumns++;
+                }
+            }
+            if (deepestUnmoved < 0 || unmovedColumns < 48)
+                return 0;
+            return deepestUnmoved + 1 + 8;
         }
 
         private int EdgeStaticCluster(bool fromLeft, int staticCeiling)
@@ -810,6 +931,11 @@ public static class ScrollingCaptureService
                         if (cols[x] != _prevColumnHashes[x])
                             _columnChangeCounts[x]++;
                     }
+                }
+                if (_lastFrame is not null && _lastFrame.Width == frame.Width &&
+                    _lastFrame.Height == frame.Height)
+                {
+                    AccumulateMovedEvidence(_lastFrame, frame, offset, header, footer);
                 }
                 _prevColumnHashes = cols;
             }
