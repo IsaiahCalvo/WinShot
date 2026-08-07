@@ -10,6 +10,8 @@ const heightNode = document.querySelector("#capture-height");
 const tilesNode = document.querySelector("#capture-tiles");
 const templateNode = document.querySelector("#filename-template");
 const batchModeNode = document.querySelector("#batch-mode");
+const retentionNode = document.querySelector("#history-retention");
+const contextMenuNode = document.querySelector("#context-menu");
 
 function showSettings() {
   delayNode.value = String(settings.delayMs);
@@ -19,6 +21,8 @@ function showSettings() {
   tilesNode.value = String(settings.maxTiles);
   templateNode.value = settings.fileNameTemplate;
   batchModeNode.value = settings.batchMode;
+  retentionNode.value = String(settings.historyRetentionDays);
+  contextMenuNode.checked = settings.contextMenu;
 }
 
 async function persistSettings() {
@@ -30,12 +34,14 @@ async function persistSettings() {
     maxHeightCss: Number(heightNode.value),
     maxTiles: Number(tilesNode.value),
     fileNameTemplate: templateNode.value,
-    batchMode: batchModeNode.value
+    batchMode: batchModeNode.value,
+    historyRetentionDays: Number(retentionNode.value),
+    contextMenu: contextMenuNode.checked
   }));
 }
 
 showSettings();
-for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode, templateNode, batchModeNode]) {
+for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode, templateNode, batchModeNode, retentionNode, contextMenuNode]) {
   node.addEventListener("change", () => persistSettings().catch((error) => {
     status.className = "error";
     status.textContent = error.message;
@@ -136,6 +142,12 @@ document.querySelector("#cancel").addEventListener("click", async () => {
     status.className = "error";
     status.textContent = error.message;
   }
+});
+
+document.querySelector("#open-history").addEventListener("click", async (event) => {
+  event.preventDefault();
+  await chrome.tabs.create({ url: chrome.runtime.getURL("src/history.html") });
+  window.close();
 });
 
 chrome.runtime.onMessage.addListener((message) => {

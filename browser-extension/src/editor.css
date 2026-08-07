@@ -30,3 +30,13 @@ details input, details select { width:100%; border:1px solid #ffffff24; border-r
 #toast { position:fixed; right:18px; bottom:18px; max-width:420px; padding:10px 13px; border-radius:8px; background:#202832; box-shadow:0 4px 20px #0008; opacity:0; pointer-events:none; transition:opacity .15s; }
 #toast.show { opacity:1; }
 @media(max-width:800px){ main{grid-template-columns:1fr} aside{border-right:0;border-bottom:1px solid #ffffff14} header{height:auto;padding:10px;align-items:flex-start}.actions{flex-wrap:wrap;justify-content:flex-end} }
+
+#open-history { color: #7ab8ff; align-self: center; margin-left: 6px; font-size: 13px; }
+
+#print-image { display: none; }
+
+@media print {
+  header, main, aside, #toast { display: none !important; }
+  body { background: #fff !important; }
+  #print-image { display: block !important; width: 100%; }
+}

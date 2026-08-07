@@ -7,14 +7,22 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "./contract.js";
-import { listRecords, putRecord, putTile } from "./store.js";
-import { captureLimits, loadSettings, normalizeSettings, renderFileName } from "./settings.js";
+import { getTiles, listRecords, pruneOlderThan, putRecord, putTile } from "./store.js";
+import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserveFileNameCounter, saveSettings } from "./settings.js";
 
-const activeCaptures = new Map();
+const activeCaptures = new Map();     // keyed by tabId
+const activeWindowLocks = new Set();  // captureVisibleTab is window-scoped — one capture per window
 const pickerFrames = new Map();
 const pickerSettings = new Map();
 let activeBatch = null;
 let lastScreenshotAt = 0;
+
+const MODE_LABELS = {
+  "visible": "Capture visible part",
+  "full-page": "Capture entire page",
+  "region": "Capture selection",
+  "element": "Capture element"
+};
 
 async function recoverInterruptedRecords() {
   const records = await listRecords();
@@ -147,11 +155,14 @@ async function throttleCapture(minIntervalMs, signal) {
   }
 }
 
-async function screenshot(windowId, minIntervalMs, signal) {
+async function screenshot(windowId, minIntervalMs, signal, session = null) {
   await throttleCapture(minIntervalMs, signal);
   throwIfAborted(signal);
   const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
   lastScreenshotAt = Date.now();
+  // Verify the intended tab was still active when the pixels were taken — a tab
+  // switch in the throttle gap would silently stitch another site's pixels.
+  if (session) await assertStillActive(session);
   return await (await fetch(dataUrl)).blob();
 }
 
@@ -200,11 +211,17 @@ async function seamScore(previous, current) {
     xb.drawImage(b, left - current.destXPx, top - current.destYPx, right - left, bottom - top, 0, 0, sampleWidth, sampleHeight);
     const da = xa.getImageData(0, 0, sampleWidth, sampleHeight).data;
     const db = xb.getImageData(0, 0, sampleWidth, sampleHeight).data;
+    // Tolerant color difference (channel mean blended with luma), adapted from
+    // Snapzy's stitcher (BSD-3-Clause, see THIRD_PARTY_NOTICES.md) — far less
+    // sensitive to sub-pixel antialiasing shimmer than exact RGB comparison.
     let error = 0;
     for (let i = 0; i < da.length; i += 4) {
-      error += Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]);
+      const channelMean = (Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2])) / 3;
+      const lumaA = da[i] * 299 + da[i + 1] * 587 + da[i + 2] * 114;
+      const lumaB = db[i] * 299 + db[i + 1] * 587 + db[i + 2] * 114;
+      error += 0.42 * channelMean + 0.58 * (Math.abs(lumaA - lumaB) / 1000);
     }
-    return Math.max(0, 1 - error / ((da.length / 4) * 3 * 255));
+    return Math.max(0, 1 - error / ((da.length / 4) * 255));
   } finally {
     a.close();
     b.close();
@@ -230,7 +247,7 @@ async function storeVisibleCapture(session, controller) {
   session.state = SessionState.CAPTURING;
   progress(session, "Capturing visible viewport…");
   await assertStillActive(session);
-  const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal);
+  const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal, session);
   const bitmap = await createImageBitmap(source);
   const width = bitmap.width;
   const height = bitmap.height;
@@ -376,7 +393,7 @@ async function storeScrollingCapture(session, controller) {
           }
         }
 
-        const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal);
+        const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal, session);
         const cropped = await cropScreenshot(source, screenshotMetrics(result.metrics, frameHost));
         const scale = (cropped.scaleX + cropped.scaleY) / 2;
         if (expectedScale === null) expectedScale = scale;
@@ -404,13 +421,18 @@ async function storeScrollingCapture(session, controller) {
           seamScore: null
         };
 
-        const previous = [...workingTiles].reverse().find((candidate) =>
+        // A 2D tile can have both a left and an upper seam — score EVERY overlapping
+        // neighbor and keep the worst, so "minimum seam confidence" means what it says.
+        const neighbors = workingTiles.filter((candidate) =>
           candidate.destXPx < tile.destXPx + tile.widthPx && candidate.destXPx + candidate.widthPx > tile.destXPx &&
           candidate.destYPx < tile.destYPx + tile.heightPx && candidate.destYPx + candidate.heightPx > tile.destYPx);
-        if (previous) {
-          tile.seamScore = await seamScore(previous, tile);
-          if (tile.seamScore !== null) seamScores.push(tile.seamScore);
+        for (const neighbor of neighbors) {
+          const score = await seamScore(neighbor, tile);
+          if (score === null) continue;
+          tile.seamScore = tile.seamScore === null || tile.seamScore === undefined ? score : Math.min(tile.seamScore, score);
+          seamScores.push(score);
         }
+        tile.seamScore ??= null;
 
         await putTile(tile);
         workingTiles.push(tile);
@@ -448,6 +470,13 @@ async function storeScrollingCapture(session, controller) {
     }
     if (safetyStopReason) session.report.warnings.push(safetyStopReason);
 
+    // Pages often report a scrollHeight a few px beyond the reachable scroll maximum
+    // (fractional zoom/DPR rounding). Those pixels do not exist — clamp the extent to
+    // what tiles actually covered instead of reporting a phantom gap.
+    const coveredWidth = Math.max(0, ...tileMetadata.map((tile) => tile.destX + tile.widthCss));
+    const coveredHeight = Math.max(0, ...tileMetadata.map((tile) => tile.destY + tile.heightCss));
+    if (coveredWidth > 0 && extent.width - coveredWidth > 0 && extent.width - coveredWidth <= 8) extent.width = coveredWidth;
+    if (coveredHeight > 0 && extent.height - coveredHeight > 0 && extent.height - coveredHeight <= 8) extent.height = coveredHeight;
     const coverage = validateCoverage(extent.width, extent.height, tileMetadata);
     session.report.coverage = coverage;
     session.report.dimensionsCss = { ...extent };
@@ -466,13 +495,19 @@ async function storeScrollingCapture(session, controller) {
       : SessionState.PARTIAL;
   } finally {
     if (prepared) {
+      let failures = null;
       try {
         const result = await sendToTab(session.tabId, { type: "WINSHOT_RESTORE", sessionId: session.id, reason: "capture-finished" }, session.frameId);
         restored = Boolean(result?.restored);
+        failures = result?.failures || null;
       } catch {
         restored = false;
       }
-      session.report.restoration = restored ? "verified" : "watchdog requested; page disconnected before acknowledgement";
+      session.report.restoration = restored
+        ? "verified by read-back"
+        : failures?.length
+          ? `partial — could not restore: ${failures.join(", ")}`
+          : "watchdog requested; page disconnected before acknowledgement";
     }
     if (frameHostPrepared.length) await restoreFrameChain(session, frameHostPrepared);
   }
@@ -482,20 +517,32 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   const tab = tabOverride || await activeTab();
   if (!tab.id) throw new Error("No active tab.");
   if (activeCaptures.has(tab.id)) throw new Error("A WinShot capture is already running in this tab.");
+  // captureVisibleTab shoots whatever tab is active in the WINDOW, so captures must
+  // also be exclusive per window, not just per tab.
+  if (activeWindowLocks.has(tab.windowId)) throw new Error("A WinShot capture is already running in this browser window.");
+  activeWindowLocks.add(tab.windowId);
 
-  const settings = normalizeSettings(options.settings || await loadSettings());
-  const session = createSession({ id: captureId(), mode, tab, target, limits: options.limits || captureLimits(settings) });
-  session.frameId = target?.frameId || 0;
-  session.frameUrl = target?.frameUrl || null;
-  session.fileName = renderFileName(settings.fileNameTemplate, session);
+  let session;
   const controller = new AbortController();
+  try {
+    const settings = normalizeSettings(options.settings || await loadSettings());
+    session = createSession({ id: captureId(), mode, tab, target, limits: options.limits || captureLimits(settings) });
+    session.frameId = target?.frameId || 0;
+    session.frameUrl = target?.frameUrl || null;
+    const reserved = await reserveFileNameCounter();
+    session.fileName = renderFileName(settings.fileNameTemplate, session, new Date(), reserved.counter, reserved.pad);
+  } catch (error) {
+    activeWindowLocks.delete(tab.windowId);
+    throw error;
+  }
   const activeEntry = { session, controller, failureReason: null };
   activeCaptures.set(tab.id, activeEntry);
-  await putRecord(session);
 
   try {
+    await putRecord(session);
     if (mode === CaptureMode.VISIBLE) await storeVisibleCapture(session, controller);
     else await storeScrollingCapture(session, controller);
+    await attachThumbnail(session);
   } catch (error) {
     if (activeEntry.failureReason) {
       session.state = SessionState.FAILED;
@@ -516,6 +563,8 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
     session.finishedAt = new Date().toISOString();
     await putRecord(session);
     activeCaptures.delete(tab.id);
+    activeWindowLocks.delete(tab.windowId);
+    refreshContextMenu().catch(() => {});
   }
 
   if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
@@ -629,9 +678,58 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
 
 async function waitCaptureDelay(tab, delayMs) {
   if (!delayMs) return;
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  // Ping an extension API every few seconds so the service worker's 30s idle timer
+  // cannot fire in the middle of a long capture delay.
+  const deadline = Date.now() + delayMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(5000, deadline - Date.now())));
+    await chrome.storage.session.set({ "winshot:delay-keepalive": Date.now() }).catch(() => {});
+  }
   const current = await chrome.tabs.get(tab.id);
   if (!current?.id || current.url !== tab.url) throw new Error("The page changed during the capture delay.");
+}
+
+// Small preview stored on the record so History can render without loading full tiles.
+async function attachThumbnail(session) {
+  try {
+    const tiles = await getTiles(session.id);
+    if (!tiles.length) return;
+    const first = tiles.find((tile) => tile.destYPx === 0 && tile.destXPx === 0) || tiles[0];
+    const bitmap = await createImageBitmap(first.blob);
+    const scale = Math.min(1, 240 / bitmap.width);
+    const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(Math.min(bitmap.height, bitmap.width) * scale)));
+    const context = canvas.getContext("2d", { alpha: false });
+    context.drawImage(bitmap, 0, 0, bitmap.width, Math.min(bitmap.height, bitmap.width), 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    session.thumbnail = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 });
+  } catch {
+    // History falls back to a text row when no thumbnail exists.
+  }
+}
+
+async function refreshContextMenu() {
+  const settings = await loadSettings();
+  await chrome.contextMenus.removeAll();
+  if (!settings.contextMenu) return;
+  const capturing = activeCaptures.size > 0 || activeBatch;
+  chrome.contextMenus.create({
+    id: capturing ? "winshot-stop" : "winshot-last",
+    title: capturing ? "Stop WinShot capture" : `WinShot: ${MODE_LABELS[settings.lastMode] || MODE_LABELS["full-page"]}`,
+    contexts: ["page", "frame", "selection", "image", "link"]
+  });
+}
+
+async function rememberMode(mode) {
+  const settings = await loadSettings();
+  if (settings.lastMode !== mode) await saveSettings({ ...settings, lastMode: mode });
+  refreshContextMenu().catch(() => {});
+}
+
+async function pruneHistory() {
+  const settings = await loadSettings();
+  if (!settings.historyRetentionDays) return;
+  const cutoff = new Date(Date.now() - settings.historyRetentionDays * 864e5).toISOString();
+  await pruneOlderThan(cutoff);
 }
 
 async function runConfiguredCapture(mode, target = null, tabOverride = null, suppliedSettings = null) {
@@ -676,13 +774,26 @@ async function cancelActiveCapture() {
     activeBatch.controller.abort();
     activeCaptures.get(activeBatch.currentTabId)?.controller.abort();
   }
-  return { cancelled: Boolean(active || activeBatch) };
+  // Stop also dismisses an open picker overlay — it is part of the capture flow.
+  const hadPicker = pickerFrames.has(tab.id);
+  if (hadPicker) {
+    pickerSettings.delete(tab.id);
+    await stopPickers(tab.id);
+  }
+  refreshContextMenu().catch(() => {});
+  return { cancelled: Boolean(active || activeBatch || hadPicker) };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
-    if (message.type === "WINSHOT_START_CAPTURE") return await runConfiguredCapture(message.mode, message.target || null, null, message.settings);
-    if (message.type === "WINSHOT_START_PICKER") return await startPicker(message.mode, null, message.settings);
+    if (message.type === "WINSHOT_START_CAPTURE") {
+      await rememberMode(message.mode);
+      return await runConfiguredCapture(message.mode, message.target || null, null, message.settings);
+    }
+    if (message.type === "WINSHOT_START_PICKER") {
+      await rememberMode(message.mode === "region" ? CaptureMode.REGION : CaptureMode.ELEMENT);
+      return await startPicker(message.mode, null, message.settings);
+    }
     if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || [], { settings: message.settings, combinePdf: message.combinePdf });
     if (message.type === "WINSHOT_CANCEL_CAPTURE") {
       return await cancelActiveCapture();
@@ -708,13 +819,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+async function startByMode(mode) {
+  await rememberMode(mode);
+  if (mode === CaptureMode.REGION || mode === CaptureMode.ELEMENT) return await startPicker(mode);
+  return await runConfiguredCapture(mode);
+}
+
 async function handleCommand(command) {
-  if (command === "capture-visible") return await runConfiguredCapture(CaptureMode.VISIBLE);
-  if (command === "capture-full-page") return await runConfiguredCapture(CaptureMode.FULL_PAGE);
+  if (command === "capture-visible") return await startByMode(CaptureMode.VISIBLE);
+  if (command === "capture-full-page") return await startByMode(CaptureMode.FULL_PAGE);
+  if (command === "capture-region") return await startByMode(CaptureMode.REGION);
+  if (command === "last-used-action") {
+    if (activeCaptures.size > 0 || activeBatch) return await cancelActiveCapture();
+    const settings = await loadSettings();
+    return await startByMode(settings.lastMode);
+  }
   return undefined;
 }
 
-chrome.commands.onCommand.addListener((command) => { handleCommand(command).catch(() => {}); });
+// The returned promise keeps the service worker alive for the duration of the capture.
+chrome.commands.onCommand.addListener((command) => handleCommand(command).catch(() => {}));
+
+chrome.contextMenus.onClicked.addListener((info) => {
+  (async () => {
+    if (info.menuItemId === "winshot-stop") return await cancelActiveCapture();
+    if (info.menuItemId === "winshot-last") {
+      const settings = await loadSettings();
+      return await startByMode(settings.lastMode);
+    }
+    return undefined;
+  })().catch(() => {});
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create("winshot-prune-history", { periodInMinutes: 60 * 24, delayInMinutes: 5 });
+  refreshContextMenu().catch(() => {});
+});
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create("winshot-prune-history", { periodInMinutes: 60 * 24, delayInMinutes: 5 });
+  refreshContextMenu().catch(() => {});
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "winshot-prune-history") pruneHistory().catch(() => {});
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes["winshot:capture-settings"]) refreshContextMenu().catch(() => {});
+});
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   const active = activeCaptures.get(tabId);

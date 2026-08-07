@@ -25,6 +25,20 @@ The package requires site access plus `activeTab`, `scripting`, `downloads`, `st
 frame capture; WinShot does not use debugger access or send page data to a service. `tabs` and
 `nativeMessaging` remain optional.
 
+## Merged product surface (2026-08-07)
+
+The Claude-built v0.1 extension was audited (cross-audit in `.claudehelper/codex-cross-audit.md`),
+its engine retired, and its product surface reimplemented here: capture History page with
+thumbnails/retention (`src/history.html`), Copy-to-clipboard and Print in the editor, right-click
+"repeat last capture" context menu (morphs to Stop), FireShot-style default hotkeys
+(Alt+Shift+1/3/4, Ctrl+Shift+S = repeat-or-stop; unset automatically if another extension such as
+FireShot already claims them), FireShot-compatible filename tokens with an atomic %n counter, and
+toolbar icons. Stitching upgrades from OSS research (ShareX/Snapzy/pic/OpenScreenShot, see
+THIRD_PARTY_NOTICES.md): sticky elements are demoted to static instead of hidden (no blank holes,
+no duplicated headers), tolerant seam scoring, all-neighbor seam minimums, and reachable-bottom
+extent clamping. Restoration is now verified by read-back, captures are window-locked, and every
+screenshot re-verifies the active tab.
+
 ## Current support boundary
 
 The capture engine supports visible viewport, full page, dragged selection with edge auto-scroll,

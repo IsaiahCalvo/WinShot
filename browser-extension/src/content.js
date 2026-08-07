@@ -57,40 +57,54 @@
   }
 
   function restore(reason = "requested") {
-    if (!session) return { restored: true, reason };
+    if (!session) return { restored: true, reason, failures: [] };
     const current = session;
     session = null;
     clearInterval(current.watchdog);
     current.observer?.disconnect();
+    const failures = [];
 
     for (const [element, properties] of [...current.changedStyles].reverse()) {
       if (!(element instanceof Element)) continue;
       for (const [property, original] of properties) {
-        if (original.value) element.style.setProperty(property, original.value, original.priority);
-        else element.style.removeProperty(property);
+        try {
+          if (original.value) element.style.setProperty(property, original.value, original.priority);
+          else element.style.removeProperty(property);
+        } catch {
+          failures.push(`style:${property}`);
+        }
       }
     }
     current.freezeStyle?.remove();
+    if (current.freezeStyle?.isConnected) failures.push("freeze-style");
 
     if (current.owner instanceof Element && current.owner !== scrollingElement()) {
       current.owner.scrollTo(current.ownerScroll.left, current.ownerScroll.top);
+      if (Math.abs(current.owner.scrollTop - current.ownerScroll.top) > 2) failures.push("owner-scroll");
     }
     window.scrollTo(current.windowScroll.left, current.windowScroll.top);
+    // Read back — restoration is only "verified" if the page actually ended up there.
+    if (Math.abs(window.scrollY - current.windowScroll.top) > 2 || Math.abs(window.scrollX - current.windowScroll.left) > 2) {
+      failures.push("window-scroll");
+    }
 
     try {
       const selection = getSelection();
       selection?.removeAllRanges();
       for (const range of current.selection) selection?.addRange(range);
       current.activeElement?.focus?.({ preventScroll: true });
+      if (current.activeElement instanceof Element && current.activeElement.isConnected && document.activeElement !== current.activeElement) {
+        failures.push("focus");
+      }
     } catch {
-      // A page may have removed the selected/focused node while capture was running.
+      failures.push("selection");
     }
 
     if (current.targetElement && current.targetToken) {
       if (current.targetAttributeBefore === null) current.targetElement.removeAttribute("data-winshot-target");
       else current.targetElement.setAttribute("data-winshot-target", current.targetAttributeBefore);
     }
-    return { restored: true, reason };
+    return { restored: failures.length === 0, reason, failures };
   }
 
   function savePickerState() {
@@ -548,7 +562,16 @@
       if (position !== "fixed" && position !== "sticky") continue;
       const rect = node.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
-      session.floating.push({ node, anchor: rect.top + rect.height / 2 < innerHeight / 2 ? "top" : "bottom" });
+      if (position === "sticky") {
+        // Hiding a sticky element leaves a blank hole at its in-flow slot. Demoting it
+        // to static paints it exactly once, where the layout puts it, in whichever tile
+        // covers that scroll range. (Technique validated against kidandcat/pic + OpenScreenShot.)
+        rememberStyle(node, "position", "static");
+        continue;
+      }
+      const tall = rect.height > innerHeight * 0.5;
+      const anchor = tall ? "overlay" : rect.top + rect.height / 2 < innerHeight / 2 ? "top" : "bottom";
+      session.floating.push({ node, anchor });
     }
   }
 
@@ -600,7 +623,9 @@
   function setFloatingVisibility(atStart, atEnd) {
     if (!session) return;
     for (const item of session.floating) {
-      const show = (item.anchor === "top" && atStart) || (item.anchor === "bottom" && atEnd);
+      // Fixed header appears once (first tile), fixed footer/chat bar once (last tile,
+      // which lands at the true page bottom). Viewport-covering overlays only in tile 1.
+      const show = (item.anchor === "top" && atStart) || (item.anchor === "bottom" && atEnd) || (item.anchor === "overlay" && atStart);
       rememberStyle(item.node, "visibility", show ? "visible" : "hidden");
     }
   }

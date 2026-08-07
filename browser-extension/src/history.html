@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WinShot — History</title>
+  <link rel="stylesheet" href="history.css">
+</head>
+<body>
+  <header>
+    <input type="checkbox" id="select-all" title="Select all shown">
+    <button id="delete-selected" disabled>Delete selected [0]</button>
+    <input type="search" id="filter" placeholder="Filter by title or URL…">
+  </header>
+  <main id="list" aria-live="polite"></main>
+  <footer>
+    <button id="load-more" hidden>Load more</button>
+    <p id="empty" hidden>No captures yet. Use the WinShot toolbar button or Alt+Shift+1.</p>
+  </footer>
+  <script type="module" src="history.js"></script>
+</body>
+</html>

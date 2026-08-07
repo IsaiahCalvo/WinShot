@@ -84,6 +84,40 @@ export async function getTiles(captureId) {
   }
 }
 
+// Delete all records finished before `cutoffIso`, their tiles, and any orphaned tiles
+// whose parent record no longer exists. Returns the number of records removed.
+export async function pruneOlderThan(cutoffIso) {
+  const records = await listRecords();
+  const keep = new Set();
+  let removed = 0;
+  for (const record of records) {
+    const stamp = record.finishedAt || record.startedAt || "";
+    if (stamp && stamp < cutoffIso) {
+      await deleteCapture(record.id);
+      removed++;
+    } else {
+      keep.add(record.id);
+    }
+  }
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(TILES, "readwrite");
+    const store = tx.objectStore(TILES);
+    const keys = await requestResult(store.getAllKeys());
+    for (const key of keys) {
+      if (!keep.has(key[0])) store.delete(key);
+    }
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+  return removed;
+}
+
 export async function deleteCapture(captureId) {
   const db = await openDatabase();
   try {

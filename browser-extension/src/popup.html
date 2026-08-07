@@ -12,10 +12,10 @@
     <div><strong>WinShot</strong><small>Browser capture</small></div>
   </header>
   <main>
-    <button data-mode="full-page"><span>Entire page</span><kbd>Alt Shift F</kbd></button>
-    <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift V</kbd></button>
+    <button data-mode="full-page"><span>Entire page</span><kbd>Alt Shift 1</kbd></button>
+    <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift 3</kbd></button>
     <button id="browser-window"><span>Browser window</span><small>Uses WinShot desktop window capture</small></button>
-    <button data-picker="region"><span>Drag a selection</span><small>Auto-scrolls at page edges</small></button>
+    <button data-picker="region"><span>Drag a selection</span><kbd>Alt Shift 4</kbd><small>Auto-scrolls at page edges</small></button>
     <button data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
     <button data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
     <details>
@@ -36,7 +36,17 @@
       <input id="capture-tiles" type="number" min="1" max="2000" step="1">
       <label for="filename-template">Filename template</label>
       <input id="filename-template" maxlength="160" placeholder="{title}-{date}-{time}">
-      <small>Safety limits prevent a runaway page from exhausting memory. Available filename fields: {title}, {host}, {date}, {time}, {mode}</small>
+      <label for="history-retention">Keep history for</label>
+      <select id="history-retention">
+        <option value="7">1 week</option>
+        <option value="30">30 days</option>
+        <option value="90">3 months</option>
+        <option value="180">6 months</option>
+        <option value="365">1 year</option>
+        <option value="0">Forever</option>
+      </select>
+      <label class="check"><input id="context-menu" type="checkbox"> Right-click menu: repeat last capture</label>
+      <small>Safety limits prevent a runaway page from exhausting memory. Filename fields: {title}, {host}, {date}, {time}, {mode}, {counter} — or FireShot-style %t %e %n %y-%m-%d %H:%M:%S</small>
     </details>
     <label for="batch-mode">Batch capture area</label>
     <select id="batch-mode">
@@ -48,7 +58,8 @@
     <label for="batch-urls">Capture a URL list</label>
     <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
     <button id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
-    <button id="cancel"><span>Cancel active capture</span><small>Restores the page and discards the result</small></button>
+    <button id="cancel"><span>Cancel active capture</span><kbd>Ctrl Shift S</kbd><small>Restores the page and discards the result</small></button>
+    <a id="open-history" href="#">Capture history…</a>
   </main>
   <p id="status" role="status">Captures stay on this device.</p>
   <script type="module" src="popup.js"></script>

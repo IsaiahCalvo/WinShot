@@ -116,6 +116,49 @@ document.querySelector("#save-png").addEventListener("click", (event) => runExpo
 document.querySelector("#save-jpeg").addEventListener("click", (event) => runExport(event.currentTarget, "JPEG", "jpg", exportJpeg));
 document.querySelector("#save-webp").addEventListener("click", (event) => runExport(event.currentTarget, "WebP", "webp", exportWebp));
 
+document.querySelector("#copy-clipboard").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const original = button.textContent;
+  try {
+    button.textContent = "Copying…";
+    // ClipboardItem accepts a Promise<Blob>, which also keeps the document "focused enough"
+    // for the clipboard permission while the PNG is still being encoded.
+    const item = new ClipboardItem({ "image/png": exportPng(record, tiles) });
+    await navigator.clipboard.write([item]);
+    showToast("Copied to clipboard.");
+  } catch (error) {
+    showToast(`Copy failed: ${error.message}. Very large captures can exceed the clipboard limit — use Save PNG instead.`);
+  } finally {
+    button.textContent = original;
+  }
+});
+
+document.querySelector("#print-capture").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const original = button.textContent;
+  try {
+    // Print the assembled image, not the positioned tiles — raw tiles overlap by
+    // design and would print duplicated bands. Print CSS shows only #print-image.
+    button.textContent = "Preparing…";
+    const blob = await exportPng(record, tiles, (progress) => { button.textContent = `Preparing ${Math.round(progress * 100)}%`; });
+    const url = URL.createObjectURL(blob);
+    objectUrls.push(url);
+    let image = document.querySelector("#print-image");
+    if (!image) {
+      image = document.createElement("img");
+      image.id = "print-image";
+      document.body.append(image);
+    }
+    image.src = url;
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error("The print image failed to load.")); });
+    window.print();
+  } catch (error) {
+    showToast(`Print failed: ${error.message}`);
+  } finally {
+    button.textContent = original;
+  }
+});
+
 const pdfNodes = {
   layout: document.querySelector("#pdf-layout"),
   pageSize: document.querySelector("#pdf-page-size"),
