@@ -176,6 +176,7 @@ public static class ScrollingCaptureService
         // shrink the matchable area (observed creep 73→334px on a 1005px region — a third of
         // every frame written off as "footer"). Grow only on agreement across consecutive
         // differing pairs; decay back when detections run consistently lower.
+        private SD.Bitmap? _firstFrameKeep;
         private int _midAnimationSkips;
         private int _footerGrowCandidate;
         private int _footerGrowStreak;
@@ -299,6 +300,7 @@ public static class ScrollingCaptureService
             if (discard)
             {
                 _lastFrame?.Dispose();
+                _firstFrameKeep?.Dispose();
                 _horizontal.Dispose();
                 _stitch.Dispose();
                 _strip?.Dispose();
@@ -311,6 +313,7 @@ public static class ScrollingCaptureService
             if (_direction == ScrollDirection.Horizontal)
             {
                 _lastFrame?.Dispose();
+                _firstFrameKeep?.Dispose();
                 _stitch.Dispose();
                 return _horizontal.Take();
             }
@@ -319,6 +322,7 @@ public static class ScrollingCaptureService
             if (vertical is not null)
                 vertical = DeduplicateStaticRails(vertical);
             _lastFrame?.Dispose();
+            _firstFrameKeep?.Dispose();
             return vertical;
         }
 
@@ -598,6 +602,13 @@ public static class ScrollingCaptureService
 
         private void AdoptFirstFrame(SD.Bitmap frame, FrameSignature sig)
         {
+            if (!_paneScoped)
+            {
+                // Ground truth for the finish-time rail composite: the rail exactly as it
+                // looked when the capture started, untouched by seams/retracts/heals.
+                _firstFrameKeep?.Dispose();
+                _firstFrameKeep = (SD.Bitmap)frame.Clone();
+            }
             _stitch.Append(frame, 0, frame.Height);
             _canvas.Append(sig, 0, sig.Height);
             _strip?.Append(frame, 0, frame.Height);
@@ -732,23 +743,27 @@ public static class ScrollingCaptureService
                 // viewport - footer, and the re-attached bottom band contains the rail's
                 // own bottom corner — the fill must stop ABOVE it or it slices a chunk out
                 // of the bottom-right (live 2026-08-07 report).
-                int viewport = Math.Min(_region.Height, vertical.Height);
-                int footer = Math.Min(_runningFooter, viewport);
-                int fillStart = Math.Max(0, viewport - footer);
-                int fillEnd = Math.Max(fillStart, vertical.Height - footer);
+                // Composite the band straight from the RETAINED FIRST FRAME: the rail
+                // exactly as it looked on screen when the capture started, once, followed
+                // by its own background — no reconstruction from stitched leftovers, so no
+                // seam/retract/footer geometry can ever slice a chunk out of it.
+                if (_firstFrameKeep is null || _firstFrameKeep.Width != width)
+                    return vertical;
+                int viewport = Math.Min(_firstFrameKeep.Height, vertical.Height);
                 using var graphics = SD.Graphics.FromImage(vertical);
                 graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
                 foreach ((int x0, int w) in new[] { (0, bandLeft), (width - bandRight, bandRight) })
                 {
                     if (w <= 0)
                         continue;
-                    using var band = vertical.Clone(new SD.Rectangle(x0, 0, w, fillStart > 0 ? fillStart : viewport),
+                    var bandRect = new SD.Rectangle(x0, 0, w, viewport);
+                    graphics.DrawImage(_firstFrameKeep, bandRect, bandRect, SD.GraphicsUnit.Pixel);
+                    using var band = _firstFrameKeep.Clone(bandRect,
                         System.Drawing.Imaging.PixelFormat.Format32bppArgb);
                     using var brush = new SD.SolidBrush(StationaryViewportCompositor.DominantColor(band));
-                    graphics.FillRectangle(brush, x0, fillStart, w, fillEnd - fillStart);
+                    graphics.FillRectangle(brush, x0, viewport, w, vertical.Height - viewport);
                 }
-                Log.Info($"Scroll: static rail kept once (left={bandLeft} right={bandRight} " +
-                    $"fill={fillStart}..{fillEnd} footer={footer})");
+                Log.Info($"Scroll: static rail kept once (left={bandLeft} right={bandRight}, from first frame)");
             }
             catch (Exception ex)
             {
@@ -771,13 +786,16 @@ public static class ScrollingCaptureService
             int[] moved = _columnMovedEvidence;
             int[] unmoved = _columnUnmovedStructured;
             int width = moved.Length;
+            // moved<=2 and a wider flicker bridge: a rail's own scrollbar or a hover pass
+            // can give a handful of its columns a couple of coincidental matches without
+            // making it content (content columns match on nearly every pair).
             int flicker = 0, deepestUnmoved = -1, unmovedColumns = 0;
             for (int i = 0; i < width; i++)
             {
                 int x = fromLeft ? i : width - 1 - i;
-                if (moved[x] > 1)
+                if (moved[x] > 2)
                 {
-                    if (++flicker > 3)
+                    if (++flicker > 8)
                         break;
                     continue;
                 }
