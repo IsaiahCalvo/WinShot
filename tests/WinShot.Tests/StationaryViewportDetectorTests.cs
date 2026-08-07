@@ -113,7 +113,9 @@ public class StationaryViewportDetectorTests
 
         // The byte-static sidebar is cropped out by whole-run evidence (CleanShot
         // behavior); document geometry and the fixed arrow must survive.
-        Assert.InRange(stitched.Width, 300, Width - Sidebar);
+        Assert.Equal(Width, stitched.Width);
+        Assert.True(CountMarkerPixels(stitched, 0, Height) > 20);
+        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
         AssertAdjacentMovingStrip(stitched);
         int firstArrow = FindFirstRedRow(stitched);
         Assert.InRange(firstArrow, stitched.Height - 48, stitched.Height - 1);
@@ -255,8 +257,11 @@ public class StationaryViewportDetectorTests
                     SD.Color color;
                     if (x >= width - sidebar)
                     {
-                        bool marker = ((y / 19) % 3 == 0 && x % 37 is >= 4 and <= 10) ||
-                            (y % 61 is >= 8 and <= 12 && x < width - 12);
+                        int seg = y / 97;
+                        int lh = 17 + (Mix(17, seg) & 15);
+                        int r = (y % 97) % lh;
+                        bool marker = (r < 5 && x < width - 12) ||
+                            (r >= 7 && r < lh - 2 && x % 37 is >= 4 and <= 10);
                         color = marker ? SD.Color.FromArgb(255, 32, 214, 105) : SD.Color.FromArgb(255, 35, 38, 43);
                     }
                     else
@@ -307,4 +312,5 @@ public class StationaryViewportDetectorTests
         }
     }
 }
+
 

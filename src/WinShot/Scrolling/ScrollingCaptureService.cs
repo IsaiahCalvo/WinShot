@@ -707,53 +707,39 @@ public static class ScrollingCaptureService
             int width = _columnChangeCounts.Length;
             if (width != vertical.Width)
                 return vertical;
-            int cap = width * 2 / 5;
 
             try
             {
-                // Tier 1 — CROP: an edge strip whose columns NEVER MOVED WITH THE SCROLL is
-                // a rail, no matter how often it changed — a contextual side panel re-renders
-                // as the view moves but its pixels never match at the scroll offset, while
-                // content always does and blank margins match trivially (and are kept). This
-                // is the discriminator change-frequency can't provide.
-                int cropLeft = EdgeUnmovedCluster(true);
-                int cropRight = EdgeUnmovedCluster(false);
-                // Flat rail backgrounds and blank margins are both evidence-neutral, so the
-                // cluster may legitimately span rail + gutter — allow up to 60% of width.
-                int cropCap = width * 3 / 5;
-                if (cropLeft < 64 || cropLeft > cropCap) cropLeft = 0;
-                if (cropRight < 64 || cropRight > cropCap) cropRight = 0;
-                if (cropLeft > 0 || cropRight > 0)
-                {
-                    var cropped = vertical.Clone(
-                        new SD.Rectangle(cropLeft, 0, width - cropLeft - cropRight, vertical.Height),
-                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                    vertical.Dispose();
-                    Log.Info($"Scroll: static rail cropped (left={cropLeft} right={cropRight})");
-                    return cropped;
-                }
-
-                // Tier 2 — row-level erase for semi-static rails (content refreshed a few
-                // times mid-run): repeated band rows are erased, unique rows survive. A rail
-                // that updates CONTINUOUSLY during capture (live streaming panel) is
-                // indistinguishable from content by any within-image evidence — that case
-                // needs the pane pick (Alt-click).
-                int right = EdgeStaticCluster(false, Math.Max(1, _columnPairs / 5));
-                int left = EdgeStaticCluster(true, Math.Max(1, _columnPairs / 5));
-                if (right < 64 || right > cap) right = 0;
-                if (left < 64 || left > cap) left = 0;
-                if (left == 0 && right == 0)
+                // A rail is an edge strip whose columns NEVER MOVED WITH THE SCROLL — no
+                // matter how often it changed (a contextual panel re-renders as the view
+                // moves but its pixels never match at the scroll offset; content always
+                // does; blank margins are neutral and can never anchor or extend the band).
+                // The user's selection is honored: the output keeps its full width, the
+                // rail keeps its on-screen appearance for the first viewport (exactly like
+                // the pinned input bar keeps its place at the bottom), and below that the
+                // band is filled with the rail's own background — never cropped, and never
+                // able to touch content because moved-evidence columns bound the band.
+                int bandLeft = EdgeUnmovedCluster(true);
+                int bandRight = EdgeUnmovedCluster(false);
+                int bandCap = width * 3 / 5;
+                if (bandLeft < 64 || bandLeft > bandCap) bandLeft = 0;
+                if (bandRight < 64 || bandRight > bandCap) bandRight = 0;
+                if (bandLeft == 0 && bandRight == 0)
                     return vertical;
 
                 int viewport = Math.Min(_region.Height, vertical.Height);
-                int erasedLeft = left > 0
-                    ? StationaryViewportCompositor.EraseRepeatedBandRows(vertical, 0, left, viewport)
-                    : 0;
-                int erasedRight = right > 0
-                    ? StationaryViewportCompositor.EraseRepeatedBandRows(vertical, width - right, right, viewport)
-                    : 0;
-                Log.Info($"Scroll: static rails de-duplicated (left={left} right={right}, " +
-                    $"rows erased={erasedLeft}/{erasedRight})");
+                using var graphics = SD.Graphics.FromImage(vertical);
+                graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                foreach ((int x0, int w) in new[] { (0, bandLeft), (width - bandRight, bandRight) })
+                {
+                    if (w <= 0)
+                        continue;
+                    using var band = vertical.Clone(new SD.Rectangle(x0, 0, w, viewport),
+                        System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                    using var brush = new SD.SolidBrush(StationaryViewportCompositor.DominantColor(band));
+                    graphics.FillRectangle(brush, x0, viewport, w, vertical.Height - viewport);
+                }
+                Log.Info($"Scroll: static rail kept once (left={bandLeft} right={bandRight} pairs={_columnPairs})");
             }
             catch (Exception ex)
             {
@@ -794,32 +780,17 @@ public static class ScrollingCaptureService
             }
             if (deepestUnmoved < 0 || unmovedColumns < 48)
                 return 0;
-            return deepestUnmoved + 1 + 8;
-        }
-
-        private int EdgeStaticCluster(bool fromLeft, int staticCeiling)
-        {
-            int[] counts = _columnChangeCounts!;
-            int width = counts.Length;
-            // A rail's columns change RARELY (its content refreshes a few times — hover
-            // states, contextual panels updating as the chat streams); scrolled content's
-            // columns change on essentially every step. Frequency separates them where the
-            // old "never changed" rule refused rails that blinked even once.
-            // ponytail: tolerate up to 3 flickering columns inside a cluster (a rail's
-            // hover glow or a 1px separator line breathing) — beyond that it isn't static.
-            int flicker = 0, span = 0;
-            for (int i = 0; i < width; i++)
+            // Pad past the rail's last structured column only through columns that never
+            // moved — the pad must not paint over provably-scrolling content.
+            int band = deepestUnmoved + 1;
+            for (int i = deepestUnmoved + 1; i < Math.Min(deepestUnmoved + 9, width); i++)
             {
                 int x = fromLeft ? i : width - 1 - i;
-                if (counts[x] > staticCeiling)
-                {
-                    if (++flicker > 3)
-                        break;
-                    continue; // may bridge interior busy columns, but never ends the cluster
-                }
-                span = i + 1;
+                if (moved[x] > 1)
+                    break;
+                band = i + 1;
             }
-            return span;
+            return band;
         }
 
         private const int FooterSlack = 5;

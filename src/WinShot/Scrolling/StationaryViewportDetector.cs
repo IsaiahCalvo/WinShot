@@ -379,7 +379,7 @@ internal static class StationaryViewportCompositor
             SD.GraphicsUnit.Pixel);
     }
 
-    private static SD.Color DominantColor(SD.Bitmap bitmap)
+    internal static SD.Color DominantColor(SD.Bitmap bitmap)
     {
         var histogram = new Dictionary<int, int>();
         for (int y = 0; y < bitmap.Height; y += 4)
