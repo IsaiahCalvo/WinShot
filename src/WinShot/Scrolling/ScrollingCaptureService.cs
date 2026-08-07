@@ -727,19 +727,28 @@ public static class ScrollingCaptureService
                 if (bandLeft == 0 && bandRight == 0)
                     return vertical;
 
+                // The output is [frame 1 minus the footer band] + appends + [footer band
+                // re-attached once]. The rail's "shown once" pixels therefore end at
+                // viewport - footer, and the re-attached bottom band contains the rail's
+                // own bottom corner — the fill must stop ABOVE it or it slices a chunk out
+                // of the bottom-right (live 2026-08-07 report).
                 int viewport = Math.Min(_region.Height, vertical.Height);
+                int footer = Math.Min(_runningFooter, viewport);
+                int fillStart = Math.Max(0, viewport - footer);
+                int fillEnd = Math.Max(fillStart, vertical.Height - footer);
                 using var graphics = SD.Graphics.FromImage(vertical);
                 graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
                 foreach ((int x0, int w) in new[] { (0, bandLeft), (width - bandRight, bandRight) })
                 {
                     if (w <= 0)
                         continue;
-                    using var band = vertical.Clone(new SD.Rectangle(x0, 0, w, viewport),
+                    using var band = vertical.Clone(new SD.Rectangle(x0, 0, w, fillStart > 0 ? fillStart : viewport),
                         System.Drawing.Imaging.PixelFormat.Format32bppArgb);
                     using var brush = new SD.SolidBrush(StationaryViewportCompositor.DominantColor(band));
-                    graphics.FillRectangle(brush, x0, viewport, w, vertical.Height - viewport);
+                    graphics.FillRectangle(brush, x0, fillStart, w, fillEnd - fillStart);
                 }
-                Log.Info($"Scroll: static rail kept once (left={bandLeft} right={bandRight} pairs={_columnPairs})");
+                Log.Info($"Scroll: static rail kept once (left={bandLeft} right={bandRight} " +
+                    $"fill={fillStart}..{fillEnd} footer={footer})");
             }
             catch (Exception ex)
             {

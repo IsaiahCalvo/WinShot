@@ -50,7 +50,7 @@ public class ScrollingSidebarNccRegressionTests
         // of the output entirely (CleanShot behavior): no sidebar pixels anywhere.
         Assert.Equal(Width, stitched.Width);
         Assert.True(CountMarkerPixels(stitched, 0, Height) > 20, "sidebar missing from first viewport");
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height - 80));
 
         // The floating arrow survives exactly once, near the true bottom.
         int firstArrow = FindFirstRedRow(stitched);
@@ -67,7 +67,7 @@ public class ScrollingSidebarNccRegressionTests
 
         Assert.InRange(stitched.Height, positions[^1] + Height - 48, positions[^1] + Height);
         Assert.Equal(Width, stitched.Width);
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height)); // rail kept once
+        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height - 80)); // rail kept once
         Assert.InRange(FindFirstRedRow(stitched), stitched.Height - 64, stitched.Height - 1);
     }
 

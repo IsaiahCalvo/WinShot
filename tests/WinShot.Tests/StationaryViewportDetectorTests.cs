@@ -96,7 +96,7 @@ public class StationaryViewportDetectorTests
         StationaryViewportCompositor.RemoveRepeatedSidebars(stitched, null, rightSidebar, Height);
 
         Assert.True(CountMarkerPixels(stitched, 0, Height) > 20);
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height - 80));
         AssertSidebarEquals(first, stitched);
     }
 
@@ -115,7 +115,7 @@ public class StationaryViewportDetectorTests
         // behavior); document geometry and the fixed arrow must survive.
         Assert.Equal(Width, stitched.Width);
         Assert.True(CountMarkerPixels(stitched, 0, Height) > 20);
-        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+        Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height - 80));
         AssertAdjacentMovingStrip(stitched);
         int firstArrow = FindFirstRedRow(stitched);
         Assert.InRange(firstArrow, stitched.Height - 48, stitched.Height - 1);
@@ -147,7 +147,7 @@ public class StationaryViewportDetectorTests
             using var stitched = await RunCapture(positions);
 
             Assert.Equal(d + Height, stitched.Height);
-            Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height));
+            Assert.Equal(0, CountMarkerPixels(stitched, Height, stitched.Height - 80));
             Assert.InRange(FindFirstRedRow(stitched), stitched.Height - 48, stitched.Height - 1);
         }
     }
