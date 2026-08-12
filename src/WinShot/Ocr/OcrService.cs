@@ -53,34 +53,13 @@ public static class OcrService
         OcrEngine? engine = GetEngine();
 
         // The engine rejects images larger than MaxImageDimension (~2600 px), so
-        // oversized captures (e.g. a 4K fullscreen) are scaled down to fit.
-        SD.Bitmap? scaled = null;
-        try
+        // oversized captures (e.g. a 4K fullscreen) are scaled down to fit. The
+        // barcode snapshot stays at native size otherwise — ZXing prefers it.
         {
-            SD.Bitmap source = bmp;
-            int maxDim = (int)OcrEngine.MaxImageDimension;
-            if (bmp.Width > maxDim || bmp.Height > maxDim)
-            {
-                double factor = Math.Min((double)maxDim / bmp.Width, (double)maxDim / bmp.Height);
-                int targetW = Math.Max(1, (int)(bmp.Width * factor));
-                int targetH = Math.Max(1, (int)(bmp.Height * factor));
-                // High-quality bicubic downscale so dense/small text survives the
-                // resize; the default Bitmap(bmp, w, h) ctor uses low-quality
-                // interpolation that smears glyph edges and hurts OCR accuracy on 4K.
-                scaled = new SD.Bitmap(targetW, targetH, SDI.PixelFormat.Format32bppArgb);
-                using (var g = SD.Graphics.FromImage(scaled))
-                {
-                    g.CompositingQuality = SD.Drawing2D.CompositingQuality.HighQuality;
-                    g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
-                    g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighQuality;
-                    g.SmoothingMode = SD.Drawing2D.SmoothingMode.HighQuality;
-                    g.DrawImage(bmp, new SD.Rectangle(0, 0, targetW, targetH));
-                }
-                source = scaled;
-            }
+            double fitScale = Math.Min(1.0, OcrEngine.MaxImageDimension / (double)Math.Max(bmp.Width, bmp.Height));
 
             var step = Stopwatch.StartNew();
-            BgraSnapshot snapshot = await Task.Run(() => CaptureBgraSnapshot(source));
+            BgraSnapshot snapshot = await Task.Run(() => SnapshotAtScale(bmp, fitScale));
             snapshotMs = step.ElapsedMilliseconds;
             Task<(List<string> Results, long ElapsedMs)> fastBarcodeTask = Task.Run(() =>
             {
@@ -113,13 +92,36 @@ public static class OcrService
                     "Time & Language > Language & Region, then try again.");
             }
 
-            step.Restart();
-            using SoftwareBitmap softwareBitmap = ToSoftwareBitmap(snapshot);
-            softwareBitmapMs = step.ElapsedMilliseconds;
-            step.Restart();
-            OcrResult result = await engine.RecognizeAsync(softwareBitmap);
-            recognizeMs = step.ElapsedMilliseconds;
-            string text = OcrTextFormatter.Format(result.Lines.Select(l => l.Text), joinLines);
+            // Windows OCR misses glyphs under ~20 px tall, and screen text in a
+            // typical selection sits below that. Small captures are magnified
+            // before recognition; an empty read retries at double the scale
+            // until the engine's dimension cap is hit.
+            string text = string.Empty;
+            double scale = InitialOcrScale(bmp.Width, bmp.Height);
+            while (true)
+            {
+                double snapScale = scale;
+                BgraSnapshot ocrSnapshot = Math.Abs(snapScale - fitScale) < 0.01
+                    ? snapshot
+                    : await Task.Run(() => SnapshotAtScale(bmp, snapScale));
+
+                step.Restart();
+                using (SoftwareBitmap softwareBitmap = ToSoftwareBitmap(ocrSnapshot))
+                {
+                    softwareBitmapMs += step.ElapsedMilliseconds;
+                    step.Restart();
+                    OcrResult result = await engine.RecognizeAsync(softwareBitmap);
+                    recognizeMs += step.ElapsedMilliseconds;
+                    text = OcrTextFormatter.Format(result.Lines.Select(l => l.Text), joinLines);
+                }
+
+                if (!string.IsNullOrWhiteSpace(text))
+                    break;
+                double next = Math.Min(scale * 2, OcrEngine.MaxImageDimension / (double)Math.Max(bmp.Width, bmp.Height));
+                if (next < scale * 1.25)
+                    break; // no meaningful headroom left
+                scale = next;
+            }
 
             var fastBarcode = await fastBarcodeTask;
             barcodeMs = fastBarcode.ElapsedMs;
@@ -135,9 +137,41 @@ public static class OcrService
             LogOcrBreakdown(snapshot, snapshotMs, softwareBitmapMs, recognizeMs, barcodeMs, deepBarcodeMs, total.ElapsedMilliseconds);
             return new OcrCaptureResult(text, qrCodes);
         }
-        finally
+    }
+
+    /// <summary>Scale for the first OCR pass: small captures are magnified
+    /// (up to 4x, toward a ~1600 px long side) so typical screen text clears
+    /// the engine's minimum glyph size; oversized captures shrink to fit
+    /// <see cref="OcrEngine.MaxImageDimension"/>.</summary>
+    private static double InitialOcrScale(int width, int height)
+    {
+        int maxSide = Math.Max(width, height);
+        double upscale = Math.Clamp(1600.0 / maxSide, 1.0, 4.0);
+        return Math.Min(upscale, OcrEngine.MaxImageDimension / (double)maxSide);
+    }
+
+    /// <summary>Snapshots <paramref name="bmp"/> rendered at <paramref name="scale"/>
+    /// with high-quality bicubic resampling (cheap ctor interpolation smears
+    /// glyph edges and hurts OCR accuracy).</summary>
+    private static BgraSnapshot SnapshotAtScale(SD.Bitmap bmp, double scale)
+    {
+        if (Math.Abs(scale - 1.0) < 0.01)
+            return CaptureBgraSnapshot(bmp);
+
+        lock (bmp)
         {
-            scaled?.Dispose();
+            int targetW = Math.Max(1, (int)Math.Round(bmp.Width * scale));
+            int targetH = Math.Max(1, (int)Math.Round(bmp.Height * scale));
+            using var scaled = new SD.Bitmap(targetW, targetH, SDI.PixelFormat.Format32bppArgb);
+            using (var g = SD.Graphics.FromImage(scaled))
+            {
+                g.CompositingQuality = SD.Drawing2D.CompositingQuality.HighQuality;
+                g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighQuality;
+                g.SmoothingMode = SD.Drawing2D.SmoothingMode.HighQuality;
+                g.DrawImage(bmp, new SD.Rectangle(0, 0, targetW, targetH));
+            }
+            return CaptureBgraSnapshot(scaled);
         }
     }
 

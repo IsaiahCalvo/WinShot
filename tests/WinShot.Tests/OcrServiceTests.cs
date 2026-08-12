@@ -31,6 +31,25 @@ public class OcrServiceTests
         Assert.Contains(payload, result.QrCodes);
     }
 
+    [Fact]
+    public async Task ExtractAsync_ReadsSmallText()
+    {
+        // Small UI text: ~7pt Segoe UI in a narrow crop, well below the
+        // ~20px glyph height Windows OCR needs at native scale.
+        using var bmp = new SD.Bitmap(220, 26, SDI.PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(bmp))
+        {
+            g.Clear(SD.Color.White);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+            using var font = new SD.Font("Segoe UI", 7f);
+            g.DrawString("The quick brown fox 12345", font, SD.Brushes.Black, 2, 5);
+        }
+
+        var result = await OcrService.ExtractAsync(bmp, joinLines: true);
+
+        Assert.Contains("quick brown fox", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static SD.Bitmap CreateQrBitmap(string text, SDI.PixelFormat pixelFormat)
     {
         const int size = 180;
