@@ -35,6 +35,12 @@ public sealed class CommandServer : IDisposable
         "exit",
     };
 
+    // Formats GDI+ can decode — what Explorer "Open with" may hand us for the editor.
+    private static readonly HashSet<string> EditableImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp",
+    };
+
     private CancellationTokenSource? _cts;
 
     public event Action<string>? CommandReceived;
@@ -118,6 +124,13 @@ public sealed class CommandServer : IDisposable
         if (string.IsNullOrWhiteSpace(arg)) return null;
 
         string s = arg.Trim().Trim('"');
+
+        // Explorer "Open with" hands us a bare image path (or a second instance forwards
+        // it as edit:<path>) — resolve it before the URL munging below can eat legal
+        // path characters like '?' or '#'.
+        if (TryParseEditCommand(s, out string? edit))
+            return edit;
+
         if (s.StartsWith("winshot://", StringComparison.OrdinalIgnoreCase))
             s = s["winshot://".Length..];
         else if (s.StartsWith("winshot:", StringComparison.OrdinalIgnoreCase))
@@ -136,6 +149,30 @@ public sealed class CommandServer : IDisposable
             return s;
 
         return ValidCommands.TryGetValue(s, out string? command) ? command : null;
+    }
+
+    /// <summary>Maps an existing image-file path (bare or "edit:"-prefixed) to
+    /// "edit:&lt;full path&gt;"; anything else returns false.</summary>
+    private static bool TryParseEditCommand(string s, out string? command)
+    {
+        command = null;
+        string path = s.StartsWith("edit:", StringComparison.OrdinalIgnoreCase)
+            ? s["edit:".Length..].Trim().Trim('"')
+            : s;
+        if (!EditableImageExtensions.Contains(Path.GetExtension(path)))
+            return false;
+        try
+        {
+            path = Path.GetFullPath(path);
+            if (!File.Exists(path))
+                return false;
+        }
+        catch
+        {
+            return false; // not a well-formed path — let the command table have a go
+        }
+        command = "edit:" + path;
+        return true;
     }
 
     private async Task RunAsync(CancellationToken token)

@@ -1,3 +1,4 @@
+using System.IO;
 using WinShot.Core;
 using Xunit;
 
@@ -51,5 +52,41 @@ public class CommandServerTests
     public void ParseCommand_AcceptsWindowBackgroundCapture(string input)
     {
         Assert.Equal("capture-window-background", CommandServer.ParseCommand(input));
+    }
+
+    [Fact]
+    public void ParseCommand_MapsExistingImagePathToEditCommand()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"winshot-openwith-{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(path, []);
+        try
+        {
+            Assert.Equal("edit:" + path, CommandServer.ParseCommand(path));
+            Assert.Equal("edit:" + path, CommandServer.ParseCommand($"\"{path}\""));
+            Assert.Equal("edit:" + path, CommandServer.ParseCommand("edit:" + path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ParseCommand_RejectsMissingAndNonImagePaths()
+    {
+        // Nonexistent image path — must not become an edit command.
+        Assert.Null(CommandServer.ParseCommand(Path.Combine(Path.GetTempPath(), $"winshot-missing-{Guid.NewGuid():N}.png")));
+
+        // Existing file with a non-image extension.
+        string txt = Path.Combine(Path.GetTempPath(), $"winshot-openwith-{Guid.NewGuid():N}.txt");
+        File.WriteAllBytes(txt, []);
+        try
+        {
+            Assert.Null(CommandServer.ParseCommand(txt));
+        }
+        finally
+        {
+            File.Delete(txt);
+        }
     }
 }

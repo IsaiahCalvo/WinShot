@@ -103,7 +103,11 @@ public partial class App : Application
             recoveredPath => _history.AddFile(recoveredPath));
         _settings.Changed += RegisterHotkeys;
 
-        _ = Task.Run(ProtocolRegistrar.EnsureRegistered);
+        _ = Task.Run(() =>
+        {
+            ProtocolRegistrar.EnsureRegistered();
+            ProtocolRegistrar.EnsureOpenWithRegistered();
+        });
         // Self-heal the launch-at-startup entry against the current exe path, so a moved or
         // updated WinShot.exe still launches at login (Settings only writes it on save).
         _ = Task.Run(() => StartupRegistration.Reconcile(_settings.Current.LaunchAtStartup));
@@ -365,6 +369,13 @@ public partial class App : Application
         if (IsCaptureCommand(cmd))
         {
             QueueCaptureCommand(cmd);
+            return;
+        }
+
+        // Explorer "Open with" (or winshot edit:<path>) — open the image in the editor.
+        if (cmd.StartsWith("edit:", StringComparison.OrdinalIgnoreCase))
+        {
+            EditFromHistory(cmd["edit:".Length..]);
             return;
         }
 
