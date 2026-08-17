@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinShot.SettingsUi"
-        Title="WinShot - Settings" Width="660" Height="720" MinWidth="620" MinHeight="560"
+        Title="WinShot - Settings" Width="860" Height="700" MinWidth="780" MinHeight="560"
         Background="{StaticResource WindowBgBrush}" ResizeMode="CanResize" ShowInTaskbar="True"
         WindowStartupLocation="CenterScreen"
         AutomationProperties.Name="WinShot settings"
@@ -23,23 +23,27 @@
              alignment (not right) makes labels start at the card's left edge — same line the
              card border/dividers start at — with controls forming their own left-aligned
              column to the right, instead of both hugging the center with a dead left gutter. -->
-        <Style x:Key="RowLabel" TargetType="TextBlock" BasedOn="{StaticResource FieldLabel}">
-            <Setter Property="Width" Value="150"/>
+        <!-- Row primary text: 13px light, fills the left side of a card row
+             (design: "text left / control right"). -->
+        <Style x:Key="RowLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="TextAlignment" Value="Left"/>
-            <Setter Property="Margin" Value="0,0,12,0"/>
+            <Setter Property="Margin" Value="0,0,16,0"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
         <!-- Hint: muted helper text, sits under or beside a control. -->
         <Style x:Key="Hint" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="8,0,0,0"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
-        <!-- Full-width hint that sits below a control, indented to the control column. -->
+        <!-- Full-width hint that sits below the row's primary text. -->
         <Style x:Key="SubHint" TargetType="TextBlock" BasedOn="{StaticResource Hint}">
-            <Setter Property="Margin" Value="162,1,0,2"/>
+            <Setter Property="Margin" Value="0,-2,0,4"/>
         </Style>
 
         <!-- Implicit input styling so every box/combo/checkbox in the sections inherits
@@ -61,7 +65,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
-                        <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
+                        <Border x:Name="Bg" Background="{StaticResource InputBgBrush}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
                                 CornerRadius="{StaticResource RadiusInput}">
                             <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
@@ -69,7 +73,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource SelectionRingBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.45"/>
@@ -83,10 +87,14 @@
         <!-- HotkeyBox inherits the readable input look but adds a muted "Record shortcut"
              placeholder when no gesture is assigned (matches CleanShot's recorder pills). -->
         <Style TargetType="{x:Type local:HotkeyBox}" BasedOn="{StaticResource SettingsTextBox}">
+            <!-- Hotkeys read in mono per the design language. -->
+            <Setter Property="FontFamily" Value="{StaticResource MonoFontFamily}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type local:HotkeyBox}">
-                        <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
+                        <Border x:Name="Bg" Background="{StaticResource InputBgBrush}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
                                 CornerRadius="{StaticResource RadiusInput}">
                             <Grid>
@@ -94,6 +102,11 @@
                                            Margin="8,0" VerticalAlignment="Center"
                                            Foreground="{StaticResource TextDisabledBrush}"
                                            FontSize="12" FontWeight="Normal"
+                                           IsHitTestVisible="False" Visibility="Collapsed"/>
+                                <TextBlock x:Name="Listening" Text="Press keys…"
+                                           Margin="8,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource SelectedTintTextBrush}"
+                                           FontSize="12" FontWeight="SemiBold"
                                            IsHitTestVisible="False" Visibility="Collapsed"/>
                                 <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
                                               VerticalAlignment="Center"/>
@@ -103,9 +116,20 @@
                             <Trigger Property="Text" Value="">
                                 <Setter TargetName="Placeholder" Property="Visibility" Value="Visible"/>
                             </Trigger>
+                            <!-- Focused = listening: blue tint (design 4f); empty + focused
+                                 shows "Press keys…" instead of the muted placeholder. -->
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Bg" Property="Background" Value="#332E6FC1"/>
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="#804E94E0"/>
                             </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsKeyboardFocused" Value="True"/>
+                                    <Condition Property="Text" Value=""/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Listening" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="Placeholder" Property="Visibility" Value="Collapsed"/>
+                            </MultiTrigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.45"/>
                             </Trigger>
@@ -114,8 +138,9 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style TargetType="CheckBox" BasedOn="{StaticResource DarkCheckBox}">
-            <Setter Property="FontSize" Value="12"/>
+        <!-- Settings rows use toggle switches (blue = state), not checkboxes. -->
+        <Style TargetType="CheckBox" BasedOn="{StaticResource ToggleSwitch}">
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocusVisual}"/>
         </Style>
         <Style TargetType="ComboBox" BasedOn="{StaticResource DarkComboBox}">
@@ -133,59 +158,63 @@
             <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocusVisual}"/>
         </Style>
 
-        <!-- A grouped settings card. Compact padding for CleanShot-tight rhythm. -->
+        <!-- A grouped settings card: #232326, 10px radius, .08 hairline. -->
         <Style x:Key="Card" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource ToolbarBgBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="Background" Value="{StaticResource CardGroupBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}"/>
-            <Setter Property="Padding" Value="14,8,14,10"/>
-            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="CornerRadius" Value="{StaticResource RadiusCardGroup}"/>
+            <Setter Property="Padding" Value="14,7,14,7"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
         </Style>
 
-        <!-- One settings row: label + control, tight vertical rhythm. -->
+        <!-- One settings row: primary text left, control docked right. -->
         <Style x:Key="Row" TargetType="DockPanel">
-            <Setter Property="Margin" Value="0,4"/>
+            <Setter Property="Margin" Value="0,5"/>
+            <Setter Property="MinHeight" Value="28"/>
             <Setter Property="LastChildFill" Value="True"/>
         </Style>
 
-        <!-- Category header used on the Shortcuts list (small, muted, all-caps feel). -->
+        <!-- Category header used on the Shortcuts list (caps, muted, tracked). -->
         <Style x:Key="ShortcutCategory" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Margin" Value="2,2,0,6"/>
+            <Setter Property="Margin" Value="2,4,0,6"/>
         </Style>
 
-        <!-- Hairline separator between groups within a card (CleanShot's inset dividers). -->
+        <!-- Row divider inside a card: .06 hairline running edge to edge. -->
         <Style x:Key="GroupSep" TargetType="Rectangle">
             <Setter Property="Height" Value="1"/>
-            <Setter Property="Fill" Value="{StaticResource BorderBrush}"/>
-            <Setter Property="Margin" Value="0,8,0,8"/>
+            <Setter Property="Fill" Value="{StaticResource DividerBrush}"/>
+            <Setter Property="Margin" Value="-14,6,-14,6"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
         </Style>
 
-        <!-- Top tab: Fluent glyph stacked above a small label. Active tab tints accent,
-             matching CleanShot's icon-over-label tab strip. -->
+        <!-- Sidebar row: 32px, 8px radius, text-only. Selected = blue tint. -->
         <Style x:Key="NavTab" TargetType="ListBoxItem">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Margin" Value="0,1"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocusVisual}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
-                                Padding="10,6" MinWidth="62">
-                            <ContentPresenter HorizontalAlignment="Center"/>
+                                BorderBrush="Transparent" BorderThickness="1"
+                                Height="32" Padding="11,0">
+                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="#0FFFFFFF"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectedTintBgBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SelectedTintBorderBrush}"/>
                                 <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="TextElement.FontWeight" Value="SemiBold"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -193,17 +222,13 @@
             </Setter>
         </Style>
 
-        <!-- A single icon-over-label tab cell. -->
+        <!-- Legacy keys kept for the nav items' inner text (icon hidden by design). -->
         <Style x:Key="NavTabIcon" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
-            <Setter Property="FontSize" Value="19"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="Visibility" Value="Collapsed"/>
         </Style>
         <Style x:Key="NavTabLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="TextAlignment" Value="Left"/>
         </Style>
 
         <!-- Sub-tab pill (Recording: General / Video / GIF). -->
@@ -224,8 +249,9 @@
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
-                                <Setter Property="Foreground" Value="White"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                <Setter Property="TextElement.FontWeight" Value="SemiBold"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -311,15 +337,25 @@
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+
+        <!-- Page title at the top of each section (design: 16/600). -->
+        <Style x:Key="PageTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,2,0,12"/>
+        </Style>
     </Window.Resources>
 
     <DockPanel Margin="0">
 
-        <!-- =============================== TOP TAB BAR =============================== -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource WindowBgBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+        <!-- =============================== SIDEBAR =============================== -->
+        <!-- 192px text-only section rail (design 1e): #19191B, 32px rows, blue-tint
+             selection, About pinned to the bottom. -->
+        <Border DockPanel.Dock="Left" Width="192" Background="{StaticResource SidebarBrush}"
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
             <ListBox x:Name="SectionList" Background="Transparent" BorderThickness="0"
-                     Padding="8,10" HorizontalAlignment="Center"
+                     Padding="8,12"
                      KeyboardNavigation.TabNavigation="Once"
                      AutomationProperties.Name="Settings categories"
                      AutomationProperties.HelpText="Use the arrow keys to choose a settings category."
@@ -329,59 +365,25 @@
                      SelectedIndex="0" SelectionChanged="OnSectionChanged">
                 <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal"/>
+                        <DockPanel LastChildFill="False"/>
                     </ItemsPanelTemplate>
                 </ListBox.ItemsPanel>
-                <ListBoxItem x:Name="GeneralNavItem" AutomationProperties.Name="General settings">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE713;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="General"/>
-                    </StackPanel>
-                </ListBoxItem>
-                <ListBoxItem x:Name="ShortcutsNavItem" AutomationProperties.Name="Shortcut settings">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE765;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Shortcuts"/>
-                    </StackPanel>
-                </ListBoxItem>
-                <ListBoxItem x:Name="QuickAccessNavItem"
-                             AutomationProperties.Name="Quick Access settings">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE7C4;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Quick Access"/>
-                    </StackPanel>
-                </ListBoxItem>
-                <ListBoxItem x:Name="RecordingNavItem" AutomationProperties.Name="Recording settings">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE714;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Recording"/>
-                    </StackPanel>
-                </ListBoxItem>
-                <ListBoxItem x:Name="ScreenshotsNavItem" AutomationProperties.Name="Screenshot settings">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE722;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Screenshots"/>
-                    </StackPanel>
-                </ListBoxItem>
-                <ListBoxItem x:Name="AnnotateNavItem" Visibility="Collapsed"
-                             AutomationProperties.Name="Annotate settings unavailable">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE70F;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Annotate"/>
-                    </StackPanel>
-                </ListBoxItem>
-                <ListBoxItem x:Name="AdvancedNavItem" AutomationProperties.Name="Advanced settings">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE90F;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="Advanced"/>
-                    </StackPanel>
-                </ListBoxItem>
-                <ListBoxItem x:Name="AboutNavItem" AutomationProperties.Name="About WinShot">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE946;"/>
-                        <TextBlock Style="{StaticResource NavTabLabel}" Text="About"/>
-                    </StackPanel>
-                </ListBoxItem>
+                <ListBoxItem x:Name="GeneralNavItem" DockPanel.Dock="Top" Content="General"
+                             AutomationProperties.Name="General settings"/>
+                <ListBoxItem x:Name="ShortcutsNavItem" DockPanel.Dock="Top" Content="Shortcuts"
+                             AutomationProperties.Name="Shortcut settings"/>
+                <ListBoxItem x:Name="QuickAccessNavItem" DockPanel.Dock="Top" Content="Quick Access"
+                             AutomationProperties.Name="Quick Access settings"/>
+                <ListBoxItem x:Name="RecordingNavItem" DockPanel.Dock="Top" Content="Recording"
+                             AutomationProperties.Name="Recording settings"/>
+                <ListBoxItem x:Name="ScreenshotsNavItem" DockPanel.Dock="Top" Content="Screenshots"
+                             AutomationProperties.Name="Screenshot settings"/>
+                <ListBoxItem x:Name="AnnotateNavItem" DockPanel.Dock="Top" Content="Annotate" Visibility="Collapsed"
+                             AutomationProperties.Name="Annotate settings unavailable"/>
+                <ListBoxItem x:Name="AdvancedNavItem" DockPanel.Dock="Top" Content="Advanced"
+                             AutomationProperties.Name="Advanced settings"/>
+                <ListBoxItem x:Name="AboutNavItem" DockPanel.Dock="Bottom" Content="About"
+                             AutomationProperties.Name="About WinShot"/>
             </ListBox>
         </Border>
 
@@ -413,32 +415,34 @@
                 <!-- ===================== GENERAL ===================== -->
                 <ScrollViewer x:Name="SectionGeneral" Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="General"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Startup"/>
-                                    <CheckBox x:Name="StartupCheck" Content="Start at login"/>
+                                    <CheckBox x:Name="StartupCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Start WinShot at login"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Updates"/>
-                                    <CheckBox x:Name="UpdatesCheck" Content="Check for updates on startup"/>
+                                    <CheckBox x:Name="UpdatesCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Check for updates on startup"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableSoundsRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Sounds"/>
-                                    <CheckBox x:Name="PlaySoundsCheck" Content="Play sounds"/>
+                                    <CheckBox x:Name="PlaySoundsCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Play sounds"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableShutterSoundRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Shutter sound"/>
-                                    <ComboBox x:Name="ShutterSoundCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="ShutterSoundCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="Default" Tag="default"/>
                                         <ComboBoxItem Content="Classic" Tag="classic"/>
                                         <ComboBoxItem Content="Subtle" Tag="subtle"/>
                                         <ComboBoxItem Content="Silent" Tag="silent"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Shutter sound"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableTrayIconRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="System tray"/>
-                                    <CheckBox x:Name="ShowTrayIconCheck" Content="Show icon"/>
+                                    <CheckBox x:Name="ShowTrayIconCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show icon"/>
                                 </DockPanel>
 
                                 <Rectangle Style="{StaticResource GroupSep}"/>
@@ -453,8 +457,8 @@
                                     <TextBox x:Name="SaveFolderBox" Margin="0,0,8,0"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Desktop icons"/>
-                                    <CheckBox x:Name="HideIconsCheck" Content="Hide while capturing"/>
+                                    <CheckBox x:Name="HideIconsCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Hide desktop icons while capturing"/>
                                 </DockPanel>
                             </StackPanel>
                         </Border>
@@ -462,8 +466,8 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="After screenshot"/>
-                                    <ComboBox x:Name="PostCaptureActionCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="PostCaptureActionCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="Show Quick Access" Tag="overlay"/>
                                         <ComboBoxItem Content="Copy to clipboard" Tag="copy"/>
                                         <ComboBoxItem Content="Save to export location" Tag="save"/>
@@ -471,10 +475,11 @@
                                         <ComboBoxItem Content="Pin to screen" Tag="pin"/>
                                         <ComboBoxItem Content="Add background" Tag="background"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="After screenshot"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Clipboard"/>
-                                    <CheckBox x:Name="PostCaptureCopyCheck" Content="Also copy after other actions"/>
+                                    <CheckBox x:Name="PostCaptureCopyCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Also copy after other actions"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Recording output is chosen in the recording window."/>
@@ -569,6 +574,7 @@
                 <ScrollViewer x:Name="SectionShortcuts" Visibility="Collapsed"
                               Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Shortcuts"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <!-- Rows are generated from the shortcut catalog in
@@ -585,11 +591,12 @@
                 <ScrollViewer x:Name="SectionQuickAccess" Visibility="Collapsed"
                               Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Quick Access"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Position on screen"/>
-                                    <ComboBox x:Name="OverlayPositionCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="OverlayPositionCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="Left" Tag="left"/>
                                         <ComboBoxItem Content="Right" Tag="right"/>
                                         <ComboBoxItem Content="Top" Tag="top"/>
@@ -597,15 +604,16 @@
                                         <ComboBoxItem Content="Bottom Left" Tag="bottom-left"/>
                                         <ComboBoxItem Content="Bottom Right" Tag="bottom-right"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Position"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Multi-display"/>
-                                    <CheckBox x:Name="OverlayMoveToActiveScreenCheck" Content="Move to active screen"/>
+                                    <CheckBox x:Name="OverlayMoveToActiveScreenCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Move to the active screen"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Active screen is the screen where your cursor is pointing."/>
                                 <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Overlay size"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Size"/>
                                     <Slider x:Name="OverlaySizeSlider" HorizontalAlignment="Stretch"
                                             Minimum="0" Maximum="100" Value="50"/>
                                 </DockPanel>
@@ -615,17 +623,17 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Auto-close"/>
-                                    <CheckBox x:Name="OverlayAutoCloseCheck" Content="Enable"
-                                              Checked="OnOverlayAutoCloseToggled" Unchecked="OnOverlayAutoCloseToggled"/>
+                                    <CheckBox x:Name="OverlayAutoCloseCheck" Checked="OnOverlayAutoCloseToggled" Unchecked="OnOverlayAutoCloseToggled" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Close automatically"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Action"/>
-                                    <ComboBox x:Name="OverlayActionCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="OverlayActionCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="Save and Close" Tag="save-close"/>
                                         <ComboBoxItem Content="Copy and Close" Tag="copy-close"/>
                                         <ComboBoxItem Content="Close" Tag="close"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Action"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Interval"/>
@@ -638,17 +646,18 @@
                                 <Rectangle Style="{StaticResource GroupSep}"/>
 
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Drag &amp; drop"/>
-                                    <CheckBox x:Name="OverlayCloseAfterDragCheck" Content="Close after dragging"/>
+                                    <CheckBox x:Name="OverlayCloseAfterDragCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Close after dragging out"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Hold Alt to keep the item on the Overlay after dragging."/>
                                 <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Save button behavior"/>
-                                    <ComboBox x:Name="OverlaySaveBehaviorCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="OverlaySaveBehaviorCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="Save to &quot;Export location&quot;" Tag="export"/>
                                         <ComboBoxItem Content="Always ask where to save" Tag="ask"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Save button behavior"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Press with Alt to choose the destination."/>
@@ -661,6 +670,7 @@
                 <ScrollViewer x:Name="SectionRecording" Visibility="Collapsed"
                               Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Recording"/>
                         <!-- Sub-tab strip: General / Video / GIF -->
                         <ListBox x:Name="RecordingSubList" Background="Transparent" BorderThickness="0"
                                  HorizontalAlignment="Center" Margin="0,0,0,10"
@@ -682,51 +692,51 @@
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
                                     <DockPanel x:Name="RecordingControlsRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Controls"/>
-                                        <CheckBox x:Name="ShowRecordingControlsCheck" Content="Show controls while recording"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="ShowRecordingControlsCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show controls while recording"/>
+                                </DockPanel>
                                     <DockPanel x:Name="RecordingTimerRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="System tray"/>
-                                        <CheckBox x:Name="ShowRecordingTimerCheck" Content="Display recording time"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="ShowRecordingTimerCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Display recording time"/>
+                                </DockPanel>
                                     <DockPanel x:Name="RecordingScaleRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
-                                        <CheckBox x:Name="ScaleHiDpiVideoCheck" Content="Scale HiDPI videos to 1x"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="ScaleHiDpiVideoCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Scale HiDPI videos to 1x"/>
+                                </DockPanel>
                                     <DockPanel x:Name="UnavailableDoNotDisturbRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Notifications"/>
-                                        <CheckBox x:Name="DoNotDisturbCheck" Content="Silence notifications while recording"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="DoNotDisturbCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Silence notifications while recording"/>
+                                </DockPanel>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Cursor"/>
-                                        <CheckBox x:Name="CaptureCursorCheck" Content="Show cursor"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="CaptureCursorCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show cursor"/>
+                                </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="ClickHighlightsCheck" Content="Highlight clicks"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="ClickHighlightsCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Highlight clicks"/>
+                                </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Keyboard"/>
-                                        <CheckBox x:Name="KeystrokesCheck" Content="Show keystrokes"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="KeystrokesCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show keystrokes"/>
+                                </DockPanel>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
                                     <DockPanel x:Name="RememberRecordingAreaRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Recording area"/>
-                                        <CheckBox x:Name="RememberLastSelectionCheck" Content="Remember last selection"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="RememberLastSelectionCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Remember last selection"/>
+                                </DockPanel>
                                     <DockPanel x:Name="DimScreenRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="DimScreenCheck" Content="Dim screen while recording"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="DimScreenCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Dim screen while recording"/>
+                                </DockPanel>
                                     <DockPanel x:Name="UnavailableShowCountdownRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="ShowCountdownCheck" Content="Show countdown"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="ShowCountdownCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show countdown"/>
+                                </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Countdown"/>
                                         <StackPanel Orientation="Horizontal">
@@ -738,8 +748,8 @@
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Webcam"/>
-                                        <ComboBox x:Name="WebcamCombo" HorizontalAlignment="Stretch">
+                                        <ComboBox x:Name="WebcamCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                             <ComboBoxItem Content="Off" Tag="off"/>
                                             <ComboBoxItem Content="Top left" Tag="top-left"/>
                                             <ComboBoxItem Content="Top right" Tag="top-right"/>
@@ -747,6 +757,7 @@
                                             <ComboBoxItem Content="Bottom right" Tag="bottom-right"/>
                                             <ComboBoxItem Content="Fullscreen" Tag="fullscreen"/>
                                         </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Webcam"/>
                                     </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Webcam size"/>
@@ -761,13 +772,13 @@
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
-                                        <CheckBox x:Name="RecordingShowOverlayCheck" Content="Show Quick Access"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="RecordingShowOverlayCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show Quick Access"/>
+                                </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="RecordingCopyCheck" Content="Copy file to clipboard"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="RecordingCopyCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Copy file to clipboard"/>
+                                </DockPanel>
                                     <TextBlock Style="{StaticResource SubHint}"
                                                Text="Completed recordings stay local and are added to History."/>
                                 </StackPanel>
@@ -779,13 +790,14 @@
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
                                     <DockPanel x:Name="MaxResolutionRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Max resolution"/>
-                                        <ComboBox x:Name="MaxResolutionCombo" HorizontalAlignment="Stretch">
+                                        <ComboBox x:Name="MaxResolutionCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                             <ComboBoxItem Content="Original" Tag="original"/>
                                             <ComboBoxItem Content="4K" Tag="4k"/>
                                             <ComboBoxItem Content="1080p" Tag="1080p"/>
                                             <ComboBoxItem Content="720p" Tag="720p"/>
                                         </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Max resolution"/>
                                     </DockPanel>
                                     <TextBlock x:Name="MaxResolutionHint" Style="{StaticResource SubHint}"
                                                Text="Set maximum resolution to reduce file size and upload time."/>
@@ -801,24 +813,24 @@
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Audio"/>
-                                        <CheckBox x:Name="RecordAudioCheck" Content="Capture microphone while recording"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="RecordAudioCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture microphone while recording"/>
+                                </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="SystemAudioCheck" Content="Capture system sound while recording"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="SystemAudioCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Capture system sound while recording"/>
+                                </DockPanel>
                                     <DockPanel x:Name="RecordMonoRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="RecordAudioMonoCheck" Content="Record audio in mono"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="RecordAudioMonoCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Record audio in mono"/>
+                                </DockPanel>
 
                                     <Rectangle x:Name="VideoEditorSeparator" Style="{StaticResource GroupSep}"/>
 
                                     <DockPanel x:Name="VideoEditorRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
-                                        <CheckBox x:Name="OpenVideoEditorCheck" Content="Open Video Editor after recording"/>
-                                    </DockPanel>
+                                        <CheckBox x:Name="OpenVideoEditorCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Open Video Editor after recording"/>
+                                </DockPanel>
                                     <TextBlock x:Name="VideoEditorHint" Style="{StaticResource SubHint}"
                                                Text="Open the local editor to trim and export the finished video."/>
                                 </StackPanel>
@@ -854,13 +866,14 @@
                                                Text="Setting the quality to maximum can speed up the processing time, but it will increase file size."/>
 
                                     <DockPanel x:Name="GifSizeRow" Style="{StaticResource Row}" Margin="0,8,0,4">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="GIF size"/>
-                                        <ComboBox x:Name="GifSizeCombo" HorizontalAlignment="Stretch">
+                                        <ComboBox x:Name="GifSizeCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                             <ComboBoxItem Content="800 x auto (default)" Tag="800"/>
                                             <ComboBoxItem Content="640 x auto" Tag="640"/>
                                             <ComboBoxItem Content="480 x auto" Tag="480"/>
                                             <ComboBoxItem Content="Original" Tag="auto"/>
                                         </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="GIF size"/>
                                     </DockPanel>
                                     <TextBlock x:Name="GifSizeHint" Style="{StaticResource SubHint}"
                                                Text="Set maximum resolution of your GIFs. Changing it will affect file size and quality. WinShot will only downscale the GIF if needed."/>
@@ -874,37 +887,40 @@
                 <ScrollViewer x:Name="SectionScreenshots" Visibility="Collapsed"
                               Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Screenshots"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="File format"/>
-                                    <ComboBox x:Name="FormatCombo" HorizontalAlignment="Stretch"
-                                              SelectionChanged="OnFormatChanged">
+                                    <ComboBox x:Name="FormatCombo"
+                                              SelectionChanged="OnFormatChanged" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="PNG" Tag="png"/>
                                         <ComboBoxItem Content="JPG" Tag="jpg"/>
                                         <ComboBoxItem Content="WEBP" Tag="webp"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="File format"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
-                                    <CheckBox x:Name="HiDpiCheck" Content="Scale HiDPI screenshots to 1x"/>
+                                    <CheckBox x:Name="HiDpiCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Scale HiDPI screenshots to 1x"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableSrgbRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Color management"/>
-                                    <CheckBox x:Name="ConvertToSrgbCheck" Content="Convert to sRGB profile"/>
+                                    <CheckBox x:Name="ConvertToSrgbCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Convert to sRGB profile"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailablePixelBorderRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Frame"/>
-                                    <CheckBox x:Name="AddPixelBorderCheck" Content="Add 1px border to all screenshots"/>
+                                    <CheckBox x:Name="AddPixelBorderCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Add 1px border to all screenshots"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableScreenshotBackgroundRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Background"/>
-                                    <ComboBox x:Name="BackgroundCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="BackgroundCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="None" Tag="none"/>
                                         <ComboBoxItem Content="Wallpaper" Tag="wallpaper"/>
                                         <ComboBoxItem Content="Gradient" Tag="gradient"/>
                                         <ComboBoxItem Content="Solid color" Tag="color"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Background"/>
                                 </DockPanel>
                                 <TextBlock x:Name="UnavailableScreenshotBackgroundHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
                                            Text="Apply Background Tool to all screenshots. Create presets in Annotate. Hold Shift while taking a screenshot to disable."/>
@@ -914,17 +930,18 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Self-Timer interval"/>
-                                    <ComboBox x:Name="SelfTimerCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="SelfTimerCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="3 Seconds" Tag="3"/>
                                         <ComboBoxItem Content="5 Seconds" Tag="5"/>
                                         <ComboBoxItem Content="10 Seconds" Tag="10"/>
                                         <ComboBoxItem Content="15 Seconds" Tag="15"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Self-Timer interval"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableScreenshotCursorRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Cursor"/>
-                                    <CheckBox x:Name="CursorOnScreenshotsCheck" Content="Show on screenshots"/>
+                                    <CheckBox x:Name="CursorOnScreenshotsCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show on screenshots"/>
                                 </DockPanel>
                                 <TextBlock x:Name="UnavailableScreenshotCursorHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
                                            Text="This works in Fullscreen or Self-Timer modes only."/>
@@ -934,20 +951,21 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Freeze screen"/>
-                                    <CheckBox x:Name="FreezeScreenCheck" Content="Freeze screen when taking a screenshot"/>
+                                    <CheckBox x:Name="FreezeScreenCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Freeze screen when taking a screenshot"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Crosshair mode"/>
-                                    <ComboBox x:Name="CrosshairModeCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="CrosshairModeCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="Always show" Tag="always"/>
                                         <ComboBoxItem Content="When Ctrl is pressed" Tag="command"/>
                                         <ComboBoxItem Content="Never" Tag="never"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Crosshair mode"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="ShowMagnifierCheck" Content="Show magnifier"/>
+                                    <CheckBox x:Name="ShowMagnifierCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show magnifier"/>
                                 </DockPanel>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
@@ -960,29 +978,30 @@
                 <ScrollViewer x:Name="SectionAnnotate" Visibility="Collapsed"
                               Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Annotate"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Arrow tool"/>
-                                    <CheckBox x:Name="InverseArrowCheck" Content="Inverse arrow direction"/>
+                                    <CheckBox x:Name="InverseArrowCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Inverse arrow direction"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Press Alt when drawing to invert the behavior."/>
                                 <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Pencil tool"/>
-                                    <CheckBox x:Name="SmoothPencilCheck" Content="Smooth drawing"/>
+                                    <CheckBox x:Name="SmoothPencilCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Smooth drawing"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Background tool"/>
-                                    <CheckBox x:Name="RememberLastToolCheck" Content="Remember if tool was opened"/>
+                                    <CheckBox x:Name="RememberLastToolCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Remember if tool was opened"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Shadow"/>
-                                    <CheckBox x:Name="DrawShadowCheck" Content="Draw shadow on objects"/>
+                                    <CheckBox x:Name="DrawShadowCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Draw shadow on objects"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Canvas"/>
-                                    <CheckBox x:Name="AutoExpandCanvasCheck" Content="Automatically expand"/>
+                                    <CheckBox x:Name="AutoExpandCanvasCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Automatically expand"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Ensures all annotations fit by dynamically resizing canvas."/>
@@ -992,16 +1011,16 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Accessibility"/>
-                                    <CheckBox x:Name="ShowColorNamesCheck" Content="Show color names"/>
+                                    <CheckBox x:Name="ShowColorNamesCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show color names"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Window"/>
-                                    <CheckBox x:Name="AlwaysOnTopCheck" Content="Always on top"/>
+                                    <CheckBox x:Name="AlwaysOnTopCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Always on top"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="ShowDockIconCheck" Content="Show taskbar icon"/>
+                                    <CheckBox x:Name="ShowDockIconCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Show taskbar icon"/>
                                 </DockPanel>
                             </StackPanel>
                         </Border>
@@ -1012,6 +1031,7 @@
                 <ScrollViewer x:Name="SectionAdvanced" Visibility="Collapsed"
                               Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Advanced"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
@@ -1025,12 +1045,12 @@
                                                TextTrimming="CharacterEllipsis"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableAskForNameRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="AskForNameCheck" Content="Ask for name after every capture"/>
+                                    <CheckBox x:Name="AskForNameCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Ask for name after every capture"/>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableRetinaSuffixRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="AddRetinaSuffixCheck" Content="Add &quot;@2x&quot; suffix to HiDPI screenshots"/>
+                                    <CheckBox x:Name="AddRetinaSuffixCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Add &quot;@2x&quot; suffix to HiDPI screenshots"/>
                                 </DockPanel>
                                 <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"
                                            LineHeight="17" Margin="162,4,0,0">
@@ -1046,12 +1066,13 @@
                         <Border x:Name="UnavailableCopyFormatCard" Style="{StaticResource Card}" Visibility="Collapsed">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Copy to clipboard"/>
-                                    <ComboBox x:Name="CopyFormatCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="CopyFormatCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="File &amp; image (default)" Tag="file-image"/>
                                         <ComboBoxItem Content="File only" Tag="file"/>
                                         <ComboBoxItem Content="Image only" Tag="image"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Copy to clipboard"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Adjust this option if you've encountered any issues with pasting from clipboard or clipboard managers."/>
@@ -1101,8 +1122,8 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="All-In-One"/>
-                                    <CheckBox x:Name="AllInOneRememberCheck" Content="Remember last selection"/>
+                                    <CheckBox x:Name="AllInOneRememberCheck" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Remember last selection"/>
                                 </DockPanel>
                             </StackPanel>
                         </Border>
@@ -1110,8 +1131,8 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <DockPanel x:Name="UnavailableOcrLanguageRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Text recognition"/>
-                                    <ComboBox x:Name="OcrLanguageCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="OcrLanguageCombo" DockPanel.Dock="Right" MinWidth="150" HorizontalAlignment="Right">
+                                    
                                         <ComboBoxItem Content="Automatically Detect Language" Tag="auto"/>
                                         <ComboBoxItem Content="English" Tag="en"/>
                                         <ComboBoxItem Content="Spanish" Tag="es"/>
@@ -1120,6 +1141,7 @@
                                         <ComboBoxItem Content="Italian" Tag="it"/>
                                         <ComboBoxItem Content="Portuguese" Tag="pt"/>
                                     </ComboBox>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Text recognition"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
@@ -1153,6 +1175,7 @@
                 <ScrollViewer x:Name="SectionAbout" Visibility="Collapsed"
                               Style="{StaticResource SectionScroll}">
                     <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="About"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel Margin="4,8" HorizontalAlignment="Center">
                                 <TextBlock Text="&#xE722;" FontFamily="{StaticResource IconFont}"
