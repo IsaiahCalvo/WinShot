@@ -9,14 +9,14 @@ namespace WinShot.Recording;
 
 public sealed class FastRecordingToastWindow : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color ButtonBack = SD.Color.FromArgb(58, 58, 58);
-    private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
-    private static readonly SD.Color Accent = ThemePalette.Accent;
-    private static readonly SD.Color AccentHot = ThemePalette.AccentHover;
-    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
-    private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Color AccentText = ThemePalette.AccentHover;
+    // Design 4d saved toast: HUD card, secondary chips, white Edit action.
+    private static readonly SD.Color Back = HudChrome.Fill;
+    private static readonly SD.Color ButtonBack = SD.Color.FromArgb(58, 58, 58);      // white .09 over charcoal
+    private static readonly SD.Color ButtonHot = SD.Color.FromArgb(70, 70, 72);       // white .14
+    private static readonly SD.Color Accent = ThemePalette.ActionBg;
+    private static readonly SD.Color AccentHot = ThemePalette.ActionBgHover;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
+    private static readonly SD.Color AccentText = ThemePalette.TextPrimary;
 
     private readonly string _filePath;
     private readonly Action? _onEdit;
@@ -45,7 +45,7 @@ public sealed class FastRecordingToastWindow : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var title = Label("Recording saved", 14, 14, 220, 12, AccentText, bold: true);
+        var title = Label("Recording saved", 14, 14, 220, 10f, ThemePalette.TextPrimary, bold: true);
         Controls.Add(title);
 
         var close = Button("x", 286, 10, 26, 24, ButtonBack, ButtonHot);
@@ -53,7 +53,8 @@ public sealed class FastRecordingToastWindow : WF.Form
         Controls.Add(close);
 
         string name = Path.GetFileName(filePath);
-        var fileName = Label(name, 14, 39, 300, 13, TextColor);
+        var fileName = Label(name, 14, 39, 300, 13, ThemePalette.TextSecondary);
+        fileName.Font = ThemePalette.MonoFont(9f);
         fileName.AutoEllipsis = true;
         fileName.UseMnemonic = false;
         fileName.TextAlign = SD.ContentAlignment.MiddleLeft;
@@ -76,6 +77,8 @@ public sealed class FastRecordingToastWindow : WF.Form
         if (onEdit is not null)
         {
             var edit = Button("Edit...", x, 78, 64, 26, Accent, AccentHot);
+            edit.ForeColor = ThemePalette.ActionText;
+            edit.Font = ThemePalette.UiFontSemiBold(9f);
             edit.Click += (_, _) => { EditFile(); Close(); };
             Controls.Add(edit);
         }
@@ -116,8 +119,8 @@ public sealed class FastRecordingToastWindow : WF.Form
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        e.Graphics.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        HudChrome.Paint(e.Graphics, new SD.Rectangle(0, 0, Width, Height), 12);
     }
 
     private void PositionBottomRight()
@@ -167,7 +170,7 @@ public sealed class FastRecordingToastWindow : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 20, 20);
+        IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 24, 24);
         Region = SD.Region.FromHrgn(regionHandle);
         DeleteObject(regionHandle);
     }
@@ -207,6 +210,13 @@ public sealed class FastRecordingToastWindow : WF.Form
         };
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = hotColor;
+        void ApplyRegion()
+        {
+            IntPtr rgn = CreateRoundRectRgn(0, 0, button.Width + 1, button.Height + 1, 12, 12);
+            button.Region = SD.Region.FromHrgn(rgn);
+            DeleteObject(rgn);
+        }
+        button.HandleCreated += (_, _) => ApplyRegion();
         return button;
     }
 

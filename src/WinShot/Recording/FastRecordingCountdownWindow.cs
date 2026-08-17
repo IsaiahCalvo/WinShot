@@ -8,24 +8,28 @@ namespace WinShot.Recording;
 
 public sealed class FastRecordingCountdownWindow : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color Ring = ThemePalette.Accent;
-    private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Color MutedText = SD.Color.FromArgb(136, 136, 136);
+    // Design 4d: charcoal disc, white progress ring on a faint track, muted hint.
+    private static readonly SD.Color Back = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
+    private static readonly SD.Color RingTrack = SD.Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF);
+    private static readonly SD.Color RingProgress = ThemePalette.ActionBg;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
+    private static readonly SD.Color MutedText = ThemePalette.TextMuted;
 
     private readonly WF.Timer _timer = new() { Interval = 1000 };
     private readonly SD.Rectangle _regionPx;
+    private readonly int _total;
     private int _remaining;
     private bool _done;
 
     public FastRecordingCountdownWindow(int seconds, SD.Rectangle regionScreenPx)
     {
         _remaining = Math.Max(1, seconds);
+        _total = _remaining;
         _regionPx = regionScreenPx;
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
-        ClientSize = new SD.Size(170, 170);
+        ClientSize = new SD.Size(150, 150);
         DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
@@ -82,11 +86,23 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.Clear(Back);
 
-        using var ring = new SD.Pen(Ring, 3);
-        e.Graphics.DrawEllipse(ring, 2, 2, Width - 5, Height - 5);
+        var ringRect = new SD.RectangleF(2.5f, 2.5f, Width - 6f, Height - 6f);
+        using (var track = new SD.Pen(RingTrack, 3))
+            e.Graphics.DrawEllipse(track, ringRect);
+        // Progress ring: sweeps down as the countdown runs (design 4d).
+        float fraction = Math.Clamp(_remaining / (float)_total, 0f, 1f);
+        if (fraction > 0)
+        {
+            using var progress = new SD.Pen(RingProgress, 3)
+            {
+                StartCap = SD.Drawing2D.LineCap.Round,
+                EndCap = SD.Drawing2D.LineCap.Round,
+            };
+            e.Graphics.DrawArc(progress, ringRect, -90f, 360f * fraction);
+        }
 
-        using var countFont = ThemePalette.UiFontSemiBold(84f, SD.GraphicsUnit.Pixel);
-        using var hintFont = ThemePalette.UiFont(11f);
+        using var countFont = ThemePalette.UiFontSemiBold(58f, SD.GraphicsUnit.Pixel);
+        using var hintFont = ThemePalette.UiFont(8f);
         var countText = _remaining.ToString();
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
@@ -96,14 +112,14 @@ public sealed class FastRecordingCountdownWindow : WF.Form
             e.Graphics,
             countText,
             countFont,
-            new SD.Rectangle(0, 10, Width, 120),
+            new SD.Rectangle(0, 22, Width, 84),
             TextColor,
             flags);
         WF.TextRenderer.DrawText(
             e.Graphics,
             "Esc to cancel",
             hintFont,
-            new SD.Rectangle(0, Height - 42, Width, 24),
+            new SD.Rectangle(0, Height - 46, Width, 18),
             MutedText,
             flags);
     }

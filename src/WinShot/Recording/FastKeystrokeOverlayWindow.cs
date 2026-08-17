@@ -13,9 +13,10 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
     private const int FadeMs = 350;
     private static readonly TimeSpan AppendWindow = TimeSpan.FromSeconds(1.2);
     private static readonly SD.Color TransparentKey = SD.Color.Magenta;
-    private static readonly SD.Color PillBack = SD.Color.FromArgb(30, 30, 30);
-    private static readonly SD.Color PillBorder = SD.Color.FromArgb(54, 255, 255, 255);
-    private static readonly SD.Color TextColor = SD.Color.White;
+    // Design 4d keystroke pill: charcoal, .14 hairline, mono keys.
+    private static readonly SD.Color PillBack = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
+    private static readonly SD.Color PillBorder = SD.Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF);
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
 
     private readonly SD.Rectangle _regionPx;
     private readonly HookProc _hookProc;
