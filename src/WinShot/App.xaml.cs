@@ -251,6 +251,7 @@ public partial class App : Application
 
         var s = _settings.Current;
         var menu = new WF.ContextMenuStrip();
+        DarkToolStrip.Apply(menu);
         // Non-clickable header showing the running version — always visible at a glance.
         var versionHeader = new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false };
         menu.Items.Add(versionHeader);

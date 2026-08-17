@@ -819,8 +819,10 @@ public partial class HistoryWindow : Window
     {
         IReadOnlyList<HistoryItem> selected = SelectedItems();
         if (selected.Count == 0) return;
-        if (MessageBox.Show(this, $"Delete {selected.Count:N0} selected history item{(selected.Count == 1 ? string.Empty : "s")}?\n\nThis removes only the local History copies.",
-                "Delete selected items", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!ConfirmDialog.Show(this,
+                $"Delete {selected.Count:N0} item{(selected.Count == 1 ? string.Empty : "s")}?",
+                "This removes only the local History copies. Saved exports are not touched.",
+                "Delete"))
             return;
 
         var failed = new List<string>();

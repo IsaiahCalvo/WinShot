@@ -8,13 +8,13 @@ namespace WinShot.Recording;
 
 public sealed class FastRecordingOptionsDialog : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color FieldBack = SD.Color.FromArgb(58, 58, 58);
-    private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Color MutedText = SD.Color.FromArgb(220, 220, 220);
-    private static readonly SD.Color Accent = ThemePalette.Accent;
-    // Same translucent light hairline FastRecordingToastWindow uses for the CleanShot panel look.
-    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
+    // Design 4c: #1C1C1E window card, white .06 inputs, white Start action.
+    private static readonly SD.Color Back = ThemePalette.WindowBg;
+    private static readonly SD.Color FieldBack = SD.Color.FromArgb(42, 42, 44);
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
+    private static readonly SD.Color MutedText = ThemePalette.TextSecondary;
+    private static readonly SD.Color Accent = ThemePalette.ActionBg;
+    private static readonly SD.Color Border = ThemePalette.Border;
 
     private readonly WF.RadioButton _mp4Radio;
     private readonly WF.RadioButton _gifRadio;
@@ -64,7 +64,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var title = Label("Record screen", 18, 16, 250, bold: true, size: 10);
+        var title = Label("Record screen", 18, 16, 250, bold: true, size: 10.5f, color: ThemePalette.TextPrimary);
         Controls.Add(title);
 
         _mp4Radio = Radio("MP4 video", 18, 48, true);
@@ -163,11 +163,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         Controls.Add(_countdownBox);
         Controls.Add(Label("0 = off", 164, 454, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
 
-        var cancel = Button("Cancel", 110, 482, SD.Color.FromArgb(58, 58, 58));
+        var cancel = Button("Cancel", 106, 480, SD.Color.FromArgb(48, 48, 50));
         cancel.Click += (_, _) => Complete(WF.DialogResult.Cancel);
         Controls.Add(cancel);
 
-        var start = Button("Start", 190, 482, Accent);
+        var start = Button("Start", 190, 480, Accent);
+        start.ForeColor = ThemePalette.ActionText;
+        start.Font = ThemePalette.UiFontSemiBold(9f);
         start.Click += (_, _) => Complete(WF.DialogResult.OK);
         Controls.Add(start);
         AcceptButton = start;
@@ -408,8 +410,10 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        e.Graphics.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using var path = GdiPaths.RoundedRect(new SD.Rectangle(0, 0, Width - 1, Height - 1), 12);
+        using var pen = new SD.Pen(SD.Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF));
+        e.Graphics.DrawPath(pen, path);
     }
 
     private void UpdateWindowRegion()
@@ -417,7 +421,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 20, 20);
+        IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 24, 24);
         Region = SD.Region.FromHrgn(regionHandle);
         DeleteObject(regionHandle);
     }
@@ -514,6 +518,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             AutoSize = false,
             Font = bold ? ThemePalette.UiFontSemiBold(size) : ThemePalette.UiFont(size),
             ForeColor = color ?? MutedText,
+            BackColor = SD.Color.Transparent,
             Location = new SD.Point(x, y),
             Size = new SD.Size(width, 22),
             Text = text,
@@ -563,11 +568,18 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
             Location = new SD.Point(x, y),
-            Size = new SD.Size(70, 26),
+            Size = new SD.Size(76, 28),
             Text = text,
             UseVisualStyleBackColor = false,
         };
         button.FlatAppearance.BorderSize = 0;
+        void ApplyRegion()
+        {
+            IntPtr rgn = CreateRoundRectRgn(0, 0, button.Width + 1, button.Height + 1, 16, 16);
+            button.Region = SD.Region.FromHrgn(rgn);
+            DeleteObject(rgn);
+        }
+        button.HandleCreated += (_, _) => ApplyRegion();
         return button;
     }
 

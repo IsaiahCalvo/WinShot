@@ -99,6 +99,7 @@ public sealed class FastPinWindow : WF.Form
             true);
 
         _menu = new WF.ContextMenuStrip();
+        DarkToolStrip.Apply(_menu);
         var copyItem = new WF.ToolStripMenuItem("Copy", null, async (_, _) => await CopyAsync())
         {
             ToolTipText = "Copy the pinned screenshot to the clipboard",
