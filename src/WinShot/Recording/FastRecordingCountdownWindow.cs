@@ -85,8 +85,8 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         using var ring = new SD.Pen(Ring, 3);
         e.Graphics.DrawEllipse(ring, 2, 2, Width - 5, Height - 5);
 
-        using var countFont = new SD.Font("Segoe UI Semibold", 84f, SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
-        using var hintFont = new SD.Font("Segoe UI", 11f, SD.FontStyle.Regular, SD.GraphicsUnit.Point);
+        using var countFont = ThemePalette.UiFontSemiBold(84f, SD.GraphicsUnit.Pixel);
+        using var hintFont = ThemePalette.UiFont(11f);
         var countText = _remaining.ToString();
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |

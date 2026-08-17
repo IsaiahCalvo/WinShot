@@ -139,7 +139,7 @@ public sealed class OcrToastWindow : WF.Form
         {
             AutoSize = false,
             BackColor = SD.Color.Transparent,
-            Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = bold ? ThemePalette.UiFontSemiBold(size) : ThemePalette.UiFont(size),
             ForeColor = color,
             Location = new SD.Point(x, y),
             Size = new SD.Size(width, 22),

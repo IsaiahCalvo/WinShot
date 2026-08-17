@@ -21,7 +21,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
     private readonly HookProc _hookProc;
     private readonly bool _installHook;
     private readonly WF.Timer _timer = new() { Interval = 33 };
-    private readonly SD.Font _font = new("Segoe UI Semibold", 15f, SD.FontStyle.Bold);
+    private readonly SD.Font _font = ThemePalette.MonoFont(11f, semiBold: true);
     private IntPtr _hook;
     private volatile bool _paused;
 

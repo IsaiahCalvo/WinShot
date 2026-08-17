@@ -234,7 +234,7 @@
                     AutomationProperties.HelpText="Plays or pauses the preview. Keyboard shortcut: Space."
                     AutomationProperties.AcceleratorKey="Space"/>
             <TextBlock x:Name="TimeLabel" DockPanel.Dock="Right" Foreground="#DDDDDD" FontSize="12"
-                       FontFamily="Consolas" VerticalAlignment="Center" Margin="10,0,0,0" Text="0:00 / 0:00"
+                       FontFamily="{StaticResource MonoFontFamily}" VerticalAlignment="Center" Margin="10,0,0,0" Text="0:00 / 0:00"
                        AutomationProperties.Name="Current position and video duration"/>
             <Slider x:Name="PositionSlider" Style="{StaticResource DarkSlider}" Margin="10,0,0,0"
                     Minimum="0" Maximum="1" SmallChange="0.1" LargeChange="5"
@@ -334,11 +334,11 @@
 
             <Grid Grid.Row="1" Margin="0,6,0,0">
                 <TextBlock x:Name="TrimStartLabel" HorizontalAlignment="Left" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Foreground="#AAAAAA" Text="In 0:00"/>
+                           FontFamily="{StaticResource MonoFontFamily}" Foreground="#AAAAAA" Text="In 0:00"/>
                 <TextBlock x:Name="TrimRangeLabel" HorizontalAlignment="Center" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Foreground="#888888" Text="0:00"/>
+                           FontFamily="{StaticResource MonoFontFamily}" Foreground="#888888" Text="0:00"/>
                 <TextBlock x:Name="TrimEndLabel" HorizontalAlignment="Right" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Foreground="#AAAAAA" Text="Out 0:00"/>
+                           FontFamily="{StaticResource MonoFontFamily}" Foreground="#AAAAAA" Text="Out 0:00"/>
             </Grid>
         </Grid>
 

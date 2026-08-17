@@ -101,7 +101,7 @@ public sealed class FastSelfTimerWindow : WF.Form
         using var pen = new SD.Pen(Border, 1);
         e.Graphics.DrawEllipse(pen, 1, 1, Width - 3, Height - 3);
 
-        using var font = new SD.Font("Segoe UI Semibold", 72f, SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        using var font = ThemePalette.UiFontSemiBold(72f, SD.GraphicsUnit.Pixel);
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
                     WF.TextFormatFlags.SingleLine |

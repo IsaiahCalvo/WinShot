@@ -512,7 +512,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         new()
         {
             AutoSize = false,
-            Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = bold ? ThemePalette.UiFontSemiBold(size) : ThemePalette.UiFont(size),
             ForeColor = color ?? MutedText,
             Location = new SD.Point(x, y),
             Size = new SD.Size(width, 22),

@@ -43,8 +43,27 @@ public static class ThemePalette
     public static SD.Font IconFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
         => new(HasFluentIcons ? "Segoe Fluent Icons" : "Segoe MDL2 Assets", sizePt, style, SD.GraphicsUnit.Point);
 
+    /// <summary>
+    /// UI text — bundled Manrope (falls back to Segoe UI if the embedded fonts
+    /// failed to register). GDI has no semibold FontStyle, so the 600 weight is
+    /// its own family name ("Manrope SemiBold"); Bold maps to the real 700 cut.
+    /// </summary>
     public static SD.Font UiFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
-        => new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
+        => AppFonts.Loaded
+            ? new("Manrope", sizePt, style, SD.GraphicsUnit.Point)
+            : new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
+
+    /// <summary>Manrope SemiBold (600) — titles, button labels, section headers.</summary>
+    public static SD.Font UiFontSemiBold(float size, SD.GraphicsUnit unit = SD.GraphicsUnit.Point)
+        => AppFonts.Loaded
+            ? new("Manrope SemiBold", size, SD.FontStyle.Regular, unit)
+            : new("Segoe UI Semibold", size, SD.FontStyle.Regular, unit);
+
+    /// <summary>JetBrains Mono — timers, dimensions, hotkeys, filenames, sizes, counts.</summary>
+    public static SD.Font MonoFont(float size, bool semiBold = false, SD.GraphicsUnit unit = SD.GraphicsUnit.Point)
+        => AppFonts.Loaded
+            ? new(semiBold ? "JetBrains Mono SemiBold" : "JetBrains Mono", size, SD.FontStyle.Regular, unit)
+            : new("Consolas", size, semiBold ? SD.FontStyle.Bold : SD.FontStyle.Regular, unit);
 
     private static bool IsFontInstalled(string name)
     {

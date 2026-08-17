@@ -42,6 +42,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Bundled UI fonts (OFL): Manrope for all UI text, JetBrains Mono for
+         timers/dimensions/hotkeys/filenames. WPF reads them via pack URI
+         (Theme.xaml UiFontFamily/MonoFontFamily); the GDI Fast* surfaces load
+         the same resources through AppFonts.AddFontMemResourceEx at startup. -->
+    <Resource Include="Assets\Fonts\Manrope-Regular.ttf" />
+    <Resource Include="Assets\Fonts\Manrope-SemiBold.ttf" />
+    <Resource Include="Assets\Fonts\Manrope-Bold.ttf" />
+    <Resource Include="Assets\Fonts\JetBrainsMono-Regular.ttf" />
+    <Resource Include="Assets\Fonts\JetBrainsMono-SemiBold.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Assets\download-window-svgrepo-com.svg"
                       LogicalName="WinShot.Assets.download-window-svgrepo-com.svg" />
     <EmbeddedResource Include="Assets\quick-access-close.svg"

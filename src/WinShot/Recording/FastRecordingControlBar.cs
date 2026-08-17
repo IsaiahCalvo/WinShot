@@ -78,7 +78,7 @@ public sealed class FastRecordingControlBar : WF.Form
         _elapsedText = new WF.Label
         {
             AutoSize = false,
-            Font = new SD.Font("Consolas", 10f, SD.FontStyle.Regular),
+            Font = ThemePalette.MonoFont(10f, semiBold: true),
             ForeColor = SD.Color.White,
             Margin = new WF.Padding(0, 4, 12, 0),
             Size = new SD.Size(66, 22),

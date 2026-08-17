@@ -94,6 +94,12 @@
 
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
+    <!-- Bundled UI fonts (pack-resource TTFs in Assets/Fonts). Manrope for all UI
+         text; JetBrains Mono for timers, dimensions, hotkeys, filenames, counts.
+         DarkTitleBar.Apply sets UiFontFamily as every themed window's default. -->
+    <FontFamily x:Key="UiFontFamily">/WinShot;component/Assets/Fonts/#Manrope, Segoe UI</FontFamily>
+    <FontFamily x:Key="MonoFontFamily">/WinShot;component/Assets/Fonts/#JetBrains Mono, Consolas</FontFamily>
+
     <!-- Shared drop shadow for floating surfaces -->
     <DropShadowEffect x:Key="FloatingShadow" BlurRadius="12" ShadowDepth="4"
                       Direction="270" Opacity="0.30" RenderingBias="Performance"

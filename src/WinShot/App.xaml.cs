@@ -49,6 +49,9 @@ public partial class App : Application
 
         string? incomingCommand = e.Args.Length > 0 ? CommandServer.ParseCommand(e.Args[0]) : null;
 
+        // Bundled Manrope/JetBrains Mono must be visible to GDI before any Fast* window paints.
+        AppFonts.Register();
+
         _mutex = new Mutex(true, "WinShot-SingleInstance", out _ownsMutex);
         if (!_ownsMutex)
         {

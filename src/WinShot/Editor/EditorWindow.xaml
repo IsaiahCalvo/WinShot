@@ -221,11 +221,11 @@
                         <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <TextBlock x:Name="ThicknessLabel" Text="Thickness" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
-                            <RadioButton x:Name="ThicknessThinBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13"
+                            <RadioButton x:Name="ThicknessThinBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="{StaticResource UiFontFamily}" FontSize="13"
                                          ToolTip="Thin" Checked="OnThicknessChecked" AutomationProperties.Name="Thin"/>
-                            <RadioButton x:Name="ThicknessMediumBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="Segoe UI" FontSize="13"
+                            <RadioButton x:Name="ThicknessMediumBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="{StaticResource UiFontFamily}" FontSize="13"
                                          ToolTip="Medium" Checked="OnThicknessChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
-                            <RadioButton x:Name="ThicknessThickBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="Segoe UI" FontSize="13"
+                            <RadioButton x:Name="ThicknessThickBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="{StaticResource UiFontFamily}" FontSize="13"
                                          ToolTip="Thick" Checked="OnThicknessChecked" AutomationProperties.Name="Thick"/>
                         </StackPanel>
 
@@ -241,11 +241,11 @@
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <TextBlock x:Name="EffectStrengthLabel" Text="Strength" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
                             <RadioButton x:Name="StrengthLightBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Light" Content="S"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Light" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Light"/>
+                                         FontFamily="{StaticResource UiFontFamily}" FontSize="13" ToolTip="Light" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Light"/>
                             <RadioButton x:Name="StrengthMediumBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Medium" Content="M"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
+                                         FontFamily="{StaticResource UiFontFamily}" FontSize="13" ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
                             <RadioButton x:Name="StrengthStrongBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Strong" Content="L"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Strong" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Strong"/>
+                                         FontFamily="{StaticResource UiFontFamily}" FontSize="13" ToolTip="Strong" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Strong"/>
                         </StackPanel>
 
                         <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -269,10 +269,10 @@
                         <StackPanel x:Name="StepModePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Count" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
                             <RadioButton x:Name="StepNumberBtn" Style="{StaticResource ToolButton}" GroupName="StepMode" Tag="Number" Content="1"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Number badges" Checked="OnStepModeChecked" IsChecked="True"
+                                         FontFamily="{StaticResource UiFontFamily}" FontSize="13" ToolTip="Number badges" Checked="OnStepModeChecked" IsChecked="True"
                                          AutomationProperties.Name="Number badges"/>
                             <RadioButton x:Name="StepLetterBtn" Style="{StaticResource ToolButton}" GroupName="StepMode" Tag="Letter" Content="A"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Letter badges" Checked="OnStepModeChecked"
+                                         FontFamily="{StaticResource UiFontFamily}" FontSize="13" ToolTip="Letter badges" Checked="OnStepModeChecked"
                                          AutomationProperties.Name="Letter badges"/>
                             <Button Style="{StaticResource PillButtonSecondary}" Content="Reset to 1" ToolTip="Reset counter"
                                     Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>

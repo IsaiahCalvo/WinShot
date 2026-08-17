@@ -25,6 +25,15 @@ public static class DarkTitleBar
     {
         if (window is null) return;
 
+        // Every themed window routes through here, so this is also where the bundled
+        // Manrope UI font becomes the window-wide default (WPF implicit styles can't
+        // reach Window subclasses; per-element Mono overrides still win).
+        if (window.ReadLocalValue(System.Windows.Controls.Control.FontFamilyProperty) == DependencyProperty.UnsetValue
+            && window.TryFindResource("UiFontFamily") is System.Windows.Media.FontFamily uiFont)
+        {
+            window.FontFamily = uiFont;
+        }
+
         var helper = new WindowInteropHelper(window);
         if (helper.Handle != IntPtr.Zero)
         {
