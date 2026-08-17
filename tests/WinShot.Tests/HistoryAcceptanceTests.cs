@@ -121,10 +121,12 @@ public class HistoryAcceptanceTests
         Assert.Contains("x:Name=\"SelectionToolbar\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"CategoryRow\" Grid.Row=\"0\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SelectionCommandRow\" Grid.Row=\"1\"", xaml, StringComparison.Ordinal);
+        // UI refresh layout: the header row (chips centered, sort + Select right) comes
+        // first and owns SortControls; the selection command row follows it.
         int selectionRowStart = xaml.IndexOf("x:Name=\"SelectionCommandRow\"", StringComparison.Ordinal);
         int categoryRowStart = xaml.IndexOf("x:Name=\"CategoryRow\"", StringComparison.Ordinal);
         int sortControlsStart = xaml.IndexOf("x:Name=\"SortControls\"", StringComparison.Ordinal);
-        Assert.InRange(sortControlsStart, selectionRowStart, categoryRowStart - 1);
+        Assert.InRange(sortControlsStart, categoryRowStart, selectionRowStart - 1);
         Assert.Contains("Content=\"Scrolling\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnRestore\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnCopySelected\"", xaml, StringComparison.Ordinal);

@@ -569,7 +569,10 @@ public partial class HistoryWindow : Window
     private void OnToggleSortDirection(object sender, RoutedEventArgs e)
     {
         _sortDescending = !_sortDescending;
-        SortDirectionGlyph.Text = _sortDescending ? "\uE74B" : "\uE74A";
+        // Lucide arrow-down / arrow-up
+        SortDirectionGlyph.Data = Geometry.Parse(_sortDescending
+            ? "M12,5 L12,19 M6,13 L12,19 L18,13"
+            : "M12,19 L12,5 M6,11 L12,5 L18,11");
         SortDirectionButton.SetValue(System.Windows.Automation.AutomationProperties.NameProperty,
             _sortDescending ? "Sort descending" : "Sort ascending");
         ApplyFilter();
@@ -703,6 +706,7 @@ public partial class HistoryWindow : Window
         ItemsList.SelectionMode = _selectionMode ? SelectionMode.Extended : SelectionMode.Single;
         NormalToolbar.Visibility = _selectionMode ? Visibility.Collapsed : Visibility.Visible;
         SelectionToolbar.Visibility = _selectionMode ? Visibility.Visible : Visibility.Collapsed;
+        SelectionCommandRow.Visibility = _selectionMode ? Visibility.Visible : Visibility.Collapsed;
         if (!_selectionMode)
         {
             HistoryItem? anchor = ItemsList.SelectedItems.Cast<HistoryItem>().FirstOrDefault();

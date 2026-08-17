@@ -6,12 +6,15 @@
         AutomationProperties.Name="WinShot history"
         AutomationProperties.HelpText="Browse, sort, select, restore, copy, edit, pin, share, reveal, or delete local captures.">
     <Window.Resources>
+        <!-- Compact toolbar button: 26px, white-alpha .07 fill + .12 border (design 1f). -->
         <Style x:Key="ToolbarButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Background" Value="#12FFFFFF"/>
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="12,8"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#1FFFFFFF"/>
+            <Setter Property="Padding" Value="11,0"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
@@ -19,13 +22,13 @@
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                CornerRadius="8" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceBrush}"/></Trigger>
-                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource ElevatedBrush}"/></Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Bd" Property="BorderThickness" Value="1"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource PressedFillBrush}"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource BorderStrongBrush}"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SelectionRingBrush}"/></Trigger>
                             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.42"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -33,51 +36,83 @@
             </Setter>
         </Style>
 
+        <!-- White action mini-button (Done in selection mode): the strong fill. -->
         <Style x:Key="AccentToolbarButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource ActionTextBrush}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="16,9"/>
-        </Style>
-
-        <Style x:Key="FilterChip" TargetType="RadioButton">
-            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Margin" Value="3,0"/>
-            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Padding" Value="13,0"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="7" Padding="16,8">
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{StaticResource ActionBgBrush}" CornerRadius="8" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceBrush}"/></Trigger>
-                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/><Setter Property="Foreground" Value="White"/></Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Bd" Property="BorderThickness" Value="1"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource ActionBgHoverBrush}"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.42"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
 
+        <!-- Danger-tint toolbar button (Delete in selection mode, design 4g). -->
+        <Style x:Key="DangerToolbarButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+            <Setter Property="Foreground" Value="#F0A3A3"/>
+            <Setter Property="Background" Value="{StaticResource DangerTintBgBrush}"/>
+            <Setter Property="BorderBrush" Value="#59E85C5C"/>
+        </Style>
+
+        <!-- Filter chip: 26px pill; selected = solid state blue (design 1f). -->
+        <Style x:Key="FilterChip" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="#14FFFFFF" BorderBrush="#1FFFFFFF" BorderThickness="1"
+                                CornerRadius="13" Height="26" Padding="13,0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#21FFFFFF"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="Transparent"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SelectionRingBrush}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Circular hover action on a tile: 26px, white-alpha face (design 1f). -->
         <Style x:Key="OverlayActionButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Foreground" Value="#F7F9FC"/>
+            <Setter Property="Width" Value="26"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Margin" Value="4,0"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                        <Grid>
+                            <Ellipse x:Name="Bd" Fill="#1AFFFFFF" Stroke="#26FFFFFF" StrokeThickness="1"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#3AFFFFFF"/></Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#AAFFFFFF"/><Setter TargetName="Bd" Property="BorderThickness" Value="1"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Fill" Value="#33FFFFFF"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="Stroke" Value="{StaticResource SelectionRingBrush}"/></Trigger>
                             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.3"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -94,77 +129,82 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border x:Name="SelectionCommandRow" Grid.Row="1" Background="{StaticResource ToolbarBgBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,10">
-            <Grid>
-                <StackPanel x:Name="NormalToolbar" Orientation="Horizontal" HorizontalAlignment="Left">
-                    <Button x:Name="SelectButton" Content="Select" Style="{StaticResource AccentToolbarButton}"
-                            Click="OnToggleSelectionMode" AutomationProperties.Name="Select history items"/>
-                </StackPanel>
-
-                <StackPanel x:Name="SelectionToolbar" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                    <Button x:Name="DoneButton" Style="{StaticResource AccentToolbarButton}" Click="OnToggleSelectionMode">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Done"/></StackPanel>
-                    </Button>
-                    <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
-                               FontSize="13" VerticalAlignment="Center" Margin="20,0,16,0"/>
-                    <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
-                    <Button x:Name="AllSelectionButton" Style="{StaticResource ToolbarButton}" Click="OnShowAllFromSelection" AutomationProperties.Name="Select or clear all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="All"/></StackPanel>
-                    </Button>
-                    <Button x:Name="SelectAllButton" Style="{StaticResource ToolbarButton}" Click="OnSelectAll" AutomationProperties.Name="Select all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Select all"/></StackPanel>
-                    </Button>
-                    <Button x:Name="CopyToButton" Style="{StaticResource ToolbarButton}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Copy to"/></StackPanel>
-                    </Button>
-                    <Button x:Name="PinSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnPinSelected" IsEnabled="False" AutomationProperties.Name="Pin selected screenshots">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Pin"/></StackPanel>
-                    </Button>
-                    <Button x:Name="ShareButton" Style="{StaticResource ToolbarButton}" Click="OnShareSelected" IsEnabled="False" AutomationProperties.Name="Share selected files">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Share"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="8,1,0,0"/></StackPanel>
-                    </Button>
-                    <Button x:Name="DeleteSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnDeleteSelected" IsEnabled="False" AutomationProperties.Name="Delete selected history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Delete"/></StackPanel>
-                    </Button>
-                </StackPanel>
-
-                <StackPanel x:Name="SortControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <Button x:Name="SortFieldButton" Style="{StaticResource ToolbarButton}" Click="OnSortFieldMenu" Background="{StaticResource SurfaceBrush}" Padding="12,7">
-                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="12,2,0,0"/></StackPanel>
-                    </Button>
-                    <Button x:Name="SortDirectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSortDirection" Margin="4,0,0,0"
-                            AutomationProperties.Name="Sort descending"><TextBlock x:Name="SortDirectionGlyph" Text="&#xE74B;" FontFamily="{StaticResource IconFont}" FontSize="16"/></Button>
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <Border x:Name="CategoryRow" Grid.Row="0" Background="{StaticResource WindowBgBrush}" Padding="16,12,16,10">
+        <!-- Header (design 1f): chips centered, sort + Select on the right. -->
+        <Border x:Name="CategoryRow" Grid.Row="0" Background="{StaticResource WindowBgBrush}"
+                BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,0,0,1" Padding="16,9,16,9">
             <Grid>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <RadioButton x:Name="ChipAll" Content="All" IsChecked="True" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
-                    <RadioButton x:Name="ChipImages" Content="Screenshots" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+                    <RadioButton x:Name="ChipImages" Content="Images" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                     <RadioButton x:Name="ChipScrolling" Content="Scrolling" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
-                    <RadioButton x:Name="ChipVideo" Content="Videos" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
-                    <RadioButton x:Name="ChipGif" Content="GIFs" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+                    <RadioButton x:Name="ChipVideo" Content="Video" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+                    <RadioButton x:Name="ChipGif" Content="GIF" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
+                </StackPanel>
+
+                <StackPanel x:Name="SortControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button x:Name="SortFieldButton" Style="{StaticResource ToolbarButton}" Click="OnSortFieldMenu">
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><Path Style="{StaticResource LucideIcon}" Data="{StaticResource LucideChevronDown}" Width="10" Height="10" StrokeThickness="2.2" Stroke="{StaticResource TextMutedBrush}" Margin="6,1,0,0"/></StackPanel>
+                    </Button>
+                    <Button x:Name="SortDirectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSortDirection" Margin="6,0,0,0" Padding="6,0" Width="26"
+                            AutomationProperties.Name="Sort descending"><Path x:Name="SortDirectionGlyph" Style="{StaticResource LucideIcon}" Data="{StaticResource LucideArrowDown}" Width="12" Height="12"/></Button>
+                    <StackPanel x:Name="NormalToolbar" Orientation="Horizontal">
+                        <Button x:Name="SelectButton" Content="Select" Style="{StaticResource ToolbarButton}" Margin="6,0,0,0"
+                                Click="OnToggleSelectionMode" AutomationProperties.Name="Select history items"/>
+                    </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <Border Grid.Row="3" Background="{StaticResource ToolbarBgBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,10">
+        <!-- Selection-mode command row (design 4g). -->
+        <Border x:Name="SelectionCommandRow" Grid.Row="1" Background="{StaticResource WindowBgBrush}"
+                BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,0,0,1" Visibility="Collapsed">
+            <StackPanel x:Name="SelectionToolbar" Orientation="Horizontal" Visibility="Collapsed" Margin="14,8,14,8">
+                <Button x:Name="DoneButton" Content="Done" Style="{StaticResource AccentToolbarButton}" Click="OnToggleSelectionMode"/>
+                <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource SelectedTintTextBrush}"
+                           FontFamily="{StaticResource MonoFontFamily}" FontWeight="SemiBold"
+                           FontSize="12" VerticalAlignment="Center" Margin="10,0,10,0"/>
+                <TextBlock Text="·" Foreground="{StaticResource TextMutedBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <Button x:Name="AllSelectionButton" Content="All" Style="{StaticResource ToolbarButton}" Click="OnShowAllFromSelection"
+                        AutomationProperties.Name="Select or clear all visible history items"/>
+                <Button x:Name="SelectAllButton" Content="Select all" Style="{StaticResource ToolbarButton}" Margin="6,0,0,0" Click="OnSelectAll"
+                        AutomationProperties.Name="Select all visible history items"/>
+                <Button x:Name="CopyToButton" Content="Copy to" Style="{StaticResource ToolbarButton}" Margin="18,0,0,0" Click="OnCopySelected" IsEnabled="False"
+                        AutomationProperties.Name="Copy selected files"/>
+                <Button x:Name="PinSelectedButton" Content="Pin" Style="{StaticResource ToolbarButton}" Margin="6,0,0,0" Click="OnPinSelected" IsEnabled="False"
+                        AutomationProperties.Name="Pin selected screenshots"/>
+                <Button x:Name="ShareButton" Content="Share" Style="{StaticResource ToolbarButton}" Margin="6,0,0,0" Click="OnShareSelected" IsEnabled="False"
+                        AutomationProperties.Name="Share selected files"/>
+                <Button x:Name="DeleteSelectedButton" Content="Delete" Style="{StaticResource DangerToolbarButton}" Margin="6,0,0,0" Click="OnDeleteSelected" IsEnabled="False"
+                        AutomationProperties.Name="Delete selected history items"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Status bar (design 1f): #19191B, muted counts left, Load-more link right. -->
+        <Border Grid.Row="3" Background="{StaticResource SidebarBrush}"
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="20,7">
             <DockPanel>
-                <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more" Style="{StaticResource ToolbarButton}"
-                        Click="OnLoadMore" Visibility="Collapsed" AutomationProperties.Name="Load more history items"
-                        AutomationProperties.HelpText="Shows the next 200 local history items without loading the entire library at once."/>
-                <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Click="OnRefresh" Margin="0,0,8,0" AutomationProperties.Name="Refresh history">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" Margin="0,0,7,0"/><TextBlock Text="Refresh"/></StackPanel>
+                <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more"
+                        Click="OnLoadMore" Visibility="Collapsed" Cursor="Hand"
+                        AutomationProperties.Name="Load more history items"
+                        AutomationProperties.HelpText="Shows the next 200 local history items without loading the entire library at once.">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <TextBlock x:Name="LinkText" Text="{TemplateBinding Content}" FontSize="11.5"
+                                       Foreground="{StaticResource LinkBrush}" VerticalAlignment="Center"/>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="LinkText" Property="Foreground" Value="#A8CCF2"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
                 </Button>
+                <Button DockPanel.Dock="Right" Content="Refresh" Style="{StaticResource ToolbarButton}" Click="OnRefresh" Margin="0,0,14,0"
+                        AutomationProperties.Name="Refresh history"/>
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock x:Name="CountText" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
-                    <Border Width="1" Height="18" Background="{StaticResource BorderBrush}" Margin="16,0"/>
-                    <TextBlock x:Name="SelectionSummaryText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="CountText" Foreground="{StaticResource TextMutedBrush}" FontSize="11.5" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
+                    <TextBlock Text="·" Foreground="{StaticResource TextMutedBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="8,0"/>
+                    <TextBlock x:Name="SelectionSummaryText" Foreground="{StaticResource TextMutedBrush}" FontFamily="{StaticResource MonoFontFamily}" FontSize="11" VerticalAlignment="Center"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -186,12 +226,12 @@
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="SelectionRing" Margin="6" BorderBrush="Transparent" BorderThickness="2" CornerRadius="7" Background="Transparent">
+                                    <Border x:Name="SelectionRing" Margin="6" BorderBrush="Transparent" BorderThickness="2" CornerRadius="12" Background="Transparent">
                                         <ContentPresenter/>
                                     </Border>
                                     <ControlTemplate.Triggers>
-                                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="SelectionRing" Property="BorderBrush" Value="{StaticResource AccentBrush}"/></Trigger>
-                                        <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="SelectionRing" Property="BorderBrush" Value="{StaticResource AccentBrush}"/></Trigger>
+                                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="SelectionRing" Property="BorderBrush" Value="{StaticResource SelectionRingBrush}"/></Trigger>
+                                        <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="SelectionRing" Property="BorderBrush" Value="{StaticResource SelectionRingBrush}"/></Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </Setter.Value>
@@ -214,7 +254,7 @@
                             </Border.ContextMenu>
                             <Grid>
                                 <Grid.RowDefinitions><RowDefinition Height="164"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <Border Grid.Row="0" CornerRadius="5" ClipToBounds="True" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                                <Border Grid.Row="0" CornerRadius="10" ClipToBounds="True" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1">
                                     <Grid>
                                         <Grid x:Name="ThumbnailSurface">
                                             <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Visibility="{Binding ThumbnailVisibility}"/>
@@ -224,47 +264,51 @@
                                             <Border Background="{StaticResource SurfaceBrush}" Opacity="0.72" Visibility="{Binding MissingThumbnailVisibility}">
                                                 <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="34" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
-                                            <Border x:Name="HoverScrim" Background="#99000000" Visibility="Collapsed"/>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding ScrollingVisibility}">
-                                                <TextBlock Text="SCROLLING" Foreground="White" FontSize="10" FontWeight="SemiBold"/>
+                                            <Border x:Name="HoverScrim" Background="#8C0F1219" Visibility="Collapsed"/>
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6" Padding="7,2.5" CornerRadius="4" Background="#8C000000" Visibility="{Binding ScrollingVisibility}">
+                                                <TextBlock Text="SCROLL" Foreground="White" FontSize="9" FontWeight="SemiBold"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Width="32" Height="25" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding VideoBadgeVisibility}">
-                                                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="6" Padding="7,2.5" CornerRadius="4" Background="#8C000000" Visibility="{Binding VideoBadgeVisibility}">
+                                                <Path Style="{StaticResource LucideIcon}" Width="11" Height="11" Stroke="{x:Null}" Fill="White" Data="{StaticResource LucidePlay}"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Padding="7,4" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding GifBadgeVisibility}">
-                                                <TextBlock Text="GIF" Foreground="White" FontSize="10" FontWeight="SemiBold"/>
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="6" Padding="7,2.5" CornerRadius="4" Background="#8C000000" Visibility="{Binding GifBadgeVisibility}">
+                                                <TextBlock Text="GIF" Foreground="White" FontSize="9" FontWeight="SemiBold"/>
                                             </Border>
                                         </Grid>
 
-                                        <Border x:Name="OverlayActions" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#DF121212" CornerRadius="7" Padding="6,4" Visibility="Collapsed">
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button Style="{StaticResource OverlayActionButton}" Click="OnRestore" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Restore to Quick Access">
-                                                    <StackPanel><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Restore" FontSize="10" Margin="0,3,0,0"/></StackPanel>
-                                                </Button>
-                                                <Button Style="{StaticResource OverlayActionButton}" Click="OnCopy" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Copy screenshot">
-                                                    <StackPanel><TextBlock Text="&#xE8C8;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Copy" FontSize="10" Margin="0,3,0,0"/></StackPanel>
-                                                </Button>
-                                                <Button Style="{StaticResource OverlayActionButton}" Click="OnEdit" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Edit screenshot">
-                                                    <StackPanel><TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Edit" FontSize="10" Margin="0,3,0,0"/></StackPanel>
-                                                </Button>
-                                                <Button Style="{StaticResource OverlayActionButton}" Click="OnPin" Visibility="{Binding PinVisibility}" AutomationProperties.Name="Pin screenshot">
-                                                    <StackPanel><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Pin" FontSize="10" Margin="0,3,0,0"/></StackPanel>
-                                                </Button>
-                                                <Button Style="{StaticResource OverlayActionButton}" Click="OnDelete" AutomationProperties.Name="Delete history item">
-                                                    <StackPanel><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Delete" FontSize="10" Margin="0,3,0,0"/></StackPanel>
-                                                </Button>
-                                            </StackPanel>
-                                        </Border>
+                                        <!-- Hover actions: circular white-alpha icon buttons (design 1f). -->
+                                        <StackPanel x:Name="OverlayActions" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+                                            <Button Style="{StaticResource OverlayActionButton}" Click="OnRestore" Visibility="{Binding ImageOnlyVisibility}" ToolTip="Restore to Quick Access" AutomationProperties.Name="Restore to Quick Access">
+                                                <Path Style="{StaticResource LucideIcon}" Width="13" Height="13" Stroke="#F7F9FC" Data="M3,12 A9,9 0 1 1 6,18.7 M3,12 L3,7 M3,12 L8,12"/>
+                                            </Button>
+                                            <Button Style="{StaticResource OverlayActionButton}" Click="OnCopy" Visibility="{Binding ImageOnlyVisibility}" ToolTip="Copy" AutomationProperties.Name="Copy screenshot">
+                                                <Path Style="{StaticResource LucideIcon}" Width="13" Height="13" Stroke="#F7F9FC" Data="{StaticResource LucideCopy}"/>
+                                            </Button>
+                                            <Button Style="{StaticResource OverlayActionButton}" Click="OnEdit" Visibility="{Binding ImageOnlyVisibility}" ToolTip="Edit" AutomationProperties.Name="Edit screenshot">
+                                                <Path Style="{StaticResource LucideIcon}" Width="13" Height="13" Stroke="#F7F9FC" Data="{StaticResource LucidePencil}"/>
+                                            </Button>
+                                            <Button Style="{StaticResource OverlayActionButton}" Click="OnPin" Visibility="{Binding PinVisibility}" ToolTip="Pin" AutomationProperties.Name="Pin screenshot">
+                                                <Path Style="{StaticResource LucideIcon}" Width="13" Height="13" Stroke="#F7F9FC" Data="M12,17 L12,22 M5,17 L19,17 L17,10 L18,5 L19,3 L5,3 L6,5 L7,10 Z"/>
+                                            </Button>
+                                            <Button Style="{StaticResource OverlayActionButton}" Click="OnDelete" ToolTip="Delete" AutomationProperties.Name="Delete history item">
+                                                <Path Style="{StaticResource LucideIcon}" Width="13" Height="13" Stroke="#F7F9FC" Data="{StaticResource LucideX}"/>
+                                            </Button>
+                                        </StackPanel>
 
-                                        <Border x:Name="SelectionCheck" Width="24" Height="24" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
-                                                Background="{StaticResource AccentBrush}" BorderBrush="White" BorderThickness="1" CornerRadius="5" Visibility="Collapsed">
-                                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                        </Border>
+                                        <!-- Selection check: 18px circle, blue = state (design 4g). -->
+                                        <Grid x:Name="SelectionCheck" Width="18" Height="18" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="7" Visibility="Collapsed">
+                                            <Ellipse Fill="{StaticResource AccentBrush}"/>
+                                            <Path Style="{StaticResource LucideIcon}" Width="9" Height="9" Stroke="White" StrokeThickness="2.4" Data="{StaticResource LucideCheck}"/>
+                                        </Grid>
+                                        <!-- Empty ring on unselected tiles while selection mode is on. -->
+                                        <Grid x:Name="SelectionEmptyDot" Width="18" Height="18" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="7" Visibility="Collapsed">
+                                            <Ellipse Fill="#4D000000" Stroke="#80FFFFFF" StrokeThickness="1.5"/>
+                                        </Grid>
                                     </Grid>
                                 </Border>
-                                <StackPanel Grid.Row="1" Margin="7,7,7,10">
-                                    <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding FileName}"/>
-                                    <TextBlock Text="{Binding MetadataText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0"/>
+                                <StackPanel Grid.Row="1" Margin="2,7,2,10">
+                                    <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11.5" TextTrimming="CharacterEllipsis" ToolTip="{Binding FileName}"/>
+                                    <TextBlock Text="{Binding MetadataText}" Foreground="{StaticResource TextMutedBrush}" FontSize="10.5" Margin="0,3,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -291,6 +335,13 @@
                                     <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True"/>
                                 </MultiDataTrigger.Conditions>
                                 <Setter TargetName="SelectionCheck" Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="True"/>
+                                    <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="SelectionEmptyDot" Property="Visibility" Value="Visible"/>
                             </MultiDataTrigger>
                         </DataTemplate.Triggers>
                     </DataTemplate>
