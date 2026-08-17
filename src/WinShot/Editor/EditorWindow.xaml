@@ -13,7 +13,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border x:Name="TopToolbar" Grid.Row="0" Style="{StaticResource FloatingToolbar}" Margin="12,12,12,6">
+        <Border x:Name="TopToolbar" Grid.Row="0" Background="{StaticResource CardGroupBrush}"
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1" Padding="12,6">
             <StackPanel>
                 <DockPanel x:Name="ToolbarPrimaryRow">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
@@ -175,13 +176,13 @@
                             <Ellipse x:Name="CurrentColorIndicator" Width="16" Height="16" Fill="{StaticResource AnnotationRedBrush}"
                                      Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1" Margin="2,0,8,0"
                                      VerticalAlignment="Center" ToolTip="Current color"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF453A" ToolTip="Red" Checked="OnColorChecked" IsChecked="True" AutomationProperties.Name="Red"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF9500" ToolTip="Orange" Checked="OnColorChecked" AutomationProperties.Name="Orange"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFCC00" ToolTip="Yellow" Checked="OnColorChecked" AutomationProperties.Name="Yellow"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#34C759" ToolTip="Green" Checked="OnColorChecked" AutomationProperties.Name="Green"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#0A84FF" ToolTip="Blue" Checked="OnColorChecked" AutomationProperties.Name="Blue"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#AF52DE" ToolTip="Purple" Checked="OnColorChecked" AutomationProperties.Name="Purple"/>
-                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#000000" ToolTip="Black" Checked="OnColorChecked" AutomationProperties.Name="Black"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF5252" ToolTip="Red" Checked="OnColorChecked" IsChecked="True" AutomationProperties.Name="Red"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF9F43" ToolTip="Orange" Checked="OnColorChecked" AutomationProperties.Name="Orange"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFD43B" ToolTip="Yellow" Checked="OnColorChecked" AutomationProperties.Name="Yellow"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#51CF66" ToolTip="Green" Checked="OnColorChecked" AutomationProperties.Name="Green"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#4DABF7" ToolTip="Blue" Checked="OnColorChecked" AutomationProperties.Name="Blue"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#B197FC" ToolTip="Purple" Checked="OnColorChecked" AutomationProperties.Name="Purple"/>
+                            <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#111111" ToolTip="Black" Checked="OnColorChecked" AutomationProperties.Name="Black"/>
                             <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFFFFF" ToolTip="White" Checked="OnColorChecked" AutomationProperties.Name="White"/>
                             <RadioButton x:Name="CustomSwatch" Style="{StaticResource ColorSwatch}" GroupName="Color"
                                          ToolTip="Custom color" Checked="OnColorChecked" Click="OnCustomSwatchClick"
@@ -305,7 +306,7 @@
             </StackPanel>
         </Border>
 
-        <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
+        <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource CanvasBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
               AutomationProperties.Name="Annotation canvas"
@@ -345,8 +346,9 @@
             </Canvas>
         </Grid>
 
-        <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"
-                Margin="12,6,12,12" Visibility="Collapsed">
+        <Border x:Name="EditorBottomBar" Grid.Row="2" Background="{StaticResource SidebarBrush}"
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="12,5"
+                Visibility="Collapsed">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
