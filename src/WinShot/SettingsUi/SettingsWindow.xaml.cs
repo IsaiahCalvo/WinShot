@@ -20,8 +20,8 @@ public partial class SettingsWindow : Window
 {
     private static SettingsWindow? _instance;
 
-    private static readonly SolidColorBrush ErrorBrush = new(Color.FromRgb(0xE8, 0x5C, 0x5C));
-    private static readonly SolidColorBrush NormalBorderBrush = new(Color.FromRgb(0x55, 0x55, 0x55));
+    private static readonly SolidColorBrush ErrorBrush = new(Color.FromArgb(0x8C, 0xE8, 0x5C, 0x5C));
+    private static readonly SolidColorBrush NormalBorderBrush = new(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));
 
     static SettingsWindow()
     {
@@ -796,16 +796,31 @@ public partial class SettingsWindow : Window
             bool conflict = gesture.Length > 0 &&
                             byGesture.TryGetValue(gesture, out var list) && list.Count > 1;
 
+            _shortcutErrorLines.TryGetValue(box, out var errorLine);
             if (conflict)
             {
                 box.BorderBrush = ErrorBrush;
                 box.ToolTip = $"{box.Text} is already assigned to another action.";
+                if (errorLine is not null)
+                {
+                    // Name the other action holding the same gesture (design 4f).
+                    var other = byGesture[gesture].FirstOrDefault(b => !ReferenceEquals(b, box));
+                    errorLine.Text = other is not null && _shortcutLabels.TryGetValue(other, out var label)
+                        ? $"Already assigned to \"{label}\""
+                        : "Already assigned to another action";
+                    errorLine.Visibility = Visibility.Visible;
+                }
             }
             else if (ReferenceEquals(box.BorderBrush, ErrorBrush))
             {
                 // Only clear marks we own (an error border with our conflict tooltip).
                 box.BorderBrush = NormalBorderBrush;
                 box.ToolTip = null;
+                if (errorLine is not null) errorLine.Visibility = Visibility.Collapsed;
+            }
+            else if (errorLine is not null && errorLine.Visibility == Visibility.Visible)
+            {
+                errorLine.Visibility = Visibility.Collapsed;
             }
         }
     }

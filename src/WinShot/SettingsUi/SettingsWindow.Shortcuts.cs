@@ -27,6 +27,8 @@ public partial class SettingsWindow
     }
 
     private readonly Dictionary<string, HotkeyBox> _shortcutBoxes = new();
+    private readonly Dictionary<HotkeyBox, TextBlock> _shortcutErrorLines = new();
+    private readonly Dictionary<HotkeyBox, string> _shortcutLabels = new();
     private ShortcutSection[] _shortcutCatalog = Array.Empty<ShortcutSection>();
     private bool _shortcutBoxesLoaded;
 
@@ -79,7 +81,7 @@ public partial class SettingsWindow
         _shortcutCatalog = BuildShortcutCatalog();
         var sepStyle = (Style)FindResource("GroupSep");
         var categoryStyle = (Style)FindResource("ShortcutCategory");
-        var labelBrush = (Brush)FindResource("TextSecondaryBrush");
+        var labelBrush = (Brush)FindResource("TextPrimaryBrush");
 
         int tabIndex = 100;
         bool firstSection = true;
@@ -93,8 +95,8 @@ public partial class SettingsWindow
 
             foreach (var item in section.Items)
             {
-                var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = true };
-                var box = new HotkeyBox { Width = 180, TabIndex = tabIndex++ };
+                var row = new DockPanel { Margin = new Thickness(0, 5, 0, 5), LastChildFill = true };
+                var box = new HotkeyBox { Width = 150, Height = 28, TabIndex = tabIndex++ };
                 AutomationProperties.SetName(box, $"{item.Label} shortcut");
                 AutomationProperties.SetHelpText(
                     box,
@@ -102,18 +104,31 @@ public partial class SettingsWindow
                 DockPanel.SetDock(box, Dock.Right);
                 row.Children.Add(box);
                 _shortcutBoxes[item.Key] = box;
+                _shortcutLabels[box] = item.Label;
 
                 row.Children.Add(new TextBlock
                 {
                     Text = item.Label,
                     Foreground = labelBrush,
-                    FontSize = 12,
+                    FontSize = 13,
                     VerticalAlignment = VerticalAlignment.Center,
                     TextTrimming = TextTrimming.CharacterEllipsis,
-                    Margin = new Thickness(0, 0, 12, 0),
+                    Margin = new Thickness(0, 0, 16, 0),
                 });
 
                 ShortcutsHost.Children.Add(row);
+
+                // Conflict message line (design 4f): red, right-aligned, under the row.
+                var errorLine = new TextBlock
+                {
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0x85, 0x85)),
+                    TextAlignment = TextAlignment.Right,
+                    Margin = new Thickness(0, -2, 0, 4),
+                    Visibility = Visibility.Collapsed,
+                };
+                _shortcutErrorLines[box] = errorLine;
+                ShortcutsHost.Children.Add(errorLine);
             }
         }
     }
