@@ -806,13 +806,16 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         // CleanShot palette: a near-black bar (form-level Opacity gives the soft translucency),
         // white line-art glyphs over dim captions, the single app accent for the active mode.
-        private static readonly SD.Color BarFill = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
-        private static readonly SD.Color BarBorder = SD.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF);
-        private static readonly SD.Color HoverFill = SD.Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF);
-        private static readonly SD.Color SelectedFill = ThemePalette.Accent;
-        private static readonly SD.Color GlyphColor = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
-        private static readonly SD.Color LabelColor = SD.Color.FromArgb(0xC8, 0xC8, 0xCC);
-        private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x33, 0x33, 0x36);
+        // Design 4b: acrylic-recipe bars, blue-tint selected chips (#9CC7FF ink).
+        private static readonly SD.Color BarFill = HudChrome.Fill;
+        private static readonly SD.Color BarBorder = ThemePalette.Border;
+        private static readonly SD.Color HoverFill = SD.Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF);
+        private static readonly SD.Color SelectedFill = ThemePalette.SelectedTintBg;
+        private static readonly SD.Color SelectedBorder = ThemePalette.SelectedTintBorder;
+        private static readonly SD.Color SelectedInk = ThemePalette.SelectedTintText;
+        private static readonly SD.Color GlyphColor = ThemePalette.TextSecondary;
+        private static readonly SD.Color LabelColor = ThemePalette.TextSecondary;
+        private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x34, 0x34, 0x36);
 
         private const int BarHeight = 64;
         private const int CornerRadius = 14;
@@ -850,7 +853,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _owner = owner;
 
             AutoScaleMode = WF.AutoScaleMode.None;
-            BackColor = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
+            BackColor = BarFill;
             DoubleBuffered = true;
             FormBorderStyle = WF.FormBorderStyle.None;
             KeyPreview = true;
@@ -990,7 +993,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             var g = e.Graphics;
             g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-            g.Clear(SD.Color.FromArgb(0x1C, 0x1C, 0x1E));
+            g.Clear(BarFill);
 
             PaintBar(g, _mainBar);
             PaintBar(g, _sizeBar);
@@ -1004,11 +1007,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         private static void PaintBar(SD.Graphics g, SD.Rectangle bar)
         {
-            using var path = GdiPaths.RoundedRect(new SD.Rectangle(bar.X, bar.Y, bar.Width - 1, bar.Height - 1), CornerRadius);
-            using var fill = new SD.SolidBrush(BarFill);
-            using var pen = new SD.Pen(BarBorder, 1);
-            g.FillPath(fill, path);
-            g.DrawPath(pen, path);
+            HudChrome.Paint(g, bar, CornerRadius);
         }
 
         private void PaintButton(SD.Graphics g, BarButton b, bool hot)
@@ -1020,9 +1019,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 using var path = GdiPaths.RoundedRect(inner, 9);
                 using var brush = new SD.SolidBrush(selected ? SelectedFill : HoverFill);
                 g.FillPath(brush, path);
+                if (selected)
+                {
+                    using var borderPen = new SD.Pen(SelectedBorder);
+                    g.DrawPath(borderPen, path);
+                }
             }
 
-            SD.Color glyphColor = selected ? SD.Color.White : GlyphColor;
+            SD.Color glyphColor = selected ? SelectedInk : hot ? ThemePalette.TextPrimary : GlyphColor;
             var glyphRect = new SD.Rectangle(b.Bounds.X, GlyphTop, b.Bounds.Width, GlyphHeight);
             WF.TextRenderer.DrawText(g, b.Glyph, b.IsTextGlyph ? _ocrFont : _glyphFont, glyphRect, glyphColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
@@ -1030,7 +1034,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
             var labelRect = new SD.Rectangle(b.Bounds.X, LabelTop, b.Bounds.Width, LabelHeight);
             WF.TextRenderer.DrawText(g, b.Label, _labelFont, labelRect,
-                selected ? SD.Color.White : LabelColor,
+                selected ? SelectedInk : LabelColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
         }
@@ -1051,9 +1055,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 using var path = GdiPaths.RoundedRect(_expandRect, 8);
                 using var brush = new SD.SolidBrush(_aspectLocked ? SelectedFill : HoverFill);
                 g.FillPath(brush, path);
+                if (_aspectLocked)
+                {
+                    using var borderPen = new SD.Pen(SelectedBorder);
+                    g.DrawPath(borderPen, path);
+                }
             }
             WF.TextRenderer.DrawText(g, "", _glyphFont, _expandRect,
-                _aspectLocked ? SD.Color.White : GlyphColor,
+                _aspectLocked ? SelectedInk : GlyphColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
 
