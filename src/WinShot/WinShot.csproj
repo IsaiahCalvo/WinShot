@@ -66,6 +66,16 @@
                       LogicalName="WinShot.Assets.quick-access-pin.svg" />
     <EmbeddedResource Include="Assets\quick-access-save.svg"
                       LogicalName="WinShot.Assets.quick-access-save.svg" />
+    <EmbeddedResource Include="Assets\lucide-camera.svg"
+                      LogicalName="WinShot.Assets.lucide-camera.svg" />
+    <EmbeddedResource Include="Assets\lucide-chevron-down.svg"
+                      LogicalName="WinShot.Assets.lucide-chevron-down.svg" />
+    <EmbeddedResource Include="Assets\lucide-monitor.svg"
+                      LogicalName="WinShot.Assets.lucide-monitor.svg" />
+    <EmbeddedResource Include="Assets\lucide-scroll-capture.svg"
+                      LogicalName="WinShot.Assets.lucide-scroll-capture.svg" />
+    <EmbeddedResource Include="Assets\lucide-x.svg"
+                      LogicalName="WinShot.Assets.lucide-x.svg" />
   </ItemGroup>
 
 </Project>
