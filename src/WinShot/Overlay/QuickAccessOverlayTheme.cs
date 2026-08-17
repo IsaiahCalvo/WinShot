@@ -53,7 +53,7 @@ internal static class QuickAccessOverlayThemePalette
             ControlBorder: SD.Color.FromArgb(36, 255, 255, 255),
             ControlShadow: SD.Color.FromArgb(61, 0, 0, 0),
             Glyph: SD.Color.FromArgb(0xF7, 0xF9, 0xFC),
-            FocusRing: SD.Color.FromArgb(0x24, 0x86, 0xFF),
+            FocusRing: ThemePalette.SelectionRing,
             TooltipFill: SD.Color.FromArgb(0x16, 0x18, 0x1F),
             TooltipBorder: SD.Color.FromArgb(48, 255, 255, 255),
             TooltipText: SD.Color.FromArgb(0xF7, 0xF9, 0xFC)),
