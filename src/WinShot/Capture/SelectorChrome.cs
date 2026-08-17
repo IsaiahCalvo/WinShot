@@ -56,22 +56,27 @@ internal static class SelectorChrome
         g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
     }
 
-    /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
+    /// <summary>Draws the size/coordinate label pill (design 1g: mono digits, 8px radius,
+    /// charcoal fill with a .12 hairline), clamped inside the client area.</summary>
     public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
     {
-        using var font = ThemePalette.UiFont(9f, SD.FontStyle.Bold);
+        using var font = ThemePalette.MonoFont(9f, semiBold: true);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + 16;
-        int h = size.Height + 8;
+        int w = size.Width + 20;
+        int h = Math.Max(24, size.Height + 8);
         int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));
         int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
         var bg = new SD.Rectangle(left, top, w, h);
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bg, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
-            g.FillPath(bgBrush, path);
+        using (var path = GdiPaths.RoundedRect(new SD.Rectangle(bg.X, bg.Y, bg.Width - 1, bg.Height - 1), 8))
+        {
+            using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
+                g.FillPath(bgBrush, path);
+            using var borderPen = new SD.Pen(SD.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF));
+            g.DrawPath(borderPen, path);
+        }
         g.SmoothingMode = prev;
 
         WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,

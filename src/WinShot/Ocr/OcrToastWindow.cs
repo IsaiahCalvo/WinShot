@@ -12,8 +12,7 @@ namespace WinShot.Ocr;
 /// </summary>
 public sealed class OcrToastWindow : WF.Form
 {
-    private static readonly SD.Color Back = ThemePalette.ToolbarBg;
-    private static readonly SD.Color BorderColor = SD.Color.FromArgb(54, 255, 255, 255);
+    private static readonly SD.Color Back = HudChrome.Fill;
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
 
@@ -42,7 +41,7 @@ public sealed class OcrToastWindow : WF.Form
         int height = hasOpen ? 96 : 70;
         ClientSize = new SD.Size(width, height);
 
-        var titleLabel = Label(title, 14, 14, width - 28, 11f, ThemePalette.AccentHover, bold: true);
+        var titleLabel = Label(title, 40, 14, width - 54, 11f, ThemePalette.TextPrimary, bold: true);
         Controls.Add(titleLabel);
 
         var previewLabel = Label(Trim(preview), 14, 38, width - 28, 9.5f, ThemePalette.TextSecondary);
@@ -52,7 +51,7 @@ public sealed class OcrToastWindow : WF.Form
 
         if (onOpen is not null)
         {
-            var open = Button("Open link", width - 14 - 96, 60, 96, 26, ThemePalette.Accent, ThemePalette.AccentHover);
+            var open = Button("Open link", width - 14 - 96, 60, 96, 26, ThemePalette.ActionBg, ThemePalette.ActionBgHover);
             open.Click += (_, _) => { try { onOpen(); } catch (Exception ex) { Log.Error("OCR toast open failed", ex); } Close(); };
             Controls.Add(open);
         }
@@ -95,8 +94,24 @@ public sealed class OcrToastWindow : WF.Form
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new SD.Pen(BorderColor, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        e.Graphics.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        HudChrome.Paint(e.Graphics, new SD.Rectangle(0, 0, Width, Height), 14);
+
+        // Leading state dot: blue-tint circle with a light-blue check (design 1g).
+        var circle = new SD.Rectangle(14, 14, 18, 18);
+        using (var tint = new SD.SolidBrush(SD.Color.FromArgb(0x47, 0x2E, 0x6F, 0xC1)))
+            e.Graphics.FillEllipse(tint, circle);
+        using var check = new SD.Pen(SD.Color.FromArgb(0x8F, 0xBC, 0xE8), 1.8f)
+        {
+            StartCap = SD.Drawing2D.LineCap.Round,
+            EndCap = SD.Drawing2D.LineCap.Round,
+        };
+        e.Graphics.DrawLines(check, new[]
+        {
+            new SD.PointF(circle.Left + 4.5f, circle.Top + 9.5f),
+            new SD.PointF(circle.Left + 7.5f, circle.Top + 12.5f),
+            new SD.PointF(circle.Left + 13.5f, circle.Top + 5.5f),
+        });
     }
 
     private void Position()
@@ -129,7 +144,7 @@ public sealed class OcrToastWindow : WF.Form
     private void UpdateRegion()
     {
         if (Width <= 0 || Height <= 0) return;
-        IntPtr rgn = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 18, 18);
+        IntPtr rgn = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 28, 28);
         Region = SD.Region.FromHrgn(rgn);
         DeleteObject(rgn);
     }
@@ -163,6 +178,15 @@ public sealed class OcrToastWindow : WF.Form
         };
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = hot;
+        button.ForeColor = ThemePalette.ActionText;
+        button.Font = ThemePalette.UiFontSemiBold(9f);
+        void ApplyRegion()
+        {
+            IntPtr rgn = CreateRoundRectRgn(0, 0, button.Width + 1, button.Height + 1, button.Height, button.Height);
+            button.Region = SD.Region.FromHrgn(rgn);
+            DeleteObject(rgn);
+        }
+        button.HandleCreated += (_, _) => ApplyRegion();
         return button;
     }
 

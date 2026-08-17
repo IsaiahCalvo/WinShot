@@ -8,15 +8,14 @@ namespace WinShot.Recording;
 
 public sealed class FastRecordingControlBar : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color ButtonBack = SD.Color.FromArgb(58, 58, 58);
-    private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
-    private static readonly SD.Color StopBack = ThemePalette.Accent;
-    private static readonly SD.Color StopHot = ThemePalette.AccentHover;
-    private static readonly SD.Color RecordingRed = SD.Color.FromArgb(255, 82, 82);
-    private static readonly SD.Color PausedAmber = SD.Color.FromArgb(255, 176, 32);
-    // Same translucent light hairline FastRecordingToastWindow uses for the CleanShot panel look.
-    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
+    // HUD pill recipe (design 1g): charcoal, ghost text buttons, white Stop action.
+    private static readonly SD.Color Back = HudChrome.Fill;
+    private static readonly SD.Color ButtonBack = Back;                                  // ghost at rest
+    private static readonly SD.Color ButtonHot = SD.Color.FromArgb(0x3C, 0x3C, 0x3E);    // white .1 over charcoal
+    private static readonly SD.Color StopBack = ThemePalette.ActionBg;
+    private static readonly SD.Color StopHot = ThemePalette.ActionBgHover;
+    private static readonly SD.Color RecordingRed = ThemePalette.RecordingRed;
+    private static readonly SD.Color PausedAmber = ThemePalette.PausedAmber;
 
     private readonly Stopwatch _elapsed = new();
     private readonly WF.Timer _timer = new() { Interval = 250 };
@@ -79,7 +78,7 @@ public sealed class FastRecordingControlBar : WF.Form
         {
             AutoSize = false,
             Font = ThemePalette.MonoFont(10f, semiBold: true),
-            ForeColor = SD.Color.White,
+            ForeColor = ThemePalette.TextPrimary,
             Margin = new WF.Padding(0, 4, 12, 0),
             Size = new SD.Size(66, 22),
             Text = "00:00",
@@ -101,6 +100,7 @@ public sealed class FastRecordingControlBar : WF.Form
         row.Controls.Add(_stop);
 
         _cancel = Button("Cancel", ButtonBack, ButtonHot);
+        _cancel.ForeColor = ThemePalette.TextSecondary;
         _cancel.Click += (_, _) => RaiseOnce(CancelRequested);
         row.Controls.Add(_cancel);
 
@@ -153,8 +153,8 @@ public sealed class FastRecordingControlBar : WF.Form
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        e.Graphics.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        HudChrome.Paint(e.Graphics, new SD.Rectangle(0, 0, Width, Height), Height / 2);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -223,7 +223,7 @@ public sealed class FastRecordingControlBar : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 36, 36);
+        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, Height, Height);
         Region = SD.Region.FromHrgn(regionHandle);
         Native.DeleteObject(regionHandle);
     }
@@ -243,20 +243,31 @@ public sealed class FastRecordingControlBar : WF.Form
 
     private static WF.Button Button(string text, SD.Color backColor, SD.Color hotColor)
     {
+        bool isAction = backColor == StopBack;
         var button = new WF.Button
         {
             AutoSize = false,
             BackColor = backColor,
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = SD.Color.White,
-            Margin = new WF.Padding(3, 0, 3, 0),
-            Size = new SD.Size(text.Length > 5 ? 64 : 54, 26),
+            Font = isAction ? ThemePalette.UiFontSemiBold(9.5f) : ThemePalette.UiFont(9.5f),
+            ForeColor = isAction ? ThemePalette.ActionText : ThemePalette.TextPrimary,
+            Margin = new WF.Padding(2, 0, 2, 0),
+            Size = new SD.Size(text.Length > 5 ? 66 : 58, 30),
             Text = text,
             UseVisualStyleBackColor = false,
         };
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = hotColor;
+        // Pill-clip each button so hovers read as rounded chips inside the bar.
+        void ApplyRegion()
+        {
+            IntPtr rgn = Native.CreateRoundRectRgn(0, 0, button.Width + 1, button.Height + 1, button.Height, button.Height);
+            button.Region = SD.Region.FromHrgn(rgn);
+            Native.DeleteObject(rgn);
+        }
+        button.HandleCreated += (_, _) => ApplyRegion();
+        button.SizeChanged += (_, _) => { if (button.IsHandleCreated) ApplyRegion(); };
         return button;
     }
 
