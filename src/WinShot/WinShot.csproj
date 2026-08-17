@@ -70,6 +70,10 @@
                       LogicalName="WinShot.Assets.lucide-camera.svg" />
     <EmbeddedResource Include="Assets\lucide-chevron-down.svg"
                       LogicalName="WinShot.Assets.lucide-chevron-down.svg" />
+    <EmbeddedResource Include="Assets\lucide-lock.svg"
+                      LogicalName="WinShot.Assets.lucide-lock.svg" />
+    <EmbeddedResource Include="Assets\lucide-lock-open.svg"
+                      LogicalName="WinShot.Assets.lucide-lock-open.svg" />
     <EmbeddedResource Include="Assets\lucide-monitor.svg"
                       LogicalName="WinShot.Assets.lucide-monitor.svg" />
     <EmbeddedResource Include="Assets\lucide-scroll-capture.svg"

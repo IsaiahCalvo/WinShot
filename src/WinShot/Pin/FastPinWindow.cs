@@ -38,14 +38,13 @@ public sealed class FastPinWindow : WF.Form
     private const int WmszBottomRight = 8;
 
     private const int ResizeBorderLogical = 6;
-    private const int ToolbarButtonSizeLogical = 28;
-    private const int ToolbarButtonGapLogical = 4;
-    private const int ToolbarPadLogical = 6;
-    private const int ToolbarTopLogical = 4;
+    private const int ToolbarButtonSizeLogical = 22;
+    private const int ToolbarButtonGapLogical = 2;
+    private const int ToolbarPadLogical = 4;
+    private const int ToolbarBottomLogical = 6;
     private const int CascadeOffsetLogical = 24;
     private const int ReadoutDurationMs = 800;
 
-    private static readonly SD.Font ToolbarGlyphFont = ThemePalette.IconFont(10f);
     private static readonly SD.Font LockBadgeFont = ThemePalette.IconFont(9f);
 
     private static readonly List<FastPinWindow> OpenPins = new();
@@ -122,10 +121,10 @@ public sealed class FastPinWindow : WF.Form
         ContextMenuStrip = _menu;
 
         // The hover toolbar reuses the exact actions the context menu already exposes.
-        _toolbarButtons.Add(new ToolbarButton("", "Copy", () => _ = CopyAsync()));
-        _toolbarButtons.Add(new ToolbarButton("", "Save", () => _ = SaveAsync()));
-        _toolbarButtons.Add(new ToolbarButton("", "Lock", () => SetLocked(!_locked)));
-        _toolbarButtons.Add(new ToolbarButton("", "Close", Close));
+        _toolbarButtons.Add(new ToolbarButton("quick-access-copy.svg", "Copy", () => _ = CopyAsync()));
+        _toolbarButtons.Add(new ToolbarButton("quick-access-save.svg", "Save", () => _ = SaveAsync()));
+        _toolbarButtons.Add(new ToolbarButton("lucide-lock-open.svg", "Lock", () => SetLocked(!_locked)));
+        _toolbarButtons.Add(new ToolbarButton("lucide-x.svg", "Close", Close));
 
         var area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
         _scale = Math.Min(1.0, Math.Min(area.Width * 0.6 / _naturalWidth, area.Height * 0.6 / _naturalHeight));
@@ -209,7 +208,7 @@ public sealed class FastPinWindow : WF.Form
 
         if (ToolbarVisible)
         {
-            using var pen = new SD.Pen(ThemePalette.Accent, Ui(1));
+            using var pen = new SD.Pen(SD.Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF), Ui(1));
             DrawWindowBorder(e.Graphics, pen);
             DrawToolbar(e.Graphics);
         }
@@ -239,7 +238,7 @@ public sealed class FastPinWindow : WF.Form
         int width = rowWidth + pad * 2;
         int height = buttonSize + pad * 2;
         int x = Math.Max(1, (ClientSize.Width - width) / 2);
-        int y = Ui(ToolbarTopLogical);
+        int y = Math.Max(1, ClientSize.Height - height - Ui(ToolbarBottomLogical));
         return new SD.Rectangle(x, y, width, height);
     }
 
@@ -259,11 +258,11 @@ public sealed class FastPinWindow : WF.Form
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         SD.Rectangle bar = ToolbarBounds();
 
-        using (var bg = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.ToolbarBg)))
+        using (var bg = new SD.SolidBrush(SD.Color.FromArgb(230, 0x1C, 0x1C, 0x1E)))
         using (var border = new SD.Pen(ThemePalette.Border))
         {
-            FillRoundedRect(g, bg, bar, Ui(8));
-            DrawRoundedRect(g, border, bar, Ui(8));
+            FillRoundedRect(g, bg, bar, bar.Height / 2);
+            DrawRoundedRect(g, border, bar, bar.Height / 2);
         }
 
         for (int i = 0; i < _toolbarButtons.Count; i++)
@@ -272,10 +271,21 @@ public sealed class FastPinWindow : WF.Form
 
     private string GlyphFor(int index)
     {
-        // The lock toggle reflects current state: closed padlock (E72E) when locked, open (E785) when unlocked.
+        // The lock toggle reflects current state: closed padlock when locked, open when unlocked.
         if (string.Equals(_toolbarButtons[index].Tip, "Lock", StringComparison.Ordinal))
-            return _locked ? "" : "";
+            return _locked ? "lucide-lock.svg" : "lucide-lock-open.svg";
         return _toolbarButtons[index].Glyph;
+    }
+
+    // Tinted icon bitmaps, cached per (asset, size, color).
+    private static readonly Dictionary<string, SD.Bitmap?> IconCache = new();
+
+    private static SD.Bitmap? Icon(string asset, int pixelSize, SD.Color color)
+    {
+        string key = $"{asset}|{pixelSize}|{color.ToArgb()}";
+        if (!IconCache.TryGetValue(key, out var bitmap))
+            IconCache[key] = bitmap = SvgIcon.Render(asset, pixelSize, color);
+        return bitmap;
     }
 
     private static void DrawButton(SD.Graphics g, SD.Rectangle bounds, string glyph, bool hot, bool focused)
@@ -288,11 +298,11 @@ public sealed class FastPinWindow : WF.Form
         }
 
         SD.Color glyphColor = hot ? ThemePalette.TextPrimary : ThemePalette.TextSecondary;
-        var flags = WF.TextFormatFlags.HorizontalCenter |
-                    WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine |
-                    WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(g, glyph, ToolbarGlyphFont, bounds, glyphColor, flags);
+        int iconSize = Math.Max(10, (int)Math.Round(bounds.Height * 0.58));
+        if (Icon(glyph, iconSize, glyphColor) is { } icon)
+        {
+            g.DrawImage(icon, bounds.Left + (bounds.Width - iconSize) / 2, bounds.Top + (bounds.Height - iconSize) / 2, iconSize, iconSize);
+        }
 
         if (focused)
         {
@@ -320,18 +330,16 @@ public sealed class FastPinWindow : WF.Form
     private void DrawReadout(SD.Graphics g, string text, SD.Point near)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using var font = ThemePalette.UiFont(9f);
+        using var font = ThemePalette.MonoFont(8.5f, semiBold: true);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + 16;
-        int h = size.Height + 8;
+        int w = size.Width + 14;
+        int h = Math.Max(18, size.Height + 6);
         int x = Math.Clamp(near.X + 12, 2, Math.Max(2, ClientSize.Width - w - 2));
         int y = Math.Clamp(near.Y + 12, 2, Math.Max(2, ClientSize.Height - h - 2));
         var pill = new SD.Rectangle(x, y, w, h);
 
-        using var bg = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.ToolbarBg));
-        using var border = new SD.Pen(ThemePalette.Border);
+        using var bg = new SD.SolidBrush(SD.Color.FromArgb(0x8C, 0x00, 0x00, 0x00));
         FillRoundedRect(g, bg, pill, h / 2);
-        DrawRoundedRect(g, border, pill, h / 2);
 
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
