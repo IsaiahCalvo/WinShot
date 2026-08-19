@@ -40,8 +40,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private readonly RectangleTween _hoverTween = new();
     /// <summary>Per-edge slack below which a re-detection counts as the same rect.</summary>
     private const int WobbleTolerancePx = 8;
-    /// <summary>A refinement scan was skipped to protect the glide; rerun it once it ends.</summary>
-    private bool _refinementDeferred;
+    /// <summary>How the current highlight was resolved. A COARSE rect (whole window or client
+    /// area) keeps getting re-examined as the cursor moves; a FINE one is left alone until the
+    /// cursor leaves it, which is what stops the highlight churning inside a single element.</summary>
+    private enum HoverTier { None, Coarse, Fine }
+    private HoverTier _hoverTier = HoverTier.None;
     private bool _elementLookupBusy;
     private SD.Point _elementLookupPoint;
     private SD.Point _lastVisualPoint = new(-9999, -9999);
@@ -196,7 +199,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _elementGranularity = false;
         _hoverPane = null;
         _hoverTween.Stop();
-        _refinementDeferred = false;
+        _hoverTier = HoverTier.None;
         _elementLookupBusy = false;
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
@@ -509,30 +512,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // click-drag instead and the marquee wins — a drawn rect is never second-guessed.
         if (_paneHover && _pendingScreen is null && !_dragging)
         {
-            SD.Rectangle? snap = SnapRectAt(_currentScreen);
-            // The HWND rect is the floor, never a ceiling: adopt it only when the cursor has
-            // left whatever finer rect the refinement tiers had settled on.
-            if (snap is SD.Rectangle hwndRect && hwndRect != _hoverPane &&
-                (_hoverPane is not SD.Rectangle held || !held.Contains(_currentScreen)))
-            {
-                SetHoverPane(hwndRect);
-            }
-
-            if (_elementGranularity)
-            {
-                // Refinement tiers (pixel segmentation now, UIA/MSAA on a worker) narrow the
-                // HWND rect inside apps that draw their whole UI into one window.
-                KickElementLookup(_currentScreen, snap);
-            }
-            else if (snap is null)
-            {
-                WindowInfo? win = ResolveWindow(_currentScreen);
-                SD.Rectangle? pane = win is null
-                    ? null
-                    : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(win.Handle, _currentScreen)
-                        ?? win.Bounds;
-                SetHoverPane(pane);
-            }
+            UpdateHoverElement(_currentScreen);
         }
 
         // Area mode, idle: keep the crosshair + loupe glued to the cursor. Repaint only the
@@ -556,8 +536,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             SD.Point p = CursorScreen();
             bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
-            bool resumeRefinement = _refinementDeferred && !_hoverTween.IsActive;
-            if (p == _currentScreen && ctrl == _lastCtrlDown && !resumeRefinement)
+            if (p == _currentScreen && ctrl == _lastCtrlDown)
                 return;
             _lastCtrlDown = ctrl;
             HandleMouseMove();
@@ -848,23 +827,39 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return _windows.FirstOrDefault(w => w.Bounds.Contains(screenPoint));
     }
 
-    private void KickElementLookup(SD.Point point, SD.Rectangle? snap)
+    /// <summary>
+    /// Resolves the highlight for a cursor position and commits it EXACTLY ONCE. The tiers used
+    /// to publish in order — HWND rect first, pixel scan a moment later — which showed as the
+    /// highlight ballooning out to the whole window and then collapsing onto the element under
+    /// the cursor. Every synchronous tier is now consulted before anything is drawn, so a move
+    /// produces a single glide to a single answer.
+    /// </summary>
+    private void UpdateHoverElement(SD.Point point)
     {
-        // The HWND rect (snap) is already showing. These tiers only ever NARROW it: pixel
-        // segmentation on the frozen snapshot (works even when an app ships with its
-        // accessibility tree off — the Claude and Codex desktop apps do), then a UIA/MSAA
-        // walk on a worker for apps that expose a real element tree.
-        if (_hoverTween.IsActive)
+        // Settled on a real element and still inside it: nothing can improve, so don't spend
+        // the pixel scan and don't disturb the highlight. A coarse rect stays under review.
+        if (_hoverTier == HoverTier.Fine && _hoverPane is SD.Rectangle settled && settled.Contains(point))
+            return;
+
+        SD.Rectangle? snap = SnapRectAt(point);
+
+        if (!_elementGranularity)
         {
-            // The scan costs several ms of UI thread - never steal frames from the glide. The
-            // cursor may come to rest during those 200 ms, so remember to come back for it.
-            _refinementDeferred = true;
+            if (snap is null)
+            {
+                WindowInfo? win = ResolveWindow(point);
+                snap = win is null
+                    ? null
+                    : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(win.Handle, point) ?? win.Bounds;
+            }
+            SetHoverPane(snap, HoverTier.Coarse);
             return;
         }
-        _refinementDeferred = false;
+
         if (Distance(point, _lastVisualPoint) < 4)
-            return; // scanning megapixels at follow-tick rate would jank the selector
+            return; // re-segmenting megapixels at follow-tick rate would jank the selector
         _lastVisualPoint = point;
+
         WindowInfo? seed = ResolveWindow(point);
         SD.Rectangle searchBounds = snap ?? seed?.Bounds ?? SD.Rectangle.Empty;
         SD.Rectangle? visual = null;
@@ -873,27 +868,35 @@ public sealed class FastRegionSelectorDialog : WF.Form
             var vp = new SD.Point(point.X - _vs.X, point.Y - _vs.Y);
             visual = VisualElementDetector.Find(_frozen, vp, VirtualFromScreen(searchBounds));
             if (visual is SD.Rectangle v)
-                visual = new SD.Rectangle(v.X + _vs.X, v.Y + _vs.Y, v.Width, v.Height);
+            {
+                var mapped = new SD.Rectangle(v.X + _vs.X, v.Y + _vs.Y, v.Width, v.Height);
+                // The segmenter seeds outward from the cursor, so it can return a block the
+                // cursor is not actually in. Highlighting that would be a lie, and the cursor
+                // would then sit outside the highlight and force a rescan on every move.
+                visual = mapped.Contains(point) ? mapped : null;
+            }
         }
-        SD.Rectangle? instant = visual ?? snap ??
+
+        SD.Rectangle? resolved = visual ?? snap ??
             (seed is null
                 ? null
                 : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point) ?? seed.Bounds);
-        if (instant is not null && instant != _hoverPane)
+
+        if (resolved is not null)
         {
-            // Stickiness: while the cursor is still inside the highlighted rect, only a
-            // TIGHTER candidate may replace it. Without this the tiers fight — the pixel
-            // scan re-widens a rect the UIA walk had just narrowed, and two near-identical
-            // segmentations flip-flop as the cursor drifts inside one element.
-            if (_hoverPane is SD.Rectangle current && current.Contains(point) &&
-                instant is SD.Rectangle now &&
-                (long)now.Width * now.Height >= (long)current.Width * current.Height)
-            {
-                return;
-            }
-            Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {instant}");
-            SetHoverPane(instant);
+            Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {resolved}");
+            SetHoverPane(resolved, visual is not null ? HoverTier.Fine : HoverTier.Coarse);
         }
+
+        KickElementLookup(point);
+    }
+
+    private void KickElementLookup(SD.Point point)
+    {
+        // The only tier that can't answer in time to join the one-step decision above: a
+        // cross-process UIA/MSAA walk, up to 450 ms. It runs on a worker and is allowed to
+        // replace the highlight only with something strictly tighter that still contains the
+        // cursor, so at worst it tightens a rect — it can never balloon one back out.
         if (_elementLookupBusy)
             return; // one in flight; the next mouse move re-kicks with the fresh point
         _elementLookupBusy = true;
@@ -918,10 +921,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     long currentArea = _hoverPane is SD.Rectangle cur
                         ? (long)cur.Width * cur.Height : long.MaxValue;
                     if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
-                        r != _hoverPane && (long)r.Width * r.Height < currentArea)
+                        r != _hoverPane && r.Contains(point) &&
+                        (long)r.Width * r.Height < currentArea)
                     {
                         Log.Info($"Hover: element {r}");
-                        SetHoverPane(r);
+                        SetHoverPane(r, HoverTier.Fine);
                     }
                 }));
             }
@@ -937,8 +941,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// keeps the glide honest: each new rect starts its slide from wherever the highlight
     /// currently sits, so a stale tier answer can never make it jump backwards.
     /// </summary>
-    private void SetHoverPane(SD.Rectangle? rect)
+    private void SetHoverPane(SD.Rectangle? rect, HoverTier tier)
     {
+        _hoverTier = rect is null ? HoverTier.None : tier;
         if (rect == _hoverPane)
             return;
 
