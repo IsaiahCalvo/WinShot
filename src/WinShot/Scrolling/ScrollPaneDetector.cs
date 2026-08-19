@@ -51,9 +51,9 @@ public static class ScrollPaneDetector
             if (Win32ScrollablePane(root, screenPx) is SD.Rectangle exact)
                 return new PaneInfo(exact, PaneSource.Win32Exact);
 
-            bool chromium = IsChromiumFamily(root, out IntPtr renderWidget);
-            if (chromium && renderWidget != IntPtr.Zero)
-                WakeChromiumAccessibility(renderWidget);
+            bool chromium = IsChromiumFamily(root, screenPx, out IntPtr renderWidget);
+            if (chromium)
+                WakeChromiumAccessibility(renderWidget != IntPtr.Zero ? renderWidget : root);
 
             PaneInfo? uia = RunWithTimeout(() => UiaScrollablePane(screenPx, chromium), timeout);
             if (uia is not null)
@@ -90,7 +90,7 @@ public static class ScrollPaneDetector
                 return null;
             if (Win32ScrollablePane(root, screenPx) is SD.Rectangle exact)
                 return exact;
-            IntPtr widget = FindWindowEx(root, IntPtr.Zero, "Chrome_RenderWidgetHostHWND", null);
+            IsChromiumFamily(root, screenPx, out IntPtr widget);
             if (widget != IntPtr.Zero && GetWindowRect(widget, out Rect wr))
             {
                 var rect = SD.Rectangle.FromLTRB(wr.Left, wr.Top, wr.Right, wr.Bottom);
@@ -118,15 +118,22 @@ public static class ScrollPaneDetector
         {
             if (root == IntPtr.Zero)
                 return null;
-            bool chromium = IsChromiumFamily(root, out IntPtr renderWidget);
-            if (chromium && renderWidget != IntPtr.Zero)
+            bool chromium = IsChromiumFamily(root, p, out IntPtr renderWidget);
+            if (chromium)
             {
-                // Chromium/Electron: managed UIA only sees the lossy MSAA→UIA proxy on
-                // pre-138 engines (sparse tree, huge boxes). The MSAA tree is the real
-                // one — NVDA's path — and resolving OBJID_CLIENT materializes it.
-                WakeChromiumAccessibility(renderWidget);
+                // Chromium/Electron: managed UIA only sees the lossy MSAA→UIA proxy (sparse
+                // tree, whole-window boxes). The MSAA tree is the real one — NVDA's path —
+                // and resolving OBJID_CLIENT materializes it.
+                //
+                // Ask the root window when no render widget turns up. Several Electron shells
+                // expose no Chrome_RenderWidgetHostHWND at all (only an Intermediate D3D
+                // Window), yet their root HWND answers OBJID_CLIENT with the full element
+                // tree. Requiring the widget is what made those apps highlight nothing but
+                // their own outline.
+                IntPtr axTarget = renderWidget != IntPtr.Zero ? renderWidget : root;
+                WakeChromiumAccessibility(axTarget);
                 var msaa = Task.Run(() => WinShot.Capture.MsaaElementDetector
-                    .ElementRectFromPoint(renderWidget, p, timeout));
+                    .ElementRectFromPoint(axTarget, p, timeout));
                 if (msaa.Wait(timeout) && msaa.Result is SD.Rectangle fromMsaa)
                     return fromMsaa;
             }
@@ -258,12 +265,55 @@ public static class ScrollPaneDetector
 
     // ---- Tier 1: UIA ----
 
-    private static bool IsChromiumFamily(IntPtr root, out IntPtr renderWidget)
+    private static bool IsChromiumFamily(IntPtr root, out IntPtr renderWidget) =>
+        IsChromiumFamily(root, null, out renderWidget);
+
+    /// <summary>
+    /// Whether this is a Chromium/Electron window, and where its web content lives.
+    ///
+    /// The render widget is NOT reliably a direct child: Electron shells and WebView2 hosts
+    /// (Raycast, Outlook) bury it one or two levels down, and FindWindowEx only looks at
+    /// immediate children — so it used to report "not Chromium" for windows that plainly are,
+    /// and element detection fell through to a fallback that answers "the whole window".
+    /// EnumChildWindows walks every descendant, and when a point is supplied the widget
+    /// containing it wins (a browser can have several, e.g. one per out-of-process frame).
+    /// </summary>
+    private static bool IsChromiumFamily(IntPtr root, SD.Point? at, out IntPtr renderWidget)
     {
-        renderWidget = FindWindowEx(root, IntPtr.Zero, "Chrome_RenderWidgetHostHWND", null);
-        if (renderWidget != IntPtr.Zero)
-            return true;
+        IntPtr found = IntPtr.Zero;
+        long foundArea = long.MaxValue;
         var sb = new StringBuilder(64);
+
+        EnumChildWindows(root, (child, _) =>
+        {
+            sb.Clear();
+            GetClassName(child, sb, sb.Capacity);
+            if (!sb.ToString().Equals("Chrome_RenderWidgetHostHWND", StringComparison.Ordinal))
+                return true;
+            if (!GetWindowRect(child, out Rect cr))
+                return true;
+
+            var rect = SD.Rectangle.FromLTRB(cr.Left, cr.Top, cr.Right, cr.Bottom);
+            if (rect.Width <= 0 || rect.Height <= 0)
+                return true;
+            if (at is SD.Point p && !rect.Contains(p))
+                return true;
+
+            // Smallest containing widget = the innermost frame at that point.
+            long area = (long)rect.Width * rect.Height;
+            if (found == IntPtr.Zero || area < foundArea)
+            {
+                found = child;
+                foundArea = area;
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        renderWidget = found;
+        if (found != IntPtr.Zero)
+            return true;
+
+        sb.Clear();
         GetClassName(root, sb, sb.Capacity);
         return sb.ToString().StartsWith("Chrome_WidgetWin", StringComparison.Ordinal);
     }
@@ -380,6 +430,11 @@ public static class ScrollPaneDetector
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+
+    private delegate bool EnumChildProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowName);
