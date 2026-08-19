@@ -37,6 +37,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// scrollable pane (scrolling captures).</summary>
     private bool _elementGranularity;
     private SD.Rectangle? _hoverPane;
+    private readonly RectangleTween _hoverTween = new();
     private bool _elementLookupBusy;
     private SD.Point _elementLookupPoint;
     private SD.Point _lastVisualPoint = new(-9999, -9999);
@@ -165,7 +166,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _lastCtrlDown = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
-        if (_options.NeedsCursorFollow)
+        if (_options.NeedsCursorFollow || _paneHover)
             _followTimer.Start();
         return await _completion.Task;
     }
@@ -190,6 +191,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _paneHover = false;
         _elementGranularity = false;
         _hoverPane = null;
+        _hoverTween.Stop();
         _elementLookupBusy = false;
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
@@ -508,8 +510,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (snap is SD.Rectangle hwndRect && hwndRect != _hoverPane &&
                 (_hoverPane is not SD.Rectangle held || !held.Contains(_currentScreen)))
             {
-                _hoverPane = hwndRect;
-                InvalidateAllSurfaces();
+                SetHoverPane(hwndRect);
             }
 
             if (_elementGranularity)
@@ -525,11 +526,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     ? null
                     : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(win.Handle, _currentScreen)
                         ?? win.Bounds;
-                if (pane != _hoverPane)
-                {
-                    _hoverPane = pane;
-                    InvalidateAllSurfaces();
-                }
+                SetHoverPane(pane);
             }
         }
 
@@ -552,6 +549,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         try
         {
+            if (_hoverTween.IsActive)
+            {
+                SD.Rectangle before = _hoverTween.Current;
+                _hoverTween.Update();
+                InvalidateHoverRegion(before, _hoverTween.Current);
+            }
+
             SD.Point p = CursorScreen();
             bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
             if (p == _currentScreen && ctrl == _lastCtrlDown)
@@ -644,6 +648,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // The active selection (drawing / adjustable pending / hovered window) shows the
         // frozen pixels at full brightness with an accent border.
         SD.Rectangle? brightScreen = null;
+        SD.Rectangle? labelScreen = null;
         bool showHandles = false;
         if (_dragging && _dragMoved)
         {
@@ -660,7 +665,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
         else if (_paneHover && _hoverPane is SD.Rectangle hoverPane)
         {
-            brightScreen = hoverPane;
+            // Mid-glide the border rides the interpolated rect, but the readout stays on the
+            // real one - spinning digits for 200 ms reads as a glitch, not as motion.
+            brightScreen = _hoverTween.IsActive ? _hoverTween.Current : hoverPane;
+            labelScreen = hoverPane;
         }
 
         if (brightScreen is SD.Rectangle bright)
@@ -678,7 +686,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 SD.Point at = new(local.Right + 8, local.Bottom + 8);
                 if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
                     at = new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
-                SelectorChrome.DrawLabel(g, clientSize, $"{bright.Width} × {bright.Height}", at.X, at.Y);
+                SD.Rectangle sized = labelScreen ?? bright;
+                SelectorChrome.DrawLabel(g, clientSize, $"{sized.Width} × {sized.Height}", at.X, at.Y);
             }
         }
 
@@ -865,9 +874,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             {
                 return;
             }
-            _hoverPane = instant;
             Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {instant}");
-            InvalidateAllSurfaces();
+            SetHoverPane(instant);
         }
         if (_elementLookupBusy)
             return; // one in flight; the next mouse move re-kicks with the fresh point
@@ -895,9 +903,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
                         r != _hoverPane && (long)r.Width * r.Height < currentArea)
                     {
-                        _hoverPane = r;
                         Log.Info($"Hover: element {r}");
-                        InvalidateAllSurfaces();
+                        SetHoverPane(r);
                     }
                 }));
             }
@@ -906,6 +913,40 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 // Selector torn down mid-lookup — nothing to update.
             }
         });
+    }
+
+    /// <summary>
+    /// The one place the hover highlight changes. Routing every tier through here is what
+    /// keeps the glide honest: each new rect starts its slide from wherever the highlight
+    /// currently sits, so a stale tier answer can never make it jump backwards.
+    /// </summary>
+    private void SetHoverPane(SD.Rectangle? rect)
+    {
+        if (rect == _hoverPane)
+            return;
+
+        if (_hoverPane is SD.Rectangle previous && rect is SD.Rectangle next)
+        {
+            _hoverTween.Retarget(previous, next);
+            InvalidateHoverRegion(previous, next);
+        }
+        else
+        {
+            _hoverTween.Stop();
+            InvalidateAllSurfaces();
+        }
+        _hoverPane = rect;
+    }
+
+    /// <summary>Repaints only the ground the highlight covers across a glide step - the
+    /// brightened interior changes too, so the whole union has to be redrawn, but that is
+    /// still far less than the whole (possibly 4K) monitor.</summary>
+    private void InvalidateHoverRegion(SD.Rectangle from, SD.Rectangle to)
+    {
+        var union = SD.Rectangle.Union(from, to);
+        union.Inflate(4, 4); // border pen width + antialiasing
+        InvalidateScreenRect(union);
+        InvalidateScreenRect(new SD.Rectangle(union.Right, union.Bottom, LoupeBoxHalf, 64)); // size label
     }
 
     /// <summary>Innermost snappable rect under the point. The list is deepest-first, so the
