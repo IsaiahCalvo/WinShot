@@ -38,6 +38,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private bool _elementGranularity;
     private SD.Rectangle? _hoverPane;
     private readonly RectangleTween _hoverTween = new();
+    /// <summary>Per-edge slack below which a re-detection counts as the same rect.</summary>
+    private const int WobbleTolerancePx = 8;
+    /// <summary>A refinement scan was skipped to protect the glide; rerun it once it ends.</summary>
+    private bool _refinementDeferred;
     private bool _elementLookupBusy;
     private SD.Point _elementLookupPoint;
     private SD.Point _lastVisualPoint = new(-9999, -9999);
@@ -192,6 +196,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _elementGranularity = false;
         _hoverPane = null;
         _hoverTween.Stop();
+        _refinementDeferred = false;
         _elementLookupBusy = false;
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
@@ -549,16 +554,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         try
         {
-            if (_hoverTween.IsActive)
-            {
-                SD.Rectangle before = _hoverTween.Current;
-                _hoverTween.Update();
-                InvalidateHoverRegion(before, _hoverTween.Current);
-            }
-
             SD.Point p = CursorScreen();
             bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
-            if (p == _currentScreen && ctrl == _lastCtrlDown)
+            bool resumeRefinement = _refinementDeferred && !_hoverTween.IsActive;
+            if (p == _currentScreen && ctrl == _lastCtrlDown && !resumeRefinement)
                 return;
             _lastCtrlDown = ctrl;
             HandleMouseMove();
@@ -631,6 +630,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SD.Size clientSize = monitorBounds.Size;
         bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
 
+        // Advance the glide on the paint clock, not on a timer tick. Update() reads a
+        // stopwatch, so calling it once per surface in a multi-monitor frame is harmless.
+        SD.Rectangle tweenBefore = _hoverTween.Current;
+        bool tweening = _hoverTween.IsActive && _hoverTween.Update();
+
         // Frozen desktop slice + uniform dim, baked once and blitted as one opaque copy.
         var dimmed = GetDimmedBackground(monitorBounds);
         if (dimmed is not null)
@@ -667,7 +671,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             // Mid-glide the border rides the interpolated rect, but the readout stays on the
             // real one - spinning digits for 200 ms reads as a glitch, not as motion.
-            brightScreen = _hoverTween.IsActive ? _hoverTween.Current : hoverPane;
+            brightScreen = tweening ? _hoverTween.Current : hoverPane;
             labelScreen = hoverPane;
         }
 
@@ -690,6 +694,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 SelectorChrome.DrawLabel(g, clientSize, $"{sized.Width} × {sized.Height}", at.X, at.Y);
             }
         }
+
+        // Ask for the next frame. Self-sustaining for the 200 ms of the glide, then it stops
+        // on its own because Update() clears IsActive once the stopwatch passes the duration.
+        if (tweenBefore != _hoverTween.Current)
+            InvalidateHoverRegion(tweenBefore, _hoverTween.Current);
 
         // Cancel / Done bar on the adjustable selection: below the region, flipped above when it
         // runs to the screen bottom, tucked inside the bottom when the region spans the full height.
@@ -845,6 +854,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // segmentation on the frozen snapshot (works even when an app ships with its
         // accessibility tree off — the Claude and Codex desktop apps do), then a UIA/MSAA
         // walk on a worker for apps that expose a real element tree.
+        if (_hoverTween.IsActive)
+        {
+            // The scan costs several ms of UI thread - never steal frames from the glide. The
+            // cursor may come to rest during those 200 ms, so remember to come back for it.
+            _refinementDeferred = true;
+            return;
+        }
+        _refinementDeferred = false;
         if (Distance(point, _lastVisualPoint) < 4)
             return; // scanning megapixels at follow-tick rate would jank the selector
         _lastVisualPoint = point;
@@ -925,6 +942,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (rect == _hoverPane)
             return;
 
+        // The pixel tier re-segments on every few px of cursor travel and its answer breathes
+        // by a handful of pixels each time. Restarting the glide for that reads as a permanent
+        // shiver, so a near-identical rect is treated as the same rect.
+        if (rect is SD.Rectangle candidate && _hoverPane is SD.Rectangle settled &&
+            IsWithin(candidate, settled, WobbleTolerancePx))
+        {
+            return;
+        }
+
         if (_hoverPane is SD.Rectangle previous && rect is SD.Rectangle next)
         {
             _hoverTween.Retarget(previous, next);
@@ -937,6 +963,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
         _hoverPane = rect;
     }
+
+    /// <summary>Edge-wise nearness: true when every side of the two rects is within
+    /// <paramref name="tolerance"/> px.</summary>
+    private static bool IsWithin(SD.Rectangle a, SD.Rectangle b, int tolerance) =>
+        Math.Abs(a.Left - b.Left) <= tolerance && Math.Abs(a.Top - b.Top) <= tolerance &&
+        Math.Abs(a.Right - b.Right) <= tolerance && Math.Abs(a.Bottom - b.Bottom) <= tolerance;
 
     /// <summary>Repaints only the ground the highlight covers across a glide step - the
     /// brightened interior changes too, so the whole union has to be redrawn, but that is
