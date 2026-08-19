@@ -72,9 +72,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// its answer counts as describing somewhere the cursor no longer is. Tight enough that a
     /// stale rect never lands, loose enough to survive a fast flick across a window.</summary>
     private const int StaleAnswerPx = 160;
-    /// <summary>Pane seams per window, found once from the frozen pixels. This is what finds a
-    /// resizable sidebar or a header strip in apps whose accessibility tree describes neither.</summary>
-    private readonly Dictionary<IntPtr, PaneGridDetector.Grid> _paneGrids = new();
     /// <summary>True when the selection came from clicking the highlighted pane rather than
     /// a hand-drawn marquee — only pane clicks opt into probe refinement downstream; a rect
     /// the user deliberately drew is captured exactly as drawn.</summary>
@@ -222,7 +219,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _snapRects = new List<SnapRect>();
         _snapEdgesX = Array.Empty<int>();
         _snapEdgesY = Array.Empty<int>();
-        _paneGrids.Clear();
         _dragging = false;
         _dragMoved = false;
         _pendingScreen = null;
@@ -951,18 +947,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
         _scanFailedAt = visual is null ? point : new SD.Point(-9999, -9999);
 
-        SD.Rectangle? pane = PaneAt(seed, point);
-        SD.Rectangle? resolved = visual ?? pane ?? snap ??
+        SD.Rectangle? resolved = visual ?? snap ??
             (seed is null
                 ? null
                 : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point) ?? seed.Bounds);
 
         if (resolved is SD.Rectangle chosen)
         {
-            _hoverSource = visual is not null ? "visual" : pane is not null ? "pane"
-                : snap is not null ? "hwnd" : "seed";
-            BuildLadder(point, chosen, null, pane);
-            SetHoverPane(chosen, visual is not null || pane is not null ? HoverTier.Fine : HoverTier.Coarse);
+            _hoverSource = visual is not null ? "visual" : snap is not null ? "hwnd" : "seed";
+            BuildLadder(point, chosen);
+            SetHoverPane(chosen, visual is not null ? HoverTier.Fine : HoverTier.Coarse);
         }
     }
 
@@ -973,11 +967,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// eight pixels bigger is not a step a person can see.
     /// </summary>
     private void BuildLadder(SD.Point point, SD.Rectangle resolved,
-        IReadOnlyList<AxNode>? chain = null, SD.Rectangle? pane = null)
+        IReadOnlyList<AxNode>? chain = null)
     {
         var rungs = new List<SD.Rectangle> { resolved };
-        if (pane is SD.Rectangle paneRect)
-            rungs.Add(paneRect); // the sidebar / header / content pane the cursor is in
         if (chain is not null)
         {
             // Every level the app itself reports — the button, the row, the toolbar it sits in,
@@ -1100,36 +1092,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
             InvalidateAllSurfaces();
         }
         _hoverPane = rect;
-    }
-
-    /// <summary>
-    /// The layout pane under the cursor — the sidebar, the header strip, the content area —
-    /// found from the seams in the frozen pixels. Built once per window and cached, because a
-    /// frozen screen's layout cannot change while the overlay is up.
-    /// </summary>
-    private SD.Rectangle? PaneAt(WindowInfo? window, SD.Point point)
-    {
-        if (window is null || _frozen is null)
-            return null;
-
-        if (!_paneGrids.TryGetValue(window.Handle, out var grid))
-        {
-            try
-            {
-                grid = PaneGridDetector.Build(_frozen, VirtualFromScreen(window.Bounds));
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Pane seam scan failed (non-fatal)", ex);
-                grid = new PaneGridDetector.Grid(Array.Empty<int>(), Array.Empty<int>());
-            }
-            _paneGrids[window.Handle] = grid;
-        }
-
-        var virtualPoint = new SD.Point(point.X - _vs.X, point.Y - _vs.Y);
-        if (PaneGridDetector.PaneAt(grid, virtualPoint, VirtualFromScreen(window.Bounds)) is not SD.Rectangle found)
-            return null;
-        return new SD.Rectangle(found.X + _vs.X, found.Y + _vs.Y, found.Width, found.Height);
     }
 
     /// <summary>
