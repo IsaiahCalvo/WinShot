@@ -45,8 +45,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// cursor leaves it, which is what stops the highlight churning inside a single element.</summary>
     private enum HoverTier { None, Coarse, Fine }
     private HoverTier _hoverTier = HoverTier.None;
-    /// <summary>Which tier produced the pending highlight, for the one log line per change.</summary>
-    private string _hoverSource = "none";
     /// <summary>Every rect under the cursor that could plausibly be "the thing", smallest
     /// first. The wheel walks it, so a detector that picked the right area at the wrong depth
     /// costs one notch instead of a hand-drawn rectangle.</summary>
@@ -60,14 +58,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private bool _elementLookupBusy;
     private SD.Point _elementLookupPoint;
     private SD.Point _lastVisualPoint = new(-9999, -9999);
-    /// <summary>Where the pixel scan last came back with nothing usable. Re-running it a few
-    /// px away would fail again for the same reason, so it is not retried until the cursor has
-    /// genuinely moved on.</summary>
-    private SD.Point _scanFailedAt = new(-9999, -9999);
-    /// <summary>Cursor travel required before the pixel scan is worth repeating, and the
-    /// larger distance required after it has already failed once nearby.</summary>
-    private const int ScanIntervalPx = 12;
-    private const int ScanRetryAfterFailurePx = 48;
     /// <summary>True when the selection came from clicking the highlighted pane rather than
     /// a hand-drawn marquee — only pane clicks opt into probe refinement downstream; a rect
     /// the user deliberately drew is captured exactly as drawn.</summary>
@@ -226,8 +216,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hoverPane = null;
         _hoverTween.Stop();
         _hoverTier = HoverTier.None;
-        _scanFailedAt = new SD.Point(-9999, -9999);
-        _lastVisualPoint = new SD.Point(-9999, -9999);
         _hoverLadder = new List<SD.Rectangle>();
         _ladderIndex = -1;
         _elementLookupBusy = false;
@@ -909,14 +897,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        // Segmenting a megapixel crop costs several ms of UI thread. At follow-tick rate that
-        // is most of the frame budget, which is what turns the glide choppy — so it runs on
-        // cursor travel, not on ticks, and backs off hard where it has already drawn a blank.
-        if (Distance(point, _lastVisualPoint) < ScanIntervalPx ||
-            Distance(point, _scanFailedAt) < ScanRetryAfterFailurePx)
-        {
-            return;
-        }
+        if (Distance(point, _lastVisualPoint) < 4)
+            return; // re-segmenting megapixels at follow-tick rate would jank the selector
         _lastVisualPoint = point;
 
         WindowInfo? seed = ResolveWindow(point);
@@ -935,7 +917,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 visual = mapped.Contains(point) ? mapped : null;
             }
         }
-        _scanFailedAt = visual is null ? point : new SD.Point(-9999, -9999);
 
         SD.Rectangle? resolved = visual ?? snap ??
             (seed is null
@@ -944,7 +925,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (resolved is SD.Rectangle chosen)
         {
-            _hoverSource = visual is not null ? "visual" : snap is not null ? "hwnd" : "seed";
+            Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {chosen}");
             BuildLadder(point, chosen);
             SetHoverPane(chosen, visual is not null ? HoverTier.Fine : HoverTier.Coarse);
         }
@@ -1011,7 +992,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
                         r != _hoverPane && r.Contains(point) && !IsWholePane(r, point))
                     {
-                        _hoverSource = "element";
+                        Log.Info($"Hover: element {r}");
                         BuildLadder(point, r);
                         SetHoverPane(r, HoverTier.Fine);
                     }
@@ -1043,7 +1024,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             return;
         }
-        Log.Info($"Hover: {_hoverSource} {(rect is SD.Rectangle r ? r.ToString() : "none")}");
 
         if (_hoverPane is SD.Rectangle previous && rect is SD.Rectangle next)
         {
