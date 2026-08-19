@@ -65,9 +65,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// genuinely moved on.</summary>
     private SD.Point _scanFailedAt = new(-9999, -9999);
     /// <summary>Cursor travel required before the pixel scan is worth repeating, and the
-    /// larger distance required after it has already failed once nearby.</summary>
-    private const int ScanIntervalPx = 12;
-    private const int ScanRetryAfterFailurePx = 48;
+    /// larger distance required after it has already failed once nearby. Kept small: the scan
+    /// is what finds elements in apps whose accessibility tree is thin, and throttling it hard
+    /// traded a visible win (the right rect) for an invisible one (a few spare ms).</summary>
+    private const int ScanIntervalPx = 5;
+    private const int ScanRetryAfterFailurePx = 16;
     /// <summary>How far the cursor may have travelled while the accessibility walk ran before
     /// its answer counts as describing somewhere the cursor no longer is. Tight enough that a
     /// stale rect never lands, loose enough to survive a fast flick across a window.</summary>
@@ -1115,11 +1117,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (node.IsPrimary)
                 return node.Rect;
         }
-        foreach (var node in chain)
-        {
-            if (node.IsRegion)
-                return node.Rect;
-        }
+        // Then the innermost thing that is not structural noise. NOT the smallest REGION —
+        // preferring a header or a group over the tighter rect beneath it made the highlight
+        // jump out to something far larger than what the cursor was on. Regions stay one
+        // wheel notch away, which is where they belong.
         foreach (var node in chain)
         {
             if (!node.IsPassThrough)

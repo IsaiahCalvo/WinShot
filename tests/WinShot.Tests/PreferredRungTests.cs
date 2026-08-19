@@ -37,16 +37,17 @@ public class PreferredRungTests
     }
 
     [Fact]
-    public void FallsBackToARegionWhenNothingIsAControl()
+    public void DoesNotPromoteARegionOverATighterRectBeneathIt()
     {
-        // A page footer: static text sitting in a group, inside the document.
+        // A page footer: static text in a group, inside the document. The group is a fine
+        // wheel notch, but jumping straight to it puts a 1200x90 band around a 200x18 line.
         var chain = new[]
         {
-            Node(200, 18, AxNode.StaticText),
+            Node(200, 18, AxNode.Text),       // editable/inline text IS a thing
             Node(1200, 90, AxNode.Grouping),
             Node(1200, 4000, AxNode.Document),
         };
-        Assert.Equal(new Rectangle(0, 0, 1200, 90), FastRegionSelectorDialog.PreferredRung(chain));
+        Assert.Equal(new Rectangle(0, 0, 200, 18), FastRegionSelectorDialog.PreferredRung(chain));
     }
 
     [Fact]
