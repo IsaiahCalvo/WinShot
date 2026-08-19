@@ -45,6 +45,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// cursor leaves it, which is what stops the highlight churning inside a single element.</summary>
     private enum HoverTier { None, Coarse, Fine }
     private HoverTier _hoverTier = HoverTier.None;
+    /// <summary>Every rect under the cursor that could plausibly be "the thing", smallest
+    /// first. The wheel walks it, so a detector that picked the right area at the wrong depth
+    /// costs one notch instead of a hand-drawn rectangle.</summary>
+    private List<SD.Rectangle> _hoverLadder = new();
+    private int _ladderIndex = -1;
+    /// <summary>Distinct edge coordinates from the snap list, sorted, for marquee snapping.</summary>
+    private int[] _snapEdgesX = Array.Empty<int>();
+    private int[] _snapEdgesY = Array.Empty<int>();
+    /// <summary>How close a dragged edge must come to a real one before it clicks onto it.</summary>
+    private const int MarqueeSnapPx = 6;
     private bool _elementLookupBusy;
     private SD.Point _elementLookupPoint;
     private SD.Point _lastVisualPoint = new(-9999, -9999);
@@ -161,6 +171,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _snapRects = _paneHover
             ? await Task.Run(() => WindowEnumerator.GetSnapRectangles())
             : new List<SnapRect>();
+        _snapEdgesX = _snapRects.SelectMany(r => new[] { r.Bounds.Left, r.Bounds.Right })
+            .Distinct().OrderBy(x => x).ToArray();
+        _snapEdgesY = _snapRects.SelectMany(r => new[] { r.Bounds.Top, r.Bounds.Bottom })
+            .Distinct().OrderBy(y => y).ToArray();
         CreatePanes();
 
         Show();
@@ -189,6 +203,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _windowsLoadStarted = false;
         _windows = new List<WindowInfo>();
         _snapRects = new List<SnapRect>();
+        _snapEdgesX = Array.Empty<int>();
+        _snapEdgesY = Array.Empty<int>();
         _dragging = false;
         _dragMoved = false;
         _pendingScreen = null;
@@ -200,6 +216,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hoverPane = null;
         _hoverTween.Stop();
         _hoverTier = HoverTier.None;
+        _hoverLadder = new List<SD.Rectangle>();
+        _ladderIndex = -1;
         _elementLookupBusy = false;
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
@@ -382,6 +400,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         base.OnMouseUp(e);
     }
 
+    protected override void OnMouseWheel(WF.MouseEventArgs e)
+    {
+        HandleMouseWheel(e);
+        base.OnMouseWheel(e);
+    }
+
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         e.Graphics.Clear(SD.Color.Black);
@@ -557,6 +581,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return _options.IsCrosshairVisible(controlPressed);
     }
 
+    /// <summary>Wheel up widens the highlight to the next enclosing candidate, wheel down
+    /// narrows it back. The detector is usually right about WHERE and only sometimes right
+    /// about HOW MUCH; this makes the second half a one-notch correction.</summary>
+    internal void HandleMouseWheel(WF.MouseEventArgs e)
+    {
+        if (!_paneHover || _pendingScreen is not null || _dragging || _hoverLadder.Count == 0)
+            return;
+
+        int next = Math.Clamp(_ladderIndex + (e.Delta > 0 ? 1 : -1), 0, _hoverLadder.Count - 1);
+        if (next == _ladderIndex)
+            return;
+
+        _ladderIndex = next;
+        // Tier Fine: an explicit choice must not be second-guessed by the next mouse twitch.
+        SetHoverPane(_hoverLadder[next], HoverTier.Fine);
+    }
+
     internal void HandleMouseUp(WF.MouseEventArgs e)
     {
         if (e.Button != WF.MouseButtons.Left)
@@ -587,7 +628,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             // Don't capture yet — present an adjustable selection (move/resize, then Enter or
             // double-click to confirm), matching CleanShot's behavior.
-            var rect = Normalize(_dragStartScreen, _currentScreen);
+            var rect = Normalize(_dragStartScreen, SnappedCursor());
             rect.Intersect(_vs);
             if (rect.Width > 0 && rect.Height > 0)
                 _pendingScreen = rect;
@@ -635,7 +676,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         bool showHandles = false;
         if (_dragging && _dragMoved)
         {
-            brightScreen = Normalize(_dragStartScreen, _currentScreen);
+            brightScreen = Normalize(_dragStartScreen, SnappedCursor());
         }
         else if (_pendingScreen is SD.Rectangle pending)
         {
@@ -882,13 +923,42 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 ? null
                 : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point) ?? seed.Bounds);
 
-        if (resolved is not null)
+        if (resolved is SD.Rectangle chosen)
         {
-            Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {resolved}");
-            SetHoverPane(resolved, visual is not null ? HoverTier.Fine : HoverTier.Coarse);
+            Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {chosen}");
+            BuildLadder(point, chosen);
+            SetHoverPane(chosen, visual is not null ? HoverTier.Fine : HoverTier.Coarse);
         }
 
         KickElementLookup(point);
+    }
+
+    /// <summary>
+    /// Collects the nesting of rects under the cursor - the resolved one plus every HWND rect
+    /// containing the point - smallest first, so the wheel has somewhere to go in both
+    /// directions. Rungs closer than the wobble tolerance are merged; stepping onto a rect
+    /// eight pixels bigger is not a step a person can see.
+    /// </summary>
+    private void BuildLadder(SD.Point point, SD.Rectangle resolved)
+    {
+        var rungs = new List<SD.Rectangle> { resolved };
+        foreach (var candidate in _snapRects)
+        {
+            if (candidate.Bounds.Contains(point))
+                rungs.Add(candidate.Bounds);
+        }
+
+        var ladder = new List<SD.Rectangle>();
+        foreach (var rung in rungs.OrderBy(r => (long)r.Width * r.Height))
+        {
+            if (ladder.Count == 0 || !IsWithin(ladder[^1], rung, WobbleTolerancePx))
+                ladder.Add(rung);
+        }
+
+        _hoverLadder = ladder;
+        _ladderIndex = ladder.FindIndex(r => IsWithin(r, resolved, WobbleTolerancePx));
+        if (_ladderIndex < 0)
+            _ladderIndex = 0;
     }
 
     private void KickElementLookup(SD.Point point)
@@ -914,17 +984,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     _elementLookupBusy = false;
                     if (IsDisposed || !_paneHover)
                         return;
-                    // Only adopt if the cursor is still near where we asked (stale answers
-                    // for old points would make the highlight lag-jump).
-                    // A UIA answer only replaces the current highlight when it is more
-                    // specific — a full-window "element" must not undo a good visual rect.
-                    long currentArea = _hoverPane is SD.Rectangle cur
-                        ? (long)cur.Width * cur.Height : long.MaxValue;
+                    // The accessibility tree KNOWS where the element ends; the pixel scan is
+                    // inferring it from colour. So the tree wins outright rather than only when
+                    // it happens to be smaller — except for the one answer it gets wrong often
+                    // enough to matter, a rect so large it is really the whole pane wearing an
+                    // element's name. Stale answers for a point the cursor has left are dropped.
                     if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
-                        r != _hoverPane && r.Contains(point) &&
-                        (long)r.Width * r.Height < currentArea)
+                        r != _hoverPane && r.Contains(point) && !IsWholePane(r, point))
                     {
                         Log.Info($"Hover: element {r}");
+                        BuildLadder(point, r);
                         SetHoverPane(r, HoverTier.Fine);
                     }
                 }));
@@ -969,6 +1038,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hoverPane = rect;
     }
 
+    /// <summary>Whether a candidate is really the whole window dressed up as an element -
+    /// the one shape the accessibility tree reports confidently and uselessly.</summary>
+    private bool IsWholePane(SD.Rectangle candidate, SD.Point point)
+    {
+        if (ResolveWindow(point) is not WindowInfo win || win.Bounds.Width <= 0)
+            return false;
+        return (long)candidate.Width * candidate.Height * 100 >=
+               (long)win.Bounds.Width * win.Bounds.Height * 55;
+    }
+
     /// <summary>Edge-wise nearness: true when every side of the two rects is within
     /// <paramref name="tolerance"/> px.</summary>
     private static bool IsWithin(SD.Rectangle a, SD.Rectangle b, int tolerance) =>
@@ -996,6 +1075,41 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 return candidate.Bounds;
         }
         return null;
+    }
+
+    /// <summary>
+    /// The dragged corner, pulled onto a real element edge when it comes within a few px of
+    /// one. Hand-drawn control, but the result lines up with what is actually on screen -
+    /// eyeballing the last three pixels is the tedious part of drawing a rectangle.
+    /// </summary>
+    private SD.Point SnappedCursor() => new(
+        SnapCoordinate(_currentScreen.X, _snapEdgesX),
+        SnapCoordinate(_currentScreen.Y, _snapEdgesY));
+
+    internal static int SnapCoordinate(int value, int[] edges)
+    {
+        if (edges.Length == 0)
+            return value;
+
+        int at = Array.BinarySearch(edges, value);
+        if (at >= 0)
+            return value;
+
+        at = ~at; // first edge greater than value
+        int best = value;
+        int bestGap = MarqueeSnapPx + 1;
+        for (int i = at - 1; i <= at; i++)
+        {
+            if (i < 0 || i >= edges.Length)
+                continue;
+            int gap = Math.Abs(edges[i] - value);
+            if (gap < bestGap)
+            {
+                bestGap = gap;
+                best = edges[i];
+            }
+        }
+        return best;
     }
 
     private static int Distance(SD.Point a, SD.Point b) =>
@@ -1269,6 +1383,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             Capture = false;
             _owner.HandleMouseUp(e);
             base.OnMouseUp(e);
+        }
+
+        protected override void OnMouseWheel(WF.MouseEventArgs e)
+        {
+            _owner.HandleMouseWheel(e);
+            base.OnMouseWheel(e);
         }
 
         protected override void OnKeyDown(WF.KeyEventArgs e)
