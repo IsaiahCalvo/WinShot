@@ -51,9 +51,9 @@ public static class ScrollPaneDetector
             if (Win32ScrollablePane(root, screenPx) is SD.Rectangle exact)
                 return new PaneInfo(exact, PaneSource.Win32Exact);
 
-            bool chromium = IsChromiumFamily(root, screenPx, out IntPtr renderWidget);
-            if (chromium)
-                WakeChromiumAccessibility(renderWidget != IntPtr.Zero ? renderWidget : root);
+            bool chromium = IsChromiumFamily(root, out IntPtr renderWidget);
+            if (chromium && renderWidget != IntPtr.Zero)
+                WakeChromiumAccessibility(renderWidget);
 
             PaneInfo? uia = RunWithTimeout(() => UiaScrollablePane(screenPx, chromium), timeout);
             if (uia is not null)
@@ -90,7 +90,7 @@ public static class ScrollPaneDetector
                 return null;
             if (Win32ScrollablePane(root, screenPx) is SD.Rectangle exact)
                 return exact;
-            IsChromiumFamily(root, screenPx, out IntPtr widget);
+            IntPtr widget = FindWindowEx(root, IntPtr.Zero, "Chrome_RenderWidgetHostHWND", null);
             if (widget != IntPtr.Zero && GetWindowRect(widget, out Rect wr))
             {
                 var rect = SD.Rectangle.FromLTRB(wr.Left, wr.Top, wr.Right, wr.Bottom);
@@ -106,50 +106,52 @@ public static class ScrollPaneDetector
     }
 
     /// <summary>
-    /// The nesting of accessible elements under a point, innermost first, with the role the
-    /// app reports for each level.
-    ///
-    /// MSAA is tried on EVERY window, not just Chromium ones. The old code gated it behind a
-    /// "looks like a browser" check and sent everything else to a managed UI Automation walk —
-    /// but measured side by side on a live desktop, the MSAA tree is richer everywhere:
-    /// File Explorer answers with the exact file row (1670x41), Electron apps with seven
-    /// levels of real nesting, where the UIA walk returns one whole-window pane. UIA is now
-    /// only the fallback for windows MSAA cannot describe.
-    ///
-    /// Blocking; call from a worker thread.
+    /// Element-level lookup for Alt-hover in the region selector: the deepest UIA element
+    /// whose bounds contain the point, found by GEOMETRIC descent from the window root
+    /// (child-contains-point at each level). No ElementFromPoint — hit-testing would land
+    /// on the selector's own overlay; geometry works against the frozen screen. Blocking;
+    /// call from a worker thread.
     /// </summary>
-    public static IReadOnlyList<WinShot.Capture.AxNode> ElementChainFromPoint(
-        IntPtr root, SD.Point p, TimeSpan timeout)
+    public static SD.Rectangle? ElementRectFromPoint(IntPtr root, SD.Point p, TimeSpan timeout)
     {
-        if (root == IntPtr.Zero)
-            return Array.Empty<WinShot.Capture.AxNode>();
-
         try
         {
-            // Chromium hosts answer for their web content on the render widget; everything
-            // else answers on the window itself. The widget may be nested several levels down.
-            IsChromiumFamily(root, p, out IntPtr renderWidget);
-            IntPtr axTarget = renderWidget != IntPtr.Zero ? renderWidget : root;
-
-            var chain = WinShot.Capture.MsaaElementDetector.ElementChainFromPoint(axTarget, p, timeout);
-            if (chain.Count > 0)
-                return chain;
-
-            // Only now the UIA wake: asking Chromium for its UIA root switches the renderer
-            // toward the UIA provider and the rich MSAA tree stops answering — measured, seven
-            // nested nodes before the wake and none after. It must never precede the MSAA read.
-            WakeChromiumAccessibility(axTarget);
-            if (DescendToElement(root, p) is SD.Rectangle found)
+            if (root == IntPtr.Zero)
+                return null;
+            bool chromium = IsChromiumFamily(root, out IntPtr renderWidget);
+            if (chromium && renderWidget != IntPtr.Zero)
             {
-                // The managed walk has no roles to offer; a bare rect still earns a rung on
-                // the ladder, it just cannot be preferred on merit.
-                return new[] { new WinShot.Capture.AxNode(found, 0) };
+                // Chromium/Electron: managed UIA only sees the lossy MSAA→UIA proxy on
+                // pre-138 engines (sparse tree, huge boxes). The MSAA tree is the real
+                // one — NVDA's path — and resolving OBJID_CLIENT materializes it.
+                WakeChromiumAccessibility(renderWidget);
+                var msaa = Task.Run(() => WinShot.Capture.MsaaElementDetector
+                    .ElementRectFromPoint(renderWidget, p, timeout));
+                if (msaa.Wait(timeout) && msaa.Result is SD.Rectangle fromMsaa)
+                    return fromMsaa;
             }
-            return Array.Empty<WinShot.Capture.AxNode>();
+            bool treeAlreadyBuilt = renderWidget != IntPtr.Zero &&
+                WinShot.Capture.MsaaElementDetector.IsTreeKnownAwake(renderWidget);
+            var task = Task.Run(() =>
+            {
+                // The tree materializes asynchronously after a Chromium wake — retry, but only
+                // the first time. Once it is known live those sleeps are half a second of pure
+                // latency on every subsequent hover.
+                int[] delays = chromium && !treeAlreadyBuilt ? new[] { 0, 160, 350 } : new[] { 0 };
+                foreach (int delay in delays)
+                {
+                    if (delay > 0)
+                        Thread.Sleep(delay);
+                    if (DescendToElement(root, p) is SD.Rectangle found)
+                        return (SD.Rectangle?)found;
+                }
+                return null;
+            });
+            return task.Wait(timeout) ? task.Result : null;
         }
         catch (Exception)
         {
-            return Array.Empty<WinShot.Capture.AxNode>();
+            return null;
         }
     }
 
@@ -256,55 +258,12 @@ public static class ScrollPaneDetector
 
     // ---- Tier 1: UIA ----
 
-    private static bool IsChromiumFamily(IntPtr root, out IntPtr renderWidget) =>
-        IsChromiumFamily(root, null, out renderWidget);
-
-    /// <summary>
-    /// Whether this is a Chromium/Electron window, and where its web content lives.
-    ///
-    /// The render widget is NOT reliably a direct child: Electron shells and WebView2 hosts
-    /// (Raycast, Outlook) bury it one or two levels down, and FindWindowEx only looks at
-    /// immediate children — so it used to report "not Chromium" for windows that plainly are,
-    /// and element detection fell through to a fallback that answers "the whole window".
-    /// EnumChildWindows walks every descendant, and when a point is supplied the widget
-    /// containing it wins (a browser can have several, e.g. one per out-of-process frame).
-    /// </summary>
-    private static bool IsChromiumFamily(IntPtr root, SD.Point? at, out IntPtr renderWidget)
+    private static bool IsChromiumFamily(IntPtr root, out IntPtr renderWidget)
     {
-        IntPtr found = IntPtr.Zero;
-        long foundArea = long.MaxValue;
+        renderWidget = FindWindowEx(root, IntPtr.Zero, "Chrome_RenderWidgetHostHWND", null);
+        if (renderWidget != IntPtr.Zero)
+            return true;
         var sb = new StringBuilder(64);
-
-        EnumChildWindows(root, (child, _) =>
-        {
-            sb.Clear();
-            GetClassName(child, sb, sb.Capacity);
-            if (!sb.ToString().Equals("Chrome_RenderWidgetHostHWND", StringComparison.Ordinal))
-                return true;
-            if (!GetWindowRect(child, out Rect cr))
-                return true;
-
-            var rect = SD.Rectangle.FromLTRB(cr.Left, cr.Top, cr.Right, cr.Bottom);
-            if (rect.Width <= 0 || rect.Height <= 0)
-                return true;
-            if (at is SD.Point p && !rect.Contains(p))
-                return true;
-
-            // Smallest containing widget = the innermost frame at that point.
-            long area = (long)rect.Width * rect.Height;
-            if (found == IntPtr.Zero || area < foundArea)
-            {
-                found = child;
-                foundArea = area;
-            }
-            return true;
-        }, IntPtr.Zero);
-
-        renderWidget = found;
-        if (found != IntPtr.Zero)
-            return true;
-
-        sb.Clear();
         GetClassName(root, sb, sb.Capacity);
         return sb.ToString().StartsWith("Chrome_WidgetWin", StringComparison.Ordinal);
     }
@@ -421,11 +380,6 @@ public static class ScrollPaneDetector
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
-
-    private delegate bool EnumChildProc(IntPtr hwnd, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowName);

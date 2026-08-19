@@ -65,15 +65,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// genuinely moved on.</summary>
     private SD.Point _scanFailedAt = new(-9999, -9999);
     /// <summary>Cursor travel required before the pixel scan is worth repeating, and the
-    /// larger distance required after it has already failed once nearby. Kept small: the scan
-    /// is what finds elements in apps whose accessibility tree is thin, and throttling it hard
-    /// traded a visible win (the right rect) for an invisible one (a few spare ms).</summary>
-    private const int ScanIntervalPx = 5;
-    private const int ScanRetryAfterFailurePx = 16;
-    /// <summary>How far the cursor may have travelled while the accessibility walk ran before
-    /// its answer counts as describing somewhere the cursor no longer is. Tight enough that a
-    /// stale rect never lands, loose enough to survive a fast flick across a window.</summary>
-    private const int StaleAnswerPx = 160;
+    /// larger distance required after it has already failed once nearby.</summary>
+    private const int ScanIntervalPx = 12;
+    private const int ScanRetryAfterFailurePx = 48;
     /// <summary>True when the selection came from clicking the highlighted pane rather than
     /// a hand-drawn marquee — only pane clicks opt into probe refinement downstream; a rect
     /// the user deliberately drew is captured exactly as drawn.</summary>
@@ -915,15 +909,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        // Ask the app first, and ask it on EVERY move. This costs the UI thread almost
-        // nothing — the walk happens on a worker — and it is the tier that actually knows
-        // what a button or a footer is. It used to sit below the throttle guard, so backing
-        // the pixel scan off silently muted the accessibility tier along with it.
-        KickElementLookup(point);
-
-        // The pixel scan is the expensive one: segmenting a megapixel crop costs several ms of
-        // UI thread, and at follow-tick rate that is most of the frame budget. It runs on
-        // cursor travel rather than on ticks, and backs off hard where it has drawn a blank.
+        // Segmenting a megapixel crop costs several ms of UI thread. At follow-tick rate that
+        // is most of the frame budget, which is what turns the glide choppy — so it runs on
+        // cursor travel, not on ticks, and backs off hard where it has already drawn a blank.
         if (Distance(point, _lastVisualPoint) < ScanIntervalPx ||
             Distance(point, _scanFailedAt) < ScanRetryAfterFailurePx)
         {
@@ -960,6 +948,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             BuildLadder(point, chosen);
             SetHoverPane(chosen, visual is not null ? HoverTier.Fine : HoverTier.Coarse);
         }
+
+        KickElementLookup(point);
     }
 
     /// <summary>
@@ -968,21 +958,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// directions. Rungs closer than the wobble tolerance are merged; stepping onto a rect
     /// eight pixels bigger is not a step a person can see.
     /// </summary>
-    private void BuildLadder(SD.Point point, SD.Rectangle resolved,
-        IReadOnlyList<AxNode>? chain = null)
+    private void BuildLadder(SD.Point point, SD.Rectangle resolved)
     {
         var rungs = new List<SD.Rectangle> { resolved };
-        if (chain is not null)
-        {
-            // Every level the app itself reports — the button, the row, the toolbar it sits in,
-            // the region around that — so the wheel steps through real structure rather than
-            // through whatever sizes happened to fall out of a pixel scan.
-            foreach (var node in chain)
-            {
-                if (node.Rect.Contains(point) && !IsWholePane(node.Rect, point))
-                    rungs.Add(node.Rect);
-            }
-        }
         foreach (var candidate in _snapRects)
         {
             if (candidate.Bounds.Contains(point))
@@ -1016,30 +994,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
         IntPtr root = win?.Handle ?? IntPtr.Zero;
         Task.Run(() =>
         {
-            try
-            {
-                RunElementLookup(root, point);
-            }
-            finally
-            {
-                // Clear the in-flight flag HERE, not inside the marshalled callback. If the
-                // walk threw, or the selector closed before BeginInvoke could run, the flag
-                // stayed set and every later lookup was skipped for the rest of the session —
-                // one answer at the start and silence after.
-                _elementLookupBusy = false;
-            }
-        });
-    }
-
-    private void RunElementLookup(IntPtr root, SD.Point point)
-    {
-            IReadOnlyList<AxNode> chain = WinShot.Scrolling.ScrollPaneDetector.ElementChainFromPoint(
+            SD.Rectangle? rect = WinShot.Scrolling.ScrollPaneDetector.ElementRectFromPoint(
                 root, point, TimeSpan.FromMilliseconds(450));
-            SD.Rectangle? rect = PreferredRung(chain);
             try
             {
                 BeginInvoke(new Action(() =>
                 {
+                    _elementLookupBusy = false;
                     if (IsDisposed || !_paneHover)
                         return;
                     // The accessibility tree KNOWS where the element ends; the pixel scan is
@@ -1047,11 +1008,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     // it happens to be smaller — except for the one answer it gets wrong often
                     // enough to matter, a rect so large it is really the whole pane wearing an
                     // element's name. Stale answers for a point the cursor has left are dropped.
-                    if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < StaleAnswerPx &&
+                    if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
                         r != _hoverPane && r.Contains(point) && !IsWholePane(r, point))
                     {
                         _hoverSource = "element";
-                        BuildLadder(point, r, chain);
+                        BuildLadder(point, r);
                         SetHoverPane(r, HoverTier.Fine);
                     }
                 }));
@@ -1060,6 +1021,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             {
                 // Selector torn down mid-lookup — nothing to update.
             }
+        });
     }
 
     /// <summary>
@@ -1094,39 +1056,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
             InvalidateAllSurfaces();
         }
         _hoverPane = rect;
-    }
-
-    /// <summary>
-    /// Which level of the app's own nesting to highlight by default.
-    ///
-    /// Innermost is the wrong answer: hit-testing lands on the text run inside a button, so
-    /// taking the deepest hit highlights a word and not the control. Prefer instead the
-    /// smallest node the app calls a THING — a button, a link, a row, a cell, a field, a tab.
-    /// Failing that, the smallest region — a toolbar, a list, a header or footer group. Only
-    /// if the app offered nothing but raw text and window wrappers does the innermost rect win.
-    /// The wheel reaches every other level, so this only has to be right by default.
-    /// </summary>
-    internal static SD.Rectangle? PreferredRung(IReadOnlyList<AxNode> chain)
-    {
-        if (chain.Count == 0)
-            return null;
-
-        // chain is sorted smallest-first, so the first match at each tier is the tightest.
-        foreach (var node in chain)
-        {
-            if (node.IsPrimary)
-                return node.Rect;
-        }
-        // Then the innermost thing that is not structural noise. NOT the smallest REGION —
-        // preferring a header or a group over the tighter rect beneath it made the highlight
-        // jump out to something far larger than what the cursor was on. Regions stay one
-        // wheel notch away, which is where they belong.
-        foreach (var node in chain)
-        {
-            if (!node.IsPassThrough)
-                return node.Rect;
-        }
-        return chain[0].Rect;
     }
 
     /// <summary>Whether a candidate is really the whole window dressed up as an element -

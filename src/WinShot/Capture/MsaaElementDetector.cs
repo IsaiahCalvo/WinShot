@@ -1,5 +1,4 @@
-﻿using System.Linq;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Accessibility;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -13,34 +12,6 @@ namespace WinShot.Capture;
 /// MSAA side — what NVDA walks — and Chromium MATERIALIZES it when OBJID_CLIENT is
 /// resolved on the Chrome_RenderWidgetHostHWND child. Blocking COM; call from a worker.
 /// </summary>
-/// <summary>One level of the accessibility tree under the cursor: where it is and what the
-/// app says it IS. The role is the whole point — it separates the label inside a button from
-/// the button, and a page's banner or footer from the paragraph sitting in it.</summary>
-public readonly record struct AxNode(SD.Rectangle Rect, int Role)
-{
-    // MSAA role constants (oleacc.h). Only the ones worth naming.
-    public const int Titlebar = 1, Scrollbar = 3, Window = 9, Client = 10, MenuPopup = 11,
-        Document = 15, Pane = 16, Dialog = 18, Grouping = 20, Separator = 21, Toolbar = 22,
-        Table = 24, Cell = 29, Link = 30, List = 33, ListItem = 34, Outline = 35,
-        OutlineItem = 36, PageTab = 37, StaticText = 41, Text = 42, PushButton = 43,
-        CheckButton = 44, RadioButton = 45, ComboBox = 46, MenuItem = 12;
-
-    /// <summary>Roles that name a thing a person would point at and call "that". These are
-    /// what the wheel-free default should land on — the button, the row, the field, the tab.</summary>
-    public bool IsPrimary => Role is PushButton or CheckButton or RadioButton or ComboBox
-        or Link or ListItem or OutlineItem or Cell or PageTab or MenuItem or Text;
-
-    /// <summary>Roles that bound a REGION rather than a control — a header, a footer, a
-    /// banner, a toolbar, a scrollable pane. Worth a rung on the ladder, never the default.</summary>
-    public bool IsRegion => Role is Grouping or Toolbar or List or Outline or Table
-        or Document or Pane or Dialog or MenuPopup;
-
-    /// <summary>Structural noise: the raw window/client wrappers and the text runs inside a
-    /// control. Real rects, but never what someone means by "this element".</summary>
-    public bool IsPassThrough => Role is Window or Client or StaticText or Separator
-        or Scrollbar or Titlebar;
-}
-
 internal static class MsaaElementDetector
 {
     private const int WmGetObject = 0x003D;
@@ -70,18 +41,12 @@ internal static class MsaaElementDetector
         }
     }
 
-    /// <summary>
-    /// The nesting under the cursor, innermost first: hit-test down to the deepest element,
-    /// then walk accParent back up collecting every ancestor that still contains the point.
-    ///
-    /// The descent alone is not enough. Chromium's accHitTest jumps straight to the leaf, so
-    /// asking only it hands back the text run inside a button and never the button, the row,
-    /// or the region around them. The ancestors are where "this is a footer" lives.
-    /// </summary>
-    public static IReadOnlyList<AxNode> ElementChainFromPoint(IntPtr renderWidget, SD.Point screenPx, TimeSpan budget)
+    /// <summary>Deepest accessible element whose bounds contain the point, by accHitTest
+    /// descent from the render widget's client root. Null when the tree stays empty.</summary>
+    public static SD.Rectangle? ElementRectFromPoint(IntPtr renderWidget, SD.Point screenPx, TimeSpan budget)
     {
         if (renderWidget == IntPtr.Zero)
-            return Array.Empty<AxNode>();
+            return null;
         try
         {
             // The screen-reader honeypot: answering lParam=1 flips Chromium's "assistive
@@ -89,7 +54,7 @@ internal static class MsaaElementDetector
             SendMessage(renderWidget, WmGetObject, IntPtr.Zero, new IntPtr(1));
             if (AccessibleObjectFromWindow(renderWidget, ObjIdClient, ref _iidIAccessible,
                     out IAccessible? root) != 0 || root is null)
-                return Array.Empty<AxNode>();
+                return null;
 
             EscalateAxMode(root);
 
@@ -110,11 +75,11 @@ internal static class MsaaElementDetector
             }
 
             SetTreeAwake(renderWidget, HasChildren(root));
-            return Chain(root, screenPx);
+            return Descend(root, screenPx);
         }
         catch (Exception)
         {
-            return Array.Empty<AxNode>();
+            return null;
         }
     }
 
@@ -149,90 +114,41 @@ internal static class MsaaElementDetector
         }
     }
 
-    private static IReadOnlyList<AxNode> Chain(IAccessible root, SD.Point p)
+    private static SD.Rectangle? Descend(IAccessible root, SD.Point p)
     {
-        var chain = new List<AxNode>();
-
-        // Descend as far as hit-testing will go, recording each level it passes through.
-        IAccessible deepest = root;
+        IAccessible current = root;
+        SD.Rectangle? best = null;
         for (int depth = 0; depth < 40; depth++)
         {
             object hit;
             try
             {
-                hit = deepest.accHitTest(p.X, p.Y);
+                hit = current.accHitTest(p.X, p.Y);
             }
             catch (Exception)
             {
                 break; // cross-proc MSAA throws freely during tree churn
             }
 
-            if (hit is IAccessible child && !ReferenceEquals(child, deepest))
+            if (hit is IAccessible child && !ReferenceEquals(child, current))
             {
-                Add(chain, child, 0, p);
-                deepest = child;
+                if (Location(child, 0) is SD.Rectangle r && r.Contains(p))
+                    best = r;
+                current = child;
                 continue;
             }
-            if (hit is int childId && childId != 0)
+            if (hit is int childId)
             {
-                // A "simple" child has no interface of its own; record it and stop.
-                Add(chain, deepest, childId, p);
+                if (childId != 0 && Location(current, childId) is SD.Rectangle r && r.Contains(p))
+                    best = r;
+                break; // simple child or self — cannot descend further
             }
             break;
         }
-
-        // Then climb, which is where the button, the row and the region actually live.
-        IAccessible current = deepest;
-        for (int depth = 0; depth < 40; depth++)
-        {
-            IAccessible? parent;
-            try
-            {
-                parent = current.accParent as IAccessible;
-            }
-            catch (Exception)
-            {
-                break;
-            }
-            if (parent is null || ReferenceEquals(parent, current))
-                break;
-
-            if (!Add(chain, parent, 0, p))
-                break; // left the point behind — everything above is bigger and less relevant
-            current = parent;
-        }
-
-        chain.Sort((a, b) => ((long)a.Rect.Width * a.Rect.Height).CompareTo((long)b.Rect.Width * b.Rect.Height));
-        return chain;
-    }
-
-    /// <summary>Appends a node when it has a usable rect containing the point and is not a
-    /// near-duplicate of one already collected. Returns whether the point was inside it.</summary>
-    private static bool Add(List<AxNode> chain, IAccessible acc, object childId, SD.Point p)
-    {
-        if (Location(acc, childId) is not SD.Rectangle rect || !rect.Contains(p))
-            return false;
-        if (rect.Width < 12 || rect.Height < 8)
-            return true; // too small to select, but the ancestors above it are still worth having
-
-        int role = RoleOf(acc, childId);
-        if (chain.Any(n => n.Rect == rect))
-            return true;
-
-        chain.Add(new AxNode(rect, role));
-        return true;
-    }
-
-    private static int RoleOf(IAccessible acc, object childId)
-    {
-        try
-        {
-            return acc.get_accRole(childId) is int role ? role : 0;
-        }
-        catch (Exception)
-        {
-            return 0;
-        }
+        // A whole-window rect adds nothing over the coarse fallback.
+        if (best is SD.Rectangle rect && (rect.Width < 12 || rect.Height < 8))
+            return null;
+        return best;
     }
 
     private static SD.Rectangle? Location(IAccessible acc, object childId)
