@@ -106,59 +106,50 @@ public static class ScrollPaneDetector
     }
 
     /// <summary>
-    /// Element-level lookup for Alt-hover in the region selector: the deepest UIA element
-    /// whose bounds contain the point, found by GEOMETRIC descent from the window root
-    /// (child-contains-point at each level). No ElementFromPoint — hit-testing would land
-    /// on the selector's own overlay; geometry works against the frozen screen. Blocking;
-    /// call from a worker thread.
+    /// The nesting of accessible elements under a point, innermost first, with the role the
+    /// app reports for each level.
+    ///
+    /// MSAA is tried on EVERY window, not just Chromium ones. The old code gated it behind a
+    /// "looks like a browser" check and sent everything else to a managed UI Automation walk —
+    /// but measured side by side on a live desktop, the MSAA tree is richer everywhere:
+    /// File Explorer answers with the exact file row (1670x41), Electron apps with seven
+    /// levels of real nesting, where the UIA walk returns one whole-window pane. UIA is now
+    /// only the fallback for windows MSAA cannot describe.
+    ///
+    /// Blocking; call from a worker thread.
     /// </summary>
-    public static SD.Rectangle? ElementRectFromPoint(IntPtr root, SD.Point p, TimeSpan timeout)
+    public static IReadOnlyList<WinShot.Capture.AxNode> ElementChainFromPoint(
+        IntPtr root, SD.Point p, TimeSpan timeout)
     {
+        if (root == IntPtr.Zero)
+            return Array.Empty<WinShot.Capture.AxNode>();
+
         try
         {
-            if (root == IntPtr.Zero)
-                return null;
-            bool chromium = IsChromiumFamily(root, p, out IntPtr renderWidget);
-            if (chromium)
+            // Chromium hosts answer for their web content on the render widget; everything
+            // else answers on the window itself. The widget may be nested several levels down.
+            IsChromiumFamily(root, p, out IntPtr renderWidget);
+            IntPtr axTarget = renderWidget != IntPtr.Zero ? renderWidget : root;
+
+            var chain = WinShot.Capture.MsaaElementDetector.ElementChainFromPoint(axTarget, p, timeout);
+            if (chain.Count > 0)
+                return chain;
+
+            // Only now the UIA wake: asking Chromium for its UIA root switches the renderer
+            // toward the UIA provider and the rich MSAA tree stops answering — measured, seven
+            // nested nodes before the wake and none after. It must never precede the MSAA read.
+            WakeChromiumAccessibility(axTarget);
+            if (DescendToElement(root, p) is SD.Rectangle found)
             {
-                // Chromium/Electron: managed UIA only sees the lossy MSAA→UIA proxy (sparse
-                // tree, whole-window boxes). The MSAA tree is the real one — NVDA's path —
-                // and resolving OBJID_CLIENT materializes it.
-                //
-                // Ask the root window when no render widget turns up. Several Electron shells
-                // expose no Chrome_RenderWidgetHostHWND at all (only an Intermediate D3D
-                // Window), yet their root HWND answers OBJID_CLIENT with the full element
-                // tree. Requiring the widget is what made those apps highlight nothing but
-                // their own outline.
-                IntPtr axTarget = renderWidget != IntPtr.Zero ? renderWidget : root;
-                WakeChromiumAccessibility(axTarget);
-                var msaa = Task.Run(() => WinShot.Capture.MsaaElementDetector
-                    .ElementRectFromPoint(axTarget, p, timeout));
-                if (msaa.Wait(timeout) && msaa.Result is SD.Rectangle fromMsaa)
-                    return fromMsaa;
+                // The managed walk has no roles to offer; a bare rect still earns a rung on
+                // the ladder, it just cannot be preferred on merit.
+                return new[] { new WinShot.Capture.AxNode(found, 0) };
             }
-            bool treeAlreadyBuilt = renderWidget != IntPtr.Zero &&
-                WinShot.Capture.MsaaElementDetector.IsTreeKnownAwake(renderWidget);
-            var task = Task.Run(() =>
-            {
-                // The tree materializes asynchronously after a Chromium wake — retry, but only
-                // the first time. Once it is known live those sleeps are half a second of pure
-                // latency on every subsequent hover.
-                int[] delays = chromium && !treeAlreadyBuilt ? new[] { 0, 160, 350 } : new[] { 0 };
-                foreach (int delay in delays)
-                {
-                    if (delay > 0)
-                        Thread.Sleep(delay);
-                    if (DescendToElement(root, p) is SD.Rectangle found)
-                        return (SD.Rectangle?)found;
-                }
-                return null;
-            });
-            return task.Wait(timeout) ? task.Result : null;
+            return Array.Empty<WinShot.Capture.AxNode>();
         }
         catch (Exception)
         {
-            return null;
+            return Array.Empty<WinShot.Capture.AxNode>();
         }
     }
 
