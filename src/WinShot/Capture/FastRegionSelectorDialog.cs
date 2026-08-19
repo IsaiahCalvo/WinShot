@@ -45,6 +45,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// the user deliberately drew is captured exactly as drawn.</summary>
     public bool SelectedByPaneClick { get; private set; }
     private List<WindowInfo> _windows = new();
+    private List<SnapRect> _snapRects = new();
     private readonly List<SelectorPane> _panes = new();
     private SD.Point _dragStartScreen;     // physical screen px (GetCursorPos)
     private SD.Point _currentScreen;       // physical screen px (GetCursorPos)
@@ -72,7 +73,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     // shown — started in ShowAsync, stopped in Complete — so it adds no idle background work.
     private readonly WF.Timer _followTimer;
     private bool _lastCtrlDown;
-    private bool _lastAltDown;
 
     public FastRegionSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
@@ -147,6 +147,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             await CaptureFrozenAsync();
         else
             DisposeFrozen();
+        // Snapshot every snappable HWND rect BEFORE our own overlay windows go up, so the
+        // list can never contain the selector itself. Cheap (a few ms) and done once - hover
+        // detection is then a pure in-memory scan with no per-move syscalls.
+        _snapRects = _paneHover
+            ? await Task.Run(() => WindowEnumerator.GetSnapRectangles())
+            : new List<SnapRect>();
         CreatePanes();
 
         Show();
@@ -174,6 +180,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _windowsProvider = windowsProvider;
         _windowsLoadStarted = false;
         _windows = new List<WindowInfo>();
+        _snapRects = new List<SnapRect>();
         _dragging = false;
         _dragMoved = false;
         _pendingScreen = null;
@@ -490,29 +497,28 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        // Smart detection rides the Alt key: hold Alt to highlight the element/pane under
-        // the cursor (Tier-0 Win32 only — cheap and safe under our own overlay; UIA + wheel
-        // probe refine after confirm) and click to accept it. Without Alt the selector is a
-        // plain marquee — a drawn rect is never second-guessed.
+        // Element detection is always on, ShareX-style: the rect under the cursor lights up
+        // the moment the overlay opens, no modifier to discover. Click it to take it;
+        // click-drag instead and the marquee wins — a drawn rect is never second-guessed.
         if (_paneHover && _pendingScreen is null && !_dragging)
         {
-            bool alt = (WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt;
-            if (!alt)
+            SD.Rectangle? snap = SnapRectAt(_currentScreen);
+            // The HWND rect is the floor, never a ceiling: adopt it only when the cursor has
+            // left whatever finer rect the refinement tiers had settled on.
+            if (snap is SD.Rectangle hwndRect && hwndRect != _hoverPane &&
+                (_hoverPane is not SD.Rectangle held || !held.Contains(_currentScreen)))
             {
-                if (_hoverPane is not null)
-                {
-                    _hoverPane = null;
-                    InvalidateAllSurfaces();
-                }
+                _hoverPane = hwndRect;
+                InvalidateAllSurfaces();
             }
-            else if (_elementGranularity)
+
+            if (_elementGranularity)
             {
-                // Element rects come from a UIA walk (slow, cross-process): resolve on a
-                // worker, marshal back, drop stale answers. The synchronous pane path below
-                // seeds an instant fallback so Alt always shows SOMETHING immediately.
-                KickElementLookup(_currentScreen);
+                // Refinement tiers (pixel segmentation now, UIA/MSAA on a worker) narrow the
+                // HWND rect inside apps that draw their whole UI into one window.
+                KickElementLookup(_currentScreen, snap);
             }
-            else
+            else if (snap is null)
             {
                 WindowInfo? win = ResolveWindow(_currentScreen);
                 SD.Rectangle? pane = win is null
@@ -548,11 +554,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             SD.Point p = CursorScreen();
             bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
-            bool alt = (WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt;
-            if (p == _currentScreen && ctrl == _lastCtrlDown && alt == _lastAltDown)
+            if (p == _currentScreen && ctrl == _lastCtrlDown)
                 return;
             _lastCtrlDown = ctrl;
-            _lastAltDown = alt;
             HandleMouseMove();
         }
         catch (Exception ex)
@@ -826,42 +830,43 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return _windows.FirstOrDefault(w => w.Bounds.Contains(screenPoint));
     }
 
-    private void KickElementLookup(SD.Point point)
+    private void KickElementLookup(SD.Point point, SD.Rectangle? snap)
     {
-        // Instant tier: pixel-edge detection on the frozen snapshot (works even when the
-        // app's accessibility tree is disabled — Claude/Codex desktop apps ship that way),
-        // falling back to the pane/window rect. The UIA walk below refines asynchronously
-        // where a real element tree exists.
+        // The HWND rect (snap) is already showing. These tiers only ever NARROW it: pixel
+        // segmentation on the frozen snapshot (works even when an app ships with its
+        // accessibility tree off — the Claude and Codex desktop apps do), then a UIA/MSAA
+        // walk on a worker for apps that expose a real element tree.
         if (Distance(point, _lastVisualPoint) < 4)
             return; // scanning megapixels at follow-tick rate would jank the selector
         _lastVisualPoint = point;
         WindowInfo? seed = ResolveWindow(point);
+        SD.Rectangle searchBounds = snap ?? seed?.Bounds ?? SD.Rectangle.Empty;
         SD.Rectangle? visual = null;
-        if (_frozen is not null && seed is not null)
+        if (_frozen is not null && searchBounds.Width > 0)
         {
             var vp = new SD.Point(point.X - _vs.X, point.Y - _vs.Y);
-            visual = VisualElementDetector.Find(_frozen, vp, VirtualFromScreen(seed.Bounds));
+            visual = VisualElementDetector.Find(_frozen, vp, VirtualFromScreen(searchBounds));
             if (visual is SD.Rectangle v)
                 visual = new SD.Rectangle(v.X + _vs.X, v.Y + _vs.Y, v.Width, v.Height);
         }
-        SD.Rectangle? instant = visual ??
+        SD.Rectangle? instant = visual ?? snap ??
             (seed is null
                 ? null
                 : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point) ?? seed.Bounds);
         if (instant is not null && instant != _hoverPane)
         {
-            // Hysteresis: a near-identical re-detection (sub-cell wobble) keeps the current
-            // rect so the highlight sits still while the cursor roams inside one element.
-            if (_hoverPane is SD.Rectangle old && instant is SD.Rectangle now)
+            // Stickiness: while the cursor is still inside the highlighted rect, only a
+            // TIGHTER candidate may replace it. Without this the tiers fight — the pixel
+            // scan re-widens a rect the UIA walk had just narrowed, and two near-identical
+            // segmentations flip-flop as the cursor drifts inside one element.
+            if (_hoverPane is SD.Rectangle current && current.Contains(point) &&
+                instant is SD.Rectangle now &&
+                (long)now.Width * now.Height >= (long)current.Width * current.Height)
             {
-                SD.Rectangle overlap = SD.Rectangle.Intersect(old, now);
-                long union = (long)old.Width * old.Height + (long)now.Width * now.Height
-                    - (long)overlap.Width * overlap.Height;
-                if (union > 0 && (long)overlap.Width * overlap.Height * 100 / union >= 80)
-                    return;
+                return;
             }
             _hoverPane = instant;
-            Log.Info($"Alt hover: {(visual is not null ? "visual" : "seed")} {instant}");
+            Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {instant}");
             InvalidateAllSurfaces();
         }
         if (_elementLookupBusy)
@@ -891,7 +896,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                         r != _hoverPane && (long)r.Width * r.Height < currentArea)
                     {
                         _hoverPane = r;
-                        Log.Info($"Alt hover: element {r}");
+                        Log.Info($"Hover: element {r}");
                         InvalidateAllSurfaces();
                     }
                 }));
@@ -901,6 +906,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 // Selector torn down mid-lookup — nothing to update.
             }
         });
+    }
+
+    /// <summary>Innermost snappable rect under the point. The list is deepest-first, so the
+    /// first hit IS the answer — no area comparison, no per-move enumeration.</summary>
+    private SD.Rectangle? SnapRectAt(SD.Point point)
+    {
+        foreach (var candidate in _snapRects)
+        {
+            if (candidate.Bounds.Contains(point))
+                return candidate.Bounds;
+        }
+        return null;
     }
 
     private static int Distance(SD.Point a, SD.Point b) =>
