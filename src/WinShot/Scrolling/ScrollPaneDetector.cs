@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Automation;
 using WinShot.Core;
@@ -130,10 +130,14 @@ public static class ScrollPaneDetector
                 if (msaa.Wait(timeout) && msaa.Result is SD.Rectangle fromMsaa)
                     return fromMsaa;
             }
+            bool treeAlreadyBuilt = renderWidget != IntPtr.Zero &&
+                WinShot.Capture.MsaaElementDetector.IsTreeKnownAwake(renderWidget);
             var task = Task.Run(() =>
             {
-                // The tree materializes asynchronously after a Chromium wake — retry.
-                int[] delays = chromium ? new[] { 0, 160, 350 } : new[] { 0 };
+                // The tree materializes asynchronously after a Chromium wake — retry, but only
+                // the first time. Once it is known live those sleeps are half a second of pure
+                // latency on every subsequent hover.
+                int[] delays = chromium && !treeAlreadyBuilt ? new[] { 0, 160, 350 } : new[] { 0 };
                 foreach (int delay in delays)
                 {
                     if (delay > 0)

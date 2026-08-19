@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Accessibility;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -22,6 +22,12 @@ internal static class MsaaElementDetector
     // Electron ≥27 checks for this exact mutex name and keeps renderer accessibility
     // enabled process-wide while it exists. Created once, held for the app's lifetime.
     private static Mutex? _narratorMutex;
+
+    // Render widgets whose tree has already been seen populated. Building it is the slow
+    // part — the first lookup on a window waits out a poll loop for it, every later one
+    // would pay that wait again for nothing. An entry is dropped the moment a tree comes
+    // back empty, so a recycled HWND or a torn-down renderer heals itself.
+    private static readonly HashSet<IntPtr> AwakeTrees = new();
 
     public static void HoldScreenReaderMutex()
     {
@@ -52,24 +58,59 @@ internal static class MsaaElementDetector
 
             EscalateAxMode(root);
 
-            // Tree construction is asynchronous after the wake — poll briefly.
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            while (clock.Elapsed < budget)
+            if (!IsTreeKnownAwake(renderWidget))
             {
-                try
+                // Tree construction is asynchronous after the wake — poll briefly.
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                while (clock.Elapsed < budget)
                 {
-                    if (root.accChildCount > 0)
-                        break;
+                    try
+                    {
+                        if (root.accChildCount > 0)
+                            break;
+                    }
+                    catch (COMException) { }
+                    Thread.Sleep(50);
                 }
-                catch (COMException) { }
-                Thread.Sleep(50);
             }
 
+            SetTreeAwake(renderWidget, HasChildren(root));
             return Descend(root, screenPx);
         }
         catch (Exception)
         {
             return null;
+        }
+    }
+
+    /// <summary>Whether this render widget's accessibility tree has already been seen
+    /// populated, so a later lookup can skip the poll loop entirely.</summary>
+    public static bool IsTreeKnownAwake(IntPtr renderWidget)
+    {
+        lock (AwakeTrees)
+            return AwakeTrees.Contains(renderWidget);
+    }
+
+    private static void SetTreeAwake(IntPtr renderWidget, bool awake)
+    {
+        lock (AwakeTrees)
+        {
+            if (awake)
+                AwakeTrees.Add(renderWidget);
+            else
+                AwakeTrees.Remove(renderWidget);
+        }
+    }
+
+    private static bool HasChildren(IAccessible root)
+    {
+        try
+        {
+            return root.accChildCount > 0;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 
