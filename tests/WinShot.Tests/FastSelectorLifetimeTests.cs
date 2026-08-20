@@ -45,7 +45,7 @@ public class FastSelectorLifetimeTests
     }
 
     [Fact]
-    public void RegionSelector_ReturnDisposesFormInsteadOfKeepingHiddenWindow()
+    public void RegionSelector_ReturnPoolsFormAndRentReusesIt()
     {
         RunSta(() =>
         {
@@ -53,14 +53,23 @@ public class FastSelectorLifetimeTests
                 () => Task.FromResult(new List<WindowInfo>()),
                 settings: null);
 
+            // Return keeps the instance warm (hidden, no bitmaps) so the next hotkey
+            // press re-shows existing window handles instead of creating new ones.
             FastRegionSelectorDialog.Return(selector);
+            Assert.False(selector.IsDisposed);
 
-            Assert.True(selector.IsDisposed);
+            var reused = FastRegionSelectorDialog.Rent(
+                () => Task.FromResult(new List<WindowInfo>()),
+                settings: null);
+            Assert.Same(selector, reused);
+
+            // Leave no cross-test pool state behind.
+            reused.Dispose();
         });
     }
 
     [Fact]
-    public void AllInOneSelector_ReturnDisposesFormAndToolbarInsteadOfKeepingHiddenWindows()
+    public void AllInOneSelector_ReturnPoolsFormAndRentReusesIt()
     {
         RunSta(() =>
         {
@@ -70,9 +79,16 @@ public class FastSelectorLifetimeTests
             var toolbar = GetToolbar(selector);
 
             FastAllInOneSelectorDialog.Return(selector);
+            Assert.False(selector.IsDisposed);
+            Assert.False(toolbar.IsDisposed);
 
-            Assert.True(selector.IsDisposed);
-            Assert.True(toolbar.IsDisposed);
+            var reused = FastAllInOneSelectorDialog.Rent(
+                () => Task.FromResult(new List<WindowInfo>()),
+                settings: null);
+            Assert.Same(selector, reused);
+
+            // Leave no cross-test pool state behind.
+            reused.Dispose();
         });
     }
 

@@ -56,29 +56,19 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _toolbar = new ToolbarForm(this);
 
         SelectorChrome.ConfigureSurface(this);
+        // Born translucent so the handle is created WS_EX_LAYERED once and never restyled:
+        // any later Form.Opacity flip across the 1.0 boundary recreates the handle
+        // (~150-500 ms measured). All opacity changes go through SetLayeredAlpha instead.
+        SelectorChrome.ConfigurePresentation(this, freezeScreen: false);
         DoubleBuffered = true;
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
-        Opacity = 1.0;
 
         _followTimer = new WF.Timer { Interval = 15 };
         _followTimer.Tick += OnFollowTick;
 
-        Shown += (_, _) =>
-        {
-            StartWindowLoad();
-            BeginInvoke(new Action(() =>
-            {
-                ShowToolbar();
-                BeginInvoke(new Action(() =>
-                {
-                    TryRestoreLastRegion();
-                    Activate();
-                    Focus();
-                    SelectorForeground.Restore(this);
-                }));
-            }));
-        };
+        // Post-show init runs from ShowAsync, not the Shown event: Shown fires only on a
+        // form's FIRST display, so a pooled re-show would never run it.
 
         ResetForUse(windowsProvider, settings);
     }
@@ -98,8 +88,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private static SD.Rectangle PrimaryBounds() =>
         (WF.Screen.PrimaryScreen ?? WF.Screen.AllScreens[0]).Bounds;
 
+    // One warm instance kept alive between captures — see FastRegionSelectorDialog.Rent.
+    private static FastAllInOneSelectorDialog? _pooled;
+
     public static FastAllInOneSelectorDialog Rent(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
+        var pooled = _pooled;
+        _pooled = null;
+        if (pooled is not null && !pooled.IsDisposed && !pooled._toolbar.IsDisposed)
+        {
+            pooled.ResetForUse(windowsProvider, settings);
+            return pooled;
+        }
         return new FastAllInOneSelectorDialog(windowsProvider, settings);
     }
 
@@ -108,7 +108,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (selector.IsDisposed)
             return;
 
-        selector.DisposePanes();
         selector.DisposeFrozen();
         selector._capturedRegion?.Dispose();
         selector._capturedRegion = null;
@@ -116,7 +115,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (!selector._toolbar.IsDisposed)
             selector._toolbar.Hide();
 
-        selector.Dispose();
+        var displaced = _pooled;
+        _pooled = selector;
+        if (displaced is not null && displaced != selector && !displaced.IsDisposed)
+        {
+            displaced.DisposePanes();
+            displaced.Dispose();
+        }
     }
 
     public async Task<WF.DialogResult> ShowAsync()
@@ -128,17 +133,36 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForAllInOne(_settings?.Current);
-        SelectorChrome.ConfigurePresentation(this, _options.FreezeScreen);
-        // Snapshot off the UI thread — see FastRegionSelectorDialog.ShowAsync.
-        if (_options.FreezeScreen)
-            await CaptureFrozenAsync();
-        else
-            DisposeFrozen();
+        // Open instantly over the live desktop; the freeze snapshot bakes in when it
+        // lands — see FastRegionSelectorDialog.ShowAsync.
+        SelectorChrome.ConfigurePresentation(this, freezeScreen: false);
+        DisposeFrozen();
         CreatePanes();
+        // Warm (pooled) surfaces may still be opaque from a previous frozen swap.
+        if (IsHandleCreated)
+            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, SelectorChrome.LiveAlpha);
+        foreach (var pane in _panes)
+        {
+            if (pane.IsHandleCreated)
+                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, SelectorChrome.LiveAlpha);
+        }
 
         Show();
         foreach (var pane in _panes)
             pane.Show();
+
+        StartWindowLoad();
+        BeginInvoke(new Action(() =>
+        {
+            ShowToolbar();
+            BeginInvoke(new Action(() =>
+            {
+                TryRestoreLastRegion();
+                Activate();
+                Focus();
+                SelectorForeground.Restore(this);
+            }));
+        }));
 
         Activate();
         Focus();
@@ -146,7 +170,30 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _lastCtrlDown = false;
         if (_options.NeedsCursorFollow)
             _followTimer.Start();
+        if (_options.FreezeScreen)
+            _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
+    }
+
+    /// <summary>Deferred freeze — see FastRegionSelectorDialog.FreezeWhileShownAsync.</summary>
+    private async Task FreezeWhileShownAsync(TaskCompletionSource<WF.DialogResult> session)
+    {
+        await CaptureFrozenAsync();
+        if (_completion != session || IsDisposed)
+        {
+            DisposeFrozen();
+            return;
+        }
+        if (_frozen is null)
+            return;
+
+        WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, 255);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed && pane.IsHandleCreated)
+                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
+        }
+        InvalidateAllSurfaces();
     }
 
     private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
@@ -171,7 +218,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         DialogResult = WF.DialogResult.None;
         Bounds = _monitorBounds;
         Capture = false;
-        Opacity = 1.0;
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
@@ -189,14 +235,28 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
     private void CreatePanes()
     {
-        DisposePanes();
-
+        var targets = new List<SD.Rectangle>();
         foreach (var screen in WF.Screen.AllScreens)
         {
-            if (screen.Bounds == _monitorBounds)
-                continue; // the coordinator Form already covers the primary monitor
+            if (screen.Bounds != _monitorBounds)
+                targets.Add(screen.Bounds);
+        }
 
-            var pane = new SelectorPane(this, screen.Bounds, _options.FreezeScreen);
+        // Reuse the existing (hidden) panes when the monitor layout is unchanged — their
+        // window handles are warm, so re-showing them is near-instant.
+        if (_panes.Count == targets.Count &&
+            _panes.All(p => !p.IsDisposed) &&
+            targets.All(b => _panes.Any(p => p.MonitorBounds == b)))
+        {
+            return;
+        }
+
+        DisposePanes();
+        foreach (var bounds in targets)
+        {
+            // Panes open translucent like the coordinator; FreezeWhileShownAsync flips
+            // them opaque when the snapshot lands.
+            var pane = new SelectorPane(this, bounds, freezeScreen: false);
             _panes.Add(pane);
         }
     }
@@ -680,7 +740,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         DialogResult = result;
         _followTimer.Stop();
         Capture = false;
-        DisposePanes();
+        // Panes are hidden, not disposed: their warm handles make the next open instant.
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed)
+                pane.Hide();
+        }
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Hide();
         if (!_toolbar.IsDisposed)
@@ -754,8 +819,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             DoubleBuffered = true;
             SetStyle(PaintStyles, true);
             Bounds = monitorBounds;
-            Opacity = 1.0;
+            // No Opacity reset here: flipping a translucent Form back to Opacity=1.0
+            // creates/recreates the window handle (~150-500 ms measured). The frozen swap
+            // goes through CaptureExclusion.SetLayeredAlpha instead.
         }
+
+        /// <summary>The physical monitor bounds this pane covers (pane-reuse matching).</summary>
+        public SD.Rectangle MonitorBounds => _bounds;
 
         protected override bool ShowWithoutActivation => true;
 

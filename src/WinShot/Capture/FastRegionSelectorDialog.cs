@@ -81,15 +81,19 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
 
         SelectorChrome.ConfigureSurface(this);
+        // Born translucent so the handle is created WS_EX_LAYERED once and never restyled:
+        // any later Form.Opacity flip across the 1.0 boundary recreates the handle
+        // (~150-500 ms measured). All opacity changes go through SetLayeredAlpha instead.
+        SelectorChrome.ConfigurePresentation(this, freezeScreen: false);
         DoubleBuffered = true;
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
-        Opacity = 1.0;
 
         _followTimer = new WF.Timer { Interval = 15 };
         _followTimer.Tick += OnFollowTick;
 
-        Shown += (_, _) => StartWindowLoad();
+        // Window-list load is kicked from ShowAsync, not the Shown event: Shown fires only
+        // on a form's FIRST display, so a pooled re-show would never load the list.
 
         ResetForUse(windowsProvider, settings);
     }
@@ -107,8 +111,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private static SD.Rectangle PrimaryBounds() =>
         (WF.Screen.PrimaryScreen ?? WF.Screen.AllScreens[0]).Bounds;
 
+    // One warm instance kept alive between captures: re-showing existing window handles
+    // is near-instant, while creating the full-screen layered surfaces from scratch costs
+    // 200-900 ms under CPU load. Hidden windows do no idle work and hold no bitmaps.
+    private static FastRegionSelectorDialog? _pooled;
+
     public static FastRegionSelectorDialog Rent(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
+        var pooled = _pooled;
+        _pooled = null;
+        if (pooled is not null && !pooled.IsDisposed)
+        {
+            pooled.ResetForUse(windowsProvider, settings);
+            return pooled;
+        }
         return new FastRegionSelectorDialog(windowsProvider, settings);
     }
 
@@ -117,12 +133,28 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (selector.IsDisposed)
             return;
 
-        selector.DisposePanes();
         selector.DisposeFrozen();
         selector._capturedRegion?.Dispose();
         selector._capturedRegion = null;
         selector.Hide();
-        selector.Dispose();
+
+        var displaced = _pooled;
+        _pooled = selector;
+        if (displaced is not null && displaced != selector && !displaced.IsDisposed)
+        {
+            displaced.DisposePanes();
+            displaced.Dispose();
+        }
+    }
+
+    /// <summary>Creates the window handles (coordinator + panes) without showing anything,
+    /// so the first hotkey press after app start skips window creation entirely.</summary>
+    internal void Prewarm()
+    {
+        CreatePanes();
+        _ = Handle;
+        foreach (var pane in _panes)
+            _ = pane.Handle;
     }
 
     public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area,
@@ -139,29 +171,76 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForRegion(_settings?.Current);
-        SelectorChrome.ConfigurePresentation(this, _options.FreezeScreen);
-        // Snapshot off the UI thread: WGC can take seconds before its fallback kicks in
-        // when the GPU capture path is contended, and the app (tray menu, settings,
-        // queued hotkeys) must stay responsive while the freeze frame is grabbed.
-        if (_options.FreezeScreen)
-            await CaptureFrozenAsync();
-        else
-            DisposeFrozen();
+        // Always open translucent over the live desktop so the overlay appears the instant
+        // the hotkey fires. The freeze snapshot (WGC setup alone can cost 300-1700 ms under
+        // load) is taken in the background — these surfaces are excluded from capture — and
+        // bakes in underneath when it lands; the dim level matches, so the swap is invisible.
+        SelectorChrome.ConfigurePresentation(this, freezeScreen: false);
+        DisposeFrozen();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         CreatePanes();
+        // Warm (pooled) surfaces may still be opaque from a previous frozen swap.
+        if (IsHandleCreated)
+            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, SelectorChrome.LiveAlpha);
+        foreach (var pane in _panes)
+        {
+            if (pane.IsHandleCreated)
+                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, SelectorChrome.LiveAlpha);
+        }
+        long panesMs = sw.ElapsedMilliseconds;
 
         Show();
+        StartWindowLoad();
+        long showMs = sw.ElapsedMilliseconds - panesMs;
         foreach (var pane in _panes)
             pane.Show();
+        long paneShowMs = sw.ElapsedMilliseconds - panesMs - showMs;
 
         Activate();
         Focus();
         SelectorForeground.Restore(this);
+        if (sw.ElapsedMilliseconds > 100)
+        {
+            Log.Info(
+                "Perf selector open breakdown: " +
+                $"panes={panesMs} show={showMs} paneShow={paneShowMs} " +
+                $"activate={sw.ElapsedMilliseconds - panesMs - showMs - paneShowMs} total={sw.ElapsedMilliseconds} ms");
+        }
         _lastCtrlDown = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
         if (_options.NeedsCursorFollow)
             _followTimer.Start();
+        if (_options.FreezeScreen)
+            _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
+    }
+
+    /// <summary>
+    /// Grabs the freeze snapshot while the selector is already on screen and switches the
+    /// surfaces from translucent-live to opaque-frozen once it lands. Everything after the
+    /// await runs on the UI thread, serialized with Complete(), so the session guard is
+    /// race-free. If the session ended first the late snapshot is discarded; if the capture
+    /// failed we simply stay on the live translucent view.
+    /// </summary>
+    private async Task FreezeWhileShownAsync(TaskCompletionSource<WF.DialogResult> session)
+    {
+        await CaptureFrozenAsync();
+        if (_completion != session || IsDisposed)
+        {
+            DisposeFrozen();
+            return;
+        }
+        if (_frozen is null)
+            return;
+
+        WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, 255);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed && pane.IsHandleCreated)
+                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
+        }
+        InvalidateAllSurfaces();
     }
 
     private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
@@ -192,7 +271,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DialogResult = WF.DialogResult.None;
         Bounds = _monitorBounds;
         Capture = false;
-        Opacity = 1.0;
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
@@ -203,14 +281,28 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     private void CreatePanes()
     {
-        DisposePanes();
-
+        var targets = new List<SD.Rectangle>();
         foreach (var screen in WF.Screen.AllScreens)
         {
-            if (screen.Bounds == _monitorBounds)
-                continue; // the coordinator Form already covers the primary monitor
+            if (screen.Bounds != _monitorBounds)
+                targets.Add(screen.Bounds);
+        }
 
-            var pane = new SelectorPane(this, screen.Bounds, _options.FreezeScreen);
+        // Reuse the existing (hidden) panes when the monitor layout is unchanged — their
+        // window handles are warm, so re-showing them is near-instant.
+        if (_panes.Count == targets.Count &&
+            _panes.All(p => !p.IsDisposed) &&
+            targets.All(b => _panes.Any(p => p.MonitorBounds == b)))
+        {
+            return;
+        }
+
+        DisposePanes();
+        foreach (var bounds in targets)
+        {
+            // Panes open translucent like the coordinator; FreezeWhileShownAsync flips
+            // them opaque when the snapshot lands.
+            var pane = new SelectorPane(this, bounds, freezeScreen: false);
             _panes.Add(pane);
         }
     }
@@ -937,7 +1029,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DialogResult = result;
         _followTimer.Stop();
         Capture = false;
-        DisposePanes();
+        // Panes are hidden, not disposed: their warm handles make the next open instant.
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed)
+                pane.Hide();
+        }
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Hide();
         _completion?.TrySetResult(result);
@@ -1147,7 +1244,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
             DoubleBuffered = true;
             SetStyle(PaintStyles, true);
             Bounds = monitorBounds;
-            Opacity = 1.0;
+            // No Opacity reset here: flipping a translucent Form back to Opacity=1.0
+            // creates/recreates the window handle (~150-500 ms measured). The frozen swap
+            // goes through CaptureExclusion.SetLayeredAlpha instead.
         }
 
         protected override bool ShowWithoutActivation => true;

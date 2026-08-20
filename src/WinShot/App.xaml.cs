@@ -118,6 +118,18 @@ public partial class App : Application
         SetupTray();
         _hotkeys = new HotkeyManager();
         RegisterHotkeys();
+        // Create the region selector's window handles once at idle so the first hotkey
+        // press re-shows warm windows instead of paying 200-900 ms of window creation.
+        Dispatcher.BeginInvoke(() =>
+        {
+            try
+            {
+                var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+                selector.Prewarm();
+                FastRegionSelectorDialog.Return(selector);
+            }
+            catch (Exception ex) { Log.Error("Selector prewarm failed (non-fatal)", ex); }
+        }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         // Electron apps keep renderer accessibility enabled while this mutex exists —
         // required for Alt-hover element detection to see their full element tree.
         WinShot.Capture.MsaaElementDetector.HoldScreenReaderMutex();
