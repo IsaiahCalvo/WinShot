@@ -34,8 +34,19 @@ internal static class CaptureExclusion
     public static void ApplyLayeredOpaque(IntPtr hwnd)
     {
         Apply(hwnd);
-        try { SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA); }
-        catch { /* worst case the window renders without the layered style */ }
+        SetLayeredAlpha(hwnd, 255);
+    }
+
+    /// <summary>
+    /// Sets a layered window's constant alpha directly (255 = opaque). The selectors use
+    /// this instead of Form.Opacity for the live→frozen swap: Form.Opacity's layered-style
+    /// bookkeeping recreates the window handle, which costs 150-500 ms on a full-screen
+    /// TopMost surface and would hitch the open selector.
+    /// </summary>
+    public static void SetLayeredAlpha(IntPtr hwnd, byte alpha)
+    {
+        try { SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA); }
+        catch { /* worst case the window keeps its current alpha */ }
     }
 
     [DllImport("user32.dll", SetLastError = true)]

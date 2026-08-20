@@ -15,6 +15,10 @@ internal static class SelectorChrome
     private const int CrosshairGapPx = 10;
     private const double LiveDesktopOpacity = 0.45;
 
+    /// <summary>LiveDesktopOpacity as a layered-window alpha, for SetLayeredAlpha resets
+    /// on pooled surfaces whose alpha was flipped to 255 by a previous frozen swap.</summary>
+    internal const byte LiveAlpha = (byte)(LiveDesktopOpacity * 255);
+
     /// <summary>Shared overlay-surface setup for a selector coordinator form or one of its panes.</summary>
     public static void ConfigureSurface(WF.Form form)
     {
@@ -26,6 +30,12 @@ internal static class SelectorChrome
         form.ShowInTaskbar = false;
         form.StartPosition = WF.FormStartPosition.Manual;
         form.TopMost = true;
+        // The selector opens BEFORE the freeze snapshot is taken (so the hotkey feels
+        // instant); exclusion keeps these surfaces out of that deferred snapshot and out
+        // of any confirm-time live grab. WGC/Desktop Duplication honor display affinity;
+        // the BitBlt tier omits CAPTUREBLT, so the translucent (layered) surface is
+        // skipped there by construction.
+        form.HandleCreated += (_, _) => WinShot.Scrolling.CaptureExclusion.Apply(form.Handle);
     }
 
     /// <summary>Freeze-on surfaces are opaque snapshots. Freeze-off surfaces are native
