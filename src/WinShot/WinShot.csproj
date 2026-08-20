@@ -38,14 +38,10 @@
     <PackageReference Include="System.Text.Json" Version="9.0.1" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- OmniParser icon-detect (YOLOv8, onnx-community export): finds interactable UI
-         elements in a screenshot. Content, not embedded — onnxruntime wants a file path. -->
-    <Content Include="Assets\ml\omniparser-icon-detect.onnx" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="Assets\download-window-svgrepo-com.svg"
                       LogicalName="WinShot.Assets.download-window-svgrepo-com.svg" />
     <EmbeddedResource Include="Assets\quick-access-close.svg"
