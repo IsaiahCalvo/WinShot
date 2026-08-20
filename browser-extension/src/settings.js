@@ -105,14 +105,25 @@ export function renderFileName(template, record, now = new Date(), counter = nul
     mode: record.mode || record.report?.mode || "capture",
     counter: counterText
   };
+  const percent = {
+    t: values.title, e: host, u: record.sourceUrl || "", n: counterText,
+    y: String(now.getFullYear()), m: p2(now.getMonth() + 1), d: p2(now.getDate()),
+    H: p2(now.getHours()), M: p2(now.getMinutes()), S: p2(now.getSeconds()),
+    B: months[now.getMonth()], A: days[now.getDay()]
+  };
+  // A single pass, so substituted text (a page title containing "%u" or "{host}")
+  // is never itself expanded as a token.
   const rendered = String(template || DEFAULT_SETTINGS.fileNameTemplate)
-    .replace(/\{(title|host|date|time|mode|counter)\}/gi, (_, key) => values[key.toLowerCase()])
-    .replaceAll("%t", values.title).replaceAll("%e", host).replaceAll("%u", record.sourceUrl || "")
-    .replaceAll("%n", counterText)
-    .replaceAll("%y", String(now.getFullYear())).replaceAll("%m", p2(now.getMonth() + 1)).replaceAll("%d", p2(now.getDate()))
-    .replaceAll("%H", p2(now.getHours())).replaceAll("%M", p2(now.getMinutes())).replaceAll("%S", p2(now.getSeconds()))
-    .replaceAll("%B", months[now.getMonth()]).replaceAll("%A", days[now.getDay()]);
-  return safePart(rendered, "winshot-capture").slice(0, 180);
+    .replace(/\{([A-Za-z]+)\}|%([teunymdHMSBA])/g, (match, brace, token) => {
+      if (brace !== undefined) {
+        const key = brace.toLowerCase();
+        return Object.hasOwn(values, key) ? values[key] : match;
+      }
+      return percent[token];
+    });
+  // Strip trailing dots/spaces AFTER the length cut too — the cut can land right
+  // after a dot, which is an illegal Windows filename ending.
+  return safePart(safePart(rendered, "winshot-capture").slice(0, 180), "winshot-capture");
 }
 
 // Counter reservation is serialized through this queue so concurrent captures cannot

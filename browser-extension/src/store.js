@@ -41,6 +41,26 @@ export async function putRecord(record) {
   }
 }
 
+// Put an updated record only if it still exists — a record the user deleted from
+// History mid-capture must stay deleted. Returns false when the record is gone.
+export async function updateRecord(record) {
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(RECORDS, "readwrite");
+    const store = tx.objectStore(RECORDS);
+    const existing = await requestResult(store.get(record.id));
+    if (existing !== undefined) store.put(record);
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    return existing !== undefined;
+  } finally {
+    db.close();
+  }
+}
+
 export async function getRecord(id) {
   const db = await openDatabase();
   try {

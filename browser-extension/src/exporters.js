@@ -188,16 +188,25 @@ function pdfLiteral(value) {
     .replace(/[()\\]/g, (character) => `\\${character}`);
 }
 
-function pdfHexUnicode(value) {
+function pdfHexUnicode(value, supplementary) {
   let result = "";
   for (const character of String(value || "").slice(0, 1000)) {
     const codePoint = character.codePointAt(0);
-    if (codePoint <= 0xffff) {
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+      result += "fffd"; // A lone surrogate has no valid text-layer mapping.
+    } else if (codePoint <= 0xffff) {
       result += codePoint.toString(16).padStart(4, "0");
     } else {
-      const adjusted = codePoint - 0x10000;
-      result += (0xd800 + (adjusted >> 10)).toString(16).padStart(4, "0");
-      result += (0xdc00 + (adjusted & 0x3ff)).toString(16).padStart(4, "0");
+      // A ToUnicode bfrange cannot map a CID to a surrogate pair, so
+      // supplementary-plane characters get a private CID (the otherwise-unused
+      // surrogate block) plus a surrogate-aware bfchar entry in the CMap.
+      // ponytail: 2048 distinct supplementary characters per PDF; overflow -> U+FFFD.
+      let cid = supplementary.get(codePoint);
+      if (cid === undefined && supplementary.size < 2048) {
+        cid = 0xd800 + supplementary.size;
+        supplementary.set(codePoint, cid);
+      }
+      result += (cid ?? 0xfffd).toString(16).padStart(4, "0");
     }
   }
   return result.toUpperCase();
@@ -371,11 +380,10 @@ function buildPdf(images, title, options = {}) {
   objects.length = objectCount + 1;
   objects[1] = [ascii("<< /Type /Catalog /Pages 2 0 R >>")];
   objects[2] = [ascii(`<< /Type /Pages /Count ${groups.length} /Kids [${groups.map((page) => `${page.pageId} 0 R`).join(" ")}] >>`)];
-  const toUnicode = ascii(`/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /WinShotUnicode def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend`);
   objects[unicodeFontId] = [ascii(`<< /Type /Font /Subtype /Type0 /BaseFont /WinShotUnicode /Encoding /Identity-H /DescendantFonts [${cidFontId} 0 R] /ToUnicode ${toUnicodeId} 0 R >>`)];
   objects[cidFontId] = [ascii(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /WinShotUnicode /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${fontDescriptorId} 0 R /DW 500 /CIDToGIDMap /Identity >>`)];
   objects[fontDescriptorId] = [ascii("<< /Type /FontDescriptor /FontName /WinShotUnicode /Flags 4 /FontBBox [0 -250 1000 1000] /ItalicAngle 0 /Ascent 880 /Descent -220 /CapHeight 700 /StemV 80 >>")];
-  objects[toUnicodeId] = [ascii(`<< /Length ${toUnicode.length} >>\nstream\n`), toUnicode, ascii("\nendstream")];
+  const supplementary = new Map(); // codePoint -> private CID; filled while pages render, CMap written after.
 
   for (let pageIndex = 0; pageIndex < groups.length; pageIndex++) {
     const page = groups[pageIndex];
@@ -389,7 +397,7 @@ function buildPdf(images, title, options = {}) {
       const fontSize = Math.max(4, Math.min(200, entry.fontSize * Math.min(xScale, yScale)));
       let cursorX = x;
       for (const run of pdfDirectionalRuns(entry.text)) {
-        const value = pdfHexUnicode(run.encodedText);
+        const value = pdfHexUnicode(run.encodedText, supplementary);
         if (!value) continue;
         lines.push(`BT /F2 ${fontSize.toFixed(2)} Tf 3 Tr 1 0 0 1 ${cursorX.toFixed(2)} ${y.toFixed(2)} Tm <${value}> Tj ET`);
         cursorX += [...run.text].length * fontSize * 0.5;
@@ -399,7 +407,9 @@ function buildPdf(images, title, options = {}) {
     if (furniture.header) lines.push(`BT /F1 10 Tf 0 Tr 0 g 1 0 0 1 ${furniture.left.toFixed(2)} ${(page.pageHeight - furniture.margin - 10).toFixed(2)} Tm (${pdfLiteral(furniture.header)}) Tj ET`);
     if (furniture.footer) lines.push(`BT /F1 10 Tf 0 Tr 0 g 1 0 0 1 ${furniture.left.toFixed(2)} ${Math.max(4, furniture.margin - 4).toFixed(2)} Tm (${pdfLiteral(furniture.footer)}) Tj ET`);
     if (furniture.watermark) {
-      const text = pdfLiteral(furniture.watermark).slice(0, 300);
+      // Truncate BEFORE escaping — cutting an escaped string can leave a bare
+      // trailing backslash that escapes the literal's closing ")".
+      const text = pdfLiteral(String(furniture.watermark).slice(0, 300));
       lines.push(`q 0.75 g BT /F1 34 Tf 0 Tr 0.707 0.707 -0.707 0.707 ${(page.pageWidth * 0.25).toFixed(2)} ${(page.pageHeight * 0.35).toFixed(2)} Tm (${text}) Tj ET Q`);
     }
     const commands = ascii(`${lines.join("\n")}\n`);
@@ -421,6 +431,20 @@ function buildPdf(images, title, options = {}) {
       objects[page.annotationIds[index]] = [ascii(`<< /Type /Annot /Subtype /Link /Rect [${left.toFixed(2)} ${bottom.toFixed(2)} ${right.toFixed(2)} ${top.toFixed(2)}] /Border [0 0 0] /A << /S /URI /URI (${pdfLiteral(entry.url)}) >> >>`)];
     }
   }
+
+  // Written after the pages so every supplementary character has its bfchar entry.
+  const bfChars = [...supplementary].map(([codePoint, cid]) => {
+    const adjusted = codePoint - 0x10000;
+    const pair = (0xd800 + (adjusted >> 10)).toString(16).padStart(4, "0") + (0xdc00 + (adjusted & 0x3ff)).toString(16).padStart(4, "0");
+    return `<${cid.toString(16).padStart(4, "0").toUpperCase()}> <${pair.toUpperCase()}>`;
+  });
+  let bfCharBlocks = "";
+  for (let index = 0; index < bfChars.length; index += 100) {
+    const chunk = bfChars.slice(index, index + 100);
+    bfCharBlocks += `${chunk.length} beginbfchar\n${chunk.join("\n")}\nendbfchar\n`;
+  }
+  const toUnicode = ascii(`/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /WinShotUnicode def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n2 beginbfrange\n<0000> <D7FF> <0000>\n<E000> <FFFF> <E000>\nendbfrange\n${bfCharBlocks}endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend`);
+  objects[toUnicodeId] = [ascii(`<< /Length ${toUnicode.length} >>\nstream\n`), toUnicode, ascii("\nendstream")];
 
   const parts = [ascii("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n")];
   const offsets = new Array(objectCount + 1).fill(0);
@@ -446,9 +470,14 @@ async function recordPdfImages(record, tiles, options, onProgress, progressStart
   const outputWidth = Math.min(12000, width);
   const fixed = pdfPageSizePoints(options);
   const furniture = fixed ? pageFurniture(options, record, 1, 1, fixed.width, fixed.height) : null;
-  const sourcePageHeight = options.layout === "single" || !fixed
-    ? Math.max(1, Math.floor(8000 * width / outputWidth))
-    : Math.max(1, Math.floor(width * furniture.height / furniture.width));
+  // ponytail: floor at height/1000 — extreme custom aspect ratios (200in x 1in)
+  // otherwise degenerate to 1px-per-page slicing: thousands of pages and encodes.
+  const sourcePageHeight = Math.max(
+    Math.ceil(height / 1000),
+    options.layout === "single" || !fixed
+      ? Math.max(1, Math.floor(8000 * width / outputWidth))
+      : Math.max(1, Math.floor(width * furniture.height / furniture.width))
+  );
   const images = [];
   for (let top = 0; top < height; top += sourcePageHeight) {
     const image = await pdfPageJpeg(record, tiles, top, Math.min(sourcePageHeight, height - top), outputWidth);

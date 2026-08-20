@@ -17,7 +17,7 @@ export default defineConfig({
   projects: [
     {
       name: "extension-puppeteer",
-      testMatch: /puppeteer-extension\.spec\.mjs/,
+      testMatch: /(?:puppeteer-extension|adversarial-[\w-]+)\.spec\.mjs/,
       use: { browserName: "chromium" }
     },
     {

@@ -48,9 +48,10 @@ for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode,
   }));
 }
 
+// Callers set their own status text BEFORE calling (a delayed capture shows its
+// countdown) — request must not stomp it with a generic message.
 async function request(message) {
   status.className = "";
-  status.textContent = "Starting...";
   const response = await chrome.runtime.sendMessage(message);
   if (response?.error) throw new Error(response.error);
   return response;
@@ -79,7 +80,9 @@ async function startMode(mode, event) {
 async function startPicker(mode, event) {
   try {
     await persistSettings();
-    await request({ type: "WINSHOT_START_PICKER", mode, settings: launchSettings(event) });
+    const launch = launchSettings(event);
+    status.textContent = launch.delayMs ? `Capture starts in ${launch.delayMs / 1000} seconds...` : "Starting...";
+    await request({ type: "WINSHOT_START_PICKER", mode, settings: launch });
     window.close();
   } catch (error) {
     status.className = "error";

@@ -34,14 +34,14 @@
     "downloads",
     "scripting",
     "storage",
+    "tabs",
     "webNavigation"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "optional_permissions": [
-    "nativeMessaging",
-    "tabs"
+    "nativeMessaging"
   ],
   "commands": {
     "capture-full-page": {

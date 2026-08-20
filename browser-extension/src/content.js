@@ -25,8 +25,16 @@
     return { x, y, any: x || y };
   }
 
+  // parentElement stops at shadow boundaries; hop to the shadow host so walks keep
+  // going for nodes picked inside open shadow roots.
+  function composedParent(node) {
+    if (node?.parentElement) return node.parentElement;
+    const root = node?.getRootNode?.();
+    return root instanceof ShadowRoot ? root.host : null;
+  }
+
   function nearestScrollOwner(element) {
-    for (let node = element?.parentElement; node && node !== document.body; node = node.parentElement) {
+    for (let node = composedParent(element); node && node !== document.body; node = composedParent(node)) {
       if (isScrollable(node).any) return node;
     }
     return scrollingElement();
@@ -115,7 +123,17 @@
       selection: snapshotSelection(),
       timer: 0
     };
-    state.timer = setTimeout(() => restorePickerState(), WATCHDOG_MS);
+    // Leaked-state watchdog only: a user can legitimately hover or hold a drag far
+    // longer than WATCHDOG_MS, so the timer re-arms while a picker overlay is open
+    // and fires only once the overlay is gone and nothing consumed the state.
+    const tick = () => {
+      if (pickerCleanup) {
+        state.timer = setTimeout(tick, WATCHDOG_MS);
+        return;
+      }
+      restorePickerState();
+    };
+    state.timer = setTimeout(tick, WATCHDOG_MS);
     pendingPickerState = state;
   }
 
@@ -206,10 +224,20 @@
     return { restored: true };
   }
 
+  // querySelectorAll never pierces shadow roots — walk them so frames hosted inside
+  // web components are still matched and counted.
+  function allFrameElements(root = document) {
+    const frames = [...root.querySelectorAll("iframe,frame")];
+    for (const element of root.querySelectorAll("*")) {
+      if (element.shadowRoot) frames.push(...allFrameElements(element.shadowRoot));
+    }
+    return frames;
+  }
+
   addEventListener("message", (event) => {
     const data = event.data;
     if (!data || data.source !== "winshot-frame" || typeof data.token !== "string") return;
-    const frame = [...document.querySelectorAll("iframe,frame")].find((candidate) => candidate.contentWindow === event.source);
+    const frame = allFrameElements().find((candidate) => candidate.contentWindow === event.source);
     if (!frame) return;
     announcedFrames.set(data.token, frame);
     setTimeout(() => announcedFrames.delete(data.token), 5000);
@@ -293,7 +321,26 @@
     let reachedX;
     let reachedY;
 
-    if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
+    if (session.fixedTarget) {
+      // The element ignores window scroll — clip its live viewport rect where it sits.
+      const rect = session.targetElement.getBoundingClientRect();
+      width = rect.width;
+      height = rect.height;
+      const left = Math.max(rect.left, 0);
+      const top = Math.max(rect.top, 0);
+      const right = Math.min(rect.right, view.width);
+      const bottom = Math.min(rect.bottom, view.height);
+      clip = {
+        left: left + view.offsetLeft,
+        top: top + view.offsetTop,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top)
+      };
+      destX = Math.max(0, left - rect.left);
+      destY = Math.max(0, top - rect.top);
+      reachedX = window.scrollX;
+      reachedY = window.scrollY;
+    } else if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
       const target = session.kind === "document"
         ? { left: 0, top: 0, ...documentSize() }
         : session.targetRect;
@@ -464,7 +511,7 @@
   function collectWarnings() {
     const warnings = [];
     let inaccessibleFrames = 0;
-    for (const frame of document.querySelectorAll("iframe,frame")) {
+    for (const frame of allFrameElements()) {
       try {
         if (!frame.contentDocument) inaccessibleFrames++;
       } catch {
@@ -483,6 +530,21 @@
     return warnings;
   }
 
+  // Pickers mark nodes found via composedPath(), which pierces open shadow roots —
+  // the lookup must pierce them too.
+  function findMarkedTarget(token) {
+    const selector = `[data-winshot-target="${CSS.escape(token)}"]`;
+    const roots = [document];
+    for (let index = 0; index < roots.length; index++) {
+      const found = roots[index].querySelector(selector);
+      if (found) return found;
+      for (const element of roots[index].querySelectorAll("*")) {
+        if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
+      }
+    }
+    return null;
+  }
+
   function classifyTarget(request) {
     if (request.mode === "full-page") {
       return { kind: "document", owner: scrollingElement(), targetRect: { left: 0, top: 0, ...documentSize() } };
@@ -491,7 +553,7 @@
       return { kind: "region", owner: scrollingElement(), targetRect: request.target.rect };
     }
     if (request.mode === "element") {
-      const element = document.querySelector(`[data-winshot-target="${CSS.escape(request.target.token)}"]`);
+      const element = findMarkedTarget(request.target.token);
       if (!element) throw new Error("The selected element is no longer on the page.");
       const ownScroll = isScrollable(element);
       const rect = element.getBoundingClientRect();
@@ -502,6 +564,20 @@
           targetElement: element,
           targetRect: { left: 0, top: 0, width: element.scrollWidth, height: element.scrollHeight }
         };
+      }
+      // A position:fixed element (or one inside a fixed container) never moves with
+      // window scroll — scrolling to its document coordinates would capture whatever
+      // page content sits underneath. Capture its viewport rect in place instead.
+      for (let node = element; node instanceof Element; node = composedParent(node)) {
+        if (getComputedStyle(node).position === "fixed") {
+          return {
+            kind: "page-element",
+            fixedTarget: true,
+            owner: scrollingElement(),
+            targetElement: element,
+            targetRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+          };
+        }
       }
       const owner = nearestScrollOwner(element);
       if (owner === scrollingElement()) {
@@ -560,6 +636,8 @@
       const node = nodes[i];
       const position = getComputedStyle(node).position;
       if (position !== "fixed" && position !== "sticky") continue;
+      // A fixed capture TARGET (or its fixed container) must stay visible on every tile.
+      if (classification.fixedTarget && (node === classification.targetElement || node.contains(classification.targetElement))) continue;
       const rect = node.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
       if (position === "sticky") {
@@ -576,6 +654,9 @@
   }
 
   async function prepare(request) {
+    // A stale picker overlay must never be captured into the pixels or keep
+    // swallowing page events after the capture.
+    pickerCleanup?.();
     restore("superseded");
     const classification = classifyTarget(request);
     const owner = classification.owner;
@@ -585,6 +666,7 @@
     session = {
       id: request.sessionId,
       kind: classification.kind,
+      fixedTarget: classification.fixedTarget || false,
       owner,
       ownerOffset: classification.ownerOffset || null,
       targetRect: classification.targetRect,
@@ -637,7 +719,9 @@
     const maxY = Math.max(0, request.extent.height - request.viewport.height);
     setFloatingVisibility(request.x <= 0.5 && request.y <= 0.5, request.x >= maxX - 0.5 && request.y >= maxY - 0.5);
 
-    if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
+    if (session.fixedTarget) {
+      // Fixed elements do not move with window scroll — capture in place.
+    } else if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
       const target = session.kind === "document" ? { left: 0, top: 0 } : session.targetRect;
       window.scrollTo(target.left + request.x, target.top + request.y);
     } else if (session.kind === "self-scroller") {
@@ -674,7 +758,12 @@
       addEventListener(type, handler, true);
       return { type, handler };
     });
-    return () => { for (const entry of handlers) removeEventListener(entry.type, entry.handler, true); };
+    // The browser dispatches the gesture's trailing `click` AFTER mouseup, so tearing
+    // the shield down synchronously inside a mouseup/click handler would leak that
+    // click to the page. Defer removal to the next task.
+    return () => {
+      setTimeout(() => { for (const entry of handlers) removeEventListener(entry.type, entry.handler, true); }, 0);
+    };
   }
 
   function cancelPicker() {
