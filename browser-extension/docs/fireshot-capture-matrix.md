@@ -25,7 +25,7 @@ Checked against FireShot's official [edition comparison](https://getfireshot.com
 | Custom PDF page size | Implemented: Auto, A4, Letter, Legal, or custom | Custom MediaBox test |
 | Custom PDF headers, footers, and watermarks | Implemented | PDF template test |
 | All tabs to one PDF in one click | Implemented | Packaged extension download test |
-| HiDPI/browser zoom | Implemented using browser pixel ratio and measured tile geometry | Real-browser tiled capture tests |
+| HiDPI/browser zoom | Implemented using browser pixel ratio and measured tile geometry | Browser zoom is e2e-tested at 125%; DPR above 1 uses the same measured-ratio path but has no dedicated e2e run yet |
 | Configurable filename template | Implemented | Delayed capture/filename test |
 
 ## Scope decision

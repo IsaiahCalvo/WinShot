@@ -755,12 +755,43 @@
   }
 
   function startRegionPicker() {
-    const { outline, tip } = pickerChrome("Drag a rectangle · Alt captures full page width · Ctrl locks a square · Move to an edge to auto-scroll · Esc cancels");
+    const { outline, tip } = pickerChrome("Drag to select · Ctrl+click captures an element · Alt selects full page width · Ctrl while dragging locks a square · Esc cancels");
+    // FireShot-style chrome: dimmed page, dashed crosshair guides, Ctrl element highlight.
+    const dim = document.createElement("div");
+    dim.style.cssText = `position:fixed;inset:0;pointer-events:none;z-index:${PICKER_Z - 2};background:rgba(0,0,0,.3)`;
+    dim.dataset.winshotPicker = "dim";
+    const guideH = document.createElement("div");
+    const guideV = document.createElement("div");
+    guideH.style.cssText = `position:fixed;left:0;width:100vw;height:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-top:1px dashed rgba(255,255,255,.85)`;
+    guideV.style.cssText = `position:fixed;top:0;height:100vh;width:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-left:1px dashed rgba(255,255,255,.85)`;
+    guideH.dataset.winshotPicker = "guide";
+    guideV.dataset.winshotPicker = "guide";
+    document.documentElement.append(dim, guideH, guideV);
+    const ownNodes = [outline, tip, dim, guideH, guideV];
     let dragging = false;
     let start = null;
     let currentClient = null;
     let currentModifiers = { altKey: false, ctrlKey: false };
+    let hoverTarget = null;
     let autoTimer = 0;
+
+    const elementUnderCursor = (event) => {
+      const path = event.composedPath?.() || [];
+      const candidate = path.find((node) => node instanceof Element && !ownNodes.includes(node)) || event.target;
+      return candidate instanceof Element ? candidate : null;
+    };
+    const showElementHighlight = (element) => {
+      const rect = element.getBoundingClientRect();
+      const scrollable = isScrollable(element).any;
+      outline.style.display = "block";
+      outline.style.boxShadow = "none";
+      outline.style.left = `${rect.left}px`;
+      outline.style.top = `${rect.top}px`;
+      outline.style.width = `${rect.width}px`;
+      outline.style.height = `${rect.height}px`;
+      outline.style.borderColor = scrollable ? "#f4bd00" : "#1687ff";
+      outline.style.background = scrollable ? "rgba(244,189,0,.15)" : "rgba(22,135,255,.12)";
+    };
 
     const documentPoint = (event) => ({ x: event.clientX + window.scrollX, y: event.clientY + window.scrollY });
     const selectionRect = (end, modifiers) => {
@@ -786,6 +817,10 @@
       const now = { x: currentClient.x + window.scrollX, y: currentClient.y + window.scrollY };
       const rect = selectionRect(now, currentModifiers);
       outline.style.display = "block";
+      outline.style.borderColor = "#1687ff";
+      outline.style.background = "rgba(22,135,255,.12)";
+      // The selection stays bright while everything around it dims.
+      outline.style.boxShadow = "0 0 0 200000px rgba(0,0,0,.3)";
       outline.style.left = `${rect.left - window.scrollX}px`;
       outline.style.top = `${rect.top - window.scrollY}px`;
       outline.style.width = `${rect.width}px`;
@@ -795,6 +830,9 @@
       if (event.button !== 0) return;
       event.preventDefault(); event.stopPropagation();
       dragging = true;
+      guideH.style.display = "none";
+      guideV.style.display = "none";
+      dim.style.display = "none";
       start = documentPoint(event);
       currentClient = { x: event.clientX, y: event.clientY };
       currentModifiers = { altKey: event.altKey, ctrlKey: event.ctrlKey };
@@ -810,7 +848,22 @@
       }, 16);
     };
     const move = (event) => {
-      if (!dragging) return;
+      if (!dragging) {
+        if (event.ctrlKey) {
+          hoverTarget = elementUnderCursor(event);
+          guideH.style.display = "none";
+          guideV.style.display = "none";
+          if (hoverTarget) showElementHighlight(hoverTarget);
+        } else {
+          hoverTarget = null;
+          outline.style.display = "none";
+          guideH.style.display = "block";
+          guideV.style.display = "block";
+          guideH.style.top = `${event.clientY}px`;
+          guideV.style.left = `${event.clientX}px`;
+        }
+        return;
+      }
       event.preventDefault(); event.stopPropagation();
       currentClient = { x: event.clientX, y: event.clientY };
       currentModifiers = { altKey: event.altKey, ctrlKey: event.ctrlKey };
@@ -824,9 +877,24 @@
         altKey: event.altKey || currentModifiers.altKey,
         ctrlKey: event.ctrlKey || currentModifiers.ctrlKey
       });
+      if (rect.width < 4 || rect.height < 4) {
+        // FireShot parity: Ctrl+click (no drag) captures the hovered element;
+        // the capture engine scrolls a scrollable one fully on its own.
+        const element = event.ctrlKey ? (hoverTarget || elementUnderCursor(event)) : null;
+        cleanup();
+        if (element) {
+          const before = element.getAttribute("data-winshot-target");
+          const token = crypto.randomUUID();
+          element.setAttribute("data-winshot-target", token);
+          sendPickerResult({ mode: "element", target: { token, attributeBefore: before }, title: element.tagName.toLowerCase() });
+        } else {
+          restorePickerState();
+          sendPickerResult({ cancelled: true });
+        }
+        return;
+      }
       cleanup();
-      if (rect.width < 4 || rect.height < 4) { restorePickerState(); sendPickerResult({ cancelled: true }); }
-      else sendPickerResult({ mode: "region", target: { rect } });
+      sendPickerResult({ mode: "region", target: { rect } });
     };
     const key = (event) => {
       if (event.key === "Escape") { cleanup(); restorePickerState(); sendPickerResult({ cancelled: true }); }
@@ -837,7 +905,7 @@
       removeEventListener("mousemove", move, true);
       removeEventListener("mouseup", up, true);
       removeEventListener("keydown", key, true);
-      outline.remove(); tip.remove();
+      outline.remove(); tip.remove(); dim.remove(); guideH.remove(); guideV.remove();
       pickerCleanup = null;
     };
     pickerCleanup = cleanup;

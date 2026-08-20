@@ -236,6 +236,14 @@ function progress(session, message) {
     tileCount: session.report.tileCount,
     message
   }).catch(() => {});
+  updateBadge(session.report?.tileCount ? String(session.report.tileCount) : "…");
+}
+
+// Toolbar badge is the progress surface that can never contaminate captured pixels.
+function updateBadge(text = "…") {
+  const busy = activeCaptures.size > 0 || Boolean(activeBatch);
+  chrome.action.setBadgeText({ text: busy ? text : "" }).catch(() => {});
+  if (busy) chrome.action.setBadgeBackgroundColor({ color: "#0A84FF" }).catch(() => {});
 }
 
 function fileSafeTitle(value) {
@@ -463,6 +471,7 @@ async function storeScrollingCapture(session, controller) {
       if (extent.width <= plannedExtent.width + 1 && extent.height <= plannedExtent.height + 1) break;
       if (safetyStopReason) break;
       growthPass++;
+      progress(session, `Page keeps growing — following new content (pass ${growthPass}). Press Ctrl+Shift+S to stop.`);
     }
 
     if (growthPass > session.limits.maxGrowthPasses) {
@@ -537,6 +546,8 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   }
   const activeEntry = { session, controller, failureReason: null };
   activeCaptures.set(tab.id, activeEntry);
+  refreshContextMenu().catch(() => {});
+  updateBadge();
 
   try {
     await putRecord(session);
@@ -565,6 +576,7 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
     activeCaptures.delete(tab.id);
     activeWindowLocks.delete(tab.windowId);
     refreshContextMenu().catch(() => {});
+    updateBadge();
   }
 
   if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
@@ -618,6 +630,8 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   const settings = normalizeSettings(batchOptions.settings || await loadSettings());
   const mode = settings.batchMode;
   activeBatch = { id: batchId, controller, currentTabId: null };
+  refreshContextMenu().catch(() => {});
+  updateBadge();
 
   try {
     let tabs;
@@ -663,6 +677,8 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
     }
     try { await chrome.tabs.update(original.id, { active: true }); } catch { /* The original tab may be gone. */ }
     activeBatch = null;
+    refreshContextMenu().catch(() => {});
+    updateBadge();
   }
 
   const summary = { id: batchId, kind, mode, combinePdf: Boolean(batchOptions.combinePdf), createdAt: new Date().toISOString(), results, skipped };
