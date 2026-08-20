@@ -762,15 +762,27 @@ async function startPicker(mode, tabOverride = null, suppliedSettings = null) {
   try {
     const injected = await injectCaptureScript(tab.id, 0, true);
     const frameIds = [...new Set(injected.map((result) => result.frameId))];
+    let frameInfo = null;
+    if (mode === "frame") {
+      if (frameIds.length <= 1) {
+        const error = new Error("No capturable frames were found on this page. Cross-origin frames need site access, and scrolling areas are captured with Select an element.");
+        error.winshotFriendly = true;
+        throw error;
+      }
+      const allFrames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => null);
+      const inaccessible = allFrames ? Math.max(0, allFrames.length - frameIds.length) : 0;
+      frameInfo = { accessible: frameIds.length - 1, inaccessible };
+    }
     pickerFrames.set(tab.id, frameIds);
     pickerSettings.set(tab.id, settings);
     const started = await Promise.allSettled(frameIds.map((frameId) =>
-      sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode }, frameId)));
+      sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, frameInfo }, frameId)));
     if (!started.some((result) => result.status === "fulfilled")) throw new Error("The picker could not start in any accessible frame.");
     return { started: true, frameCount: frameIds.length };
   } catch (error) {
     pickerFrames.delete(tab.id);
     pickerSettings.delete(tab.id);
+    if (error?.winshotFriendly) throw error;
     throw new Error(`${restrictedPageReason(tab.url)} (${friendlyError(error)})`);
   }
 }

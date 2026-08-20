@@ -651,13 +651,30 @@
     return result;
   }
 
-  async function beginPicker(mode) {
+  async function beginPicker(mode, frameInfo = null) {
     pickerCleanup?.();
     restore("picker-started");
     savePickerState();
     if (mode === "region") startRegionPicker();
-    else startElementPicker(mode);
+    else startElementPicker(mode, frameInfo);
     return { started: true };
+  }
+
+  // A picker overlay must be modal: no press, click, or context menu may reach the
+  // page underneath, or the page mutates mid-capture. Pointer events are only
+  // stopped, not cancelled — cancelling pointerdown would suppress the
+  // compatibility mouse events the pickers themselves handle.
+  function swallowPageEvents(except = []) {
+    const types = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu"];
+    const handlers = types.filter((type) => !except.includes(type)).map((type) => {
+      const handler = (event) => {
+        if (!type.startsWith("pointer")) event.preventDefault();
+        event.stopPropagation();
+      };
+      addEventListener(type, handler, true);
+      return { type, handler };
+    });
+    return () => { for (const entry of handlers) removeEventListener(entry.type, entry.handler, true); };
   }
 
   function cancelPicker() {
@@ -682,12 +699,18 @@
     chrome.runtime.sendMessage({ type: "WINSHOT_PICK_RESULT", ...payload }).catch(() => {});
   }
 
-  function startElementPicker(mode = "element") {
+  function startElementPicker(mode = "element", frameInfo = null) {
     const frameMode = mode === "frame";
     const { outline, tip } = pickerChrome("Click an element · Hold Ctrl for the exact node · Yellow means hidden scrollable content · Esc cancels");
-    if (frameMode) tip.textContent = window === top
-      ? "Click inside the frame you want to capture · Esc cancels"
-      : "Click anywhere to capture this entire scrolling frame · Esc cancels";
+    if (frameMode) {
+      const blocked = frameInfo?.inaccessible
+        ? ` · ${frameInfo.inaccessible} frame(s) here can't be captured (cross-origin or restricted)`
+        : "";
+      tip.textContent = window === top
+        ? `Click inside the frame you want to capture${blocked} · Esc cancels`
+        : "Click anywhere to capture this entire scrolling frame · Esc cancels";
+    }
+    const unswallow = swallowPageEvents();
     let current = null;
 
     const chooseCandidate = (event) => {
@@ -702,6 +725,15 @@
       return candidate;
     };
     const move = (event) => {
+      if (frameMode && window !== top) {
+        // The whole frame is the target — outline the entire frame viewport.
+        outline.style.display = "block";
+        outline.style.left = "0px";
+        outline.style.top = "0px";
+        outline.style.width = `${innerWidth}px`;
+        outline.style.height = `${innerHeight}px`;
+        return;
+      }
       current = chooseCandidate(event);
       if (!current) return;
       const rect = current.getBoundingClientRect();
@@ -719,7 +751,21 @@
       event.stopPropagation();
       if (frameMode) {
         if (window === top) {
-          tip.textContent = "Click inside the frame, not its border.";
+          // Clicks over an accessible frame land in that frame, never here. Landing
+          // here means the click hit the top page — help instead of nagging: a
+          // scrollable element is captured directly, like the element picker would.
+          const candidate = chooseCandidate(event);
+          if (candidate && candidate !== document.body && candidate !== document.documentElement && isScrollable(candidate).any) {
+            const before = candidate.getAttribute("data-winshot-target");
+            const token = crypto.randomUUID();
+            candidate.setAttribute("data-winshot-target", token);
+            cleanup();
+            sendPickerResult({ mode: "element", target: { token, attributeBefore: before }, title: candidate.tagName.toLowerCase() });
+            return;
+          }
+          tip.textContent = candidate?.closest?.("iframe, frame, object, embed")
+            ? "This frame can't be captured (cross-origin or restricted). Grant site access or use Select an element."
+            : "That isn't a frame or scrolling area. Click inside a frame, or press Esc and use Select an element.";
           return;
         }
         cleanup();
@@ -742,6 +788,7 @@
       }
     };
     const cleanup = () => {
+      unswallow();
       removeEventListener("mousemove", move, true);
       removeEventListener("click", click, true);
       removeEventListener("keydown", key, true);
@@ -768,6 +815,7 @@
     guideV.dataset.winshotPicker = "guide";
     document.documentElement.append(dim, guideH, guideV);
     const ownNodes = [outline, tip, dim, guideH, guideV];
+    const unswallow = swallowPageEvents();
     let dragging = false;
     let start = null;
     let currentClient = null;
@@ -900,6 +948,7 @@
       if (event.key === "Escape") { cleanup(); restorePickerState(); sendPickerResult({ cancelled: true }); }
     };
     const cleanup = () => {
+      unswallow();
       clearInterval(autoTimer);
       removeEventListener("mousedown", down, true);
       removeEventListener("mousemove", move, true);
@@ -935,7 +984,7 @@
           if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();
           return { alive: Boolean(frameHostSession) };
         case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
-        case "WINSHOT_START_PICKER": return await beginPicker(request.mode);
+        case "WINSHOT_START_PICKER": return await beginPicker(request.mode, request.frameInfo || null);
         case "WINSHOT_CANCEL_PICKER": return cancelPicker();
         default: return undefined;
       }

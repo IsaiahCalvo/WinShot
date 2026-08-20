@@ -608,6 +608,59 @@ test("scroll-snap element capture restores focus and its original scroll positio
   }
 });
 
+test("picker overlays are modal — no press or click reaches the page underneath", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    monitorPage(page, run.errors);
+    await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    await page.evaluate(() => {
+      window.__pageHits = 0;
+      for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+        document.addEventListener(type, () => { window.__pageHits += 1; });
+      }
+    });
+
+    // Element picker: the capture click must not leak to the page.
+    let waitingEditor = editorTarget(run);
+    await startPicker(run, page, "element");
+    await page.mouse.click(200, 200);
+    const { record } = await recordFromEditorTarget(await waitingEditor);
+    expect(record.state).toBe("complete");
+    expect(await page.evaluate(() => window.__pageHits)).toBe(0);
+
+    // Region picker: neither the drag nor the synthesized click may leak.
+    waitingEditor = editorTarget(run);
+    await startPicker(run, page, "region");
+    await page.mouse.move(100, 150);
+    await page.mouse.down();
+    await page.mouse.move(400, 400, { steps: 5 });
+    await page.mouse.up();
+    await recordFromEditorTarget(await waitingEditor);
+    expect(await page.evaluate(() => window.__pageHits)).toBe(0);
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
+test("frame picker refuses a frameless page with a clear popup error", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    monitorPage(page, run.errors);
+    await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    const popup = await openPopup(run, page);
+    await popup.click("[data-picker='frame']");
+    await popup.waitForFunction(() =>
+      /No capturable frames/i.test(document.querySelector("#status")?.textContent || ""), { timeout: 10_000 });
+    expect(await page.evaluate(() => Boolean(document.querySelector("[data-winshot-picker]")))).toBe(false);
+    await popup.close();
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
 test("drag selection auto-scrolls at the edge and restores the pre-picker page state", async () => {
   const run = await launchExactExtension();
   try {
