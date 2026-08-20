@@ -160,6 +160,7 @@ public class SettingsService
 
     /// <summary>True once Load() ran. Saves are refused before that — a Save() racing ahead
     /// of Load() would write pristine defaults over the user's file.</summary>
+    public bool IsLoaded => _loaded;
     private bool _loaded;
 
     /// <summary>Set when a settings file EXISTED but could not be read even after retries and

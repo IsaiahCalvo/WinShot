@@ -218,7 +218,9 @@ public partial class App : Application
     {
         // Persist in-memory settings (e.g. FileNamer's counter) without re-triggering hotkey registration.
         _settings.Changed -= RegisterHotkeys;
-        try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to persist settings on exit", ex); }
+        // A second instance shuts down before Load() ever runs — nothing to persist there.
+        if (_settings.IsLoaded)
+            try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to persist settings on exit", ex); }
 
         try { _recording?.Shutdown(); } catch (Exception ex) { Log.Error("Failed to stop recording on exit", ex); }
         try { CaptureService.ReleaseCaptureResources(); } catch (Exception ex) { Log.Error("Failed to release capture resources on exit", ex); }
