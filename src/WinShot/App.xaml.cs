@@ -121,6 +121,10 @@ public partial class App : Application
         // Electron apps keep renderer accessibility enabled while this mutex exists —
         // required for Alt-hover element detection to see their full element tree.
         WinShot.Capture.MsaaElementDetector.HoldScreenReaderMutex();
+        // Chromium builds accessibility trees lazily over 1-3 s; hovering can't wait that
+        // long, so keep every Chromium window's tree warm continuously, the way a screen
+        // reader does. This is what makes element detection actually answer in Electron apps.
+        WinShot.Capture.ChromiumTreeWarmer.Start();
         Log.Info("WinShot started");
 
         if (_settings.Current.CheckForUpdatesOnStartup)
