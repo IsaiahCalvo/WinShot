@@ -58,6 +58,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private bool _elementLookupBusy;
     private SD.Point _elementLookupPoint;
     private SD.Point _lastVisualPoint = new(-9999, -9999);
+    /// <summary>OmniParser boxes per window handle, in screen space. Filled by a worker the
+    /// first time the cursor enters a window; empty list = scan done, nothing found.</summary>
+    private readonly Dictionary<IntPtr, List<SD.Rectangle>> _mlBoxes = new();
+    private readonly HashSet<IntPtr> _mlScansInFlight = new();
     /// <summary>True when the selection came from clicking the highlighted pane rather than
     /// a hand-drawn marquee — only pane clicks opt into probe refinement downstream; a rect
     /// the user deliberately drew is captured exactly as drawn.</summary>
@@ -219,6 +223,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hoverLadder = new List<SD.Rectangle>();
         _ladderIndex = -1;
         _elementLookupBusy = false;
+        _mlBoxes.Clear();
+        _mlScansInFlight.Clear();
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
         DisposeFrozen();
@@ -902,6 +908,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _lastVisualPoint = point;
 
         WindowInfo? seed = ResolveWindow(point);
+        if (seed is not null)
+            EnsureMlScan(seed);
+        SD.Rectangle? ml = MlBoxAt(seed, point);
         SD.Rectangle searchBounds = snap ?? seed?.Bounds ?? SD.Rectangle.Empty;
         SD.Rectangle? visual = null;
         if (_frozen is not null && searchBounds.Width > 0)
@@ -918,16 +927,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
             }
         }
 
-        SD.Rectangle? resolved = visual ?? snap ??
+        // The trained detector's box wins over the colour-segmentation guess: it was taught
+        // what a control looks like, the segmenter only knows what the background is. The
+        // segmentation stays as the fallback for content blocks the model doesn't consider
+        // interactable (a paragraph, a chat message).
+        SD.Rectangle? resolved = ml ?? visual ?? snap ??
             (seed is null
                 ? null
                 : WinShot.Scrolling.ScrollPaneDetector.QuickPaneRect(seed.Handle, point) ?? seed.Bounds);
 
         if (resolved is SD.Rectangle chosen)
         {
-            Log.Info($"Hover: {(visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {chosen}");
+            Log.Info($"Hover: {(ml is not null ? "ml" : visual is not null ? "visual" : snap is not null ? "hwnd" : "seed")} {chosen}");
             BuildLadder(point, chosen);
-            SetHoverPane(chosen, visual is not null ? HoverTier.Fine : HoverTier.Coarse);
+            SetHoverPane(chosen, ml is not null || visual is not null ? HoverTier.Fine : HoverTier.Coarse);
         }
 
         KickElementLookup(point);
@@ -942,6 +955,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void BuildLadder(SD.Point point, SD.Rectangle resolved)
     {
         var rungs = new List<SD.Rectangle> { resolved };
+        foreach (var boxes in _mlBoxes.Values)
+        {
+            foreach (var box in boxes)
+            {
+                if (box.Contains(point))
+                    rungs.Add(box);
+            }
+        }
         foreach (var candidate in _snapRects)
         {
             if (candidate.Bounds.Contains(point))
@@ -959,6 +980,70 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _ladderIndex = ladder.FindIndex(r => IsWithin(r, resolved, WobbleTolerancePx));
         if (_ladderIndex < 0)
             _ladderIndex = 0;
+    }
+
+    /// <summary>Starts the one-time OmniParser scan for a window. ~50-100 ms on a worker
+    /// against the frozen snapshot; results land on the UI thread and the next mouse move
+    /// picks them up. The scan is per-window because the model input is 640px square — one
+    /// whole-desktop pass would blur every control below detectability.</summary>
+    private void EnsureMlScan(WindowInfo window)
+    {
+        if (_frozen is null || _mlBoxes.ContainsKey(window.Handle) || !_mlScansInFlight.Add(window.Handle))
+            return;
+
+        SD.Bitmap frozen = _frozen;
+        SD.Rectangle area = VirtualFromScreen(window.Bounds);
+        IntPtr handle = window.Handle;
+        Task.Run(() =>
+        {
+            List<SD.Rectangle> found = MlElementDetector.Detect(frozen, area);
+            // Map bitmap space back to screen space once, here, so hover checks are free.
+            for (int i = 0; i < found.Count; i++)
+            {
+                found[i] = new SD.Rectangle(found[i].X + _vs.X, found[i].Y + _vs.Y,
+                    found[i].Width, found[i].Height);
+            }
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    _mlScansInFlight.Remove(handle);
+                    if (IsDisposed || !_paneHover)
+                        return;
+                    _mlBoxes[handle] = found;
+                    Log.Info($"ML scan: {found.Count} elements in {area.Width}x{area.Height} window");
+                    // Refresh the highlight in place — the cursor may be sitting on a box
+                    // that didn't exist a frame ago.
+                    _lastVisualPoint = new SD.Point(-9999, -9999);
+                    HandleMouseMove();
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+                // Selector torn down mid-scan.
+            }
+        });
+    }
+
+    /// <summary>Smallest detected box under the point, if its window has been scanned.</summary>
+    private SD.Rectangle? MlBoxAt(WindowInfo? window, SD.Point point)
+    {
+        if (window is null || !_mlBoxes.TryGetValue(window.Handle, out var boxes))
+            return null;
+        SD.Rectangle? best = null;
+        long bestArea = long.MaxValue;
+        foreach (var box in boxes)
+        {
+            if (!box.Contains(point))
+                continue;
+            long area = (long)box.Width * box.Height;
+            if (area < bestArea)
+            {
+                bestArea = area;
+                best = box;
+            }
+        }
+        return best;
     }
 
     private void KickElementLookup(SD.Point point)
@@ -989,8 +1074,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     // it happens to be smaller — except for the one answer it gets wrong often
                     // enough to matter, a rect so large it is really the whole pane wearing an
                     // element's name. Stale answers for a point the cursor has left are dropped.
-                    if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 48 &&
-                        r != _hoverPane && r.Contains(point) && !IsWholePane(r, point))
+                    long currentArea = _hoverPane is SD.Rectangle cur && cur.Contains(point)
+                        ? (long)cur.Width * cur.Height : long.MaxValue;
+                    if (rect is SD.Rectangle r && Distance(CursorScreen(), point) < 160 &&
+                        r != _hoverPane && r.Contains(point) && !IsWholePane(r, point) &&
+                        (long)r.Width * r.Height < currentArea)
                     {
                         Log.Info($"Hover: element {r}");
                         BuildLadder(point, r);
