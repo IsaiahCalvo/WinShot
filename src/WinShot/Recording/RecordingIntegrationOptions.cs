@@ -60,31 +60,54 @@ public static class RecordingAreaMemory
     }
 }
 
-public readonly record struct RecordingDisplayPlan(
-    SD.Rectangle ScreenBounds,
-    SD.Rectangle CaptureRect,
-    bool CrossesDisplays)
+/// <summary>One display source placed on the recorder's composed canvas.</summary>
+public sealed record RecordingDisplaySource(string DeviceName, SD.Rectangle Bounds, SD.Point CanvasPosition);
+
+/// <summary>
+/// Lays the displays a selection touches onto one canvas that mirrors their real
+/// arrangement (canvas origin = top-left of the union of their bounds), so
+/// ScreenRecorderLib can record any rectangle — single display, cross-display, or a
+/// chosen subset of displays — with one crop.
+/// </summary>
+public readonly record struct RecordingDisplayComposition(
+    IReadOnlyList<RecordingDisplaySource> Sources,
+    SD.Rectangle SourceRect)
 {
-    public static RecordingDisplayPlan Create(SD.Rectangle selection, IReadOnlyList<SD.Rectangle> displays)
+    public bool IsUsable => Sources.Count > 0 && SourceRect.Width >= 2 && SourceRect.Height >= 2;
+
+    /// <param name="chosenDisplays">When the user explicitly picked displays, only those
+    /// become sources; any other display inside the selection union stays black in the
+    /// output. Null means every display the selection touches.</param>
+    public static RecordingDisplayComposition Create(
+        SD.Rectangle selection,
+        IReadOnlyList<(string DeviceName, SD.Rectangle Bounds)> displays,
+        IReadOnlyList<SD.Rectangle>? chosenDisplays = null)
     {
-        if (displays.Count == 0)
-            throw new ArgumentException("At least one display is required.", nameof(displays));
+        var hits = displays
+            .Where(d => chosenDisplays is null
+                ? !SD.Rectangle.Intersect(d.Bounds, selection).IsEmpty
+                : chosenDisplays.Contains(d.Bounds))
+            .ToList();
+        if (hits.Count == 0)
+            return new RecordingDisplayComposition(Array.Empty<RecordingDisplaySource>(), SD.Rectangle.Empty);
 
-        SD.Rectangle chosen = displays
-            .OrderByDescending(display => Area(SD.Rectangle.Intersect(display, selection)))
-            .First();
-        SD.Rectangle capture = SD.Rectangle.Intersect(chosen, selection);
-        capture.Width &= ~1;
-        capture.Height &= ~1;
+        SD.Rectangle union = hits[0].Bounds;
+        foreach (var hit in hits.Skip(1))
+            union = SD.Rectangle.Union(union, hit.Bounds);
 
-        int intersectingDisplays = displays.Count(display => Area(SD.Rectangle.Intersect(display, selection)) > 0);
-        long selectedArea = Area(selection);
-        long coveredArea = displays.Sum(display => Area(SD.Rectangle.Intersect(display, selection)));
-        bool crosses = intersectingDisplays > 1 || coveredArea < selectedArea;
-        return new RecordingDisplayPlan(chosen, capture, crosses);
+        SD.Rectangle crop = SD.Rectangle.Intersect(selection, union);
+        crop.Offset(-union.X, -union.Y);
+        crop.Width &= ~1;  // H.264 needs even dimensions
+        crop.Height &= ~1;
+
+        var sources = hits
+            .Select(d => new RecordingDisplaySource(
+                d.DeviceName,
+                d.Bounds,
+                new SD.Point(d.Bounds.X - union.X, d.Bounds.Y - union.Y)))
+            .ToList();
+        return new RecordingDisplayComposition(sources, crop);
     }
-
-    private static long Area(SD.Rectangle rect) => Math.Max(0L, (long)rect.Width * rect.Height);
 }
 
 public static class RecordingOutputSize

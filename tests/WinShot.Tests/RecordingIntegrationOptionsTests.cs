@@ -51,31 +51,63 @@ public class RecordingIntegrationOptionsTests
     }
 
     [Fact]
-    public void DisplayPlan_FlagsCrossMonitorAndSelectsLargestOverlap()
+    public void DisplayComposition_SingleMonitorKeepsAreaExactEvenAndDisplayRelative()
     {
-        var displays = new[]
-        {
-            new SD.Rectangle(0, 0, 1920, 1080),
-            new SD.Rectangle(1920, 0, 2560, 1440),
-        };
+        var composition = RecordingDisplayComposition.Create(
+            new SD.Rectangle(-1801, 31, 701, 503),
+            [(@"\\.\DISPLAY1", new SD.Rectangle(-1920, 0, 1920, 1080))]);
 
-        RecordingDisplayPlan plan = RecordingDisplayPlan.Create(
-            new SD.Rectangle(1700, 100, 800, 600), displays);
-
-        Assert.True(plan.CrossesDisplays);
-        Assert.Equal(displays[1], plan.ScreenBounds);
-        Assert.Equal(new SD.Rectangle(1920, 100, 580, 600), plan.CaptureRect);
+        Assert.True(composition.IsUsable);
+        var source = Assert.Single(composition.Sources);
+        Assert.Equal(@"\\.\DISPLAY1", source.DeviceName);
+        Assert.Equal(new SD.Point(0, 0), source.CanvasPosition);
+        Assert.Equal(new SD.Rectangle(119, 31, 700, 502), composition.SourceRect);
     }
 
     [Fact]
-    public void DisplayPlan_KeepsSingleMonitorAreaExactAndEven()
+    public void DisplayComposition_CrossMonitorSelectionComposesBothDisplays()
     {
-        var display = new SD.Rectangle(-1920, 0, 1920, 1080);
-        RecordingDisplayPlan plan = RecordingDisplayPlan.Create(
-            new SD.Rectangle(-1801, 31, 701, 503), [display]);
+        var composition = RecordingDisplayComposition.Create(
+            new SD.Rectangle(1700, 100, 800, 600),
+            [
+                (@"\\.\DISPLAY1", new SD.Rectangle(0, 0, 1920, 1080)),
+                (@"\\.\DISPLAY2", new SD.Rectangle(1920, 0, 2560, 1440)),
+            ]);
 
-        Assert.False(plan.CrossesDisplays);
-        Assert.Equal(new SD.Rectangle(-1801, 31, 700, 502), plan.CaptureRect);
+        Assert.True(composition.IsUsable);
+        Assert.Equal(2, composition.Sources.Count);
+        Assert.Equal(new SD.Point(0, 0), composition.Sources[0].CanvasPosition);
+        Assert.Equal(new SD.Point(1920, 0), composition.Sources[1].CanvasPosition);
+        Assert.Equal(new SD.Rectangle(1700, 100, 800, 600), composition.SourceRect);
+    }
+
+    [Fact]
+    public void DisplayComposition_ChosenSubsetSkipsUnpickedMiddleDisplay()
+    {
+        var left = new SD.Rectangle(0, 0, 1920, 1080);
+        var middle = new SD.Rectangle(1920, 0, 1920, 1080);
+        var right = new SD.Rectangle(3840, 0, 1920, 1080);
+
+        var composition = RecordingDisplayComposition.Create(
+            SD.Rectangle.Union(left, right),
+            [(@"\\.\DISPLAY1", left), (@"\\.\DISPLAY2", middle), (@"\\.\DISPLAY3", right)],
+            chosenDisplays: [left, right]);
+
+        Assert.True(composition.IsUsable);
+        Assert.Equal(2, composition.Sources.Count);
+        Assert.Equal(new SD.Point(0, 0), composition.Sources[0].CanvasPosition);
+        Assert.Equal(new SD.Point(3840, 0), composition.Sources[1].CanvasPosition);
+        Assert.Equal(new SD.Rectangle(0, 0, 5760, 1080), composition.SourceRect);
+    }
+
+    [Fact]
+    public void DisplayComposition_SelectionOffAllDisplaysIsUnusable()
+    {
+        var composition = RecordingDisplayComposition.Create(
+            new SD.Rectangle(9000, 9000, 400, 300),
+            [(@"\\.\DISPLAY1", new SD.Rectangle(0, 0, 1920, 1080))]);
+
+        Assert.False(composition.IsUsable);
     }
 
     [Theory]

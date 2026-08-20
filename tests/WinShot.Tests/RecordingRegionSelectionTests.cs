@@ -27,6 +27,20 @@ public class RecordingRegionSelectionTests
         Assert.True(region.IsUsable);
     }
 
+    [Fact]
+    public void FromDisplays_UnionsChosenDisplayBounds()
+    {
+        var region = RecordingRegionSelection.FromDisplays(
+        [
+            new SD.Rectangle(0, 0, 1920, 1200),
+            new SD.Rectangle(7, -1080, 1920, 1080),
+            new SD.Rectangle(1927, -1091, 1920, 1080),
+        ]);
+
+        Assert.Equal(new SD.Rectangle(0, -1091, 3846, 2290), region.ScreenRect);
+        Assert.True(region.IsUsable);
+    }
+
     [Theory]
     [InlineData(1, 50)]
     [InlineData(50, 1)]

@@ -50,6 +50,7 @@ public sealed class RecordingController
 
     private sealed record CaptureParameters(
         SD.Rectangle ScreenRect,
+        SD.Rectangle[]? SourceDisplays,
         bool IsGif,
         bool RecordMicrophone,
         bool RecordSystemAudio,
@@ -213,12 +214,14 @@ public sealed class RecordingController
         s.GifFps = gifFps;
 
         RecordingRegionSelection selection;
+        SD.Rectangle[]? sourceDisplays = null;
         if (pickDisplay)
         {
-            SD.Rectangle? display = FastDisplayPickerDialog.ChooseDisplay();
-            if (display is null)
+            SD.Rectangle[]? displays = FastDisplayPickerDialog.ChooseDisplays();
+            if (displays is null || displays.Length == 0)
                 return;
-            selection = RecordingRegionSelection.FromDisplay(display.Value);
+            selection = RecordingRegionSelection.FromDisplays(displays);
+            sourceDisplays = displays;
         }
         else if (RecordingAreaMemory.TryResolve(
             selectedVirtualRegion,
@@ -263,30 +266,6 @@ public sealed class RecordingController
             return;
         }
 
-        if (!isGif)
-        {
-            var displayPlan = RecordingDisplayPlan.Create(
-                screenRect,
-                WF.Screen.AllScreens.Select(screen => screen.Bounds).ToArray());
-            if (displayPlan.CrossesDisplays)
-            {
-                string displayName = WF.Screen.AllScreens
-                    .FirstOrDefault(screen => screen.Bounds == displayPlan.ScreenBounds)?.DeviceName
-                    ?? "the display with the largest selected area";
-                var result = WF.MessageBox.Show(
-                    $"MP4 recording supports one display at a time. This selection crosses displays.\n\n" +
-                    $"Continue to record only the portion on {displayName}, or Cancel and choose a single display. " +
-                    "GIF recording can capture the full cross-display rectangle.",
-                    "Recording area crosses displays",
-                    WF.MessageBoxButtons.OKCancel,
-                    WF.MessageBoxIcon.Warning,
-                    WF.MessageBoxDefaultButton.Button2);
-                if (result != WF.DialogResult.OK)
-                    return;
-                screenRect = displayPlan.CaptureRect;
-            }
-        }
-
         if (s.RememberLastSelection)
             s.LastRecordingRegion = PreviousRegion.Format(screenRect);
 
@@ -300,6 +279,7 @@ public sealed class RecordingController
         RecordingSessionUiOptions sessionUi = RecordingSessionUiOptions.FromSettings(s);
         var parameters = new CaptureParameters(
             screenRect,
+            sourceDisplays,
             isGif,
             recordMicrophone,
             recordSystemAudio,
@@ -376,7 +356,7 @@ public sealed class RecordingController
             if (_isGif)
                 StartGif(screenRect, p.CaptureCursor, p.GifFps, p.GifSize, p.GifQuality, p.OptimizeGifs);
             else
-                StartMp4(screenRect, p.RecordMicrophone, p.RecordSystemAudio, p.CaptureCursor, p.WebcamPosition, p.WebcamSizePercent, p.WebcamDeviceName, p.MicrophoneDeviceName, p.RecordingFps, p.VideoQuality, p.ScaleHiDpiVideo, p.MaxResolution, p.RecordAudioMono);
+                StartMp4(p);
         }
         catch
         {
@@ -441,56 +421,49 @@ public sealed class RecordingController
         _gifRecorder.Start();
     }
 
-    private void StartMp4(
-        SD.Rectangle screenRect,
-        bool micAudio,
-        bool systemAudio,
-        bool captureCursor,
-        string webcamPosition,
-        int webcamSizePercent,
-        string? webcamDeviceName,
-        string? microphoneDeviceName,
-        int recordingFps,
-        int videoQuality,
-        bool scaleHiDpiVideo,
-        string maxResolution,
-        bool recordAudioMono)
+    private void StartMp4(CaptureParameters p)
     {
-        // ScreenRecorderLib records one display source. Cross-display selections were
-        // disclosed to the user before this point; this plan keeps the source crop
-        // relative to the chosen display's top-left corner.
-        var displayPlan = RecordingDisplayPlan.Create(
+        SD.Rectangle screenRect = p.ScreenRect;
+        // Every display the selection touches (or the picked subset) is composed onto
+        // one canvas mirroring the real monitor layout, then cropped to the selection —
+        // so single-display, cross-display, and multi-display recordings share one path.
+        var composition = RecordingDisplayComposition.Create(
             screenRect,
-            WF.Screen.AllScreens.Select(candidate => candidate.Bounds).ToArray());
-        WF.Screen screen = WF.Screen.AllScreens.First(candidate => candidate.Bounds == displayPlan.ScreenBounds);
-        SD.Rectangle rect = displayPlan.CaptureRect;
-        if (rect.Width < 2 || rect.Height < 2)
+            WF.Screen.AllScreens.Select(candidate => (candidate.DeviceName, candidate.Bounds)).ToArray(),
+            p.SourceDisplays);
+        if (!composition.IsUsable)
             throw new InvalidOperationException("The selected region does not overlap a display.");
+        SD.Rectangle crop = composition.SourceRect;
 
-        var audio = RecordingAudioSelection.FromChoices(micAudio, systemAudio);
+        var audio = RecordingAudioSelection.FromChoices(p.RecordMicrophone, p.RecordSystemAudio);
         SD.Size outputSize = RecordingOutputSize.CalculateVideo(
-            rect.Size,
-            maxResolution,
-            scaleHiDpiVideo,
-            RecordingMonitorDpi.ScaleFor(rect));
+            crop.Size,
+            p.MaxResolution,
+            p.ScaleHiDpiVideo,
+            RecordingMonitorDpi.ScaleFor(screenRect));
         var options = new RecorderOptions
         {
             SourceOptions = new SourceOptions
             {
-                RecordingSources = new List<RecordingSourceBase> { new DisplayRecordingSource(screen.DeviceName) },
+                RecordingSources = composition.Sources
+                    .Select(source => (RecordingSourceBase)new DisplayRecordingSource(source.DeviceName)
+                    {
+                        Position = new ScreenPoint(source.CanvasPosition.X, source.CanvasPosition.Y),
+                    })
+                    .ToList(),
             },
             OutputOptions = new OutputOptions
             {
                 RecorderMode = RecorderMode.Video,
-                SourceRect = new ScreenRect(rect.X - screen.Bounds.X, rect.Y - screen.Bounds.Y, rect.Width, rect.Height),
+                SourceRect = new ScreenRect(crop.X, crop.Y, crop.Width, crop.Height),
                 OutputFrameSize = new ScreenSize(outputSize.Width, outputSize.Height),
                 Stretch = StretchMode.Uniform,
             },
             VideoEncoderOptions = new VideoEncoderOptions
             {
                 Encoder = new H264VideoEncoder { BitrateMode = H264BitrateControlMode.Quality },
-                Quality = Math.Clamp(videoQuality, 1, 100),
-                Framerate = Math.Clamp(recordingFps, 1, 120),
+                Quality = Math.Clamp(p.VideoQuality, 1, 100),
+                Framerate = Math.Clamp(p.RecordingFps, 1, 120),
                 IsHardwareEncodingEnabled = true,
             },
             AudioOptions = new AudioOptions
@@ -498,22 +471,27 @@ public sealed class RecordingController
                 IsAudioEnabled = audio.IsAudioEnabled,
                 IsInputDeviceEnabled = audio.IsInputDeviceEnabled,
                 IsOutputDeviceEnabled = audio.IsOutputDeviceEnabled,
-                ForceInputDeviceMono = RecordingAudioInputOptions.ShouldForceMono(micAudio, recordAudioMono),
+                ForceInputDeviceMono = RecordingAudioInputOptions.ShouldForceMono(p.RecordMicrophone, p.RecordAudioMono),
                 // null/empty => recorder uses the system default input device.
-                AudioInputDevice = micAudio && !string.IsNullOrEmpty(microphoneDeviceName)
-                    ? microphoneDeviceName
+                AudioInputDevice = p.RecordMicrophone && !string.IsNullOrEmpty(p.MicrophoneDeviceName)
+                    ? p.MicrophoneDeviceName
                     : null,
             },
             // Click feedback comes from our own overlay window (shared with the
             // GIF path); ScreenRecorderLib's built-in click detection stays off.
-            MouseOptions = new MouseOptions { IsMousePointerEnabled = captureCursor },
+            MouseOptions = new MouseOptions { IsMousePointerEnabled = p.CaptureCursor },
         };
 
-        ApplyWebcamOverlay(options, webcamPosition, webcamSizePercent, webcamDeviceName, rect);
+        ApplyWebcamOverlay(options, p.WebcamPosition, p.WebcamSizePercent, p.WebcamDeviceName, crop);
 
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnMp4Complete;
         _recorder.OnRecordingFailed += OnMp4Failed;
+        // Windows allows one active desktop duplication per output per process, and the
+        // recorder duplicates every source display. The selector's warm capture cache
+        // may still hold duplications from the region pick seconds ago — release them
+        // or the recorder dies with "The parameter is incorrect" (E_INVALIDARG).
+        DesktopDuplicationCapture.ReleaseResources(timeoutMs: 2000);
         _recorder.Record(_tempPath!);
     }
 

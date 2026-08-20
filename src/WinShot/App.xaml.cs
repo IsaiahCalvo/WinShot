@@ -614,8 +614,10 @@ public partial class App : Application
     private void CaptureDisplayFlow() => RunCaptureFlow(
         "Display capture failed", "Capture failed", async () =>
         {
-            if (FastDisplayPickerDialog.ChooseDisplay() is SD.Rectangle r)
+            if (FastDisplayPickerDialog.ChooseDisplays() is { Length: > 0 } picked)
             {
+                // Multiple picked displays screenshot as the union rectangle.
+                SD.Rectangle r = picked.Aggregate(SD.Rectangle.Union);
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-display screen grab", sw);

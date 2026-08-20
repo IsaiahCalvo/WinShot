@@ -43,13 +43,19 @@ public sealed class FastDisplayPickerDialog : WF.Form
             ForeColor = TextColor,
             Height = 24,
             Margin = new WF.Padding(0, 0, 0, 8),
-            Text = "Choose a display",
+            Text = "Choose displays to record",
             Width = 260,
         });
 
         var screens = WF.Screen.AllScreens;
+        var selected = new HashSet<int>();
+        var displayButtons = new WF.Button[screens.Length];
+        WF.Button record = Button("Record", 74, ButtonBack);
+        record.Enabled = false;
+
         for (int i = 0; i < screens.Length; i++)
         {
+            int index = i;
             var screen = screens[i];
             var bounds = screen.Bounds;
             var button = Button(
@@ -58,11 +64,22 @@ public sealed class FastDisplayPickerDialog : WF.Form
                 ButtonBack);
             button.Click += (_, _) =>
             {
-                SelectedBounds = bounds;
-                DialogResult = WF.DialogResult.OK;
+                if (!selected.Add(index))
+                    selected.Remove(index);
+                button.BackColor = selected.Contains(index) ? Accent : ButtonBack;
+                record.Enabled = selected.Count > 0;
             };
+            displayButtons[i] = button;
             panel.Controls.Add(button);
         }
+
+        var all = Button("Record all displays", 260, ButtonBack);
+        all.Click += (_, _) =>
+        {
+            SelectedDisplays = screens.Select(s => s.Bounds).ToArray();
+            DialogResult = WF.DialogResult.OK;
+        };
+        panel.Controls.Add(all);
 
         var bottom = new WF.FlowLayoutPanel
         {
@@ -78,11 +95,19 @@ public sealed class FastDisplayPickerDialog : WF.Form
 
         var cancel = Button("Cancel", 74, ButtonBack);
         cancel.Click += (_, _) => DialogResult = WF.DialogResult.Cancel;
+        record.Click += (_, _) =>
+        {
+            if (selected.Count == 0)
+                return;
+            SelectedDisplays = selected.OrderBy(i => i).Select(i => screens[i].Bounds).ToArray();
+            DialogResult = WF.DialogResult.OK;
+        };
         bottom.Controls.Add(cancel);
+        bottom.Controls.Add(record);
         panel.Controls.Add(bottom);
 
         Controls.Add(panel);
-        AcceptButton = screens.Length > 0 ? panel.Controls.OfType<WF.Button>().FirstOrDefault() : null;
+        AcceptButton = record;
         CancelButton = cancel;
 
         MouseDown += (_, e) =>
@@ -99,18 +124,18 @@ public sealed class FastDisplayPickerDialog : WF.Form
         UpdateWindowRegion();
     }
 
-    public SD.Rectangle? SelectedBounds { get; private set; }
+    public SD.Rectangle[]? SelectedDisplays { get; private set; }
 
-
-    public static SD.Rectangle? ChooseDisplay()
+    /// <summary>Bounds of the displays to record (any subset, or all), or null on cancel.</summary>
+    public static SD.Rectangle[]? ChooseDisplays()
     {
         var screens = WF.Screen.AllScreens;
         if (screens.Length == 1)
-            return screens[0].Bounds;
+            return [screens[0].Bounds];
 
         using var dialog = new FastDisplayPickerDialog();
         PerfLog.TrackFirstShown(dialog, "display picker");
-        return dialog.ShowDialog() == WF.DialogResult.OK ? dialog.SelectedBounds : null;
+        return dialog.ShowDialog() == WF.DialogResult.OK ? dialog.SelectedDisplays : null;
     }
 
     protected override void OnKeyDown(WF.KeyEventArgs e)

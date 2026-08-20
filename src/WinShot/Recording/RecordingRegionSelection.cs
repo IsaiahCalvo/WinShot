@@ -26,6 +26,17 @@ public readonly record struct RecordingRegionSelection(SD.Rectangle ScreenRect)
             RoundDownToEven(displayBounds.Height)));
     }
 
+    /// <summary>Union of the chosen displays' bounds (even-rounded for H.264).</summary>
+    public static RecordingRegionSelection FromDisplays(IReadOnlyList<SD.Rectangle> displays)
+    {
+        if (displays.Count == 0)
+            return default;
+        SD.Rectangle union = displays[0];
+        for (int i = 1; i < displays.Count; i++)
+            union = SD.Rectangle.Union(union, displays[i]);
+        return FromDisplay(union);
+    }
+
     public static RecordingRegionSelection FromScreenSelection(SD.Rectangle screenRegion)
     {
         return new RecordingRegionSelection(new SD.Rectangle(

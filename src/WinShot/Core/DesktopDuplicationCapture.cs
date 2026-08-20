@@ -175,12 +175,14 @@ internal static class DesktopDuplicationCapture
     public static bool IsTemporarilyUnavailable =>
         IsTemporarilyDisabled() || Volatile.Read(ref _lastAttemptFailed) != 0;
 
-    public static void ReleaseResources()
+    public static void ReleaseResources(int timeoutMs = 250)
     {
         // Best-effort: a stalled attempt can hold the gate for minutes inside a native
         // call — never block app shutdown on it; the abandoned worker cleans up via
         // Reset() in its own failure path whenever the native call returns.
-        if (!Monitor.TryEnter(Gate, 250))
+        // (Recording start passes a longer timeout: it must win the gate from a
+        // background probe or the recorder's own duplication fails.)
+        if (!Monitor.TryEnter(Gate, timeoutMs))
             return;
         try
         {
