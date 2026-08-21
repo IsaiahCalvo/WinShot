@@ -149,7 +149,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         selector.DisposeFrozen();
         selector._capturedRegion?.Dispose();
         selector._capturedRegion = null;
-        selector.Hide();
+        selector.Park();
 
         var displaced = _pooled;
         _pooled = selector;
@@ -162,12 +162,30 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     /// <summary>Creates the window handles (coordinator + panes) without showing anything,
     /// so the first hotkey press after app start skips window creation entirely.</summary>
+    /// <summary>
+    /// Makes the selector invisible without surrendering its DWM composition, so the next
+    /// open is an alpha flip rather than ~130 ms of ShowWindow per full-screen surface.
+    /// </summary>
+    internal void Park()
+    {
+        SelectorSurfaces.Park(this);
+        foreach (var pane in _panes)
+            SelectorSurfaces.Park(pane);
+
+        // Shown-but-parked, never hidden: Hide() would throw the composition away again.
+        if (!Visible) Show();
+        foreach (var pane in _panes)
+            if (!pane.Visible) pane.Show();
+    }
+
     internal void Prewarm()
     {
         CreatePanes();
         _ = Handle;
         foreach (var pane in _panes)
             _ = pane.Handle;
+        // Pay the ShowWindow cost once, at startup, so even the first hotkey is instant.
+        Park();
     }
 
     public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area,
@@ -206,20 +224,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
         var sw = System.Diagnostics.Stopwatch.StartNew();
         CreatePanes();
         // Warm (pooled) surfaces may still be opaque from a previous frozen swap.
-        if (IsHandleCreated)
-            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, SelectorChrome.LiveAlpha);
+        SelectorSurfaces.Unpark(this, SelectorChrome.LiveAlpha);
         foreach (var pane in _panes)
-        {
-            if (pane.IsHandleCreated)
-                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, SelectorChrome.LiveAlpha);
-        }
+            SelectorSurfaces.Unpark(pane, SelectorChrome.LiveAlpha);
         long panesMs = sw.ElapsedMilliseconds;
 
         Show();
         StartWindowLoad();
         long showMs = sw.ElapsedMilliseconds - panesMs;
+        var paneTimings = new List<string>(_panes.Count);
         foreach (var pane in _panes)
+        {
+            long before = sw.ElapsedMilliseconds;
+            bool warm = pane.IsHandleCreated;
             pane.Show();
+            paneTimings.Add($"{pane.MonitorBounds.Width}x{pane.MonitorBounds.Height}" +
+                $"{(warm ? "" : "(cold)")}={sw.ElapsedMilliseconds - before}");
+        }
         long paneShowMs = sw.ElapsedMilliseconds - panesMs - showMs;
 
         Activate();
@@ -230,6 +251,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             Log.Info(
                 "Perf selector open breakdown: " +
                 $"panes={panesMs} show={showMs} paneShow={paneShowMs} " +
+                $"[{string.Join(" ", paneTimings)}] " +
                 $"activate={sw.ElapsedMilliseconds - panesMs - showMs - paneShowMs} total={sw.ElapsedMilliseconds} ms");
         }
         _lastCtrlDown = false;
