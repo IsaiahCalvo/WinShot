@@ -103,6 +103,27 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         return new FastAllInOneSelectorDialog(windowsProvider, settings);
     }
 
+    /// <summary>
+    /// Invisible and click-through, but still composited — so the next open is an alpha flip
+    /// instead of ~130 ms of ShowWindow per full-screen surface. See <see cref="SelectorSurfaces"/>.
+    /// </summary>
+    internal void Park()
+    {
+        SelectorSurfaces.Park(this);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed)
+                SelectorSurfaces.Park(pane);
+        }
+
+        if (!Visible) Show();
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed && !pane.Visible)
+                pane.Show();
+        }
+    }
+
     public static void Return(FastAllInOneSelectorDialog selector)
     {
         if (selector.IsDisposed)
@@ -111,7 +132,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         selector.DisposeFrozen();
         selector._capturedRegion?.Dispose();
         selector._capturedRegion = null;
-        selector.Hide();
+        selector.Park();
         if (!selector._toolbar.IsDisposed)
             selector._toolbar.Hide();
 
@@ -139,13 +160,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         DisposeFrozen();
         CreatePanes();
         // Warm (pooled) surfaces may still be opaque from a previous frozen swap.
-        if (IsHandleCreated)
-            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, SelectorChrome.LiveAlpha);
+        SelectorSurfaces.Unpark(this, SelectorChrome.LiveAlpha);
         foreach (var pane in _panes)
-        {
-            if (pane.IsHandleCreated)
-                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, SelectorChrome.LiveAlpha);
-        }
+            SelectorSurfaces.Unpark(pane, SelectorChrome.LiveAlpha);
 
         Show();
         foreach (var pane in _panes)
@@ -760,14 +777,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         DialogResult = result;
         _followTimer.Stop();
         Capture = false;
-        // Panes are hidden, not disposed: their warm handles make the next open instant.
-        foreach (var pane in _panes)
-        {
-            if (!pane.IsDisposed)
-                pane.Hide();
-        }
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
-        Hide();
+        Park();
         if (!_toolbar.IsDisposed)
             _toolbar.Hide();
         _completion?.TrySetResult(result);
