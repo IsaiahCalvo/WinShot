@@ -504,13 +504,23 @@ public partial class EditorWindow : Window
         try
         {
             var flat = Flatten();
-            using var thumbnail = DragImage.CreateThumbnail(flat, VisualTreeHelper.GetDpi(this).DpiScaleX);
+            var preview = new DragPreview(flat);
             string path = await WriteDragFileAsync(flat);
-            if (!IsVisible) return;
+            if (!IsVisible) { preview.Dispose(); return; }
 
-            var data = new DataObject(DataFormats.FileDrop, new[] { path });
-            DragImage.Attach(data, thumbnail);
-            DragDrop.DoDragDrop(BtnDragOut, data, DragDropEffects.Copy);
+            // The preview window is ours to move — OLE pumps GiveFeedback on every mouse move.
+            void OnFeedback(object s, GiveFeedbackEventArgs args) => preview.MoveToCursor();
+            BtnDragOut.GiveFeedback += OnFeedback;
+            try
+            {
+                var data = new DataObject(DataFormats.FileDrop, new[] { path });
+                DragDrop.DoDragDrop(BtnDragOut, data, DragDropEffects.Copy);
+            }
+            finally
+            {
+                BtnDragOut.GiveFeedback -= OnFeedback;
+                preview.Dispose();
+            }
         }
         catch (Exception ex)
         {
