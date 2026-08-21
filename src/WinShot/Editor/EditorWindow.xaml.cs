@@ -187,6 +187,8 @@ public partial class EditorWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            _dragPreview?.Dispose();
+            _dragPreview = null;
             Task sourceOperationsDrained = _sourceLifetime.BeginClose();
             SD.Bitmap[] owned = _owned.ToArray();
             _owned.Clear();

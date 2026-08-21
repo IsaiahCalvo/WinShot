@@ -475,19 +475,42 @@ public partial class EditorWindow : Window
         return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
     }
 
-    // ------------------------------------------------- drag-out ("Drag Me")
+    // ------------------------------------------------- drag-out ("Drag & Drop")
 
     private Point _dragOutStart;
     private bool _dragOutArmed;
+    private BitmapSource? _dragThumbnail;
+    private Task<string>? _dragFileTask;
+    private DragPreview? _dragPreview;
 
+    /// <summary>
+    /// Flattening and PNG-encoding on mouse-down, not on the drag threshold, is what keeps the
+    /// drag from stalling: by the time the pointer has moved far enough to start the drag, the
+    /// file is already written and DoDragDrop can begin on the very next message.
+    /// </summary>
     private void OnDragOutMouseDown(object sender, MouseButtonEventArgs e)
     {
         _dragOutArmed = true;
         _dragOutStart = e.GetPosition(this);
+        if (_sourceOperationActive) return;
+
+        try
+        {
+            var flat = Flatten();
+            _dragThumbnail = DragPreview.CreateThumbnail(flat, VisualTreeHelper.GetDpi(this).DpiScaleX);
+            _dragFileTask = WriteDragFileAsync(flat);
+            _dragPreview ??= new DragPreview();
+        }
+        catch (Exception ex)
+        {
+            _dragThumbnail = null;
+            _dragFileTask = null;
+            Log.Error("Editor drag-out prewarm failed", ex);
+        }
     }
 
     /// <summary>
-    /// Press-and-drag the bottom-bar pill to drop the flattened image into any app as a real
+    /// Press-and-drag the bottom-bar pill to drop the flattened image into another app as a real
     /// PNG file (FileDrop), so mail clients attach it instead of pasting it inline.
     /// </summary>
     private async void OnDragOutMouseMove(object sender, MouseEventArgs e)
@@ -500,16 +523,20 @@ public partial class EditorWindow : Window
             return;
 
         _dragOutArmed = false;
-        if (_sourceOperationActive) return;
+        if (_dragFileTask is not Task<string> fileTask || _dragThumbnail is not BitmapSource thumbnail)
+            return;
+
+        var preview = _dragPreview;
         try
         {
-            var flat = Flatten();
-            var preview = new DragPreview(flat);
-            string path = await WriteDragFileAsync(flat);
-            if (!IsVisible) { preview.Dispose(); return; }
+            preview?.Show(thumbnail, VisualTreeHelper.GetDpi(this).DpiScaleX);
 
-            // The preview window is ours to move — OLE pumps GiveFeedback on every mouse move.
-            void OnFeedback(object s, GiveFeedbackEventArgs args) => preview.MoveToCursor();
+            // Normally already finished — the encode started back on mouse-down.
+            string path = await fileTask;
+            if (!IsVisible) return;
+
+            // OLE pumps GiveFeedback on every mouse move, so the preview tracks the cursor 1:1.
+            void OnFeedback(object s, GiveFeedbackEventArgs args) => preview?.MoveToCursor();
             BtnDragOut.GiveFeedback += OnFeedback;
             try
             {
@@ -519,12 +546,17 @@ public partial class EditorWindow : Window
             finally
             {
                 BtnDragOut.GiveFeedback -= OnFeedback;
-                preview.Dispose();
             }
         }
         catch (Exception ex)
         {
             Log.Error("Editor drag-out failed", ex);
+        }
+        finally
+        {
+            preview?.Hide();
+            _dragThumbnail = null;
+            _dragFileTask = null;
         }
     }
 
