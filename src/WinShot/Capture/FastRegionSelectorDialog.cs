@@ -282,13 +282,46 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_frozen is null)
             return;
 
+        // Live mode paints solid black behind a 45% layered alpha; frozen mode paints the
+        // dimmed snapshot at full alpha. The two look identical on screen (0.553*desktop vs
+        // 0.549*desktop) — but only once the frozen paint has actually landed. Flipping alpha
+        // first left every surface fully opaque over its live-mode BLACK for as long as the
+        // first frozen paint took, which is a full-monitor bitmap allocation plus two blits
+        // per surface: a black flash across every monitor, worst on the first hotkey.
+        //
+        // So the dimmed slices are built first. There is deliberately no await between here
+        // and the repaint, so WinForms cannot pump a paint in the half-swapped state.
+        var swap = System.Diagnostics.Stopwatch.StartNew();
+        GetDimmedBackground(_monitorBounds);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed)
+                GetDimmedBackground(pane.MonitorBounds);
+        }
+        long prewarmMs = swap.ElapsedMilliseconds;
+
+        // Per surface: paint the frozen frame FIRST, then go opaque. There is no ordering
+        // that is completely invisible — while the live desktop still shows through, the
+        // composite cannot equal the frozen one — but the two artifacts are not equal:
+        //   flip first  -> the surface is opaque over live mode's BLACK until the paint
+        //                  lands: a full-screen black flash, and it reads as a fault.
+        //   paint first -> for the length of that one paint the surface shows the frozen
+        //                  image THROUGH the 45% alpha, i.e. briefly brighter, which reads
+        //                  as the dim settling in.
+        // Doing it per surface also means no monitor waits on another monitor's paint.
+        long alphaStart = swap.ElapsedMilliseconds;
+        Invalidate();
+        Update();
         WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, 255);
         foreach (var pane in _panes)
         {
-            if (!pane.IsDisposed && pane.IsHandleCreated)
-                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
+            if (pane.IsDisposed || !pane.IsHandleCreated) continue;
+            pane.Invalidate();
+            pane.Update();
+            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
         }
-        InvalidateAllSurfaces();
+        Log.Info($"Perf freeze swap: prewarm={prewarmMs} alpha={alphaStart - prewarmMs} " +
+            $"paint={swap.ElapsedMilliseconds - alphaStart} ms");
     }
 
     private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
@@ -519,7 +552,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     protected override void OnPaint(WF.PaintEventArgs e)
     {
-        e.Graphics.Clear(SD.Color.Black);
+        // No Clear here: PaintSurface's first act covers the whole surface, either with the
+        // frozen slice or with a full-surface dim, and a redundant full-monitor fill is
+        // expensive enough at 4K-ish sizes to show up in the freeze swap.
+        if (!HasFullSurfaceBackground)
+            e.Graphics.Clear(SD.Color.Black);
         PaintSurface(e.Graphics, _monitorBounds);
         base.OnPaint(e);
     }
@@ -760,6 +797,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     // ----------------------------------------------------------- painting (per surface)
 
+    /// <summary>
+    /// True when PaintSurface's own background covers every pixel, so the surface does not
+    /// need clearing first. Without a frozen snapshot it paints a SEMI-transparent dim that
+    /// relies on the black underneath, so the Clear is still required there.
+    /// </summary>
+    internal bool HasFullSurfaceBackground => _frozen is not null;
+
     internal void PaintSurface(SD.Graphics g, SD.Rectangle monitorBounds)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
@@ -776,7 +820,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (dimmed is not null)
         {
             var dest = new SD.Rectangle(0, 0, clientSize.Width, clientSize.Height);
+            // SourceCopy: the background covers the whole surface, so there is nothing to
+            // blend with and a straight copy is a lot cheaper at full-monitor size.
+            var previousCompositing = g.CompositingMode;
+            g.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
             g.DrawImage(dimmed, dest, 0, 0, dimmed.Width, dimmed.Height, SD.GraphicsUnit.Pixel);
+            g.CompositingMode = previousCompositing;
         }
         else
         {
@@ -872,7 +921,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_dimmedCache.TryGetValue(monitorBounds, out var cached))
             return cached;
 
-        var bmp = new SD.Bitmap(monitorBounds.Width, monitorBounds.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
+        // Format32bppRgb, not PArgb: the result is opaque, and an alpha channel would force
+        // GDI+ to blend this full-monitor bitmap per pixel on every single paint.
+        var bmp = new SD.Bitmap(monitorBounds.Width, monitorBounds.Height, SD.Imaging.PixelFormat.Format32bppRgb);
         using (var g = SD.Graphics.FromImage(bmp))
         {
             g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
@@ -1182,14 +1233,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DialogResult = result;
         StopFollowMotion();
         Capture = false;
-        // Panes are hidden, not disposed: their warm handles make the next open instant.
-        foreach (var pane in _panes)
-        {
-            if (!pane.IsDisposed)
-                pane.Hide();
-        }
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
-        Hide();
+        Park();
         _completion?.TrySetResult(result);
         _completion = null;
     }
@@ -1463,7 +1508,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         protected override void OnPaint(WF.PaintEventArgs e)
         {
-            e.Graphics.Clear(SD.Color.Black);
+            // Skip the clear once a frozen slice covers the surface — a redundant
+            // full-monitor fill is expensive enough to show up in the freeze swap.
+            if (!_owner.HasFullSurfaceBackground)
+                e.Graphics.Clear(SD.Color.Black);
             _owner.PaintSurface(e.Graphics, _bounds);
             base.OnPaint(e);
         }

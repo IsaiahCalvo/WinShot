@@ -204,13 +204,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (_frozen is null)
             return;
 
+        // Paint each surface before going opaque — see
+        // FastRegionSelectorDialog.FreezeWhileShownAsync for why this ordering matters.
+        Invalidate();
+        Update();
         WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, 255);
         foreach (var pane in _panes)
         {
-            if (!pane.IsDisposed && pane.IsHandleCreated)
-                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
+            if (pane.IsDisposed || !pane.IsHandleCreated) continue;
+            pane.Invalidate();
+            pane.Update();
+            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
         }
-        InvalidateAllSurfaces();
     }
 
     private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)

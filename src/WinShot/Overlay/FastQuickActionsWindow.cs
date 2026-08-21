@@ -163,6 +163,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     protected override bool ShowWithoutActivation => true;
 
+
     protected override void OnFormClosing(WF.FormClosingEventArgs e)
     {
         bool systemClose = e.CloseReason is
@@ -506,7 +507,20 @@ public sealed class FastQuickActionsWindow : WF.Form
         return path;
     }
 
+    /// <summary>
+    /// Rasterized button glyphs, keyed by asset + size + colour. Building one means loading an
+    /// embedded resource, parsing XML, building WPF geometry and rendering it — and the overlay
+    /// does that for every button on every capture (twice, when the monitor DPI differs from the
+    /// one the layout was first built for). Cached for the process: a handful of small bitmaps.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, int, int), SD.Bitmap?>
+        IconCache = new();
+
     private static SD.Bitmap? CreateSvgIcon(string assetName, int pixelSize, SD.Color color)
+        => IconCache.GetOrAdd((assetName, pixelSize, color.ToArgb()),
+            key => RenderSvgIcon(key.Item1, key.Item2, SD.Color.FromArgb(key.Item3)));
+
+    private static SD.Bitmap? RenderSvgIcon(string assetName, int pixelSize, SD.Color color)
     {
         try
         {
@@ -1493,7 +1507,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         public void Dispose()
         {
             LabelFont?.Dispose();
-            Icon?.Dispose();
+            // Icon is NOT disposed: glyphs are shared out of the process-wide IconCache.
         }
     }
 
