@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using SD = System.Drawing;
 
 namespace WinShot.Capture;
@@ -17,7 +17,7 @@ namespace WinShot.Capture;
 /// </summary>
 internal sealed class RectangleTween
 {
-    private static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(WinShot.Core.Motion.GlideDurationMs);
 
     private readonly Stopwatch _clock = new();
     private SD.RectangleF _from;

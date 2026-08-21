@@ -37,8 +37,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private QuickAccessTooltipWindow? _tooltipWindow;
     private WF.Timer? _exitMotionTimer;
     private WF.Timer? _stackMotionTimer;
-    private bool _exitHighResolutionTimer;
-    private bool _stackHighResolutionTimer;
+    private IDisposable? _exitMotionClock;
+    private IDisposable? _stackMotionClock;
     private WF.Timer? _autoCloseTimer;
     private long _autoCloseDueTick;
     private int _autoCloseRemainingMs;
@@ -677,7 +677,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         long started = Stopwatch.GetTimestamp();
 
         _exitMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
-        _exitHighResolutionTimer = TimeBeginPeriod(1) == 0;
+        _exitMotionClock = WinShot.Core.Motion.Acquire();
         _exitMotionTimer.Tick += (_, _) =>
         {
             if (IsDisposed)
@@ -739,7 +739,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         SD.Point start = Location;
         _stackMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
-        _stackHighResolutionTimer = TimeBeginPeriod(1) == 0;
+        _stackMotionClock = WinShot.Core.Motion.Acquire();
         _stackMotionTimer.Tick += (_, _) =>
         {
             if (_exitMotionStarted || _closed || IsDisposed)
@@ -770,11 +770,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         _exitMotionTimer?.Stop();
         _exitMotionTimer?.Dispose();
         _exitMotionTimer = null;
-        if (_exitHighResolutionTimer)
-        {
-            TimeEndPeriod(1);
-            _exitHighResolutionTimer = false;
-        }
+        _exitMotionClock?.Dispose();
+        _exitMotionClock = null;
     }
 
     private void StopStackMotionTimer()
@@ -782,11 +779,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         _stackMotionTimer?.Stop();
         _stackMotionTimer?.Dispose();
         _stackMotionTimer = null;
-        if (_stackHighResolutionTimer)
-        {
-            TimeEndPeriod(1);
-            _stackHighResolutionTimer = false;
-        }
+        _stackMotionClock?.Dispose();
+        _stackMotionClock = null;
     }
 
     private void MoveWithoutActivation(SD.Point point)

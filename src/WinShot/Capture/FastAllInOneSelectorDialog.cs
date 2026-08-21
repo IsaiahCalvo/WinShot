@@ -64,7 +64,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
 
-        _followTimer = new WF.Timer { Interval = 15 };
+        _followTimer = new WF.Timer { Interval = WinShot.Core.Motion.FrameIntervalMs };
         _followTimer.Tick += OnFollowTick;
 
         // Post-show init runs from ShowAsync, not the Shown event: Shown fires only on a
@@ -186,7 +186,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SelectorForeground.Restore(this);
         _lastCtrlDown = false;
         if (_options.NeedsCursorFollow)
-            _followTimer.Start();
+            StartFollowMotion();
         if (_options.FreezeScreen)
             _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
@@ -775,7 +775,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private void Complete(WF.DialogResult result)
     {
         DialogResult = result;
-        _followTimer.Stop();
+        StopFollowMotion();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -836,6 +836,27 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// A non-primary monitor's overlay surface. Owns no state — it forwards input to and
     /// paints from the coordinator, so the selection is one logical thing spanning monitors.
     /// </summary>
+
+    private IDisposable? _followMotionClock;
+
+    /// <summary>
+    /// The follow tick drives both the cursor-follow and the hover-highlight glide, so it runs
+    /// under the high-resolution clock — at Windows' default ~15.6 ms tick an 8 ms timer
+    /// silently halves its frame rate and coalesces under load.
+    /// </summary>
+    private void StartFollowMotion()
+    {
+        _followMotionClock ??= WinShot.Core.Motion.Acquire();
+        _followTimer.Start();
+    }
+
+    private void StopFollowMotion()
+    {
+        _followTimer.Stop();
+        _followMotionClock?.Dispose();
+        _followMotionClock = null;
+    }
+
     private sealed class SelectorPane : WF.Form
     {
         private readonly FastAllInOneSelectorDialog _owner;

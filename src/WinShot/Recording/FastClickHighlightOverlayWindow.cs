@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -17,7 +17,8 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
     private readonly HookProc _hookProc;
     private readonly bool _installHook;
     private readonly List<Ring> _rings = new(MaxConcurrentRings);
-    private readonly WF.Timer _timer = new() { Interval = 16 };
+    private readonly WF.Timer _timer = new() { Interval = WinShot.Core.Motion.FrameIntervalMs };
+    private IDisposable? _motionClock;
     private IntPtr _hook;
     private volatile bool _paused;
 
@@ -79,7 +80,7 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
     protected override void OnClosed(EventArgs e)
     {
         RemoveHook();
-        _timer.Stop();
+        StopMotion();
         _timer.Dispose();
         base.OnClosed(e);
     }
@@ -116,7 +117,7 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
         long now = Environment.TickCount64;
         _rings.RemoveAll(r => now - r.StartMs >= RingLifetimeMs);
         if (_rings.Count == 0)
-            _timer.Stop();
+            StopMotion();
         Invalidate();
     }
 
@@ -129,7 +130,7 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
 
         _rings.Add(new Ring(screenX - _regionPx.X, screenY - _regionPx.Y, Environment.TickCount64));
         if (!_timer.Enabled)
-            _timer.Start();
+            StartMotion();
         Invalidate();
     }
 
@@ -222,4 +223,22 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    /// <summary>
+    /// Animation ticks only land on time while the high-resolution clock is held, so it is
+    /// acquired with the timer and released with it — never for longer.
+    /// </summary>
+    private void StartMotion()
+    {
+        _motionClock ??= WinShot.Core.Motion.Acquire();
+        _timer.Start();
+    }
+
+    private void StopMotion()
+    {
+        _timer.Stop();
+        _motionClock?.Dispose();
+        _motionClock = null;
+    }
+
 }

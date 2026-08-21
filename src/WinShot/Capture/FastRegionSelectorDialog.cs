@@ -102,7 +102,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
 
-        _followTimer = new WF.Timer { Interval = 15 };
+        _followTimer = new WF.Timer { Interval = WinShot.Core.Motion.FrameIntervalMs };
         _followTimer.Tick += OnFollowTick;
 
         // Window-list load is kicked from ShowAsync, not the Shown event: Shown fires only
@@ -258,7 +258,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
         if (_options.NeedsCursorFollow || _paneHover)
-            _followTimer.Start();
+            StartFollowMotion();
         if (_options.FreezeScreen)
             _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
@@ -1180,7 +1180,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void Complete(WF.DialogResult result)
     {
         DialogResult = result;
-        _followTimer.Stop();
+        StopFollowMotion();
         Capture = false;
         // Panes are hidden, not disposed: their warm handles make the next open instant.
         foreach (var pane in _panes)
@@ -1383,6 +1383,27 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// A non-primary monitor's overlay surface. Owns no state — it forwards input to and
     /// paints from the coordinator, so the selection is one logical thing spanning monitors.
     /// </summary>
+
+    private IDisposable? _followMotionClock;
+
+    /// <summary>
+    /// The follow tick drives both the cursor-follow and the hover-highlight glide, so it runs
+    /// under the high-resolution clock — at Windows' default ~15.6 ms tick an 8 ms timer
+    /// silently halves its frame rate and coalesces under load.
+    /// </summary>
+    private void StartFollowMotion()
+    {
+        _followMotionClock ??= WinShot.Core.Motion.Acquire();
+        _followTimer.Start();
+    }
+
+    private void StopFollowMotion()
+    {
+        _followTimer.Stop();
+        _followMotionClock?.Dispose();
+        _followMotionClock = null;
+    }
+
     private sealed class SelectorPane : WF.Form
     {
         private readonly FastRegionSelectorDialog _owner;

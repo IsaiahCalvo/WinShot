@@ -1,14 +1,12 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 
 namespace WinShot.Overlay;
 
 internal static class QuickAccessOverlayMotion
 {
-    // 8 ms targets high-refresh displays; the multimedia timer request is held
-    // only while a short motion is actually running.
-    public const int FrameIntervalMs = 8;
-    public const int ExitDurationMs = 360;
-    public const int RestackDurationMs = 280;
+    public const int FrameIntervalMs = WinShot.Core.Motion.FrameIntervalMs;
+    public const int ExitDurationMs = WinShot.Core.Motion.ExitDurationMs;
+    public const int RestackDurationMs = WinShot.Core.Motion.RestackDurationMs;
 
     public static SD.Point ExitTarget(SD.Rectangle workingArea, SD.Rectangle windowBounds, string? position)
     {
@@ -29,17 +27,9 @@ internal static class QuickAccessOverlayMotion
         return new SD.Point(x, windowBounds.Top);
     }
 
-    public static double EaseInOutSine(double progress)
-    {
-        double value = Math.Clamp(progress, 0d, 1d);
-        return -(Math.Cos(Math.PI * value) - 1d) / 2d;
-    }
+    public static double EaseInOutSine(double progress) => WinShot.Core.Motion.EaseInOutSine(progress);
 
-    public static double EaseOutCubic(double progress)
-    {
-        double value = 1d - Math.Clamp(progress, 0d, 1d);
-        return 1d - value * value * value;
-    }
+    public static double EaseOutCubic(double progress) => WinShot.Core.Motion.EaseOutCubic(progress);
 
     public static SD.Point Interpolate(SD.Point start, SD.Point end, double progress)
     {

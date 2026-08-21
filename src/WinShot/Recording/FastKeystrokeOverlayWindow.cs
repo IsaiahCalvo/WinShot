@@ -20,7 +20,8 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
     private readonly SD.Rectangle _regionPx;
     private readonly HookProc _hookProc;
     private readonly bool _installHook;
-    private readonly WF.Timer _timer = new() { Interval = 33 };
+    private readonly WF.Timer _timer = new() { Interval = WinShot.Core.Motion.FrameIntervalMs };
+    private IDisposable? _motionClock;
     private readonly SD.Font _font = new("Segoe UI Semibold", 15f, SD.FontStyle.Bold);
     private IntPtr _hook;
     private volatile bool _paused;
@@ -74,7 +75,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
         _paused = paused;
         if (paused)
         {
-            _timer.Stop();
+            StopMotion();
             _opacity = 0;
             _runAppendable = false;
             Invalidate();
@@ -93,7 +94,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
     protected override void OnClosed(EventArgs e)
     {
         RemoveHook();
-        _timer.Stop();
+        StopMotion();
         _timer.Dispose();
         _font.Dispose();
         base.OnClosed(e);
@@ -144,7 +145,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
             _runAppendable = false;
             _opacity = Math.Max(0, 1 - ((elapsed - VisibleMs) / (double)FadeMs));
             if (_opacity <= 0)
-                _timer.Stop();
+                StopMotion();
         }
 
         Invalidate();
@@ -195,7 +196,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
         _shownAtMs = Environment.TickCount64;
         _opacity = 1;
         if (!_timer.Enabled)
-            _timer.Start();
+            StartMotion();
         Invalidate();
     }
 
@@ -398,4 +399,22 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    /// <summary>
+    /// Animation ticks only land on time while the high-resolution clock is held, so it is
+    /// acquired with the timer and released with it — never for longer.
+    /// </summary>
+    private void StartMotion()
+    {
+        _motionClock ??= WinShot.Core.Motion.Acquire();
+        _timer.Start();
+    }
+
+    private void StopMotion()
+    {
+        _timer.Stop();
+        _motionClock?.Dispose();
+        _motionClock = null;
+    }
+
 }
