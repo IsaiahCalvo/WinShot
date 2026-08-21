@@ -648,6 +648,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         try
         {
             SD.Point p = CursorScreen();
+            // Before anything else: a window that raised itself after the overlay opened
+            // (a crash dialog, an always-on-top utility) would otherwise sit on top and
+            // swallow every click inside its rect while the highlight below kept tracking.
+            SelectorForeground.KeepOnTop(SurfaceHandles(), p);
             bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
             if (p == _currentScreen && ctrl == _lastCtrlDown)
                 return;
@@ -1109,6 +1113,21 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     private static int Distance(SD.Point a, SD.Point b) =>
         Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+
+    /// <summary>Every window handle the selector owns, back to front - the set
+    /// <see cref="SelectorForeground.KeepOnTop"/> re-raises together.</summary>
+    private List<IntPtr> SurfaceHandles()
+    {
+        var handles = new List<IntPtr>(_panes.Count + 1);
+        if (IsHandleCreated)
+            handles.Add(Handle);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed && pane.IsHandleCreated)
+                handles.Add(pane.Handle);
+        }
+        return handles;
+    }
 
     private bool IsPaneHandle(IntPtr handle)
     {

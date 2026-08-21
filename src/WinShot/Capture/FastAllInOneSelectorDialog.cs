@@ -460,6 +460,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         try
         {
             SD.Point cursor = CursorScreen();
+            // See FastRegionSelectorDialog.OnFollowTick: keeps a self-raising window (crash
+            // dialog, always-on-top utility) from covering the overlay and eating clicks.
+            SelectorForeground.KeepOnTop(SurfaceHandles(), cursor);
             bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
             if (cursor == _currentScreen && controlPressed == _lastCtrlDown)
                 return;
@@ -695,6 +698,23 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         }
 
         return _windows.FirstOrDefault(w => w.Bounds.Contains(screenPoint));
+    }
+
+    /// <summary>Every window handle the selector owns, back to front - the toolbar last so
+    /// it stays above the panes when <see cref="SelectorForeground.KeepOnTop"/> re-raises them.</summary>
+    private List<IntPtr> SurfaceHandles()
+    {
+        var handles = new List<IntPtr>(_panes.Count + 2);
+        if (IsHandleCreated)
+            handles.Add(Handle);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed && pane.IsHandleCreated)
+                handles.Add(pane.Handle);
+        }
+        if (!_toolbar.IsDisposed && _toolbar.IsHandleCreated)
+            handles.Add(_toolbar.Handle);
+        return handles;
     }
 
     private bool IsPaneHandle(IntPtr handle)

@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using WinShot.Capture;
 using WinShot.Core;
 using Xunit;
@@ -109,5 +109,25 @@ public class SelectorOptionsTests
         bool expected)
     {
         Assert.Equal(expected, SelectorForeground.ShouldAttachInput(currentThread, foregroundThread));
+    }
+
+    [Fact]
+    public void IsCovered_IsFalseForTheSelectorsOwnSurfaces()
+    {
+        var surfaces = new List<IntPtr> { new(10), new(20), new(30) };
+
+        Assert.False(SelectorForeground.IsCovered(new IntPtr(20), surfaces));
+        Assert.False(SelectorForeground.IsCovered(IntPtr.Zero, surfaces));
+    }
+
+    [Fact]
+    public void IsCovered_IsTrueWhenAForeignWindowSitsOverTheOverlay()
+    {
+        var surfaces = new List<IntPtr> { new(10), new(20) };
+
+        // A crash dialog / always-on-top utility that raised itself after the overlay opened:
+        // clicks inside its rect never reach the selector until it is pushed back down.
+        Assert.True(SelectorForeground.IsCovered(new IntPtr(99), surfaces));
+        Assert.True(SelectorForeground.IsCovered(new IntPtr(99), new List<IntPtr>()));
     }
 }
