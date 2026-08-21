@@ -363,12 +363,12 @@
                 <Button x:Name="BtnDragOut" Grid.Column="1" Style="{StaticResource PillButtonSecondary}"
                         HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="SizeAll"
                         PreviewMouseLeftButtonDown="OnDragOutMouseDown" PreviewMouseMove="OnDragOutMouseMove"
-                        ToolTip="Drag this image into another app" AutomationProperties.Name="Drag me"
+                        ToolTip="Drag this image into another app" AutomationProperties.Name="Drag and drop"
                         AutomationProperties.HelpText="Press and drag to drop the edited image as a file into another application.">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="12"
                                    VerticalAlignment="Center" Opacity="0.7" Margin="0,0,8,0"/>
-                        <TextBlock Text="Drag Me" VerticalAlignment="Center"/>
+                        <TextBlock Text="Drag &amp; Drop" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
 

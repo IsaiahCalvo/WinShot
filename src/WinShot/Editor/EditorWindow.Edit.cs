@@ -503,9 +503,13 @@ public partial class EditorWindow : Window
         if (_sourceOperationActive) return;
         try
         {
-            string path = await WriteDragFileAsync();
+            var flat = Flatten();
+            using var thumbnail = DragImage.CreateThumbnail(flat, VisualTreeHelper.GetDpi(this).DpiScaleX);
+            string path = await WriteDragFileAsync(flat);
             if (!IsVisible) return;
+
             var data = new DataObject(DataFormats.FileDrop, new[] { path });
+            DragImage.Attach(data, thumbnail);
             DragDrop.DoDragDrop(BtnDragOut, data, DragDropEffects.Copy);
         }
         catch (Exception ex)
@@ -514,10 +518,9 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Flattens on the UI thread, then writes the PNG off-thread into the temp folder.</summary>
-    private async Task<string> WriteDragFileAsync()
+    /// <summary>Writes <paramref name="flat"/> off-thread into the temp folder, then disposes it.</summary>
+    private async Task<string> WriteDragFileAsync(SD.Bitmap flat)
     {
-        var flat = Flatten();
         string dir = TempFileJanitor.WinShotTempDirectory;
         string path = FileNamer.NextUniquePath(_settings, dir, "png");
         await Task.Run(() =>
