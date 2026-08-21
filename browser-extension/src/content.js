@@ -669,7 +669,7 @@
   function pickerChrome(text) {
     const outline = document.createElement("div");
     const tip = document.createElement("div");
-    outline.style.cssText = `position:fixed;display:none;pointer-events:none;z-index:${PICKER_Z};border:2px solid #1687ff;background:rgba(22,135,255,.12);box-sizing:border-box`;
+    outline.style.cssText = `position:fixed;display:none;pointer-events:none;z-index:${PICKER_Z};border:2px solid #0a84ff;background:rgba(10,132,255,.12);box-sizing:border-box`;
     tip.style.cssText = `position:fixed;left:12px;top:12px;pointer-events:none;z-index:${PICKER_Z};padding:7px 10px;border-radius:6px;background:#111;color:white;font:12px/1.35 system-ui,sans-serif;box-shadow:0 2px 10px #0006`;
     tip.textContent = text;
     outline.dataset.winshotPicker = "outline";
@@ -711,8 +711,8 @@
       outline.style.top = `${rect.top}px`;
       outline.style.width = `${rect.width}px`;
       outline.style.height = `${rect.height}px`;
-      outline.style.borderColor = scrollable ? "#f4bd00" : "#1687ff";
-      outline.style.background = scrollable ? "rgba(244,189,0,.15)" : "rgba(22,135,255,.12)";
+      outline.style.borderColor = scrollable ? "#f4bd00" : "#0a84ff";
+      outline.style.background = scrollable ? "rgba(244,189,0,.15)" : "rgba(10,132,255,.12)";
     };
     const click = (event) => {
       event.preventDefault();

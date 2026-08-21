@@ -134,6 +134,9 @@ public partial class App : Application
         // required for Alt-hover element detection to see their full element tree.
         WinShot.Capture.MsaaElementDetector.HoldScreenReaderMutex();
         Log.Info("WinShot started");
+        // Ask once for capture without Windows' yellow border; the answer is cached for
+        // the process and every capture session opts out on the strength of it.
+        BorderlessCaptureAccess.RequestOnce();
 
         if (_settings.Current.CheckForUpdatesOnStartup)
             _ = StartupUpdateCheckAsync();

@@ -3,7 +3,7 @@
 body { margin:0; min-height:100vh; display:grid; grid-template-rows:auto 1fr; }
 header { height:58px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 18px; border-bottom:1px solid #ffffff18; background:#12151b; position:sticky; top:0; z-index:2; }
 .brand { display:flex; align-items:center; gap:9px; font-size:15px; }
-.mark { width:24px; height:24px; border:3px solid #1d8cff; border-radius:50%; }
+.mark { width:24px; height:24px; border:3px solid #0a84ff; border-radius:50%; }
 .actions { display:flex; gap:7px; }
 button { border:1px solid #ffffff24; border-radius:7px; background:#20252e; color:inherit; padding:7px 11px; cursor:pointer; }
 button:hover,button:focus-visible { border-color:#208bff; outline:none; }

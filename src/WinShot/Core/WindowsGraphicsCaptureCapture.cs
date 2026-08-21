@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -584,25 +584,14 @@ internal static class WindowsGraphicsCaptureCapture
             try { session.IsCursorCaptureEnabled = false; }
             catch { /* optional polish; capture still works if Windows denies it */ }
 
-            // IsBorderRequired is Windows 11+ (build 22000) and isn't in the 19041 SDK
-            // projection this project targets, so it can't be called directly. Reflection
-            // sets it on newer OSes and no-ops on older ones. ponytail: reflection stays
-            // until the target platform is raised to 22000+.
-            TrySetSessionProperty(session, "IsBorderRequired", false);
-        }
-
-        private static void TrySetSessionProperty(GraphicsCaptureSession session, string propertyName, bool value)
-        {
-            try
-            {
-                var property = session.GetType().GetProperty(propertyName);
-                if (property?.CanWrite == true)
-                    property.SetValue(session, value);
-            }
-            catch
-            {
-                // Optional polish only; capture still works if Windows denies it.
-            }
+            // The yellow "this display is being captured" rectangle Windows paints around the
+            // monitor. It flashes on for the length of every capture, which reads as flicker.
+            // Windows 11 21H2+ lets a capture session opt out, but only once the process has
+            // been granted borderless access — see BorderlessCaptureAccess.
+            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+                return;
+            try { session.IsBorderRequired = false; }
+            catch { /* denied; the border stays but capture still works */ }
         }
 
         public void Dispose()
