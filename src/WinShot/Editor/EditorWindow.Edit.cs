@@ -475,6 +475,63 @@ public partial class EditorWindow : Window
         return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
     }
 
+    // ------------------------------------------------- drag-out ("Drag Me")
+
+    private Point _dragOutStart;
+    private bool _dragOutArmed;
+
+    private void OnDragOutMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragOutArmed = true;
+        _dragOutStart = e.GetPosition(this);
+    }
+
+    /// <summary>
+    /// Press-and-drag the bottom-bar pill to drop the flattened image into any app as a real
+    /// PNG file (FileDrop), so mail clients attach it instead of pasting it inline.
+    /// </summary>
+    private async void OnDragOutMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_dragOutArmed || e.LeftButton != MouseButtonState.Pressed) return;
+
+        Point now = e.GetPosition(this);
+        if (Math.Abs(now.X - _dragOutStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(now.Y - _dragOutStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        _dragOutArmed = false;
+        if (_sourceOperationActive) return;
+        try
+        {
+            string path = await WriteDragFileAsync();
+            if (!IsVisible) return;
+            var data = new DataObject(DataFormats.FileDrop, new[] { path });
+            DragDrop.DoDragDrop(BtnDragOut, data, DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor drag-out failed", ex);
+        }
+    }
+
+    /// <summary>Flattens on the UI thread, then writes the PNG off-thread into the temp folder.</summary>
+    private async Task<string> WriteDragFileAsync()
+    {
+        var flat = Flatten();
+        string dir = TempFileJanitor.WinShotTempDirectory;
+        string path = FileNamer.NextUniquePath(_settings, dir, "png");
+        await Task.Run(() =>
+        {
+            using (flat)
+            {
+                System.IO.Directory.CreateDirectory(dir);
+                TempFileJanitor.DeleteOldFiles(dir, DateTimeOffset.UtcNow, TimeSpan.FromDays(1), maxFilesToDelete: 50);
+                ImageSaver.Save(flat, path);
+            }
+        });
+        return path;
+    }
+
     private async void OnCopy(object sender, RoutedEventArgs e)
     {
         if (_sourceOperationActive) return;
