@@ -180,14 +180,15 @@ internal static class FastSelectorLoupeRenderer
         g.SmoothingMode = prevSmoothing;
     }
 
-    /// <summary>CleanShot shows a plain light coordinate readout near the loupe (no heavy
-    /// pill). WinShot adds a small hex swatch; both are drawn as light text with a soft
-    /// dark shadow for legibility over any background.</summary>
+    /// <summary>Coordinate + hex readout in a small dark pill — the same material as
+    /// <see cref="SelectorChrome.DrawLabel"/>'s size pill — so the loupe's payload stays
+    /// readable over light desktop content, where shadowed bare text washes out.</summary>
     private static void DrawLabel(SD.Graphics g, SD.Size clientSize, FastSelectorLoupe loupe, string hex, SD.Color pixel)
     {
         const int SwatchSize = 10;
         const int SwatchGap = 6;
         const int LineGap = 3;
+        const int Pad = 6;
 
         using var font = ThemePalette.UiFont(8.25f);
         SD.Size coordSize = WF.TextRenderer.MeasureText(loupe.Coordinates, font);
@@ -195,13 +196,24 @@ internal static class FastSelectorLoupeRenderer
 
         int lineHeight = Math.Max(coordSize.Height, Math.Max(hexSize.Height, SwatchSize));
         int blockW = Math.Max(coordSize.Width, SwatchSize + SwatchGap + hexSize.Width);
-        int blockH = lineHeight * 2 + LineGap;
+        int pillW = blockW + Pad * 2;
+        int pillH = lineHeight * 2 + LineGap + Pad * 2;
 
-        int left = Math.Clamp(loupe.Bounds.Left + 2, 0, Math.Max(0, clientSize.Width - blockW));
-        int top = Math.Clamp(loupe.Bounds.Bottom + 6, 0, Math.Max(0, clientSize.Height - blockH));
+        int pillLeft = Math.Clamp(loupe.Bounds.Left + 2, 0, Math.Max(0, clientSize.Width - pillW));
+        int pillTop = Math.Clamp(loupe.Bounds.Bottom + 6, 0, Math.Max(0, clientSize.Height - pillH));
 
-        // Line 1: coordinates (plain light text, soft shadow).
-        DrawShadowedText(g, loupe.Coordinates, font, new SD.Point(left, top));
+        var prevSmoothing = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = GdiPaths.RoundedRect(new SD.Rectangle(pillLeft, pillTop, pillW, pillH), 6))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.WindowBg)))
+            g.FillPath(bgBrush, path);
+        g.SmoothingMode = prevSmoothing;
+
+        int left = pillLeft + Pad;
+        int top = pillTop + Pad;
+
+        // Line 1: coordinates.
+        WF.TextRenderer.DrawText(g, loupe.Coordinates, font, new SD.Point(left, top), ThemePalette.TextPrimary);
 
         // Line 2: hex swatch + value.
         int line2Top = top + lineHeight + LineGap;
@@ -210,15 +222,6 @@ internal static class FastSelectorLoupeRenderer
             g.FillRectangle(swatchBrush, swatch);
         using (var swatchBorder = new SD.Pen(SD.Color.FromArgb(200, 0, 0, 0), 1))
             g.DrawRectangle(swatchBorder, swatch);
-        DrawShadowedText(g, hex, font, new SD.Point(left + SwatchSize + SwatchGap, line2Top));
-    }
-
-    /// <summary>Draws light text with a 1px dark shadow so it stays readable over any
-    /// desktop content without a background pill.</summary>
-    private static void DrawShadowedText(SD.Graphics g, string text, SD.Font font, SD.Point origin)
-    {
-        var shadow = SD.Color.FromArgb(180, 0, 0, 0);
-        WF.TextRenderer.DrawText(g, text, font, new SD.Point(origin.X + 1, origin.Y + 1), shadow);
-        WF.TextRenderer.DrawText(g, text, font, origin, ThemePalette.TextPrimary);
+        WF.TextRenderer.DrawText(g, hex, font, new SD.Point(left + SwatchSize + SwatchGap, line2Top), ThemePalette.TextPrimary);
     }
 }

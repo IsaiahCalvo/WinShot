@@ -66,6 +66,15 @@ internal static class SelectorChrome
         g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
     }
 
+    /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
+    /// that place the pill by an edge other than its top-left.</summary>
+    public static SD.Size MeasureLabel(string text)
+    {
+        using var font = ThemePalette.UiFont(9f, SD.FontStyle.Bold);
+        SD.Size size = WF.TextRenderer.MeasureText(text, font);
+        return new SD.Size(size.Width + 16, size.Height + 8);
+    }
+
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
     public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
     {

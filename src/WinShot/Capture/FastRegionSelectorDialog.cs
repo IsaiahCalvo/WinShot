@@ -23,7 +23,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     public enum SelectorMode { Area, Window }
 
     private const int DragThresholdPx = 4;
-    private const int HandleHalf = 4;       // handle square is 2*HandleHalf px
+    private const int HandleHalf = 5;       // handle circle is 2*HandleHalf px
     private const int HandleHitTol = 9;     // grab tolerance around a handle center
     private static readonly SD.Color Accent = ThemePalette.Accent;
 
@@ -66,6 +66,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private bool _dragging;                // drawing a fresh marquee
     private bool _dragMoved;
     private SD.Rectangle? _pendingScreen;  // the adjustable selection (Area mode), screen px
+    private int _hoverBarButton = -1;      // 0 = Cancel, 1 = Done while hovered, else -1
+    private int _pressedBarButton = -1;    // same encoding while the button is held down
     private int _resizeHandle = -1;        // 0..7 while dragging a handle, else -1
     private bool _movingPending;           // dragging the pending rect body to move it
     private SD.Point _adjustAnchor;        // cursor at the start of a move/resize
@@ -346,6 +348,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _dragging = false;
         _dragMoved = false;
         _pendingScreen = null;
+        _hoverBarButton = -1;
+        _pressedBarButton = -1;
         _resizeHandle = -1;
         _movingPending = false;
         _hoverWindow = null;
@@ -638,12 +642,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Area mode.
         if (_pendingScreen is SD.Rectangle pending)
         {
-            // Cancel / Done bar wins over move/resize, so a click on it always commits or cancels.
+            // Cancel / Done bar wins over move/resize. The press only arms the button —
+            // the action fires on mouse-up over the same button, standard button feel.
             var (barRect, cancelRect, doneRect) = ActionBarRects(pending);
             if (barRect.Contains(screen))
             {
-                if (doneRect.Contains(screen)) Confirm(VirtualFromScreen(pending));
-                else if (cancelRect.Contains(screen)) Complete(WF.DialogResult.Cancel);
+                _pressedBarButton = doneRect.Contains(screen) ? 1 : cancelRect.Contains(screen) ? 0 : -1;
+                InvalidateScreenRect(barRect);
                 return; // consume any click on the bar (don't start a new marquee under it)
             }
 
@@ -709,6 +714,19 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _pendingScreen = MoveRect(_adjustStartRect, _currentScreen.X - _adjustAnchor.X, _currentScreen.Y - _adjustAnchor.Y);
             InvalidateAllSurfaces();
             return;
+        }
+
+        // Cancel / Done hover feedback (only the bar rect repaints on a state change).
+        if (_pendingScreen is SD.Rectangle barPending)
+        {
+            var (barRect, cancelRect, doneRect) = ActionBarRects(barPending);
+            int hover = doneRect.Contains(_currentScreen) ? 1
+                : cancelRect.Contains(_currentScreen) ? 0 : -1;
+            if (hover != _hoverBarButton)
+            {
+                _hoverBarButton = hover;
+                InvalidateScreenRect(barRect);
+            }
         }
 
         if (_mode == SelectorMode.Window)
@@ -802,6 +820,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             if (_hoverWindow is not null)
                 Confirm(VirtualFromScreen(_hoverWindow.Bounds));
+            return;
+        }
+
+        if (_pressedBarButton >= 0)
+        {
+            int pressed = _pressedBarButton;
+            _pressedBarButton = -1;
+            if (_pendingScreen is SD.Rectangle pend)
+            {
+                var (bar, cancel, done) = ActionBarRects(pend);
+                InvalidateScreenRect(bar);
+                if (pressed == 1 && done.Contains(_currentScreen)) Confirm(VirtualFromScreen(pend));
+                else if (pressed == 0 && cancel.Contains(_currentScreen)) Complete(WF.DialogResult.Cancel);
+            }
             return;
         }
 
@@ -912,11 +944,25 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
             if (cursorOnThisSurface)
             {
+                SD.Rectangle sized = labelScreen ?? bright;
+                string sizeText = $"{sized.Width} × {sized.Height}";
                 SD.Point at = new(local.Right + 8, local.Bottom + 8);
                 if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
+                {
                     at = new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
-                SD.Rectangle sized = labelScreen ?? bright;
-                SelectorChrome.DrawLabel(g, clientSize, $"{sized.Width} × {sized.Height}", at.X, at.Y);
+                }
+                else if (_pendingScreen is not null)
+                {
+                    // The Cancel/Done bar owns the space below a pending region — on a narrow
+                    // selection the pill would land on Cancel — so the readout rides the
+                    // selection's top-right, flipped just inside when the region touches the
+                    // monitor top.
+                    SD.Size pill = SelectorChrome.MeasureLabel(sizeText);
+                    int pillTop = local.Top - pill.Height - 8;
+                    if (pillTop < 0) pillTop = local.Top + 8;
+                    at = new SD.Point(Math.Max(0, local.Right - pill.Width), pillTop);
+                }
+                SelectorChrome.DrawLabel(g, clientSize, sizeText, at.X, at.Y);
             }
         }
 
@@ -1001,14 +1047,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(60, 0, 0, 0));
         using var fill = new SD.SolidBrush(SD.Color.White);
         using var pen = new SD.Pen(Accent, 1.5f);
         foreach (SD.Point pt in HandlePoints(screenRect))
         {
             SD.Point l = ToLocal(pt, monitorBounds);
-            var sq = new SD.Rectangle(l.X - HandleHalf, l.Y - HandleHalf, HandleHalf * 2, HandleHalf * 2);
-            g.FillRectangle(fill, sq);
-            g.DrawRectangle(pen, sq);
+            var dot = new SD.Rectangle(l.X - HandleHalf, l.Y - HandleHalf, HandleHalf * 2, HandleHalf * 2);
+            var under = dot;
+            under.Offset(0, 1);
+            g.FillEllipse(shadow, under);
+            g.FillEllipse(fill, dot);
+            g.DrawEllipse(pen, dot);
         }
         g.SmoothingMode = prev;
     }
@@ -1341,6 +1391,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_pendingScreen is SD.Rectangle p)
         {
+            // The Cancel/Done bar reads as buttons, not as selection ground.
+            var (bar, _, _) = ActionBarRects(p);
+            if (bar.Contains(_currentScreen))
+                return WF.Cursors.Hand;
+
             int h = _resizeHandle >= 0 ? _resizeHandle : HitTestHandle(_currentScreen, p);
             switch (h)
             {
@@ -1407,16 +1462,28 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SD.Rectangle lb = ToLocal(bar, monitorBounds), lc = ToLocal(cancel, monitorBounds), ld = ToLocal(done, monitorBounds);
         using var font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold);
 
+        // Hover lifts, press darkens — the same interaction language as the toolbar/card.
+        SD.Color cancelFill = _pressedBarButton == 0 ? SD.Color.FromArgb(0x30, 0x30, 0x32)
+            : _hoverBarButton == 0 ? ThemePalette.SurfaceHover
+            : SD.Color.FromArgb(0x3A, 0x3A, 0x3C);
+        SD.Color doneFill = _pressedBarButton == 1 ? SD.Color.FromArgb(0x0A, 0x6F, 0xD6)
+            : _hoverBarButton == 1 ? ThemePalette.AccentHover
+            : Accent;
+
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(lb, 8))
-        using (var bg = new SD.SolidBrush(SD.Color.FromArgb(245, 0x1C, 0x1C, 0x1E)))
-            g.FillPath(bg, path);
+        {
+            using (var bg = new SD.SolidBrush(SD.Color.FromArgb(245, ThemePalette.WindowBg)))
+                g.FillPath(bg, path);
+            using (var edge = new SD.Pen(ThemePalette.BorderStrong, 1))
+                g.DrawPath(edge, path);
+        }
         using (var cp = GdiPaths.RoundedRect(lc, 6))
-        using (var cb = new SD.SolidBrush(SD.Color.FromArgb(255, 0x3A, 0x3A, 0x3C)))
+        using (var cb = new SD.SolidBrush(cancelFill))
             g.FillPath(cb, cp);
         using (var dp = GdiPaths.RoundedRect(ld, 6))
-        using (var db = new SD.SolidBrush(Accent))
+        using (var db = new SD.SolidBrush(doneFill))
             g.FillPath(db, dp);
         g.SmoothingMode = prev;
 

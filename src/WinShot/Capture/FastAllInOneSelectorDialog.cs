@@ -258,6 +258,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _toolbar.Opacity = 1;
             _toolbar.UpdateMode(0);
             _toolbar.SetSize(1, 1);
+            _toolbar.RefreshPendingState();
         }
     }
 
@@ -496,6 +497,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 _dragMoved = true;
                 _pendingPx = null;
+                _toolbar.RefreshPendingState();
             }
 
             var virtualRect = VirtualFromScreen(MakeDragRect(_currentScreen));
@@ -599,6 +601,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _pendingPx = rect;
         _hoverWindow = null;
         _toolbar.SetSize(rect.Width, rect.Height);
+        _toolbar.RefreshPendingState();
         InvalidateAllSurfaces();
         Focus();
     }
@@ -606,6 +609,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     internal void Cancel()
     {
         Complete(WF.DialogResult.Cancel);
+    }
+
+    /// <summary>Commits the pending region from the toolbar's confirm button; no-op when
+    /// there is nothing pending (the button paints disabled then).</summary>
+    internal void ConfirmPending()
+    {
+        if (_pendingPx is SD.Rectangle pending)
+            Confirm(pending);
     }
 
     // ----------------------------------------------------------- painting (per surface)
@@ -791,6 +802,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (px.Width < 1 || px.Height < 1) return;
         _pendingPx = px;
         _toolbar.SetSize(px.Width, px.Height);
+        _toolbar.RefreshPendingState();
         InvalidateAllSurfaces();
     }
 
@@ -829,6 +841,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         _pendingPx = null;
         _hoverWindow = null;
+        _toolbar.RefreshPendingState();
         InvalidateAllSurfaces();
     }
 
@@ -972,15 +985,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// </summary>
     private sealed class ToolbarForm : WF.Form
     {
-        // CleanShot palette: a near-black bar (form-level Opacity gives the soft translucency),
-        // white line-art glyphs over dim captions, the single app accent for the active mode.
-        private static readonly SD.Color BarFill = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
-        private static readonly SD.Color BarBorder = SD.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF);
-        private static readonly SD.Color HoverFill = SD.Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF);
+        // CleanShot look, WinShot palette: every color aliases a ThemePalette token so the
+        // bar cannot drift from the rest of the app when the palette is tuned.
+        private static readonly SD.Color BarFill = ThemePalette.WindowBg;
+        private static readonly SD.Color BarBorder = ThemePalette.BorderStrong;
+        private static readonly SD.Color HoverFill = ThemePalette.HoverFill;
         private static readonly SD.Color SelectedFill = ThemePalette.Accent;
-        private static readonly SD.Color GlyphColor = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
-        private static readonly SD.Color LabelColor = SD.Color.FromArgb(0xC8, 0xC8, 0xCC);
-        private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x33, 0x33, 0x36);
+        private static readonly SD.Color GlyphColor = ThemePalette.TextPrimary;
+        private static readonly SD.Color LabelColor = ThemePalette.TextSecondary;
+        private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x3A, 0x3A, 0x3A);
 
         private const int BarHeight = 64;
         private const int CornerRadius = 14;
@@ -995,14 +1008,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         private readonly FastAllInOneSelectorDialog _owner;
         private readonly SD.Font _glyphFont = ThemePalette.IconFont(15f);
-        private readonly SD.Font _caretFont = ThemePalette.IconFont(7f);
+        private readonly SD.Font _tipFont = ThemePalette.UiFont(8.25f);
         private readonly SD.Font _ocrFont = ThemePalette.UiFont(13f, SD.FontStyle.Bold);
         private readonly SD.Font _labelFont = ThemePalette.UiFont(7.5f);
         private readonly SD.Font _fieldFont = ThemePalette.UiFont(9.5f);
         private readonly List<BarButton> _buttons = new();
         private readonly WF.TextBox _widthBox;
         private readonly WF.TextBox _heightBox;
-        private readonly WF.ToolTip _toolTip = new() { InitialDelay = 350, ReshowDelay = 120 };
+        private readonly WF.ToolTip _toolTip = new() { InitialDelay = 350, ReshowDelay = 120, OwnerDraw = true };
 
         private SD.Rectangle _mainBar;       // client-space bounds of the mode bar
         private SD.Rectangle _sizeBar;       // client-space bounds of the size bar
@@ -1018,7 +1031,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _owner = owner;
 
             AutoScaleMode = WF.AutoScaleMode.None;
-            BackColor = SD.Color.FromArgb(0x1C, 0x1C, 0x1E);
+            BackColor = BarFill;
             DoubleBuffered = true;
             FormBorderStyle = WF.FormBorderStyle.None;
             KeyPreview = true;
@@ -1048,6 +1061,22 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             Controls.Add(_heightBox);
 
             BuildLayout();
+
+            // The stock tooltip is a light system balloon — the one un-themed element over
+            // an otherwise fully owner-drawn dark bar — so it is drawn in the palette too.
+            _toolTip.Popup += (_, e) => e.ToolTipSize = SD.Size.Add(
+                WF.TextRenderer.MeasureText(_toolTip.GetToolTip(e.AssociatedControl), _tipFont),
+                new SD.Size(12, 8));
+            _toolTip.Draw += (_, e) =>
+            {
+                using var bg = new SD.SolidBrush(SD.Color.FromArgb(0x2B, 0x2B, 0x2B));
+                e.Graphics.FillRectangle(bg, e.Bounds);
+                using var edge = new SD.Pen(BarBorder, 1);
+                e.Graphics.DrawRectangle(edge,
+                    new SD.Rectangle(e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1));
+                WF.TextRenderer.DrawText(e.Graphics, e.ToolTipText, _tipFont, e.Bounds, GlyphColor,
+                    WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter);
+            };
 
             MouseMove += OnBarMouseMove;
             MouseLeave += (_, _) => SetHover(-1);
@@ -1094,6 +1123,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             Invalidate(_mainBar);
         }
 
+        /// <summary>Repaints the confirm button when the pending region appears/disappears.</summary>
+        public void RefreshPendingState() => Invalidate(_sizeBar);
+
         // ---------------------------------------------------------------- layout
 
         private void BuildLayout()
@@ -1108,7 +1140,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             int mainWidth = x - ButtonGap + BarPadX;
             _mainBar = new SD.Rectangle(0, 0, mainWidth, BarHeight);
 
-            // Size bar: [ width ] × [ height ]  [expand]  [crop ▾]
+            // Size bar: [ width ] × [ height ]  [expand]  [confirm]
             const int fieldW = 48;
             const int iconW = 34;
             int innerPad = 12;
@@ -1127,8 +1159,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
             _expandRect = new SD.Rectangle(sx, (BarHeight - 40) / 2, iconW, 40);
             sx += iconW + 4;
-            _cropRect = new SD.Rectangle(sx, (BarHeight - 40) / 2, iconW + 12, 40);
-            sx += iconW + 12 + innerPad;
+            _cropRect = new SD.Rectangle(sx, (BarHeight - 40) / 2, iconW, 40);
+            sx += iconW + innerPad;
 
             _sizeBar = new SD.Rectangle(sizeBarLeft, 0, sx - sizeBarLeft, BarHeight);
 
@@ -1158,7 +1190,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             var g = e.Graphics;
             g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-            g.Clear(SD.Color.FromArgb(0x1C, 0x1C, 0x1E));
+            g.Clear(BarFill);
 
             PaintBar(g, _mainBar);
             PaintBar(g, _sizeBar);
@@ -1225,20 +1257,19 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
 
-            // Crop / confirm with dropdown caret.
-            bool cropHot = _hoverIndex == HoverCrop;
+            // Confirm button: commits the pending region, dimmed while there is nothing to
+            // commit. No caret — there is no menu behind this button.
+            bool cropEnabled = _owner._pendingPx is not null;
+            bool cropHot = cropEnabled && _hoverIndex == HoverCrop;
             if (cropHot)
             {
                 using var path = GdiPaths.RoundedRect(_cropRect, 8);
                 using var brush = new SD.SolidBrush(HoverFill);
                 g.FillPath(brush, path);
             }
-            var cropGlyphRect = new SD.Rectangle(_cropRect.X, _cropRect.Y, _cropRect.Width - 12, _cropRect.Height);
-            WF.TextRenderer.DrawText(g, "", _glyphFont, cropGlyphRect, GlyphColor,
-                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
-                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
-            var caretRect = new SD.Rectangle(_cropRect.Right - 14, _cropRect.Y, 12, _cropRect.Height);
-            WF.TextRenderer.DrawText(g, "", _caretFont, caretRect, LabelColor,
+            var cropGlyphRect = _cropRect;
+            WF.TextRenderer.DrawText(g, "", _glyphFont, cropGlyphRect,
+                cropEnabled ? GlyphColor : SD.Color.FromArgb(0x60, GlyphColor),
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
         }
@@ -1267,11 +1298,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             if (_hoverIndex == index)
                 return;
             _hoverIndex = index;
-            Cursor = index == -1 ? WF.Cursors.Default : WF.Cursors.Hand;
+            bool cropDisabled = index == HoverCrop && _owner._pendingPx is null;
+            Cursor = index == -1 || cropDisabled ? WF.Cursors.Default : WF.Cursors.Hand;
+            // Tooltips only for the two caption-less controls; the mode buttons already
+            // carry visible captions under their glyphs.
             _toolTip.SetToolTip(this,
-                index is >= 0 and < HoverExpand ? _buttons[index].Label
-                : index == HoverExpand ? "Lock aspect ratio"
-                : index == HoverCrop ? "Capture region"
+                index == HoverExpand ? "Lock aspect ratio"
+                : index == HoverCrop ? (cropDisabled ? "Capture selected region (draw or restore one first)" : "Capture selected region")
                 : null);
             Invalidate();
         }
@@ -1290,7 +1323,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
             if (hit == HoverCrop)
             {
-                _owner.Cancel();   // dismiss the bar; the live region/drag drives the actual capture
+                _owner.ConfirmPending();   // commits the pending region; inert when there is none
                 return;
             }
             if (hit < 0 || hit >= _buttons.Count)
@@ -1353,7 +1386,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             if (disposing)
             {
                 _glyphFont.Dispose();
-                _caretFont.Dispose();
+                _tipFont.Dispose();
                 _ocrFont.Dispose();
                 _labelFont.Dispose();
                 _fieldFont.Dispose();
