@@ -18,7 +18,10 @@ public static class Log
         thread.Start();
     }
 
-    public static string Dir => Path.Combine(
+    // Test seam: keeps test runs out of the live %LOCALAPPDATA% log (mirrors SettingsService.DirOverride).
+    internal static string? DirOverride;
+
+    public static string Dir => DirOverride ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinShot", "logs");
 
     private static string FilePath => Path.Combine(Dir, "winshot.log");
