@@ -12,9 +12,17 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private static readonly SD.Color FieldBack = SD.Color.FromArgb(58, 58, 58);
     private static readonly SD.Color TextColor = SD.Color.White;
     private static readonly SD.Color MutedText = SD.Color.FromArgb(220, 220, 220);
+    private static readonly SD.Color HintText = SD.Color.FromArgb(170, 170, 170);
     private static readonly SD.Color Accent = ThemePalette.Accent;
     // Translucent light hairline for the CleanShot panel look.
     private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
+
+    // Design-unit layout grid (96-DPI logical pixels, scaled by _scale everywhere).
+    private const int DialogWidth = 286;
+    private const int PadX = 18;
+    private const int LabelWidth = 96;
+    private const int FieldX = 120;
+    private const int FieldWidth = 148;
 
     private readonly WF.RadioButton _mp4Radio;
     private readonly WF.RadioButton _gifRadio;
@@ -22,10 +30,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private readonly WF.Label _micDeviceLabel;
     private readonly WF.ComboBox _micDeviceCombo;
     private readonly WF.CheckBox _systemAudioCheck;
+    private readonly WF.Label _webcamLabel;
     private readonly WF.ComboBox _webcamCombo;
     private readonly WF.Label _webcamDeviceLabel;
     private readonly WF.ComboBox _webcamDeviceCombo;
+    private readonly WF.Label _webcamSizeLabel;
     private readonly WF.TextBox _webcamSizeBox;
+    private readonly WF.Label _webcamSizeHint;
 
     // DeviceName values parallel to the combo items (index 0 = "Default", which
     // maps to the first real device). Populated lazily from ScreenRecorderLib.
@@ -44,6 +55,18 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private static FastRecordingOptionsDialog? _cached;
     private TaskCompletionSource<WF.DialogResult>? _completion;
 
+    /// <summary>One vertical slot in the dialog. A row whose predicate is false is
+    /// skipped entirely, so toggling options never leaves dead gaps. (A predicate,
+    /// not Control.Visible: that getter reads false for everything while the form
+    /// itself is still hidden.) Offsets and heights are design units.</summary>
+    private readonly record struct Row(
+        int GapBefore,
+        int Height,
+        Func<bool>? IsShown,
+        (WF.Control Control, int OffsetY)[] Controls);
+
+    private readonly List<Row> _rows = new();
+
     // Point-based fonts render at the monitor's DPI, but this layout is designed in
     // 96-DPI pixels — so every coordinate is multiplied by the cursor monitor's scale
     // or labels truncate on 125%/150% displays. (AutoScaleMode.Dpi can't do this: it
@@ -57,7 +80,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         _scale = RecordingMonitorDpi.ScaleFor(WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
-        ClientSize = new SD.Size(S(286), S(504));
+        ClientSize = new SD.Size(S(DialogWidth), S(400)); // height is owned by Reflow()
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
         MaximizeBox = false;
@@ -73,88 +96,87 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var title = Label("Record screen", 18, 16, 250, bold: true, size: 10);
-        Controls.Add(title);
+        var title = Label("Record screen", PadX, 250, bold: true, size: 11);
 
-        _mp4Radio = Radio("MP4 video", 18, 48, true);
-        _gifRadio = Radio("GIF animation", 18, 74, false);
-        Controls.Add(_mp4Radio);
-        Controls.Add(_gifRadio);
+        _mp4Radio = Radio("MP4 video", true);
+        _gifRadio = Radio("GIF animation", false);
 
-        // FPS + Quality. The GIF FPS field shares the Quality row but is only
-        // shown when GIF is selected (Quality is meaningless for GIF here).
-        _fpsLabel = Label("Frame rate", 18, 108, 92);
-        Controls.Add(_fpsLabel);
-        _fpsCombo = Combo(110, 104, 150);
+        // FPS + Quality. The GIF FPS row takes Quality's slot when GIF is selected
+        // (Quality is meaningless for GIF here).
+        _fpsLabel = Label("Frame rate", PadX, LabelWidth);
+        _fpsCombo = Combo();
         _fpsCombo.Items.AddRange(["60 fps", "30 fps", "15 fps"]);
         _fpsCombo.SelectedIndex = 1;
-        Controls.Add(_fpsCombo);
 
-        _qualityLabel = Label("Quality", 18, 142, 92);
-        Controls.Add(_qualityLabel);
-        _qualityCombo = Combo(110, 138, 150);
+        _qualityLabel = Label("Quality", PadX, LabelWidth);
+        _qualityCombo = Combo();
         _qualityCombo.Items.AddRange(["High", "Medium", "Low"]);
         _qualityCombo.SelectedIndex = 1;
-        Controls.Add(_qualityCombo);
 
-        _gifFpsLabel = Label("GIF frame rate", 18, 142, 92);
-        Controls.Add(_gifFpsLabel);
-        _gifFpsCombo = Combo(110, 138, 150);
+        _gifFpsLabel = Label("GIF frame rate", PadX, LabelWidth);
+        _gifFpsCombo = Combo();
         _gifFpsCombo.Items.AddRange(["20 fps", "15 fps", "12 fps", "8 fps"]);
         _gifFpsCombo.SelectedIndex = 2;
-        Controls.Add(_gifFpsCombo);
 
-        _audioCheck = Check("Record microphone", 18, 172, isChecked: false);
-        Controls.Add(_audioCheck);
+        _audioCheck = Check("Record microphone", isChecked: false);
+        _micDeviceLabel = Label("Mic device", PadX, LabelWidth);
+        _micDeviceCombo = Combo();
+        _systemAudioCheck = Check("Record system audio", isChecked: false);
 
-        // Microphone device picker — only shown when "Record microphone" is on.
-        _micDeviceLabel = Label("Mic device", 18, 202, 92);
-        Controls.Add(_micDeviceLabel);
-        _micDeviceCombo = Combo(110, 198, 150);
-        Controls.Add(_micDeviceCombo);
-
-        _systemAudioCheck = Check("Record system audio", 18, 232, isChecked: false);
-        Controls.Add(_systemAudioCheck);
-
-        Controls.Add(Label("Webcam", 18, 266, 92));
-        _webcamCombo = Combo(110, 262, 150);
+        _webcamLabel = Label("Webcam", PadX, LabelWidth);
+        _webcamCombo = Combo();
         _webcamCombo.Items.AddRange(["Off", "Top left", "Top right", "Bottom left", "Bottom right", "Fullscreen"]);
         _webcamCombo.SelectedIndex = 0;
         _webcamCombo.SelectedIndexChanged += (_, _) => UpdateMp4DependentState();
-        Controls.Add(_webcamCombo);
 
-        // Webcam device picker — only shown when a webcam position is selected.
-        _webcamDeviceLabel = Label("Camera", 18, 300, 92);
-        Controls.Add(_webcamDeviceLabel);
-        _webcamDeviceCombo = Combo(110, 296, 150);
-        Controls.Add(_webcamDeviceCombo);
+        _webcamDeviceLabel = Label("Camera", PadX, LabelWidth);
+        _webcamDeviceCombo = Combo();
 
-        Controls.Add(Label("Webcam size", 18, 334, 92));
-        _webcamSizeBox = NumberBox(110, 330, RecordingOptions.DefaultWebcamSizePercent.ToString());
-        Controls.Add(_webcamSizeBox);
-        Controls.Add(Label("10-45%", 164, 334, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
+        _webcamSizeLabel = Label("Webcam size", PadX, LabelWidth);
+        _webcamSizeBox = NumberBox(RecordingOptions.DefaultWebcamSizePercent.ToString());
+        _webcamSizeHint = Label("10–45%", FieldX + 56, 90, color: HintText, size: 8);
 
-        _cursorCheck = Check("Capture cursor", 18, 368, isChecked: false);
-        _clickHighlightCheck = Check("Highlight mouse clicks", 18, 394, isChecked: false);
-        _keystrokeCheck = Check("Show keystrokes", 18, 420, isChecked: false);
-        Controls.Add(_cursorCheck);
-        Controls.Add(_clickHighlightCheck);
-        Controls.Add(_keystrokeCheck);
+        _cursorCheck = Check("Capture cursor", isChecked: false);
+        _clickHighlightCheck = Check("Highlight mouse clicks", isChecked: false);
+        _keystrokeCheck = Check("Show keystrokes", isChecked: false);
 
-        Controls.Add(Label("Countdown (s)", 18, 454, 92));
-        _countdownBox = NumberBox(110, 450, "0");
-        Controls.Add(_countdownBox);
-        Controls.Add(Label("0 = off", 164, 454, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
+        var countdownLabel = Label("Countdown (s)", PadX, LabelWidth);
+        _countdownBox = NumberBox("0");
+        var countdownHint = Label("0 = off", FieldX + 56, 90, color: HintText, size: 8);
 
-        var cancel = Button("Cancel", 110, 482, SD.Color.FromArgb(58, 58, 58));
-        cancel.Click += (_, _) => Complete(WF.DialogResult.Cancel);
-        Controls.Add(cancel);
-
-        var start = Button("Start", 190, 482, Accent);
+        var start = ActionButton("Start", Accent);
         start.Click += (_, _) => Complete(WF.DialogResult.OK);
-        Controls.Add(start);
+        var cancel = ActionButton("Cancel", FieldBack);
+        cancel.Click += (_, _) => Complete(WF.DialogResult.Cancel);
         AcceptButton = start;
         CancelButton = cancel;
+
+        // Rows in visual order. Labels sit 4 design px below their field's top so
+        // their baselines align with combo text.
+        bool Mp4() => _mp4Radio.Checked;
+        bool MicOn() => _mp4Radio.Checked && _audioCheck.Checked;
+        bool WebcamOn() => _mp4Radio.Checked && _webcamCombo.SelectedIndex > 0;
+        AddRow(0, 24, null, (title, 0));
+        AddRow(14, 22, null, (_mp4Radio, 0));
+        AddRow(4, 22, null, (_gifRadio, 0));
+        AddRow(16, 26, Mp4, (_fpsLabel, 4), (_fpsCombo, 0));
+        AddRow(8, 26, Mp4, (_qualityLabel, 4), (_qualityCombo, 0));
+        AddRow(16, 26, () => !_mp4Radio.Checked, (_gifFpsLabel, 4), (_gifFpsCombo, 0));
+        AddRow(16, 22, Mp4, (_audioCheck, 0));
+        AddRow(8, 26, MicOn, (_micDeviceLabel, 4), (_micDeviceCombo, 0));
+        AddRow(8, 22, Mp4, (_systemAudioCheck, 0));
+        AddRow(16, 26, Mp4, (_webcamLabel, 4), (_webcamCombo, 0));
+        AddRow(8, 26, WebcamOn, (_webcamDeviceLabel, 4), (_webcamDeviceCombo, 0));
+        AddRow(8, 26, WebcamOn, (_webcamSizeLabel, 4), (_webcamSizeBox, 0), (_webcamSizeHint, 5));
+        AddRow(16, 22, null, (_cursorCheck, 0));
+        AddRow(4, 22, null, (_clickHighlightCheck, 0));
+        AddRow(4, 22, null, (_keystrokeCheck, 0));
+        AddRow(16, 26, null, (countdownLabel, 4), (_countdownBox, 0), (countdownHint, 5));
+        AddRow(20, 30, null, (cancel, 0), (start, 0));
+
+        // Right-align the action pair: Start on the edge, Cancel beside it.
+        start.Left = S(DialogWidth - PadX - 78);
+        cancel.Left = start.Left - S(8) - cancel.Width;
 
         _audioCheck.CheckedChanged += (_, _) => UpdateMp4DependentState();
         _mp4Radio.CheckedChanged += (_, _) => UpdateMp4DependentState();
@@ -167,6 +189,41 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             if (e.Button == WF.MouseButtons.Left)
                 Native.ReleaseCaptureAndDrag(Handle);
         };
+    }
+
+    private void AddRow(int gapBefore, int height, Func<bool>? isShown, params (WF.Control, int)[] controls)
+    {
+        _rows.Add(new Row(gapBefore, height, isShown, controls));
+        foreach ((WF.Control control, _) in controls)
+            Controls.Add(control);
+    }
+
+    /// <summary>
+    /// Stacks the visible rows top to bottom and sizes the dialog to fit, so the
+    /// action row always sits a full padding above the bottom edge and hidden
+    /// option rows collapse instead of leaving holes.
+    /// </summary>
+    private void Reflow()
+    {
+        int y = 18;
+        foreach (Row row in _rows)
+        {
+            bool shown = row.IsShown?.Invoke() ?? true;
+            if (shown)
+                y += row.GapBefore;
+            foreach ((WF.Control control, int offset) in row.Controls)
+            {
+                control.Visible = shown;
+                if (shown)
+                    control.Top = S(y + offset);
+            }
+            if (shown)
+                y += row.Height;
+        }
+
+        int height = S(y + 18);
+        if (ClientSize.Height != height)
+            ClientSize = new SD.Size(S(DialogWidth), height);
     }
 
     /// <summary>
@@ -466,36 +523,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             area.Top + Math.Max(0, (area.Height - Height) / 2));
     }
 
-    private void UpdateMp4DependentState()
-    {
-        bool mp4 = _mp4Radio.Checked;
-        _audioCheck.Enabled = mp4;
-        _systemAudioCheck.Enabled = mp4;
-        _webcamCombo.Enabled = mp4;
-        _webcamSizeBox.Enabled = mp4;
-
-        // MP4 shows FPS + Quality; GIF replaces Quality with a GIF FPS picker.
-        _fpsLabel.Visible = mp4;
-        _fpsCombo.Visible = mp4;
-        _qualityLabel.Visible = mp4;
-        _qualityCombo.Visible = mp4;
-        _gifFpsLabel.Visible = !mp4;
-        _gifFpsCombo.Visible = !mp4;
-
-        // Device pickers only matter for MP4, and only when their feature is on.
-        bool micOn = mp4 && _audioCheck.Checked;
-        _micDeviceLabel.Visible = micOn;
-        _micDeviceCombo.Visible = micOn;
-
-        bool webcamOn = mp4 && _webcamCombo.SelectedIndex > 0;
-        _webcamDeviceLabel.Visible = webcamOn;
-        _webcamDeviceCombo.Visible = webcamOn;
-    }
+    // Row predicates own which options apply (MP4 vs GIF, mic on, webcam on);
+    // Reflow applies them and restacks in one pass.
+    private void UpdateMp4DependentState() => Reflow();
 
     private WF.Label Label(
         string text,
         int x,
-        int y,
         int width,
         bool bold = false,
         float size = 9,
@@ -505,35 +539,35 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             AutoSize = false,
             Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? MutedText,
-            Location = new SD.Point(S(x), S(y)),
+            Location = new SD.Point(S(x), 0),
             Size = new SD.Size(S(width), S(22)),
             Text = text,
         };
 
-    private WF.ComboBox Combo(int x, int y, int width) =>
+    private WF.ComboBox Combo() =>
         new()
         {
             BackColor = FieldBack,
             DropDownStyle = WF.ComboBoxStyle.DropDownList,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(S(x), S(y)),
-            Size = new SD.Size(S(width), S(24)),
+            Location = new SD.Point(S(FieldX), 0),
+            Size = new SD.Size(S(FieldWidth), S(24)),
         };
 
-    private WF.TextBox NumberBox(int x, int y, string text) =>
+    private WF.TextBox NumberBox(string text) =>
         new()
         {
             BackColor = FieldBack,
             BorderStyle = WF.BorderStyle.FixedSingle,
             ForeColor = TextColor,
-            Location = new SD.Point(S(x), S(y)),
+            Location = new SD.Point(S(FieldX), 0),
             Size = new SD.Size(S(44), S(24)),
             Text = text,
             TextAlign = WF.HorizontalAlignment.Center,
         };
 
-    private WF.RadioButton Radio(string text, int x, int y, bool isChecked) =>
+    private WF.RadioButton Radio(string text, bool isChecked) =>
         new()
         {
             AutoSize = true,
@@ -541,11 +575,11 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(S(x), S(y)),
+            Location = new SD.Point(S(PadX), 0),
             Text = text,
         };
 
-    private WF.CheckBox Check(string text, int x, int y, bool isChecked) =>
+    private WF.CheckBox Check(string text, bool isChecked) =>
         new()
         {
             AutoSize = true,
@@ -553,11 +587,11 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(S(x), S(y)),
+            Location = new SD.Point(S(PadX), 0),
             Text = text,
         };
 
-    private WF.Button Button(string text, int x, int y, SD.Color backColor)
+    private WF.Button ActionButton(string text, SD.Color backColor)
     {
         var button = new WF.Button
         {
@@ -565,8 +599,8 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(S(x), S(y)),
-            Size = new SD.Size(S(70), S(26)),
+            Location = new SD.Point(0, 0),
+            Size = new SD.Size(S(78), S(30)),
             Text = text,
             UseVisualStyleBackColor = false,
         };

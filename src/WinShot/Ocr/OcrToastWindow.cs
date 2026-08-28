@@ -17,16 +17,24 @@ public sealed class OcrToastWindow : WF.Form
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
 
+    // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
+    // the anchor monitor or labels truncate on 125%/150% displays.
+    private readonly double _scale;
+
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     public OcrToastWindow(string title, string preview, SD.Point? anchorScreen, Action? onOpen)
     {
         _anchor = anchorScreen;
+        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
+            WF.Screen.FromPoint(anchorScreen ?? WF.Cursor.Position).Bounds);
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
         Opacity = 0.97;
-        Padding = new WF.Padding(14);
+        Padding = new WF.Padding(S(14));
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
@@ -40,7 +48,7 @@ public sealed class OcrToastWindow : WF.Form
         const int width = 300;
         bool hasOpen = onOpen is not null;
         int height = hasOpen ? 96 : 70;
-        ClientSize = new SD.Size(width, height);
+        ClientSize = new SD.Size(S(width), S(height));
 
         var titleLabel = Label(title, 14, 14, width - 28, 11f, ThemePalette.AccentHover, bold: true);
         Controls.Add(titleLabel);
@@ -129,25 +137,25 @@ public sealed class OcrToastWindow : WF.Form
     private void UpdateRegion()
     {
         if (Width <= 0 || Height <= 0) return;
-        IntPtr rgn = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 18, 18);
+        IntPtr rgn = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(18), S(18));
         Region = SD.Region.FromHrgn(rgn);
         DeleteObject(rgn);
     }
 
-    private static WF.Label Label(string text, int x, int y, int width, float size, SD.Color color, bool bold = false) =>
+    private WF.Label Label(string text, int x, int y, int width, float size, SD.Color color, bool bold = false) =>
         new()
         {
             AutoSize = false,
             BackColor = SD.Color.Transparent,
             Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color,
-            Location = new SD.Point(x, y),
-            Size = new SD.Size(width, 22),
+            Location = new SD.Point(S(x), S(y)),
+            Size = new SD.Size(S(width), S(22)),
             Text = text,
             TextAlign = SD.ContentAlignment.MiddleLeft,
         };
 
-    private static WF.Button Button(string text, int x, int y, int width, int height, SD.Color back, SD.Color hot)
+    private WF.Button Button(string text, int x, int y, int width, int height, SD.Color back, SD.Color hot)
     {
         var button = new WF.Button
         {
@@ -156,8 +164,8 @@ public sealed class OcrToastWindow : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = SD.Color.White,
-            Location = new SD.Point(x, y),
-            Size = new SD.Size(width, height),
+            Location = new SD.Point(S(x), S(y)),
+            Size = new SD.Size(S(width), S(height)),
             Text = text,
             UseVisualStyleBackColor = false,
         };

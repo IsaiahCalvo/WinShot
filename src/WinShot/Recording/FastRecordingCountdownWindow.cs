@@ -11,21 +11,29 @@ public sealed class FastRecordingCountdownWindow : WF.Form
     private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
     private static readonly SD.Color Ring = ThemePalette.Accent;
     private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Color MutedText = SD.Color.FromArgb(136, 136, 136);
+    // Light enough to pass 4.5:1 on the #2B2B2B card (136 gray failed contrast).
+    private static readonly SD.Color MutedText = SD.Color.FromArgb(170, 170, 170);
 
     private readonly WF.Timer _timer = new() { Interval = 1000 };
     private readonly SD.Rectangle _regionPx;
     private int _remaining;
     private bool _done;
 
+    // Scales the badge (and its pixel-unit digits) to the recorded region's monitor,
+    // so it reads the same physical size on 100% and 150% displays.
+    private readonly double _scale;
+
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     public FastRecordingCountdownWindow(int seconds, SD.Rectangle regionScreenPx)
     {
         _remaining = Math.Max(1, seconds);
         _regionPx = regionScreenPx;
+        _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
-        ClientSize = new SD.Size(170, 170);
+        ClientSize = new SD.Size(S(170), S(170));
         DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
@@ -82,10 +90,10 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.Clear(Back);
 
-        using var ring = new SD.Pen(Ring, 3);
+        using var ring = new SD.Pen(Ring, Math.Max(3, S(3)));
         e.Graphics.DrawEllipse(ring, 2, 2, Width - 5, Height - 5);
 
-        using var countFont = new SD.Font("Segoe UI Semibold", 84f, SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        using var countFont = new SD.Font("Segoe UI Semibold", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
         using var hintFont = new SD.Font("Segoe UI", 11f, SD.FontStyle.Regular, SD.GraphicsUnit.Point);
         var countText = _remaining.ToString();
         var flags = WF.TextFormatFlags.HorizontalCenter |
@@ -96,14 +104,14 @@ public sealed class FastRecordingCountdownWindow : WF.Form
             e.Graphics,
             countText,
             countFont,
-            new SD.Rectangle(0, 10, Width, 120),
+            new SD.Rectangle(0, S(10), Width, S(120)),
             TextColor,
             flags);
         WF.TextRenderer.DrawText(
             e.Graphics,
             "Esc to cancel",
             hintFont,
-            new SD.Rectangle(0, Height - 42, Width, 24),
+            new SD.Rectangle(0, Height - S(42), Width, S(24)),
             MutedText,
             flags);
     }

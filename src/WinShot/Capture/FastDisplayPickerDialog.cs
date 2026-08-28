@@ -1,4 +1,5 @@
 ﻿using WinShot.Core;
+using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -12,15 +13,22 @@ public sealed class FastDisplayPickerDialog : WF.Form
     private static readonly SD.Color Accent = ThemePalette.Accent;
     private static readonly SD.Color TextColor = SD.Color.White;
 
+    // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
+    // the cursor monitor or labels truncate on 125%/150% displays.
+    private readonly double _scale;
+
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     private FastDisplayPickerDialog()
     {
+        _scale = RecordingMonitorDpi.ScaleFor(WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
         AutoScaleMode = WF.AutoScaleMode.None;
         AutoSize = true;
         AutoSizeMode = WF.AutoSizeMode.GrowAndShrink;
         BackColor = Back;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
-        Padding = new WF.Padding(18);
+        Padding = new WF.Padding(S(18));
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.CenterScreen;
         TopMost = true;
@@ -41,10 +49,10 @@ public sealed class FastDisplayPickerDialog : WF.Form
             AutoSize = false,
             Font = new SD.Font("Segoe UI", 10f, SD.FontStyle.Bold),
             ForeColor = TextColor,
-            Height = 24,
-            Margin = new WF.Padding(0, 0, 0, 8),
+            Height = S(24),
+            Margin = new WF.Padding(0, 0, 0, S(8)),
             Text = "Choose displays to record",
-            Width = 260,
+            Width = S(260),
         });
 
         var screens = WF.Screen.AllScreens;
@@ -52,6 +60,7 @@ public sealed class FastDisplayPickerDialog : WF.Form
         var displayButtons = new WF.Button[screens.Length];
         WF.Button record = Button("Record", 74, ButtonBack);
         record.Enabled = false;
+        record.EnabledChanged += (_, _) => record.BackColor = record.Enabled ? Accent : ButtonBack;
 
         for (int i = 0; i < screens.Length; i++)
         {
@@ -87,14 +96,20 @@ public sealed class FastDisplayPickerDialog : WF.Form
             AutoSizeMode = WF.AutoSizeMode.GrowAndShrink,
             BackColor = Back,
             FlowDirection = WF.FlowDirection.RightToLeft,
-            Margin = new WF.Padding(0, 10, 0, 0),
+            Margin = new WF.Padding(0, S(10), 0, 0),
             Padding = WF.Padding.Empty,
-            Width = 260,
+            Width = S(260),
             WrapContents = false,
         };
 
         var cancel = Button("Cancel", 74, ButtonBack);
         cancel.Click += (_, _) => DialogResult = WF.DialogResult.Cancel;
+        // The action pair reads as buttons, not list rows: centered labels, a gap between.
+        record.TextAlign = SD.ContentAlignment.MiddleCenter;
+        record.Padding = WF.Padding.Empty;
+        cancel.TextAlign = SD.ContentAlignment.MiddleCenter;
+        cancel.Padding = WF.Padding.Empty;
+        cancel.Margin = new WF.Padding(S(8), 0, 0, S(6));
         record.Click += (_, _) =>
         {
             if (selected.Count == 0)
@@ -167,12 +182,12 @@ public sealed class FastDisplayPickerDialog : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 20, 20);
+        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(20), S(20));
         Region = SD.Region.FromHrgn(regionHandle);
         Native.DeleteObject(regionHandle);
     }
 
-    private static WF.Button Button(string text, int width, SD.Color backColor)
+    private WF.Button Button(string text, int width, SD.Color backColor)
     {
         var button = new WF.Button
         {
@@ -181,12 +196,13 @@ public sealed class FastDisplayPickerDialog : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Height = 30,
-            Margin = new WF.Padding(0, 0, 0, 6),
+            Height = S(30),
+            Margin = new WF.Padding(0, 0, 0, S(6)),
+            Padding = new WF.Padding(S(8), 0, 0, 0),
             Text = text,
             TextAlign = SD.ContentAlignment.MiddleLeft,
             UseVisualStyleBackColor = false,
-            Width = width,
+            Width = S(width),
         };
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = ButtonHot;

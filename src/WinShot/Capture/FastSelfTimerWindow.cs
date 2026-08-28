@@ -15,13 +15,21 @@ public sealed class FastSelfTimerWindow : WF.Form
     private readonly WF.Timer _timer = new() { Interval = 1000 };
     private int _remaining;
 
+    // Scales the badge (and its pixel-unit digits) to the cursor monitor, so it
+    // reads the same physical size on 100% and 150% displays.
+    private readonly double _scale;
+
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     public FastSelfTimerWindow(int seconds)
     {
         _remaining = SelfTimerOptions.ClampDelaySeconds(seconds);
+        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
+            WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
-        ClientSize = new SD.Size(150, 150);
+        ClientSize = new SD.Size(S(150), S(150));
         DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         Opacity = 0.9;
@@ -101,7 +109,7 @@ public sealed class FastSelfTimerWindow : WF.Form
         using var pen = new SD.Pen(Border, 1);
         e.Graphics.DrawEllipse(pen, 1, 1, Width - 3, Height - 3);
 
-        using var font = new SD.Font("Segoe UI Semibold", 72f, SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        using var font = new SD.Font("Segoe UI Semibold", S(72), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
                     WF.TextFormatFlags.SingleLine |
