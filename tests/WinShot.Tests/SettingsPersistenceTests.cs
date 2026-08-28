@@ -143,6 +143,29 @@ public class SettingsPersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task LockedPrimary_RetriesUntilTheLockReleases()
+    {
+        // The install.ps1 relaunch race: a dying instance still holds settings.json while the
+        // new instance loads. Load() must retry past the share violation, not run on defaults.
+        WriteUserSettings("Ctrl+Alt+F9");
+
+        using var lockHeld = new ManualResetEventSlim();
+        var locker = Task.Run(() =>
+        {
+            using var fs = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.None);
+            lockHeld.Set();
+            Thread.Sleep(250); // release inside Load()'s 3-attempt / 150ms retry window
+        });
+        lockHeld.Wait();
+
+        var svc = new SettingsService();
+        svc.Load(); // attempt 1 hits the share violation; a later attempt must succeed
+
+        Assert.Equal("Ctrl+Alt+F9", svc.Current.HotkeyCaptureRegion);
+        await locker;
+    }
+
+    [Fact]
     public void UnreadablePrimaryWithNoBackups_IsPreservedBeforeFirstSave()
     {
         File.WriteAllText(SettingsPath, "{ this is not json"); // no backups exist

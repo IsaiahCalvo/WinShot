@@ -172,23 +172,24 @@ public class SettingsService
     public void Load()
     {
         _loaded = true;
-        // Transient share violations are real: an exiting instance's atomic File.Move can
-        // overlap a starting instance's read during upgrades/restarts. Falling back to
-        // defaults on a transient error is exactly how user hotkeys get wiped — the next
-        // auto-save cements the defaults and then rotates the backups past the good copy.
-        for (int attempt = 0; attempt < 4; attempt++)
+        // Transient torn reads are real: an exiting instance's exit-save can overlap a starting
+        // instance's read during upgrades/restarts (install.ps1 relaunch). The primary is
+        // replaced atomically, but the .bak rotation uses File.Copy, which is NOT atomic — a
+        // reader can see a half-written backup. So the bounded retry must cover the backups
+        // too, not just the primary. Falling back to defaults on a transient error is exactly
+        // how user hotkeys get wiped — the next auto-save cements the defaults and then
+        // rotates the backups past the good copy.
+        if (TryLoadWithRetry(FilePath, out int attempt))
         {
-            if (attempt > 0)
-                Thread.Sleep(50 * attempt);
-            if (TryLoadFrom(FilePath))
-                return;
+            if (attempt > 1)
+                Log.Info($"Loaded settings.json on retry attempt {attempt}");
+            return;
         }
-        // Fall back to the backup generations if the primary is missing/corrupt/torn.
         foreach (string backup in new[] { FilePath + ".bak", FilePath + ".bak2" })
         {
-            if (TryLoadFrom(backup))
+            if (TryLoadWithRetry(backup, out attempt))
             {
-                Log.Info($"Loaded settings from {Path.GetFileName(backup)} (primary settings.json was missing or unreadable)");
+                Log.Info($"Loaded settings from {Path.GetFileName(backup)} on attempt {attempt} (primary settings.json was missing or unreadable)");
                 return;
             }
         }
@@ -201,6 +202,24 @@ public class SettingsService
                       "the file will be preserved as settings.json.corrupt-* before any save");
         }
         Current = new Settings();
+    }
+
+    /// <summary>Bounded retry around one candidate file: 3 attempts, 150ms apart, so a reader
+    /// racing a dying instance's exit-save (locked file or half-written copy) recovers instead
+    /// of falling to defaults. A missing file short-circuits — it will not appear by waiting.</summary>
+    private bool TryLoadWithRetry(string path, out int attempt)
+    {
+        for (attempt = 1; attempt <= 3; attempt++)
+        {
+            if (attempt > 1)
+                Thread.Sleep(150);
+            if (TryLoadFrom(path))
+                return true;
+            if (!File.Exists(path))
+                return false;
+        }
+        attempt = 3;
+        return false;
     }
 
     private bool TryLoadFrom(string path)
