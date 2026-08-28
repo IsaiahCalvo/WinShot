@@ -304,7 +304,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (_hovering == hovering) return;
         if (hovering)
         {
-            foreach (var window in OpenWindows.Where(w => !ReferenceEquals(w, this)))
+            foreach (var window in OpenWindows.ToArray().Where(w => !ReferenceEquals(w, this)))
                 window.SetHovering(false);
             PauseAutoCloseTimer();
         }
@@ -564,7 +564,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             ? WF.Screen.FromPoint(WF.Cursor.Position)
             : WF.Screen.PrimaryScreen ?? WF.Screen.FromPoint(WF.Cursor.Position);
         var area = screen.WorkingArea;
-        int offset = OpenWindows
+        // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
+        int offset = OpenWindows.ToArray()
             .Where(w => !ReferenceEquals(w, this) && w.Visible && area.IntersectsWith(w.Bounds))
             .Sum(w => w.Height + 12);
         Location = QuickAccessOverlayLayout.Place(
@@ -630,7 +631,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         var offsets = new Dictionary<SD.Rectangle, int>();
         long started = Stopwatch.GetTimestamp();
-        foreach (FastQuickActionsWindow window in OpenWindows.Where(w =>
+        foreach (FastQuickActionsWindow window in OpenWindows.ToArray().Where(w =>
                      w.Visible && !w.IsDisposed && !w._exitMotionStarted))
         {
             SD.Rectangle workingArea = WF.Screen.FromRectangle(window.Bounds).WorkingArea;
