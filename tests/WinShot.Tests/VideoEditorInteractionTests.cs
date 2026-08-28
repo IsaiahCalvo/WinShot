@@ -103,8 +103,12 @@ public class VideoEditorInteractionTests
             (string?)panel.Attribute("Grid.Row") == "3");
 
         string xamlText = File.ReadAllText(xamlPath);
+        // Trim thumbs keep a local keyboard focus ring; everything else gets its
+        // focus visuals from the shared Theme.xaml styles referenced here.
         Assert.Contains("IsKeyboardFocused", xamlText, StringComparison.Ordinal);
-        Assert.Contains("IsKeyboardFocusWithin", xamlText, StringComparison.Ordinal);
+        Assert.Contains("PillButtonPrimary", xamlText, StringComparison.Ordinal);
+        Assert.Contains("PillButtonSecondary", xamlText, StringComparison.Ordinal);
+        Assert.Contains("DarkComboBox", xamlText, StringComparison.Ordinal);
     }
 
     private static string FindRepoFile(params string[] parts)

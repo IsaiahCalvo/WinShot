@@ -40,6 +40,8 @@
 
     <!-- Annotation / destructive red -->
     <Color x:Key="AnnotationRedColor">#FFFF453A</Color>  <!-- default stroke, step counter, record dot, destructive -->
+    <Color x:Key="RedHoverColor">#FFFF6B60</Color>       <!-- brighter red, hover of destructive action -->
+    <Color x:Key="RedPressedColor">#FFE0352B</Color>     <!-- darker red, pressed of destructive action -->
 
     <!-- Text -->
     <Color x:Key="TextPrimaryColor">#FFF2F2F4</Color>    <!-- ~95% white -->
@@ -68,6 +70,8 @@
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>
     <SolidColorBrush x:Key="InfoBrush"          Color="{StaticResource InfoColor}"/>
     <SolidColorBrush x:Key="AnnotationRedBrush" Color="{StaticResource AnnotationRedColor}"/>
+    <SolidColorBrush x:Key="RedHoverBrush"      Color="{StaticResource RedHoverColor}"/>
+    <SolidColorBrush x:Key="RedPressedBrush"    Color="{StaticResource RedPressedColor}"/>
 
     <SolidColorBrush x:Key="TextPrimaryBrush"   Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
@@ -222,6 +226,7 @@
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"
                                           Margin="{TemplateBinding Padding}"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -263,6 +268,7 @@
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             CornerRadius="{StaticResource RadiusButton}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"
                                           Margin="{TemplateBinding Padding}"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -275,6 +281,40 @@
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
                             <Setter TargetName="Bg" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bg" Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         PILL BUTTON — DESTRUCTIVE (red). Confirm buttons for delete-style
+         actions in themed dialogs. Same shape/states as PillButtonPrimary.
+         ==================================================================== -->
+    <Style x:Key="PillButtonDestructive" TargetType="Button" BasedOn="{StaticResource PillButtonPrimary}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bg" Background="{StaticResource AnnotationRedBrush}"
+                            BorderBrush="Transparent" BorderThickness="2"
+                            CornerRadius="{StaticResource RadiusButton}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"
+                                          Margin="{TemplateBinding Padding}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource RedHoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource RedPressedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bg" Property="BorderBrush" Value="White"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Bg" Property="Opacity" Value="0.4"/>
@@ -596,7 +636,8 @@
                                   StrokeLineJoin="Round"
                                   Data="M4,9 L8,13 L14,5"/>
                         </Grid>
-                        <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
                     </StackPanel>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">

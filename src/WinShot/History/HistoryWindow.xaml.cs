@@ -768,7 +768,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error("Failed to copy selected history files", ex);
-            MessageBox.Show(this, "WinShot could not copy the selected files to the clipboard.", "Copy failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ThemedMessageDialog.Show(this, "Copy failed", "WinShot could not copy the selected files to the clipboard.");
         }
     }
 
@@ -801,7 +801,7 @@ public partial class HistoryWindow : Window
         windowsShare.Click += (_, _) => HistoryShareService.ShowWindowsShare(this, paths, ex =>
         {
             Log.Error("Windows Share failed", ex);
-            Dispatcher.BeginInvoke(new Action(() => MessageBox.Show(this, "WinShot could not prepare these files for sharing.", "Share failed", MessageBoxButton.OK, MessageBoxImage.Warning)));
+            Dispatcher.BeginInvoke(new Action(() => ThemedMessageDialog.Show(this, "Share failed", "WinShot could not prepare these files for sharing.")));
         });
         menu.Items.Add(windowsShare);
         menu.PlacementTarget = ShareButton;
@@ -815,8 +815,9 @@ public partial class HistoryWindow : Window
     {
         IReadOnlyList<HistoryItem> selected = SelectedItems();
         if (selected.Count == 0) return;
-        if (MessageBox.Show(this, $"Delete {selected.Count:N0} selected history item{(selected.Count == 1 ? string.Empty : "s")}?\n\nThis removes only the local History copies.",
-                "Delete selected items", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!ThemedMessageDialog.Confirm(this, "Delete selected items",
+                $"Delete {selected.Count:N0} selected history item{(selected.Count == 1 ? string.Empty : "s")}?\n\nThis removes only the local History copies.",
+                "Delete", destructive: true))
             return;
 
         var failed = new List<string>();
@@ -835,7 +836,7 @@ public partial class HistoryWindow : Window
             UpdateCollectionState();
         _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
         if (failed.Count > 0)
-            MessageBox.Show(this, $"WinShot could not delete {failed.Count:N0} selected item{(failed.Count == 1 ? string.Empty : "s")}.", "Delete incomplete", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ThemedMessageDialog.Show(this, "Delete incomplete", $"WinShot could not delete {failed.Count:N0} selected item{(failed.Count == 1 ? string.Empty : "s")}.");
     }
 
     // ---- Tile actions ----
@@ -1013,12 +1014,8 @@ public partial class HistoryWindow : Window
                 string detail = string.IsNullOrWhiteSpace(result.ErrorMessage)
                     ? "Windows could not remove this history item from disk."
                     : result.ErrorMessage;
-                MessageBox.Show(
-                    this,
-                    $"WinShot could not delete this history item.\n\n{detail}",
-                    "Delete failed",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                ThemedMessageDialog.Show(this, "Delete failed",
+                    $"WinShot could not delete this history item.\n\n{detail}");
                 return;
             }
         }

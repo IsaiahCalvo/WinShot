@@ -31,7 +31,36 @@
             <ListBox x:Name="RecordingList" Background="Transparent"
                      BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}"
                      IsTabStop="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      automation:AutomationProperties.Name="Unfinished recordings">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="8,5"/>
+                        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
+                                            BorderBrush="Transparent" BorderThickness="1"
+                                            Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#1A0A84FF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsKeyboardFocused" Value="True">
+                                            <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Margin="2,5">
@@ -53,11 +82,12 @@
 
         <StackPanel Grid.Row="3" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="0,18,0,0">
+            <!-- Enter runs the primary action (Recover); Esc keeps files for later. -->
             <Button Content="Recover" Style="{StaticResource PillButtonPrimary}"
-                    Click="OnRecover" MinWidth="92"
+                    Click="OnRecover" MinWidth="92" IsDefault="True"
                     automation:AutomationProperties.Name="Recover unfinished recordings"/>
             <Button Content="Keep for later" Style="{StaticResource PillButtonSecondary}"
-                    IsDefault="True" IsCancel="True" MinWidth="112"
+                    IsCancel="True" MinWidth="112"
                     automation:AutomationProperties.Name="Keep unfinished recordings for later"/>
         </StackPanel>
     </Grid>

@@ -382,12 +382,7 @@ public partial class SettingsWindow : Window
     /// </summary>
     private void OnResetWarnings(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(
-            this,
-            "All warning dialogs are already enabled.",
-            "Reset warnings",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        ThemedMessageDialog.Show(this, "Reset warnings", "All warning dialogs are already enabled.");
     }
 
     // ------------------------------------------------------------ About tab
@@ -415,9 +410,7 @@ public partial class SettingsWindow : Window
                 UpdateState.UpToDate => $"You're on the latest version ({AppInfo.Version}).",
                 _ => $"Couldn't check for updates.\n\n{result.Message}",
             };
-            MessageBox.Show(this, message, "Check for updates",
-                MessageBoxButton.OK,
-                result.State == UpdateState.Error ? MessageBoxImage.Warning : MessageBoxImage.Information);
+            ThemedMessageDialog.Show(this, "Check for updates", message);
         }
         finally
         {

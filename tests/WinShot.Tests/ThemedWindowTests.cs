@@ -69,6 +69,11 @@ public class ThemedWindowTests
                 ShowAndClose(FastKeystrokeOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(new ResizeDialog(80, 50));
                 ShowAndClose(new VideoEditorWindow(previewFile.Path, settings, history));
+                ShowAndClose(new RecordingRecoveryWindow(new List<RecoverableRecordingTempFile>
+                {
+                    new(previewFile.Path, ".mp4", 1024, DateTime.UtcNow),
+                }));
+                ShowAndClose(ThemedMessageDialog.Build(null!, "Delete item", "Body text").Dialog);
 
                 CreatePrivateForm<FastDisplayPickerDialog>().Close();
                 ShowAndClose(new ScrollDimOverlay(new SD.Rectangle(20, 20, 160, 120)));
