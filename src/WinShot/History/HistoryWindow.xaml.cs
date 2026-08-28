@@ -1140,7 +1140,8 @@ public sealed class HistoryItem : INotifyPropertyChanged
         Caption = BuildCaption(CapturedAt, FileSize);
         RelativeTime = BuildRelativeTime(CapturedAt);
         DayGroup = BuildDayGroup(CapturedAt);
-        MetadataText = $"{CapturedAt:g}    {FormatFileSize(FileSize)}";
+        string sizeText = FormatFileSize(FileSize);
+        MetadataText = sizeText.Length == 0 ? ExtensionLabel : $"{sizeText} · {ExtensionLabel}";
     }
 
     public string FilePath { get; }

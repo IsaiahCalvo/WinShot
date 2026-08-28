@@ -19,7 +19,7 @@
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                CornerRadius="{StaticResource RadiusButton}" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -49,7 +49,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="7" Padding="16,8">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="{StaticResource RadiusButton}" Padding="16,8">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -72,7 +72,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusButton}" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -186,7 +186,8 @@
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="SelectionRing" Margin="6" BorderBrush="Transparent" BorderThickness="2" CornerRadius="7" Background="Transparent">
+                                    <!-- Ring radius = thumbnail frame radius (8) + 2px border inset so they stay concentric. -->
+                                    <Border x:Name="SelectionRing" Margin="6" BorderBrush="Transparent" BorderThickness="2" CornerRadius="10" Background="Transparent">
                                         <ContentPresenter/>
                                     </Border>
                                     <ControlTemplate.Triggers>
@@ -214,7 +215,7 @@
                             </Border.ContextMenu>
                             <Grid>
                                 <Grid.RowDefinitions><RowDefinition Height="164"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <Border Grid.Row="0" CornerRadius="5" ClipToBounds="True" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                                <Border Grid.Row="0" CornerRadius="{StaticResource RadiusButton}" ClipToBounds="True" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                                     <Grid>
                                         <Grid x:Name="ThumbnailSurface">
                                             <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Visibility="{Binding ThumbnailVisibility}"/>
@@ -224,7 +225,6 @@
                                             <Border Background="{StaticResource SurfaceBrush}" Opacity="0.72" Visibility="{Binding MissingThumbnailVisibility}">
                                                 <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="34" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
-                                            <Border x:Name="HoverScrim" Background="#99000000" Visibility="Collapsed"/>
                                             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding ScrollingVisibility}">
                                                 <TextBlock Text="SCROLLING" Foreground="White" FontSize="10" FontWeight="SemiBold"/>
                                             </Border>
@@ -236,8 +236,16 @@
                                             </Border>
                                         </Grid>
 
-                                        <Border x:Name="OverlayActions" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#DF121212" CornerRadius="7" Padding="6,4" Visibility="Collapsed">
-                                            <StackPanel Orientation="Horizontal">
+                                        <!-- Bottom-anchored gradient scrim holding the action row: hover adds
+                                             controls without blurring or blacking out the preview itself. -->
+                                        <Border x:Name="OverlayActions" VerticalAlignment="Bottom" Height="56" Visibility="Collapsed">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                    <GradientStop Color="#00000000" Offset="0"/>
+                                                    <GradientStop Color="#B3000000" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,3">
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnRestore" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Restore to Quick Access">
                                                     <StackPanel><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Restore" FontSize="10" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
@@ -256,14 +264,16 @@
                                             </StackPanel>
                                         </Border>
 
+                                        <!-- Photo-picker pattern: selection mode shows an empty ring on every tile;
+                                             selecting fills it accent with the check glyph. -->
                                         <Border x:Name="SelectionCheck" Width="24" Height="24" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
-                                                Background="{StaticResource AccentBrush}" BorderBrush="White" BorderThickness="1" CornerRadius="5" Visibility="Collapsed">
-                                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                Background="#66000000" BorderBrush="White" BorderThickness="1.5" CornerRadius="5" Visibility="Collapsed">
+                                            <TextBlock x:Name="SelectionCheckGlyph" Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                                         </Border>
                                     </Grid>
                                 </Border>
-                                <StackPanel Grid.Row="1" Margin="7,7,7,10">
-                                    <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding FileName}"/>
+                                <StackPanel Grid.Row="1" Margin="7,7,7,10" ToolTip="{Binding FileName}">
+                                    <TextBlock Text="{Binding RelativeTime}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/>
                                     <TextBlock Text="{Binding MetadataText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0"/>
                                 </StackPanel>
                             </Grid>
@@ -274,23 +284,44 @@
                                     <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True"/>
                                     <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="False"/>
                                 </MultiDataTrigger.Conditions>
-                                <Setter TargetName="OverlayActions" Property="Visibility" Value="Visible"/><Setter TargetName="HoverScrim" Property="Visibility" Value="Visible"/>
-                                <Setter TargetName="ThumbnailSurface" Property="Effect"><Setter.Value><BlurEffect Radius="5"/></Setter.Value></Setter>
+                                <Setter TargetName="OverlayActions" Property="Visibility" Value="Visible"/>
+                                <MultiDataTrigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </MultiDataTrigger.EnterActions>
                             </MultiDataTrigger>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
                                     <Condition Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True"/>
                                     <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="False"/>
                                 </MultiDataTrigger.Conditions>
-                                <Setter TargetName="OverlayActions" Property="Visibility" Value="Visible"/><Setter TargetName="HoverScrim" Property="Visibility" Value="Visible"/>
-                                <Setter TargetName="ThumbnailSurface" Property="Effect"><Setter.Value><BlurEffect Radius="5"/></Setter.Value></Setter>
+                                <Setter TargetName="OverlayActions" Property="Visibility" Value="Visible"/>
+                                <MultiDataTrigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </MultiDataTrigger.EnterActions>
                             </MultiDataTrigger>
+                            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="True">
+                                <Setter TargetName="SelectionCheck" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
                                     <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="True"/>
                                     <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True"/>
                                 </MultiDataTrigger.Conditions>
-                                <Setter TargetName="SelectionCheck" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="SelectionCheck" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="SelectionCheck" Property="BorderThickness" Value="1"/>
+                                <Setter TargetName="SelectionCheckGlyph" Property="Visibility" Value="Visible"/>
                             </MultiDataTrigger>
                         </DataTemplate.Triggers>
                     </DataTemplate>

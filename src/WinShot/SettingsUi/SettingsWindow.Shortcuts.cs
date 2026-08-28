@@ -79,7 +79,7 @@ public partial class SettingsWindow
         _shortcutCatalog = BuildShortcutCatalog();
         var sepStyle = (Style)FindResource("GroupSep");
         var categoryStyle = (Style)FindResource("ShortcutCategory");
-        var labelBrush = (Brush)FindResource("TextSecondaryBrush");
+        var rowLabelStyle = (Style)FindResource("RowLabel");
 
         int tabIndex = 100;
         bool firstSection = true;
@@ -93,25 +93,23 @@ public partial class SettingsWindow
 
             foreach (var item in section.Items)
             {
-                var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = true };
+                // Same 150px label + 162px control column every other tab uses (RowLabel),
+                // so switching tabs never re-anchors the content grid.
+                var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = false };
+                row.Children.Add(new TextBlock
+                {
+                    Style = rowLabelStyle,
+                    Text = item.Label,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+
                 var box = new HotkeyBox { Width = 180, TabIndex = tabIndex++ };
                 AutomationProperties.SetName(box, $"{item.Label} shortcut");
                 AutomationProperties.SetHelpText(
                     box,
                     "Press the desired key combination. Clear the field to disable this shortcut.");
-                DockPanel.SetDock(box, Dock.Right);
                 row.Children.Add(box);
                 _shortcutBoxes[item.Key] = box;
-
-                row.Children.Add(new TextBlock
-                {
-                    Text = item.Label,
-                    Foreground = labelBrush,
-                    FontSize = 12,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    Margin = new Thickness(0, 0, 12, 0),
-                });
 
                 ShortcutsHost.Children.Add(row);
             }

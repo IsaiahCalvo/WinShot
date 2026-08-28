@@ -20,14 +20,10 @@ public partial class SettingsWindow : Window
 {
     private static SettingsWindow? _instance;
 
-    private static readonly SolidColorBrush ErrorBrush = new(Color.FromRgb(0xE8, 0x5C, 0x5C));
-    private static readonly SolidColorBrush NormalBorderBrush = new(Color.FromRgb(0x55, 0x55, 0x55));
-
-    static SettingsWindow()
-    {
-        ErrorBrush.Freeze();
-        NormalBorderBrush.Freeze();
-    }
+    /// <summary>The theme's error red (single shared instance, so ReferenceEquals
+    /// identifies borders we set). Restores go through ClearValue so the style's
+    /// hairline BorderBrush resumes instead of a hard-coded gray.</summary>
+    private static Brush ErrorBrush => (Brush)Application.Current.FindResource("AnnotationRedBrush");
 
     private readonly SettingsService _settings;
     private bool _saving;
@@ -804,7 +800,7 @@ public partial class SettingsWindow : Window
             else if (ReferenceEquals(box.BorderBrush, ErrorBrush))
             {
                 // Only clear marks we own (an error border with our conflict tooltip).
-                box.BorderBrush = NormalBorderBrush;
+                box.ClearValue(BorderBrushProperty);
                 box.ToolTip = null;
             }
         }
@@ -825,7 +821,7 @@ public partial class SettingsWindow : Window
     {
         foreach (var box in AllInputBoxes())
         {
-            box.BorderBrush = NormalBorderBrush;
+            box.ClearValue(BorderBrushProperty);
             box.ToolTip = null;
         }
     }

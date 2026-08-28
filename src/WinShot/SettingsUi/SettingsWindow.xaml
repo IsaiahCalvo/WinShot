@@ -12,8 +12,8 @@
             <Setter Property="Control.Template">
                 <Setter.Value>
                     <ControlTemplate>
-                        <Rectangle Margin="-3" StrokeThickness="2" StrokeDashArray="1,1"
-                                   Stroke="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
+                        <Rectangle Margin="-3" RadiusX="10" RadiusY="10" StrokeThickness="2"
+                                   Stroke="{StaticResource InfoBrush}"
                                    SnapsToDevicePixels="True"/>
                     </ControlTemplate>
                 </Setter.Value>
@@ -184,8 +184,8 @@
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
-                                <Setter Property="Foreground" Value="White"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

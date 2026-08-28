@@ -649,15 +649,24 @@
                     <Border x:Name="Bg" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
                         <Grid>
                             <Grid.ColumnDefinitions>
+                                <!-- Leading glyph column is always reserved so checked and
+                                     unchecked headers stay aligned. -->
+                                <ColumnDefinition Width="20"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <ContentPresenter Grid.Column="0" ContentSource="Header" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="{TemplateBinding InputGestureText}"
+                            <TextBlock x:Name="CheckGlyph" Grid.Column="0" Text="&#xE73E;"
+                                       FontFamily="{StaticResource IconFont}" FontSize="12"
+                                       VerticalAlignment="Center" Visibility="Hidden"/>
+                            <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}"
                                        Foreground="{StaticResource TextSecondaryBrush}" Margin="20,0,0,0"/>
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="CheckGlyph" Property="Visibility" Value="Visible"/>
+                        </Trigger>
                         <Trigger Property="IsHighlighted" Value="True">
                             <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
