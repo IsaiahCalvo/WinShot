@@ -116,8 +116,10 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
             using var brush = new SD.SolidBrush(fill);
             g.FillPath(brush, path);
             // The default button gets a soft accent outline instead of a fill change,
-            // so Enter's target reads without shouting.
-            if (_isDefault || Focused)
+            // so Enter's target reads without shouting. Plain focus only rings after
+            // actual keyboard navigation (ShowFocusCues) — otherwise the first button
+            // on a HUD silently holds focus and looks different from its siblings.
+            if (_isDefault || (Focused && ShowFocusCues))
             {
                 using var pen = new SD.Pen(SD.Color.FromArgb(150, ThemePalette.AccentHover), 1f);
                 g.DrawPath(pen, path);

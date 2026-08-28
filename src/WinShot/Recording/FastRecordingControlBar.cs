@@ -110,6 +110,9 @@ public sealed class FastRecordingControlBar : WF.Form
         row.Controls.Add(_cancel);
 
         Controls.Add(row);
+        // A form's Padding feeds AutoSize but does NOT position non-docked children —
+        // without this the row hugs the top-left and all the padding lands bottom-right.
+        row.Location = new SD.Point(S(14), S(8));
 
         MouseDown += OnDragMouseDown;
         row.MouseDown += OnDragMouseDown;
@@ -262,6 +265,8 @@ public sealed class FastRecordingControlBar : WF.Form
             FillColor = fillColor,
             Margin = new WF.Padding(S(3), 0, S(3), 0),
             Size = new SD.Size(Math.Max(S(54), (int)Math.Round(measured.Width * _scale) + S(28)), S(26)),
+            // A mouse HUD: nothing should silently hold keyboard focus and wear a ring.
+            TabStop = false,
             Text = text,
         };
     }

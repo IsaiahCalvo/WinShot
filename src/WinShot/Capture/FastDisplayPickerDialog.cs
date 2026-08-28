@@ -124,6 +124,9 @@ public sealed class FastDisplayPickerDialog : WF.Form
         panel.Controls.Add(bottom);
 
         Controls.Add(panel);
+        // A form's Padding feeds AutoSize but does NOT position non-docked children —
+        // without this the list hugs the top-left and all the padding lands bottom-right.
+        panel.Location = new SD.Point(S(18), S(18));
         AcceptButton = record;
         CancelButton = cancel;
 
