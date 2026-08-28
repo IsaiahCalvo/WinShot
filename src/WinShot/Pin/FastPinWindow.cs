@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using WinShot.Core;
+using WinShot.Overlay;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -45,8 +46,8 @@ public sealed class FastPinWindow : WF.Form
     private const int CascadeOffsetLogical = 24;
     private const int ReadoutDurationMs = 800;
 
-    private static readonly SD.Font ToolbarGlyphFont = ThemePalette.IconFont(10f);
-    private static readonly SD.Font LockBadgeFont = ThemePalette.IconFont(9f);
+    private const int ToolbarIconSizeLogical = 16;
+    private static readonly SD.Color PressedFill = SD.Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF);
 
     private static readonly List<FastPinWindow> OpenPins = new();
     private static int _openCount;
@@ -62,11 +63,16 @@ public sealed class FastPinWindow : WF.Form
     private readonly bool _roundedCorners;
     private readonly bool _shadow;
     private readonly bool _border;
+    private readonly QuickAccessOverlayVisuals _visuals =
+        QuickAccessOverlayThemePalette.For(QuickAccessOverlayThemePalette.Current);
+    private readonly WF.Timer _tooltipTimer = new() { Interval = 300 };
+    private QuickAccessTooltipWindow? _tooltipWindow;
     private double _scale;
     private bool _locked;
     private double _opacityBeforeLock = 1.0;
     private bool _mouseInside;
     private int _hoverButton = -1;
+    private int _pressedButton = -1;
     private int _focusButton = -1;
     private string? _readoutText;
     private SD.Point _readoutPoint;
@@ -99,7 +105,11 @@ public sealed class FastPinWindow : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        _menu = new WF.ContextMenuStrip();
+        _menu = new WF.ContextMenuStrip
+        {
+            Renderer = new DarkDropDown.DarkMenuRenderer(),
+            ShowImageMargin = false,
+        };
         var copyItem = new WF.ToolStripMenuItem("Copy", null, async (_, _) => await CopyAsync())
         {
             ToolTipText = "Copy the pinned screenshot to the clipboard",
@@ -122,10 +132,10 @@ public sealed class FastPinWindow : WF.Form
         ContextMenuStrip = _menu;
 
         // The hover toolbar reuses the exact actions the context menu already exposes.
-        _toolbarButtons.Add(new ToolbarButton("", "Copy", () => _ = CopyAsync()));
-        _toolbarButtons.Add(new ToolbarButton("", "Save", () => _ = SaveAsync()));
-        _toolbarButtons.Add(new ToolbarButton("", "Lock", () => SetLocked(!_locked)));
-        _toolbarButtons.Add(new ToolbarButton("", "Close", Close));
+        _toolbarButtons.Add(new ToolbarButton("quick-access-copy.svg", "Copy", () => _ = CopyAsync()));
+        _toolbarButtons.Add(new ToolbarButton("quick-access-save.svg", "Save", () => _ = SaveAsync()));
+        _toolbarButtons.Add(new ToolbarButton("quick-access-unlock.svg", "Lock", () => SetLocked(!_locked)));
+        _toolbarButtons.Add(new ToolbarButton("quick-access-close.svg", "Close", Close));
 
         var area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
         _scale = Math.Min(1.0, Math.Min(area.Width * 0.6 / _naturalWidth, area.Height * 0.6 / _naturalHeight));
@@ -140,7 +150,7 @@ public sealed class FastPinWindow : WF.Form
             DeviceDpi);
 
         MouseEnter += (_, _) => { _mouseInside = true; Invalidate(); };
-        MouseLeave += (_, _) => { _mouseInside = false; SetHoverButton(-1); Invalidate(); };
+        MouseLeave += (_, _) => { _mouseInside = false; SetHoverButton(-1); SetPressed(-1); Invalidate(); };
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
         MouseUp += OnMouseUp;
@@ -159,9 +169,12 @@ public sealed class FastPinWindow : WF.Form
             _readoutText = null;
             Invalidate();
         };
+        _tooltipTimer.Tick += (_, _) => ShowActionTooltip();
         Closed += (_, _) =>
         {
             _readoutTimer.Dispose();
+            HideActionTooltip();
+            _tooltipTimer.Dispose();
             OpenPins.Remove(this);
             _image.Dispose();
             MemoryCleanup.Request();
@@ -207,12 +220,10 @@ public sealed class FastPinWindow : WF.Form
             DrawWindowBorder(e.Graphics, border);
         }
 
+        // No accent outline on hover: the appearing toolbar itself is the hover signal,
+        // matching the Quick Access card's restrained hover language.
         if (ToolbarVisible)
-        {
-            using var pen = new SD.Pen(ThemePalette.Accent, Ui(1));
-            DrawWindowBorder(e.Graphics, pen);
             DrawToolbar(e.Graphics);
-        }
 
         if (_locked)
             DrawLockBadge(e.Graphics);
@@ -267,37 +278,51 @@ public sealed class FastPinWindow : WF.Form
         }
 
         for (int i = 0; i < _toolbarButtons.Count; i++)
-            DrawButton(g, ButtonBounds(i), GlyphFor(i), i == _hoverButton, i == _focusButton && ContainsFocus);
+            DrawButton(
+                g,
+                ButtonBounds(i),
+                IconAssetFor(i),
+                i == _hoverButton,
+                i == _pressedButton,
+                i == _focusButton && ContainsFocus);
     }
 
-    private string GlyphFor(int index)
+    private string IconAssetFor(int index)
     {
-        // The lock toggle reflects current state: closed padlock (E72E) when locked, open (E785) when unlocked.
+        // The lock toggle reflects current state: closed padlock when locked, open when unlocked.
         if (string.Equals(_toolbarButtons[index].Tip, "Lock", StringComparison.Ordinal))
-            return _locked ? "" : "";
-        return _toolbarButtons[index].Glyph;
+            return _locked ? "quick-access-lock.svg" : "quick-access-unlock.svg";
+        return _toolbarButtons[index].IconAsset;
     }
 
-    private static void DrawButton(SD.Graphics g, SD.Rectangle bounds, string glyph, bool hot, bool focused)
+    private void DrawButton(SD.Graphics g, SD.Rectangle bounds, string iconAsset, bool hot, bool pressed, bool focused)
     {
-        // Mirrors FastQuickActionsWindow.DrawButton: rest = dim glyph, hover = HoverFill circle.
-        if (hot)
+        // Mirrors FastQuickActionsWindow.DrawButton: rest = dim glyph, hover = HoverFill circle,
+        // pressed = one step brighter than hover.
+        if (hot || pressed)
         {
-            using var hover = new SD.SolidBrush(ThemePalette.HoverFill);
-            g.FillEllipse(hover, bounds);
+            using var fill = new SD.SolidBrush(pressed ? PressedFill : ThemePalette.HoverFill);
+            g.FillEllipse(fill, bounds);
         }
 
-        SD.Color glyphColor = hot ? ThemePalette.TextPrimary : ThemePalette.TextSecondary;
-        var flags = WF.TextFormatFlags.HorizontalCenter |
-                    WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine |
-                    WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(g, glyph, ToolbarGlyphFont, bounds, glyphColor, flags);
+        SD.Color glyphColor = hot || pressed ? ThemePalette.TextPrimary : ThemePalette.TextSecondary;
+        SD.Bitmap? icon = SvgIcons.Get(iconAsset, Ui(ToolbarIconSizeLogical), glyphColor);
+        if (icon is not null)
+        {
+            g.DrawImageUnscaled(
+                icon,
+                bounds.Left + (bounds.Width - icon.Width) / 2,
+                bounds.Top + (bounds.Height - icon.Height) / 2);
+        }
 
         if (focused)
         {
-            SD.Rectangle focus = SD.Rectangle.Inflate(bounds, -2, -2);
-            WF.ControlPaint.DrawFocusRectangle(g, focus, ThemePalette.TextPrimary, SD.Color.Transparent);
+            // Dotted ring following the circular button, like the card's DrawFocus.
+            using var pen = new SD.Pen(ThemePalette.TextPrimary, 1)
+            {
+                DashStyle = SD.Drawing2D.DashStyle.Dot,
+            };
+            g.DrawEllipse(pen, SD.Rectangle.Inflate(bounds, -2, -2));
         }
     }
 
@@ -310,11 +335,14 @@ public sealed class FastPinWindow : WF.Form
         g.FillEllipse(bg, badge);
         g.DrawEllipse(border, badge);
 
-        var flags = WF.TextFormatFlags.HorizontalCenter |
-                    WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine |
-                    WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(g, "", LockBadgeFont, badge, ThemePalette.TextPrimary, flags);
+        SD.Bitmap? icon = SvgIcons.Get("quick-access-lock.svg", Ui(12), ThemePalette.TextPrimary);
+        if (icon is not null)
+        {
+            g.DrawImageUnscaled(
+                icon,
+                badge.Left + (badge.Width - icon.Width) / 2,
+                badge.Top + (badge.Height - icon.Height) / 2);
+        }
     }
 
     private void DrawReadout(SD.Graphics g, string text, SD.Point near)
@@ -366,7 +394,55 @@ public sealed class FastPinWindow : WF.Form
         if (_hoverButton == index)
             return;
         _hoverButton = index;
+        _tooltipTimer.Stop();
+        HideActionTooltip();
+        if (index >= 0)
+            _tooltipTimer.Start();
         Invalidate(ToolbarBounds());
+    }
+
+    private void SetPressed(int index)
+    {
+        if (_pressedButton == index)
+            return;
+        _pressedButton = index;
+        Invalidate(ToolbarBounds());
+    }
+
+    private string TooltipTextFor(int index) => _toolbarButtons[index].Tip switch
+    {
+        "Copy" => "Copy (Ctrl+C)",
+        "Save" => "Save (Ctrl+S)",
+        "Lock" => _locked ? "Unlock — Ctrl+L" : "Lock (click-through) — Ctrl+L",
+        _ => _toolbarButtons[index].Tip,
+    };
+
+    private void ShowActionTooltip()
+    {
+        // Same 300ms labeling pattern as FastQuickActionsWindow.ShowActionTooltip.
+        _tooltipTimer.Stop();
+        if (IsDisposed || !Visible || !ToolbarVisible || _hoverButton < 0 || _hoverButton >= _toolbarButtons.Count)
+            return;
+
+        var tooltip = new QuickAccessTooltipWindow(TooltipTextFor(_hoverButton), _visuals, DeviceDpi);
+        _tooltipWindow = tooltip;
+        tooltip.FormClosed += (_, _) =>
+        {
+            if (ReferenceEquals(_tooltipWindow, tooltip))
+                _tooltipWindow = null;
+        };
+        tooltip.ShowBelow(this, RectangleToScreen(ButtonBounds(_hoverButton)));
+    }
+
+    private void HideActionTooltip()
+    {
+        QuickAccessTooltipWindow? tooltip = _tooltipWindow;
+        _tooltipWindow = null;
+        if (tooltip is null || tooltip.IsDisposed)
+            return;
+
+        tooltip.Close();
+        tooltip.Dispose();
     }
 
     // ----- Scale / layout ----------------------------------------------------
@@ -405,6 +481,7 @@ public sealed class FastPinWindow : WF.Form
         if (button >= 0)
         {
             FocusToolbarButton(button);
+            SetPressed(button);
             return;
         }
 
@@ -424,6 +501,7 @@ public sealed class FastPinWindow : WF.Form
         if (e.Button != WF.MouseButtons.Left)
             return;
 
+        SetPressed(-1);
         int index = HitTestButton(e.Location);
         if (index >= 0)
             _toolbarButtons[index].Action();
@@ -434,7 +512,7 @@ public sealed class FastPinWindow : WF.Form
         if ((ModifierKeys & WF.Keys.Control) == WF.Keys.Control)
         {
             Opacity = PinInteraction.AdjustOpacity(Opacity, e.Delta);
-            ShowReadout($"{(int)Math.Round(Opacity * 100)}%", PointToClient(WF.Cursor.Position));
+            ShowReadout($"Opacity {(int)Math.Round(Opacity * 100)}%", PointToClient(WF.Cursor.Position));
             return;
         }
 
@@ -895,9 +973,9 @@ public sealed class FastPinWindow : WF.Form
         };
     }
 
-    private sealed class ToolbarButton(string glyph, string tip, Action action)
+    private sealed class ToolbarButton(string iconAsset, string tip, Action action)
     {
-        public string Glyph { get; } = glyph;
+        public string IconAsset { get; } = iconAsset;
         public string Tip { get; } = tip;
         public string Help { get; } = tip switch
         {
