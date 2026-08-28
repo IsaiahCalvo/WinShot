@@ -15,11 +15,14 @@ internal static class DarkControlPalette
     public static readonly SD.Color TextMuted = ThemePalette.TextSecondary;
     public static readonly SD.Color Hairline = ThemePalette.Border;
 
+    // Clamp BOTH ends: a negative amount on a low channel (Accent's red is 0x0A)
+    // otherwise throws inside OnPaint, and WinForms brands the control with a
+    // permanent red-X placeholder after a single paint exception.
     public static SD.Color Lighten(SD.Color c, int amount) => SD.Color.FromArgb(
         c.A,
-        Math.Min(255, c.R + amount),
-        Math.Min(255, c.G + amount),
-        Math.Min(255, c.B + amount));
+        Math.Clamp(c.R + amount, 0, 255),
+        Math.Clamp(c.G + amount, 0, 255),
+        Math.Clamp(c.B + amount, 0, 255));
 }
 
 /// <summary>
