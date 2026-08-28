@@ -8,30 +8,27 @@ namespace WinShot.Recording;
 
 public sealed class FastRecordingControlBar : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color ButtonBack = SD.Color.FromArgb(58, 58, 58);
-    private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
+    private static readonly SD.Color Back = ThemePalette.ToolbarBg;
+    private static readonly SD.Color ButtonBack = ThemePalette.SurfaceAlt;
     private static readonly SD.Color StopBack = ThemePalette.Accent;
-    private static readonly SD.Color StopHot = ThemePalette.AccentHover;
-    private static readonly SD.Color RecordingRed = SD.Color.FromArgb(255, 82, 82);
-    private static readonly SD.Color PausedAmber = SD.Color.FromArgb(255, 176, 32);
-    // Translucent light hairline for the CleanShot panel look.
-    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
+    private static readonly SD.Color RecordingRed = ThemePalette.Red;
+    private static readonly SD.Color PausedAmber = ThemePalette.Warn;
 
     private readonly Stopwatch _elapsed = new();
-    private readonly WF.Timer _timer = new() { Interval = 250 };
+    // 50ms is fast enough for a smooth breathing pulse without holding the
+    // high-resolution clock for the whole recording.
+    private readonly WF.Timer _timer = new() { Interval = 50 };
     private readonly DotControl _dot;
     private readonly WF.Label _elapsedText;
-    private readonly WF.Button _pause;
-    private readonly WF.Button _restart;
-    private readonly WF.Button _stop;
-    private readonly WF.Button _cancel;
+    private readonly DarkButton _pause;
+    private readonly DarkButton _restart;
+    private readonly DarkButton _stop;
+    private readonly DarkButton _cancel;
     private readonly SD.Rectangle? _recordingRegion;
     private readonly bool _showTimer;
     private readonly double _scale;
     private bool _actionTaken;
     private bool _paused;
-    private bool _pulseDim;
 
     public FastRecordingControlBar(SD.Rectangle? recordingRegion = null, bool showTimer = true)
     {
@@ -96,20 +93,19 @@ public sealed class FastRecordingControlBar : WF.Form
         _elapsedText.Visible = showTimer;
         row.Controls.Add(_elapsedText);
 
-        _pause = Button("Pause", ButtonBack, ButtonHot);
-        _pause.Width = S(66); // sized for its wider "Resume" state
+        _pause = Button("Pause", ButtonBack, widthFor: "Resume");
         _pause.Click += (_, _) => TogglePause();
         row.Controls.Add(_pause);
 
-        _restart = Button("Restart", ButtonBack, ButtonHot);
+        _restart = Button("Restart", ButtonBack);
         _restart.Click += (_, _) => RaiseOnce(RestartRequested);
         row.Controls.Add(_restart);
 
-        _stop = Button("Stop", StopBack, StopHot);
+        _stop = Button("Stop", StopBack);
         _stop.Click += (_, _) => RaiseOnce(StopRequested);
         row.Controls.Add(_stop);
 
-        _cancel = Button("Cancel", ButtonBack, ButtonHot);
+        _cancel = Button("Cancel", ButtonBack);
         _cancel.Click += (_, _) => RaiseOnce(CancelRequested);
         row.Controls.Add(_cancel);
 
@@ -124,11 +120,14 @@ public sealed class FastRecordingControlBar : WF.Form
         };
         _timer.Tick += (_, _) =>
         {
-            _elapsedText.Text = FormatElapsed(_elapsed.Elapsed);
-            _pulseDim = !_pulseDim;
+            string elapsed = FormatElapsed(_elapsed.Elapsed);
+            if (_elapsedText.Text != elapsed)
+                _elapsedText.Text = elapsed;
+            // Eased breathing instead of a binary blink: alpha rides a 1.6s sine.
+            double wave = (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 1600.0)) / 2;
             _dot.DotColor = _paused
                 ? PausedAmber
-                : (_pulseDim ? SD.Color.FromArgb(130, RecordingRed) : RecordingRed);
+                : SD.Color.FromArgb(120 + (int)Math.Round(135 * wave), RecordingRed);
         };
     }
 
@@ -162,8 +161,7 @@ public sealed class FastRecordingControlBar : WF.Form
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        PopupChrome.DrawBorder(e.Graphics, ClientSize, Height / 2);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -232,9 +230,7 @@ public sealed class FastRecordingControlBar : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(36), S(36));
-        Region = SD.Region.FromHrgn(regionHandle);
-        Native.DeleteObject(regionHandle);
+        PopupChrome.ApplyRegion(this, Height / 2); // full capsule
     }
 
     private void ExcludeFromCapture()
@@ -252,23 +248,22 @@ public sealed class FastRecordingControlBar : WF.Form
 
     private int S(int logical) => (int)Math.Round(logical * _scale);
 
-    private WF.Button Button(string text, SD.Color backColor, SD.Color hotColor)
+    private DarkButton Button(string text, SD.Color fillColor, string? widthFor = null)
     {
-        var button = new WF.Button
+        // Width from measured content, not label length, so padding stays uniform
+        // (widthFor sizes for the button's widest state, e.g. Pause -> Resume).
+        SD.Size measured = WF.TextRenderer.MeasureText(
+            widthFor ?? text, WF.Control.DefaultFont);
+        return new DarkButton
         {
-            AutoSize = false,
-            BackColor = backColor,
-            Cursor = WF.Cursors.Hand,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = SD.Color.White,
+            Scale = _scale,
+            BackColor = Back,
+            CornerRadius = 13,
+            FillColor = fillColor,
             Margin = new WF.Padding(S(3), 0, S(3), 0),
-            Size = new SD.Size(S(text.Length > 5 ? 64 : 54), S(26)),
+            Size = new SD.Size(Math.Max(S(54), (int)Math.Round(measured.Width * _scale) + S(28)), S(26)),
             Text = text,
-            UseVisualStyleBackColor = false,
         };
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = hotColor;
-        return button;
     }
 
     private sealed class DotControl : WF.Control

@@ -11,10 +11,9 @@ public sealed class FastQuickPreviewWindow : WF.Form
     private static readonly string[] PreviewableExtensions =
         { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp" };
 
-    private static readonly SD.Color Back = SD.Color.FromArgb(30, 30, 30);
-    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
-    private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Color MutedText = SD.Color.FromArgb(187, 187, 187);
+    private static readonly SD.Color Back = ThemePalette.ToolbarBg;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
+    private static readonly SD.Color MutedText = ThemePalette.TextSecondary;
 
     private readonly string _filePath;
     private readonly bool _looksLikeImage;
@@ -99,8 +98,17 @@ public sealed class FastQuickPreviewWindow : WF.Form
             DrawFallback(e.Graphics, content);
         }
 
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        PopupChrome.DrawBorder(e.Graphics, ClientSize, 14);
+    }
+
+    protected override WF.CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW, matching the Quick Access card
+            return cp;
+        }
     }
 
     private SD.Size CalculateSize()
@@ -146,8 +154,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        using var path = GdiPaths.RoundedRect(new SD.Rectangle(0, 0, Width, Height), 10);
-        Region = new SD.Region(path);
+        PopupChrome.ApplyRegion(this, 14);
     }
 
     private void CloseOnce()

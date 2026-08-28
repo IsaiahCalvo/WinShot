@@ -7,11 +7,10 @@ namespace WinShot.Capture;
 
 public sealed class FastDisplayPickerDialog : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color ButtonBack = SD.Color.FromArgb(58, 58, 58);
-    private static readonly SD.Color ButtonHot = SD.Color.FromArgb(79, 79, 79);
+    private static readonly SD.Color Back = ThemePalette.ToolbarBg;
+    private static readonly SD.Color ButtonBack = ThemePalette.SurfaceAlt;
     private static readonly SD.Color Accent = ThemePalette.Accent;
-    private static readonly SD.Color TextColor = SD.Color.White;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
     // the cursor monitor or labels truncate on 125%/150% displays.
@@ -57,10 +56,13 @@ public sealed class FastDisplayPickerDialog : WF.Form
 
         var screens = WF.Screen.AllScreens;
         var selected = new HashSet<int>();
-        var displayButtons = new WF.Button[screens.Length];
-        WF.Button record = Button("Record", 74, ButtonBack);
+        DarkButton record = Button("Record", 74, ButtonBack);
         record.Enabled = false;
-        record.EnabledChanged += (_, _) => record.BackColor = record.Enabled ? Accent : ButtonBack;
+        record.EnabledChanged += (_, _) =>
+        {
+            record.FillColor = record.Enabled ? Accent : ButtonBack;
+            record.Invalidate();
+        };
 
         for (int i = 0; i < screens.Length; i++)
         {
@@ -68,17 +70,17 @@ public sealed class FastDisplayPickerDialog : WF.Form
             var screen = screens[i];
             var bounds = screen.Bounds;
             var button = Button(
-                $"Display {i + 1}{(screen.Primary ? " (primary)" : "")} - {bounds.Width}x{bounds.Height}",
+                $"Display {i + 1}{(screen.Primary ? " · primary" : "")} · {bounds.Width}×{bounds.Height}",
                 260,
                 ButtonBack);
             button.Click += (_, _) =>
             {
                 if (!selected.Add(index))
                     selected.Remove(index);
-                button.BackColor = selected.Contains(index) ? Accent : ButtonBack;
+                button.FillColor = selected.Contains(index) ? Accent : ButtonBack;
+                button.Invalidate();
                 record.Enabled = selected.Count > 0;
             };
-            displayButtons[i] = button;
             panel.Controls.Add(button);
         }
 
@@ -177,37 +179,41 @@ public sealed class FastDisplayPickerDialog : WF.Form
         UpdateWindowRegion();
     }
 
+    protected override WF.CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW, matching the Quick Access card
+            return cp;
+        }
+    }
+
+    protected override void OnPaint(WF.PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        PopupChrome.DrawBorder(e.Graphics, ClientSize, S(14));
+    }
+
     private void UpdateWindowRegion()
     {
-        if (Width <= 0 || Height <= 0)
-            return;
-
-        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(20), S(20));
-        Region = SD.Region.FromHrgn(regionHandle);
-        Native.DeleteObject(regionHandle);
+        PopupChrome.ApplyRegion(this, S(14));
     }
 
-    private WF.Button Button(string text, int width, SD.Color backColor)
-    {
-        var button = new WF.Button
+    private DarkButton Button(string text, int width, SD.Color fillColor) =>
+        new()
         {
-            AutoSize = false,
-            BackColor = backColor,
-            Cursor = WF.Cursors.Hand,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = TextColor,
+            Scale = _scale,
+            BackColor = Back,
+            CornerRadius = 8,
+            FillColor = fillColor,
             Height = S(30),
             Margin = new WF.Padding(0, 0, 0, S(6)),
-            Padding = new WF.Padding(S(8), 0, 0, 0),
+            Padding = new WF.Padding(S(10), 0, 0, 0),
             Text = text,
             TextAlign = SD.ContentAlignment.MiddleLeft,
-            UseVisualStyleBackColor = false,
             Width = S(width),
         };
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = ButtonHot;
-        return button;
-    }
 
     private static class Native
     {

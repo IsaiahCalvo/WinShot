@@ -6,23 +6,23 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Recording;
 
-public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
+public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingOverlay
 {
     private const int MaxRunLength = 18;
     private const int VisibleMs = 1500;
     private const int FadeMs = 350;
     private static readonly TimeSpan AppendWindow = TimeSpan.FromSeconds(1.2);
-    private static readonly SD.Color TransparentKey = SD.Color.Magenta;
-    private static readonly SD.Color PillBack = SD.Color.FromArgb(30, 30, 30);
-    private static readonly SD.Color PillBorder = SD.Color.FromArgb(54, 255, 255, 255);
-    private static readonly SD.Color TextColor = SD.Color.White;
+    private static readonly SD.Color PillBack = ThemePalette.ToolbarBg;
+    private static readonly SD.Color PillBorder = ThemePalette.BorderStrong;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
 
     private readonly SD.Rectangle _regionPx;
     private readonly HookProc _hookProc;
     private readonly bool _installHook;
     private readonly WF.Timer _timer = new() { Interval = WinShot.Core.Motion.FrameIntervalMs };
     private IDisposable? _motionClock;
-    private readonly SD.Font _font = new("Segoe UI Semibold", 15f, SD.FontStyle.Bold);
+    private readonly double _scale;
+    private readonly SD.Font _font;
     private IntPtr _hook;
     private volatile bool _paused;
 
@@ -41,34 +41,19 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
     public static FastKeystrokeOverlayWindow CreateForSmokeTest(SD.Rectangle regionScreenPx) =>
         new(regionScreenPx, installHook: false);
 
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     private FastKeystrokeOverlayWindow(SD.Rectangle regionScreenPx, bool installHook)
     {
         _regionPx = regionScreenPx;
         _installHook = installHook;
         _hookProc = KeyboardHookCallback;
-
-        int stripHeight = Math.Min(Math.Max(1, regionScreenPx.Height), 160);
-        AutoScaleMode = WF.AutoScaleMode.None;
-        BackColor = TransparentKey;
-        ClientSize = new SD.Size(Math.Max(1, regionScreenPx.Width), stripHeight);
-        DoubleBuffered = true;
-        FormBorderStyle = WF.FormBorderStyle.None;
-        ShowInTaskbar = false;
-        StartPosition = WF.FormStartPosition.Manual;
-        TopMost = true;
-        TransparencyKey = TransparentKey;
-
-        SetStyle(
-            WF.ControlStyles.AllPaintingInWmPaint |
-            WF.ControlStyles.OptimizedDoubleBuffer |
-            WF.ControlStyles.ResizeRedraw |
-            WF.ControlStyles.UserPaint,
-            true);
+        _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
+        // Pixel-unit font so the glyphs scale with the pill box, not the monitor DPI.
+        _font = new SD.Font("Segoe UI", S(20), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
 
         _timer.Tick += (_, _) => AdvanceFade();
     }
-
-    protected override bool ShowWithoutActivation => true;
 
     public void SetPaused(bool paused)
     {
@@ -78,15 +63,14 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
             StopMotion();
             _opacity = 0;
             _runAppendable = false;
-            Invalidate();
+            PresentEmpty();
         }
     }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        MakeClickThrough();
-        PositionOverRegion();
+        PresentEmpty();
         if (_installHook)
             InstallHook();
     }
@@ -100,37 +84,49 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
         base.OnClosed(e);
     }
 
-    protected override void OnPaint(WF.PaintEventArgs e)
+    /// <summary>Draws the pill into an ARGB frame and presents it bottom-center of the
+    /// recorded region. The fade lives in the bitmap's alpha, so anti-aliased edges and
+    /// the fading pill blend against the real desktop.</summary>
+    private void RenderFrame()
     {
-        base.OnPaint(e);
         if (_opacity <= 0 || string.IsNullOrEmpty(_run))
+        {
+            PresentEmpty();
             return;
+        }
 
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         SD.Size textSize = WF.TextRenderer.MeasureText(_run, _font);
-        int width = Math.Min(Width - 16, Math.Max(74, textSize.Width + 32));
-        int height = 36;
-        int x = Math.Max(8, (Width - width) / 2);
-        int y = Math.Max(0, Height - height - 14);
-        int alpha = (int)Math.Round(230 * _opacity);
-        using var path = GdiPaths.RoundedRect(new SD.Rectangle(x, y, width, height), 17);
-        using var brush = new SD.SolidBrush(SD.Color.FromArgb(alpha, PillBack));
-        using var pen = new SD.Pen(SD.Color.FromArgb((int)Math.Round(54 * _opacity), PillBorder), 1);
-        e.Graphics.FillPath(brush, path);
-        e.Graphics.DrawPath(pen, path);
+        int height = S(36);
+        int width = Math.Min(Math.Max(16, _regionPx.Width - S(16)), Math.Max(S(74), textSize.Width + S(32)));
+        using var frame = new SD.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(frame))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            int fillAlpha = (int)Math.Round(235 * _opacity);
+            using var path = GdiPaths.RoundedRect(new SD.Rectangle(0, 0, width - 1, height - 1), height / 2);
+            using var brush = new SD.SolidBrush(SD.Color.FromArgb(fillAlpha, PillBack));
+            using var pen = new SD.Pen(SD.Color.FromArgb((int)Math.Round(PillBorder.A * _opacity), PillBorder), 1);
+            g.FillPath(brush, path);
+            g.DrawPath(pen, path);
 
-        var textBounds = new SD.Rectangle(x + 16, y + 7, width - 32, height - 14);
-        var flags = WF.TextFormatFlags.HorizontalCenter |
-                    WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine |
-                    WF.TextFormatFlags.EndEllipsis;
-        WF.TextRenderer.DrawText(
-            e.Graphics,
-            _run,
-            _font,
-            textBounds,
-            SD.Color.FromArgb((int)Math.Round(255 * _opacity), TextColor),
-            flags);
+            var textBounds = new SD.Rectangle(S(16), 0, width - S(32), height);
+            var flags = WF.TextFormatFlags.HorizontalCenter |
+                        WF.TextFormatFlags.VerticalCenter |
+                        WF.TextFormatFlags.SingleLine |
+                        WF.TextFormatFlags.EndEllipsis;
+            WF.TextRenderer.DrawText(
+                g,
+                _run,
+                _font,
+                textBounds,
+                SD.Color.FromArgb((int)Math.Round(255 * _opacity), TextColor),
+                flags);
+        }
+
+        var at = new SD.Point(
+            _regionPx.X + Math.Max(0, (_regionPx.Width - width) / 2),
+            Math.Max(_regionPx.Y, _regionPx.Bottom - height - S(14)));
+        Present(frame, at);
     }
 
     private void AdvanceFade()
@@ -148,7 +144,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
                 StopMotion();
         }
 
-        Invalidate();
+        RenderFrame();
     }
 
     private void OnKeyEvent(bool down, int vk)
@@ -197,7 +193,7 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
         _opacity = 1;
         if (!_timer.Enabled)
             StartMotion();
-        Invalidate();
+        RenderFrame();
     }
 
     private static (string Text, bool Appendable) BuildDisplay(int vk)
@@ -300,25 +296,6 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
         };
     }
 
-    private void MakeClickThrough()
-    {
-        int style = GetWindowLongW(Handle, GwlExstyle);
-        SetWindowLongW(Handle, GwlExstyle, style | WsExTransparent | WsExNoActivate | WsExToolWindow);
-    }
-
-    private void PositionOverRegion()
-    {
-        int stripHeight = Math.Min(_regionPx.Height, 160);
-        SetWindowPos(
-            Handle,
-            HwndTopmost,
-            _regionPx.X,
-            _regionPx.Bottom - stripHeight,
-            _regionPx.Width,
-            stripHeight,
-            SwpNoActivate);
-    }
-
     private void InstallHook()
     {
         _hook = SetWindowsHookExW(WhKeyboardLl, _hookProc, GetModuleHandleW(null), 0);
@@ -357,12 +334,6 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
     private const int WmKeyUp = 0x0101;
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
-    private const int GwlExstyle = -20;
-    private const int WsExTransparent = 0x00000020;
-    private const int WsExToolWindow = 0x00000080;
-    private const int WsExNoActivate = 0x08000000;
-    private const uint SwpNoActivate = 0x0010;
-    private static readonly IntPtr HwndTopmost = new(-1);
 
     private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -390,15 +361,6 @@ public sealed class FastKeystrokeOverlayWindow : WF.Form, IRecordingOverlay
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
-
-    [DllImport("user32.dll")]
-    private static extern int GetWindowLongW(IntPtr hWnd, int nIndex);
-
-    [DllImport("user32.dll")]
-    private static extern int SetWindowLongW(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
     /// <summary>
     /// Animation ticks only land on time while the high-resolution clock is held, so it is

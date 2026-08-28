@@ -44,7 +44,7 @@ public sealed class FastRecordingDimOverlay : IDisposable
         foreach (WF.Screen screen in WF.Screen.AllScreens)
         {
             foreach (SD.Rectangle rect in RecordingDimOverlayLayout.OutsideRecordingArea(screen.Bounds, recordingArea))
-                _surfaces.Add(new DimSurface(rect));
+                _surfaces.Add(new DimSurface(rect, recordingArea));
         }
     }
 
@@ -66,11 +66,15 @@ public sealed class FastRecordingDimOverlay : IDisposable
 
     private sealed class DimSurface : WF.Form
     {
-        public DimSurface(SD.Rectangle bounds)
+        private readonly SD.Rectangle _recordingArea;
+
+        public DimSurface(SD.Rectangle bounds, SD.Rectangle recordingArea)
         {
+            _recordingArea = recordingArea;
             AutoScaleMode = WF.AutoScaleMode.None;
             BackColor = SD.Color.Black;
             Bounds = bounds;
+            DoubleBuffered = true;
             FormBorderStyle = WF.FormBorderStyle.None;
             Opacity = 0.36;
             ShowInTaskbar = false;
@@ -79,6 +83,33 @@ public sealed class FastRecordingDimOverlay : IDisposable
         }
 
         protected override bool ShowWithoutActivation => true;
+
+        /// <summary>
+        /// Marks the recorded rectangle's edge with a crisp accent line wherever this
+        /// dim band abuts it, so the user can see exactly what is being captured. The
+        /// line lives on the dim window — outside the recorded pixels — and the surface
+        /// is capture-excluded anyway, so the recording stays clean. (Opacity applies,
+        /// so the pen is drawn strong to survive the 36% window alpha.)
+        /// </summary>
+        protected override void OnPaint(WF.PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            SD.Rectangle r = Bounds;
+            SD.Rectangle rec = _recordingArea;
+            int left = Math.Max(r.Left, rec.Left) - r.Left;
+            int right = Math.Min(r.Right, rec.Right) - r.Left;
+            int top = Math.Max(r.Top, rec.Top) - r.Top;
+            int bottom = Math.Min(r.Bottom, rec.Bottom) - r.Top;
+            using var pen = new SD.Pen(ThemePalette.Accent, 2);
+            if (r.Bottom == rec.Top && right > left) // band above the recording
+                e.Graphics.DrawLine(pen, left, Height - 1, right, Height - 1);
+            if (r.Top == rec.Bottom && right > left) // band below
+                e.Graphics.DrawLine(pen, left, 0, right, 0);
+            if (r.Right == rec.Left && bottom > top) // band to the left
+                e.Graphics.DrawLine(pen, Width - 1, top, Width - 1, bottom);
+            if (r.Left == rec.Right && bottom > top) // band to the right
+                e.Graphics.DrawLine(pen, 0, top, 0, bottom);
+        }
 
         protected override WF.CreateParams CreateParams
         {

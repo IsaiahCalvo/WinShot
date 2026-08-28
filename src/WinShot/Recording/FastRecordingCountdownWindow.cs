@@ -8,7 +8,7 @@ namespace WinShot.Recording;
 
 public sealed class FastRecordingCountdownWindow : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
+    private static readonly SD.Color Back = ThemePalette.ToolbarBg;
     private static readonly SD.Color Ring = ThemePalette.Accent;
     private static readonly SD.Color TextColor = SD.Color.White;
     // Light enough to pass 4.5:1 on the #2B2B2B card (136 gray failed contrast).
@@ -93,7 +93,8 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         using var ring = new SD.Pen(Ring, Math.Max(3, S(3)));
         e.Graphics.DrawEllipse(ring, 2, 2, Width - 5, Height - 5);
 
-        using var countFont = new SD.Font("Segoe UI Semibold", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        // Real bold face, not faux-bold synthesized over Semibold.
+        using var countFont = new SD.Font("Segoe UI", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
         using var hintFont = new SD.Font("Segoe UI", 11f, SD.FontStyle.Regular, SD.GraphicsUnit.Point);
         var countText = _remaining.ToString();
         var flags = WF.TextFormatFlags.HorizontalCenter |
@@ -109,7 +110,7 @@ public sealed class FastRecordingCountdownWindow : WF.Form
             flags);
         WF.TextRenderer.DrawText(
             e.Graphics,
-            "Esc to cancel",
+            "Click or Esc to cancel",
             hintFont,
             new SD.Rectangle(0, Height - S(42), Width, S(24)),
             MutedText,

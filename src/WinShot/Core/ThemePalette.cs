@@ -24,6 +24,11 @@ public static class ThemePalette
     public static readonly SD.Color Accent = SD.Color.FromArgb(0x0A, 0x84, 0xFF);
     public static readonly SD.Color AccentHover = SD.Color.FromArgb(0x40, 0x9C, 0xFF);
 
+    // Status colors, paired with the system-blue identity (macOS system red/orange).
+    // Red doubles as the recording dot and destructive actions; Warn as paused/warning.
+    public static readonly SD.Color Red = SD.Color.FromArgb(0xFF, 0x45, 0x3A);
+    public static readonly SD.Color Warn = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
+
     // Text.
     public static readonly SD.Color TextPrimary = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
     public static readonly SD.Color TextSecondary = SD.Color.FromArgb(0xB8, 0xB8, 0xBC);

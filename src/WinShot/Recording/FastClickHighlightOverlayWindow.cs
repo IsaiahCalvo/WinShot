@@ -6,11 +6,10 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Recording;
 
-public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
+public sealed class FastClickHighlightOverlayWindow : AlphaOverlayWindow, IRecordingOverlay
 {
     private const int MaxConcurrentRings = 24;
     private const int RingLifetimeMs = 450;
-    private static readonly SD.Color TransparentKey = SD.Color.Magenta;
     private static readonly SD.Color RingColor = ThemePalette.Accent;
 
     private readonly SD.Rectangle _regionPx;
@@ -19,6 +18,7 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
     private readonly List<Ring> _rings = new(MaxConcurrentRings);
     private readonly WF.Timer _timer = new() { Interval = WinShot.Core.Motion.FrameIntervalMs };
     private IDisposable? _motionClock;
+    private readonly double _scale;
     private IntPtr _hook;
     private volatile bool _paused;
 
@@ -35,28 +35,12 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
         _regionPx = regionScreenPx;
         _installHook = installHook;
         _hookProc = MouseHookCallback;
-
-        AutoScaleMode = WF.AutoScaleMode.None;
-        BackColor = TransparentKey;
-        ClientSize = new SD.Size(Math.Max(1, regionScreenPx.Width), Math.Max(1, regionScreenPx.Height));
-        DoubleBuffered = true;
-        FormBorderStyle = WF.FormBorderStyle.None;
-        ShowInTaskbar = false;
-        StartPosition = WF.FormStartPosition.Manual;
-        TopMost = true;
-        TransparencyKey = TransparentKey;
-
-        SetStyle(
-            WF.ControlStyles.AllPaintingInWmPaint |
-            WF.ControlStyles.OptimizedDoubleBuffer |
-            WF.ControlStyles.ResizeRedraw |
-            WF.ControlStyles.UserPaint,
-            true);
+        _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
 
         _timer.Tick += (_, _) => AdvanceRings();
     }
 
-    protected override bool ShowWithoutActivation => true;
+    private int S(int logical) => (int)Math.Round(logical * _scale);
 
     public void SetPaused(bool paused)
     {
@@ -64,15 +48,14 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
         if (paused)
         {
             _rings.Clear();
-            Invalidate();
+            PresentEmpty();
         }
     }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        MakeClickThrough();
-        PositionOverRegion();
+        PresentEmpty();
         if (_installHook)
             InstallHook();
     }
@@ -85,31 +68,59 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
         base.OnClosed(e);
     }
 
-    protected override void OnPaint(WF.PaintEventArgs e)
+    /// <summary>
+    /// Draws the live rings into one ARGB frame covering their union and presents it,
+    /// so the eased accent fade blends against the real desktop (the old magenta-key
+    /// window turned every semi-transparent ring pixel purple in recordings).
+    /// </summary>
+    private void RenderFrame()
     {
-        base.OnPaint(e);
         if (_rings.Count == 0)
-            return;
-
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        long now = Environment.TickCount64;
-        foreach (var ring in _rings.ToArray())
         {
-            double progress = Math.Clamp((now - ring.StartMs) / (double)RingLifetimeMs, 0, 1);
-            double eased = 1 - Math.Pow(1 - progress, 2);
-            float size = (float)(44 * (0.25 + 0.75 * eased));
-            int alpha = (int)Math.Round(242 * (1 - progress));
-            if (alpha <= 0)
-                continue;
-
-            using var pen = new SD.Pen(SD.Color.FromArgb(alpha, RingColor), 3);
-            e.Graphics.DrawEllipse(
-                pen,
-                ring.X - size / 2,
-                ring.Y - size / 2,
-                size,
-                size);
+            PresentEmpty();
+            return;
         }
+
+        int maxRing = S(44) + 8;
+        long now = Environment.TickCount64;
+
+        SD.Rectangle union = SD.Rectangle.Empty;
+        foreach (var ring in _rings)
+        {
+            var bounds = new SD.Rectangle(ring.X - maxRing / 2, ring.Y - maxRing / 2, maxRing, maxRing);
+            union = union.IsEmpty ? bounds : SD.Rectangle.Union(union, bounds);
+        }
+        union.Intersect(new SD.Rectangle(0, 0, _regionPx.Width, _regionPx.Height));
+        if (union.Width <= 0 || union.Height <= 0)
+        {
+            PresentEmpty();
+            return;
+        }
+
+        using var frame = new SD.Bitmap(union.Width, union.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(frame))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (var ring in _rings)
+            {
+                double progress = Math.Clamp((now - ring.StartMs) / (double)RingLifetimeMs, 0, 1);
+                double eased = 1 - Math.Pow(1 - progress, 2);
+                float size = (float)(S(44) * (0.25 + 0.75 * eased));
+                int alpha = (int)Math.Round(242 * (1 - progress));
+                if (alpha <= 0)
+                    continue;
+
+                using var pen = new SD.Pen(SD.Color.FromArgb(alpha, RingColor), Math.Max(3f, (float)(3 * _scale)));
+                g.DrawEllipse(
+                    pen,
+                    ring.X - union.X - size / 2,
+                    ring.Y - union.Y - size / 2,
+                    size,
+                    size);
+            }
+        }
+
+        Present(frame, new SD.Point(_regionPx.X + union.X, _regionPx.Y + union.Y));
     }
 
     private void AdvanceRings()
@@ -118,7 +129,7 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
         _rings.RemoveAll(r => now - r.StartMs >= RingLifetimeMs);
         if (_rings.Count == 0)
             StopMotion();
-        Invalidate();
+        RenderFrame();
     }
 
     private void AddRing(int screenX, int screenY)
@@ -131,18 +142,7 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
         _rings.Add(new Ring(screenX - _regionPx.X, screenY - _regionPx.Y, Environment.TickCount64));
         if (!_timer.Enabled)
             StartMotion();
-        Invalidate();
-    }
-
-    private void MakeClickThrough()
-    {
-        int style = GetWindowLongW(Handle, GwlExstyle);
-        SetWindowLongW(Handle, GwlExstyle, style | WsExTransparent | WsExNoActivate | WsExToolWindow);
-    }
-
-    private void PositionOverRegion()
-    {
-        SetWindowPos(Handle, HwndTopmost, _regionPx.X, _regionPx.Y, _regionPx.Width, _regionPx.Height, SwpNoActivate);
+        RenderFrame();
     }
 
     private void InstallHook()
@@ -184,12 +184,6 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
     private const int WmLButtonDown = 0x0201;
     private const int WmRButtonDown = 0x0204;
     private const int WmMButtonDown = 0x0207;
-    private const int GwlExstyle = -20;
-    private const int WsExTransparent = 0x00000020;
-    private const int WsExToolWindow = 0x00000080;
-    private const int WsExNoActivate = 0x08000000;
-    private const uint SwpNoActivate = 0x0010;
-    private static readonly IntPtr HwndTopmost = new(-1);
 
     private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -214,15 +208,6 @@ public sealed class FastClickHighlightOverlayWindow : WF.Form, IRecordingOverlay
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandleW(string? lpModuleName);
-
-    [DllImport("user32.dll")]
-    private static extern int GetWindowLongW(IntPtr hWnd, int nIndex);
-
-    [DllImport("user32.dll")]
-    private static extern int SetWindowLongW(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
     /// <summary>
     /// Animation ticks only land on time while the high-resolution clock is held, so it is

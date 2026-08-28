@@ -57,7 +57,7 @@ public static class VideoThumbnail
     {
         var bmp = new SD.Bitmap(320, 180);
         using var g = SD.Graphics.FromImage(bmp);
-        g.Clear(SD.Color.FromArgb(35, 35, 38));
+        g.Clear(ThemePalette.WindowBg);
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using var brush = new SD.SolidBrush(SD.Color.FromArgb(120, 255, 255, 255));
         g.FillPolygon(brush, new[] { new SD.Point(140, 60), new SD.Point(140, 120), new SD.Point(190, 90) });

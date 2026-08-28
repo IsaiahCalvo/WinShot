@@ -8,14 +8,12 @@ namespace WinShot.Recording;
 
 public sealed class FastRecordingOptionsDialog : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(43, 43, 43);
-    private static readonly SD.Color FieldBack = SD.Color.FromArgb(58, 58, 58);
-    private static readonly SD.Color TextColor = SD.Color.White;
-    private static readonly SD.Color MutedText = SD.Color.FromArgb(220, 220, 220);
+    private static readonly SD.Color Back = ThemePalette.ToolbarBg;
+    private static readonly SD.Color FieldBack = ThemePalette.SurfaceAlt;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
+    private static readonly SD.Color MutedText = ThemePalette.TextSecondary;
     private static readonly SD.Color HintText = SD.Color.FromArgb(170, 170, 170);
     private static readonly SD.Color Accent = ThemePalette.Accent;
-    // Translucent light hairline for the CleanShot panel look.
-    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
 
     // Design-unit layout grid (96-DPI logical pixels, scaled by _scale everywhere).
     private const int DialogWidth = 286;
@@ -24,18 +22,17 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private const int FieldX = 120;
     private const int FieldWidth = 148;
 
-    private readonly WF.RadioButton _mp4Radio;
-    private readonly WF.RadioButton _gifRadio;
+    private readonly DarkSegmented _format;
     private readonly WF.CheckBox _audioCheck;
     private readonly WF.Label _micDeviceLabel;
-    private readonly WF.ComboBox _micDeviceCombo;
+    private readonly DarkDropDown _micDeviceCombo;
     private readonly WF.CheckBox _systemAudioCheck;
     private readonly WF.Label _webcamLabel;
-    private readonly WF.ComboBox _webcamCombo;
+    private readonly DarkDropDown _webcamCombo;
     private readonly WF.Label _webcamDeviceLabel;
-    private readonly WF.ComboBox _webcamDeviceCombo;
+    private readonly DarkDropDown _webcamDeviceCombo;
     private readonly WF.Label _webcamSizeLabel;
-    private readonly WF.TextBox _webcamSizeBox;
+    private readonly DarkNumberBox _webcamSizeBox;
     private readonly WF.Label _webcamSizeHint;
 
     // DeviceName values parallel to the combo items (index 0 = "Default", which
@@ -45,13 +42,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private readonly WF.CheckBox _cursorCheck;
     private readonly WF.CheckBox _clickHighlightCheck;
     private readonly WF.CheckBox _keystrokeCheck;
-    private readonly WF.TextBox _countdownBox;
-    private readonly WF.ComboBox _fpsCombo;
-    private readonly WF.ComboBox _qualityCombo;
+    private readonly DarkNumberBox _countdownBox;
+    private readonly DarkDropDown _fpsCombo;
+    private readonly DarkDropDown _qualityCombo;
     private readonly WF.Label _fpsLabel;
     private readonly WF.Label _qualityLabel;
     private readonly WF.Label _gifFpsLabel;
-    private readonly WF.ComboBox _gifFpsCombo;
+    private readonly DarkDropDown _gifFpsCombo;
     private static FastRecordingOptionsDialog? _cached;
     private TaskCompletionSource<WF.DialogResult>? _completion;
 
@@ -98,8 +95,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
         var title = Label("Record screen", PadX, 250, bold: true, size: 11);
 
-        _mp4Radio = Radio("MP4 video", true);
-        _gifRadio = Radio("GIF animation", false);
+        _format = new DarkSegmented
+        {
+            Scale = _scale,
+            Options = ["MP4 video", "GIF animation"],
+            Location = new SD.Point(S(PadX), 0),
+            Size = new SD.Size(S(DialogWidth - PadX * 2), S(30)),
+        };
 
         // FPS + Quality. The GIF FPS row takes Quality's slot when GIF is selected
         // (Quality is meaningless for GIF here).
@@ -153,15 +155,14 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
         // Rows in visual order. Labels sit 4 design px below their field's top so
         // their baselines align with combo text.
-        bool Mp4() => _mp4Radio.Checked;
-        bool MicOn() => _mp4Radio.Checked && _audioCheck.Checked;
-        bool WebcamOn() => _mp4Radio.Checked && _webcamCombo.SelectedIndex > 0;
+        bool Mp4() => IsMp4;
+        bool MicOn() => IsMp4 && _audioCheck.Checked;
+        bool WebcamOn() => IsMp4 && _webcamCombo.SelectedIndex > 0;
         AddRow(0, 24, null, (title, 0));
-        AddRow(14, 22, null, (_mp4Radio, 0));
-        AddRow(4, 22, null, (_gifRadio, 0));
+        AddRow(14, 30, null, (_format, 0));
         AddRow(16, 26, Mp4, (_fpsLabel, 4), (_fpsCombo, 0));
         AddRow(8, 26, Mp4, (_qualityLabel, 4), (_qualityCombo, 0));
-        AddRow(16, 26, () => !_mp4Radio.Checked, (_gifFpsLabel, 4), (_gifFpsCombo, 0));
+        AddRow(16, 26, () => !IsMp4, (_gifFpsLabel, 4), (_gifFpsCombo, 0));
         AddRow(16, 22, Mp4, (_audioCheck, 0));
         AddRow(8, 26, MicOn, (_micDeviceLabel, 4), (_micDeviceCombo, 0));
         AddRow(8, 22, Mp4, (_systemAudioCheck, 0));
@@ -172,15 +173,15 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         AddRow(4, 22, null, (_clickHighlightCheck, 0));
         AddRow(4, 22, null, (_keystrokeCheck, 0));
         AddRow(16, 26, null, (countdownLabel, 4), (_countdownBox, 0), (countdownHint, 5));
-        AddRow(20, 30, null, (cancel, 0), (start, 0));
+        AddRow(20, 32, null, (cancel, 0), (start, 0));
 
-        // Right-align the action pair: Start on the edge, Cancel beside it.
-        start.Left = S(DialogWidth - PadX - 78);
-        cancel.Left = start.Left - S(8) - cancel.Width;
+        // Center the action pair on the card.
+        int pairWidth = 88 + 10 + 88;
+        cancel.Left = S((DialogWidth - pairWidth) / 2);
+        start.Left = S((DialogWidth - pairWidth) / 2 + 88 + 10);
 
         _audioCheck.CheckedChanged += (_, _) => UpdateMp4DependentState();
-        _mp4Radio.CheckedChanged += (_, _) => UpdateMp4DependentState();
-        _gifRadio.CheckedChanged += (_, _) => UpdateMp4DependentState();
+        _format.SelectedIndexChanged += (_, _) => UpdateMp4DependentState();
         LoadDevices();
         ApplySettings(settings);
 
@@ -339,11 +340,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         return _completion.Task;
     }
 
-    public bool IsGif => _gifRadio.Checked;
+    private bool IsMp4 => _format.SelectedIndex == 0;
 
-    public bool RecordMicrophone => _audioCheck.Checked && _mp4Radio.Checked;
+    public bool IsGif => !IsMp4;
 
-    public bool RecordSystemAudio => _systemAudioCheck.Checked && _mp4Radio.Checked;
+    public bool RecordMicrophone => _audioCheck.Checked && IsMp4;
+
+    public bool RecordSystemAudio => _systemAudioCheck.Checked && IsMp4;
 
     public bool CaptureCursor => _cursorCheck.Checked;
 
@@ -356,7 +359,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             ? RecordingOptions.ClampCountdownSeconds(seconds)
             : RecordingOptions.MinCountdownSeconds;
 
-    public string WebcamPosition => _mp4Radio.Checked
+    public string WebcamPosition => IsMp4
         ? _webcamCombo.SelectedIndex switch
         {
             1 => "top-left",
@@ -387,7 +390,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     public string? WebcamDeviceName =>
         SelectedDeviceName(_webcamDeviceCombo, _webcamDeviceNames);
 
-    private static string? SelectedDeviceName(WF.ComboBox combo, List<string?> names)
+    private static string? SelectedDeviceName(DarkDropDown combo, List<string?> names)
     {
         int index = combo.SelectedIndex;
         return index >= 0 && index < names.Count ? names[index] : null;
@@ -456,8 +459,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        PopupChrome.DrawBorder(e.Graphics, ClientSize, S(10));
     }
 
     private void UpdateWindowRegion()
@@ -465,9 +467,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(20), S(20));
-        Region = SD.Region.FromHrgn(regionHandle);
-        DeleteObject(regionHandle);
+        PopupChrome.ApplyRegion(this, S(10));
     }
 
     private void Complete(WF.DialogResult result)
@@ -480,8 +480,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
     private void ApplySettings(Settings settings)
     {
-        _mp4Radio.Checked = true;
-        _gifRadio.Checked = false;
+        _format.SelectedIndex = 0;
         _audioCheck.Checked = settings.RecordAudio;
         _systemAudioCheck.Checked = settings.RecordSystemAudio;
         _cursorCheck.Checked = settings.CaptureCursor;
@@ -544,34 +543,22 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             Text = text,
         };
 
-    private WF.ComboBox Combo() =>
+    private DarkDropDown Combo() =>
         new()
         {
-            BackColor = FieldBack,
-            DropDownStyle = WF.ComboBoxStyle.DropDownList,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = TextColor,
+            Scale = _scale,
+            BackColor = Back,
             Location = new SD.Point(S(FieldX), 0),
-            Size = new SD.Size(S(FieldWidth), S(24)),
+            Size = new SD.Size(S(FieldWidth), S(26)),
         };
 
-    private WF.TextBox NumberBox(string text) =>
+    private DarkNumberBox NumberBox(string text) =>
         new()
         {
-            BackColor = FieldBack,
-            BorderStyle = WF.BorderStyle.FixedSingle,
-            ForeColor = TextColor,
+            Scale = _scale,
+            BackColor = Back,
             Location = new SD.Point(S(FieldX), 0),
-            Size = new SD.Size(S(44), S(24)),
-            Text = text,
-            TextAlign = WF.HorizontalAlignment.Center,
-        };
-
-    private WF.RadioButton Radio(string text, bool isChecked) =>
-        new DarkRadioButton(_scale)
-        {
-            Checked = isChecked,
-            Location = new SD.Point(S(PadX), 0),
+            Size = new SD.Size(S(48), S(26)),
             Text = text,
         };
 
@@ -584,10 +571,9 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         };
 
     /// <summary>
-    /// Owner-drawn dark toggle glyphs shared by <see cref="DarkCheckBox"/> and
-    /// <see cref="DarkRadioButton"/>: an accent-filled rounded box with a white check
-    /// (or an accent circle with a white dot), replacing the stock WinForms flat
-    /// glyphs that ignore the dialog's palette.
+    /// Owner-drawn dark toggle glyph for <see cref="DarkCheckBox"/>: an accent-filled
+    /// rounded box with a white check, replacing the stock WinForms flat glyph that
+    /// ignores the dialog's palette.
     /// </summary>
     private static class ToggleGlyph
     {
@@ -709,60 +695,16 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             => ToggleGlyph.Paint(e.Graphics, this, _scale, Checked, _hot, round: false, Focused);
     }
 
-    private sealed class DarkRadioButton : WF.RadioButton
-    {
-        private readonly double _scale;
-        private bool _hot;
-
-        public DarkRadioButton(double scale)
+    private DarkButton ActionButton(string text, SD.Color fillColor) =>
+        new()
         {
-            _scale = scale;
-            SetStyle(
-                WF.ControlStyles.UserPaint |
-                WF.ControlStyles.AllPaintingInWmPaint |
-                WF.ControlStyles.OptimizedDoubleBuffer |
-                WF.ControlStyles.ResizeRedraw,
-                true);
-            AutoSize = true;
-            BackColor = Back;
-            Cursor = WF.Cursors.Hand;
-            ForeColor = TextColor;
-            CheckedChanged += (_, _) => Invalidate();
-            GotFocus += (_, _) => Invalidate();
-            LostFocus += (_, _) => Invalidate();
-            MouseEnter += (_, _) => { _hot = true; Invalidate(); };
-            MouseLeave += (_, _) => { _hot = false; Invalidate(); };
-        }
-
-        public override SD.Size GetPreferredSize(SD.Size proposedSize)
-            => ToggleGlyph.PreferredSize(this, _scale);
-
-        protected override void OnPaint(WF.PaintEventArgs e)
-            => ToggleGlyph.Paint(e.Graphics, this, _scale, Checked, _hot, round: true, Focused);
-    }
-
-    private WF.Button ActionButton(string text, SD.Color backColor)
-    {
-        var button = new WF.Button
-        {
-            BackColor = backColor,
-            Cursor = WF.Cursors.Hand,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = TextColor,
+            Scale = _scale,
+            BackColor = Back,
+            FillColor = fillColor,
             Location = new SD.Point(0, 0),
-            Size = new SD.Size(S(78), S(30)),
+            Size = new SD.Size(S(88), S(32)),
             Text = text,
-            UseVisualStyleBackColor = false,
         };
-        button.FlatAppearance.BorderSize = 0;
-        return button;
-    }
-
-    [DllImport("gdi32.dll")]
-    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
-
-    [DllImport("gdi32.dll")]
-    private static extern bool DeleteObject(IntPtr handle);
 
     private static class Native
     {

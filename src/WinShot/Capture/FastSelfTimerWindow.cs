@@ -8,9 +8,9 @@ namespace WinShot.Capture;
 
 public sealed class FastSelfTimerWindow : WF.Form
 {
-    private static readonly SD.Color Back = SD.Color.FromArgb(30, 30, 30);
-    private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
-    private static readonly SD.Color TextColor = SD.Color.White;
+    private static readonly SD.Color Back = ThemePalette.ToolbarBg;
+    private static readonly SD.Color Border = ThemePalette.BorderStrong;
+    private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
 
     private readonly WF.Timer _timer = new() { Interval = 1000 };
     private int _remaining;
@@ -109,7 +109,9 @@ public sealed class FastSelfTimerWindow : WF.Form
         using var pen = new SD.Pen(Border, 1);
         e.Graphics.DrawEllipse(pen, 1, 1, Width - 3, Height - 3);
 
-        using var font = new SD.Font("Segoe UI Semibold", S(72), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        // Real bold face — Bold on top of the Semibold family makes GDI synthesize a
+        // smeared faux-bold at exactly the size where it shows most.
+        using var font = new SD.Font("Segoe UI", S(72), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
                     WF.TextFormatFlags.SingleLine |

@@ -47,10 +47,11 @@ public sealed class OcrToastWindow : WF.Form
 
         const int width = 300;
         bool hasOpen = onOpen is not null;
-        int height = hasOpen ? 96 : 70;
+        int height = hasOpen ? 104 : 70;
         ClientSize = new SD.Size(S(width), S(height));
 
-        var titleLabel = Label(title, 14, 14, width - 28, 11f, ThemePalette.AccentHover, bold: true);
+        // Accent stays reserved for actions; the title reads as text, not a control.
+        var titleLabel = Label(title, 14, 14, width - 28, 11f, ThemePalette.TextPrimary, bold: true);
         Controls.Add(titleLabel);
 
         var previewLabel = Label(Trim(preview), 14, 38, width - 28, 9.5f, ThemePalette.TextSecondary);
@@ -60,7 +61,15 @@ public sealed class OcrToastWindow : WF.Form
 
         if (onOpen is not null)
         {
-            var open = Button("Open link", width - 14 - 96, 60, 96, 26, ThemePalette.Accent, ThemePalette.AccentHover);
+            var open = new DarkButton
+            {
+                Scale = _scale,
+                BackColor = Back,
+                FillColor = ThemePalette.Accent,
+                Location = new SD.Point(S(width - 14 - 96), S(68)),
+                Size = new SD.Size(S(96), S(26)),
+                Text = "Open link",
+            };
             open.Click += (_, _) => { try { onOpen(); } catch (Exception ex) { Log.Error("OCR toast open failed", ex); } Close(); };
             Controls.Add(open);
         }
@@ -100,11 +109,20 @@ public sealed class OcrToastWindow : WF.Form
         base.OnClosed(e);
     }
 
+    protected override WF.CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW, matching the Quick Access card
+            return cp;
+        }
+    }
+
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new SD.Pen(BorderColor, 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        PopupChrome.DrawBorder(e.Graphics, ClientSize, S(14));
     }
 
     private void Position()
@@ -134,13 +152,7 @@ public sealed class OcrToastWindow : WF.Form
         return text.Length > 90 ? text[..90] + "…" : text;
     }
 
-    private void UpdateRegion()
-    {
-        if (Width <= 0 || Height <= 0) return;
-        IntPtr rgn = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(18), S(18));
-        Region = SD.Region.FromHrgn(rgn);
-        DeleteObject(rgn);
-    }
+    private void UpdateRegion() => PopupChrome.ApplyRegion(this, S(14));
 
     private WF.Label Label(string text, int x, int y, int width, float size, SD.Color color, bool bold = false) =>
         new()
