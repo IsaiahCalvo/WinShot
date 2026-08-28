@@ -263,6 +263,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         // Seed at the real cursor so the first paint draws the crosshair/loupe at the
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
+        _lastFollowScreen = _currentScreen;
         _lastCtrlDown = false;
         _magnifierOn = _options.ShowMagnifier;
         _altLatched = false;
@@ -272,6 +273,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _toolbar.Opacity = 1;
             _toolbar.UpdateMode(0);
             _toolbar.SetSize(1, 1);
+            _toolbar.ResetAspectLock(); // pooled instance: a stale lock made new drags snap to the OLD session's ratio
             _toolbar.RefreshPendingState();
         }
     }
@@ -521,11 +523,66 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         else if (_pendingPx is null)
         {
             HitTestWindow(_currentScreen);
+            // HitTestWindow repaints only when the hovered WINDOW changes, but the
+            // loupe/crosshair/size chrome is anchored to the cursor — without this the
+            // chrome froze at the last window-boundary crossing while the cursor moved.
+            InvalidateFollowRegion(_lastFollowScreen, _currentScreen);
+            _lastFollowScreen = _currentScreen;
         }
         else
         {
             InvalidateAllSurfaces();
         }
+    }
+
+    private SD.Point _lastFollowScreen; // last cursor pos the crosshair/loupe were painted at
+
+    // Half-extents of the regions the idle crosshair/loupe occupy around the cursor
+    // (mirrors FastRegionSelectorDialog).
+    private const int CrosshairBandHalf = 16;
+    private const int LoupeBoxHalf = 250;
+
+    /// <summary>Repaints just the crosshair bands + loupe boxes at the old and new cursor
+    /// positions, on whichever surfaces they touch — proportional to the chrome, not the
+    /// (possibly 4K) monitor. Port of FastRegionSelectorDialog.InvalidateFollowRegion.</summary>
+    private void InvalidateFollowRegion(SD.Point oldScreen, SD.Point newScreen)
+    {
+        InvalidateFollowAt(oldScreen);
+        if (newScreen != oldScreen)
+            InvalidateFollowAt(newScreen);
+    }
+
+    private void InvalidateFollowAt(SD.Point pt)
+    {
+        SD.Rectangle mon = MonitorBoundsAt(pt);
+        InvalidateScreenRect(new SD.Rectangle(pt.X - CrosshairBandHalf, mon.Top, CrosshairBandHalf * 2, mon.Height));
+        InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - CrosshairBandHalf, mon.Width, CrosshairBandHalf * 2));
+        InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
+    }
+
+    private SD.Rectangle MonitorBoundsAt(SD.Point screen)
+    {
+        if (_monitorBounds.Contains(screen)) return _monitorBounds;
+        foreach (var pane in _panes)
+            if (!pane.IsDisposed && pane.MonitorBounds.Contains(screen))
+                return pane.MonitorBounds;
+        return WF.Screen.FromPoint(screen).Bounds;
+    }
+
+    private void InvalidateScreenRect(SD.Rectangle screenRect)
+    {
+        InvalidateSurfaceRect(this, _monitorBounds, screenRect);
+        foreach (var pane in _panes)
+            if (!pane.IsDisposed)
+                InvalidateSurfaceRect(pane, pane.MonitorBounds, screenRect);
+    }
+
+    private static void InvalidateSurfaceRect(WF.Control surface, SD.Rectangle surfaceScreen, SD.Rectangle screenRect)
+    {
+        var hit = SD.Rectangle.Intersect(surfaceScreen, screenRect);
+        if (hit.Width <= 0 || hit.Height <= 0)
+            return;
+        surface.Invalidate(new SD.Rectangle(hit.X - surfaceScreen.X, hit.Y - surfaceScreen.Y, hit.Width, hit.Height));
     }
 
     private void OnFollowTick(object? sender, EventArgs e)
@@ -995,6 +1052,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private static readonly SD.Color LabelColor = ThemePalette.TextSecondary;
         private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x3A, 0x3A, 0x3A);
 
+        // Design units (96-DPI logical px). Point-based fonts render at the monitor's
+        // DPI, so the pixel layout must scale with them via U() or the bar renders
+        // cramped/clipped on 125%/150% displays.
         private const int BarHeight = 64;
         private const int CornerRadius = 14;
         private const int ButtonWidth = 64;
@@ -1005,6 +1065,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private const int GlyphHeight = 24;
         private const int LabelTop = 38;
         private const int LabelHeight = 16;
+
+        private readonly double _u = WinShot.Recording.RecordingMonitorDpi.ScaleFor(PrimaryBounds());
+
+        private int U(int logical) => (int)Math.Round(logical * _u);
 
         private readonly FastAllInOneSelectorDialog _owner;
         private readonly SD.Font _glyphFont = ThemePalette.IconFont(15f);
@@ -1126,45 +1190,55 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         /// <summary>Repaints the confirm button when the pending region appears/disappears.</summary>
         public void RefreshPendingState() => Invalidate(_sizeBar);
 
+        /// <summary>Clears the aspect-lock toggle between pooled sessions.</summary>
+        public void ResetAspectLock()
+        {
+            if (!_aspectLocked)
+                return;
+            _aspectLocked = false;
+            Invalidate();
+        }
+
         // ---------------------------------------------------------------- layout
 
         private void BuildLayout()
         {
-            int x = BarPadX;
+            int barHeight = U(BarHeight);
+            int x = U(BarPadX);
             foreach (var b in _buttons)
             {
-                b.Bounds = new SD.Rectangle(x, 0, ButtonWidth, BarHeight);
-                x += ButtonWidth + ButtonGap;
+                b.Bounds = new SD.Rectangle(x, 0, U(ButtonWidth), barHeight);
+                x += U(ButtonWidth) + U(ButtonGap);
             }
 
-            int mainWidth = x - ButtonGap + BarPadX;
-            _mainBar = new SD.Rectangle(0, 0, mainWidth, BarHeight);
+            int mainWidth = x - U(ButtonGap) + U(BarPadX);
+            _mainBar = new SD.Rectangle(0, 0, mainWidth, barHeight);
 
             // Size bar: [ width ] × [ height ]  [expand]  [confirm]
-            const int fieldW = 48;
-            const int iconW = 34;
-            int innerPad = 12;
+            int fieldW = U(48);
+            int iconW = U(34);
+            int innerPad = U(12);
             // A single-line TextBox sizes its own height to the font; center on that real height.
             int fieldH = _widthBox.PreferredHeight;
-            int sizeBarLeft = _mainBar.Right + BarGap;
+            int sizeBarLeft = _mainBar.Right + U(BarGap);
             int sx = sizeBarLeft + innerPad;
-            int fieldY = (BarHeight - fieldH) / 2;
+            int fieldY = (barHeight - fieldH) / 2;
 
             _widthBox.SetBounds(sx, fieldY, fieldW, fieldH);
             sx += fieldW;
-            _xLabelRect = new SD.Rectangle(sx, 0, 16, BarHeight);
-            sx += 16;
+            _xLabelRect = new SD.Rectangle(sx, 0, U(16), barHeight);
+            sx += U(16);
             _heightBox.SetBounds(sx, fieldY, fieldW, fieldH);
-            sx += fieldW + 8;
+            sx += fieldW + U(8);
 
-            _expandRect = new SD.Rectangle(sx, (BarHeight - 40) / 2, iconW, 40);
-            sx += iconW + 4;
-            _cropRect = new SD.Rectangle(sx, (BarHeight - 40) / 2, iconW, 40);
+            _expandRect = new SD.Rectangle(sx, (barHeight - U(40)) / 2, iconW, U(40));
+            sx += iconW + U(4);
+            _cropRect = new SD.Rectangle(sx, (barHeight - U(40)) / 2, iconW, U(40));
             sx += iconW + innerPad;
 
-            _sizeBar = new SD.Rectangle(sizeBarLeft, 0, sx - sizeBarLeft, BarHeight);
+            _sizeBar = new SD.Rectangle(sizeBarLeft, 0, sx - sizeBarLeft, barHeight);
 
-            ClientSize = new SD.Size(_sizeBar.Right, BarHeight);
+            ClientSize = new SD.Size(_sizeBar.Right, barHeight);
             ApplyRegion();
         }
 
@@ -1173,10 +1247,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // The host window is shaped to the two bars only, so the desktop shows through the gap.
             IntPtr main = CreateRoundRectRgn(
                 _mainBar.Left, _mainBar.Top, _mainBar.Right + 1, _mainBar.Bottom + 1,
-                CornerRadius * 2, CornerRadius * 2);
+                U(CornerRadius) * 2, U(CornerRadius) * 2);
             IntPtr size = CreateRoundRectRgn(
                 _sizeBar.Left, _sizeBar.Top, _sizeBar.Right + 1, _sizeBar.Bottom + 1,
-                CornerRadius * 2, CornerRadius * 2);
+                U(CornerRadius) * 2, U(CornerRadius) * 2);
             CombineRgn(main, main, size, RgnOr);
             Region?.Dispose();
             Region = SD.Region.FromHrgn(main);
@@ -1202,9 +1276,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             base.OnPaint(e);
         }
 
-        private static void PaintBar(SD.Graphics g, SD.Rectangle bar)
+        private void PaintBar(SD.Graphics g, SD.Rectangle bar)
         {
-            using var path = GdiPaths.RoundedRect(new SD.Rectangle(bar.X, bar.Y, bar.Width - 1, bar.Height - 1), CornerRadius);
+            using var path = GdiPaths.RoundedRect(new SD.Rectangle(bar.X, bar.Y, bar.Width - 1, bar.Height - 1), U(CornerRadius));
             using var fill = new SD.SolidBrush(BarFill);
             using var pen = new SD.Pen(BarBorder, 1);
             g.FillPath(fill, path);
@@ -1223,12 +1297,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
 
             SD.Color glyphColor = selected ? SD.Color.White : GlyphColor;
-            var glyphRect = new SD.Rectangle(b.Bounds.X, GlyphTop, b.Bounds.Width, GlyphHeight);
+            var glyphRect = new SD.Rectangle(b.Bounds.X, U(GlyphTop), b.Bounds.Width, U(GlyphHeight));
             WF.TextRenderer.DrawText(g, b.Glyph, b.IsTextGlyph ? _ocrFont : _glyphFont, glyphRect, glyphColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
 
-            var labelRect = new SD.Rectangle(b.Bounds.X, LabelTop, b.Bounds.Width, LabelHeight);
+            var labelRect = new SD.Rectangle(b.Bounds.X, U(LabelTop), b.Bounds.Width, U(LabelHeight));
             WF.TextRenderer.DrawText(g, b.Label, _labelFont, labelRect,
                 selected ? SD.Color.White : LabelColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |

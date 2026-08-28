@@ -132,13 +132,16 @@ public sealed class GifRecorder
     public bool Stop()
     {
         _stopped = true;
-        if (_timer is not null)
+        // Exchange, not check-then-use: Stop is called concurrently (the user's Stop on a
+        // Task.Run thread + Shutdown on the UI thread at exit), and the loser of a plain
+        // null-check would dereference a field the winner already nulled.
+        Timer? timer = Interlocked.Exchange(ref _timer, null);
+        if (timer is not null)
         {
             // Dispose(WaitHandle) waits for any in-flight tick callback.
             using var drained = new ManualResetEvent(false);
-            if (_timer.Dispose(drained))
+            if (timer.Dispose(drained))
                 drained.WaitOne(TimeSpan.FromSeconds(2));
-            _timer = null;
         }
         lock (_gate)
         {

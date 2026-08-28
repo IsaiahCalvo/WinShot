@@ -30,6 +30,9 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         _remaining = Math.Max(1, seconds);
         _regionPx = regionScreenPx;
         _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
+        // Create on the target monitor so the OnShown move never fires a WM_DPICHANGED
+        // rescale on top of the pre-applied _scale (see FastRecordingControlBar).
+        Location = new SD.Point(regionScreenPx.X, regionScreenPx.Y);
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;

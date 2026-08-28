@@ -421,7 +421,7 @@ public partial class App : Application
         // command instead of parking it in the pending slot. Every caller is user-initiated
         // (hotkey, tray, winshot://), and replaying a press made while the selector was
         // already open reads as a ghost re-trigger right after the user cancels with Esc.
-        if (_captureInProgress) return;
+        if (_captureInProgress || Recording.SelectionUiActive) return;
         _pendingCaptureCommand = cmd;
         SchedulePendingCaptureDrain();
     }
@@ -512,7 +512,9 @@ public partial class App : Application
     /// </summary>
     private async void RunCaptureFlow(string failureLog, string failureBalloon, Func<Task> body)
     {
-        if (_captureInProgress) return;
+        // The recording chooser/selector counts as an active capture UI: letting a second
+        // full-screen selector open on top made the two overlays z-order-fight at 66 fps.
+        if (_captureInProgress || Recording.SelectionUiActive) return;
         _captureInProgress = true;
         try
         {
@@ -1166,9 +1168,19 @@ public partial class App : Application
 
     // ---- Feature entry points ----
 
-    private void RecordFlow() => Recording.ToggleFlow();
+    // Toggling a recording is legal while one is running (that's the stop path), but a
+    // screenshot selector being open means its overlay would bury/battle the record UI.
+    private void RecordFlow()
+    {
+        if (_captureInProgress) return;
+        Recording.ToggleFlow();
+    }
 
-    private void RecordDisplayFlow() => Recording.ToggleDisplayFlow();
+    private void RecordDisplayFlow()
+    {
+        if (_captureInProgress) return;
+        Recording.ToggleDisplayFlow();
+    }
 
     private void OcrFlow() => RunCaptureFlow(
         "OCR capture failed", "OCR failed", async () =>

@@ -41,6 +41,10 @@ public sealed class FastRecordingControlBar : WF.Form
             ? WF.Screen.FromRectangle(r).Bounds
             : WF.Screen.FromPoint(WF.Cursor.Position).Bounds;
         _scale = RecordingMonitorDpi.ScaleFor(targetScreen);
+        // Create the window ON its target monitor: born at (0,0) on the primary and moved
+        // later, PerMonitorV2 fires WM_DPICHANGED on the move and rescales the window on
+        // top of the pre-applied _scale (double-scaled bar on mixed-DPI setups).
+        Location = new SD.Point(targetScreen.X, targetScreen.Y);
         AutoScaleMode = WF.AutoScaleMode.None;
         AutoSize = true;
         AutoSizeMode = WF.AutoSizeMode.GrowAndShrink;
@@ -209,6 +213,27 @@ public sealed class FastRecordingControlBar : WF.Form
         }
     }
 
+    /// <summary>Realigns the bar with the recorder's ACTUAL pause state. TogglePause flips
+    /// optimistically before asking the recorder; when the pause/resume fails the bar was
+    /// left showing a paused recording that was still running (or vice versa).</summary>
+    public void SyncPaused(bool paused)
+    {
+        if (_paused == paused)
+            return;
+
+        _paused = paused;
+        if (paused)
+        {
+            _elapsed.Stop();
+            _pause.Text = "Resume";
+        }
+        else
+        {
+            _elapsed.Start();
+            _pause.Text = "Pause";
+        }
+    }
+
     private void RaiseOnce(Action? action)
     {
         if (_actionTaken)
@@ -255,8 +280,11 @@ public sealed class FastRecordingControlBar : WF.Form
     {
         // Width from measured content, not label length, so padding stays uniform
         // (widthFor sizes for the button's widest state, e.g. Pause -> Resume).
-        SD.Size measured = WF.TextRenderer.MeasureText(
-            widthFor ?? text, WF.Control.DefaultFont);
+        // Measure with a pixel-unit font at the TARGET scale: DefaultFont measures at the
+        // primary monitor's DPI, and multiplying that by _scale double-applied the factor
+        // whenever the primary itself is scaled.
+        using var measureFont = new SD.Font("Segoe UI", Math.Max(9, S(12)), SD.FontStyle.Regular, SD.GraphicsUnit.Pixel);
+        SD.Size measured = WF.TextRenderer.MeasureText(widthFor ?? text, measureFont);
         return new DarkButton
         {
             Scale = _scale,
@@ -264,7 +292,7 @@ public sealed class FastRecordingControlBar : WF.Form
             CornerRadius = 13,
             FillColor = fillColor,
             Margin = new WF.Padding(S(3), 0, S(3), 0),
-            Size = new SD.Size(Math.Max(S(54), (int)Math.Round(measured.Width * _scale) + S(28)), S(26)),
+            Size = new SD.Size(Math.Max(S(54), measured.Width + S(28)), S(26)),
             // A mouse HUD: nothing should silently hold keyboard focus and wear a ring.
             TabStop = false,
             Text = text,

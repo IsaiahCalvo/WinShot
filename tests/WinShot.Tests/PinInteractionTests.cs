@@ -14,6 +14,10 @@ public class PinInteractionTests
     [InlineData(1.0, -120, 0.9090909090909091)]
     [InlineData(3.0, 120, 3.0)]
     [InlineData(0.2, -120, 0.2)]
+    // A huge image's fit scale sits below MinScale: zooming in steps smoothly from it
+    // (regression: the old MinScale clamp snapped 0.078 -> 0.2, tripling the pin).
+    [InlineData(0.078, 120, 0.0858)]
+    [InlineData(0.078, -120, 0.078)]
     public void AdjustScale_UsesSharedWheelBounds(double current, int delta, double expected)
     {
         Assert.Equal(expected, PinInteraction.AdjustScale(current, delta), precision: 10);

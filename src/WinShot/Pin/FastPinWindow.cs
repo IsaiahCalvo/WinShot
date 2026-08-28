@@ -459,9 +459,13 @@ public sealed class FastPinWindow : WF.Form
     {
         // Resize via the border edges drives ClientSize; derive _scale back from it so
         // wheel-resize and keyboard nudges keep working against the new size.
+        // No MinScale floor here: the constructor's FIT scale for a huge image (a tall
+        // scrolling capture) is legitimately below MinScale, and clamping it up
+        // desynced _scale from the actual window — the first wheel notch then jumped
+        // the pin ~3x. Interactive paths (AdjustScale, WM_SIZING) enforce the minimum.
         double sx = (ClientSize.Width - 2) / (double)_naturalWidth;
         double sy = (ClientSize.Height - 2) / (double)_naturalHeight;
-        _scale = Math.Clamp(Math.Max(sx, sy), PinInteraction.MinScale, PinInteraction.MaxScale);
+        _scale = Math.Min(Math.Max(sx, sy), PinInteraction.MaxScale);
     }
 
     // ----- Mouse -------------------------------------------------------------

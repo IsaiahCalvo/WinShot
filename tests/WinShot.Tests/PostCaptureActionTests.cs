@@ -38,12 +38,15 @@ public class PostCaptureActionTests
         Assert.Equal(direct, PostCaptureAction.IsDirectAction(value));
     }
 
+    // Every direct action transfers the bitmap to a new owner that uses it at once
+    // (Copy/Save dispose it, Pin/Background/Edit paint it), so all of them need the
+    // caller-thread clone; only the overlay path keeps ownership and can clone lazily.
     [Theory]
     [InlineData("copy", true)]
     [InlineData("save", true)]
-    [InlineData("edit", false)]
-    [InlineData("pin", false)]
-    [InlineData("background", false)]
+    [InlineData("edit", true)]
+    [InlineData("pin", true)]
+    [InlineData("background", true)]
     [InlineData("overlay", false)]
     public void NeedsCallerThreadHistoryClone_IsLimitedToActionsThatTransferOwnershipImmediately(string value, bool expected)
     {

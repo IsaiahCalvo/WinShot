@@ -92,6 +92,11 @@ public sealed class RecordingController
     internal bool BlocksStartupRecovery =>
         _flowActive || IsRecording || _stopping || _tempPath is not null;
 
+    /// <summary>True while the recording chooser/selector UI is open (NOT while merely
+    /// recording — screenshots during a recording are fine). Capture flows check this so
+    /// two full-screen selectors never stack and z-order-fight each other.</summary>
+    public bool SelectionUiActive => _flowActive;
+
     public event Action<TimeSpan?>? RecordingElapsedChanged;
 
     public void Shutdown()
@@ -115,6 +120,19 @@ public sealed class RecordingController
             try { _gifRecorder.Stop(); }
             catch (Exception ex) { Log.Error("Failed to stop GIF recording during shutdown", ex); }
             _gifRecorder = null;
+        }
+
+        // A keep-stop may be mid-finalization (its dispatcher continuation dies with the
+        // app): the temp file is that recording's ONLY copy, and startup recovery restores
+        // it next launch. Only delete when the user never asked to keep it.
+        if (_stopping && !_discard)
+        {
+            Log.Info($"Exiting during recording finalization; keeping {_tempPath} for startup recovery");
+            CloseBar();
+            CloseOverlays();
+            CloseDimOverlay();
+            StopElapsedTimer();
+            return;
         }
 
         TryDelete(_tempPath);
@@ -565,6 +583,8 @@ public sealed class RecordingController
             Log.Error);
 
         _paused = result.IsPaused;
+        if (_bar is { IsDisposed: false })
+            _bar.SyncPaused(_paused); // a failed pause must not leave the bar showing "paused"
         if (result.Changed)
         {
             if (_elapsedEnabled)
@@ -584,6 +604,8 @@ public sealed class RecordingController
             Log.Error);
 
         _paused = result.IsPaused;
+        if (_bar is { IsDisposed: false })
+            _bar.SyncPaused(_paused); // a failed resume must not leave the bar showing "recording"
         if (result.Changed)
         {
             if (_elapsedEnabled)

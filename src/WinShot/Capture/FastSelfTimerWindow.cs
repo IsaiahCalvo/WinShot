@@ -24,8 +24,11 @@ public sealed class FastSelfTimerWindow : WF.Form
     public FastSelfTimerWindow(int seconds)
     {
         _remaining = SelfTimerOptions.ClampDelaySeconds(seconds);
-        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
-            WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
+        SD.Rectangle timerScreen = WF.Screen.FromPoint(WF.Cursor.Position).Bounds;
+        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(timerScreen);
+        // Create on the target monitor so the OnShown move never fires a WM_DPICHANGED
+        // rescale on top of the pre-applied _scale (see FastRecordingControlBar).
+        Location = new SD.Point(timerScreen.X, timerScreen.Y);
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;

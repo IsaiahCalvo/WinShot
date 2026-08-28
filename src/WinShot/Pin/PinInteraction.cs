@@ -17,7 +17,11 @@ public static class PinInteraction
     public static double AdjustScale(double current, int wheelDelta)
     {
         double multiplier = wheelDelta > 0 ? ScaleStep : 1 / ScaleStep;
-        return Math.Clamp(current * multiplier, MinScale, MaxScale);
+        // A huge image's FIT scale can legitimately sit below MinScale; the floor is
+        // then the current scale itself, so zooming steps smoothly instead of snapping
+        // up to MinScale (which visibly tripled the pin on the first wheel notch).
+        double floor = Math.Min(MinScale, current);
+        return Math.Clamp(current * multiplier, floor, MaxScale);
     }
 
     public static double AdjustOpacity(double current, int wheelDelta)

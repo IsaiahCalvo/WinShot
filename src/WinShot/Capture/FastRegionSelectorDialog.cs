@@ -179,9 +179,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
             SelectorSurfaces.Park(pane);
 
         // Shown-but-parked, never hidden: Hide() would throw the composition away again.
-        if (!Visible) Show();
+        // Disposed panes report Visible==false, so guard: Show() on one would throw
+        // ObjectDisposedException out of Complete() and wedge the selector session.
+        if (!IsDisposed && !Visible) Show();
         foreach (var pane in _panes)
-            if (!pane.Visible) pane.Show();
+            if (!pane.IsDisposed && !pane.Visible) pane.Show();
     }
 
     internal void Prewarm()
