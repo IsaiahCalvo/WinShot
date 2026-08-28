@@ -50,8 +50,12 @@
                       LogicalName="WinShot.Assets.quick-access-copy.svg" />
     <EmbeddedResource Include="Assets\quick-access-edit.svg"
                       LogicalName="WinShot.Assets.quick-access-edit.svg" />
+    <EmbeddedResource Include="Assets\quick-access-lock.svg"
+                      LogicalName="WinShot.Assets.quick-access-lock.svg" />
     <EmbeddedResource Include="Assets\quick-access-pin.svg"
                       LogicalName="WinShot.Assets.quick-access-pin.svg" />
+    <EmbeddedResource Include="Assets\quick-access-unlock.svg"
+                      LogicalName="WinShot.Assets.quick-access-unlock.svg" />
     <EmbeddedResource Include="Assets\quick-access-save.svg"
                       LogicalName="WinShot.Assets.quick-access-save.svg" />
   </ItemGroup>

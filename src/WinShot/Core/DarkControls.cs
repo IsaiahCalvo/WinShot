@@ -307,7 +307,7 @@ public sealed class DarkDropDown : WF.Control
 
         protected override void OnRenderItemText(WF.ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = DarkControlPalette.Text;
+            e.TextColor = e.Item.Enabled ? DarkControlPalette.Text : DarkControlPalette.TextMuted;
             base.OnRenderItemText(e);
         }
 
@@ -331,6 +331,8 @@ public sealed class DarkDropDown : WF.Control
             public override SD.Color ImageMarginGradientEnd => Back;
             public override SD.Color MenuBorder => SD.Color.FromArgb(70, 70, 74);
             public override SD.Color MenuItemBorder => SD.Color.Transparent;
+            public override SD.Color SeparatorDark => SD.Color.FromArgb(70, 70, 74);
+            public override SD.Color SeparatorLight => Back;
         }
     }
 }

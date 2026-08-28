@@ -196,4 +196,19 @@ internal sealed class QuickAccessTooltipWindow : WF.Form
         Location = QuickAccessTooltipLayout.Place(workingArea, Size, anchorScreen, cardScreen, _dpi);
         Show(owner);
     }
+
+    /// <summary>Centered below the anchor (used by the pin toolbar, whose buttons hug the top edge).</summary>
+    public void ShowBelow(WF.Form owner, SD.Rectangle anchorScreen)
+    {
+        SD.Rectangle workingArea = WF.Screen.FromRectangle(anchorScreen).WorkingArea;
+        int gap = Math.Max(1, (int)Math.Round(5 * (_dpi / 96d)));
+        int x = anchorScreen.Left + (anchorScreen.Width - Width) / 2;
+        int y = anchorScreen.Bottom + gap;
+        if (y + Height > workingArea.Bottom)
+            y = anchorScreen.Top - Height - gap;
+        Location = new SD.Point(
+            Math.Clamp(x, workingArea.Left, Math.Max(workingArea.Left, workingArea.Right - Width)),
+            Math.Clamp(y, workingArea.Top, Math.Max(workingArea.Top, workingArea.Bottom - Height)));
+        Show(owner);
+    }
 }
