@@ -56,10 +56,36 @@ public class AnnotationEditorRenderHarness
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-primary-shell.png"));
 
+                var drawGroup = (System.Windows.Controls.Primitives.Popup)editor.FindName("DrawGroupPopup")!;
+                drawGroup.IsOpen = true;
+                Pump(4);
+                RenderElementToPng(drawGroup.Child, Path.Combine(outDir, "editor-after-draw-group.png"));
+                drawGroup.IsOpen = false;
+
+                var shapeGroup = (System.Windows.Controls.Primitives.Popup)editor.FindName("ShapeGroupPopup")!;
+                shapeGroup.IsOpen = true;
+                Pump(4);
+                RenderElementToPng(shapeGroup.Child, Path.Combine(outDir, "editor-after-shape-group.png"));
+                shapeGroup.IsOpen = false;
+
+                var textGroup = (System.Windows.Controls.Primitives.Popup)editor.FindName("TextGroupPopup")!;
+                textGroup.IsOpen = true;
+                Pump(4);
+                RenderElementToPng(textGroup.Child, Path.Combine(outDir, "editor-after-text-group.png"));
+                textGroup.IsOpen = false;
+
                 var filledRectangle = (RadioButton)editor.FindName("FilledRectangleToolBtn")!;
                 filledRectangle.IsChecked = true;
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-filled-rectangle-context.png"));
+
+                var colorPicker = (System.Windows.Controls.Primitives.Popup)editor.FindName("ColorPickerPopup")!;
+                typeof(EditorWindow).GetMethod("BuildColorPickerPalette",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null);
+                colorPicker.IsOpen = true;
+                Pump(4);
+                RenderElementToPng(colorPicker.Child, Path.Combine(outDir, "editor-after-color-picker.png"));
+                colorPicker.IsOpen = false;
 
                 var moreTools = (System.Windows.Controls.Primitives.Popup)editor.FindName("MoreToolsPopup")!;
                 moreTools.IsOpen = true;
@@ -109,8 +135,9 @@ public class AnnotationEditorRenderHarness
                     "Sanitized WinShot annotation editor after-state\n" +
                     "Generated in-process with RenderTargetBitmap; WinShot.exe was not launched.\n" +
                     "Source content is synthetic and contains no user data.\n" +
-                    "Renders: primary shell, filled rectangle context, More overflow, annotations,\n" +
-                    "200% DPI, rectangle selection, blur strength, text style, crop ratio, and spotlight.\n");
+                    "Renders: primary shell, Draw/Shape/Text groups, color picker, filled rectangle,\n" +
+                    "More overflow, annotations (incl. dashed line, V-arrow, callout), 200% DPI,\n" +
+                    "rectangle selection, blur strength, text style, crop ratio, and spotlight.\n");
 
                 editor.Close();
                 Pump(2);
@@ -200,7 +227,21 @@ public class AnnotationEditorRenderHarness
             Points = new[] { new[] { 90d, 505d }, new[] { 345d, 455d } },
             Color = "#FF34C759",
             Thickness = 4,
+            LineStyle = "dashed",
         });
+        Add(new AnnotationData
+        {
+            Type = AnnotationData.TypeArrow,
+            Points = new[] { new[] { 760d, 500d }, new[] { 980d, 500d } },
+            Color = "#FFFF2D55",
+            Thickness = 4,
+            Head = "vShape",
+            LineStyle = "dotted",
+        });
+        Add(AnnotationData.ForCallout(
+            CalloutLayout.FromDrag(new Point(720, 200), new Point(860, 90)),
+            "Callout", Color.FromRgb(255, 69, 58), Color.FromArgb(0x40, 255, 255, 255),
+            2, ArrowheadStyle.SolidTriangle, LineBorderStyle.Solid, 18));
 
         var rectangle = Add(new AnnotationData
         {

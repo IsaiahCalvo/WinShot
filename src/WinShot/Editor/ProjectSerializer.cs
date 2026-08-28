@@ -36,6 +36,7 @@ internal sealed class AnnotationData
     public const string TypeStep = "step";
     public const string TypeSpotlight = "spotlight";
     public const string TypeImage = "image";
+    public const string TypeCallout = "callout";
 
     public string Type { get; set; } = "";
 
@@ -56,6 +57,18 @@ internal sealed class AnnotationData
 
     /// <summary><see cref="ShapeFillMode"/> name for rectangles/ellipses (None | Quarter | Solid).</summary>
     public string? Fill { get; set; }
+
+    /// <summary>Independent fill color "#AARRGGBB". When set, overrides Fill-mode derivation from stroke.</summary>
+    public string? FillColor { get; set; }
+
+    /// <summary>Survey line style: solid | dashed | dotted | cloud.</summary>
+    public string? LineStyle { get; set; }
+
+    /// <summary>Survey arrowhead at the end: none | solidTriangle | vShape | openCircle | openTriangle | horizontalLine.</summary>
+    public string? Head { get; set; }
+
+    /// <summary>Optional arrowhead at the start (legacy Double arrows).</summary>
+    public string? StartHead { get; set; }
 
     public string? Text { get; set; }
 
@@ -83,21 +96,57 @@ internal sealed class AnnotationData
 
     // ------------------------------ factory helpers used at commit time
 
-    public static AnnotationData ForStroke(string type, IEnumerable<Point> points, Color color, double thickness) => new()
+    public static AnnotationData ForStroke(string type, IEnumerable<Point> points, Color color, double thickness) =>
+        ForStroke(type, points, color, thickness, LineBorderStyle.Solid, ArrowheadStyle.None, ArrowheadStyle.None);
+
+    public static AnnotationData ForStroke(
+        string type, IEnumerable<Point> points, Color color, double thickness,
+        LineBorderStyle lineStyle, ArrowheadStyle head, ArrowheadStyle startHead) => new()
     {
         Type = type,
         Points = ToArray(points),
         Color = ToHex(color),
         Thickness = thickness,
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+        Head = head == ArrowheadStyle.None && type != TypeArrow ? null : AnnotationStyle.ToStorageName(head),
+        StartHead = startHead == ArrowheadStyle.None ? null : AnnotationStyle.ToStorageName(startHead),
     };
 
-    public static AnnotationData ForShape(string type, Rect bounds, Color color, double thickness, ShapeFillMode fill) => new()
+    public static AnnotationData ForShape(string type, Rect bounds, Color color, double thickness, ShapeFillMode fill) =>
+        ForShape(type, bounds, color, thickness, fill, fillColor: null, lineStyle: LineBorderStyle.Solid);
+
+    public static AnnotationData ForShape(
+        string type, Rect bounds, Color color, double thickness, ShapeFillMode fill,
+        Color? fillColor, LineBorderStyle lineStyle) => new()
     {
         Type = type,
         Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
         Color = ToHex(color),
         Thickness = thickness,
         Fill = fill.ToString(),
+        FillColor = fillColor is Color fc ? ToHex(fc) : null,
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+    };
+
+    public static AnnotationData ForCallout(
+        CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize) => new()
+    {
+        Type = TypeCallout,
+        Points = new[]
+        {
+            new[] { layout.Tip.X, layout.Tip.Y },
+            new[] { layout.Knee.X, layout.Knee.Y },
+            new[] { layout.Box.X, layout.Box.Y },
+        },
+        Rect = new[] { layout.Box.X, layout.Box.Y, layout.Box.Width, layout.Box.Height },
+        Color = ToHex(stroke),
+        FillColor = ToHex(fill),
+        Thickness = thickness,
+        Head = AnnotationStyle.ToStorageName(head),
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+        Text = text,
+        FontSize = fontSize,
     };
 
     public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) => new()
@@ -280,7 +329,9 @@ internal static class ProjectSerializer
                 var pts = RequirePoints(a, curved ? 3 : 2);
                 double t = RequireThickness(a);
                 var brush = new SolidColorBrush(RequireColor(a));
-                return new Shapes.Path
+                var (end, start) = AnnotationStyle.HeadsFrom(a);
+                bool thin = AnnotationFactory.ParseArrowStyle(a.Style) == ArrowStyle.Thin;
+                var path = new Shapes.Path
                 {
                     Stroke = brush,
                     Fill = brush,
@@ -290,14 +341,15 @@ internal static class ProjectSerializer
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = curved
                         ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t)
-                        : AnnotationFactory.ArrowGeometry(
-                            pts[0], pts[1], t, AnnotationFactory.ParseArrowStyle(a.Style)),
+                        : AnnotationFactory.ArrowGeometry(pts[0], pts[1], t, end, start, thin),
                 };
+                AnnotationFactory.ApplyDash(path, AnnotationStyle.LineStyleFrom(a));
+                return path;
             }
             case AnnotationData.TypeLine:
             {
                 var pts = RequirePoints(a, 2);
-                return new Shapes.Line
+                var line = new Shapes.Line
                 {
                     X1 = pts[0].X, Y1 = pts[0].Y, X2 = pts[1].X, Y2 = pts[1].Y,
                     Stroke = new SolidColorBrush(RequireColor(a)),
@@ -305,22 +357,56 @@ internal static class ProjectSerializer
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
                 };
+                AnnotationFactory.ApplyDash(line, AnnotationStyle.LineStyleFrom(a));
+                return line;
             }
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
             {
                 var bounds = RequireRect(a);
                 var color = RequireColor(a);
-                Shapes.Shape shape = a.Type == AnnotationData.TypeRectangle
-                    ? new Shapes.Rectangle { RadiusX = 2, RadiusY = 2 }
-                    : new Shapes.Ellipse();
+                var fillColor = AnnotationStyle.FillColorFrom(a, color);
+                var lineStyle = AnnotationStyle.LineStyleFrom(a);
+                Shapes.Shape shape;
+                if (a.Type == AnnotationData.TypeRectangle && lineStyle == LineBorderStyle.Cloud)
+                {
+                    shape = new Shapes.Path
+                    {
+                        Data = CloudPath.ForRectangle(new Rect(0, 0, bounds.Width, bounds.Height)),
+                    };
+                }
+                else
+                {
+                    shape = a.Type == AnnotationData.TypeRectangle
+                        ? new Shapes.Rectangle { RadiusX = 2, RadiusY = 2 }
+                        : new Shapes.Ellipse();
+                }
                 shape.Stroke = new SolidColorBrush(color);
                 shape.StrokeThickness = RequireThickness(a);
-                shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
+                shape.Fill = fillColor.A == 0
+                    ? ShapeFillBrush.CreateFromName(a.Fill, color)
+                    : new SolidColorBrush(fillColor);
                 shape.Width = bounds.Width;
                 shape.Height = bounds.Height;
+                if (lineStyle != LineBorderStyle.Cloud)
+                    AnnotationFactory.ApplyDash(shape, lineStyle);
                 SetPos(shape, bounds.TopLeft);
                 return shape;
+            }
+            case AnnotationData.TypeCallout:
+            {
+                var pts = RequirePoints(a, 3);
+                var box = RequireRect(a);
+                var layout = CalloutLayout.FromParts(pts[0], pts[1], box);
+                var stroke = RequireColor(a);
+                var fill = a.FillColor is string hex && AnnotationStyle.TryParseHex(hex, out var fc)
+                    ? fc
+                    : Color.FromArgb(0, 255, 255, 255);
+                var (head, _) = AnnotationStyle.HeadsFrom(a);
+                double fontSize = a.FontSize is double fs && fs > 0 ? fs : 16;
+                return AnnotationFactory.CreateCallout(
+                    layout, a.Text ?? "", stroke, fill, RequireThickness(a),
+                    head, AnnotationStyle.LineStyleFrom(a), fontSize);
             }
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:

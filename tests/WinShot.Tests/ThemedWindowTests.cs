@@ -368,8 +368,9 @@ public class ThemedWindowTests
     private static void EditorShellContractSmoke(EditorWindow editor)
     {
         var primary = (WrapPanel)editor.FindName("ToolPanel")!;
-        var primaryOrder = primary.Children.OfType<RadioButton>()
-            .Select(rb => (string)rb.Tag)
+        var primaryOrder = primary.Children.OfType<FrameworkElement>()
+            .Select(el => el.Tag as string)
+            .Where(tag => tag is "Select" or "Draw" or "Shape" or "Text" or "Pixelate" or "Spotlight" or "Step")
             .ToArray();
         Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
 
@@ -382,8 +383,9 @@ public class ThemedWindowTests
         string[] namedControls =
         {
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
             "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
@@ -399,8 +401,9 @@ public class ThemedWindowTests
         string[] iconOnlyControls =
         {
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
             "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",

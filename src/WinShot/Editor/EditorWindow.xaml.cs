@@ -70,7 +70,24 @@ public partial class EditorWindow : Window
     private bool _filledRectangleMode;
     private TextStyle _textStyle = TextStyle.Plain;
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
-    private double _opacity = 1.0; // annotation alpha multiplier (0.25–1.0) for new + restyled marks
+    private ArrowheadStyle _arrowhead = ArrowheadStyle.SolidTriangle;
+    private ArrowheadStyle _startArrowhead = ArrowheadStyle.None;
+    private LineBorderStyle _lineStyle = LineBorderStyle.Solid;
+    private ColorWell _colorWell = ColorWell.Stroke;
+    private Color _fillColor = Color.FromArgb(0, 255, 255, 255);
+    private double _fillOpacity = 0;
+    private EditorTool _lastDrawTool = EditorTool.Freehand;
+    private EditorTool _lastShapeTool = EditorTool.Rectangle;
+    private EditorTool _lastTextTool = EditorTool.Text;
+    private Color _colorBeforeHighlighter;
+    private double _opacityBeforeHighlighter = 1;
+    private bool _highlighterArmed;
+    private double _pickerHue;
+    private double _pickerSat = 1;
+    private double _pickerVal = 1;
+    private bool _svDragging;
+    private bool _hueDragging;
+    private double _opacity = 1.0; // annotation alpha multiplier (0–1.0) for new + restyled marks
     private EffectStrength _blurStrength = EffectStrength.Medium;
     private EffectStrength _pixelateStrength = EffectStrength.Medium;
 
@@ -517,6 +534,8 @@ public partial class EditorWindow : Window
             if (tool != EditorTool.Eyedropper)
                 EyedropSwatch.Visibility = Visibility.Collapsed;
         }
+        RememberGroupTool(tool);
+        ArmHighlighterColor(tool);
         _tool = tool;
         if (ReferenceEquals(rb, RectangleToolBtn))
         {
@@ -528,8 +547,12 @@ public partial class EditorWindow : Window
         {
             UncheckOtherToolButtons(rb);
             MoreToolsPopup.IsOpen = false;
+            DrawGroupPopup.IsOpen = false;
+            ShapeGroupPopup.IsOpen = false;
+            TextGroupPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
+            UpdateGroupButtonChrome();
         }
     }
 
@@ -548,12 +571,19 @@ public partial class EditorWindow : Window
         _tool = EditorTool.Rectangle;
         _filledRectangleMode = true;
         _fillMode = ShapeFillMode.Solid;
+        _fillOpacity = _fillOpacity > 0 ? _fillOpacity : 1;
+        if (_fillColor.A == 0) _fillColor = _color;
+        _lastShapeTool = EditorTool.Rectangle;
         if (FillSolidBtn is not null) FillSolidBtn.IsChecked = true;
         if (IsLoaded)
         {
             MoreToolsPopup.IsOpen = false;
+            DrawGroupPopup.IsOpen = false;
+            ShapeGroupPopup.IsOpen = false;
+            TextGroupPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
+            UpdateGroupButtonChrome();
         }
     }
 
@@ -562,8 +592,94 @@ public partial class EditorWindow : Window
         if (CropUtilityBtn is not null) yield return CropUtilityBtn;
         if (ToolPanel is not null)
             foreach (var rb in ToolPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (DrawGroupPanel is not null)
+            foreach (var rb in DrawGroupPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (ShapeGroupPanel is not null)
+            foreach (var rb in ShapeGroupPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (TextGroupPanel is not null)
+            foreach (var rb in TextGroupPanel.Children.OfType<RadioButton>()) yield return rb;
         if (MoreToolPanel is not null)
             foreach (var rb in MoreToolPanel.Children.OfType<RadioButton>()) yield return rb;
+    }
+
+    private void OnDrawGroupClick(object sender, RoutedEventArgs e)
+    {
+        bool already = EditorShellContract.GroupFor(_tool, _filledRectangleMode) == "Draw";
+        if (!already) CheckToolButton(_lastDrawTool);
+        DrawGroupPopup.IsOpen = !DrawGroupPopup.IsOpen;
+        ShapeGroupPopup.IsOpen = false;
+        TextGroupPopup.IsOpen = false;
+        MoreToolsPopup.IsOpen = false;
+    }
+
+    private void OnShapeGroupClick(object sender, RoutedEventArgs e)
+    {
+        bool already = EditorShellContract.GroupFor(_tool, _filledRectangleMode) == "Shape";
+        if (!already)
+        {
+            if (_lastShapeTool == EditorTool.Rectangle && _filledRectangleMode)
+                FilledRectangleToolBtn.IsChecked = true;
+            else
+                CheckToolButton(_lastShapeTool);
+        }
+        ShapeGroupPopup.IsOpen = !ShapeGroupPopup.IsOpen;
+        DrawGroupPopup.IsOpen = false;
+        TextGroupPopup.IsOpen = false;
+        MoreToolsPopup.IsOpen = false;
+    }
+
+    private void OnTextGroupClick(object sender, RoutedEventArgs e)
+    {
+        bool already = EditorShellContract.GroupFor(_tool, _filledRectangleMode) == "Text";
+        if (!already) CheckToolButton(_lastTextTool);
+        TextGroupPopup.IsOpen = !TextGroupPopup.IsOpen;
+        DrawGroupPopup.IsOpen = false;
+        ShapeGroupPopup.IsOpen = false;
+        MoreToolsPopup.IsOpen = false;
+    }
+
+    private void RememberGroupTool(EditorTool tool)
+    {
+        switch (EditorShellContract.GroupFor(tool, _filledRectangleMode))
+        {
+            case "Draw": _lastDrawTool = tool; break;
+            case "Shape": _lastShapeTool = tool; break;
+            case "Text": _lastTextTool = tool; break;
+        }
+    }
+
+    private void ArmHighlighterColor(EditorTool tool)
+    {
+        if (tool == EditorTool.Highlighter && !_highlighterArmed)
+        {
+            _colorBeforeHighlighter = _color;
+            _opacityBeforeHighlighter = _opacity;
+            _highlighterArmed = true;
+            SetCurrentColor(Color.FromRgb(0xFF, 0xFF, 0x00));
+            SetOpacityPercent(50, restyle: false);
+        }
+        else if (tool != EditorTool.Highlighter && _highlighterArmed)
+        {
+            _highlighterArmed = false;
+            SetCurrentColor(_colorBeforeHighlighter);
+            SetOpacityPercent(_opacityBeforeHighlighter * 100, restyle: false);
+        }
+    }
+
+    private void UpdateGroupButtonChrome()
+    {
+        string group = EditorShellContract.GroupFor(_tool, _filledRectangleMode);
+        void Paint(Button btn, bool on)
+        {
+            if (btn is null) return;
+            btn.Opacity = on ? 1 : 0.92;
+            btn.Background = on
+                ? (Brush)FindResource("AccentBrush")
+                : Brushes.Transparent;
+        }
+        Paint(DrawGroupBtn, group == "Draw");
+        Paint(ShapeGroupBtn, group == "Shape");
+        Paint(TextGroupBtn, group == "Text");
     }
 
     private void UncheckOtherToolButtons(RadioButton selected)
@@ -592,6 +708,13 @@ public partial class EditorWindow : Window
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
+        FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
+        ColorWellLabel.Visibility = Show(!Has(EditorContextControls.FillStrokeTabs));
+        ColorWellLabel.Text = "Color";
+        if (CloudStyleItem is not null)
+            CloudStyleItem.Visibility = Show(_tool == EditorTool.Rectangle);
+        SyncColorWellIndicator();
         ThicknessLabel.Text = _tool == EditorTool.Text ? "Size" : "Thickness";
         if (Has(EditorContextControls.Thickness))
             SyncThicknessButtons();
@@ -680,12 +803,95 @@ public partial class EditorWindow : Window
 
     private void SetCurrentColor(Color color)
     {
-        _color = color;
-        // Fires during XAML parse for the default swatch, before the indicator exists.
-        if (CurrentColorIndicator is not null)
-            CurrentColorIndicator.Fill = new SolidColorBrush(color);
-        if (IsLoaded)
-            RestyleSelected(color: color, thickness: null, fill: null);
+        if (_colorWell == ColorWell.Fill && EditorShellContract.ContextFor(_tool, _filledRectangleMode)
+                .HasFlag(EditorContextControls.FillStrokeTabs))
+        {
+            _fillColor = AnnotationStyle.Opaque(color);
+            if (IsLoaded)
+                RestyleSelected(color: null, thickness: null, fill: _fillMode, fillColor: CurrentFillBrush());
+        }
+        else
+        {
+            _color = AnnotationStyle.Opaque(color);
+            if (IsLoaded)
+                RestyleSelected(color: CurrentStrokeBrush(), thickness: null, fill: null);
+        }
+        SyncColorWellIndicator();
+    }
+
+    private Color CurrentStrokeBrush() => AnnotationStyle.Compose(_color, _opacity);
+
+    private Color CurrentFillBrush()
+    {
+        Color rgb = _fillColor.A == 0 && _fillMode != ShapeFillMode.None ? _color : AnnotationStyle.Opaque(_fillColor);
+        double op = _fillMode switch
+        {
+            ShapeFillMode.Quarter => 0.25,
+            ShapeFillMode.Solid => _fillOpacity > 0 ? _fillOpacity : 1,
+            _ => _fillOpacity,
+        };
+        return AnnotationStyle.Compose(rgb, op);
+    }
+
+    private void OnColorWellChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tag) return;
+        _colorWell = tag == "Fill" ? ColorWell.Fill : ColorWell.Stroke;
+        SyncColorWellIndicator();
+        if (IsLoaded) UpdateContextPanels();
+    }
+
+    private void SyncColorWellIndicator()
+    {
+        if (CurrentColorIndicator is null) return;
+        Color shown = _colorWell == ColorWell.Fill &&
+                      EditorShellContract.ContextFor(_tool, _filledRectangleMode).HasFlag(EditorContextControls.FillStrokeTabs)
+            ? CurrentFillBrush()
+            : CurrentStrokeBrush();
+        if (shown.A == 0)
+        {
+            CurrentColorIndicator.Fill = Brushes.Transparent;
+            CurrentColorIndicator.StrokeDashArray = new DoubleCollection { 2, 2 };
+        }
+        else
+        {
+            CurrentColorIndicator.Fill = new SolidColorBrush(shown);
+            CurrentColorIndicator.StrokeDashArray = null;
+        }
+    }
+
+    private void SetOpacityPercent(double percent, bool restyle)
+    {
+        double pct = Math.Clamp(percent, 0, 100);
+        if (_colorWell == ColorWell.Fill &&
+            EditorShellContract.ContextFor(_tool, _filledRectangleMode).HasFlag(EditorContextControls.FillStrokeTabs))
+        {
+            _fillOpacity = pct / 100.0;
+            if (_fillOpacity <= 0) _fillMode = ShapeFillMode.None;
+            else if (Math.Abs(_fillOpacity - 0.25) < 0.02) _fillMode = ShapeFillMode.Quarter;
+            else _fillMode = ShapeFillMode.Solid;
+            if (restyle && IsLoaded)
+                RestyleSelected(color: null, thickness: null, fill: _fillMode, fillColor: CurrentFillBrush());
+        }
+        else
+        {
+            _opacity = pct / 100.0;
+            if (restyle && IsLoaded)
+                RestyleSelected(color: CurrentStrokeBrush(), thickness: null, fill: null, opacity: _opacity);
+        }
+        if (OpacitySlider is not null && Math.Abs(OpacitySlider.Value - pct) > 0.5)
+            OpacitySlider.Value = pct;
+        if (OpacityValue is not null)
+            OpacityValue.Text = $"{Math.Round(pct)}%";
+        SyncColorWellIndicator();
+    }
+
+    private void OnLineStyleChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item || item.Tag is not string tag)
+            return;
+        _lineStyle = AnnotationStyle.ParseLineStyle(tag);
+        if (IsLoaded) RestyleSelectedLineStyle(_lineStyle);
     }
 
     private void OnThicknessChecked(object sender, RoutedEventArgs e)
@@ -707,8 +913,16 @@ public partial class EditorWindow : Window
         if (sender is RadioButton rb && rb.Tag is string tag && Enum.TryParse(tag, out ShapeFillMode mode))
         {
             _fillMode = mode;
+            _fillOpacity = mode switch
+            {
+                ShapeFillMode.Quarter => 0.25,
+                ShapeFillMode.Solid => _fillOpacity > 0 ? _fillOpacity : 1,
+                _ => 0,
+            };
+            if (_fillColor.A == 0 && mode != ShapeFillMode.None)
+                _fillColor = _color;
             if (IsLoaded)
-                RestyleSelected(color: null, thickness: null, fill: mode);
+                RestyleSelected(color: null, thickness: null, fill: mode, fillColor: CurrentFillBrush());
         }
     }
 

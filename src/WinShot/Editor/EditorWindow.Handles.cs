@@ -17,7 +17,7 @@ public partial class EditorWindow : Window
     // ----------------------------------------------------- resize handles (Gap)
 
     /// <summary>Which family of handles is currently shown.</summary>
-    private enum HandleKind { None, Box, Endpoints, Crop }
+    private enum HandleKind { None, Box, Endpoints, Crop, Callout }
 
     private const double HandleScreenPx = 9;   // on-screen thumb size, kept constant via /_zoom
     private const double HandleGrabPx = 11;     // screen-px grab radius for hit testing
@@ -42,6 +42,9 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeLine:
             case AnnotationData.TypeCurvedArrow:
                 LayoutEndpointHandles(meta);
+                break;
+            case AnnotationData.TypeCallout:
+                LayoutCalloutHandles(meta);
                 break;
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
@@ -78,6 +81,21 @@ public partial class EditorWindow : Window
         new Point(b.Left + b.Width / 2, b.Bottom),      // 6 B
         new Point(b.Left, b.Top + b.Height / 2),        // 7 L
     };
+
+    /// <summary>Callout thumbs: 0=tip, 1=knee, 2=box-TL, 3=box-BR.</summary>
+    private void LayoutCalloutHandles(AnnotationData meta)
+    {
+        if (_selected is not CalloutAnnotation callout) { HideHandles(); return; }
+        var layout = callout.Layout;
+        Vector off = ElementOffset(_selected);
+        _handleKind = HandleKind.Callout;
+        EnsureThumbs(4);
+        PlaceThumb(0, layout.Tip + off);
+        PlaceThumb(1, layout.Knee + off);
+        PlaceThumb(2, layout.Box.TopLeft + off);
+        PlaceThumb(3, layout.Box.BottomRight + off);
+        HandleLayer.Visibility = Visibility.Visible;
+    }
 
     /// <summary>Two thumbs at the stroke endpoints (index 0 = from, 1 = to).</summary>
     private void LayoutEndpointHandles(AnnotationData meta)
@@ -190,6 +208,8 @@ public partial class EditorWindow : Window
         Rect oldBounds = _resizeBefore.Bounds;
         if (_handleKind == HandleKind.Endpoints)
             ApplyEndpointResize(fe, meta, pos);
+        else if (_handleKind == HandleKind.Callout)
+            ApplyCalloutResize(fe, meta, pos);
         else
             ApplyBoxResize(fe, meta, NewBoundsForHandle(oldBounds, _activeHandle, pos));
 
@@ -296,6 +316,17 @@ public partial class EditorWindow : Window
         Canvas.SetTop(fe, b.Y);
         fe.Width = Math.Max(1, b.Width);
         fe.Height = Math.Max(1, b.Height);
+        if (fe is Path path && fe.Tag is AnnotationData meta &&
+            AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
+            path.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height));
+        if (fe.Tag is AnnotationData data &&
+            data.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
+        {
+            data.Rect = new[] { b.X, b.Y, fe.Width, fe.Height };
+            data.Tx = 0;
+            data.Ty = 0;
+            fe.Tag = data;
+        }
     }
 
     /// <summary>
@@ -350,7 +381,7 @@ public partial class EditorWindow : Window
     /// <summary>Arrow / line / curved arrow: drag one endpoint, rebuilding geometry from the moved endpoints.</summary>
     private void ApplyEndpointResize(FrameworkElement fe, AnnotationData meta, Point pos)
     {
-        if (fe is not Path path || _resizeBefore?.Points is not { Length: >= 2 } basePts) return;
+        if (_resizeBefore?.Points is not { Length: >= 2 } basePts) return;
 
         // basePts (canvas coords): arrow/line = [from, to]; curved = [from, control, to].
         Point from = basePts[0];
@@ -361,8 +392,18 @@ public partial class EditorWindow : Window
         if (_activeHandle == 0) from = pos;
         else to = pos;
 
+        fe.RenderTransform = null; // points are absolute now
+        if (fe is Line line)
+        {
+            line.X1 = from.X; line.Y1 = from.Y; line.X2 = to.X; line.Y2 = to.Y;
+            meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
+            meta.Tx = 0;
+            meta.Ty = 0;
+            line.Tag = meta;
+            return;
+        }
+        if (fe is not Path path) return;
         double thickness = meta.Thickness ?? path.StrokeThickness;
-        path.RenderTransform = null; // points are absolute now
         if (curved)
         {
             // Keep the stored control point as-is so a previously bent curve keeps its shape.
@@ -371,13 +412,40 @@ public partial class EditorWindow : Window
         }
         else
         {
-            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style));
+            var (end, start) = AnnotationStyle.HeadsFrom(meta);
+            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start);
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
         }
         // Keep the stored geometry in sync so the end-of-drag snapshot reads the live state.
         meta.Tx = 0;
         meta.Ty = 0;
         path.Tag = meta;
+    }
+
+    private void ApplyCalloutResize(FrameworkElement fe, AnnotationData meta, Point pos)
+    {
+        if (fe is not CalloutAnnotation callout) return;
+        var layout = callout.Layout;
+        Vector off = ElementOffset(callout);
+        Point local = pos - off;
+        CalloutLayout next = _activeHandle switch
+        {
+            0 => layout.WithTip(local),
+            1 => layout.WithKnee(local),
+            2 => layout.WithBox(new Rect(local, layout.Box.BottomRight)),
+            3 => layout.WithBox(new Rect(layout.Box.TopLeft, local)),
+            _ => layout,
+        };
+        var (head, _) = AnnotationStyle.HeadsFrom(meta);
+        var stroke = meta.Color is string hex && TryParseColor(hex, out var sc) ? sc : Colors.White;
+        var fill = AnnotationStyle.FillColorFrom(meta, stroke);
+        callout.Apply(next, meta.Text ?? "", stroke, fill, meta.Thickness ?? 2, head,
+            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16);
+        var data = AnnotationData.ForCallout(next, meta.Text ?? "", stroke, fill,
+            meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16);
+        data.Tx = meta.Tx;
+        data.Ty = meta.Ty;
+        callout.Tag = data;
     }
 
     // ---- snapshots (undo/redo) ----
@@ -419,7 +487,8 @@ public partial class EditorWindow : Window
         Point[]? pts = null;
         if (meta.Points is { } mp && mp.Length > 0 &&
             meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeLine
-                or AnnotationData.TypeCurvedArrow or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter)
+                or AnnotationData.TypeCurvedArrow or AnnotationData.TypeFreehand
+                or AnnotationData.TypeHighlighter or AnnotationData.TypeCallout)
         {
             pts = mp.Select(p => new Point(p[0] + off.X, p[1] + off.Y)).ToArray();
         }
@@ -468,18 +537,45 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeArrow:
             case AnnotationData.TypeLine:
             case AnnotationData.TypeCurvedArrow:
+                fe.RenderTransform = null;
+                if (fe is Line line && snap.Points is { Length: >= 2 } lp)
+                {
+                    line.X1 = lp[0].X; line.Y1 = lp[0].Y; line.X2 = lp[^1].X; line.Y2 = lp[^1].Y;
+                    meta.Points = lp.Select(p => new[] { p.X, p.Y }).ToArray();
+                    meta.Tx = 0;
+                    meta.Ty = 0;
+                    break;
+                }
                 if (fe is Path path && snap.Points is { Length: >= 2 } sp)
                 {
-                    path.RenderTransform = null;
                     double thickness = meta.Thickness ?? path.StrokeThickness;
                     bool curved = snap.Type == AnnotationData.TypeCurvedArrow && sp.Length >= 3;
+                    var (end, start) = AnnotationStyle.HeadsFrom(meta);
                     path.Data = curved
                         ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness)
-                        : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness,
-                            AnnotationFactory.ParseArrowStyle(meta.Style));
+                        : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness, end, start);
                     meta.Points = sp.Select(p => new[] { p.X, p.Y }).ToArray();
                     meta.Tx = 0;
                     meta.Ty = 0;
+                }
+                break;
+            case AnnotationData.TypeCallout:
+                if (fe is CalloutAnnotation callout && snap.Meta.Points is { Length: >= 3 } cp)
+                {
+                    fe.RenderTransform = snap.Tx != 0 || snap.Ty != 0
+                        ? new TranslateTransform(snap.Tx, snap.Ty)
+                        : null;
+                    var box = snap.Meta.Rect is { Length: >= 4 } r
+                        ? new Rect(r[0], r[1], r[2], r[3])
+                        : new Rect(cp[2][0], cp[2][1], CalloutLayout.DefaultBoxWidth, CalloutLayout.DefaultBoxHeight);
+                    var layout = CalloutLayout.FromParts(
+                        new Point(cp[0][0], cp[0][1]), new Point(cp[1][0], cp[1][1]), box);
+                    var (head, _) = AnnotationStyle.HeadsFrom(snap.Meta);
+                    var stroke = snap.Meta.Color is string hx && TryParseColor(hx, out var sc) ? sc : Colors.White;
+                    callout.Apply(layout, snap.Meta.Text ?? "", stroke, AnnotationStyle.FillColorFrom(snap.Meta, stroke),
+                        snap.Meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(snap.Meta),
+                        snap.Meta.FontSize ?? 16);
+                    meta = snap.Meta.Clone();
                 }
                 break;
 
@@ -755,6 +851,7 @@ public partial class EditorWindow : Window
             Key.B => EditorTool.Blur,
             Key.S => EditorTool.Step,
             Key.C => EditorTool.Crop,
+            Key.Q => EditorTool.Callout,
             _ => null,
         };
         if (tool is not EditorTool t) return false;

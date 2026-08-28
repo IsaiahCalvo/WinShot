@@ -751,6 +751,12 @@ public partial class EditorWindow : Window
                 data.Tx = 0;
                 data.Ty = 0;
             }
+            if (data.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
+            {
+                double l = Canvas.GetLeft(fe); if (double.IsNaN(l)) l = 0;
+                double t0 = Canvas.GetTop(fe); if (double.IsNaN(t0)) t0 = 0;
+                data.Rect = new[] { l, t0, Math.Max(1, fe.Width), Math.Max(1, fe.Height) };
+            }
             if (data.Type == AnnotationData.TypeImage && el is Image img && img.Source is BitmapSource bs)
             {
                 data.ImageIndex = images.Count;

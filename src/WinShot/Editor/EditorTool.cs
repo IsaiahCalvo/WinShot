@@ -19,6 +19,7 @@ public enum EditorTool
     Spotlight,
     CurvedArrow,
     Emoji,
+    Callout,
 }
 
 /// <summary>Fill applied to newly drawn rectangles and ellipses.</summary>

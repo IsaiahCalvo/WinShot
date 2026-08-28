@@ -13,6 +13,8 @@ internal enum EditorContextControls
     TextStyle = 1 << 6,
     CropRatio = 1 << 7,
     StepMode = 1 << 8,
+    LineStyle = 1 << 9,
+    FillStrokeTabs = 1 << 10,
 }
 
 /// <summary>
@@ -24,18 +26,17 @@ internal static class EditorShellContract
     public static readonly string[] PrimaryToolOrder =
     {
         "Select",
-        "Rectangle",
-        "FilledRectangle",
-        "Ellipse",
-        "Line",
-        "Arrow",
+        "Draw",
+        "Shape",
         "Text",
         "Pixelate",
         "Spotlight",
         "Step",
-        "Freehand",
-        "Highlighter",
     };
+
+    public static readonly string[] DrawGroupTools = { "Freehand", "Highlighter" };
+    public static readonly string[] ShapeGroupTools = { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow" };
+    public static readonly string[] TextGroupTools = { "Text", "Callout" };
 
     public static readonly string[] MoreToolOrder =
     {
@@ -45,8 +46,8 @@ internal static class EditorShellContract
         "Eyedropper",
     };
 
-    // 3 leading actions + 12 primary tools + More + Save/Done and separators,
-    // using the shared 36-DIP controls and margins from Theme.xaml.
+    // 3 leading actions + grouped annotation tools + Pixelate/Spotlight/Step + More + Save/Done.
+    // Groups collapse eight individual 36-DIP radios into three, so the 980-DIP minimum still fits.
     public const double PrimaryToolbarLogicalWidth = 872;
     public const double MinimumEditorLogicalWidth = 980;
     public const double ToolbarOuterMargin = 24;
@@ -63,18 +64,26 @@ internal static class EditorShellContract
     public static EditorContextControls ContextFor(EditorTool tool, bool filledRectangle) => tool switch
     {
         EditorTool.Rectangle when filledRectangle =>
-            EditorContextControls.Color | EditorContextControls.Fill | EditorContextControls.Opacity,
+            EditorContextControls.Color | EditorContextControls.Fill | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
         EditorTool.Rectangle or EditorTool.Ellipse =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.Fill | EditorContextControls.Opacity,
+            EditorContextControls.Fill | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
         EditorTool.Line or EditorTool.CurvedArrow or EditorTool.Freehand or EditorTool.Highlighter =>
-            EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
+            EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity |
+            (tool is EditorTool.Line or EditorTool.CurvedArrow ? EditorContextControls.LineStyle : 0),
         EditorTool.Arrow =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.ArrowStyle | EditorContextControls.Opacity,
+            EditorContextControls.ArrowStyle | EditorContextControls.Opacity | EditorContextControls.LineStyle,
         EditorTool.Text =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.TextStyle | EditorContextControls.Opacity,
+            EditorContextControls.TextStyle | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
+        EditorTool.Callout =>
+            EditorContextControls.Color | EditorContextControls.Thickness |
+            EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle | EditorContextControls.TextStyle,
         EditorTool.Step =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,
@@ -82,4 +91,13 @@ internal static class EditorShellContract
         EditorTool.Crop => EditorContextControls.CropRatio,
         _ => EditorContextControls.None,
     };
+
+    public static string GroupFor(EditorTool tool, bool filledRectangle) =>
+        tool switch
+        {
+            EditorTool.Freehand or EditorTool.Highlighter => "Draw",
+            EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow => "Shape",
+            EditorTool.Text or EditorTool.Callout => "Text",
+            _ => "",
+        };
 }

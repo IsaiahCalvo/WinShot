@@ -102,6 +102,106 @@ public class ProjectSerializerTests
     }
 
     [Fact]
+    public void SaveAndLoad_RoundTripsSurveyDrawShapeTextMetadata()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"winshot-survey-style-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "survey.winshot");
+        try
+        {
+            using var source = new SD.Bitmap(8, 6);
+            var doc = new ProjectDocument
+            {
+                Annotations =
+                {
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeArrow,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 6d, 2d } },
+                        Color = "#FFFF0000",
+                        Thickness = 3,
+                        Head = "vShape",
+                        LineStyle = "dashed",
+                    },
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeRectangle,
+                        Rect = new[] { 1d, 1d, 4d, 3d },
+                        Color = "#FF00FF00",
+                        FillColor = "#400000FF",
+                        Thickness = 2,
+                        Fill = "Solid",
+                        LineStyle = "dotted",
+                    },
+                    AnnotationData.ForCallout(
+                        CalloutLayout.FromDrag(new Point(0, 0), new Point(3, 2)),
+                        "hello", Color.FromRgb(255, 0, 0), Color.FromArgb(0, 255, 255, 255),
+                        2, ArrowheadStyle.OpenCircle, LineBorderStyle.Solid, 16),
+                },
+            };
+
+            ProjectSerializer.Save(path, source, doc, Array.Empty<BitmapSource>());
+            var loaded = ProjectSerializer.Load(path);
+            using var loadedSource = loaded.Source;
+            Assert.Equal("vShape", loaded.Doc.Annotations[0].Head);
+            Assert.Equal("dashed", loaded.Doc.Annotations[0].LineStyle);
+            Assert.Equal("#400000FF", loaded.Doc.Annotations[1].FillColor);
+            Assert.Equal("dotted", loaded.Doc.Annotations[1].LineStyle);
+            Assert.Equal(AnnotationData.TypeCallout, loaded.Doc.Annotations[2].Type);
+            Assert.Equal("hello", loaded.Doc.Annotations[2].Text);
+            Assert.Equal("openCircle", loaded.Doc.Annotations[2].Head);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateElement_RebuildsSurveyArrowheadAndCallout()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var arrow = Assert.IsType<System.Windows.Shapes.Path>(ProjectSerializer.CreateElement(
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeArrow,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 80d, 0d } },
+                        Color = "#FFFF453A",
+                        Thickness = 4,
+                        Head = "openTriangle",
+                        LineStyle = "dashed",
+                    }, Array.Empty<BitmapSource>()));
+                var geometry = Assert.IsType<PathGeometry>(arrow.Data);
+                Assert.Equal(2, geometry.Figures.Count);
+                Assert.False(geometry.Figures[1].IsFilled);
+                Assert.NotNull(arrow.StrokeDashArray);
+                Assert.Equal(new[] { 6d, 4d }, arrow.StrokeDashArray.ToArray());
+
+                var callout = Assert.IsType<CalloutAnnotation>(ProjectSerializer.CreateElement(
+                    AnnotationData.ForCallout(
+                        CalloutLayout.FromDrag(new Point(4, 4), new Point(40, 20)),
+                        "note", Color.FromRgb(30, 41, 59), Color.FromArgb(0, 255, 255, 255),
+                        2, ArrowheadStyle.SolidTriangle, LineBorderStyle.Dotted, 14),
+                    Array.Empty<BitmapSource>()));
+                Assert.Equal("note", callout.Text);
+                Assert.True(callout.Layout.Box.Width >= CalloutLayout.MinBoxWidth);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
+    [Fact]
     public void SaveAndLoad_RoundTripsMultipleEmbeddedImages()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"winshot-project-{Guid.NewGuid():N}");

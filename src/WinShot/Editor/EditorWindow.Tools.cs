@@ -16,6 +16,63 @@ public partial class EditorWindow : Window
 {
     // ------------------------------------------------------------- text tool
 
+    private void CommitCallout(Point tip, Point boxOrigin)
+    {
+        var layout = CalloutLayout.FromDrag(tip, boxOrigin);
+        var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
+        double fontSize = AnnotationFactory.FontSizeFor(_thickness);
+        var visual = AnnotationFactory.CreateCallout(
+            layout, "", stroke, fill, _thickness, _arrowhead,
+            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize);
+        visual.Tag = AnnotationData.ForCallout(
+            layout, "", stroke, fill, _thickness, _arrowhead,
+            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize);
+        AnnotationCanvas.Children.Add(visual);
+
+        var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(stroke), fontSize);
+        tb.Width = layout.Box.Width;
+        tb.Height = layout.Box.Height;
+        tb.Tag = visual;
+        Canvas.SetLeft(tb, layout.Box.X);
+        Canvas.SetTop(tb, layout.Box.Y);
+        AnnotationCanvas.Children.Add(tb);
+        _activeText = tb;
+        tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
+        tb.PreviewKeyDown += (_, ev) =>
+        {
+            if (ev.Key == Key.Enter) { CommitCalloutText(); ev.Handled = true; }
+            else if (ev.Key == Key.Escape)
+            {
+                AnnotationCanvas.Children.Remove(tb);
+                _activeText = null;
+                AnnotationCanvas.Children.Remove(visual);
+                ev.Handled = true;
+            }
+        };
+        Dispatcher.InvokeAsync(() => tb.Focus());
+    }
+
+    private void CommitCalloutText()
+    {
+        var tb = _activeText;
+        if (tb is null || tb.Tag is not CalloutAnnotation visual) return;
+        _activeText = null;
+        string text = tb.Text?.Trim() ?? "";
+        AnnotationCanvas.Children.Remove(tb);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            AnnotationCanvas.Children.Remove(visual);
+            return;
+        }
+        visual.Text = text;
+        if (visual.Tag is AnnotationData meta)
+        {
+            meta.Text = text;
+            visual.Tag = meta;
+        }
+        PushAddElement(visual);
+    }
+
     private void PlaceText(Point pos)
     {
         var style = _textStyle;
@@ -97,6 +154,11 @@ public partial class EditorWindow : Window
     {
         var tb = _activeText;
         if (tb is null) return;
+        if (tb.Tag is CalloutAnnotation)
+        {
+            CommitCalloutText();
+            return;
+        }
         _activeText = null; // guards against re-entry from LostKeyboardFocus on removal
 
         double x = Canvas.GetLeft(tb), y = Canvas.GetTop(tb);

@@ -24,7 +24,7 @@ public partial class EditorWindow : Window
     /// before/after snapshot of the affected visual properties and the stored
     /// <see cref="AnnotationData"/> so undo/redo simply replay the appropriate snapshot.
     /// </summary>
-    private void RestyleSelected(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null)
+    private void RestyleSelected(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null, Color? fillColor = null)
     {
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
             return;
@@ -32,22 +32,23 @@ public partial class EditorWindow : Window
         // and fill only make sense for the shapes that carry them. Skip no-op restyles so
         // those annotations don't push empty undo entries.
         if (!CanRestyle(_selected, color, thickness, fill) &&
-            !(opacity is not null && CanSetOpacity(_selected)))
+            !(opacity is not null && CanSetOpacity(_selected)) &&
+            fillColor is null)
             return;
 
         // A color pick (swatch / eyedropper) is opaque, but the annotation may carry a
         // reduced alpha — from the highlighter's translucent base or an earlier opacity
         // change. Preserve that existing alpha so changing the hue never silently resets
         // opacity. An explicit opacity change (opacity != null) overrides this below.
-        if (color is Color picked && opacity is null)
+        if (color is Color picked && opacity is null && picked.A == 255)
         {
-            byte fallback = meta.Type == AnnotationData.TypeHighlighter ? (byte)0x59 : (byte)0xFF;
+            byte fallback = meta.Type == AnnotationData.TypeHighlighter ? (byte)0x80 : (byte)0xFF;
             byte alpha = meta.Color is string hex0 && TryParseColor(hex0, out var cur) ? cur.A : fallback;
             color = Color.FromArgb(alpha, picked.R, picked.G, picked.B);
         }
 
         var before = SnapshotStyle(_selected, meta);
-        var after = before.With(color, thickness, fill, opacity);
+        var after = before.With(color, thickness, fill, opacity, fillColor);
         ApplyStyleSnapshot(_selected, after);
 
         UIElement el = _selected;
@@ -66,7 +67,7 @@ public partial class EditorWindow : Window
             AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow or AnnotationData.TypeLine
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter =>
                 color is not null || thickness is not null,
-            AnnotationData.TypeRectangle or AnnotationData.TypeEllipse => true,
+            AnnotationData.TypeRectangle or AnnotationData.TypeEllipse or AnnotationData.TypeCallout => true,
             AnnotationData.TypeText => color is not null,
             AnnotationData.TypeStep => color is not null || thickness is not null,
             _ => false, // emoji / spotlight / image carry no editable stroke style
@@ -80,7 +81,7 @@ public partial class EditorWindow : Window
             AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow or AnnotationData.TypeLine
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter
                 or AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
-                or AnnotationData.TypeText or AnnotationData.TypeStep => true,
+                or AnnotationData.TypeText or AnnotationData.TypeStep or AnnotationData.TypeCallout => true,
             _ => false,
         };
 
@@ -92,29 +93,35 @@ public partial class EditorWindow : Window
         Color StrokeColor,
         double Thickness,
         ShapeFillMode Fill,
+        Color FillColor,
         AnnotationData Meta)
     {
-        public StyleSnapshot With(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null)
+        public StyleSnapshot With(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null, Color? fillColor = null)
         {
             Color c = color ?? StrokeColor;
             double t = thickness ?? Thickness;
             ShapeFillMode f = fill ?? Fill;
+            Color fc = fillColor ?? FillColor;
 
-            // Opacity rewrites the color's alpha. Highlighter has a translucent base alpha
-            // (~0x59) that opacity scales; every other kind treats RGB as fully opaque and
-            // sets alpha straight from the multiplier so the result is idempotent.
+            // Opacity rewrites the stroke alpha. Highlighter keeps a translucent base so a
+            // 100% slider still reads as a marker; every other kind uses the slider directly.
             if (opacity is double op)
             {
-                byte baseAlpha = Meta.Type == AnnotationData.TypeHighlighter ? (byte)0x59 : (byte)0xFF;
+                byte baseAlpha = Meta.Type == AnnotationData.TypeHighlighter ? (byte)0x80 : (byte)0xFF;
                 byte alpha = (byte)Math.Clamp(Math.Round(baseAlpha * op), 0, 255);
                 c = Color.FromArgb(alpha, c.R, c.G, c.B);
             }
+
+            if (Meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse or AnnotationData.TypeCallout)
+                (c, fc) = AnnotationStyle.EnforceOneVisible(c, fc);
 
             var meta = Meta.Clone();
             meta.Color = ToHex(c);
             if (thickness is not null) meta.Thickness = t;
             if (fill is not null) meta.Fill = f.ToString();
-            return new StyleSnapshot(c, t, f, meta);
+            if (fillColor is not null || Meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
+                meta.FillColor = ToHex(fc);
+            return new StyleSnapshot(c, t, f, fc, meta);
         }
     }
 
@@ -123,7 +130,8 @@ public partial class EditorWindow : Window
         Color stroke = meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White;
         double thickness = meta.Thickness ?? 4;
         ShapeFillMode fill = Enum.TryParse(meta.Fill, out ShapeFillMode f) ? f : ShapeFillMode.None;
-        return new StyleSnapshot(stroke, thickness, fill, meta);
+        Color fillColor = AnnotationStyle.FillColorFrom(meta, stroke);
+        return new StyleSnapshot(stroke, thickness, fill, fillColor, meta);
     }
 
     /// <summary>Applies a snapshot to the live element and refreshes its stored AnnotationData.</summary>
@@ -142,14 +150,15 @@ public partial class EditorWindow : Window
                     arrow.Stroke = stroke;
                     arrow.Fill = stroke;
                     arrow.StrokeThickness = snap.Thickness;
+                    AnnotationFactory.ApplyDash(arrow, AnnotationStyle.LineStyleFrom(snap.Meta));
                     // The triangular head scales with thickness, so rebuild geometry.
                     if (snap.Meta.Points is { } pts && pts.Length >= 2)
                     {
                         var p = pts.Select(q => new Point(q[0], q[1])).ToArray();
+                        var (end, start) = AnnotationStyle.HeadsFrom(snap.Meta);
                         arrow.Data = meta.Type == AnnotationData.TypeCurvedArrow && p.Length >= 3
                             ? AnnotationFactory.CurvedArrowGeometry(p[0], p[1], p[2], snap.Thickness)
-                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness,
-                                AnnotationFactory.ParseArrowStyle(snap.Meta.Style));
+                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness, end, start);
                     }
                 }
                 break;
@@ -161,6 +170,8 @@ public partial class EditorWindow : Window
                     // Highlighter keeps its baked-in translucent alpha; honor it from the snapshot.
                     lineLike.Stroke = stroke;
                     lineLike.StrokeThickness = snap.Thickness;
+                    if (meta.Type == AnnotationData.TypeLine)
+                        AnnotationFactory.ApplyDash(lineLike, AnnotationStyle.LineStyleFrom(snap.Meta));
                 }
                 break;
             case AnnotationData.TypeRectangle:
@@ -169,7 +180,37 @@ public partial class EditorWindow : Window
                 {
                     boxLike.Stroke = stroke;
                     boxLike.StrokeThickness = snap.Thickness;
-                    boxLike.Fill = ShapeFillBrush.Create(snap.Fill, snap.StrokeColor);
+                    boxLike.Fill = snap.FillColor.A == 0
+                        ? ShapeFillBrush.Create(snap.Fill, snap.StrokeColor)
+                        : new SolidColorBrush(snap.FillColor);
+                    var lineStyle = AnnotationStyle.LineStyleFrom(snap.Meta);
+                    if (boxLike is Path cloud)
+                    {
+                        if (lineStyle == LineBorderStyle.Cloud)
+                        {
+                            cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, boxLike.Width), Math.Max(1, boxLike.Height)));
+                            cloud.StrokeDashArray = null;
+                        }
+                        else
+                            AnnotationFactory.ApplyDash(cloud, lineStyle);
+                    }
+                    else
+                    {
+                        AnnotationFactory.ApplyDash(boxLike, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
+                    }
+                }
+                break;
+            case AnnotationData.TypeCallout:
+                if (element is CalloutAnnotation callout && snap.Meta.Points is { Length: >= 3 } cp)
+                {
+                    var box = snap.Meta.Rect is { Length: >= 4 } r
+                        ? new Rect(r[0], r[1], r[2], r[3])
+                        : new Rect(cp[2][0], cp[2][1], CalloutLayout.DefaultBoxWidth, CalloutLayout.DefaultBoxHeight);
+                    var layout = CalloutLayout.FromParts(new Point(cp[0][0], cp[0][1]), new Point(cp[1][0], cp[1][1]), box);
+                    var (head, _) = AnnotationStyle.HeadsFrom(snap.Meta);
+                    callout.Apply(layout, snap.Meta.Text ?? callout.Text, snap.StrokeColor, snap.FillColor,
+                        snap.Thickness, head, AnnotationStyle.LineStyleFrom(snap.Meta),
+                        snap.Meta.FontSize ?? 16);
                 }
                 break;
             case AnnotationData.TypeText:
@@ -257,10 +298,59 @@ public partial class EditorWindow : Window
     private void OnArrowStyleChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
-            item.Tag is not string tag || !Enum.TryParse(tag, out ArrowStyle style))
+            item.Tag is not string tag)
             return;
-        _arrowStyle = style;
-        if (IsLoaded) RestyleSelectedArrow(style);
+        if (tag == "Double")
+        {
+            _arrowStyle = ArrowStyle.Double;
+            _arrowhead = ArrowheadStyle.SolidTriangle;
+            _startArrowhead = ArrowheadStyle.SolidTriangle;
+        }
+        else if (Enum.TryParse(tag, out ArrowStyle legacy))
+        {
+            _arrowStyle = legacy;
+            _arrowhead = AnnotationStyle.ParseArrowhead(legacy.ToString(), out _startArrowhead);
+        }
+        else
+        {
+            _arrowhead = AnnotationStyle.ParseArrowhead(tag, out _);
+            _startArrowhead = ArrowheadStyle.None;
+            _arrowStyle = ArrowStyle.Straight;
+        }
+        if (IsLoaded) RestyleSelectedArrowhead();
+    }
+
+    private void RestyleSelectedArrowhead()
+    {
+        if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
+            meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeCallout))
+        {
+            if (_selected is CalloutAnnotation callout && callout.Tag is AnnotationData calloutMeta)
+            {
+                var before = calloutMeta.Clone();
+                var after = calloutMeta.Clone();
+                after.Head = AnnotationStyle.ToStorageName(_arrowhead);
+                after.StartHead = _startArrowhead == ArrowheadStyle.None ? null : AnnotationStyle.ToStorageName(_startArrowhead);
+                ApplyStyleSnapshot(callout, SnapshotStyle(callout, after));
+                Push(new EditorAction(
+                    undo: () => { callout.Tag = before; ApplyStyleSnapshot(callout, SnapshotStyle(callout, before)); },
+                    redo: () => { callout.Tag = after; ApplyStyleSnapshot(callout, SnapshotStyle(callout, after)); }),
+                    apply: false);
+            }
+            else
+                RestyleSelectedArrow(_arrowStyle);
+            return;
+        }
+        var beforeMeta = meta.Clone();
+        var afterMeta = meta.Clone();
+        afterMeta.Head = AnnotationStyle.ToStorageName(_arrowhead);
+        afterMeta.StartHead = _startArrowhead == ArrowheadStyle.None ? null : AnnotationStyle.ToStorageName(_startArrowhead);
+        ApplyArrowStyleData(arrow, afterMeta);
+        Push(new EditorAction(
+            undo: () => { ApplyArrowStyleData(arrow, beforeMeta); if (ReferenceEquals(_selected, arrow)) UpdateSelectionVisual(); },
+            redo: () => { ApplyArrowStyleData(arrow, afterMeta); if (ReferenceEquals(_selected, arrow)) UpdateSelectionVisual(); }),
+            apply: false);
+        UpdateSelectionVisual();
     }
 
     /// <summary>
@@ -295,7 +385,8 @@ public partial class EditorWindow : Window
             Point from = new(pts[0][0], pts[0][1]);
             Point to = new(pts[^1][0], pts[^1][1]);
             double thickness = meta.Thickness ?? arrow.StrokeThickness;
-            arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style));
+            var (end, start) = AnnotationStyle.HeadsFrom(meta);
+            arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start);
         }
         arrow.Tag = meta;
     }
@@ -311,10 +402,14 @@ public partial class EditorWindow : Window
     /// </summary>
     private void OnOpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        double pct = Math.Clamp(e.NewValue, 25, 100);
-        _opacity = pct / 100.0;
-        if (OpacityValue is not null)
-            OpacityValue.Text = $"{Math.Round(pct)}%";
+        double pct = Math.Clamp(e.NewValue, 0, 100);
+        if (_colorWell == ColorWell.Fill &&
+            EditorShellContract.ContextFor(_tool, _filledRectangleMode).HasFlag(EditorContextControls.FillStrokeTabs))
+        {
+            SetOpacityPercent(pct, restyle: IsLoaded);
+            return;
+        }
+        SetOpacityPercent(pct, restyle: false);
         if (!IsLoaded) return;
 
         // Apply live to the selection without pushing undo, capturing a one-time "before" for
@@ -418,12 +513,14 @@ public partial class EditorWindow : Window
         if (_colorPickerBuilt) return;
         _colorPickerBuilt = true;
 
+        AddPickerSwatch(Colors.Transparent, "Transparent");
         string[] swatches =
         {
-            // row 1 — greys
-            "#000000", "#3A3A3C", "#636366", "#8E8E93", "#AEAEB2", "#C7C7CC", "#E5E5EA", "#FFFFFF",
+            // row 1 — greys (transparent already occupies the first cell)
+            "#3A3A3C", "#636366", "#8E8E93", "#AEAEB2", "#C7C7CC", "#E5E5EA", "#FFFFFF",
+            "#FF3B30",
             // row 2 — reds / oranges
-            "#FF3B30", "#FF6B5E", "#FF9500", "#FFB340", "#FFCC00", "#FFE066", "#D70015", "#A2231D",
+            "#FF6B5E", "#FF9500", "#FFB340", "#FFCC00", "#FFE066", "#D70015", "#A2231D",
             // row 3 — greens / teals
             "#34C759", "#30D158", "#00C7BE", "#63E6BE", "#5AC8FA", "#64D2FF", "#248A3D", "#0E6E4E",
             // row 4 — blues / purples
@@ -435,23 +532,42 @@ public partial class EditorWindow : Window
         foreach (string hex in swatches)
         {
             if (!TryParseColor(hex, out var c)) continue;
-            var btn = new Button
-            {
-                Width = 22,
-                Height = 22,
-                Margin = new Thickness(2),
-                Cursor = Cursors.Hand,
-                ToolTip = hex,
-                Tag = c,
-                Background = new SolidColorBrush(c),
-                BorderBrush = (Brush)FindResource("BorderStrongBrush"),
-                BorderThickness = new Thickness(1),
-            };
-            AutomationProperties.SetName(btn, $"Color {hex}");
-            AutomationProperties.SetHelpText(btn, $"Use local annotation color {hex}.");
-            btn.Click += OnColorPickerGridPick;
-            ColorPickerGrid.Children.Add(btn);
+            AddPickerSwatch(c, hex);
         }
+    }
+
+    private void AddPickerSwatch(Color c, string name)
+    {
+        Brush fill = c.A == 0
+            ? new DrawingBrush
+            {
+                TileMode = TileMode.Tile,
+                Viewport = new Rect(0, 0, 8, 8),
+                ViewportUnits = BrushMappingMode.Absolute,
+                Drawing = new GeometryDrawing(
+                    new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
+                    null,
+                    new RectangleGeometry(new Rect(0, 0, 4, 4))),
+            }
+            : new SolidColorBrush(c);
+        var btn = new Button
+        {
+            Width = 22,
+            Height = 22,
+            Margin = new Thickness(2),
+            Cursor = Cursors.Hand,
+            ToolTip = name,
+            Tag = c,
+            Background = fill,
+            BorderBrush = (Brush)FindResource("BorderStrongBrush"),
+            BorderThickness = new Thickness(1),
+        };
+        AutomationProperties.SetName(btn, c.A == 0 ? "Transparent" : $"Color {name}");
+        AutomationProperties.SetHelpText(btn, c.A == 0
+            ? "Set the current color well to fully transparent."
+            : $"Use local annotation color {name}.");
+        btn.Click += OnColorPickerGridPick;
+        ColorPickerGrid.Children.Add(btn);
     }
 
     private void OnColorPickerGridPick(object sender, RoutedEventArgs e)
@@ -501,9 +617,24 @@ public partial class EditorWindow : Window
     private void SyncColorPickerInputs(Color c)
     {
         _suppressHexEvents = true;
-        ColorPickerPreview.Fill = new SolidColorBrush(c);
+        ColorPickerPreview.Fill = c.A == 0 ? Brushes.Transparent : new SolidColorBrush(c);
         ColorPickerHex.Text = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
         _suppressHexEvents = false;
+        var (h, s, v) = AnnotationStyle.ToHsv(c);
+        _pickerHue = h;
+        _pickerSat = s;
+        _pickerVal = v;
+        if (SvHueRect is not null)
+            SvHueRect.Fill = new SolidColorBrush(AnnotationStyle.FromHsv(h, 1, 1));
+        if (SvCursor is not null && ColorPickerSv is not null)
+        {
+            Canvas.SetLeft(SvCursor, Math.Clamp(s * ColorPickerSv.Width - 5, 0, ColorPickerSv.Width - 10));
+            Canvas.SetTop(SvCursor, Math.Clamp((1 - v) * ColorPickerSv.Height - 5, 0, ColorPickerSv.Height - 10));
+        }
+        if (HueCursor is not null && ColorPickerHue is not null)
+            Canvas.SetLeft(HueCursor, Math.Clamp(h / 360.0 * ColorPickerHue.Width - 5, 0, ColorPickerHue.Width - 10));
+        if (PickerOpacitySlider is not null)
+            PickerOpacitySlider.Value = AnnotationStyle.OpacityOf(c) * 100;
     }
 
     /// <summary>
@@ -513,11 +644,120 @@ public partial class EditorWindow : Window
     /// </summary>
     private void ApplyCustomColor(Color c)
     {
-        _customColor = c;
-        // The swatch fill becomes the picked color (replacing the rainbow "unset" gradient).
-        CustomSwatch.Background = new SolidColorBrush(c);
-        CustomSwatch.IsChecked = true; // reflect it as the active swatch
-        SetCurrentColor(c);
+        _customColor = c.A == 0 ? _customColor : c;
+        CustomSwatch.Background = c.A == 0
+            ? Brushes.Transparent
+            : new SolidColorBrush(AnnotationStyle.Opaque(c));
+        CustomSwatch.IsChecked = true;
+        if (c.A == 0)
+        {
+            SetOpacityPercent(0, restyle: true);
+            return;
+        }
+        SetCurrentColor(AnnotationStyle.Opaque(c));
+        if (c.A < 255)
+            SetOpacityPercent(c.A / 2.55, restyle: true);
+    }
+
+    private void OnPickerOpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!IsLoaded || PickerOpacityValue is null) return;
+        PickerOpacityValue.Text = $"{Math.Round(e.NewValue)}%";
+        SetOpacityPercent(e.NewValue, restyle: true);
+    }
+
+    private void OnColorPickerSvDown(object sender, MouseButtonEventArgs e)
+    {
+        _svDragging = true;
+        ColorPickerSv.CaptureMouse();
+        SampleSv(e.GetPosition(ColorPickerSv));
+        e.Handled = true;
+    }
+
+    private void OnColorPickerSvMove(object sender, MouseEventArgs e)
+    {
+        if (_svDragging) SampleSv(e.GetPosition(ColorPickerSv));
+    }
+
+    private void OnColorPickerSvUp(object sender, MouseButtonEventArgs e)
+    {
+        _svDragging = false;
+        ColorPickerSv.ReleaseMouseCapture();
+    }
+
+    private void OnColorPickerHueDown(object sender, MouseButtonEventArgs e)
+    {
+        _hueDragging = true;
+        ColorPickerHue.CaptureMouse();
+        SampleHue(e.GetPosition(ColorPickerHue));
+        e.Handled = true;
+    }
+
+    private void OnColorPickerHueMove(object sender, MouseEventArgs e)
+    {
+        if (_hueDragging) SampleHue(e.GetPosition(ColorPickerHue));
+    }
+
+    private void OnColorPickerHueUp(object sender, MouseButtonEventArgs e)
+    {
+        _hueDragging = false;
+        ColorPickerHue.ReleaseMouseCapture();
+    }
+
+    private void SampleSv(Point p)
+    {
+        if (ColorPickerSv.Width <= 0 || ColorPickerSv.Height <= 0) return;
+        _pickerSat = Math.Clamp(p.X / ColorPickerSv.Width, 0, 1);
+        _pickerVal = Math.Clamp(1 - p.Y / ColorPickerSv.Height, 0, 1);
+        ApplyCustomColor(AnnotationStyle.FromHsv(_pickerHue, _pickerSat, _pickerVal));
+        SyncColorPickerInputs(AnnotationStyle.FromHsv(_pickerHue, _pickerSat, _pickerVal));
+    }
+
+    private void SampleHue(Point p)
+    {
+        if (ColorPickerHue.Width <= 0) return;
+        _pickerHue = Math.Clamp(p.X / ColorPickerHue.Width, 0, 1) * 360;
+        ApplyCustomColor(AnnotationStyle.FromHsv(_pickerHue, _pickerSat, _pickerVal));
+        SyncColorPickerInputs(AnnotationStyle.FromHsv(_pickerHue, _pickerSat, _pickerVal));
+    }
+
+    private void RestyleSelectedLineStyle(LineBorderStyle style)
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
+        if (meta.Type is not (AnnotationData.TypeLine or AnnotationData.TypeArrow
+            or AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
+            or AnnotationData.TypeText or AnnotationData.TypeCallout))
+            return;
+        var before = meta.Clone();
+        var after = meta.Clone();
+        after.LineStyle = AnnotationStyle.ToStorageName(style);
+        if (fe is Shape shape)
+        {
+            if (style == LineBorderStyle.Cloud && fe is Path or Rectangle)
+            {
+                // Keep the live dash; cloud is rebuilt on save/reload for rectangles.
+                AnnotationFactory.ApplyDash(shape, LineBorderStyle.Solid);
+            }
+            else
+                AnnotationFactory.ApplyDash(shape, style == LineBorderStyle.Cloud ? LineBorderStyle.Solid : style);
+        }
+        if (fe is CalloutAnnotation callout)
+            ApplyStyleSnapshot(callout, SnapshotStyle(callout, after));
+        fe.Tag = after;
+        Push(new EditorAction(
+            undo: () =>
+            {
+                fe.Tag = before;
+                if (fe is Shape s) AnnotationFactory.ApplyDash(s, AnnotationStyle.LineStyleFrom(before));
+                if (fe is CalloutAnnotation c) ApplyStyleSnapshot(c, SnapshotStyle(c, before));
+            },
+            redo: () =>
+            {
+                fe.Tag = after;
+                if (fe is Shape s) AnnotationFactory.ApplyDash(s, AnnotationStyle.LineStyleFrom(after));
+                if (fe is CalloutAnnotation c) ApplyStyleSnapshot(c, SnapshotStyle(c, after));
+            }),
+            apply: false);
     }
 
     /// <summary>Parses "#RGB", "#RRGGBB", "#AARRGGBB" or bare hex; tolerates a missing leading '#'.</summary>

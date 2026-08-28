@@ -59,40 +59,116 @@ internal static class AnnotationFactory
         Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;
 
     /// <summary>
-    /// Straight arrow in one of the <see cref="ArrowStyle"/> variants:
-    /// Straight (one filled head), Double (filled head at both ends), or Thin (a slimmer,
-    /// tapered head). All heads scale with stroke thickness so they read well at any size.
+    /// Legacy CleanShot-style arrows (Straight / Double / Thin) mapped onto Survey's
+    /// six-head vocabulary so old .winshot files keep their look.
     /// </summary>
     public static Geometry ArrowGeometry(Point from, Point to, double thickness, ArrowStyle style)
+    {
+        var end = AnnotationStyle.ParseArrowhead(style.ToString(), out var start);
+        return ArrowGeometry(from, to, thickness, end, start, thin: style == ArrowStyle.Thin);
+    }
+
+    /// <summary>
+    /// Survey arrow: a stroked shaft plus optional start/end heads. Head size is
+    /// <c>max(8, thickness * 3)</c> (Survey Phase 15). Solid triangles are filled;
+    /// the other five heads are stroked.
+    /// </summary>
+    public static Geometry ArrowGeometry(
+        Point from, Point to, double thickness, ArrowheadStyle end,
+        ArrowheadStyle start = ArrowheadStyle.None, bool thin = false)
     {
         var v = to - from;
         if (v.Length < 0.5) v = new Vector(0.5, 0);
         var dir = v;
         dir.Normalize();
+        double angle = Math.Atan2(dir.Y, dir.X);
 
-        // Thin arrows use a smaller, narrower head so the whole mark looks slimmer.
-        double headScale = style == ArrowStyle.Thin ? 2.6 : 3.5;
-        double headWidth = style == ArrowStyle.Thin ? 0.34 : 0.45;
-        double head = Math.Clamp(thickness * headScale, style == ArrowStyle.Thin ? 8 : 10, 30);
-        var perp = new Vector(-dir.Y, dir.X) * head * headWidth;
-
-        // The shaft stops short of each head so the stroked line never pokes through the
-        // filled triangle. A double-headed arrow trims both ends.
-        Point endBase = to - dir * head;
-        Point startBase = style == ArrowStyle.Double ? from + dir * head : from;
+        double headSize = Math.Max(8, thickness * (thin ? 2.6 : 3));
+        Point endBase = end == ArrowheadStyle.None || end == ArrowheadStyle.HorizontalLine
+            ? to
+            : to - dir * ShaftTrim(end, headSize);
+        Point startBase = start == ArrowheadStyle.None || start == ArrowheadStyle.HorizontalLine
+            ? from
+            : from + dir * ShaftTrim(start, headSize);
 
         var geometry = new PathGeometry();
-
         var shaft = new PathFigure { StartPoint = startBase, IsFilled = false };
         shaft.Segments.Add(new LineSegment(endBase, isStroked: true));
         geometry.Figures.Add(shaft);
 
-        geometry.Figures.Add(HeadFigure(to, endBase, perp));
-        if (style == ArrowStyle.Double)
-            geometry.Figures.Add(HeadFigure(from, startBase, perp));
-
+        AppendHead(geometry, to, angle, headSize, thickness, end);
+        if (start != ArrowheadStyle.None)
+            AppendHead(geometry, from, angle + Math.PI, headSize, thickness, start);
         return geometry;
     }
+
+    private static double ShaftTrim(ArrowheadStyle style, double headSize) => style switch
+    {
+        ArrowheadStyle.SolidTriangle or ArrowheadStyle.OpenTriangle => headSize / 3,
+        ArrowheadStyle.OpenCircle => headSize / 2,
+        ArrowheadStyle.VShape => 0,
+        _ => 0,
+    };
+
+    private static void AppendHead(
+        PathGeometry geometry, Point tip, double angle, double headSize, double thickness, ArrowheadStyle style)
+    {
+        switch (style)
+        {
+            case ArrowheadStyle.None:
+                return;
+            case ArrowheadStyle.SolidTriangle:
+            case ArrowheadStyle.OpenTriangle:
+            {
+                bool filled = style == ArrowheadStyle.SolidTriangle;
+                double back = headSize / 3;
+                double half = headSize / 2;
+                Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
+                Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
+                Point nose = tip;
+                var fig = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = filled };
+                fig.Segments.Add(new LineSegment(nose, isStroked: !filled));
+                fig.Segments.Add(new LineSegment(right, isStroked: !filled));
+                geometry.Figures.Add(fig);
+                return;
+            }
+            case ArrowheadStyle.VShape:
+            {
+                const double spread = Math.PI / 6;
+                Point arm1 = tip - new Vector(Math.Cos(angle - spread), Math.Sin(angle - spread)) * headSize;
+                Point arm2 = tip - new Vector(Math.Cos(angle + spread), Math.Sin(angle + spread)) * headSize;
+                var fig = new PathFigure { StartPoint = arm1, IsClosed = false, IsFilled = false };
+                fig.Segments.Add(new LineSegment(tip, isStroked: true));
+                fig.Segments.Add(new LineSegment(arm2, isStroked: true));
+                geometry.Figures.Add(fig);
+                return;
+            }
+            case ArrowheadStyle.OpenCircle:
+            {
+                double r = headSize / 2;
+                Point start = tip + new Vector(r, 0);
+                var fig = new PathFigure { StartPoint = start, IsClosed = true, IsFilled = false };
+                fig.Segments.Add(new ArcSegment(
+                    tip + new Vector(-r, 0), new Size(r, r), 0, false, SweepDirection.Clockwise, true));
+                fig.Segments.Add(new ArcSegment(
+                    start, new Size(r, r), 0, false, SweepDirection.Clockwise, true));
+                geometry.Figures.Add(fig);
+                return;
+            }
+            case ArrowheadStyle.HorizontalLine:
+            {
+                double half = headSize / 2;
+                var perp = new Vector(-Math.Sin(angle), Math.Cos(angle)) * half;
+                var fig = new PathFigure { StartPoint = tip + perp, IsClosed = false, IsFilled = false };
+                fig.Segments.Add(new LineSegment(tip - perp, isStroked: true));
+                geometry.Figures.Add(fig);
+                return;
+            }
+        }
+    }
+
+    private static Vector Polar(double angle, double length) =>
+        new(Math.Cos(angle) * length, Math.Sin(angle) * length);
 
     /// <summary>One filled triangular arrowhead: tip at <paramref name="tip"/>, base centered at <paramref name="baseCenter"/>.</summary>
     private static PathFigure HeadFigure(Point tip, Point baseCenter, Vector perp)
@@ -366,4 +442,20 @@ internal static class AnnotationFactory
         });
         return badge;
     }
+
+    public static void ApplyDash(Shape shape, LineBorderStyle style)
+    {
+        shape.StrokeDashArray = AnnotationStyle.DashArray(style);
+        shape.StrokeDashCap = PenLineCap.Round;
+    }
+
+    public static CalloutAnnotation CreateCallout(
+        CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize)
+    {
+        var visual = new CalloutAnnotation();
+        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize);
+        return visual;
+    }
 }
+

@@ -10,19 +10,24 @@ public class EditorShellContractTests
     {
         Assert.Equal(new[]
         {
-            "Select", "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow",
-            "Text", "Pixelate", "Spotlight", "Step", "Freehand", "Highlighter",
+            "Select", "Draw", "Shape", "Text", "Pixelate", "Spotlight", "Step",
         }, EditorShellContract.PrimaryToolOrder);
+        Assert.Equal(new[] { "Freehand", "Highlighter" }, EditorShellContract.DrawGroupTools);
+        Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow" },
+            EditorShellContract.ShapeGroupTools);
+        Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.TextGroupTools);
         Assert.Equal(new[] { "Pan", "CurvedArrow", "Blur", "Eyedropper" },
             EditorShellContract.MoreToolOrder);
 
-        string[] uniqueTools = EditorShellContract.PrimaryToolOrder
-            .Where(name => name != "FilledRectangle")
+        string[] uniqueTools = new[] { "Select", "Pixelate", "Spotlight", "Step", "Crop" }
+            .Concat(EditorShellContract.DrawGroupTools)
+            .Concat(EditorShellContract.ShapeGroupTools)
+            .Concat(EditorShellContract.TextGroupTools)
             .Concat(EditorShellContract.MoreToolOrder)
-            .Concat(new[] { "Crop" })
+            .Where(name => name != "FilledRectangle")
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        Assert.Equal(16, uniqueTools.Length);
+        Assert.Equal(17, uniqueTools.Length);
         Assert.DoesNotContain(nameof(EditorTool.Emoji), uniqueTools);
         Assert.All(Enum.GetNames<EditorTool>().Where(name => name != nameof(EditorTool.Emoji)),
             name => Assert.Contains(name, uniqueTools));
@@ -34,11 +39,15 @@ public class EditorShellContractTests
         Assert.Equal(EditorContextControls.None,
             EditorShellContract.ContextFor(EditorTool.Select, filledRectangle: false));
         Assert.Equal(EditorContextControls.Color | EditorContextControls.Thickness |
-                     EditorContextControls.Fill | EditorContextControls.Opacity,
+                     EditorContextControls.Fill | EditorContextControls.Opacity |
+                     EditorContextControls.LineStyle | EditorContextControls.FillStrokeTabs,
             EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: false));
-        Assert.Equal(EditorContextControls.Color | EditorContextControls.Fill |
-                     EditorContextControls.Opacity,
-            EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)
+            .HasFlag(EditorContextControls.FillStrokeTabs));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Callout, false)
+            .HasFlag(EditorContextControls.ArrowStyle));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Line, false)
+            .HasFlag(EditorContextControls.LineStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Arrow, false)
             .HasFlag(EditorContextControls.ArrowStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)

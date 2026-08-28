@@ -50,27 +50,82 @@
                                      Tag="Select" Content="&#xE8B0;" Checked="OnToolChecked" IsChecked="True"
                                      ToolTip="Cursor (V)" AutomationProperties.Name="Cursor"
                                      AutomationProperties.HelpText="Select, move, resize, reorder, or delete annotations. Shortcut V."/>
-                        <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Rectangle" Content="&#xE739;" Checked="OnToolChecked"
-                                     ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
-                                     AutomationProperties.HelpText="Draw an outline rectangle. Shortcut R."/>
-                        <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="FilledRectangle" Content="&#xE73B;" Checked="OnFilledRectangleToolChecked"
-                                     ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
-                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current color."/>
-                        <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Ellipse" Content="&#xEA3A;" Checked="OnToolChecked" ToolTip="Ellipse (E)"
-                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."/>
-                        <RadioButton x:Name="LineToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Line" Content="&#xE738;" Checked="OnToolChecked" ToolTip="Line (L)"
-                                     AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."/>
-                        <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Arrow" Content="&#xE72A;" Checked="OnToolChecked" ToolTip="Arrow (A)"
-                                     AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw a straight, double, or thin arrow. Shortcut A."/>
-                        <RadioButton x:Name="TextToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Text" Content="&#xE8D2;" Checked="OnToolChecked" ToolTip="Text (T)"
-                                     AutomationProperties.Name="Text"
-                                     AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."/>
+
+                        <Button x:Name="DrawGroupBtn" Style="{StaticResource ToolIconButton}" Content="&#xE70F;"
+                                Click="OnDrawGroupClick" Tag="Draw" ToolTip="Draw"
+                                AutomationProperties.Name="Draw"
+                                AutomationProperties.HelpText="Pen and highlighter. Last-used draw tool is remembered. Shortcut P or H."/>
+                        <Popup x:Name="DrawGroupPopup" PlacementTarget="{Binding ElementName=DrawGroupBtn}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
+                                    Effect="{StaticResource FloatingShadow}">
+                                <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal">
+                                    <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Freehand" Content="&#xE70F;" Checked="OnToolChecked" ToolTip="Pen (P)"
+                                                 AutomationProperties.Name="Pen"
+                                                 AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."/>
+                                    <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Highlighter" Content="&#xE891;" Checked="OnToolChecked" ToolTip="Highlighter (H)"
+                                                 AutomationProperties.Name="Highlighter"
+                                                 AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+
+                        <Button x:Name="ShapeGroupBtn" Style="{StaticResource ToolIconButton}" Content="&#xE739;"
+                                Click="OnShapeGroupClick" Tag="Shape" ToolTip="Shapes"
+                                AutomationProperties.Name="Shapes"
+                                AutomationProperties.HelpText="Rectangle, ellipse, line, and arrow. Last-used shape is remembered."/>
+                        <Popup x:Name="ShapeGroupPopup" PlacementTarget="{Binding ElementName=ShapeGroupBtn}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
+                                    Effect="{StaticResource FloatingShadow}">
+                                <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal">
+                                    <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Rectangle" Content="&#xE739;" Checked="OnToolChecked"
+                                                 ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
+                                                 AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."/>
+                                    <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="FilledRectangle" Content="&#xE73B;" Checked="OnFilledRectangleToolChecked"
+                                                 ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
+                                                 AutomationProperties.HelpText="Draw a solid filled rectangle using the current fill color."/>
+                                    <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Ellipse" Content="&#xEA3A;" Checked="OnToolChecked" ToolTip="Ellipse (E)"
+                                                 AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."/>
+                                    <RadioButton x:Name="LineToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Line" Content="&#xE738;" Checked="OnToolChecked" ToolTip="Line (L)"
+                                                 AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."/>
+                                    <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Arrow" Content="&#xE72A;" Checked="OnToolChecked" ToolTip="Arrow (A)"
+                                                 AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+
+                        <Button x:Name="TextGroupBtn" Style="{StaticResource ToolIconButton}" Content="&#xE8D2;"
+                                Click="OnTextGroupClick" Tag="Text" ToolTip="Text"
+                                AutomationProperties.Name="Text"
+                                AutomationProperties.HelpText="Text box and callout. Last-used text tool is remembered."/>
+                        <Popup x:Name="TextGroupPopup" PlacementTarget="{Binding ElementName=TextGroupBtn}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
+                                    Effect="{StaticResource FloatingShadow}">
+                                <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal">
+                                    <RadioButton x:Name="TextToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Text" Content="&#xE8D2;" Checked="OnToolChecked" ToolTip="Text (T)"
+                                                 AutomationProperties.Name="Text"
+                                                 AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."/>
+                                    <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Callout" Content="&#xE8BD;" Checked="OnToolChecked" ToolTip="Callout (Q)"
+                                                 AutomationProperties.Name="Callout"
+                                                 AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+
                         <RadioButton x:Name="PixelateToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Pixelate" Content="&#xE80A;" Checked="OnToolChecked" ToolTip="Pixelate"
                                      AutomationProperties.Name="Pixelate"
@@ -83,14 +138,6 @@
                                      Tag="Step" Content="&#xE8EF;" Checked="OnToolChecked" ToolTip="Counter (S)"
                                      AutomationProperties.Name="Counter"
                                      AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."/>
-                        <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Freehand" Content="&#xE70F;" Checked="OnToolChecked" ToolTip="Draw (P)"
-                                     AutomationProperties.Name="Draw"
-                                     AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."/>
-                        <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Highlighter" Content="&#xE891;" Checked="OnToolChecked" ToolTip="Draw highlight (H)"
-                                     AutomationProperties.Name="Draw highlight"
-                                     AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."/>
                         <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <Button x:Name="MoreToolsButton" Style="{StaticResource ToolIconButton}" Content="&#xE712;"
@@ -171,7 +218,17 @@
 
                     <WrapPanel x:Name="ContextPanel" VerticalAlignment="Center">
                         <StackPanel x:Name="ColorPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <TextBlock Text="Color" Style="{StaticResource FieldLabel}" Margin="2,0,4,0"/>
+                            <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center" Margin="0,0,8,0">
+                                <RadioButton x:Name="StrokeWellBtn" Style="{StaticResource ToolButton}" GroupName="ColorWell" Tag="Stroke"
+                                             Content="Border" FontFamily="Segoe UI" FontSize="12" IsChecked="True"
+                                             Checked="OnColorWellChecked" AutomationProperties.Name="Border color"
+                                             AutomationProperties.HelpText="Edit the stroke or border color and opacity."/>
+                                <RadioButton x:Name="FillWellBtn" Style="{StaticResource ToolButton}" GroupName="ColorWell" Tag="Fill"
+                                             Content="Fill" FontFamily="Segoe UI" FontSize="12"
+                                             Checked="OnColorWellChecked" AutomationProperties.Name="Fill color"
+                                             AutomationProperties.HelpText="Edit the fill color and opacity independently of the border."/>
+                            </StackPanel>
+                            <TextBlock x:Name="ColorWellLabel" Text="Color" Style="{StaticResource FieldLabel}" Margin="2,0,4,0"/>
                             <Ellipse x:Name="CurrentColorIndicator" Width="16" Height="16" Fill="{StaticResource AnnotationRedBrush}"
                                      Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1" Margin="2,0,8,0"
                                      VerticalAlignment="Center" ToolTip="Current color"/>
@@ -200,9 +257,56 @@
                                 <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
                                         BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
                                         Effect="{StaticResource FloatingShadow}">
-                                    <StackPanel Width="232">
+                                    <StackPanel Width="248">
                                         <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
                                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
+                                        <Canvas x:Name="ColorPickerSv" Width="232" Height="110" Margin="0,0,0,8" Cursor="Cross"
+                                                Background="Transparent"
+                                                MouseDown="OnColorPickerSvDown" MouseMove="OnColorPickerSvMove" MouseUp="OnColorPickerSvUp"
+                                                AutomationProperties.Name="Color spectrum"
+                                                AutomationProperties.HelpText="Drag to pick saturation and brightness.">
+                                            <Rectangle x:Name="SvHueRect" Width="232" Height="110" RadiusX="6" RadiusY="6"
+                                                       Fill="#FFFF0000" IsHitTestVisible="False"/>
+                                            <Rectangle Width="232" Height="110" RadiusX="6" RadiusY="6" IsHitTestVisible="False">
+                                                <Rectangle.Fill>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                        <GradientStop Color="#FFFFFFFF" Offset="0"/>
+                                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Rectangle.Fill>
+                                            </Rectangle>
+                                            <Rectangle Width="232" Height="110" RadiusX="6" RadiusY="6" IsHitTestVisible="False">
+                                                <Rectangle.Fill>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                        <GradientStop Color="#00000000" Offset="0"/>
+                                                        <GradientStop Color="#FF000000" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Rectangle.Fill>
+                                            </Rectangle>
+                                            <Ellipse x:Name="SvCursor" Width="10" Height="10" Stroke="White" StrokeThickness="2"
+                                                     IsHitTestVisible="False"/>
+                                        </Canvas>
+                                        <Canvas x:Name="ColorPickerHue" Width="232" Height="12" Margin="0,0,0,8" Cursor="Hand"
+                                                Background="Transparent"
+                                                MouseDown="OnColorPickerHueDown" MouseMove="OnColorPickerHueMove" MouseUp="OnColorPickerHueUp"
+                                                AutomationProperties.Name="Hue"
+                                                AutomationProperties.HelpText="Drag to pick hue.">
+                                            <Rectangle Width="232" Height="12" RadiusX="4" RadiusY="4">
+                                                <Rectangle.Fill>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                        <GradientStop Color="#FFFF0000" Offset="0"/>
+                                                        <GradientStop Color="#FFFFFF00" Offset="0.17"/>
+                                                        <GradientStop Color="#FF00FF00" Offset="0.33"/>
+                                                        <GradientStop Color="#FF00FFFF" Offset="0.50"/>
+                                                        <GradientStop Color="#FF0000FF" Offset="0.67"/>
+                                                        <GradientStop Color="#FFFF00FF" Offset="0.83"/>
+                                                        <GradientStop Color="#FFFF0000" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Rectangle.Fill>
+                                            </Rectangle>
+                                            <Ellipse x:Name="HueCursor" Width="10" Height="10" Stroke="White" StrokeThickness="2"
+                                                     Fill="Transparent" IsHitTestVisible="False" Canvas.Top="1"/>
+                                        </Canvas>
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
@@ -213,6 +317,15 @@
                                             <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource PillButtonPrimary}"
                                                     Content="Use" Click="OnColorPickerApply" AutomationProperties.Name="Use color"/>
                                         </Grid>
+                                        <DockPanel Margin="0,8,0,0">
+                                            <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" DockPanel.Dock="Left" Margin="0,0,8,0"/>
+                                            <TextBlock x:Name="PickerOpacityValue" Text="100%" Style="{StaticResource ValueLabel}"
+                                                       DockPanel.Dock="Right" MinWidth="38" TextAlignment="Right"/>
+                                            <Slider x:Name="PickerOpacitySlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="100" Value="100"
+                                                    SmallChange="1" LargeChange="10"
+                                                    ValueChanged="OnPickerOpacityChanged"
+                                                    AutomationProperties.Name="Picker opacity"/>
+                                        </DockPanel>
                                     </StackPanel>
                                 </Border>
                             </Popup>
@@ -231,9 +344,26 @@
 
                         <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Arrow" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" Width="98" SelectedIndex="0"
-                                      SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrow style">
-                                <ComboBoxItem Content="Straight" Tag="Straight"/><ComboBoxItem Content="Double" Tag="Double"/><ComboBoxItem Content="Thin" Tag="Thin"/>
+                            <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" Width="128" SelectedIndex="1"
+                                      SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrowhead">
+                                <ComboBoxItem Content="None" Tag="none"/>
+                                <ComboBoxItem Content="Solid triangle" Tag="solidTriangle"/>
+                                <ComboBoxItem Content="V-shape" Tag="vShape"/>
+                                <ComboBoxItem Content="Open circle" Tag="openCircle"/>
+                                <ComboBoxItem Content="Open triangle" Tag="openTriangle"/>
+                                <ComboBoxItem Content="Horizontal line" Tag="horizontalLine"/>
+                                <ComboBoxItem Content="Double" Tag="Double"/>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel x:Name="LineStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="LineStyleBox" Style="{StaticResource DarkComboBox}" Width="96" SelectedIndex="0"
+                                      SelectionChanged="OnLineStyleChanged" AutomationProperties.Name="Line style">
+                                <ComboBoxItem Content="Solid" Tag="solid"/>
+                                <ComboBoxItem Content="Dashed" Tag="dashed"/>
+                                <ComboBoxItem Content="Dotted" Tag="dotted"/>
+                                <ComboBoxItem x:Name="CloudStyleItem" Content="Cloud" Tag="cloud"/>
                             </ComboBox>
                         </StackPanel>
 
@@ -293,7 +423,7 @@
 
                         <StackPanel x:Name="OpacityPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <Slider x:Name="OpacitySlider" Style="{StaticResource DarkSlider}" Width="92" Minimum="25" Maximum="100" Value="100"
+                            <Slider x:Name="OpacitySlider" Style="{StaticResource DarkSlider}" Width="92" Minimum="0" Maximum="100" Value="100"
                                     SmallChange="5" LargeChange="25" TickFrequency="25" IsSnapToTickEnabled="False"
                                     ValueChanged="OnOpacityChanged" PreviewMouseUp="OnOpacitySliderReleased" LostMouseCapture="OnOpacitySliderReleased"
                                     KeyUp="OnOpacitySliderReleased" ToolTip="Annotation opacity" AutomationProperties.Name="Annotation opacity"/>
