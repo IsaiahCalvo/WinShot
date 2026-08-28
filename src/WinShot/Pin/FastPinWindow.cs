@@ -175,8 +175,9 @@ public sealed class FastPinWindow : WF.Form
             _readoutTimer.Dispose();
             HideActionTooltip();
             _tooltipTimer.Dispose();
+            _menu.Dispose(); // not parented into Controls, so Form disposal never reaches it
             OpenPins.Remove(this);
-            _image.Dispose();
+            DisposeImageWhenCopyDone();
             MemoryCleanup.Request();
         };
         OpenPins.Add(this);
@@ -811,16 +812,35 @@ public sealed class FastPinWindow : WF.Form
 
     // ----- Actions (reused by toolbar + context menu) ------------------------
 
+    private Task? _copyTask;
+
     private async Task CopyAsync()
     {
         try
         {
-            await CaptureService.CopyToClipboardAsync(_image);
+            // Tracked so Close never disposes _image while the copy's own STA thread
+            // is still cloning it (which silently dropped the copy).
+            _copyTask = CaptureService.CopyToClipboardAsync(_image);
+            await _copyTask;
         }
         catch (Exception ex)
         {
             Log.Error("Pin copy failed", ex);
         }
+    }
+
+    private void DisposeImageWhenCopyDone()
+    {
+        Task? pending = _copyTask;
+        if (pending is null || pending.IsCompleted)
+        {
+            _image.Dispose();
+            return;
+        }
+
+        _ = pending.ContinueWith(
+            _ => _image.Dispose(),
+            TaskContinuationOptions.ExecuteSynchronously);
     }
 
     private async Task SaveAsync()

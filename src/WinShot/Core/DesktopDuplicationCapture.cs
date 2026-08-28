@@ -337,32 +337,46 @@ internal static class DesktopDuplicationCapture
                 out FeatureLevel _,
                 out _context).CheckError();
 
-            using var dxgiDevice = _device.QueryInterface<IDXGIDevice>();
-            using var adapter = dxgiDevice.GetAdapter();
-            using var output = FindOutput(adapter, screen.DeviceName);
-            using var output1 = output.QueryInterface<IDXGIOutput1>();
-            _duplication = output1.DuplicateOutput(_device);
-
-            var desc = _duplication.Description;
-            _width = (int)desc.ModeDescription.Width;
-            _height = (int)desc.ModeDescription.Height;
-            if (_width != screen.Bounds.Width || _height != screen.Bounds.Height)
-                throw new InvalidOperationException(
-                    $"Display duplication size {_width}x{_height} does not match screen bounds {screen.Bounds.Width}x{screen.Bounds.Height}.");
-
-            _staging = _device.CreateTexture2D(new Texture2DDescription
+            // From here on any throw must release what's already created: a throwing
+            // ctor never reaches the Displays dictionary, so nothing else disposes it,
+            // and each retry (~every cooldown while e.g. a DPI-virtualized display's
+            // duplication size mismatches Screen.Bounds) would leak a whole D3D device.
+            try
             {
-                Width = (uint)_width,
-                Height = (uint)_height,
-                MipLevels = 1,
-                ArraySize = 1,
-                Format = desc.ModeDescription.Format,
-                SampleDescription = new SampleDescription(1, 0),
-                Usage = ResourceUsage.Staging,
-                CPUAccessFlags = CpuAccessFlags.Read,
-                BindFlags = BindFlags.None,
-                MiscFlags = ResourceOptionFlags.None,
-            });
+                using var dxgiDevice = _device.QueryInterface<IDXGIDevice>();
+                using var adapter = dxgiDevice.GetAdapter();
+                using var output = FindOutput(adapter, screen.DeviceName);
+                using var output1 = output.QueryInterface<IDXGIOutput1>();
+                _duplication = output1.DuplicateOutput(_device);
+
+                var desc = _duplication.Description;
+                _width = (int)desc.ModeDescription.Width;
+                _height = (int)desc.ModeDescription.Height;
+                if (_width != screen.Bounds.Width || _height != screen.Bounds.Height)
+                    throw new InvalidOperationException(
+                        $"Display duplication size {_width}x{_height} does not match screen bounds {screen.Bounds.Width}x{screen.Bounds.Height}.");
+
+                _staging = _device.CreateTexture2D(new Texture2DDescription
+                {
+                    Width = (uint)_width,
+                    Height = (uint)_height,
+                    MipLevels = 1,
+                    ArraySize = 1,
+                    Format = desc.ModeDescription.Format,
+                    SampleDescription = new SampleDescription(1, 0),
+                    Usage = ResourceUsage.Staging,
+                    CPUAccessFlags = CpuAccessFlags.Read,
+                    BindFlags = BindFlags.None,
+                    MiscFlags = ResourceOptionFlags.None,
+                });
+            }
+            catch
+            {
+                _duplication?.Dispose();
+                _context.Dispose();
+                _device.Dispose();
+                throw;
+            }
         }
 
         public Rectangle ScreenBounds { get; }

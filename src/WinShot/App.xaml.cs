@@ -813,8 +813,13 @@ public partial class App : Application
             bmp,
             cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action),
             historyKind);
+        // Direct actions below take ownership of bmp (Save disposes it, Pin/Background
+        // hand it to a window), and the auto-copy clones on its OWN STA thread — sharing
+        // bmp raced use-against-dispose (save failing "Parameter is not valid", or the
+        // copy dying and arming the 8s auto-copy suppression). Clone on this thread so
+        // the copy owns its bitmap outright, mirroring the history path.
         if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
-            QueueAutoClipboardCopy(bmp);
+            _ = QueueAutoClipboardCopy(CaptureService.CloneBitmap(bmp), takeOwnership: true);
 
         switch (action)
         {
@@ -954,17 +959,19 @@ public partial class App : Application
             : $"WinShot — Recording {(int)elapsed.Value.TotalMinutes:00}:{elapsed.Value.Seconds:00}";
     }
 
-    private void QueueAutoClipboardCopy(SD.Bitmap bmp)
+    private Task QueueAutoClipboardCopy(SD.Bitmap bmp, bool takeOwnership = false)
     {
         if (Environment.TickCount64 < Interlocked.Read(ref _autoCopySuppressedUntilTick))
         {
+            if (takeOwnership)
+                bmp.Dispose();
             Log.Info("Auto-copy to clipboard skipped: clipboard temporarily unavailable.");
-            return;
+            return Task.CompletedTask;
         }
 
-        _ = CopyToClipboardAndNotifyAsync(
+        return CopyToClipboardAndNotifyAsync(
             bmp,
-            takeOwnership: false,
+            takeOwnership: takeOwnership,
             showSuccess: false,
             showFailure: false,
             includePng: false,
@@ -1082,8 +1089,12 @@ public partial class App : Application
             }).ConfigureAwait(false);
             historyPathCompletion.TrySetResult(historyPath);
 
+            // Await the copy: captureWorkCompletion is the overlay's gate for disposing
+            // bmp, and the copy's clone happens on its own STA thread — completing the
+            // gate with the copy still in flight let a quickly-dismissed overlay dispose
+            // bmp under the clone (auto-copy silently died + armed the 8s suppression).
             if (autoCopy)
-                QueueAutoClipboardCopy(bmp);
+                await QueueAutoClipboardCopy(bmp).ConfigureAwait(false);
 
             captureWorkCompletion.TrySetResult(null);
         }

@@ -281,12 +281,30 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </summary>
     private async Task FreezeWhileShownAsync(TaskCompletionSource<WF.DialogResult> session)
     {
-        await CaptureFrozenAsync();
+        // Capture into a LOCAL. The selector is pooled, so a cancelled session's capture
+        // can still be in flight when the next session opens; a stale continuation must
+        // never assign to (or dispose) the shared _frozen/_dimmedCache the live session
+        // paints from — the old code did both, and when the stale (slow) capture landed
+        // after the new (fast) one, it nulled the live snapshot while every surface was
+        // already opaque: a solid-black overlay across all monitors.
+        SD.Bitmap? snapshot = null;
+        try
+        {
+            snapshot = await Task.Run(CaptureService.CaptureVirtualDesktop);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
+        }
+
         if (_completion != session || IsDisposed)
         {
-            DisposeFrozen();
+            snapshot?.Dispose(); // stale: touch nothing shared
             return;
         }
+
+        DisposeFrozen();
+        _frozen = snapshot;
         if (_frozen is null)
             return;
 
@@ -412,6 +430,21 @@ public sealed class FastRegionSelectorDialog : WF.Form
             catch { /* best effort */ }
         }
         _panes.Clear();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            DisposePanes();
+            DisposeFrozen();
+            _followTimer.Dispose();
+            _followMotionClock?.Dispose();
+            _followMotionClock = null;
+            _capturedRegion?.Dispose();
+            _capturedRegion = null;
+        }
+        base.Dispose(disposing);
     }
 
     /// <summary>Repaints the coordinator surface and every pane (the selection can span monitors).</summary>
@@ -1061,20 +1094,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
             g.DrawEllipse(pen, dot);
         }
         g.SmoothingMode = prev;
-    }
-
-    private async Task CaptureFrozenAsync()
-    {
-        DisposeFrozen();
-        try
-        {
-            _frozen = await Task.Run(CaptureService.CaptureVirtualDesktop);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
-            _frozen = null;
-        }
     }
 
     private void DisposeFrozen()

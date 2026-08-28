@@ -198,15 +198,29 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         return await _completion.Task;
     }
 
-    /// <summary>Deferred freeze — see FastRegionSelectorDialog.FreezeWhileShownAsync.</summary>
+    /// <summary>Deferred freeze — see FastRegionSelectorDialog.FreezeWhileShownAsync,
+    /// including why a stale (pooled, cancelled) session must only ever dispose its own
+    /// LOCAL snapshot and never the shared _frozen the live session paints from.</summary>
     private async Task FreezeWhileShownAsync(TaskCompletionSource<WF.DialogResult> session)
     {
-        await CaptureFrozenAsync();
+        SD.Bitmap? snapshot = null;
+        try
+        {
+            snapshot = await Task.Run(CaptureService.CaptureVirtualDesktop);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
+        }
+
         if (_completion != session || IsDisposed)
         {
-            DisposeFrozen();
+            snapshot?.Dispose(); // stale: touch nothing shared
             return;
         }
+
+        DisposeFrozen();
+        _frozen = snapshot;
         if (_frozen is null)
             return;
 
@@ -693,20 +707,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         g.SetClip(clip);
         DrawFrozenSlice(g, monitorBounds);
         g.Restore(state);
-    }
-
-    private async Task CaptureFrozenAsync()
-    {
-        DisposeFrozen();
-        try
-        {
-            _frozen = await Task.Run(CaptureService.CaptureVirtualDesktop);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
-            _frozen = null;
-        }
     }
 
     private void DisposeFrozen()

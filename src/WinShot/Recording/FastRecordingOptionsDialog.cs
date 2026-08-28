@@ -292,6 +292,18 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private static string Truncate(string text) =>
         text.Length <= 28 ? text : text[..27] + "…";
 
+    /// <summary>Re-selects previously chosen devices by DeviceName after a re-enumeration,
+    /// falling back to the pickers' defaults when a device is gone.</summary>
+    private void RestoreDeviceSelection(string? micDeviceName, string? webcamDeviceName)
+    {
+        int micIndex = micDeviceName is null ? -1 : _micDeviceNames.IndexOf(micDeviceName);
+        if (micIndex >= 0)
+            _micDeviceCombo.SelectedIndex = micIndex;
+        int camIndex = webcamDeviceName is null ? -1 : _webcamDeviceNames.IndexOf(webcamDeviceName);
+        if (camIndex >= 0)
+            _webcamDeviceCombo.SelectedIndex = camIndex;
+    }
+
     public static FastRecordingOptionsDialog Create(Settings settings)
     {
         var dialog = Interlocked.Exchange(ref _cached, null);
@@ -305,6 +317,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         }
         if (dialog is { IsDisposed: false })
         {
+            // Re-enumerate devices on every open — the cached dialog otherwise shows
+            // the hardware set from first open forever (a webcam plugged in later
+            // would stay invisible). Keep the user's picks when they still exist.
+            string? mic = dialog.MicrophoneDeviceName;
+            string? cam = dialog.WebcamDeviceName;
+            dialog.LoadDevices();
+            dialog.RestoreDeviceSelection(mic, cam);
             dialog.ApplySettings(settings);
             dialog.Opacity = 1;
             dialog.ShowInTaskbar = false;

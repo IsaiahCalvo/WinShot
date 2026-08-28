@@ -451,9 +451,9 @@ public sealed class FastQuickActionsWindow : WF.Form
                 return;
 
             using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
-            var oldClip = g.Clip;
-            var oldInterp = g.InterpolationMode;
-            var oldOffset = g.PixelOffsetMode;
+            // Save/Restore instead of get/set Clip: the Clip getter allocates a NEW native
+            // Region per call, which leaked one per paint in this hot path.
+            GraphicsState state = g.Save();
             try
             {
                 g.SetClip(clip, CombineMode.Intersect);
@@ -463,9 +463,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
             finally
             {
-                g.Clip = oldClip;
-                g.InterpolationMode = oldInterp;
-                g.PixelOffsetMode = oldOffset;
+                g.Restore(state);
             }
         }
     }
@@ -860,12 +858,21 @@ public sealed class FastQuickActionsWindow : WF.Form
                 return;
             }
 
-            BeginInvoke(new Action(() =>
+            try
             {
-                _historyPath = path;
-                if (_closed)
-                    PushRecentlyClosed(path);
-            }));
+                BeginInvoke(new Action(() =>
+                {
+                    _historyPath = path;
+                    if (_closed)
+                        PushRecentlyClosed(path);
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+                // The window was disposed between the check above and the BeginInvoke —
+                // behave like the closed fast path so restore-last still finds the capture.
+                PushRecentlyClosed(path);
+            }
         }
         catch (Exception ex)
         {
