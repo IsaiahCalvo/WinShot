@@ -243,7 +243,10 @@ public sealed class RecordingController
             SD.Rectangle region;
             try
             {
-                if (await selector.ShowAsync() != WF.DialogResult.OK || selector.SelectedRegionPx is not SD.Rectangle selected)
+                // Same feel as screenshot area capture: hover snaps to windows/elements,
+                // click takes the snap, click-drag draws a marquee.
+                if (await selector.ShowAsync(elementHover: true) != WF.DialogResult.OK ||
+                    selector.SelectedRegionPx is not SD.Rectangle selected)
                     return;
                 region = selected;
             }

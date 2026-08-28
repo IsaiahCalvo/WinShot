@@ -1410,9 +1410,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return WF.Cursors.Cross;
     }
 
-    private const int BarBtnH = 30;
-    private const int BarPad = 8;
-    private const int BarInnerGap = 8;
+    private const int BarPad = 8;   // placement inset only; button geometry scales in ActionBarRects
     private const int BarGap = 12;
 
     /// <summary>
@@ -1421,19 +1419,31 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// screen bottom; tucked INSIDE the region's bottom when it spans the full screen height.
     /// Pure function of the region (+ its monitor) so paint and hit-test always agree.
     /// </summary>
+    /// <summary>Pixel-unit UI font sized for the monitor scale, so measure and draw agree
+    /// regardless of which pane's DPI renders it (12px = the modal buttons' 9pt at 96).</summary>
+    private static SD.Font ActionBarFont(double s) =>
+        new("Segoe UI", Math.Max(9, (int)Math.Round(12 * s)), SD.FontStyle.Regular, SD.GraphicsUnit.Pixel);
+
     private static (SD.Rectangle bar, SD.Rectangle cancel, SD.Rectangle done) ActionBarRects(SD.Rectangle r)
     {
-        using var font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold);
-        int cancelW = WF.TextRenderer.MeasureText("Cancel", font).Width + 28;
-        int doneW = WF.TextRenderer.MeasureText("Done", font).Width + 28;
-        int barW = BarPad + cancelW + BarInnerGap + doneW + BarPad;
-        int barH = BarPad + BarBtnH + BarPad;
-
+        // Same proportions as the record modal's Cancel/Start pair, scaled to the
+        // region's monitor: quiet regular-weight labels in roomy rounded buttons.
         SD.Rectangle m = WF.Screen.FromRectangle(r).Bounds;
+        double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(m);
+        using var font = ActionBarFont(s);
+        int hpad = (int)Math.Round(16 * s);
+        int pad = (int)Math.Round(6 * s);
+        int gap = (int)Math.Round(8 * s);
+        int btnH = (int)Math.Round(30 * s);
+        int cancelW = WF.TextRenderer.MeasureText("Cancel", font).Width + hpad * 2;
+        int doneW = Math.Max(cancelW, WF.TextRenderer.MeasureText("Done", font).Width + hpad * 2);
+        int barW = pad + cancelW + gap + doneW + pad;
+        int barH = pad + btnH + pad;
+
         SD.Point origin = PlaceActionBar(r, m, barW, barH);
         var bar = new SD.Rectangle(origin.X, origin.Y, barW, barH);
-        var cancel = new SD.Rectangle(origin.X + BarPad, origin.Y + BarPad, cancelW, BarBtnH);
-        var done = new SD.Rectangle(cancel.Right + BarInnerGap, origin.Y + BarPad, doneW, BarBtnH);
+        var cancel = new SD.Rectangle(origin.X + pad, origin.Y + pad, cancelW, btnH);
+        var done = new SD.Rectangle(cancel.Right + gap, origin.Y + pad, doneW, btnH);
         return (bar, cancel, done);
     }
 
@@ -1460,7 +1470,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void DrawActionBar(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle bar, SD.Rectangle cancel, SD.Rectangle done)
     {
         SD.Rectangle lb = ToLocal(bar, monitorBounds), lc = ToLocal(cancel, monitorBounds), ld = ToLocal(done, monitorBounds);
-        using var font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold);
+        double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(WF.Screen.FromRectangle(bar).Bounds);
+        using var font = ActionBarFont(s);
 
         // Hover lifts, press darkens — the same interaction language as the toolbar/card.
         SD.Color cancelFill = _pressedBarButton == 0 ? SD.Color.FromArgb(0x30, 0x30, 0x32)
@@ -1472,17 +1483,19 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(lb, 8))
+        int barRadius = (int)Math.Round(10 * s);
+        int btnRadius = (int)Math.Round(6 * s);
+        using (var path = GdiPaths.RoundedRect(lb, barRadius))
         {
             using (var bg = new SD.SolidBrush(SD.Color.FromArgb(245, ThemePalette.WindowBg)))
                 g.FillPath(bg, path);
             using (var edge = new SD.Pen(ThemePalette.BorderStrong, 1))
                 g.DrawPath(edge, path);
         }
-        using (var cp = GdiPaths.RoundedRect(lc, 6))
+        using (var cp = GdiPaths.RoundedRect(lc, btnRadius))
         using (var cb = new SD.SolidBrush(cancelFill))
             g.FillPath(cb, cp);
-        using (var dp = GdiPaths.RoundedRect(ld, 6))
+        using (var dp = GdiPaths.RoundedRect(ld, btnRadius))
         using (var db = new SD.SolidBrush(doneFill))
             g.FillPath(db, dp);
         g.SmoothingMode = prev;
