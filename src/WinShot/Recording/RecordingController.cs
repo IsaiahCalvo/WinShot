@@ -712,7 +712,7 @@ public sealed class RecordingController
 
     /// <summary>
     /// Moves the finished file into the save folder, adds it to history, and
-    /// shows the completion toast (Open / Reveal / Edit… for MP4).
+    /// shows the Quick Access completion card (Pin / Copy / Save / Edit for MP4).
     /// </summary>
     private async Task FinalizeFileAsync(string tempPath, string extension)
     {
@@ -751,13 +751,8 @@ public sealed class RecordingController
 
             if (actions.ShowCompletionOverlay)
             {
-                try
-                {
-                    var toast = new FastRecordingToastWindow(savedPath, onEdit);
-                    PerfLog.TrackFirstShown(toast, "recording toast");
-                    toast.Show();
-                }
-                catch (Exception ex) { Log.Error("Failed to show recording toast", ex); }
+                try { RecordingCompletionOverlay.Show(savedPath, _settings, onEdit); }
+                catch (Exception ex) { Log.Error("Failed to show recording overlay", ex); }
             }
 
             if (actions.OpenEditor)

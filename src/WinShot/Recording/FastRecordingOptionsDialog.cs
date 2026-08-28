@@ -13,7 +13,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private static readonly SD.Color TextColor = SD.Color.White;
     private static readonly SD.Color MutedText = SD.Color.FromArgb(220, 220, 220);
     private static readonly SD.Color Accent = ThemePalette.Accent;
-    // Same translucent light hairline FastRecordingToastWindow uses for the CleanShot panel look.
+    // Translucent light hairline for the CleanShot panel look.
     private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
 
     private readonly WF.RadioButton _mp4Radio;
@@ -46,7 +46,10 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
     public FastRecordingOptionsDialog(Settings settings)
     {
-        AutoScaleMode = WF.AutoScaleMode.None;
+        // Layout below is designed in 96-DPI pixels; fonts are in points and grow with
+        // the monitor DPI, so the layout must scale with them or labels truncate.
+        AutoScaleDimensions = new SD.SizeF(96F, 96F);
+        AutoScaleMode = WF.AutoScaleMode.Dpi;
         BackColor = Back;
         ClientSize = new SD.Size(286, 504);
         FormBorderStyle = WF.FormBorderStyle.None;

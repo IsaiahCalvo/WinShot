@@ -675,11 +675,10 @@ public partial class VideoEditorWindow : Window
 
             StatusText.Text = $"Saved {outFile.Name}";
             Log.Info($"Edited video exported to {savedPath}");
-            var toast = new FastRecordingToastWindow(
+            RecordingCompletionOverlay.Show(
                 savedPath,
+                _settings,
                 onEdit: () => new VideoEditorWindow(savedPath, _settings, _history).Show());
-            PerfLog.TrackFirstShown(toast, "edited video toast");
-            toast.Show();
         }
         catch (Exception ex) when (VideoEditorInteraction.IsCancellation(ex) || _exportCancellationRequested)
         {

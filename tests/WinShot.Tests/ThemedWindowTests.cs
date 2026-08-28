@@ -63,7 +63,8 @@ public class ThemedWindowTests
                 ShowAndClose(new FastRecordingOptionsDialog(settings.Current));
                 ShowAndClose(new FastRecordingControlBar());
                 ShowAndClose(new FastRecordingCountdownWindow(1, new SD.Rectangle(0, 0, 80, 60)));
-                ShowAndClose(new FastRecordingToastWindow(previewFile.Path, onEdit: null));
+                ShowAndClose(FastQuickActionsWindow.CreateForMediaFile(
+                    previewFile.Path, NewBitmap(), settings, canEdit: true));
                 ShowAndClose(FastClickHighlightOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(FastKeystrokeOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(new ResizeDialog(80, 50));

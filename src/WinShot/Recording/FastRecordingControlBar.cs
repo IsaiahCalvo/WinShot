@@ -15,7 +15,7 @@ public sealed class FastRecordingControlBar : WF.Form
     private static readonly SD.Color StopHot = ThemePalette.AccentHover;
     private static readonly SD.Color RecordingRed = SD.Color.FromArgb(255, 82, 82);
     private static readonly SD.Color PausedAmber = SD.Color.FromArgb(255, 176, 32);
-    // Same translucent light hairline FastRecordingToastWindow uses for the CleanShot panel look.
+    // Translucent light hairline for the CleanShot panel look.
     private static readonly SD.Color Border = SD.Color.FromArgb(54, 255, 255, 255);
 
     private readonly Stopwatch _elapsed = new();
@@ -36,7 +36,10 @@ public sealed class FastRecordingControlBar : WF.Form
     {
         _recordingRegion = recordingRegion;
         _showTimer = showTimer;
-        AutoScaleMode = WF.AutoScaleMode.None;
+        // Fonts are in points and grow with the monitor DPI; scale the fixed-pixel
+        // button layout with them or the labels truncate on 125%/150% displays.
+        AutoScaleDimensions = new SD.SizeF(96F, 96F);
+        AutoScaleMode = WF.AutoScaleMode.Dpi;
         AutoSize = true;
         AutoSizeMode = WF.AutoSizeMode.GrowAndShrink;
         BackColor = Back;
@@ -89,6 +92,7 @@ public sealed class FastRecordingControlBar : WF.Form
         row.Controls.Add(_elapsedText);
 
         _pause = Button("Pause", ButtonBack, ButtonHot);
+        _pause.Width = 66; // sized for its wider "Resume" state
         _pause.Click += (_, _) => TogglePause();
         row.Controls.Add(_pause);
 

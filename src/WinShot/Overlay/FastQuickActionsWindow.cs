@@ -27,6 +27,10 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private readonly SD.Bitmap _image;
     private readonly SettingsService _settings;
+    // Media-file mode: the card fronts a finished recording (mp4/gif) instead of a
+    // fresh bitmap. _image is just the poster frame; copy/save/drag act on the file.
+    private readonly string? _mediaFilePath;
+    private readonly bool _mediaCanEdit;
     private readonly Task? _releaseAfterTask;
     private readonly bool _requestMemoryCleanupOnClose;
     private readonly bool _loadPreview;
@@ -94,6 +98,27 @@ public sealed class FastQuickActionsWindow : WF.Form
             loadPreview: true,
             themeOverride: theme);
 
+    /// <summary>
+    /// The screenshot card, fronting a finished recording file instead: same
+    /// chrome, but Copy puts the file on the clipboard, Save copies the file,
+    /// dragging drags the file, and Edit is only offered when a video editor
+    /// applies. <paramref name="thumbnail"/> ownership transfers to the window.
+    /// </summary>
+    public static FastQuickActionsWindow CreateForMediaFile(
+        string filePath,
+        SD.Bitmap thumbnail,
+        SettingsService settings,
+        bool canEdit)
+        => new(
+            thumbnail,
+            settings,
+            historyPath: filePath,
+            historyPathTask: null,
+            releaseAfterTask: null,
+            themeOverride: null,
+            mediaFilePath: filePath,
+            mediaCanEdit: canEdit);
+
     private FastQuickActionsWindow(
         SD.Bitmap image,
         SettingsService settings,
@@ -102,10 +127,14 @@ public sealed class FastQuickActionsWindow : WF.Form
         Task? releaseAfterTask,
         bool requestMemoryCleanupOnClose = true,
         bool loadPreview = true,
-        QuickAccessOverlayTheme? themeOverride = null)
+        QuickAccessOverlayTheme? themeOverride = null,
+        string? mediaFilePath = null,
+        bool mediaCanEdit = true)
     {
         _image = image;
         _settings = settings;
+        _mediaFilePath = mediaFilePath;
+        _mediaCanEdit = mediaCanEdit;
         _historyPath = historyPath;
         _releaseAfterTask = releaseAfterTask;
         _requestMemoryCleanupOnClose = requestMemoryCleanupOnClose;
@@ -148,7 +177,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
             HideActionTooltip();
-            if (_historyPath is not null)
+            // Restore-last reopens captures as images, so a media file never qualifies.
+            if (_historyPath is not null && _mediaFilePath is null)
                 PushRecentlyClosed(_historyPath);
             DisposeImageWhenUnused();
             ReflowOpenWindowsAnimated();
@@ -368,7 +398,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         // Preserve the user's verified action placement while using the selected HTML design.
         AddIconButton("quick-access-pin.svg", "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
         AddIconButton("quick-access-close.svg", "Close (Ctrl+W)", "Close", "Close", right, top, layout.IconSize, Close);
-        AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
+        if (_mediaFilePath is null)
+            AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
+        else if (_mediaCanEdit)
+            AddIconButton("quick-access-edit.svg", "Open video editor (Ctrl+E)", "Edit video", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
         AddIconButton("quick-access-save.svg", "Save (Ctrl+S)", "Save", "Save", right, bottom, layout.IconSize, SaveFromInput);
 
         int pillX = _cardRect.Left + (_cardRect.Width - layout.PillWidth) / 2;
@@ -810,8 +843,16 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void BuildOverflowMenu()
     {
         _overflowMenu.AccessibleName = "More capture actions";
-        _overflowMenu.Items.Add("Recognize text (OCR)", null, (_, _) => OcrRequested?.Invoke(this));
-        _overflowMenu.Items.Add("Add background", null, (_, _) => BackgroundRequested?.Invoke(this));
+        if (_mediaFilePath is not null)
+        {
+            _overflowMenu.Items.Add("Open", null, (_, _) => OpenMediaFile());
+            _overflowMenu.Items.Add("Show in folder", null, (_, _) => RevealMediaFile());
+        }
+        else
+        {
+            _overflowMenu.Items.Add("Recognize text (OCR)", null, (_, _) => OcrRequested?.Invoke(this));
+            _overflowMenu.Items.Add("Add background", null, (_, _) => BackgroundRequested?.Invoke(this));
+        }
         _overflowMenu.Opening += (_, _) =>
         {
             SetHovering(true);
@@ -889,7 +930,14 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private async Task RunAutoCloseActionAsync()
     {
-        switch (QuickAccessOverlayLayout.NormalizeAutoCloseAction(_settings.Current.OverlayAutoCloseAction))
+        string action = QuickAccessOverlayLayout.NormalizeAutoCloseAction(_settings.Current.OverlayAutoCloseAction);
+        if (_mediaFilePath is not null && action != "copy-close")
+        {
+            Close(); // the recording is already saved; auto-"save" would just duplicate it
+            return;
+        }
+
+        switch (action)
         {
             case "copy-close":
                 await CopyCoreAsync(keepOpen: false);
@@ -1368,8 +1416,17 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         try
         {
-            _copyTask = CaptureService.CopyToClipboardAsync(_image);
-            await _copyTask;
+            if (_mediaFilePath is not null)
+            {
+                // Copy the recording as a real file so Outlook/Slack paste an attachment.
+                var files = new System.Collections.Specialized.StringCollection { _mediaFilePath };
+                WF.Clipboard.SetFileDropList(files);
+            }
+            else
+            {
+                _copyTask = CaptureService.CopyToClipboardAsync(_image);
+                await _copyTask;
+            }
             if (_closed || IsDisposed) return;
 
             if (!keepOpen)
@@ -1409,6 +1466,25 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         try
         {
+            if (_mediaFilePath is not null)
+            {
+                // The recording is already saved; Save here means "save a copy as…".
+                string extension = Path.GetExtension(_mediaFilePath).TrimStart('.');
+                using var mediaDialog = new WF.SaveFileDialog
+                {
+                    FileName = Path.GetFileName(_mediaFilePath),
+                    InitialDirectory = _settings.Current.SaveFolder,
+                    Filter = $"{extension.ToUpperInvariant()} file|*.{extension}|All files|*.*",
+                };
+                if (mediaDialog.ShowDialog(this) != WF.DialogResult.OK)
+                    return;
+                string source = _mediaFilePath;
+                string destination = mediaDialog.FileName;
+                await Task.Run(() => File.Copy(source, destination, overwrite: true));
+                if (closeAfterSave && !_closed && !IsDisposed)
+                    Close();
+                return;
+            }
             Directory.CreateDirectory(_settings.Current.SaveFolder);
             string path;
             if (askForDestination)
@@ -1446,6 +1522,32 @@ public sealed class FastQuickActionsWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Save failed", ex);
+        }
+    }
+
+    private void OpenMediaFile()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(_mediaFilePath!) { UseShellExecute = true });
+            Close();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to open {_mediaFilePath}", ex);
+        }
+    }
+
+    private void RevealMediaFile()
+    {
+        try
+        {
+            Process.Start("explorer.exe", $"/select,\"{_mediaFilePath}\"");
+            Close();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to reveal {_mediaFilePath}", ex);
         }
     }
 

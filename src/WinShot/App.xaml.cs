@@ -202,9 +202,7 @@ public partial class App : Application
                         editor.Show();
                     }
                     : null;
-                var toast = new FastRecordingToastWindow(latest, onEdit);
-                PerfLog.TrackFirstShown(toast, "recording recovery toast");
-                toast.Show();
+                RecordingCompletionOverlay.Show(latest, _settings, onEdit);
             }
             catch (Exception ex)
             {
