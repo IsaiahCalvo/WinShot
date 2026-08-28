@@ -44,14 +44,20 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private static FastRecordingOptionsDialog? _cached;
     private TaskCompletionSource<WF.DialogResult>? _completion;
 
+    // Point-based fonts render at the monitor's DPI, but this layout is designed in
+    // 96-DPI pixels — so every coordinate is multiplied by the cursor monitor's scale
+    // or labels truncate on 125%/150% displays. (AutoScaleMode.Dpi can't do this: it
+    // only reacts to DPI *changes*, never the monitor the form first appears on.)
+    private readonly double _scale;
+
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     public FastRecordingOptionsDialog(Settings settings)
     {
-        // Layout below is designed in 96-DPI pixels; fonts are in points and grow with
-        // the monitor DPI, so the layout must scale with them or labels truncate.
-        AutoScaleDimensions = new SD.SizeF(96F, 96F);
-        AutoScaleMode = WF.AutoScaleMode.Dpi;
+        _scale = RecordingMonitorDpi.ScaleFor(WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
+        AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
-        ClientSize = new SD.Size(286, 504);
+        ClientSize = new SD.Size(S(286), S(504));
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
         MaximizeBox = false;
@@ -111,15 +117,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         Controls.Add(_systemAudioCheck);
 
         Controls.Add(Label("Webcam", 18, 266, 92));
-        _webcamCombo = new WF.ComboBox
-        {
-            BackColor = FieldBack,
-            DropDownStyle = WF.ComboBoxStyle.DropDownList,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = TextColor,
-            Location = new SD.Point(110, 262),
-            Size = new SD.Size(150, 24),
-        };
+        _webcamCombo = Combo(110, 262, 150);
         _webcamCombo.Items.AddRange(["Off", "Top left", "Top right", "Bottom left", "Bottom right", "Fullscreen"]);
         _webcamCombo.SelectedIndex = 0;
         _webcamCombo.SelectedIndexChanged += (_, _) => UpdateMp4DependentState();
@@ -132,16 +130,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         Controls.Add(_webcamDeviceCombo);
 
         Controls.Add(Label("Webcam size", 18, 334, 92));
-        _webcamSizeBox = new WF.TextBox
-        {
-            BackColor = FieldBack,
-            BorderStyle = WF.BorderStyle.FixedSingle,
-            ForeColor = TextColor,
-            Location = new SD.Point(110, 330),
-            Size = new SD.Size(44, 24),
-            Text = RecordingOptions.DefaultWebcamSizePercent.ToString(),
-            TextAlign = WF.HorizontalAlignment.Center,
-        };
+        _webcamSizeBox = NumberBox(110, 330, RecordingOptions.DefaultWebcamSizePercent.ToString());
         Controls.Add(_webcamSizeBox);
         Controls.Add(Label("10-45%", 164, 334, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
 
@@ -153,16 +142,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         Controls.Add(_keystrokeCheck);
 
         Controls.Add(Label("Countdown (s)", 18, 454, 92));
-        _countdownBox = new WF.TextBox
-        {
-            BackColor = FieldBack,
-            BorderStyle = WF.BorderStyle.FixedSingle,
-            ForeColor = TextColor,
-            Location = new SD.Point(110, 450),
-            Size = new SD.Size(44, 24),
-            Text = "0",
-            TextAlign = WF.HorizontalAlignment.Center,
-        };
+        _countdownBox = NumberBox(110, 450, "0");
         Controls.Add(_countdownBox);
         Controls.Add(Label("0 = off", 164, 454, 90, color: SD.Color.FromArgb(150, 150, 150), size: 8));
 
@@ -257,6 +237,14 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     public static FastRecordingOptionsDialog Create(Settings settings)
     {
         var dialog = Interlocked.Exchange(ref _cached, null);
+        // A cached dialog keeps the layout scale of the monitor it was built for;
+        // rebuild when the cursor has moved to a monitor with a different scale.
+        if (dialog is { IsDisposed: false } &&
+            Math.Abs(dialog._scale - RecordingMonitorDpi.ScaleFor(WF.Screen.FromPoint(WF.Cursor.Position).Bounds)) > 0.01)
+        {
+            dialog.Dispose();
+            dialog = null;
+        }
         if (dialog is { IsDisposed: false })
         {
             dialog.ApplySettings(settings);
@@ -420,7 +408,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 20, 20);
+        IntPtr regionHandle = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(20), S(20));
         Region = SD.Region.FromHrgn(regionHandle);
         DeleteObject(regionHandle);
     }
@@ -504,7 +492,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         _webcamDeviceCombo.Visible = webcamOn;
     }
 
-    private static WF.Label Label(
+    private WF.Label Label(
         string text,
         int x,
         int y,
@@ -517,23 +505,35 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             AutoSize = false,
             Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? MutedText,
-            Location = new SD.Point(x, y),
-            Size = new SD.Size(width, 22),
+            Location = new SD.Point(S(x), S(y)),
+            Size = new SD.Size(S(width), S(22)),
             Text = text,
         };
 
-    private static WF.ComboBox Combo(int x, int y, int width) =>
+    private WF.ComboBox Combo(int x, int y, int width) =>
         new()
         {
             BackColor = FieldBack,
             DropDownStyle = WF.ComboBoxStyle.DropDownList,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(x, y),
-            Size = new SD.Size(width, 24),
+            Location = new SD.Point(S(x), S(y)),
+            Size = new SD.Size(S(width), S(24)),
         };
 
-    private static WF.RadioButton Radio(string text, int x, int y, bool isChecked) =>
+    private WF.TextBox NumberBox(int x, int y, string text) =>
+        new()
+        {
+            BackColor = FieldBack,
+            BorderStyle = WF.BorderStyle.FixedSingle,
+            ForeColor = TextColor,
+            Location = new SD.Point(S(x), S(y)),
+            Size = new SD.Size(S(44), S(24)),
+            Text = text,
+            TextAlign = WF.HorizontalAlignment.Center,
+        };
+
+    private WF.RadioButton Radio(string text, int x, int y, bool isChecked) =>
         new()
         {
             AutoSize = true,
@@ -541,11 +541,11 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(x, y),
+            Location = new SD.Point(S(x), S(y)),
             Text = text,
         };
 
-    private static WF.CheckBox Check(string text, int x, int y, bool isChecked) =>
+    private WF.CheckBox Check(string text, int x, int y, bool isChecked) =>
         new()
         {
             AutoSize = true,
@@ -553,11 +553,11 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(x, y),
+            Location = new SD.Point(S(x), S(y)),
             Text = text,
         };
 
-    private static WF.Button Button(string text, int x, int y, SD.Color backColor)
+    private WF.Button Button(string text, int x, int y, SD.Color backColor)
     {
         var button = new WF.Button
         {
@@ -565,8 +565,8 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = TextColor,
-            Location = new SD.Point(x, y),
-            Size = new SD.Size(70, 26),
+            Location = new SD.Point(S(x), S(y)),
+            Size = new SD.Size(S(70), S(26)),
             Text = text,
             UseVisualStyleBackColor = false,
         };

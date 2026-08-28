@@ -28,6 +28,7 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly WF.Button _cancel;
     private readonly SD.Rectangle? _recordingRegion;
     private readonly bool _showTimer;
+    private readonly double _scale;
     private bool _actionTaken;
     private bool _paused;
     private bool _pulseDim;
@@ -36,17 +37,21 @@ public sealed class FastRecordingControlBar : WF.Form
     {
         _recordingRegion = recordingRegion;
         _showTimer = showTimer;
-        // Fonts are in points and grow with the monitor DPI; scale the fixed-pixel
-        // button layout with them or the labels truncate on 125%/150% displays.
-        AutoScaleDimensions = new SD.SizeF(96F, 96F);
-        AutoScaleMode = WF.AutoScaleMode.Dpi;
+        // Point-based fonts render at the monitor's DPI, so the fixed-pixel button
+        // layout must scale with the target monitor or labels truncate on 125%/150%
+        // displays. (AutoScaleMode.Dpi can't: it only reacts to DPI *changes*.)
+        SD.Rectangle targetScreen = recordingRegion is SD.Rectangle r
+            ? WF.Screen.FromRectangle(r).Bounds
+            : WF.Screen.FromPoint(WF.Cursor.Position).Bounds;
+        _scale = RecordingMonitorDpi.ScaleFor(targetScreen);
+        AutoScaleMode = WF.AutoScaleMode.None;
         AutoSize = true;
         AutoSizeMode = WF.AutoSizeMode.GrowAndShrink;
         BackColor = Back;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
         Opacity = 0.96;
-        Padding = new WF.Padding(14, 8, 14, 8);
+        Padding = new WF.Padding(S(14), S(8), S(14), S(8));
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
@@ -72,8 +77,8 @@ public sealed class FastRecordingControlBar : WF.Form
         _dot = new DotControl
         {
             DotColor = RecordingRed,
-            Margin = new WF.Padding(2, 7, 8, 0),
-            Size = new SD.Size(10, 10),
+            Margin = new WF.Padding(S(2), S(7), S(8), 0),
+            Size = new SD.Size(S(10), S(10)),
         };
         _dot.Visible = showTimer;
         row.Controls.Add(_dot);
@@ -83,8 +88,8 @@ public sealed class FastRecordingControlBar : WF.Form
             AutoSize = false,
             Font = new SD.Font("Consolas", 10f, SD.FontStyle.Regular),
             ForeColor = SD.Color.White,
-            Margin = new WF.Padding(0, 4, 12, 0),
-            Size = new SD.Size(66, 22),
+            Margin = new WF.Padding(0, S(4), S(12), 0),
+            Size = new SD.Size(S(66), S(22)),
             Text = "00:00",
             TextAlign = SD.ContentAlignment.MiddleLeft,
         };
@@ -92,7 +97,7 @@ public sealed class FastRecordingControlBar : WF.Form
         row.Controls.Add(_elapsedText);
 
         _pause = Button("Pause", ButtonBack, ButtonHot);
-        _pause.Width = 66; // sized for its wider "Resume" state
+        _pause.Width = S(66); // sized for its wider "Resume" state
         _pause.Click += (_, _) => TogglePause();
         row.Controls.Add(_pause);
 
@@ -227,7 +232,7 @@ public sealed class FastRecordingControlBar : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 36, 36);
+        IntPtr regionHandle = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, S(36), S(36));
         Region = SD.Region.FromHrgn(regionHandle);
         Native.DeleteObject(regionHandle);
     }
@@ -245,7 +250,9 @@ public sealed class FastRecordingControlBar : WF.Form
         }
     }
 
-    private static WF.Button Button(string text, SD.Color backColor, SD.Color hotColor)
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
+    private WF.Button Button(string text, SD.Color backColor, SD.Color hotColor)
     {
         var button = new WF.Button
         {
@@ -254,8 +261,8 @@ public sealed class FastRecordingControlBar : WF.Form
             Cursor = WF.Cursors.Hand,
             FlatStyle = WF.FlatStyle.Flat,
             ForeColor = SD.Color.White,
-            Margin = new WF.Padding(3, 0, 3, 0),
-            Size = new SD.Size(text.Length > 5 ? 64 : 54, 26),
+            Margin = new WF.Padding(S(3), 0, S(3), 0),
+            Size = new SD.Size(S(text.Length > 5 ? 64 : 54), S(26)),
             Text = text,
             UseVisualStyleBackColor = false,
         };
