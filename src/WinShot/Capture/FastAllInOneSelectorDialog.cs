@@ -47,6 +47,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private TaskCompletionSource<WF.DialogResult>? _completion;
     private readonly WF.Timer _followTimer;
     private bool _lastCtrlDown;
+    // Session-effective loupe visibility: seeded from the "Show magnifier" setting each
+    // ShowAsync, flipped by tapping Alt. The latch swallows key-repeat while Alt is held.
+    private bool _magnifierOn;
+    private bool _altLatched;
 
     public FastAllInOneSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
@@ -185,6 +189,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         Focus();
         SelectorForeground.Restore(this);
         _lastCtrlDown = false;
+        _magnifierOn = _options.ShowMagnifier;
+        _altLatched = false;
         if (_options.NeedsCursorFollow)
             StartFollowMotion();
         if (_options.FreezeScreen)
@@ -244,6 +250,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         // pointer instead of a corner until the first mouse-move arrives.
         _currentScreen = CursorScreen();
         _lastCtrlDown = false;
+        _magnifierOn = _options.ShowMagnifier;
+        _altLatched = false;
         _completion = null;
         if (!_toolbar.IsDisposed)
         {
@@ -348,6 +356,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         base.OnKeyDown(e);
     }
 
+    protected override void OnKeyUp(WF.KeyEventArgs e)
+    {
+        HandleKeyUp(e);
+        base.OnKeyUp(e);
+    }
+
     protected override void OnFormClosing(WF.FormClosingEventArgs e)
     {
         if (_completion is not null)
@@ -414,7 +428,28 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             e.Handled = true;
             Confirm(pending);
         }
+        else if (e.KeyCode == WF.Keys.Menu)
+        {
+            if (!_altLatched)
+            {
+                _altLatched = true;
+                _magnifierOn = !_magnifierOn;
+                if (_magnifierOn)
+                    StartFollowMotion(); // the setting may be off, so the follow tick may not be running
+                InvalidateAllSurfaces();
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true; // no menu-loop ding on a borderless overlay
+        }
     }
+
+    internal void HandleKeyUp(WF.KeyEventArgs e)
+    {
+        if (e.KeyCode == WF.Keys.Menu)
+            _altLatched = false;
+    }
+
+    internal bool MagnifierVisible => _magnifierOn;
 
     internal void HandleMouseDown(WF.MouseEventArgs e)
     {
@@ -621,7 +656,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (cursorOnThisSurface && _options.IsCrosshairVisible(controlPressed))
             SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
-        if (cursorOnThisSurface && _options.ShowMagnifier)
+        if (cursorOnThisSurface && _magnifierOn)
         {
             FastSelectorLoupeRenderer.Draw(
                 g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
@@ -910,6 +945,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             _owner.HandleKeyDown(e);
             base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(WF.KeyEventArgs e)
+        {
+            _owner.HandleKeyUp(e);
+            base.OnKeyUp(e);
         }
 
         protected override void OnPaint(WF.PaintEventArgs e)

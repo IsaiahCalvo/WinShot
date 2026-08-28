@@ -86,6 +86,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     // shown — started in ShowAsync, stopped in Complete — so it adds no idle background work.
     private readonly WF.Timer _followTimer;
     private bool _lastCtrlDown;
+    // Session-effective loupe visibility: seeded from the "Show magnifier" setting each
+    // ShowAsync, flipped by tapping Alt. The latch swallows key-repeat while Alt is held.
+    private bool _magnifierOn;
+    private bool _altLatched;
 
     public FastRegionSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
@@ -255,6 +259,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 $"activate={sw.ElapsedMilliseconds - panesMs - showMs - paneShowMs} total={sw.ElapsedMilliseconds} ms");
         }
         _lastCtrlDown = false;
+        _magnifierOn = _options.ShowMagnifier;
+        _altLatched = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
         if (_options.NeedsCursorFollow || _paneHover)
@@ -511,6 +517,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         base.OnKeyDown(e);
     }
 
+    protected override void OnKeyUp(WF.KeyEventArgs e)
+    {
+        HandleKeyUp(e);
+        base.OnKeyUp(e);
+    }
+
     protected override void OnFormClosing(WF.FormClosingEventArgs e)
     {
         if (_completion is not null)
@@ -576,6 +588,34 @@ public sealed class FastRegionSelectorDialog : WF.Form
             e.Handled = true;
             Confirm(VirtualFromScreen(pending));
         }
+        else if (e.KeyCode == WF.Keys.Menu)
+        {
+            if (!_altLatched)
+            {
+                _altLatched = true;
+                ToggleMagnifier();
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true; // no menu-loop ding on a borderless overlay
+        }
+    }
+
+    internal void HandleKeyUp(WF.KeyEventArgs e)
+    {
+        if (e.KeyCode == WF.Keys.Menu)
+            _altLatched = false;
+    }
+
+    internal bool MagnifierVisible => _magnifierOn;
+
+    private void ToggleMagnifier()
+    {
+        _magnifierOn = !_magnifierOn;
+        if (_magnifierOn)
+            StartFollowMotion(); // the setting may be off, so the follow tick may not be running
+        SD.Point pt = _currentScreen;
+        InvalidateScreenRect(new SD.Rectangle(
+            pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
     }
 
     internal void HandleMouseDown(WF.MouseEventArgs e)
@@ -904,7 +944,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (CrosshairLinesVisible())
                 SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
-            if (_options.ShowMagnifier)
+            if (_magnifierOn)
                 FastSelectorLoupeRenderer.Draw(
                     g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
         }
@@ -1504,6 +1544,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             _owner.HandleKeyDown(e);
             base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(WF.KeyEventArgs e)
+        {
+            _owner.HandleKeyUp(e);
+            base.OnKeyUp(e);
         }
 
         protected override void OnPaint(WF.PaintEventArgs e)

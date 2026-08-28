@@ -568,28 +568,178 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         };
 
     private WF.RadioButton Radio(string text, bool isChecked) =>
-        new()
+        new DarkRadioButton(_scale)
         {
-            AutoSize = true,
             Checked = isChecked,
-            Cursor = WF.Cursors.Hand,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = TextColor,
             Location = new SD.Point(S(PadX), 0),
             Text = text,
         };
 
     private WF.CheckBox Check(string text, bool isChecked) =>
-        new()
+        new DarkCheckBox(_scale)
         {
-            AutoSize = true,
             Checked = isChecked,
-            Cursor = WF.Cursors.Hand,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = TextColor,
             Location = new SD.Point(S(PadX), 0),
             Text = text,
         };
+
+    /// <summary>
+    /// Owner-drawn dark toggle glyphs shared by <see cref="DarkCheckBox"/> and
+    /// <see cref="DarkRadioButton"/>: an accent-filled rounded box with a white check
+    /// (or an accent circle with a white dot), replacing the stock WinForms flat
+    /// glyphs that ignore the dialog's palette.
+    /// </summary>
+    private static class ToggleGlyph
+    {
+        private static int Sc(int logical, double scale) => (int)Math.Round(logical * scale);
+
+        public static SD.Size PreferredSize(WF.Control control, double scale)
+        {
+            SD.Size text = WF.TextRenderer.MeasureText(control.Text, control.Font);
+            int box = Sc(16, scale);
+            return new SD.Size(
+                box + Sc(8, scale) + text.Width + 2,
+                Math.Max(box + 2, text.Height + 2));
+        }
+
+        public static void Paint(
+            SD.Graphics g,
+            WF.Control control,
+            double scale,
+            bool isChecked,
+            bool hot,
+            bool round,
+            bool focused)
+        {
+            g.Clear(Back);
+            g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+
+            int box = Sc(16, scale);
+            var rect = new SD.Rectangle(0, (control.Height - box) / 2, box, box);
+            int cornerRadius = Sc(4, scale);
+
+            if (isChecked)
+            {
+                using var fill = new SD.SolidBrush(Accent);
+                if (round)
+                {
+                    g.FillEllipse(fill, rect);
+                    int inset = (int)Math.Round(box * 0.3125);
+                    using var dot = new SD.SolidBrush(SD.Color.White);
+                    g.FillEllipse(dot, SD.Rectangle.Inflate(rect, -inset, -inset));
+                }
+                else
+                {
+                    using (var path = GdiPaths.RoundedRect(rect, cornerRadius))
+                        g.FillPath(fill, path);
+                    using var pen = new SD.Pen(SD.Color.White, Math.Max(2f, box / 8f))
+                    {
+                        StartCap = SD.Drawing2D.LineCap.Round,
+                        EndCap = SD.Drawing2D.LineCap.Round,
+                        LineJoin = SD.Drawing2D.LineJoin.Round,
+                    };
+                    g.DrawLines(pen, new[]
+                    {
+                        new SD.PointF(rect.X + box * 0.26f, rect.Y + box * 0.54f),
+                        new SD.PointF(rect.X + box * 0.43f, rect.Y + box * 0.72f),
+                        new SD.PointF(rect.X + box * 0.75f, rect.Y + box * 0.31f),
+                    });
+                }
+            }
+            else
+            {
+                using var fill = new SD.SolidBrush(FieldBack);
+                using var pen = new SD.Pen(SD.Color.FromArgb(hot ? 120 : 64, 255, 255, 255), 1f);
+                if (round)
+                {
+                    g.FillEllipse(fill, rect);
+                    g.DrawEllipse(pen, rect);
+                }
+                else
+                {
+                    using var path = GdiPaths.RoundedRect(rect, cornerRadius);
+                    g.FillPath(fill, path);
+                    g.DrawPath(pen, path);
+                }
+            }
+
+            int textX = box + Sc(8, scale);
+            var textRect = new SD.Rectangle(textX, 0, Math.Max(1, control.Width - textX), control.Height);
+            WF.TextRenderer.DrawText(
+                g,
+                control.Text,
+                control.Font,
+                textRect,
+                control.ForeColor,
+                WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Left | WF.TextFormatFlags.SingleLine);
+            if (focused)
+                WF.ControlPaint.DrawFocusRectangle(g, textRect);
+        }
+    }
+
+    private sealed class DarkCheckBox : WF.CheckBox
+    {
+        private readonly double _scale;
+        private bool _hot;
+
+        public DarkCheckBox(double scale)
+        {
+            _scale = scale;
+            SetStyle(
+                WF.ControlStyles.UserPaint |
+                WF.ControlStyles.AllPaintingInWmPaint |
+                WF.ControlStyles.OptimizedDoubleBuffer |
+                WF.ControlStyles.ResizeRedraw,
+                true);
+            AutoSize = true;
+            BackColor = Back;
+            Cursor = WF.Cursors.Hand;
+            ForeColor = TextColor;
+            CheckedChanged += (_, _) => Invalidate();
+            GotFocus += (_, _) => Invalidate();
+            LostFocus += (_, _) => Invalidate();
+            MouseEnter += (_, _) => { _hot = true; Invalidate(); };
+            MouseLeave += (_, _) => { _hot = false; Invalidate(); };
+        }
+
+        public override SD.Size GetPreferredSize(SD.Size proposedSize)
+            => ToggleGlyph.PreferredSize(this, _scale);
+
+        protected override void OnPaint(WF.PaintEventArgs e)
+            => ToggleGlyph.Paint(e.Graphics, this, _scale, Checked, _hot, round: false, Focused);
+    }
+
+    private sealed class DarkRadioButton : WF.RadioButton
+    {
+        private readonly double _scale;
+        private bool _hot;
+
+        public DarkRadioButton(double scale)
+        {
+            _scale = scale;
+            SetStyle(
+                WF.ControlStyles.UserPaint |
+                WF.ControlStyles.AllPaintingInWmPaint |
+                WF.ControlStyles.OptimizedDoubleBuffer |
+                WF.ControlStyles.ResizeRedraw,
+                true);
+            AutoSize = true;
+            BackColor = Back;
+            Cursor = WF.Cursors.Hand;
+            ForeColor = TextColor;
+            CheckedChanged += (_, _) => Invalidate();
+            GotFocus += (_, _) => Invalidate();
+            LostFocus += (_, _) => Invalidate();
+            MouseEnter += (_, _) => { _hot = true; Invalidate(); };
+            MouseLeave += (_, _) => { _hot = false; Invalidate(); };
+        }
+
+        public override SD.Size GetPreferredSize(SD.Size proposedSize)
+            => ToggleGlyph.PreferredSize(this, _scale);
+
+        protected override void OnPaint(WF.PaintEventArgs e)
+            => ToggleGlyph.Paint(e.Graphics, this, _scale, Checked, _hot, round: true, Focused);
+    }
 
     private WF.Button ActionButton(string text, SD.Color backColor)
     {
