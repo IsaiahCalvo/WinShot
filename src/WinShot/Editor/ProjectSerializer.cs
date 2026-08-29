@@ -175,7 +175,8 @@ internal sealed class AnnotationData
     public static AnnotationData ForText(
         Point topLeft, string text, TextStyle style, double fontSize, Color color,
         string fontFamily, bool bold, bool italic, bool underline, bool strike, string align,
-        string verticalAlign, Rect? box) => new()
+        string verticalAlign, Rect? box,
+        Color fill = default, double strokeThickness = 0, LineBorderStyle lineStyle = LineBorderStyle.Solid) => new()
     {
         Type = TypeText,
         Points = ToArray(new[] { topLeft }),
@@ -191,6 +192,9 @@ internal sealed class AnnotationData
         Strike = strike,
         Align = align,
         VerticalAlign = verticalAlign == "top" ? null : verticalAlign,
+        FillColor = fill.A != 0 ? ToHex(fill) : null,
+        Thickness = strokeThickness > 0 ? strokeThickness : null,
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
     };
 
     public static AnnotationData ForEmoji(Point topLeft, string emoji) => new()
@@ -445,12 +449,14 @@ internal static class ProjectSerializer
                 Rect? box = a.Rect is { Length: >= 4 } r
                     ? new Rect(r[0], r[1], r[2], r[3])
                     : null;
+                var stroke = RequireColor(a);
+                var fill = AnnotationStyle.FillColorFrom(a, stroke);
                 var label = AnnotationFactory.CreateStyledTextLabel(
-                    text, new SolidColorBrush(RequireColor(a)), fontSize, style,
+                    text, new SolidColorBrush(stroke), fontSize, style,
                     a.FontFamily ?? "Segoe UI", a.Bold == true || style == TextStyle.Bold,
                     a.Italic == true, a.Underline == true, a.Strike == true,
                     AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
-                    box?.Width, box?.Height);
+                    box?.Width, box?.Height, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a));
                 SetPos(label, pts[0]);
                 return label;
             }

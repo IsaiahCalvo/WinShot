@@ -412,7 +412,17 @@ internal static class AnnotationFactory
     public static FrameworkElement CreateStyledTextLabel(
         string text, Brush foreground, double fontSize, TextStyle style,
         string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align,
-        string? verticalAlign, double? boxWidth, double? boxHeight)
+        string? verticalAlign, double? boxWidth, double? boxHeight) =>
+        CreateStyledTextLabel(text, foreground, fontSize, style, fontFamily, bold, italic, underline, strike, align,
+            verticalAlign, boxWidth, boxHeight, fill: Colors.Transparent, strokeThickness: 0, LineBorderStyle.Solid);
+
+    public const double DefaultTextBoxWidth = 160;
+
+    public static FrameworkElement CreateStyledTextLabel(
+        string text, Brush foreground, double fontSize, TextStyle style,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align,
+        string? verticalAlign, double? boxWidth, double? boxHeight,
+        Color fill, double strokeThickness, LineBorderStyle lineStyle)
     {
         bool useBold = bold || style == TextStyle.Bold;
         FrameworkElement inner = style switch
@@ -428,21 +438,29 @@ internal static class AnnotationFactory
             _ => CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align),
         };
 
-        if (boxWidth is not > 1)
+        if (style is TextStyle.Outline or TextStyle.Pill)
             return inner;
 
+        double width = boxWidth is > 1 ? boxWidth.Value : DefaultTextBoxWidth;
+        double height = boxHeight is > 1 ? boxHeight.Value : fontSize * 1.31 + 2 * TextPadding;
         if (inner is TextBlock tb)
         {
-            tb.Width = Math.Max(1, boxWidth.Value - 2 * TextPadding);
+            tb.Width = Math.Max(1, width - 2 * TextPadding);
             tb.TextWrapping = TextWrapping.Wrap;
             tb.VerticalAlignment = ParseVerticalAlign(verticalAlign);
         }
 
-        var box = new Grid
+        var box = new Grid { Width = width, Height = height };
+        var chrome = new Rectangle
         {
-            Width = boxWidth.Value,
-            Height = boxHeight is > 1 ? boxHeight.Value : double.NaN,
+            Fill = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill),
+            Stroke = strokeThickness > 0 ? foreground : Brushes.Transparent,
+            StrokeThickness = Math.Max(0, strokeThickness),
+            RadiusX = 2,
+            RadiusY = 2,
         };
+        ApplyDash(chrome, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
+        box.Children.Add(chrome);
         inner.Margin = new Thickness(TextPadding);
         box.Children.Add(inner);
         return box;
@@ -477,33 +495,40 @@ internal static class AnnotationFactory
         };
 
     /// <summary>
-    /// Circle badge whose caption is either the number (1, 2, …) or a letter sequence
-    /// (A, B, …, Z, AA) when <paramref name="letters"/> is set. Ring and caption color
-    /// flip to black on light fills; the font shrinks for longer captions.
+    /// Survey teardrop pin: circle + nub at 225° (southwest). Caption is the
+    /// number (1, 2, …) or a letter sequence when <paramref name="letters"/> is set.
     /// </summary>
-    public static Grid CreateStepBadge(int number, Color color, double thickness, bool letters)
+    public static Grid CreateStepBadge(int number, Color color, double thickness, bool letters,
+        double pointerAngle = CounterGeometry.DefaultPointerAngle)
     {
-        double diameter = 22 + thickness * 3;
+        double radius = CounterGeometry.RadiusFor(thickness);
+        double tipDist = CounterGeometry.TipDistance(radius);
+        double size = tipDist * 2;
+        Point body = new(tipDist, tipDist);
         bool lightFill = 0.299 * color.R + 0.587 * color.G + 0.114 * color.B > 160;
         Color contrast = lightFill ? Colors.Black : Colors.White;
-
         string caption = letters ? StepLetterLabel(number) : number.ToString();
 
-        var badge = new Grid { Width = diameter, Height = diameter };
-        badge.Children.Add(new Ellipse
+        double font = CounterGeometry.FontSize(radius, caption);
+        var badge = new Grid { Width = size, Height = size };
+        badge.Children.Add(new Path
         {
+            Data = CounterGeometry.Pin(body, radius, pointerAngle),
             Fill = new SolidColorBrush(color),
             Stroke = new SolidColorBrush(contrast) { Opacity = 0.85 },
-            StrokeThickness = 2,
+            StrokeThickness = 1.5,
         });
         badge.Children.Add(new TextBlock
         {
             Text = caption,
             Foreground = new SolidColorBrush(contrast),
             FontWeight = FontWeights.Bold,
-            FontSize = diameter * (caption.Length < 2 ? 0.5 : 0.4),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = font,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(
+                Math.Max(0, body.X - font * caption.Length * 0.32),
+                Math.Max(0, body.Y - font * 0.55), 0, 0),
         });
         return badge;
     }

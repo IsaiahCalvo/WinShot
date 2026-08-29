@@ -104,13 +104,56 @@ public partial class EditorWindow : Window
         }
         else
         {
-            Canvas.SetLeft(tb, box.X - AnnotationFactory.TextPadding);
-            Canvas.SetTop(tb, box.Y - AnnotationFactory.TextPadding);
+            tb.Width = AnnotationFactory.DefaultTextBoxWidth;
+            tb.Height = fontSize * 1.31 + 2 * AnnotationFactory.TextPadding;
+            tb.TextWrapping = TextWrapping.Wrap;
+            tb.AcceptsReturn = true;
+            _activeTextBox = new Rect(box.X, box.Y, tb.Width, tb.Height);
+            Canvas.SetLeft(tb, box.X);
+            Canvas.SetTop(tb, box.Y);
         }
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         HookTextEditor(tb);
         Dispatcher.InvokeAsync(() => tb.Focus());
+    }
+
+    private void BeginCalloutReEdit(CalloutAnnotation visual)
+    {
+        if (visual.Tag is not AnnotationData meta) return;
+        Select(null);
+        var layout = visual.Layout;
+        Vector off = visual.RenderTransform is TranslateTransform t
+            ? new Vector(t.X, t.Y)
+            : new Vector();
+        var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(
+            meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White),
+            meta.FontSize ?? 16);
+        tb.Width = layout.Box.Width;
+        tb.Height = layout.Box.Height;
+        tb.Text = meta.Text ?? visual.Text;
+        tb.Tag = visual;
+        tb.AcceptsReturn = true;
+        tb.TextWrapping = TextWrapping.Wrap;
+        Canvas.SetLeft(tb, layout.Box.X + off.X);
+        Canvas.SetTop(tb, layout.Box.Y + off.Y);
+        AnnotationCanvas.Children.Add(tb);
+        _activeText = tb;
+        tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
+        tb.PreviewKeyDown += (_, ev) =>
+        {
+            if (ev.Key == Key.Escape)
+            {
+                AnnotationCanvas.Children.Remove(tb);
+                _activeText = null;
+                ev.Handled = true;
+            }
+        };
+        Dispatcher.InvokeAsync(() =>
+        {
+            tb.Focus();
+            tb.SelectAll();
+        });
     }
 
     /// <summary>
@@ -211,18 +254,22 @@ public partial class EditorWindow : Window
 
         var style = tb.Tag is TextStyle s ? s : TextStyle.Plain;
         bool sized = box is Rect sizedBox && sizedBox.Width >= 8 && sizedBox.Height >= 8;
-        Point topLeft = sized ? new Point(x, y) : new Point(x + AnnotationFactory.TextPadding, y + AnnotationFactory.TextPadding);
+        Point topLeft = sized ? new Point(x, y) : new Point(x, y);
+        var (strokeColor, fillColor) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
+        double boxW = sized ? box!.Value.Width : AnnotationFactory.DefaultTextBoxWidth;
+        double boxH = sized ? box!.Value.Height : tb.FontSize * 1.31 + 2 * AnnotationFactory.TextPadding;
         var label = AnnotationFactory.CreateStyledTextLabel(
             text, tb.Foreground, tb.FontSize, style, _textFontFamily,
             _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike,
             AnnotationFactory.ParseAlign(_textAlign), _textVerticalAlign,
-            sized ? box!.Value.Width : null, sized ? box!.Value.Height : null);
+            boxW, boxH, fillColor, _shapeSize, _lineStyle);
         Canvas.SetLeft(label, topLeft.X);
         Canvas.SetTop(label, topLeft.Y);
         label.Tag = AnnotationData.ForText(topLeft, text, style, tb.FontSize,
-            tb.Foreground is SolidColorBrush fg ? fg.Color : Colors.White,
+            tb.Foreground is SolidColorBrush fg ? fg.Color : strokeColor,
             _textFontFamily, _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike, _textAlign,
-            _textVerticalAlign, sized ? box : null);
+            _textVerticalAlign, new Rect(topLeft.X, topLeft.Y, boxW, boxH),
+            fillColor, _shapeSize, _lineStyle);
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(label),
             redo: () =>

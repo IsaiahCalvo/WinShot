@@ -8,12 +8,13 @@ namespace WinShot.Editor;
 /// </summary>
 internal readonly record struct CalloutLayout(Point Tip, Point Knee, Rect Box, Point Join)
 {
-    public const double DefaultBoxWidth = 160;
-    public const double DefaultBoxHeight = 56;
+    public const double DefaultBoxWidth = 120;
+    public const double DefaultBoxHeight = 32;
     public const double MinBoxWidth = 48;
     public const double MinBoxHeight = 28;
-    public const double MinDrag = 8;
-    public const double MinKneeToTip = 12;
+    public const double MinDrag = 4;
+    public const double MinKneeToTip = 11;
+    public const double CreateKneeLength = 40;
     public const double TextPadding = 6;
 
     public static CalloutLayout FromDrag(Point tip, Point current, Size? boxSize = null)
@@ -28,14 +29,10 @@ internal readonly record struct CalloutLayout(Point Tip, Point Knee, Rect Box, P
     {
         Point center = new(box.X + box.Width / 2, box.Y + box.Height / 2);
         Vector v = center - tip;
-        if (v.Length < 1) v = new Vector(40, -20);
-        Point knee = tip + v * 0.35;
-        if ((knee - tip).Length < MinKneeToTip)
-        {
-            v.Normalize();
-            knee = tip + v * MinKneeToTip;
-        }
-        return knee;
+        if (v.Length < 1) v = new Vector(CreateKneeLength, -CreateKneeLength * 0.5);
+        v.Normalize();
+        double length = Math.Max(MinKneeToTip, CreateKneeLength);
+        return tip + v * length;
     }
 
     public static CalloutLayout FromParts(Point tip, Point knee, Rect box)

@@ -15,7 +15,7 @@ public class CalloutLayoutTests
         Assert.Equal(CalloutLayout.DefaultBoxWidth, layout.Box.Width);
         Assert.Equal(CalloutLayout.DefaultBoxHeight, layout.Box.Height);
         Assert.Equal(new Point(10, 10), layout.Tip);
-        Assert.True((layout.Knee - layout.Tip).Length >= CalloutLayout.MinKneeToTip);
+        Assert.InRange((layout.Knee - layout.Tip).Length, CalloutLayout.CreateKneeLength - 0.01, CalloutLayout.CreateKneeLength + 0.01);
         Assert.True(layout.Box.Contains(layout.Join) || IsOnBorder(layout.Join, layout.Box));
     }
 

@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using SD = System.Drawing;
 using SDPixel = System.Drawing.Imaging.PixelFormat;
 
@@ -76,6 +78,64 @@ internal static class HighlighterBlend
     public static bool IsHighlighter(UIElement el) =>
         el is FrameworkElement fe && fe.Tag is AnnotationData meta &&
         meta.Type == AnnotationData.TypeHighlighter;
+
+    /// <summary>
+    /// Live canvas fill: the Path is clipped to the ink, and the fill is the
+    /// screenshot crop multiplied by the highlighter color — the same CSS
+    /// formula Flatten uses. Rebuild after a move; Flatten remains authoritative.
+    /// </summary>
+    public static void ApplyLiveFill(System.Windows.Shapes.Path ink, SD.Bitmap screenshot, Color color)
+    {
+        if (ink.Data is null)
+        {
+            ink.Fill = new SolidColorBrush(color);
+            return;
+        }
+
+        Rect bounds = ink.Data.Bounds;
+        if (bounds.Width < 1 || bounds.Height < 1 || screenshot.Width < 1)
+        {
+            ink.Fill = new SolidColorBrush(color);
+            return;
+        }
+
+        int x = (int)Math.Floor(bounds.X);
+        int y = (int)Math.Floor(bounds.Y);
+        int w = Math.Max(1, (int)Math.Ceiling(bounds.Width) + 1);
+        int h = Math.Max(1, (int)Math.Ceiling(bounds.Height) + 1);
+        var crop = new SD.Rectangle(x, y, w, h);
+        crop.Intersect(new SD.Rectangle(0, 0, screenshot.Width, screenshot.Height));
+        if (crop.Width < 1 || crop.Height < 1)
+        {
+            ink.Fill = new SolidColorBrush(color);
+            return;
+        }
+
+        using var dest = screenshot.Clone(crop, SDPixel.Format32bppArgb);
+        using var overlay = new SD.Bitmap(crop.Width, crop.Height, SDPixel.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(overlay))
+            g.Clear(SD.Color.FromArgb(color.A, color.R, color.G, color.B));
+        MultiplyOnto(dest, overlay);
+
+        using var ms = new System.IO.MemoryStream();
+        dest.Save(ms, SD.Imaging.ImageFormat.Png);
+        ms.Position = 0;
+        var bmp = new BitmapImage();
+        bmp.BeginInit();
+        bmp.CacheOption = BitmapCacheOption.OnLoad;
+        bmp.StreamSource = ms;
+        bmp.EndInit();
+        bmp.Freeze();
+
+        ink.Fill = new ImageBrush(bmp)
+        {
+            Stretch = Stretch.Fill,
+            ViewportUnits = BrushMappingMode.Absolute,
+            Viewport = new Rect(crop.X, crop.Y, crop.Width, crop.Height),
+            AlignmentX = AlignmentX.Left,
+            AlignmentY = AlignmentY.Top,
+        };
+    }
 
     /// <summary>Unit-testable pixel formula for one channel.</summary>
     public static byte MultiplyChannel(byte backdrop, byte source, byte sourceAlpha)

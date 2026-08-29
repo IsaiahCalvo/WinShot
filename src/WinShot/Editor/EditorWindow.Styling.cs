@@ -68,7 +68,7 @@ public partial class EditorWindow : Window
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter =>
                 color is not null || thickness is not null,
             AnnotationData.TypeRectangle or AnnotationData.TypeEllipse or AnnotationData.TypeCallout => true,
-            AnnotationData.TypeText => color is not null,
+            AnnotationData.TypeText => true,
             AnnotationData.TypeStep => color is not null || thickness is not null,
             _ => false, // emoji / spotlight / image carry no editable stroke style
         };
@@ -111,14 +111,16 @@ public partial class EditorWindow : Window
                 c = Color.FromArgb(alpha, c.R, c.G, c.B);
             }
 
-            if (Meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse or AnnotationData.TypeCallout)
+            if (Meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
+                or AnnotationData.TypeCallout or AnnotationData.TypeText)
                 (c, fc) = AnnotationStyle.EnforceOneVisible(c, fc);
 
             var meta = Meta.Clone();
             meta.Color = ToHex(c);
             if (thickness is not null) meta.Thickness = t;
             if (fill is not null) meta.Fill = f.ToString();
-            if (fillColor is not null || Meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
+            if (fillColor is not null || Meta.Type is AnnotationData.TypeRectangle
+                or AnnotationData.TypeEllipse or AnnotationData.TypeText)
                 meta.FillColor = ToHex(fc);
             return new StyleSnapshot(c, t, f, fc, meta);
         }
@@ -180,9 +182,12 @@ public partial class EditorWindow : Window
                 {
                     var pts = ip.Select(q => new Point(q[0], q[1])).ToList();
                     ink.Data = PaperInk.Outline(pts, snap.Thickness);
-                    ink.Fill = stroke;
                     ink.Stroke = Brushes.Transparent;
                     ink.StrokeThickness = 0;
+                    if (meta.Type == AnnotationData.TypeHighlighter)
+                        HighlighterBlend.ApplyLiveFill(ink, _source, snap.StrokeColor);
+                    else
+                        ink.Fill = stroke;
                 }
                 break;
             case AnnotationData.TypeRectangle:
@@ -219,6 +224,24 @@ public partial class EditorWindow : Window
                 break;
             case AnnotationData.TypeText:
                 ApplyTextColor(element, stroke);
+                if (element is Grid textBox)
+                {
+                    foreach (var child in textBox.Children)
+                    {
+                        if (child is Shape chrome)
+                        {
+                            chrome.Fill = snap.FillColor.A == 0
+                                ? Brushes.Transparent
+                                : new SolidColorBrush(snap.FillColor);
+                            chrome.Stroke = snap.Thickness > 0 ? stroke : Brushes.Transparent;
+                            chrome.StrokeThickness = Math.Max(0, snap.Thickness);
+                            AnnotationFactory.ApplyDash(chrome,
+                                AnnotationStyle.LineStyleFrom(snap.Meta) == LineBorderStyle.Cloud
+                                    ? LineBorderStyle.Solid
+                                    : AnnotationStyle.LineStyleFrom(snap.Meta));
+                        }
+                    }
+                }
                 break;
             case AnnotationData.TypeStep:
                 if (element is Grid badge)
@@ -228,10 +251,10 @@ public partial class EditorWindow : Window
                     var contrast = lightFill ? Colors.Black : Colors.White;
                     foreach (var child in badge.Children)
                     {
-                        if (child is Ellipse ring)
+                        if (child is Shape pin)
                         {
-                            ring.Fill = stroke;
-                            ring.Stroke = new SolidColorBrush(contrast) { Opacity = 0.85 };
+                            pin.Fill = stroke;
+                            pin.Stroke = new SolidColorBrush(contrast) { Opacity = 0.85 };
                         }
                         else if (child is TextBlock digit)
                         {
@@ -261,7 +284,8 @@ public partial class EditorWindow : Window
                 break;
             case Grid box:
                 foreach (UIElement child in box.Children)
-                    ApplyTextColor(child, foreground);
+                    if (child is not Shape)
+                        ApplyTextColor(child, foreground);
                 break;
         }
     }
@@ -824,6 +848,12 @@ public partial class EditorWindow : Window
 
         if (fe is Shape shape)
             AnnotationFactory.ApplyDash(shape, style == LineBorderStyle.Cloud ? LineBorderStyle.Solid : style);
+        if (fe is Grid textGrid && meta.Type == AnnotationData.TypeText)
+        {
+            foreach (var child in textGrid.Children)
+                if (child is Shape chrome)
+                    AnnotationFactory.ApplyDash(chrome, style == LineBorderStyle.Cloud ? LineBorderStyle.Solid : style);
+        }
         if (fe is CalloutAnnotation callout)
             ApplyStyleSnapshot(callout, SnapshotStyle(callout, after));
         fe.Tag = after;

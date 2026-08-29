@@ -290,6 +290,8 @@ public partial class EditorWindow : Window
                         highlighter ? AnnotationData.TypeHighlighter : AnnotationData.TypeFreehand,
                         pts, StrokeColorOf(stroke), width);
                     AnnotationCanvas.Children.Add(ink);
+                    if (highlighter)
+                        HighlighterBlend.ApplyLiveFill(ink, _source, StrokeColorOf(stroke));
                     PushAddElement(ink);
                 }
                 else if (shape is not null) AnnotationCanvas.Children.Remove(shape);
@@ -659,12 +661,20 @@ public partial class EditorWindow : Window
         }
         // Double-click any text annotation (Plain/Bold/Huge TextBlock, Outline Path, or
         // Pill Border) to reopen it for editing; the owning element carries its style.
-        if (e.ClickCount == 2 && hit is FrameworkElement fe &&
-            fe.Tag is AnnotationData tm && tm.Type == AnnotationData.TypeText)
+        if (e.ClickCount == 2 && hit is FrameworkElement fe && fe.Tag is AnnotationData tm)
         {
-            BeginTextReEdit(fe);
-            e.Handled = true;
-            return;
+            if (tm.Type == AnnotationData.TypeText)
+            {
+                BeginTextReEdit(fe);
+                e.Handled = true;
+                return;
+            }
+            if (tm.Type == AnnotationData.TypeCallout && fe is CalloutAnnotation callout)
+            {
+                BeginCalloutReEdit(callout);
+                e.Handled = true;
+                return;
+            }
         }
         Select(hit);
         _movingSelection = true;
@@ -689,6 +699,15 @@ public partial class EditorWindow : Window
                 redo: () => MoveElement(el, dx, dy)), apply: false);
         }
         _moveTotal = new Vector();
+        RefreshHighlighterFill(_selected);
+    }
+
+    private void RefreshHighlighterFill(UIElement? el)
+    {
+        if (el is Path ink && ink.Tag is AnnotationData meta &&
+            meta.Type == AnnotationData.TypeHighlighter &&
+            meta.Color is string hex && TryParseColor(hex, out var color))
+            HighlighterBlend.ApplyLiveFill(ink, _source, color);
     }
 
     private void AbortMove()

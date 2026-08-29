@@ -9,6 +9,10 @@ public class TextBoxLayoutTests
     public void TextPadding_MatchesSurvey()
     {
         Assert.Equal(6, AnnotationFactory.TextPadding);
+        Assert.Equal(160, AnnotationFactory.DefaultTextBoxWidth);
+        Assert.Equal(120, CalloutLayout.DefaultBoxWidth);
+        Assert.Equal(32, CalloutLayout.DefaultBoxHeight);
+        Assert.Equal(40, CalloutLayout.CreateKneeLength);
     }
 
     [Theory]
