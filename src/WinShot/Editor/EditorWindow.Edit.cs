@@ -472,7 +472,7 @@ public partial class EditorWindow : Window
         CommitText();
         CommitPendingCurve();
         CanvasHost.UpdateLayout();
-        return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
+        return HighlighterBlend.Flatten(CanvasHost, BaseTiles, AnnotationCanvas, _source.Width, _source.Height);
     }
 
     // ------------------------------------------------- drag-out ("Drag & Drop")

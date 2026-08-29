@@ -196,20 +196,13 @@ public partial class EditorWindow : Window
                         ? ShapeFillBrush.Create(snap.Fill, snap.StrokeColor)
                         : new SolidColorBrush(snap.FillColor);
                     var lineStyle = AnnotationStyle.LineStyleFrom(snap.Meta);
-                    if (boxLike is Path cloud)
+                    if (boxLike is Path cloud && lineStyle == LineBorderStyle.Cloud)
                     {
-                        if (lineStyle == LineBorderStyle.Cloud)
-                        {
-                            cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, boxLike.Width), Math.Max(1, boxLike.Height)));
-                            cloud.StrokeDashArray = null;
-                        }
-                        else
-                            AnnotationFactory.ApplyDash(cloud, lineStyle);
+                        cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, boxLike.Width), Math.Max(1, boxLike.Height)));
+                        cloud.StrokeDashArray = null;
                     }
                     else
-                    {
                         AnnotationFactory.ApplyDash(boxLike, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
-                    }
                 }
                 break;
             case AnnotationData.TypeCallout:
@@ -267,6 +260,10 @@ public partial class EditorWindow : Window
             case Border pill when pill.Child is TextBlock inner:
                 inner.Foreground = foreground;
                 break;
+            case Grid box:
+                foreach (UIElement child in box.Children)
+                    ApplyTextColor(child, foreground);
+                break;
         }
     }
 
@@ -284,6 +281,7 @@ public partial class EditorWindow : Window
         after.Underline = _textUnderline;
         after.Strike = _textStrike;
         after.Align = _textAlign;
+        after.VerticalAlign = _textVerticalAlign;
         after.FontSize = _textFontSize;
         ApplyTextFormat(fe, after);
         Push(new EditorAction(
@@ -299,9 +297,12 @@ public partial class EditorWindow : Window
         var family = new FontFamily(string.IsNullOrWhiteSpace(meta.FontFamily) ? "Segoe UI" : meta.FontFamily);
         bool bold = meta.Bold == true;
         bool italic = meta.Italic == true;
-        TextBlock? tb = fe as TextBlock ?? (fe as Border)?.Child as TextBlock
+        TextBlock? tb = fe as TextBlock
+            ?? (fe as Border)?.Child as TextBlock
+            ?? (fe as Grid)?.Children.OfType<TextBlock>().FirstOrDefault()
             ?? (fe as CalloutAnnotation)?.Label;
         if (tb is null) return;
+        tb.VerticalAlignment = AnnotationFactory.ParseVerticalAlign(meta.VerticalAlign);
         tb.FontFamily = family;
         tb.FontWeight = bold ? FontWeights.Bold : FontWeights.SemiBold;
         tb.FontStyle = italic ? FontStyles.Italic : FontStyles.Normal;
@@ -787,16 +788,42 @@ public partial class EditorWindow : Window
         var before = meta.Clone();
         var after = meta.Clone();
         after.LineStyle = AnnotationStyle.ToStorageName(style);
-        if (fe is Shape shape)
+
+        if (meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
         {
-            if (style == LineBorderStyle.Cloud && fe is Path or Rectangle)
-            {
-                // Keep the live dash; cloud is rebuilt on save/reload for rectangles.
-                AnnotationFactory.ApplyDash(shape, LineBorderStyle.Solid);
-            }
-            else
-                AnnotationFactory.ApplyDash(shape, style == LineBorderStyle.Cloud ? LineBorderStyle.Solid : style);
+            var bounds = GetCanvasBounds(fe);
+            var stroke = after.Color is string hx && TryParseColor(hx, out var sc) ? sc : Colors.White;
+            var fill = AnnotationStyle.FillColorFrom(after, stroke);
+            double thickness = after.Thickness ?? (fe is Shape live ? live.StrokeThickness : 2);
+            var rebuilt = AnnotationFactory.CreateBoxShape(
+                after.Type, bounds, stroke, fill, thickness, style);
+            if (fill.A == 0)
+                rebuilt.Fill = ShapeFillBrush.CreateFromName(after.Fill, stroke);
+            rebuilt.Tag = after;
+            var original = fe;
+            ReplaceCanvasElement(original, rebuilt);
+            Push(new EditorAction(
+                undo: () =>
+                {
+                    ReplaceCanvasElement(rebuilt, original);
+                    original.Tag = before;
+                    if (ReferenceEquals(_selected, rebuilt) || ReferenceEquals(_selected, original))
+                        Select(original);
+                },
+                redo: () =>
+                {
+                    ReplaceCanvasElement(original, rebuilt);
+                    rebuilt.Tag = after;
+                    if (ReferenceEquals(_selected, original) || ReferenceEquals(_selected, rebuilt))
+                        Select(rebuilt);
+                }),
+                apply: false);
+            Select(rebuilt);
+            return;
         }
+
+        if (fe is Shape shape)
+            AnnotationFactory.ApplyDash(shape, style == LineBorderStyle.Cloud ? LineBorderStyle.Solid : style);
         if (fe is CalloutAnnotation callout)
             ApplyStyleSnapshot(callout, SnapshotStyle(callout, after));
         fe.Tag = after;
@@ -814,6 +841,18 @@ public partial class EditorWindow : Window
                 if (fe is CalloutAnnotation c) ApplyStyleSnapshot(c, SnapshotStyle(c, after));
             }),
             apply: false);
+    }
+
+    private void ReplaceCanvasElement(UIElement oldEl, UIElement newEl)
+    {
+        if (ReferenceEquals(oldEl, newEl)) return;
+        int idx = AnnotationCanvas.Children.IndexOf(oldEl);
+        if (idx >= 0) AnnotationCanvas.Children.RemoveAt(idx);
+        else idx = AnnotationCanvas.Children.Count;
+        if (AnnotationCanvas.Children.Contains(newEl))
+            AnnotationCanvas.Children.Remove(newEl);
+        AnnotationCanvas.Children.Insert(Math.Min(idx, AnnotationCanvas.Children.Count), newEl);
+        if (ReferenceEquals(_selected, oldEl)) _selected = newEl;
     }
 
     /// <summary>Parses "#RGB", "#RRGGBB", "#AARRGGBB" or bare hex; tolerates a missing leading '#'.</summary>

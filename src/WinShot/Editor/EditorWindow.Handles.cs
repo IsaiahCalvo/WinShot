@@ -215,11 +215,24 @@ public partial class EditorWindow : Window
 
         Rect oldBounds = _resizeBefore.Bounds;
         if (_handleKind == HandleKind.Endpoints)
+        {
+            if (ShapeConstraint.ShiftHeld && meta.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow
+                && _activeHandle is 0 or 1 && _resizeBefore.Points is { Length: >= 2 } pts)
+            {
+                Point other = _activeHandle == 0 ? pts[^1] : pts[0];
+                pos = ShapeConstraint.SnapLineEnd(other, pos, snap: true);
+            }
             ApplyEndpointResize(fe, meta, pos);
+        }
         else if (_handleKind == HandleKind.Callout)
             ApplyCalloutResize(fe, meta, pos);
         else
-            ApplyBoxResize(fe, meta, NewBoundsForHandle(oldBounds, _activeHandle, pos));
+        {
+            var next = NewBoundsForHandle(oldBounds, _activeHandle, pos);
+            if (ShapeConstraint.ShiftHeld)
+                next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next);
+            ApplyBoxResize(fe, meta, next);
+        }
 
         UpdateSelectionVisual();
     }
@@ -345,6 +358,22 @@ public partial class EditorWindow : Window
     private void ResizeTextElement(FrameworkElement fe, AnnotationData meta, Rect newBounds)
     {
         if (_resizeBefore is not { } snap) return;
+        if (fe is Grid || meta.Rect is { Length: >= 4 })
+        {
+            FlattenTransformIntoCanvas(fe);
+            Canvas.SetLeft(fe, newBounds.X);
+            Canvas.SetTop(fe, newBounds.Y);
+            fe.Width = Math.Max(1, newBounds.Width);
+            fe.Height = Math.Max(1, newBounds.Height);
+            if (fe is Grid g && g.Children.OfType<TextBlock>().FirstOrDefault() is TextBlock tb)
+                tb.Width = Math.Max(1, fe.Width - 2 * AnnotationFactory.TextPadding);
+            meta.Rect = new[] { newBounds.X, newBounds.Y, fe.Width, fe.Height };
+            meta.Tx = 0;
+            meta.Ty = 0;
+            fe.Tag = meta;
+            return;
+        }
+
         Rect baseBounds = snap.Bounds;
         if (baseBounds.Width < 0.5 || baseBounds.Height < 0.5) return;
         double ratio = Math.Max(newBounds.Width / baseBounds.Width, newBounds.Height / baseBounds.Height);
@@ -626,6 +655,7 @@ public partial class EditorWindow : Window
     {
         TextBlock tb => tb.FontSize,
         Border pill when pill.Child is TextBlock inner => inner.FontSize,
+        Grid box when box.Children.OfType<TextBlock>().FirstOrDefault() is TextBlock boxed => boxed.FontSize,
         FrameworkElement fe when fe.Tag is AnnotationData m && m.FontSize is double f => f,
         _ => null,
     };
@@ -649,6 +679,9 @@ public partial class EditorWindow : Window
                 inner.FontSize = fontSize;
                 pill.CornerRadius = new CornerRadius(fontSize * 0.55);
                 pill.Padding = new Thickness(fontSize * 0.5, fontSize * 0.2, fontSize * 0.5, fontSize * 0.2);
+                break;
+            case Grid box when box.Children.OfType<TextBlock>().FirstOrDefault() is TextBlock boxed:
+                boxed.FontSize = fontSize;
                 break;
             case Path glyph:
                 // Outline style: rebuild the glyph geometry at the new size from the stored text/color.

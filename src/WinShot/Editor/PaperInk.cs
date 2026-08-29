@@ -10,7 +10,13 @@ namespace WinShot.Editor;
 /// </summary>
 internal static class PaperInk
 {
-    public static List<Point> Compact(IEnumerable<Point> raw, double minDistance = 0.35)
+    /// <summary>Survey live coalescing distance while the pointer is down.</summary>
+    public const double LiveMinDistance = 0.2;
+
+    /// <summary>Survey compact distance applied when the stroke is committed.</summary>
+    public const double CompactMinDistance = 0.35;
+
+    public static List<Point> Compact(IEnumerable<Point> raw, double minDistance = CompactMinDistance)
     {
         var pts = new List<Point>();
         foreach (var p in raw)

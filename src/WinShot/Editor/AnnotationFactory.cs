@@ -346,7 +346,7 @@ internal static class AnnotationFactory
             Background = new SolidColorBrush(Color.FromArgb(0x40, 0x00, 0x00, 0x00)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(0xAA, 0x0A, 0x84, 0xFF)),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(2),
+            Padding = new Thickness(TextPadding),
         };
 
     /// <summary>Transparent background keeps the whole text box clickable for the Select tool without rendering anything.</summary>
@@ -405,38 +405,65 @@ internal static class AnnotationFactory
 
     public static FrameworkElement CreateStyledTextLabel(
         string text, Brush foreground, double fontSize, TextStyle style,
-        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align)
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align) =>
+        CreateStyledTextLabel(text, foreground, fontSize, style, fontFamily, bold, italic, underline, strike, align,
+            verticalAlign: "top", boxWidth: null, boxHeight: null);
+
+    public static FrameworkElement CreateStyledTextLabel(
+        string text, Brush foreground, double fontSize, TextStyle style,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align,
+        string? verticalAlign, double? boxWidth, double? boxHeight)
     {
         bool useBold = bold || style == TextStyle.Bold;
-        switch (style)
+        FrameworkElement inner = style switch
         {
-            case TextStyle.Outline:
-                var typeface = new Typeface(new FontFamily(fontFamily),
-                    italic ? FontStyles.Italic : FontStyles.Normal,
-                    useBold ? FontWeights.Bold : FontWeights.SemiBold, FontStretches.Normal);
-                var formatted = new FormattedText(text, CultureInfo.CurrentUICulture,
-                    FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
-                return new Path
-                {
-                    Data = formatted.BuildGeometry(new Point(0, 0)),
-                    Fill = foreground,
-                    Stroke = Brushes.White,
-                    StrokeThickness = Math.Max(1.2, fontSize / 14),
-                    StrokeLineJoin = PenLineJoin.Round,
-                };
+            TextStyle.Outline => CreateOutlineGlyph(text, foreground, fontSize, fontFamily, useBold, italic),
+            TextStyle.Pill => new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(0xD9, 0x1E, 0x1E, 0x1E)),
+                CornerRadius = new CornerRadius(fontSize * 0.55),
+                Padding = new Thickness(fontSize * 0.5, fontSize * 0.2, fontSize * 0.5, fontSize * 0.2),
+                Child = CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align),
+            },
+            _ => CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align),
+        };
 
-            case TextStyle.Pill:
-                return new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(0xD9, 0x1E, 0x1E, 0x1E)),
-                    CornerRadius = new CornerRadius(fontSize * 0.55),
-                    Padding = new Thickness(fontSize * 0.5, fontSize * 0.2, fontSize * 0.5, fontSize * 0.2),
-                    Child = CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align),
-                };
+        if (boxWidth is not > 1)
+            return inner;
 
-            default: // Plain / Bold / Huge
-                return CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align);
+        if (inner is TextBlock tb)
+        {
+            tb.Width = Math.Max(1, boxWidth.Value - 2 * TextPadding);
+            tb.TextWrapping = TextWrapping.Wrap;
+            tb.VerticalAlignment = ParseVerticalAlign(verticalAlign);
         }
+
+        var box = new Grid
+        {
+            Width = boxWidth.Value,
+            Height = boxHeight is > 1 ? boxHeight.Value : double.NaN,
+        };
+        inner.Margin = new Thickness(TextPadding);
+        box.Children.Add(inner);
+        return box;
+    }
+
+    private static Path CreateOutlineGlyph(
+        string text, Brush foreground, double fontSize, string fontFamily, bool bold, bool italic)
+    {
+        var typeface = new Typeface(new FontFamily(fontFamily),
+            italic ? FontStyles.Italic : FontStyles.Normal,
+            bold ? FontWeights.Bold : FontWeights.SemiBold, FontStretches.Normal);
+        var formatted = new FormattedText(text, CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
+        return new Path
+        {
+            Data = formatted.BuildGeometry(new Point(0, 0)),
+            Fill = foreground,
+            Stroke = Brushes.White,
+            StrokeThickness = Math.Max(1.2, fontSize / 14),
+            StrokeLineJoin = PenLineJoin.Round,
+        };
     }
 
     /// <summary>32px emoji dropped as a text annotation; transparent background keeps it fully clickable.</summary>
@@ -481,6 +508,54 @@ internal static class AnnotationFactory
         return badge;
     }
 
+    public const double TextPadding = 6;
+
+    public static VerticalAlignment ParseVerticalAlign(string? name) => name switch
+    {
+        "middle" => VerticalAlignment.Center,
+        "bottom" => VerticalAlignment.Bottom,
+        _ => VerticalAlignment.Top,
+    };
+
+    public static string VerticalAlignName(VerticalAlignment align) => align switch
+    {
+        VerticalAlignment.Center => "middle",
+        VerticalAlignment.Bottom => "bottom",
+        _ => "top",
+    };
+
+    public static Shape CreateBoxShape(
+        string type, Rect bounds, Color stroke, Color fill, double thickness, LineBorderStyle lineStyle)
+    {
+        Shape shape;
+        if (type == AnnotationData.TypeRectangle && lineStyle == LineBorderStyle.Cloud)
+        {
+            shape = new Path
+            {
+                Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height))),
+            };
+        }
+        else
+        {
+            shape = type == AnnotationData.TypeEllipse
+                ? new Ellipse()
+                : new Rectangle { RadiusX = 2, RadiusY = 2 };
+        }
+
+        shape.Stroke = new SolidColorBrush(stroke);
+        shape.StrokeThickness = thickness;
+        shape.Fill = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill);
+        shape.Width = Math.Max(1, bounds.Width);
+        shape.Height = Math.Max(1, bounds.Height);
+        if (lineStyle != LineBorderStyle.Cloud)
+            ApplyDash(shape, lineStyle);
+        else
+            shape.StrokeDashArray = null;
+        Canvas.SetLeft(shape, bounds.X);
+        Canvas.SetTop(shape, bounds.Y);
+        return shape;
+    }
+
     public static Path CreateInk(IList<Point> points, Color color, double width, bool highlighter)
     {
         var path = new Path
@@ -490,8 +565,9 @@ internal static class AnnotationFactory
             Stroke = Brushes.Transparent,
             StrokeThickness = 0,
         };
+        // Live canvas is alpha-fill; Flatten multiplies highlighter ink against the screenshot.
         if (highlighter)
-            path.Opacity = 1; // alpha is in the fill; multiply is approximate via that alpha
+            path.Opacity = 1;
         return path;
     }
 

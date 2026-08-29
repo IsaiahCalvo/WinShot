@@ -72,6 +72,8 @@ public partial class EditorWindow : Window
     private bool _textUnderline;
     private bool _textStrike;
     private string _textAlign = "left";
+    private string _textVerticalAlign = "top";
+    private Rect? _activeTextBox;
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
@@ -990,6 +992,19 @@ public partial class EditorWindow : Window
         if (AlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
         _textAlign = align;
         if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void OnVerticalAlignChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (VerticalAlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
+        _textVerticalAlign = align;
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void OnShapeCounterClick(object sender, RoutedEventArgs e)
+    {
+        StepToolBtn.IsChecked = true;
+        ShapeGroupPopup.IsOpen = false;
     }
 
     private void SyncTextFormatChrome()

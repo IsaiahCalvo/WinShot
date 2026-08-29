@@ -106,6 +106,14 @@ public class AnnotationToolsAdversarialTests
     }
 
     [Fact]
+    public void PaperInk_LiveCoalesceIsTighterThanCommitCompact()
+    {
+        Assert.Equal(0.2, PaperInk.LiveMinDistance);
+        Assert.Equal(0.35, PaperInk.CompactMinDistance);
+        Assert.True(PaperInk.LiveMinDistance < PaperInk.CompactMinDistance);
+    }
+
+    [Fact]
     public void SizePresets_IncludeSurveyWidthList()
     {
         Assert.Contains(1, AnnotationStyle.SizePresets);

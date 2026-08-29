@@ -120,20 +120,26 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
+                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness, _arrowhead, _startArrowhead);
                 break;
             case EditorTool.Callout:
                 ShowDragRect(new Rect(_dragStart, pos), dim: false);
                 break;
+            case EditorTool.Text:
+                ShowDragRect(ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld), dim: false);
+                break;
             case EditorTool.CurvedArrow when _activeShape is Path curve:
+                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
                     _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, pos), pos, _thickness);
                 break;
             case EditorTool.Line when _activeShape is Path linePath:
+                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 linePath.Data = LineCurve.Stroke(_dragStart, pos, null);
                 break;
             case EditorTool.Rectangle or EditorTool.Ellipse when _activeShape is not null:
-                var r = new Rect(_dragStart, pos);
+                var r = ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 Canvas.SetLeft(_activeShape, r.X);
                 Canvas.SetTop(_activeShape, r.Y);
                 _activeShape.Width = Math.Max(1, r.Width);
@@ -142,7 +148,7 @@ public partial class EditorWindow : Window
                     cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height));
                 break;
             case EditorTool.Freehand or EditorTool.Highlighter when _activeShape is Polyline stroke:
-                if (stroke.Points.Count == 0 || (pos - stroke.Points[^1]).Length > 1.2)
+                if (stroke.Points.Count == 0 || (pos - stroke.Points[^1]).Length > PaperInk.LiveMinDistance)
                     stroke.Points.Add(pos);
                 break;
             case EditorTool.Eraser:
@@ -199,12 +205,19 @@ public partial class EditorWindow : Window
         {
             case EditorTool.Arrow or EditorTool.Line:
                 if (shape is null) return;
+                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 if ((pos - _dragStart).Length < 3)
                 {
                     AnnotationCanvas.Children.Remove(shape);
                 }
                 else
                 {
+                    if (shape is Path livePath)
+                    {
+                        livePath.Data = _tool == EditorTool.Arrow
+                            ? AnnotationFactory.ArrowGeometry(_dragStart, pos, livePath.StrokeThickness, _arrowhead, _startArrowhead)
+                            : LineCurve.Stroke(_dragStart, pos, null);
+                    }
                     var strokeData = AnnotationData.ForStroke(
                         _tool == EditorTool.Arrow ? AnnotationData.TypeArrow : AnnotationData.TypeLine,
                         new[] { _dragStart, pos }, StrokeColorOf(shape), shape.StrokeThickness,
@@ -223,12 +236,22 @@ public partial class EditorWindow : Window
                 return;
             case EditorTool.CurvedArrow:
                 if (shape is not Path curve) return;
+                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 if ((pos - _dragStart).Length < 3) AnnotationCanvas.Children.Remove(curve);
                 else BeginCurveEdit(curve, _dragStart, pos);
                 return;
+            case EditorTool.Text:
+                HideDragRect();
+                if (!inImageAt(_dragStart)) return;
+                var textBox = ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld);
+                if (textBox.Width < 8 && textBox.Height < 8)
+                    PlaceText(_dragStart);
+                else
+                    PlaceTextInBox(textBox);
+                return;
             case EditorTool.Rectangle or EditorTool.Ellipse:
                 if (shape is null) return;
-                var r = new Rect(_dragStart, pos);
+                var r = ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 if (r.Width < 3 && r.Height < 3)
                 {
                     AnnotationCanvas.Children.Remove(shape);
@@ -318,9 +341,15 @@ public partial class EditorWindow : Window
 
         if (_tool == EditorTool.Text)
         {
-            // A click that just committed an open text box should not immediately
-            // open another; clicks on the backdrop outside the image place nothing.
-            if (!hadOpenText && inImage) PlaceText(pos);
+            // Survey: click places a default box; drag sizes the box. A click that
+            // just committed an open editor must not immediately open another.
+            if (!hadOpenText && inImage)
+            {
+                _dragStart = pos;
+                _dragging = true;
+                Viewport.CaptureMouse();
+                ShowDragRect(new Rect(pos, pos), dim: false);
+            }
             e.Handled = true;
             return;
         }
@@ -479,6 +508,9 @@ public partial class EditorWindow : Window
         if (_activeShape is not null)
             AnnotationCanvas.Children.Add(_activeShape);
     }
+
+    private bool inImageAt(Point pos) =>
+        pos.X >= 0 && pos.Y >= 0 && pos.X <= _source.Width && pos.Y <= _source.Height;
 
     /// <summary>Stroke color of a committed shape — the project metadata's source of truth.</summary>
     private static Color StrokeColorOf(Shape shape) =>

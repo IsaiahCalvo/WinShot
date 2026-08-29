@@ -104,6 +104,10 @@
                                     <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                                  Tag="Arrow" Content="&#xE72A;" Checked="OnToolChecked" ToolTip="Arrow (A)"
                                                  AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."/>
+                                    <Button x:Name="ShapeCounterBtn" Style="{StaticResource ToolIconButton}" Content="&#xE8EF;"
+                                            Click="OnShapeCounterClick" ToolTip="Counter (S)"
+                                            AutomationProperties.Name="Counter"
+                                            AutomationProperties.HelpText="Place sequential number or letter badges. Same as the Counter tool on the primary row."/>
                                 </StackPanel>
                             </Border>
                         </Popup>
@@ -406,6 +410,13 @@
                                 <ComboBoxItem Content="Left" Tag="left"/>
                                 <ComboBoxItem Content="Center" Tag="center"/>
                                 <ComboBoxItem Content="Right" Tag="right"/>
+                            </ComboBox>
+                            <ComboBox x:Name="VerticalAlignBox" Style="{StaticResource DarkComboBox}" Width="88" Margin="6,0,0,0"
+                                      SelectionChanged="OnVerticalAlignChanged" AutomationProperties.Name="Vertical align"
+                                      AutomationProperties.HelpText="Top, middle, or bottom align inside a sized text box.">
+                                <ComboBoxItem Content="Top" Tag="top"/>
+                                <ComboBoxItem Content="Middle" Tag="middle"/>
+                                <ComboBoxItem Content="Bottom" Tag="bottom"/>
                             </ComboBox>
                         </StackPanel>
 

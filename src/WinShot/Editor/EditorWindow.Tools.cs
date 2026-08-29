@@ -73,7 +73,13 @@ public partial class EditorWindow : Window
         PushAddElement(visual);
     }
 
-    private void PlaceText(Point pos)
+    private void PlaceText(Point pos) => PlaceTextInBox(new Rect(pos.X, pos.Y, 0, 0));
+
+    /// <summary>
+    /// Survey text: a click (empty/tiny box) opens a free editor; a drag opens a
+    /// wrapped editor inset by TEXT_PADDING = 6 inside the dragged rect.
+    /// </summary>
+    private void PlaceTextInBox(Rect box)
     {
         var style = _textStyle;
         double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
@@ -83,11 +89,24 @@ public partial class EditorWindow : Window
         tb.FontWeight = _textBold || style == TextStyle.Bold ? FontWeights.Bold : FontWeights.SemiBold;
         tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
         tb.TextAlignment = AnnotationFactory.ParseAlign(_textAlign);
-        tb.Tag = style; // CommitText reads the style back when building the label
-        // Offset by the editor chrome (1px border + 2px padding) so committed
-        // text lands exactly where the user clicked.
-        Canvas.SetLeft(tb, pos.X - 3);
-        Canvas.SetTop(tb, pos.Y - 3);
+        tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(_textVerticalAlign);
+        tb.Tag = style;
+        bool sized = box.Width >= 8 && box.Height >= 8;
+        _activeTextBox = sized ? box : null;
+        if (sized)
+        {
+            tb.Width = box.Width;
+            tb.Height = box.Height;
+            tb.TextWrapping = TextWrapping.Wrap;
+            tb.AcceptsReturn = true;
+            Canvas.SetLeft(tb, box.X);
+            Canvas.SetTop(tb, box.Y);
+        }
+        else
+        {
+            Canvas.SetLeft(tb, box.X - AnnotationFactory.TextPadding);
+            Canvas.SetTop(tb, box.Y - AnnotationFactory.TextPadding);
+        }
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         HookTextEditor(tb);
@@ -130,10 +149,24 @@ public partial class EditorWindow : Window
             meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White);
 
         var tb = AnnotationFactory.CreateTextEditor(foreground, fontSize);
-        tb.Tag = style; // CommitText reads the style back when building the replacement label
+        tb.Tag = style;
         tb.Text = meta.Text ?? string.Empty;
-        Canvas.SetLeft(tb, x - 3);
-        Canvas.SetTop(tb, y - 3);
+        if (meta.Rect is { Length: >= 4 } box && box[2] >= 8 && box[3] >= 8)
+        {
+            tb.Width = box[2];
+            tb.Height = box[3];
+            tb.TextWrapping = TextWrapping.Wrap;
+            tb.AcceptsReturn = true;
+            _activeTextBox = new Rect(x, y, box[2], box[3]);
+            Canvas.SetLeft(tb, x);
+            Canvas.SetTop(tb, y);
+        }
+        else
+        {
+            _activeTextBox = null;
+            Canvas.SetLeft(tb, x - AnnotationFactory.TextPadding);
+            Canvas.SetTop(tb, y - AnnotationFactory.TextPadding);
+        }
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         HookTextEditor(tb);
@@ -149,8 +182,12 @@ public partial class EditorWindow : Window
         tb.LostKeyboardFocus += (_, _) => CommitText();
         tb.PreviewKeyDown += (_, ev) =>
         {
-            if (ev.Key == Key.Enter) { CommitText(); ev.Handled = true; }
-            else if (ev.Key == Key.Escape) { CancelText(); ev.Handled = true; }
+            if (ev.Key == Key.Escape) { CancelText(); ev.Handled = true; }
+            else if (ev.Key == Key.Enter && !tb.AcceptsReturn)
+            {
+                CommitText();
+                ev.Handled = true;
+            }
         };
     }
 
@@ -164,6 +201,8 @@ public partial class EditorWindow : Window
             return;
         }
         _activeText = null; // guards against re-entry from LostKeyboardFocus on removal
+        var box = _activeTextBox;
+        _activeTextBox = null;
 
         double x = Canvas.GetLeft(tb), y = Canvas.GetTop(tb);
         string text = tb.Text;
@@ -171,15 +210,19 @@ public partial class EditorWindow : Window
         if (string.IsNullOrWhiteSpace(text)) return;
 
         var style = tb.Tag is TextStyle s ? s : TextStyle.Plain;
+        bool sized = box is Rect sizedBox && sizedBox.Width >= 8 && sizedBox.Height >= 8;
+        Point topLeft = sized ? new Point(x, y) : new Point(x + AnnotationFactory.TextPadding, y + AnnotationFactory.TextPadding);
         var label = AnnotationFactory.CreateStyledTextLabel(
             text, tb.Foreground, tb.FontSize, style, _textFontFamily,
             _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike,
-            AnnotationFactory.ParseAlign(_textAlign));
-        Canvas.SetLeft(label, x + 3);
-        Canvas.SetTop(label, y + 3);
-        label.Tag = AnnotationData.ForText(new Point(x + 3, y + 3), text, style, tb.FontSize,
+            AnnotationFactory.ParseAlign(_textAlign), _textVerticalAlign,
+            sized ? box!.Value.Width : null, sized ? box!.Value.Height : null);
+        Canvas.SetLeft(label, topLeft.X);
+        Canvas.SetTop(label, topLeft.Y);
+        label.Tag = AnnotationData.ForText(topLeft, text, style, tb.FontSize,
             tb.Foreground is SolidColorBrush fg ? fg.Color : Colors.White,
-            _textFontFamily, _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike, _textAlign);
+            _textFontFamily, _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike, _textAlign,
+            _textVerticalAlign, sized ? box : null);
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(label),
             redo: () =>
@@ -194,6 +237,7 @@ public partial class EditorWindow : Window
         var tb = _activeText;
         if (tb is null) return;
         _activeText = null;
+        _activeTextBox = null;
         AnnotationCanvas.Children.Remove(tb);
     }
 

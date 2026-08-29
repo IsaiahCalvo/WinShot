@@ -82,6 +82,9 @@ internal sealed class AnnotationData
     public bool? Strike { get; set; }
     public string? Align { get; set; }
 
+    /// <summary>Survey text box vertical align: top | middle | bottom.</summary>
+    public string? VerticalAlign { get; set; }
+
     /// <summary><see cref="TextStyle"/> name for text annotations (Plain | Bold | Outline | Pill | Huge).</summary>
     public string? Style { get; set; }
 
@@ -165,10 +168,18 @@ internal sealed class AnnotationData
 
     public static AnnotationData ForText(
         Point topLeft, string text, TextStyle style, double fontSize, Color color,
-        string fontFamily, bool bold, bool italic, bool underline, bool strike, string align) => new()
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, string align) =>
+        ForText(topLeft, text, style, fontSize, color, fontFamily, bold, italic, underline, strike, align,
+            verticalAlign: "top", box: null);
+
+    public static AnnotationData ForText(
+        Point topLeft, string text, TextStyle style, double fontSize, Color color,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, string align,
+        string verticalAlign, Rect? box) => new()
     {
         Type = TypeText,
         Points = ToArray(new[] { topLeft }),
+        Rect = box is Rect r ? new[] { r.X, r.Y, r.Width, r.Height } : null,
         Text = text,
         Style = style.ToString(),
         FontSize = fontSize,
@@ -179,6 +190,7 @@ internal sealed class AnnotationData
         Underline = underline,
         Strike = strike,
         Align = align,
+        VerticalAlign = verticalAlign == "top" ? null : verticalAlign,
     };
 
     public static AnnotationData ForEmoji(Point topLeft, string emoji) => new()
@@ -391,30 +403,12 @@ internal static class ProjectSerializer
                 var color = RequireColor(a);
                 var fillColor = AnnotationStyle.FillColorFrom(a, color);
                 var lineStyle = AnnotationStyle.LineStyleFrom(a);
-                Shapes.Shape shape;
-                if (a.Type == AnnotationData.TypeRectangle && lineStyle == LineBorderStyle.Cloud)
-                {
-                    shape = new Shapes.Path
-                    {
-                        Data = CloudPath.ForRectangle(new Rect(0, 0, bounds.Width, bounds.Height)),
-                    };
-                }
-                else
-                {
-                    shape = a.Type == AnnotationData.TypeRectangle
-                        ? new Shapes.Rectangle { RadiusX = 2, RadiusY = 2 }
-                        : new Shapes.Ellipse();
-                }
-                shape.Stroke = new SolidColorBrush(color);
-                shape.StrokeThickness = RequireThickness(a);
-                shape.Fill = fillColor.A == 0
-                    ? ShapeFillBrush.CreateFromName(a.Fill, color)
-                    : new SolidColorBrush(fillColor);
-                shape.Width = bounds.Width;
-                shape.Height = bounds.Height;
-                if (lineStyle != LineBorderStyle.Cloud)
-                    AnnotationFactory.ApplyDash(shape, lineStyle);
-                SetPos(shape, bounds.TopLeft);
+                var shape = AnnotationFactory.CreateBoxShape(
+                    a.Type, bounds, color,
+                    fillColor.A == 0 ? Colors.Transparent : fillColor,
+                    RequireThickness(a), lineStyle);
+                if (fillColor.A == 0)
+                    shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
                 return shape;
             }
             case AnnotationData.TypeCallout:
@@ -448,11 +442,15 @@ internal static class ProjectSerializer
                 if (a.FontSize is not double fontSize || fontSize <= 0)
                     throw new InvalidDataException("Text annotation is missing its font size.");
                 Enum.TryParse(a.Style, out TextStyle style); // unknown style → Plain
+                Rect? box = a.Rect is { Length: >= 4 } r
+                    ? new Rect(r[0], r[1], r[2], r[3])
+                    : null;
                 var label = AnnotationFactory.CreateStyledTextLabel(
                     text, new SolidColorBrush(RequireColor(a)), fontSize, style,
                     a.FontFamily ?? "Segoe UI", a.Bold == true || style == TextStyle.Bold,
                     a.Italic == true, a.Underline == true, a.Strike == true,
-                    AnnotationFactory.ParseAlign(a.Align));
+                    AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
+                    box?.Width, box?.Height);
                 SetPos(label, pts[0]);
                 return label;
             }
