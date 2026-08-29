@@ -129,9 +129,8 @@ public partial class EditorWindow : Window
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
                     _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, pos), pos, _thickness);
                 break;
-            case EditorTool.Line when _activeShape is Line line:
-                line.X2 = pos.X;
-                line.Y2 = pos.Y;
+            case EditorTool.Line when _activeShape is Path linePath:
+                linePath.Data = LineCurve.Stroke(_dragStart, pos, null);
                 break;
             case EditorTool.Rectangle or EditorTool.Ellipse when _activeShape is not null:
                 var r = new Rect(_dragStart, pos);
@@ -330,6 +329,12 @@ public partial class EditorWindow : Window
             ? ClampToSurface(pos) : pos;
         _dragging = true;
         Viewport.CaptureMouse();
+        _thickness = ActiveSize();
+        double strokeWidth = _tool == EditorTool.Highlighter
+            ? AnnotationStyle.HighlighterWidth(_highlighterSize)
+            : _tool is EditorTool.Text or EditorTool.Callout
+                ? _shapeSize
+                : _thickness;
 
         // New shapes/arrows/lines pick up the current opacity by baking it into the brush alpha.
         var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
@@ -342,11 +347,11 @@ public partial class EditorWindow : Window
                 {
                     Stroke = brush,
                     Fill = brush,
-                    StrokeThickness = _thickness,
+                    StrokeThickness = strokeWidth,
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
-                    Data = AnnotationFactory.ArrowGeometry(_dragStart, _dragStart, _thickness, _arrowhead, _startArrowhead),
+                    Data = AnnotationFactory.ArrowGeometry(_dragStart, _dragStart, strokeWidth, _arrowhead, _startArrowhead),
                 };
                 AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
                 break;
@@ -355,22 +360,23 @@ public partial class EditorWindow : Window
                 {
                     Stroke = brush,
                     Fill = brush,
-                    StrokeThickness = _thickness,
+                    StrokeThickness = strokeWidth,
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
-                    Data = AnnotationFactory.CurvedArrowGeometry(_dragStart, _dragStart, _dragStart, _thickness),
+                    Data = AnnotationFactory.CurvedArrowGeometry(_dragStart, _dragStart, _dragStart, strokeWidth),
                 };
                 AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
                 break;
             case EditorTool.Line:
-                _activeShape = new Line
+                _activeShape = new Path
                 {
-                    X1 = pos.X, Y1 = pos.Y, X2 = pos.X, Y2 = pos.Y,
                     Stroke = brush,
-                    StrokeThickness = _thickness,
+                    StrokeThickness = strokeWidth,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    Data = LineCurve.Stroke(pos, pos, null),
                 };
                 AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
                 break;
@@ -380,7 +386,7 @@ public partial class EditorWindow : Window
                     _activeShape = new Path
                     {
                         Stroke = brush,
-                        StrokeThickness = _thickness,
+                        StrokeThickness = strokeWidth,
                         Fill = fillBrush,
                         Data = CloudPath.ForRectangle(new Rect(0, 0, 1, 1)),
                     };
@@ -390,7 +396,7 @@ public partial class EditorWindow : Window
                     _activeShape = new Rectangle
                     {
                         Stroke = brush,
-                        StrokeThickness = _thickness,
+                        StrokeThickness = strokeWidth,
                         RadiusX = 2, RadiusY = 2,
                         Fill = fillBrush,
                     };
@@ -403,7 +409,7 @@ public partial class EditorWindow : Window
                 _activeShape = new Ellipse
                 {
                     Stroke = brush,
-                    StrokeThickness = _thickness,
+                    StrokeThickness = strokeWidth,
                     Fill = fillBrush,
                 };
                 AnnotationFactory.ApplyDash(_activeShape, _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle);
@@ -414,7 +420,7 @@ public partial class EditorWindow : Window
                 _activeShape = new Polyline
                 {
                     Stroke = brush,
-                    StrokeThickness = _thickness,
+                    StrokeThickness = AnnotationStyle.ClampSize(_penSize),
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
@@ -425,7 +431,7 @@ public partial class EditorWindow : Window
                 _activeShape = new Polyline
                 {
                     Stroke = brush,
-                    StrokeThickness = Math.Max(12, _thickness * 4),
+                    StrokeThickness = AnnotationStyle.HighlighterWidth(_highlighterSize),
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,

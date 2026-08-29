@@ -60,10 +60,18 @@ public partial class EditorWindow : Window
 
     private EditorTool _tool = EditorTool.Select;
     private Color _color = Color.FromRgb(0xFF, 0x3B, 0x30);
-    private double _thickness = 4;
-    private double _strokeThickness = 4;
-    private double _textThickness = 4;
-    private bool _syncingThicknessButtons;
+    private double _thickness = AnnotationStyle.DefaultPenSize;
+    private double _penSize = AnnotationStyle.DefaultPenSize;
+    private double _highlighterSize = AnnotationStyle.DefaultHighlighterSize;
+    private double _shapeSize = AnnotationStyle.DefaultShapeSize;
+    private double _textFontSize = AnnotationStyle.DefaultTextSize;
+    private bool _syncingSizeBox;
+    private string _textFontFamily = "Segoe UI";
+    private bool _textBold;
+    private bool _textItalic;
+    private bool _textUnderline;
+    private bool _textStrike;
+    private string _textAlign = "left";
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
@@ -715,9 +723,11 @@ public partial class EditorWindow : Window
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(_tool == EditorTool.Rectangle);
         SyncColorWellIndicator();
-        ThicknessLabel.Text = _tool == EditorTool.Text ? "Size" : "Thickness";
+        ThicknessLabel.Text = "Size";
         if (Has(EditorContextControls.Thickness))
-            SyncThicknessButtons();
+            SyncSizeBox();
+        if (Has(EditorContextControls.TextStyle))
+            SyncTextFormatChrome();
 
         if (Has(EditorContextControls.EffectStrength))
         {
@@ -730,38 +740,74 @@ public partial class EditorWindow : Window
             : Visibility.Visible;
     }
 
-    /// <summary>
-    /// The project format keeps the established 2/4/6 thickness values. Text presents the
-    /// corresponding runtime font sizes (19/27/35 pt), while other tools keep stroke values.
-    /// Separate remembered values stop a thick shape from silently making the next text 35 pt.
-    /// </summary>
-    private void SyncThicknessButtons()
+    private void SyncSizeBox()
     {
-        bool text = _tool == EditorTool.Text;
-        _thickness = text ? _textThickness : _strokeThickness;
+        if (SizeBox is null) return;
+        bool text = _tool is EditorTool.Text or EditorTool.Callout;
+        int[] presets = text ? AnnotationStyle.TextSizePresets : AnnotationStyle.SizePresets;
+        _thickness = ActiveSize();
 
-        var buttons = new[] { ThicknessThinBtn, ThicknessMediumBtn, ThicknessThickBtn };
-        string[] contents = text ? new[] { "19", "27", "35" } : new[] { "2", "4", "6" };
-        string[] names = text
-            ? new[] { "19 point text", "27 point text", "35 point text" }
-            : new[] { "Thin stroke", "Medium stroke", "Thick stroke" };
-
-        _syncingThicknessButtons = true;
+        _syncingSizeBox = true;
         try
         {
-            for (int i = 0; i < buttons.Length; i++)
+            SizeBox.Items.Clear();
+            int current = text ? AnnotationStyle.ClampTextSize(_textFontSize) : AnnotationStyle.ClampSize(_thickness);
+            ComboBoxItem? selected = null;
+            foreach (int preset in presets)
             {
-                RadioButton button = buttons[i];
-                button.Content = contents[i];
-                button.ToolTip = names[i];
-                AutomationProperties.SetName(button, names[i]);
-                if (button.Tag is string tag && double.TryParse(tag, out double value))
-                    button.IsChecked = Math.Abs(value - _thickness) < 0.01;
+                var item = new ComboBoxItem { Content = preset.ToString(), Tag = (double)preset };
+                SizeBox.Items.Add(item);
+                if (preset == current) selected = item;
             }
+            if (selected is null)
+            {
+                selected = new ComboBoxItem { Content = current.ToString(), Tag = (double)current };
+                SizeBox.Items.Insert(0, selected);
+            }
+            SizeBox.SelectedItem = selected;
         }
         finally
         {
-            _syncingThicknessButtons = false;
+            _syncingSizeBox = false;
+        }
+    }
+
+    private double ActiveSize() => _tool switch
+    {
+        EditorTool.Highlighter => _highlighterSize,
+        EditorTool.Text or EditorTool.Callout => _textFontSize,
+        EditorTool.Freehand => _penSize,
+        EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
+            or EditorTool.CurvedArrow or EditorTool.Step => _shapeSize,
+        _ => _penSize,
+    };
+
+    private void RememberSize(double size)
+    {
+        switch (_tool)
+        {
+            case EditorTool.Highlighter: _highlighterSize = AnnotationStyle.HighlighterWidth(size); break;
+            case EditorTool.Text or EditorTool.Callout: _textFontSize = AnnotationStyle.ClampTextSize(size); break;
+            case EditorTool.Freehand: _penSize = AnnotationStyle.ClampSize(size); break;
+            default: _shapeSize = AnnotationStyle.ClampSize(size); break;
+        }
+        _thickness = ActiveSize();
+    }
+
+    private void OnSizeBoxChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingSizeBox || SizeBox?.SelectedItem is not ComboBoxItem item) return;
+        double size = item.Tag is double d ? d : AnnotationStyle.DefaultPenSize;
+        RememberSize(size);
+        if (!IsLoaded) return;
+        if (_tool is EditorTool.Text or EditorTool.Callout)
+            RestyleSelectedTextFormat();
+        else
+        {
+            double applied = _tool == EditorTool.Highlighter
+                ? AnnotationStyle.HighlighterWidth(_thickness)
+                : _thickness;
+            RestyleSelected(color: null, thickness: applied, fill: null);
         }
     }
 
@@ -894,17 +940,70 @@ public partial class EditorWindow : Window
         if (IsLoaded) RestyleSelectedLineStyle(_lineStyle);
     }
 
-    private void OnThicknessChecked(object sender, RoutedEventArgs e)
+    private void OnFontFamilyChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is RadioButton rb && rb.Tag is string s && double.TryParse(s, out double t))
+        if (FontFamilyBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string family) return;
+        _textFontFamily = family;
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void OnTextBoldClick(object sender, RoutedEventArgs e)
+    {
+        _textBold = !_textBold;
+        SyncTextFormatChrome();
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void OnTextItalicClick(object sender, RoutedEventArgs e)
+    {
+        _textItalic = !_textItalic;
+        SyncTextFormatChrome();
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void OnTextUnderlineClick(object sender, RoutedEventArgs e)
+    {
+        _textUnderline = !_textUnderline;
+        SyncTextFormatChrome();
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void OnTextStrikeClick(object sender, RoutedEventArgs e)
+    {
+        _textStrike = !_textStrike;
+        SyncTextFormatChrome();
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void OnTextAlignChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (AlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
+        _textAlign = align;
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
+    private void SyncTextFormatChrome()
+    {
+        if (FontFamilyBox is not null && FontFamilyBox.Items.Count == 0)
         {
-            _thickness = t;
-            if (_tool == EditorTool.Text)
-                _textThickness = t;
-            else
-                _strokeThickness = t;
-            if (IsLoaded && !_syncingThicknessButtons)
-                RestyleSelected(color: null, thickness: t, fill: null);
+            foreach (string family in AnnotationStyle.FontFamilies)
+                FontFamilyBox.Items.Add(new ComboBoxItem { Content = family, Tag = family });
+            FontFamilyBox.SelectedIndex = 0;
+        }
+        void Paint(Button? btn, bool on)
+        {
+            if (btn is null) return;
+            btn.Background = on ? (Brush)FindResource("AccentBrush") : Brushes.Transparent;
+        }
+        Paint(BoldBtn, _textBold || _textStyle == TextStyle.Bold);
+        Paint(ItalicBtn, _textItalic);
+        Paint(UnderlineBtn, _textUnderline);
+        Paint(StrikeBtn, _textStrike);
+        if (FontFamilyBox is not null)
+        {
+            foreach (ComboBoxItem item in FontFamilyBox.Items.OfType<ComboBoxItem>())
+                if (item.Tag is string f && f == _textFontFamily)
+                    FontFamilyBox.SelectedItem = item;
         }
     }
 

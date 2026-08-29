@@ -64,8 +64,8 @@ internal static class EditorShellContract
     public static EditorContextControls ContextFor(EditorTool tool, bool filledRectangle) => tool switch
     {
         EditorTool.Rectangle when filledRectangle =>
-            EditorContextControls.Color | EditorContextControls.Fill | EditorContextControls.Opacity |
-            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
+            EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Fill |
+            EditorContextControls.Opacity | EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
         EditorTool.Rectangle or EditorTool.Ellipse =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.Fill | EditorContextControls.Opacity |

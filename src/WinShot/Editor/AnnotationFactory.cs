@@ -75,30 +75,32 @@ internal static class AnnotationFactory
     /// </summary>
     public static Geometry ArrowGeometry(
         Point from, Point to, double thickness, ArrowheadStyle end,
-        ArrowheadStyle start = ArrowheadStyle.None, bool thin = false)
+        ArrowheadStyle start = ArrowheadStyle.None, bool thin = false, Point? mid = null)
     {
-        var v = to - from;
-        if (v.Length < 0.5) v = new Vector(0.5, 0);
-        var dir = v;
-        dir.Normalize();
-        double angle = Math.Atan2(dir.Y, dir.X);
-
         double headSize = Math.Max(8, thickness * (thin ? 2.6 : 3));
+        bool curved = LineCurve.IsCurved(mid, from, to);
+        double endAngle = curved
+            ? LineCurve.EndAngleRadians(from, to, mid!.Value)
+            : Math.Atan2(to.Y - from.Y, to.X - from.X);
+        double startAngle = curved
+            ? Math.Atan2(
+                LineCurve.ControlThroughMid(from, to, mid!.Value).Y - from.Y,
+                LineCurve.ControlThroughMid(from, to, mid!.Value).X - from.X)
+            : endAngle;
+
+        var endDir = new Vector(Math.Cos(endAngle), Math.Sin(endAngle));
+        var startDir = new Vector(Math.Cos(startAngle), Math.Sin(startAngle));
         Point endBase = end == ArrowheadStyle.None || end == ArrowheadStyle.HorizontalLine
             ? to
-            : to - dir * ShaftTrim(end, headSize);
+            : to - endDir * ShaftTrim(end, headSize);
         Point startBase = start == ArrowheadStyle.None || start == ArrowheadStyle.HorizontalLine
             ? from
-            : from + dir * ShaftTrim(start, headSize);
+            : from + startDir * ShaftTrim(start, headSize);
 
-        var geometry = new PathGeometry();
-        var shaft = new PathFigure { StartPoint = startBase, IsFilled = false };
-        shaft.Segments.Add(new LineSegment(endBase, isStroked: true));
-        geometry.Figures.Add(shaft);
-
-        AppendHead(geometry, to, angle, headSize, thickness, end);
+        var geometry = LineCurve.Stroke(startBase, endBase, curved ? mid : null);
+        AppendHead(geometry, to, endAngle, headSize, thickness, end);
         if (start != ArrowheadStyle.None)
-            AppendHead(geometry, from, angle + Math.PI, headSize, thickness, start);
+            AppendHead(geometry, from, startAngle + Math.PI, headSize, thickness, start);
         return geometry;
     }
 
@@ -349,14 +351,47 @@ internal static class AnnotationFactory
 
     /// <summary>Transparent background keeps the whole text box clickable for the Select tool without rendering anything.</summary>
     public static TextBlock CreateTextLabel(string text, Brush foreground, double fontSize) =>
-        new()
+        CreateTextLabel(text, foreground, fontSize, "Segoe UI", bold: false, italic: false,
+            underline: false, strike: false, TextAlignment.Left);
+
+    public static TextBlock CreateTextLabel(
+        string text, Brush foreground, double fontSize, string fontFamily,
+        bool bold, bool italic, bool underline, bool strike, TextAlignment align)
+    {
+        var tb = new TextBlock
         {
             Text = text,
             FontSize = fontSize,
-            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? "Segoe UI" : fontFamily),
+            FontWeight = bold ? FontWeights.Bold : FontWeights.SemiBold,
+            FontStyle = italic ? FontStyles.Italic : FontStyles.Normal,
             Foreground = foreground,
             Background = Brushes.Transparent,
+            TextAlignment = align,
+            TextWrapping = TextWrapping.Wrap,
         };
+        if (underline || strike)
+        {
+            tb.TextDecorations = new TextDecorationCollection();
+            if (underline) tb.TextDecorations.Add(TextDecorations.Underline);
+            if (strike) tb.TextDecorations.Add(TextDecorations.Strikethrough);
+        }
+        return tb;
+    }
+
+    public static TextAlignment ParseAlign(string? name) => name switch
+    {
+        "center" => TextAlignment.Center,
+        "right" => TextAlignment.Right,
+        _ => TextAlignment.Left,
+    };
+
+    public static string AlignName(TextAlignment align) => align switch
+    {
+        TextAlignment.Center => "center",
+        TextAlignment.Right => "right",
+        _ => "left",
+    };
 
     /// <summary>
     /// Builds the committed annotation element for a text style. Plain/Bold/Huge return
@@ -364,18 +399,21 @@ internal static class AnnotationFactory
     /// glyph Path with a white stroke; Pill wraps the text in a rounded dark Border.
     /// Huge's enlarged font size is applied by the caller before committing.
     /// </summary>
-    public static FrameworkElement CreateStyledTextLabel(string text, Brush foreground, double fontSize, TextStyle style)
+    public static FrameworkElement CreateStyledTextLabel(string text, Brush foreground, double fontSize, TextStyle style) =>
+        CreateStyledTextLabel(text, foreground, fontSize, style, "Segoe UI",
+            bold: style == TextStyle.Bold, italic: false, underline: false, strike: false, TextAlignment.Left);
+
+    public static FrameworkElement CreateStyledTextLabel(
+        string text, Brush foreground, double fontSize, TextStyle style,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align)
     {
+        bool useBold = bold || style == TextStyle.Bold;
         switch (style)
         {
-            case TextStyle.Bold:
-                var bold = CreateTextLabel(text, foreground, fontSize);
-                bold.FontWeight = FontWeights.Bold;
-                return bold;
-
             case TextStyle.Outline:
-                var typeface = new Typeface(new FontFamily("Segoe UI"),
-                    FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+                var typeface = new Typeface(new FontFamily(fontFamily),
+                    italic ? FontStyles.Italic : FontStyles.Normal,
+                    useBold ? FontWeights.Bold : FontWeights.SemiBold, FontStretches.Normal);
                 var formatted = new FormattedText(text, CultureInfo.CurrentUICulture,
                     FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
                 return new Path
@@ -393,11 +431,11 @@ internal static class AnnotationFactory
                     Background = new SolidColorBrush(Color.FromArgb(0xD9, 0x1E, 0x1E, 0x1E)),
                     CornerRadius = new CornerRadius(fontSize * 0.55),
                     Padding = new Thickness(fontSize * 0.5, fontSize * 0.2, fontSize * 0.5, fontSize * 0.2),
-                    Child = CreateTextLabel(text, foreground, fontSize),
+                    Child = CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align),
                 };
 
-            default: // Plain; Huge is Plain at a size the caller already doubled
-                return CreateTextLabel(text, foreground, fontSize);
+            default: // Plain / Bold / Huge
+                return CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align);
         }
     }
 

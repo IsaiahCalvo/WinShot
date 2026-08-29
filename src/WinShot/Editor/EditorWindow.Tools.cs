@@ -20,7 +20,7 @@ public partial class EditorWindow : Window
     {
         var layout = CalloutLayout.FromDrag(tip, boxOrigin);
         var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
-        double fontSize = AnnotationFactory.FontSizeFor(_thickness);
+        double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
         var visual = AnnotationFactory.CreateCallout(
             layout, "", stroke, fill, _thickness, _arrowhead,
             _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize);
@@ -76,9 +76,13 @@ public partial class EditorWindow : Window
     private void PlaceText(Point pos)
     {
         var style = _textStyle;
-        double fontSize = AnnotationFactory.FontSizeFor(_thickness);
+        double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
         if (style == TextStyle.Huge) fontSize *= 2.2;
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(_color), fontSize);
+        tb.FontFamily = new FontFamily(_textFontFamily);
+        tb.FontWeight = _textBold || style == TextStyle.Bold ? FontWeights.Bold : FontWeights.SemiBold;
+        tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
+        tb.TextAlignment = AnnotationFactory.ParseAlign(_textAlign);
         tb.Tag = style; // CommitText reads the style back when building the label
         // Offset by the editor chrome (1px border + 2px padding) so committed
         // text lands exactly where the user clicked.
@@ -167,11 +171,15 @@ public partial class EditorWindow : Window
         if (string.IsNullOrWhiteSpace(text)) return;
 
         var style = tb.Tag is TextStyle s ? s : TextStyle.Plain;
-        var label = AnnotationFactory.CreateStyledTextLabel(text, tb.Foreground, tb.FontSize, style);
+        var label = AnnotationFactory.CreateStyledTextLabel(
+            text, tb.Foreground, tb.FontSize, style, _textFontFamily,
+            _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike,
+            AnnotationFactory.ParseAlign(_textAlign));
         Canvas.SetLeft(label, x + 3);
         Canvas.SetTop(label, y + 3);
         label.Tag = AnnotationData.ForText(new Point(x + 3, y + 3), text, style, tb.FontSize,
-            tb.Foreground is SolidColorBrush fg ? fg.Color : Colors.White);
+            tb.Foreground is SolidColorBrush fg ? fg.Color : Colors.White,
+            _textFontFamily, _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike, _textAlign);
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(label),
             redo: () =>

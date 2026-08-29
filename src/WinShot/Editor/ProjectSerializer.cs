@@ -70,7 +70,17 @@ internal sealed class AnnotationData
     /// <summary>Optional arrowhead at the start (legacy Double arrows).</summary>
     public string? StartHead { get; set; }
 
+    /// <summary>Survey line/arrow midpoint (point on the curve). Absent = straight.</summary>
+    public double[]? Mid { get; set; }
+
     public string? Text { get; set; }
+
+    public string? FontFamily { get; set; }
+    public bool? Bold { get; set; }
+    public bool? Italic { get; set; }
+    public bool? Underline { get; set; }
+    public bool? Strike { get; set; }
+    public string? Align { get; set; }
 
     /// <summary><see cref="TextStyle"/> name for text annotations (Plain | Bold | Outline | Pill | Huge).</summary>
     public string? Style { get; set; }
@@ -149,7 +159,13 @@ internal sealed class AnnotationData
         FontSize = fontSize,
     };
 
-    public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) => new()
+    public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) =>
+        ForText(topLeft, text, style, fontSize, color, "Segoe UI",
+            bold: style == TextStyle.Bold, italic: false, underline: false, strike: false, align: "left");
+
+    public static AnnotationData ForText(
+        Point topLeft, string text, TextStyle style, double fontSize, Color color,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, string align) => new()
     {
         Type = TypeText,
         Points = ToArray(new[] { topLeft }),
@@ -157,6 +173,12 @@ internal sealed class AnnotationData
         Style = style.ToString(),
         FontSize = fontSize,
         Color = ToHex(color),
+        FontFamily = fontFamily,
+        Bold = bold,
+        Italic = italic,
+        Underline = underline,
+        Strike = strike,
+        Align = align,
     };
 
     public static AnnotationData ForEmoji(Point topLeft, string emoji) => new()
@@ -341,7 +363,7 @@ internal static class ProjectSerializer
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = curved
                         ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t)
-                        : AnnotationFactory.ArrowGeometry(pts[0], pts[1], t, end, start, thin),
+                        : AnnotationFactory.ArrowGeometry(pts[0], pts[1], t, end, start, thin, LineCurve.ParseMid(a.Mid)),
                 };
                 AnnotationFactory.ApplyDash(path, AnnotationStyle.LineStyleFrom(a));
                 return path;
@@ -349,13 +371,15 @@ internal static class ProjectSerializer
             case AnnotationData.TypeLine:
             {
                 var pts = RequirePoints(a, 2);
-                var line = new Shapes.Line
+                var mid = LineCurve.ParseMid(a.Mid);
+                var line = new Shapes.Path
                 {
-                    X1 = pts[0].X, Y1 = pts[0].Y, X2 = pts[1].X, Y2 = pts[1].Y,
                     Stroke = new SolidColorBrush(RequireColor(a)),
                     StrokeThickness = RequireThickness(a),
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    Data = LineCurve.Stroke(pts[0], pts[1], mid),
                 };
                 AnnotationFactory.ApplyDash(line, AnnotationStyle.LineStyleFrom(a));
                 return line;
@@ -431,7 +455,10 @@ internal static class ProjectSerializer
                     throw new InvalidDataException("Text annotation is missing its font size.");
                 Enum.TryParse(a.Style, out TextStyle style); // unknown style → Plain
                 var label = AnnotationFactory.CreateStyledTextLabel(
-                    text, new SolidColorBrush(RequireColor(a)), fontSize, style);
+                    text, new SolidColorBrush(RequireColor(a)), fontSize, style,
+                    a.FontFamily ?? "Segoe UI", a.Bold == true || style == TextStyle.Bold,
+                    a.Italic == true, a.Underline == true, a.Strike == true,
+                    AnnotationFactory.ParseAlign(a.Align));
                 SetPos(label, pts[0]);
                 return label;
             }

@@ -42,6 +42,20 @@ internal static class AnnotationStyle
     public static readonly double[] DashedPattern = { 6, 4 };
     public static readonly double[] DottedPattern = { 2, 4 };
     public static readonly int[] SizePresets = { 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 32, 50 };
+    public static readonly int[] TextSizePresets = { 8, 10, 12, 14, 16, 18, 20, 24, 27, 32, 36, 48, 72 };
+    public static readonly string[] FontFamilies =
+    {
+        "Segoe UI", "Arial", "Helvetica", "Times New Roman", "Courier New", "Georgia", "Verdana",
+    };
+
+    public const int DefaultPenSize = 3;
+    public const int DefaultShapeSize = 2;
+    public const int DefaultHighlighterSize = 20;
+    public const int DefaultTextSize = 16;
+    public const int HighlighterMin = 8;
+
+    public static int HighlighterWidth(double size) =>
+        Math.Max(HighlighterMin, ClampSize(size));
 
     public static readonly Color[] PickerPresets =
     {
@@ -159,6 +173,9 @@ internal static class AnnotationStyle
 
     public static int ClampSize(double size) =>
         (int)Math.Clamp(Math.Round(size), 1, 50);
+
+    public static int ClampTextSize(double size) =>
+        (int)Math.Clamp(Math.Round(size), 8, 72);
 
     public static (double h, double s, double v) ToHsv(Color color)
     {

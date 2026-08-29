@@ -333,13 +333,11 @@
 
                         <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock x:Name="ThicknessLabel" Text="Thickness" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
-                            <RadioButton x:Name="ThicknessThinBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Thin" Checked="OnThicknessChecked" AutomationProperties.Name="Thin"/>
-                            <RadioButton x:Name="ThicknessMediumBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Medium" Checked="OnThicknessChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
-                            <RadioButton x:Name="ThicknessThickBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Thick" Checked="OnThicknessChecked" AutomationProperties.Name="Thick"/>
+                            <TextBlock x:Name="ThicknessLabel" Text="Size" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
+                            <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}" Width="64"
+                                      SelectionChanged="OnSizeBoxChanged"
+                                      AutomationProperties.Name="Annotation size"
+                                      AutomationProperties.HelpText="Survey size presets. Stroke tools use 1–50; text uses 8–72."/>
                         </StackPanel>
 
                         <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -384,6 +382,26 @@
                                       SelectionChanged="OnTextStyleChanged" AutomationProperties.Name="Text style">
                                 <ComboBoxItem Content="Plain" Tag="Plain"/><ComboBoxItem Content="Bold" Tag="Bold"/><ComboBoxItem Content="Outline" Tag="Outline"/>
                                 <ComboBoxItem Content="Pill" Tag="Pill"/><ComboBoxItem Content="Huge" Tag="Huge"/>
+                            </ComboBox>
+                            <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Width="120" Margin="6,0,0,0"
+                                      SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
+                            <Button x:Name="BoldBtn" Style="{StaticResource ToolIconButton}" Content="B" FontFamily="Segoe UI" FontWeight="Bold"
+                                    Click="OnTextBoldClick" ToolTip="Bold" AutomationProperties.Name="Bold"
+                                    AutomationProperties.HelpText="Toggle bold on new and selected text."/>
+                            <Button x:Name="ItalicBtn" Style="{StaticResource ToolIconButton}" Content="I" FontFamily="Segoe UI" FontStyle="Italic"
+                                    Click="OnTextItalicClick" ToolTip="Italic" AutomationProperties.Name="Italic"
+                                    AutomationProperties.HelpText="Toggle italic on new and selected text."/>
+                            <Button x:Name="UnderlineBtn" Style="{StaticResource ToolIconButton}" Content="U" FontFamily="Segoe UI"
+                                    Click="OnTextUnderlineClick" ToolTip="Underline" AutomationProperties.Name="Underline"
+                                    AutomationProperties.HelpText="Toggle underline on new and selected text."/>
+                            <Button x:Name="StrikeBtn" Style="{StaticResource ToolIconButton}" Content="S" FontFamily="Segoe UI"
+                                    Click="OnTextStrikeClick" ToolTip="Strikethrough" AutomationProperties.Name="Strikethrough"
+                                    AutomationProperties.HelpText="Toggle strikethrough on new and selected text."/>
+                            <ComboBox x:Name="AlignBox" Style="{StaticResource DarkComboBox}" Width="88" Margin="6,0,0,0"
+                                      SelectionChanged="OnTextAlignChanged" AutomationProperties.Name="Text align">
+                                <ComboBoxItem Content="Left" Tag="left"/>
+                                <ComboBoxItem Content="Center" Tag="center"/>
+                                <ComboBoxItem Content="Right" Tag="right"/>
                             </ComboBox>
                         </StackPanel>
 

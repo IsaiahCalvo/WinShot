@@ -97,7 +97,7 @@ public partial class EditorWindow : Window
         HandleLayer.Visibility = Visibility.Visible;
     }
 
-    /// <summary>Two thumbs at the stroke endpoints (index 0 = from, 1 = to).</summary>
+    /// <summary>Thumbs: 0=from, 1=to, and for line/arrow 2=Survey midpoint-on-curve.</summary>
     private void LayoutEndpointHandles(AnnotationData meta)
     {
         if (meta.Points is not { Length: >= 2 } pts) { HideHandles(); return; }
@@ -111,9 +111,17 @@ public partial class EditorWindow : Window
         to += off;
 
         _handleKind = HandleKind.Endpoints;
-        EnsureThumbs(2);
+        bool surveyCurve = meta.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow;
+        EnsureThumbs(surveyCurve ? 3 : 2);
         PlaceThumb(0, from);
         PlaceThumb(1, to);
+        if (surveyCurve)
+        {
+            Point mid = LineCurve.ParseMid(meta.Mid) is Point stored
+                ? stored + off
+                : LineCurve.Midpoint(from, to);
+            PlaceThumb(2, mid);
+        }
         HandleLayer.Visibility = Visibility.Visible;
     }
 
@@ -389,19 +397,20 @@ public partial class EditorWindow : Window
         Point to = curved ? basePts[2] : basePts[^1];
         Point control = curved ? basePts[1] : default;
 
-        if (_activeHandle == 0) from = pos;
-        else to = pos;
+        Point? surveyMid = LineCurve.ParseMid(meta.Mid);
+        if (meta.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow)
+        {
+            if (_activeHandle == 0) from = pos;
+            else if (_activeHandle == 1) to = pos;
+            else surveyMid = pos;
+        }
+        else
+        {
+            if (_activeHandle == 0) from = pos;
+            else to = pos;
+        }
 
         fe.RenderTransform = null; // points are absolute now
-        if (fe is Line line)
-        {
-            line.X1 = from.X; line.Y1 = from.Y; line.X2 = to.X; line.Y2 = to.Y;
-            meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
-            meta.Tx = 0;
-            meta.Ty = 0;
-            line.Tag = meta;
-            return;
-        }
         if (fe is not Path path) return;
         double thickness = meta.Thickness ?? path.StrokeThickness;
         if (curved)
@@ -410,11 +419,22 @@ public partial class EditorWindow : Window
             path.Data = AnnotationFactory.CurvedArrowGeometry(from, control, to, thickness);
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { control.X, control.Y }, new[] { to.X, to.Y } };
         }
+        else if (meta.Type == AnnotationData.TypeLine)
+        {
+            if (surveyMid is Point m && LineCurve.ShouldSnapToLinear(m, from, to))
+                surveyMid = null;
+            path.Data = LineCurve.Stroke(from, to, surveyMid);
+            meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
+            meta.Mid = surveyMid is Point sm ? LineCurve.ToArray(sm) : null;
+        }
         else
         {
             var (end, start) = AnnotationStyle.HeadsFrom(meta);
-            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start);
+            if (surveyMid is Point m && LineCurve.ShouldSnapToLinear(m, from, to))
+                surveyMid = null;
+            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start, mid: surveyMid);
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
+            meta.Mid = surveyMid is Point sm ? LineCurve.ToArray(sm) : null;
         }
         // Keep the stored geometry in sync so the end-of-drag snapshot reads the live state.
         meta.Tx = 0;
@@ -538,22 +558,18 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeLine:
             case AnnotationData.TypeCurvedArrow:
                 fe.RenderTransform = null;
-                if (fe is Line line && snap.Points is { Length: >= 2 } lp)
-                {
-                    line.X1 = lp[0].X; line.Y1 = lp[0].Y; line.X2 = lp[^1].X; line.Y2 = lp[^1].Y;
-                    meta.Points = lp.Select(p => new[] { p.X, p.Y }).ToArray();
-                    meta.Tx = 0;
-                    meta.Ty = 0;
-                    break;
-                }
                 if (fe is Path path && snap.Points is { Length: >= 2 } sp)
                 {
                     double thickness = meta.Thickness ?? path.StrokeThickness;
                     bool curved = snap.Type == AnnotationData.TypeCurvedArrow && sp.Length >= 3;
                     var (end, start) = AnnotationStyle.HeadsFrom(meta);
-                    path.Data = curved
-                        ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness)
-                        : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness, end, start);
+                    if (snap.Type == AnnotationData.TypeLine)
+                        path.Data = LineCurve.Stroke(sp[0], sp[^1], LineCurve.ParseMid(meta.Mid));
+                    else
+                        path.Data = curved
+                            ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness)
+                            : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness, end, start,
+                                mid: LineCurve.ParseMid(meta.Mid));
                     meta.Points = sp.Select(p => new[] { p.X, p.Y }).ToArray();
                     meta.Tx = 0;
                     meta.Ty = 0;

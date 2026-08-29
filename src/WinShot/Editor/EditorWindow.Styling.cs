@@ -158,7 +158,8 @@ public partial class EditorWindow : Window
                         var (end, start) = AnnotationStyle.HeadsFrom(snap.Meta);
                         arrow.Data = meta.Type == AnnotationData.TypeCurvedArrow && p.Length >= 3
                             ? AnnotationFactory.CurvedArrowGeometry(p[0], p[1], p[2], snap.Thickness)
-                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness, end, start);
+                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness, end, start,
+                                mid: LineCurve.ParseMid(snap.Meta.Mid));
                     }
                 }
                 break;
@@ -171,7 +172,13 @@ public partial class EditorWindow : Window
                     lineLike.Stroke = stroke;
                     lineLike.StrokeThickness = snap.Thickness;
                     if (meta.Type == AnnotationData.TypeLine)
+                    {
                         AnnotationFactory.ApplyDash(lineLike, AnnotationStyle.LineStyleFrom(snap.Meta));
+                        if (lineLike is Path linePath && snap.Meta.Points is { Length: >= 2 } lp)
+                            linePath.Data = LineCurve.Stroke(
+                                new Point(lp[0][0], lp[0][1]), new Point(lp[1][0], lp[1][1]),
+                                LineCurve.ParseMid(snap.Meta.Mid));
+                    }
                 }
                 break;
             case AnnotationData.TypeRectangle:
@@ -259,6 +266,50 @@ public partial class EditorWindow : Window
     }
 
     private static string ToHex(Color c) => $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+
+    private void RestyleSelectedTextFormat()
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
+        if (meta.Type is not (AnnotationData.TypeText or AnnotationData.TypeCallout)) return;
+        var before = meta.Clone();
+        var after = meta.Clone();
+        after.FontFamily = _textFontFamily;
+        after.Bold = _textBold;
+        after.Italic = _textItalic;
+        after.Underline = _textUnderline;
+        after.Strike = _textStrike;
+        after.Align = _textAlign;
+        after.FontSize = _textFontSize;
+        ApplyTextFormat(fe, after);
+        Push(new EditorAction(
+            undo: () => ApplyTextFormat(fe, before),
+            redo: () => ApplyTextFormat(fe, after)), apply: false);
+        UpdateSelectionVisual();
+    }
+
+    private static void ApplyTextFormat(FrameworkElement fe, AnnotationData meta)
+    {
+        fe.Tag = meta;
+        var align = AnnotationFactory.ParseAlign(meta.Align);
+        var family = new FontFamily(string.IsNullOrWhiteSpace(meta.FontFamily) ? "Segoe UI" : meta.FontFamily);
+        bool bold = meta.Bold == true;
+        bool italic = meta.Italic == true;
+        TextBlock? tb = fe as TextBlock ?? (fe as Border)?.Child as TextBlock
+            ?? (fe as CalloutAnnotation)?.Label;
+        if (tb is null) return;
+        tb.FontFamily = family;
+        tb.FontWeight = bold ? FontWeights.Bold : FontWeights.SemiBold;
+        tb.FontStyle = italic ? FontStyles.Italic : FontStyles.Normal;
+        tb.TextAlignment = align;
+        if (meta.FontSize is double fs && fs > 0) tb.FontSize = fs;
+        tb.TextDecorations = null;
+        if (meta.Underline == true || meta.Strike == true)
+        {
+            tb.TextDecorations = new TextDecorationCollection();
+            if (meta.Underline == true) tb.TextDecorations.Add(TextDecorations.Underline);
+            if (meta.Strike == true) tb.TextDecorations.Add(TextDecorations.Strikethrough);
+        }
+    }
 
     private static bool TryParseColor(string hex, out Color color)
     {

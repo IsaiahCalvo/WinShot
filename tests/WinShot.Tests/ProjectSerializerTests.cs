@@ -202,6 +202,75 @@ public class ProjectSerializerTests
     }
 
     [Fact]
+    public void SaveAndLoad_RoundTripsLineMidpointAndTextFormat()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"winshot-mid-text-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "mid.winshot");
+        try
+        {
+            using var source = new SD.Bitmap(8, 6);
+            var doc = new ProjectDocument
+            {
+                Annotations =
+                {
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeLine,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 6d, 0d } },
+                        Mid = new[] { 3d, 2d },
+                        Color = "#FFFF0000",
+                        Thickness = 3,
+                    },
+                    AnnotationData.ForText(new Point(1, 1), "Hi", TextStyle.Plain, 16,
+                        Color.FromRgb(0, 0, 0), "Arial", true, true, true, false, "center"),
+                },
+            };
+            ProjectSerializer.Save(path, source, doc, Array.Empty<BitmapSource>());
+            var loaded = ProjectSerializer.Load(path);
+            using var loadedSource = loaded.Source;
+            Assert.Equal(new[] { 3d, 2d }, loaded.Doc.Annotations[0].Mid);
+            Assert.Equal("Arial", loaded.Doc.Annotations[1].FontFamily);
+            Assert.True(loaded.Doc.Annotations[1].Bold);
+            Assert.True(loaded.Doc.Annotations[1].Italic);
+            Assert.True(loaded.Doc.Annotations[1].Underline);
+            Assert.Equal("center", loaded.Doc.Annotations[1].Align);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateElement_LineWithMidpoint_IsAQuadraticPath()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var line = Assert.IsType<System.Windows.Shapes.Path>(ProjectSerializer.CreateElement(
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeLine,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 40d, 0d } },
+                        Mid = new[] { 20d, 15d },
+                        Color = "#FFFF0000",
+                        Thickness = 2,
+                    }, Array.Empty<BitmapSource>()));
+                var g = Assert.IsType<PathGeometry>(line.Data);
+                Assert.IsType<QuadraticBezierSegment>(g.Figures[0].Segments[0]);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
+    [Fact]
     public void SaveAndLoad_RoundTripsMultipleEmbeddedImages()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"winshot-project-{Guid.NewGuid():N}");

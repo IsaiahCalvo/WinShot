@@ -44,6 +44,8 @@ public class EditorShellContractTests
             EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: false));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)
             .HasFlag(EditorContextControls.FillStrokeTabs));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)
+            .HasFlag(EditorContextControls.Thickness));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Callout, false)
             .HasFlag(EditorContextControls.ArrowStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Line, false)
