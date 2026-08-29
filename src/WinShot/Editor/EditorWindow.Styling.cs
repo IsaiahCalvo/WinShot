@@ -103,12 +103,11 @@ public partial class EditorWindow : Window
             ShapeFillMode f = fill ?? Fill;
             Color fc = fillColor ?? FillColor;
 
-            // Opacity rewrites the stroke alpha. Highlighter keeps a translucent base so a
-            // 100% slider still reads as a marker; every other kind uses the slider directly.
+            // Opacity rewrites stroke alpha from the slider (0–1). Highlighter used to
+            // multiply a baked 0x80 base, so a 50% arm + 50% slider became A=64.
             if (opacity is double op)
             {
-                byte baseAlpha = Meta.Type == AnnotationData.TypeHighlighter ? (byte)0x80 : (byte)0xFF;
-                byte alpha = (byte)Math.Clamp(Math.Round(baseAlpha * op), 0, 255);
+                byte alpha = (byte)Math.Clamp(Math.Round(255 * op), 0, 255);
                 c = Color.FromArgb(alpha, c.R, c.G, c.B);
             }
 
@@ -443,7 +442,8 @@ public partial class EditorWindow : Window
             Point to = new(pts[^1][0], pts[^1][1]);
             double thickness = meta.Thickness ?? arrow.StrokeThickness;
             var (end, start) = AnnotationStyle.HeadsFrom(meta);
-            arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start);
+            arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start,
+                mid: LineCurve.ParseMid(meta.Mid));
         }
         arrow.Tag = meta;
     }

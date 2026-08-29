@@ -566,6 +566,8 @@ public partial class EditorWindow : Window
                 Canvas.SetTop(fe, snap.Bounds.Y);
                 fe.Width = Math.Max(1, snap.Bounds.Width);
                 fe.Height = Math.Max(1, snap.Bounds.Height);
+                if (fe is Path cloud && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
+                    cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height));
                 meta.Rect = new[] { snap.Bounds.X, snap.Bounds.Y, snap.Bounds.Width, snap.Bounds.Height };
                 meta.Tx = 0;
                 meta.Ty = 0;

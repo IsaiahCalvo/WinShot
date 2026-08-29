@@ -20,6 +20,13 @@ public class PaperInkTests
     }
 
     [Fact]
+    public void Outline_UsesEvenOddLikeSurvey()
+    {
+        var g = PaperInk.Outline(new[] { new Point(0, 0), new Point(20, 0) }, width: 6);
+        Assert.Equal(FillRule.EvenOdd, g.FillRule);
+    }
+
+    [Fact]
     public void Outline_Dot_IsADiskAroundThePoint()
     {
         var g = PaperInk.Outline(new[] { new Point(10, 10) }, width: 8);

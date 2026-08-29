@@ -6,7 +6,8 @@ namespace WinShot.Editor;
 /// <summary>
 /// Survey paper-ink: a round-cap swept outline filled even-odd, built from a
 /// centerline. Preview stays a polyline; commit/widen is this geometry so an
-/// eraser can subtract the same way Survey subtracts from ink.
+/// eraser can subtract the same way Survey subtracts from ink. WPF widen is
+/// Nonzero by default; we force EvenOdd to match Survey's fillRule.
 /// </summary>
 internal static class PaperInk
 {
@@ -52,7 +53,7 @@ internal static class PaperInk
         try
         {
             var widened = centerline.GetWidenedPathGeometry(pen);
-            widened.FillRule = FillRule.Nonzero;
+            widened.FillRule = FillRule.EvenOdd;
             return widened;
         }
         catch (InvalidOperationException)
