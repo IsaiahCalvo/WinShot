@@ -90,6 +90,9 @@ public partial class EditorWindow : Window
     private Color _colorBeforeHighlighter;
     private double _opacityBeforeHighlighter = 1;
     private bool _highlighterArmed;
+    private bool _eraserPartial = true;
+    private double _eraserSize = 10;
+    private readonly List<Point> _eraserPoints = new();
     private double _pickerHue;
     private double _pickerSat = 1;
     private double _pickerVal = 1;
@@ -718,6 +721,7 @@ public partial class EditorWindow : Window
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
+        EraserModePanel.Visibility = Show(Has(EditorContextControls.EraserMode));
         ColorWellLabel.Visibility = Show(!Has(EditorContextControls.FillStrokeTabs));
         ColorWellLabel.Text = "Color";
         if (CloudStyleItem is not null)
@@ -744,14 +748,18 @@ public partial class EditorWindow : Window
     {
         if (SizeBox is null) return;
         bool text = _tool is EditorTool.Text or EditorTool.Callout;
-        int[] presets = text ? AnnotationStyle.TextSizePresets : AnnotationStyle.SizePresets;
+        int[] presets = _tool == EditorTool.Eraser
+            ? AnnotationStyle.EraserSizePresets
+            : text ? AnnotationStyle.TextSizePresets : AnnotationStyle.SizePresets;
         _thickness = ActiveSize();
 
         _syncingSizeBox = true;
         try
         {
             SizeBox.Items.Clear();
-            int current = text ? AnnotationStyle.ClampTextSize(_textFontSize) : AnnotationStyle.ClampSize(_thickness);
+            int current = _tool == EditorTool.Eraser
+                ? AnnotationStyle.ClampEraserSize(_eraserSize)
+                : text ? AnnotationStyle.ClampTextSize(_textFontSize) : AnnotationStyle.ClampSize(_thickness);
             ComboBoxItem? selected = null;
             foreach (int preset in presets)
             {
@@ -775,6 +783,7 @@ public partial class EditorWindow : Window
     private double ActiveSize() => _tool switch
     {
         EditorTool.Highlighter => _highlighterSize,
+        EditorTool.Eraser => _eraserSize,
         EditorTool.Text or EditorTool.Callout => _textFontSize,
         EditorTool.Freehand => _penSize,
         EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
@@ -787,6 +796,7 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Highlighter: _highlighterSize = AnnotationStyle.HighlighterWidth(size); break;
+            case EditorTool.Eraser: _eraserSize = AnnotationStyle.ClampEraserSize(size); break;
             case EditorTool.Text or EditorTool.Callout: _textFontSize = AnnotationStyle.ClampTextSize(size); break;
             case EditorTool.Freehand: _penSize = AnnotationStyle.ClampSize(size); break;
             default: _shapeSize = AnnotationStyle.ClampSize(size); break;
@@ -1005,6 +1015,12 @@ public partial class EditorWindow : Window
                 if (item.Tag is string f && f == _textFontFamily)
                     FontFamilyBox.SelectedItem = item;
         }
+    }
+
+    private void OnEraserModeChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton rb && rb.Tag is string tag)
+            _eraserPartial = tag != "Full";
     }
 
     private void OnFillChecked(object sender, RoutedEventArgs e)

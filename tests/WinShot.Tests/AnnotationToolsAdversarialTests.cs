@@ -96,6 +96,7 @@ public class AnnotationToolsAdversarialTests
     {
         Assert.Equal("Draw", EditorShellContract.GroupFor(EditorTool.Freehand, false));
         Assert.Equal("Draw", EditorShellContract.GroupFor(EditorTool.Highlighter, false));
+        Assert.Equal("Draw", EditorShellContract.GroupFor(EditorTool.Eraser, false));
         Assert.Equal("Shape", EditorShellContract.GroupFor(EditorTool.Arrow, false));
         Assert.Equal("Shape", EditorShellContract.GroupFor(EditorTool.Line, false));
         Assert.Equal("Shape", EditorShellContract.GroupFor(EditorTool.Rectangle, true));

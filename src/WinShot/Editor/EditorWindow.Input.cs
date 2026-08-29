@@ -145,6 +145,10 @@ public partial class EditorWindow : Window
                 if (stroke.Points.Count == 0 || (pos - stroke.Points[^1]).Length > 1.2)
                     stroke.Points.Add(pos);
                 break;
+            case EditorTool.Eraser:
+                if (_eraserPoints.Count == 0 || (pos - _eraserPoints[^1]).Length > 1)
+                    _eraserPoints.Add(pos);
+                break;
             case EditorTool.Blur:
             case EditorTool.Pixelate:
                 ShowDragRect(new Rect(_dragStart, ClampToSurface(pos)), dim: false);
@@ -250,17 +254,25 @@ public partial class EditorWindow : Window
                 }
                 return;
             case EditorTool.Freehand or EditorTool.Highlighter:
-                if (shape is Polyline stroke && stroke.Points.Count >= 2)
+                if (shape is Polyline stroke && stroke.Points.Count >= 1)
                 {
-                    // The pencil captures raw points during the drag for responsiveness;
-                    // on release, smooth them so the committed stroke looks polished.
-                    stroke.Points = AnnotationFactory.SmoothFreehandPoints(stroke.Points);
-                    stroke.Tag = AnnotationData.ForStroke(
-                        _tool == EditorTool.Freehand ? AnnotationData.TypeFreehand : AnnotationData.TypeHighlighter,
-                        stroke.Points, StrokeColorOf(stroke), stroke.StrokeThickness);
-                    PushAddElement(shape);
+                    var pts = AnnotationFactory.SmoothFreehandPoints(stroke.Points);
+                    AnnotationCanvas.Children.Remove(stroke);
+                    bool highlighter = _tool == EditorTool.Highlighter;
+                    double width = highlighter
+                        ? AnnotationStyle.HighlighterWidth(_highlighterSize)
+                        : stroke.StrokeThickness;
+                    var ink = AnnotationFactory.CreateInk(pts, StrokeColorOf(stroke), width, highlighter);
+                    ink.Tag = AnnotationData.ForStroke(
+                        highlighter ? AnnotationData.TypeHighlighter : AnnotationData.TypeFreehand,
+                        pts, StrokeColorOf(stroke), width);
+                    AnnotationCanvas.Children.Add(ink);
+                    PushAddElement(ink);
                 }
                 else if (shape is not null) AnnotationCanvas.Children.Remove(shape);
+                return;
+            case EditorTool.Eraser:
+                ApplyEraserStroke();
                 return;
             case EditorTool.Blur:
                 HideDragRect();
@@ -321,6 +333,16 @@ public partial class EditorWindow : Window
         if (_tool == EditorTool.Eyedropper)
         {
             if (inImage) SampleEyedropper(pos);
+            e.Handled = true;
+            return;
+        }
+        if (_tool == EditorTool.Eraser)
+        {
+            _eraserPoints.Clear();
+            _eraserPoints.Add(pos);
+            _dragStart = pos;
+            _dragging = true;
+            Viewport.CaptureMouse();
             e.Handled = true;
             return;
         }
@@ -466,6 +488,7 @@ public partial class EditorWindow : Window
     {
         if (!_dragging) return;
         _dragging = false;
+        _eraserPoints.Clear();
         if (_activeShape is not null)
         {
             AnnotationCanvas.Children.Remove(_activeShape);

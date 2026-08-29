@@ -164,21 +164,26 @@ public partial class EditorWindow : Window
                 }
                 break;
             case AnnotationData.TypeLine:
-            case AnnotationData.TypeFreehand:
-            case AnnotationData.TypeHighlighter:
                 if (element is Shape lineLike)
                 {
-                    // Highlighter keeps its baked-in translucent alpha; honor it from the snapshot.
                     lineLike.Stroke = stroke;
                     lineLike.StrokeThickness = snap.Thickness;
-                    if (meta.Type == AnnotationData.TypeLine)
-                    {
-                        AnnotationFactory.ApplyDash(lineLike, AnnotationStyle.LineStyleFrom(snap.Meta));
-                        if (lineLike is Path linePath && snap.Meta.Points is { Length: >= 2 } lp)
-                            linePath.Data = LineCurve.Stroke(
-                                new Point(lp[0][0], lp[0][1]), new Point(lp[1][0], lp[1][1]),
-                                LineCurve.ParseMid(snap.Meta.Mid));
-                    }
+                    AnnotationFactory.ApplyDash(lineLike, AnnotationStyle.LineStyleFrom(snap.Meta));
+                    if (lineLike is Path linePath && snap.Meta.Points is { Length: >= 2 } lp)
+                        linePath.Data = LineCurve.Stroke(
+                            new Point(lp[0][0], lp[0][1]), new Point(lp[1][0], lp[1][1]),
+                            LineCurve.ParseMid(snap.Meta.Mid));
+                }
+                break;
+            case AnnotationData.TypeFreehand:
+            case AnnotationData.TypeHighlighter:
+                if (element is Path ink && snap.Meta.Points is { Length: >= 1 } ip)
+                {
+                    var pts = ip.Select(q => new Point(q[0], q[1])).ToList();
+                    ink.Data = PaperInk.Outline(pts, snap.Thickness);
+                    ink.Fill = stroke;
+                    ink.Stroke = Brushes.Transparent;
+                    ink.StrokeThickness = 0;
                 }
                 break;
             case AnnotationData.TypeRectangle:

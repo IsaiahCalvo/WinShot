@@ -481,6 +481,20 @@ internal static class AnnotationFactory
         return badge;
     }
 
+    public static Path CreateInk(IList<Point> points, Color color, double width, bool highlighter)
+    {
+        var path = new Path
+        {
+            Data = PaperInk.Outline(points, width),
+            Fill = new SolidColorBrush(color),
+            Stroke = Brushes.Transparent,
+            StrokeThickness = 0,
+        };
+        if (highlighter)
+            path.Opacity = 1; // alpha is in the fill; multiply is approximate via that alpha
+        return path;
+    }
+
     public static void ApplyDash(Shape shape, LineBorderStyle style)
     {
         shape.StrokeDashArray = AnnotationStyle.DashArray(style);

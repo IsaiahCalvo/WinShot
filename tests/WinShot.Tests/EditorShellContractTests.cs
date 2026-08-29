@@ -12,7 +12,7 @@ public class EditorShellContractTests
         {
             "Select", "Draw", "Shape", "Text", "Pixelate", "Spotlight", "Step",
         }, EditorShellContract.PrimaryToolOrder);
-        Assert.Equal(new[] { "Freehand", "Highlighter" }, EditorShellContract.DrawGroupTools);
+        Assert.Equal(new[] { "Freehand", "Highlighter", "Eraser" }, EditorShellContract.DrawGroupTools);
         Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow" },
             EditorShellContract.ShapeGroupTools);
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.TextGroupTools);
@@ -27,7 +27,7 @@ public class EditorShellContractTests
             .Where(name => name != "FilledRectangle")
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        Assert.Equal(17, uniqueTools.Length);
+        Assert.Equal(18, uniqueTools.Length);
         Assert.DoesNotContain(nameof(EditorTool.Emoji), uniqueTools);
         Assert.All(Enum.GetNames<EditorTool>().Where(name => name != nameof(EditorTool.Emoji)),
             name => Assert.Contains(name, uniqueTools));

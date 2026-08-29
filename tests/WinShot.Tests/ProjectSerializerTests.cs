@@ -271,6 +271,34 @@ public class ProjectSerializerTests
     }
 
     [Fact]
+    public void CreateElement_FreehandInk_IsAFilledOutlinePath()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var ink = Assert.IsType<System.Windows.Shapes.Path>(ProjectSerializer.CreateElement(
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeFreehand,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 30d, 0d }, new[] { 30d, 10d } },
+                        Color = "#FFFF0000",
+                        Thickness = 6,
+                    }, Array.Empty<BitmapSource>()));
+                Assert.NotNull(ink.Data);
+                Assert.True(ink.Data.FillContains(new Point(15, 0)));
+                Assert.Equal(0, ink.StrokeThickness);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
+    [Fact]
     public void SaveAndLoad_RoundTripsMultipleEmbeddedImages()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"winshot-project-{Guid.NewGuid():N}");

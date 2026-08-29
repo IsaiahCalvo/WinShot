@@ -54,7 +54,7 @@
                         <Button x:Name="DrawGroupBtn" Style="{StaticResource ToolIconButton}" Content="&#xE70F;"
                                 Click="OnDrawGroupClick" Tag="Draw" ToolTip="Draw"
                                 AutomationProperties.Name="Draw"
-                                AutomationProperties.HelpText="Pen and highlighter. Last-used draw tool is remembered. Shortcut P or H."/>
+                                AutomationProperties.HelpText="Pen, highlighter, and eraser. Last-used draw tool is remembered. Shortcut P or H."/>
                         <Popup x:Name="DrawGroupPopup" PlacementTarget="{Binding ElementName=DrawGroupBtn}"
                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
@@ -69,6 +69,10 @@
                                                  Tag="Highlighter" Content="&#xE891;" Checked="OnToolChecked" ToolTip="Highlighter (H)"
                                                  AutomationProperties.Name="Highlighter"
                                                  AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."/>
+                                    <RadioButton x:Name="EraserToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                                 Tag="Eraser" Content="&#xE75C;" Checked="OnToolChecked" ToolTip="Eraser"
+                                                 AutomationProperties.Name="Eraser"
+                                                 AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink. Full erase deletes the annotation under the stroke."/>
                                 </StackPanel>
                             </Border>
                         </Popup>
@@ -437,6 +441,21 @@
                             <RadioButton x:Name="FillSolidBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;" ToolTip="Solid fill"
                                          Checked="OnFillChecked" AutomationProperties.Name="Solid fill"
                                          AutomationProperties.HelpText="Draw shapes with a solid fill."/>
+                        </StackPanel>
+
+                        <StackPanel x:Name="EraserModePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                            <TextBlock Text="Erase" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <RadioButton x:Name="EraserPartialBtn" Style="{StaticResource ToolButton}" GroupName="EraserMode" Tag="Partial"
+                                         Content="Part" FontFamily="Segoe UI" FontSize="12" IsChecked="True"
+                                         Checked="OnEraserModeChecked" ToolTip="Partial erase (ink only)"
+                                         AutomationProperties.Name="Partial erase"
+                                         AutomationProperties.HelpText="Subtract the eraser stroke from pen and highlighter ink."/>
+                            <RadioButton x:Name="EraserFullBtn" Style="{StaticResource ToolButton}" GroupName="EraserMode" Tag="Full"
+                                         Content="Full" FontFamily="Segoe UI" FontSize="12"
+                                         Checked="OnEraserModeChecked" ToolTip="Full erase"
+                                         AutomationProperties.Name="Full erase"
+                                         AutomationProperties.HelpText="Delete any annotation the eraser hits."/>
                         </StackPanel>
 
                         <StackPanel x:Name="OpacityPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">

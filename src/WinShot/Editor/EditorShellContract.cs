@@ -15,6 +15,7 @@ internal enum EditorContextControls
     StepMode = 1 << 8,
     LineStyle = 1 << 9,
     FillStrokeTabs = 1 << 10,
+    EraserMode = 1 << 11,
 }
 
 /// <summary>
@@ -34,7 +35,7 @@ internal static class EditorShellContract
         "Step",
     };
 
-    public static readonly string[] DrawGroupTools = { "Freehand", "Highlighter" };
+    public static readonly string[] DrawGroupTools = { "Freehand", "Highlighter", "Eraser" };
     public static readonly string[] ShapeGroupTools = { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow" };
     public static readonly string[] TextGroupTools = { "Text", "Callout" };
 
@@ -87,6 +88,7 @@ internal static class EditorShellContract
         EditorTool.Step =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,
+        EditorTool.Eraser => EditorContextControls.Thickness | EditorContextControls.EraserMode,
         EditorTool.Blur or EditorTool.Pixelate => EditorContextControls.EffectStrength,
         EditorTool.Crop => EditorContextControls.CropRatio,
         _ => EditorContextControls.None,
@@ -95,7 +97,7 @@ internal static class EditorShellContract
     public static string GroupFor(EditorTool tool, bool filledRectangle) =>
         tool switch
         {
-            EditorTool.Freehand or EditorTool.Highlighter => "Draw",
+            EditorTool.Freehand or EditorTool.Highlighter or EditorTool.Eraser => "Draw",
             EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow => "Shape",
             EditorTool.Text or EditorTool.Callout => "Text",
             _ => "",

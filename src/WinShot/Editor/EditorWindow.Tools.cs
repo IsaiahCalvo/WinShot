@@ -199,6 +199,93 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------------------------- step tool
 
+    private void ApplyEraserStroke()
+    {
+        if (_eraserPoints.Count == 0) return;
+        var cut = PaperInk.EraserStroke(_eraserPoints, _eraserSize);
+        _eraserPoints.Clear();
+        var removed = new List<UIElement>();
+        var inkEdits = new List<(Path path, Geometry before, Geometry after, AnnotationData meta)>();
+
+        foreach (UIElement child in AnnotationCanvas.Children.Cast<UIElement>().ToList())
+        {
+            if (child is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+                continue;
+            bool ink = meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
+            if (_eraserPartial)
+            {
+                if (!ink || fe is not Path path || path.Data is null) continue;
+                if (!GeometriesOverlap(path.Data, cut, fe)) continue;
+                var before = path.Data.CloneCurrentValue();
+                var after = PaperInk.Subtract(TranslateGeometry(before, ElementOffset(path)), cut);
+                after = TranslateGeometry(after, new Vector(-ElementOffset(path).X, -ElementOffset(path).Y));
+                if (PaperInk.IsEmpty(after))
+                    removed.Add(path);
+                else
+                    inkEdits.Add((path, before, after, meta));
+            }
+            else if (HitsEraser(fe, cut))
+            {
+                removed.Add(fe);
+            }
+        }
+
+        foreach (var (path, _, after, _) in inkEdits)
+            path.Data = after;
+        foreach (var el in removed)
+            AnnotationCanvas.Children.Remove(el);
+        if (removed.Count == 0 && inkEdits.Count == 0) return;
+
+        Push(new EditorAction(
+            undo: () =>
+            {
+                foreach (var el in removed)
+                    if (!AnnotationCanvas.Children.Contains(el))
+                        AnnotationCanvas.Children.Add(el);
+                foreach (var (path, before, _, _) in inkEdits)
+                    path.Data = before;
+            },
+            redo: () =>
+            {
+                foreach (var el in removed)
+                    AnnotationCanvas.Children.Remove(el);
+                foreach (var (path, _, after, _) in inkEdits)
+                    path.Data = after;
+            }), apply: false);
+    }
+
+    private static Geometry TranslateGeometry(Geometry geometry, Vector offset)
+    {
+        if (offset.Length < 0.01) return geometry;
+        var copy = geometry.CloneCurrentValue();
+        copy.Transform = new TranslateTransform(offset.X, offset.Y);
+        return copy.GetFlattenedPathGeometry();
+    }
+
+    private static bool GeometriesOverlap(Geometry ink, Geometry cut, FrameworkElement owner)
+    {
+        var world = TranslateGeometry(ink, ElementOffset(owner));
+        var inter = Geometry.Combine(world, cut, GeometryCombineMode.Intersect, Transform.Identity);
+        return inter is not null && !inter.IsEmpty() && inter.Bounds.Width * inter.Bounds.Height > 0.25;
+    }
+
+    private static bool HitsEraser(FrameworkElement fe, Geometry cut)
+    {
+        Rect b = new(
+            Canvas.GetLeft(fe) + (double.IsNaN(Canvas.GetLeft(fe)) ? 0 : 0),
+            Canvas.GetTop(fe) + (double.IsNaN(Canvas.GetTop(fe)) ? 0 : 0),
+            Math.Max(1, fe.ActualWidth > 0 ? fe.ActualWidth : fe.Width),
+            Math.Max(1, fe.ActualHeight > 0 ? fe.ActualHeight : fe.Height));
+        Vector off = ElementOffset(fe);
+        b.X = (double.IsNaN(Canvas.GetLeft(fe)) ? 0 : Canvas.GetLeft(fe)) + off.X;
+        b.Y = (double.IsNaN(Canvas.GetTop(fe)) ? 0 : Canvas.GetTop(fe)) + off.Y;
+        if (fe is Path p && p.Data is not null)
+            return GeometriesOverlap(p.Data, cut, fe);
+        var box = new RectangleGeometry(b);
+        var inter = Geometry.Combine(box, cut, GeometryCombineMode.Intersect, Transform.Identity);
+        return inter is not null && !inter.IsEmpty() && inter.Bounds.Width > 0 && inter.Bounds.Height > 0;
+    }
+
     private void PlaceStep(Point pos)
     {
         int number = _nextStep;

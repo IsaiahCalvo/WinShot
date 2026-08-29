@@ -311,7 +311,7 @@ public partial class EditorWindow : Window
                 break;
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
-                ResizePolyline(fe, meta, b);
+                ResizeInk(fe, meta, b);
                 break;
         }
     }
@@ -356,9 +356,9 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Freehand / highlighter: scale every stored point about the box's top-left so the polyline fits the new box.</summary>
-    private void ResizePolyline(FrameworkElement fe, AnnotationData meta, Rect newBounds)
+    private void ResizeInk(FrameworkElement fe, AnnotationData meta, Rect newBounds)
     {
-        if (fe is not Polyline poly || _resizeBefore?.Points is not { } basePts || basePts.Length == 0) return;
+        if (fe is not Path ink || _resizeBefore?.Points is not { } basePts || basePts.Length == 0) return;
 
         // Reconstruct the polyline from the captured (pre-drag) points so successive
         // moves accumulate from the same baseline, then scale into the new box.
@@ -366,8 +366,7 @@ public partial class EditorWindow : Window
         double sx = baseBounds.Width > 0.5 ? newBounds.Width / baseBounds.Width : 1;
         double sy = baseBounds.Height > 0.5 ? newBounds.Height / baseBounds.Height : 1;
 
-        // basePts are in canvas coords (element offset already folded in by the snapshot).
-        var scaled = new PointCollection(basePts.Length);
+        var scaled = new List<Point>(basePts.Length);
         var raw = new double[basePts.Length][];
         for (int i = 0; i < basePts.Length; i++)
         {
@@ -376,14 +375,12 @@ public partial class EditorWindow : Window
             scaled.Add(new Point(nx, ny));
             raw[i] = new[] { nx, ny };
         }
-        // Points now hold absolute canvas coords, so neutralize any move transform.
-        poly.RenderTransform = null;
-        poly.Points = scaled;
-        // Keep the stored geometry in sync so the end-of-drag snapshot reads the live state.
+        ink.RenderTransform = null;
+        ink.Data = PaperInk.Outline(scaled, meta.Thickness ?? 4);
         meta.Points = raw;
         meta.Tx = 0;
         meta.Ty = 0;
-        poly.Tag = meta;
+        ink.Tag = meta;
     }
 
     /// <summary>Arrow / line / curved arrow: drag one endpoint, rebuilding geometry from the moved endpoints.</summary>
@@ -597,10 +594,10 @@ public partial class EditorWindow : Window
 
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
-                if (fe is Polyline poly && snap.Points is { Length: > 0 } pp)
+                if (fe is Path inkPath && snap.Points is { Length: > 0 } pp)
                 {
-                    poly.RenderTransform = null;
-                    poly.Points = new PointCollection(pp);
+                    inkPath.RenderTransform = null;
+                    inkPath.Data = PaperInk.Outline(pp, meta.Thickness ?? 4);
                     meta.Points = pp.Select(p => new[] { p.X, p.Y }).ToArray();
                     meta.Tx = 0;
                     meta.Ty = 0;

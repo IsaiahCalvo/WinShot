@@ -435,16 +435,10 @@ internal static class ProjectSerializer
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
             {
-                var pts = RequirePoints(a, 2);
-                return new Shapes.Polyline
-                {
-                    Stroke = new SolidColorBrush(RequireColor(a)),
-                    StrokeThickness = RequireThickness(a),
-                    StrokeLineJoin = PenLineJoin.Round,
-                    StrokeStartLineCap = PenLineCap.Round,
-                    StrokeEndLineCap = PenLineCap.Round,
-                    Points = new PointCollection(pts),
-                };
+                var pts = RequirePoints(a, 1);
+                return AnnotationFactory.CreateInk(
+                    pts, RequireColor(a), RequireThickness(a),
+                    highlighter: a.Type == AnnotationData.TypeHighlighter);
             }
             case AnnotationData.TypeText:
             {

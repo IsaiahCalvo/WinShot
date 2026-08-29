@@ -20,6 +20,7 @@ public enum EditorTool
     CurvedArrow,
     Emoji,
     Callout,
+    Eraser,
 }
 
 /// <summary>Fill applied to newly drawn rectangles and ellipses.</summary>

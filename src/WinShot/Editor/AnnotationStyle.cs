@@ -42,6 +42,7 @@ internal static class AnnotationStyle
     public static readonly double[] DashedPattern = { 6, 4 };
     public static readonly double[] DottedPattern = { 2, 4 };
     public static readonly int[] SizePresets = { 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 32, 50 };
+    public static readonly int[] EraserSizePresets = { 1, 4, 8, 12, 16, 24, 32, 48, 64, 80, 100 };
     public static readonly int[] TextSizePresets = { 8, 10, 12, 14, 16, 18, 20, 24, 27, 32, 36, 48, 72 };
     public static readonly string[] FontFamilies =
     {
@@ -176,6 +177,9 @@ internal static class AnnotationStyle
 
     public static int ClampTextSize(double size) =>
         (int)Math.Clamp(Math.Round(size), 8, 72);
+
+    public static int ClampEraserSize(double size) =>
+        (int)Math.Clamp(Math.Round(size), 1, 100);
 
     public static (double h, double s, double v) ToHsv(Color color)
     {
