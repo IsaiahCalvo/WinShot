@@ -269,6 +269,7 @@ public partial class EditorWindow : Window
             new Action(() =>
             {
                 UpdateContextPanels();
+                FitEditorCombos();
                 EditorBottomBar.Visibility = Visibility.Visible;
             }));
     }
@@ -702,12 +703,10 @@ public partial class EditorWindow : Window
         void Paint(Button btn, bool on)
         {
             if (btn is null) return;
-            btn.Opacity = on ? 1 : 0.92;
-            btn.Background = on
-                ? (Brush)FindResource("AccentBrush")
-                : Brushes.Transparent;
+            btn.Opacity = 1;
+            btn.Background = Brushes.Transparent;
             btn.Foreground = on
-                ? Brushes.White
+                ? (Brush)FindResource("AccentBrush")
                 : (Brush)FindResource("TextPrimaryBrush");
         }
         Paint(DrawGroupBtn, group == "Draw");
@@ -913,11 +912,65 @@ public partial class EditorWindow : Window
                 SizeBox.Items.Insert(0, selected);
             }
             SizeBox.SelectedItem = selected;
+            FitComboToLongestItem(SizeBox,
+                AnnotationStyle.SizePresets.Select(n => n.ToString())
+                    .Concat(AnnotationStyle.TextSizePresets.Select(n => n.ToString()))
+                    .Concat(AnnotationStyle.EraserSizePresets.Select(n => n.ToString()))
+                    .ToArray());
         }
         finally
         {
             _syncingSizeBox = false;
         }
+    }
+
+    /// <summary>
+    /// Sizes a combo to its longest item (plus extras) so picking a shorter
+    /// value never shrinks the toolbar.
+    /// </summary>
+    private static void FitComboToLongestItem(ComboBox? box, params string[] extra)
+    {
+        if (box is null) return;
+        double dip = 1;
+        try { dip = VisualTreeHelper.GetDpi(box).PixelsPerDip; }
+        catch (InvalidOperationException) { /* not in a visual tree yet */ }
+        var typeface = new Typeface("Segoe UI");
+        double max = 0;
+        void Consider(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var ft = new FormattedText(
+                text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                typeface, 13, Brushes.White, dip);
+            if (ft.Width > max) max = ft.Width;
+        }
+        foreach (string s in extra) Consider(s);
+        foreach (object item in box.Items)
+            Consider(item is ComboBoxItem cbi ? cbi.Content?.ToString() : item?.ToString());
+        // DarkComboBox ContentSite margin is 10 left + 24 for the chevron.
+        double width = Math.Ceiling(max) + 38;
+        if (width < 52) width = 52;
+        box.MinWidth = width;
+        box.Width = width;
+    }
+
+    private void FitEditorCombos()
+    {
+        FitComboToLongestItem(SizeBox,
+            AnnotationStyle.SizePresets.Select(n => n.ToString())
+                .Concat(AnnotationStyle.TextSizePresets.Select(n => n.ToString()))
+                .Concat(AnnotationStyle.EraserSizePresets.Select(n => n.ToString()))
+                .ToArray());
+        FitComboToLongestItem(ArrowStyleBox);
+        FitComboToLongestItem(LineStyleBox);
+        FitComboToLongestItem(FontFamilyBox);
+        FitComboToLongestItem(AlignBox);
+        FitComboToLongestItem(VerticalAlignBox);
+        FitComboToLongestItem(CropRatioBox);
+        FitComboToLongestItem(EraserModeBox);
+        FitComboToLongestItem(EffectStrengthBox);
+        FitComboToLongestItem(StepModeBox);
+        FitComboToLongestItem(ZoomBox);
     }
 
     private double ActiveSize() => ChromeTool() switch
@@ -961,17 +1014,13 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Reflects the active blur/pixelate strength on the strength radio group without re-triggering an apply.</summary>
+    /// <summary>Reflects the active blur/pixelate strength on the strength combo without re-triggering an apply.</summary>
     private void SyncEffectStrengthButtons(EffectStrength strength)
     {
-        RadioButton target = strength switch
-        {
-            EffectStrength.Light => StrengthLightBtn,
-            EffectStrength.Strong => StrengthStrongBtn,
-            _ => StrengthMediumBtn,
-        };
-        if (target.IsChecked != true)
-            target.IsChecked = true; // OnEffectStrengthChecked re-stores the same value (idempotent)
+        bool restore = _syncingContext;
+        _syncingContext = true;
+        try { SelectComboByTag(EffectStrengthBox, strength.ToString()); }
+        finally { _syncingContext = restore; }
     }
 
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
@@ -1156,6 +1205,7 @@ public partial class EditorWindow : Window
             foreach (string family in AnnotationStyle.FontFamilies)
                 FontFamilyBox.Items.Add(new ComboBoxItem { Content = family, Tag = family });
             FontFamilyBox.SelectedIndex = 0;
+            FitComboToLongestItem(FontFamilyBox);
         }
         void Paint(Button? btn, bool on)
         {
@@ -1174,9 +1224,10 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void OnEraserModeChecked(object sender, RoutedEventArgs e)
+    private void OnEraserModeChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is RadioButton rb && rb.Tag is string tag)
+        if (_syncingContext) return;
+        if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item && item.Tag is string tag)
             _eraserPartial = tag != "Full";
     }
 

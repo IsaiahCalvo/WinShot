@@ -162,6 +162,7 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Source: Theme/Icons/pixelate.svg -->
     <Viewbox x:Key="SurveyIcon.Pixelate" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="5" Height="5"/>
@@ -176,11 +177,17 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Source: Theme/Icons/select-all-svgrepo-com.svg (Timothée Giet / SVG Repo, CC BY-SA 4.0) -->
     <Viewbox x:Key="SurveyIcon.Spotlight" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9,3 H15 L17,8 H7 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M7,8 L4,21 H20 L17,8"/>
-            <Ellipse Style="{StaticResource SurveyIconFill}" Canvas.Left="10" Canvas.Top="12" Width="4" Height="4"/>
+        <Canvas Width="16" Height="16">
+            <Canvas.RenderTransform>
+                <TranslateTransform X="-461.714" Y="-531.79"/>
+            </Canvas.RenderTransform>
+            <Path Style="{StaticResource SurveyIconFill}" Data="M461.714,531.79 v4 h1 v-3 h3 v-1 z"/>
+            <Path Style="{StaticResource SurveyIconFill}" Data="M461.714,547.79 v-4 h1 v3 h3 v1 z"/>
+            <Path Style="{StaticResource SurveyIconFill}" Data="M477.714,531.79 v4 h-1 v-3 h-3 v-1 z"/>
+            <Path Style="{StaticResource SurveyIconFill}" Data="M477.714,547.79 v-4 h-1 v3 h-3 v1 z"/>
+            <Path Style="{StaticResource SurveyIconFill}" Data="M470.714,533.877 v1.015 a5,5 0 0 1 1.754,0.73 l0.717,-0.716 a6,6 0 0 0 -2.47,-1.03 z m-2,0.004 a6,6 0 0 0 -2.472,1.023 l0.718,0.719 a5,5 0 0 1 1.754,-0.727 z m5.887,2.437 -0.719,0.719 a5,5 0 0 1 0.727,1.754 h1.015 a6,6 0 0 0 -1.023,-2.473 z m-9.771,0.002 a6,6 0 0 0 -1.03,2.47 h1.016 a5,5 0 0 1 0.73,-1.753 z m-1.026,4.47 a6,6 0 0 0 1.024,2.474 l0.718,-0.72 a5,5 0 0 1 -0.726,-1.753 z m10.809,0 a5,5 0 0 1 -0.73,1.755 l0.716,0.717 a6,6 0 0 0 1.03,-2.471 z m-7.653,3.169 -0.716,0.717 a6,6 0 0 0 2.47,1.029 v-1.016 a5,5 0 0 1 -1.754,-0.73 z m5.508,0 a5,5 0 0 1 -1.754,0.726 v1.016 a6,6 0 0 0 2.473,-1.023 z"/>
         </Canvas>
     </Viewbox>
 </ResourceDictionary>

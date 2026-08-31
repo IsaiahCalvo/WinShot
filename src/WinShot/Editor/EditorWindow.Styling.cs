@@ -413,9 +413,10 @@ public partial class EditorWindow : Window
 
     // ----------------------------------------------------------- step mode (Gap 5)
 
-    private void OnStepModeChecked(object sender, RoutedEventArgs e)
+    private void OnStepModeChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is RadioButton rb && rb.Tag is string tag)
+        if (_syncingContext) return;
+        if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item && item.Tag is string tag)
             _stepLetters = string.Equals(tag, "Letter", StringComparison.Ordinal);
     }
 
@@ -611,12 +612,12 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------- blur/pixelate strength (parity tail)
 
-    private void OnEffectStrengthChecked(object sender, RoutedEventArgs e)
+    private void OnEffectStrengthChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is not RadioButton rb || rb.Tag is not string tag ||
-            !Enum.TryParse(tag, out EffectStrength strength))
+        if (_syncingContext) return;
+        if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
+            item.Tag is not string tag || !Enum.TryParse(tag, out EffectStrength strength))
             return;
-        // The same radio group drives both tools; route to whichever effect is active.
         if (_tool == EditorTool.Pixelate) _pixelateStrength = strength;
         else _blurStrength = strength;
     }

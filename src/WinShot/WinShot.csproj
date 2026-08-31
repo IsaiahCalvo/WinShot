@@ -58,6 +58,7 @@
                       LogicalName="WinShot.Assets.quick-access-unlock.svg" />
     <EmbeddedResource Include="Assets\quick-access-save.svg"
                       LogicalName="WinShot.Assets.quick-access-save.svg" />
+    <None Include="Theme\Icons\*.svg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -464,6 +464,24 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
+        Assert.Null(editor.FindName("EraserPartialBtn"));
+        Assert.NotNull(editor.FindName("EraserModeBox"));
+        typeof(EditorWindow).GetMethod("FitEditorCombos",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, null);
+        var lineBox = (ComboBox)editor.FindName("LineStyleBox")!;
+        var arrowBox = (ComboBox)editor.FindName("ArrowStyleBox")!;
+        Assert.True(lineBox.Width > 40, $"Line style combo was not sized to content: {lineBox.Width}");
+        double lineWidth = lineBox.Width;
+        foreach (ComboBoxItem item in lineBox.Items.OfType<ComboBoxItem>())
+            if (item.Tag as string == "dashed") { lineBox.SelectedItem = item; break; }
+        editor.UpdateLayout();
+        Assert.Equal(lineWidth, lineBox.Width);
+        double arrowWidth = arrowBox.Width;
+        foreach (ComboBoxItem item in arrowBox.Items.OfType<ComboBoxItem>())
+            if (item.Tag as string == "none") { arrowBox.SelectedItem = item; break; }
+        editor.UpdateLayout();
+        Assert.Equal(arrowWidth, arrowBox.Width);
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "2");
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
