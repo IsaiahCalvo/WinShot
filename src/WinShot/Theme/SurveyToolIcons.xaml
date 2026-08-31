@@ -154,6 +154,14 @@
         </Canvas>
     </Viewbox>
 
+    <Viewbox x:Key="SurveyIcon.Eyedropper" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M15,4 L20,9"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M16,3 L21,8 L19.5,9.5 L14.5,4.5 Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M13,7 L5,15 L4,20 L9,19 L17,11"/>
+        </Canvas>
+    </Viewbox>
+
     <Viewbox x:Key="SurveyIcon.Blur" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Path Style="{StaticResource SurveyIconStroke}"

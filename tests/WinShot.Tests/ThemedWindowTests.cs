@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -463,11 +464,24 @@ public class ThemedWindowTests
             el => el.Tag as string == "Step");
         Assert.Contains(((StackPanel)editor.FindName("ShapeGroupPanel")!).Children.OfType<RadioButton>(),
             rb => rb.Tag as string == "Step");
+        editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        ((RadioButton)editor.FindName("PanToolBtn")!).IsChecked = true;
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        double viewportHSelect = viewport.ActualHeight;
+        var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ColorPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ThicknessPanel")!).Visibility);
+
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
+        PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
         double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            $"Viewport shrank Arrow vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Visible, colorBar.Visibility);
         Assert.Equal(Visibility.Visible, formatBar.Visibility);
@@ -501,6 +515,7 @@ public class ThemedWindowTests
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
+        PackEditorFormat(editor);
         var top = (Border)editor.FindName("TopToolbar")!;
         var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
         Assert.True(primaryRow.ActualHeight <= 48,
@@ -526,9 +541,26 @@ public class ThemedWindowTests
         Point sizeOrigin = ((FrameworkElement)sizeBox).TranslatePoint(new Point(0, 0), editor);
         Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 16,
             $"Color well and size combo have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            $"Viewport shrank Text vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
+        var overflowBtn = (Button)editor.FindName("FormatOverflowBtn")!;
+        var overflowPanel = (StackPanel)editor.FindName("FormatOverflowPanel")!;
+        var bold = (Button)editor.FindName("BoldBtn")!;
+        var textButtons = (FrameworkElement)editor.FindName("TextFormatButtons")!;
+        Assert.Equal(Visibility.Visible, overflowBtn.Visibility);
+        Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
+            el => el.Name is "TextFormatButtons" or "BoldBtn" or "ItalicBtn");
+        Assert.True(IsLogicalDescendant(formatBar, textButtons),
+            "B/I/U/S must stay on the primary strip, not the overflow flyout.");
+        Assert.True(IsLogicalDescendant(formatBar, bold));
+        Point textSave = ((Button)editor.FindName("BtnSave")!).TranslatePoint(new Point(0, 0), editor);
+        Point textSec = secondary.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(textSec.X + secondary.ActualWidth <= textSave.X + 0.5,
+            $"Text secondary sits on Save as…: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
 
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
+        PackEditorFormat(editor);
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "1");
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
@@ -543,13 +575,29 @@ public class ThemedWindowTests
         Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
             $"Callout size sits on Save as…: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
         editor.UpdateLayout();
+        PackEditorFormat(editor);
         Point formatOrigin = formatBar.TranslatePoint(new Point(0, 0), editor);
+        saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
         Assert.True(formatOrigin.X + formatBar.ActualWidth <= saveOrigin.X + 0.5,
             $"Format extras sit on Save as…: format={formatOrigin.X}+{formatBar.ActualWidth} save={saveOrigin.X}");
+        Point calloutSec = secondary.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(calloutSec.X + secondary.ActualWidth <= saveOrigin.X + 0.5,
+            $"Callout secondary sits on Save as…: sec={calloutSec.X}+{secondary.ActualWidth} save={saveOrigin.X}");
+        var done = (Button)editor.FindName("BtnDone")!;
+        Point doneOrigin = done.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(doneOrigin.X + done.ActualWidth <= editor.ActualWidth + 0.5,
+            $"Done overflows the window: done={doneOrigin.X}+{done.ActualWidth} win={editor.ActualWidth}");
+        Assert.Equal(Visibility.Visible, overflowBtn.Visibility);
+        Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
+            el => el.Name is "TextFormatButtons" or "BoldBtn");
+        Assert.True(IsLogicalDescendant(formatBar, textButtons));
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.NotNull(editor.FindName("AlignMenuBtn"));
         Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName((Button)editor.FindName("BoldBtn")!)));
+        var italicGlyph = Assert.IsType<TextBlock>(((Button)editor.FindName("ItalicBtn")!).Content);
+        Assert.Equal(FontStyles.Italic, italicGlyph.FontStyle);
+        Assert.False(italicGlyph.RenderTransform is SkewTransform);
 
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
@@ -576,6 +624,7 @@ public class ThemedWindowTests
 
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
+        PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, effects.Visibility);
         Assert.Equal(Visibility.Collapsed, color.Visibility);
         var effectBox = (FrameworkElement)editor.FindName("EffectStrengthBox")!;
@@ -587,8 +636,21 @@ public class ThemedWindowTests
         typeof(EditorWindow).GetMethod("OnCropClick",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object[] { editor, new RoutedEventArgs() });
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
         Assert.Equal(true, ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked);
+        var cropPanel = (FrameworkElement)editor.FindName("CropPanel")!;
+        cropPanel.Visibility = Visibility.Visible;
+        PackEditorFormat(editor);
+        Button applyCrop = LogicalTreeHelper.GetChildren(cropPanel).OfType<Button>()
+            .First(b => AutomationProperties.GetName(b) == "Apply crop");
+        Assert.True(applyCrop.IsVisible && applyCrop.Parent == cropPanel,
+            "Apply crop must stay on the strip; overflow Don't crop / ratio first.");
+        Point applyOrigin = applyCrop.TranslatePoint(new Point(0, 0), editor);
+        Point cropSave = save.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(applyOrigin.X + applyCrop.ActualWidth <= cropSave.X + 0.5,
+            $"Apply crop sits on Save as…: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
@@ -598,6 +660,20 @@ public class ThemedWindowTests
         Assert.True(primary.ActualHeight <= 42, $"Primary tools wrapped at minimum width: {primary.ActualHeight}");
 
         MarqueeSelectsEveryIntersectingAnnotation(editor);
+    }
+
+    private static void PackEditorFormat(EditorWindow editor)
+    {
+        var pack = typeof(EditorWindow).GetMethod("PackFormatOverflow",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var frame = new DispatcherFrame();
+        editor.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            pack.Invoke(editor, null);
+            frame.Continue = false;
+        });
+        Dispatcher.PushFrame(frame);
+        editor.UpdateLayout();
     }
 
     private static bool IsLogicalDescendant(DependencyObject root, DependencyObject child)

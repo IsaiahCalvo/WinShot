@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -225,7 +226,7 @@ public partial class EditorWindow : Window
         SizeChanged += (_, _) =>
         {
             if (_pendingInitialFit) FitToView();
-            PackFormatOverflow();
+            Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Background);
         };
         // The WINDOW can stop resizing while the VIEWPORT keeps shrinking as the toolbars / zoom
         // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
@@ -856,8 +857,15 @@ public partial class EditorWindow : Window
         TextGroupPanel.Visibility = Show(group == "Text");
 
         EditorColorBar.Visibility = Visibility.Visible;
+        if (SizeEffectHost is not null)
+            SizeEffectHost.Visibility = Show(Has(EditorContextControls.Thickness) || Has(EditorContextControls.EffectStrength));
+        bool props = Has(EditorContextControls.Color) || Has(EditorContextControls.Thickness) ||
+                     Has(EditorContextControls.EffectStrength) || Has(EditorContextControls.TextStyle) ||
+                     Has(EditorContextControls.ArrowStyle) || Has(EditorContextControls.LineStyle) ||
+                     Has(EditorContextControls.EraserMode) || Has(EditorContextControls.StepMode) ||
+                     Has(EditorContextControls.CropRatio) || CropPanel.Visibility == Visibility.Visible;
         if (SecondaryToolPanel is not null)
-            SecondaryToolPanel.Visibility = Visibility.Visible;
+            SecondaryToolPanel.Visibility = Show(props);
         EditorFormatBar.Visibility = Visibility.Visible;
         EditorGroupToolsHost.Visibility = Visibility.Visible;
         EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text");
@@ -870,45 +878,124 @@ public partial class EditorWindow : Window
             FormatOverflowPopup.IsOpen = true;
     }
 
+    private readonly Dictionary<FrameworkElement, Panel> _formatHomes = new();
+    private bool _packingFormat;
+
     /// <summary>
-    /// Keep color + size on the strip. Extras that would run through Save as…
-    /// move into the same-row overflow flyout.
+    /// Keep color + size on the strip. Pack per control so B/I/U/S stay visible
+    /// and long combos (font, arrowhead) go into the same-row overflow flyout.
+    /// Crop Apply is packed first. Budget is leftover star-column slack after
+    /// extras are collapsed, not a magic 200 DIP and not the already-grown bar.
     /// </summary>
     private void PackFormatOverflow()
     {
-        if (FormatOverflowPanel is null || ContextPanel is null || FormatOverflowBtn is null) return;
-        while (FormatOverflowPanel.Children.Count > 0)
+        if (_packingFormat || FormatOverflowPanel is null || FormatOverflowBtn is null) return;
+        if (!IsLoaded || ActualWidth < 200) return;
+        _packingFormat = true;
+        try
         {
-            var child = FormatOverflowPanel.Children[0];
-            FormatOverflowPanel.Children.RemoveAt(0);
-            ContextPanel.Children.Add(child);
+            RememberFormatHomes();
+            foreach (var kv in _formatHomes)
+            {
+                if (kv.Key.Parent == kv.Value) continue;
+                (kv.Key.Parent as Panel)?.Children.Remove(kv.Key);
+                kv.Value.Children.Add(kv.Key);
+            }
+            FormatOverflowBtn.Visibility = Visibility.Collapsed;
+
+            var candidates = FormatPackUnits()
+                .Where(u => u.IsVisible)
+                .ToList();
+            if (candidates.Count == 0) return;
+
+            double slack = MeasureFormatSlack();
+            List<FrameworkElement> overflow = WhoOverflows(candidates, slack);
+
+            foreach (FrameworkElement unit in overflow)
+            {
+                (unit.Parent as Panel)?.Children.Remove(unit);
+                FormatOverflowPanel.Children.Add(unit);
+            }
+            FormatOverflowBtn.Visibility = overflow.Count > 0
+                ? Visibility.Visible : Visibility.Collapsed;
         }
-        FormatOverflowBtn.Visibility = Visibility.Collapsed;
-        const double max = 200;
-        var overflow = new List<UIElement>();
+        catch (InvalidOperationException)
+        {
+            // Reparent during an in-flight layout pass — the next idle pack will retry.
+        }
+        finally { _packingFormat = false; }
+    }
+
+    /// <summary>
+    /// Room for extras after undo cluster, centered tools, color/size, and Save/Done.
+    /// Does not call UpdateLayout — packing can run from SizeChanged.
+    /// </summary>
+    private double MeasureFormatSlack()
+    {
+        double inner = TopToolbar is { ActualWidth: > 0 } top
+            ? top.ActualWidth
+            : Math.Max(0, ActualWidth - 24);
+        double col0 = MeasureWidth(BtnUndo?.Parent as FrameworkElement);
+        double tools = MeasureWidth(ToolPanel);
+        double right = MeasureWidth(BtnSave) + MeasureWidth(BtnDone) + 8;
+        if (ColorPanel?.Visibility == Visibility.Visible)
+            right += MeasureWidth(ColorPanel);
+        if (SizeEffectHost?.Visibility == Visibility.Visible)
+            right += MeasureWidth(SizeEffectHost);
+        double slack = inner - col0 - tools - right;
+        // Letters and Apply crop stay on the strip even if tools walk a few DIP.
+        if (TextStylePanel?.Visibility == Visibility.Visible && TextFormatButtons is not null)
+            slack = Math.Max(slack, MeasureWidth(TextFormatButtons) + 4);
+        if (CropPanel?.Visibility == Visibility.Visible)
+            slack = Math.Max(slack, 96);
+        return Math.Max(48, slack);
+    }
+
+    private static double MeasureWidth(FrameworkElement? el)
+    {
+        if (el is null || el.Visibility != Visibility.Visible) return 0;
+        if (el.ActualWidth > 1) return el.ActualWidth;
+        return el.DesiredSize.Width;
+    }
+
+    private static List<FrameworkElement> WhoOverflows(
+        List<FrameworkElement> candidates, double max)
+    {
         double used = 0;
-        foreach (UIElement child in ContextPanel.Children)
+        var overflow = new List<FrameworkElement>();
+        foreach (FrameworkElement unit in candidates)
         {
-            if (child.Visibility != Visibility.Visible) continue;
-            child.Measure(new Size(double.PositiveInfinity, 40));
-            double w = child.DesiredSize.Width;
+            double w = unit.ActualWidth > 1 ? unit.ActualWidth : unit.DesiredSize.Width;
+            if (w < 1) w = Math.Max(unit.MinWidth, 48);
             if (used + w <= max) used += w;
-            else overflow.Add(child);
+            else overflow.Add(unit);
         }
-        if (CropPanel is not null && CropPanel.Visibility == Visibility.Visible)
-        {
-            CropPanel.Measure(new Size(double.PositiveInfinity, 40));
-            if (used + CropPanel.DesiredSize.Width > max)
-                overflow.Add(CropPanel);
-        }
-        foreach (UIElement child in overflow)
-        {
-            if (child is FrameworkElement { Parent: Panel parent })
-                parent.Children.Remove(child);
-            FormatOverflowPanel.Children.Add(child);
-        }
-        FormatOverflowBtn.Visibility = FormatOverflowPanel.Children.Count > 0
-            ? Visibility.Visible : Visibility.Collapsed;
+        return overflow;
+    }
+
+    private void RememberFormatHomes()
+    {
+        foreach (FrameworkElement unit in FormatPackUnits())
+            if (!_formatHomes.ContainsKey(unit) && unit.Parent is Panel home)
+                _formatHomes[unit] = home;
+    }
+
+    private IEnumerable<FrameworkElement> FormatPackUnits()
+    {
+        if (CropPanel?.Visibility == Visibility.Visible)
+            foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
+                yield return inner;
+        if (TextStylePanel?.Visibility == Visibility.Visible)
+            foreach (FrameworkElement inner in TextStylePanel.Children.OfType<FrameworkElement>())
+            {
+                if (inner is Popup) continue;
+                yield return inner;
+            }
+        if (EraserModePanel is not null) yield return EraserModePanel;
+        if (LineStylePanel is not null) yield return LineStylePanel;
+        if (ArrowStylePanel is not null) yield return ArrowStylePanel;
+        if (StepModePanel is not null) yield return StepModePanel;
+        if (CropRatioPanel is not null) yield return CropRatioPanel;
     }
 
     private EditorTool ChromeTool()

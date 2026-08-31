@@ -143,9 +143,10 @@
                                 Content="{StaticResource SurveyIcon.Text}"/>
 
                         <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Eyedropper" Content="&#xEF3C;" Checked="OnToolChecked" ToolTip="Eyedropper"
+                                     Tag="Eyedropper" Checked="OnToolChecked" ToolTip="Eyedropper"
                                      AutomationProperties.Name="Eyedropper"
-                                     AutomationProperties.HelpText="Sample a source pixel and make it the current annotation color."/>
+                                     AutomationProperties.HelpText="Sample a source pixel and make it the current annotation color."
+                                     Content="{StaticResource SurveyIcon.Eyedropper}"/>
 
                         <RadioButton x:Name="PixelateToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Pixelate" Checked="OnToolChecked" ToolTip="Pixelate"
@@ -295,7 +296,7 @@
                                                         </WrapPanel>
                                                     </StackPanel>
                                                 </StackPanel>
-                            <Grid MinWidth="52" VerticalAlignment="Center" Margin="0,0,8,0">
+                            <Grid x:Name="SizeEffectHost" MinWidth="52" VerticalAlignment="Center" Margin="0,0,8,0">
                             <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <TextBlock x:Name="ThicknessLabel" Text="Stroke" Style="{StaticResource FieldLabel}" Margin="0,0,6,0" Visibility="Collapsed"/>
                                                         <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}"
@@ -319,8 +320,8 @@
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
                                                                 AutomationProperties.Name="Apply crop"/>
-                                                        <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" Click="OnCancelCrop"
-                                                                AutomationProperties.Name="Cancel crop"/>
+                                                        <Button Style="{StaticResource PillButtonSecondary}" Content="Don't crop" Click="OnCancelCrop"
+                                                                AutomationProperties.Name="Don't crop"/>
                                                     </StackPanel>
                                                 <StackPanel x:Name="ContextPanel" Orientation="Horizontal" VerticalAlignment="Center">
                                                     
@@ -349,12 +350,7 @@
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
-                                                                  SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
-                                                        <ComboBox x:Name="FontSizeBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
-                                                                  SelectionChanged="OnFontSizeBoxChanged" AutomationProperties.Name="Font size"
-                                                                  AutomationProperties.HelpText="Font size for text and callout labels."/>
-                                                        <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
+                                                        <StackPanel x:Name="TextFormatButtons" Orientation="Horizontal" Margin="0,0,6,0">
                                                         <Button x:Name="BoldBtn" Style="{StaticResource CompactFormatButton}" FontWeight="Bold"
                                                                 Click="OnTextBoldClick" ToolTip="Bold" AutomationProperties.Name="Bold"
                                                                 AutomationProperties.HelpText="Toggle bold on new and selected text.">
@@ -363,12 +359,7 @@
                                                         <Button x:Name="ItalicBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextItalicClick" ToolTip="Italic" AutomationProperties.Name="Italic"
                                                                 AutomationProperties.HelpText="Toggle italic on new and selected text.">
-                                                            <TextBlock Text="I" FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold"
-                                                                       Margin="2,0" RenderTransformOrigin="0.5,0.5">
-                                                                <TextBlock.RenderTransform>
-                                                                    <SkewTransform AngleX="-12"/>
-                                                                </TextBlock.RenderTransform>
-                                                            </TextBlock>
+                                                            <TextBlock Text="I" FontFamily="Georgia" FontSize="13" FontStyle="Italic" FontWeight="SemiBold"/>
                                                         </Button>
                                                         <Button x:Name="UnderlineBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextUnderlineClick" ToolTip="Underline" AutomationProperties.Name="Underline"
@@ -448,6 +439,11 @@
                                                             <ComboBoxItem Content="Middle" Tag="middle"/>
                                                             <ComboBoxItem Content="Bottom" Tag="bottom"/>
                                                         </ComboBox>
+                                                        <ComboBox x:Name="FontSizeBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
+                                                                  SelectionChanged="OnFontSizeBoxChanged" AutomationProperties.Name="Font size"
+                                                                  AutomationProperties.HelpText="Font size for text and callout labels."/>
+                                                        <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
+                                                                  SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="CropRatioPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
