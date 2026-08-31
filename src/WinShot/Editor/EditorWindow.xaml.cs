@@ -694,6 +694,7 @@ public partial class EditorWindow : Window
         UpdateCursor();
         UpdateContextPanels();
         UpdateGroupButtonChrome();
+        PaintCropChrome(true);
     }
 
     private void UpdateGroupButtonChrome()
@@ -713,6 +714,18 @@ public partial class EditorWindow : Window
         Paint(DrawGroupBtn, group == "Draw");
         Paint(ShapeGroupBtn, group == "Shape");
         Paint(TextGroupBtn, group == "Text");
+        PaintCropChrome(_tool == EditorTool.Crop);
+    }
+
+    private void PaintCropChrome(bool on)
+    {
+        if (CropUtilityBtn is null) return;
+        CropUtilityBtn.Background = on
+            ? (Brush)FindResource("HoverFillBrush")
+            : Brushes.Transparent;
+        CropUtilityBtn.Foreground = on
+            ? (Brush)FindResource("AccentBrush")
+            : (Brush)FindResource("TextPrimaryBrush");
     }
 
     private void UncheckOtherToolButtons(RadioButton selected)
@@ -759,7 +772,9 @@ public partial class EditorWindow : Window
 
         if (Has(EditorContextControls.EffectStrength))
         {
-            EffectStrengthLabel.Text = chrome == EditorTool.Blur ? "Blur" : "Pixelate";
+            EffectStrengthLabel.Visibility = Visibility.Collapsed;
+            if (EffectStrengthBox is not null)
+                EffectStrengthBox.ToolTip = chrome == EditorTool.Blur ? "Blur strength" : "Pixelate strength";
             SyncEffectStrengthButtons(chrome == EditorTool.Blur ? _blurStrength : _pixelateStrength);
         }
 

@@ -429,7 +429,8 @@ public class ThemedWindowTests
         }
 
         Assert.Null(editor.FindName("EditorStyleBar"));
-        var groupBar = (StackPanel)editor.FindName("EditorGroupBar")!;
+        var groupBar = (Grid)editor.FindName("EditorGroupBar")!;
+        var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
         var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
         var color = (StackPanel)editor.FindName("ColorPanel")!;
@@ -443,7 +444,8 @@ public class ThemedWindowTests
         var undo = (Button)editor.FindName("BtnUndo")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Center, groupBar.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Right, formatBar.HorizontalAlignment);
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");

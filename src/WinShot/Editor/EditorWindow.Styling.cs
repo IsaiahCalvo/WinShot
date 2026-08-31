@@ -298,7 +298,14 @@ public partial class EditorWindow : Window
 
     private void RestyleSelectedTextFormat()
     {
-        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
+        foreach (UIElement el in SelectionList().ToArray())
+            RestyleOneTextFormat(el);
+        UpdateSelectionVisual();
+    }
+
+    private void RestyleOneTextFormat(UIElement element)
+    {
+        if (element is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
         if (meta.Type is not (AnnotationData.TypeText or AnnotationData.TypeCallout)) return;
         var before = meta.Clone();
         var after = meta.Clone();
@@ -368,7 +375,6 @@ public partial class EditorWindow : Window
                 undo: () => ApplyTextFormat(fe, before),
                 redo: () => ApplyTextFormat(fe, after)), apply: false);
         }
-        UpdateSelectionVisual();
     }
 
     private FrameworkElement CreateTextVisual(AnnotationData a)
@@ -769,7 +775,10 @@ public partial class EditorWindow : Window
         // Fires once during XAML parse (initial Text) before the preview rect exists.
         if (_suppressHexEvents || ColorPickerPreview is null) return;
         if (ColorPickerHex.Text is string s && TryParseHexLoose(s, out var c))
+        {
             ColorPickerPreview.Fill = new SolidColorBrush(c);
+            ApplyCustomColor(c);
+        }
     }
 
     private void OnColorPickerHexKeyDown(object sender, KeyEventArgs e)

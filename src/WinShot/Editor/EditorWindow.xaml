@@ -129,8 +129,8 @@
                                                                 Click="OnCustomSwatchClick" ToolTip="Color"
                                                                 AutomationProperties.Name="Color"
                                                                 AutomationProperties.HelpText="Open the color picker.">
-                                                            <Ellipse x:Name="CurrentColorIndicator" Width="14" Height="14" Fill="{StaticResource AnnotationRedBrush}"
-                                                                     Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"
+                                                            <Ellipse x:Name="CurrentColorIndicator" Width="20" Height="20" Fill="{StaticResource AnnotationRedBrush}"
+                                                                     Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="2"
                                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                         </Button>
                                                         <TextBlock x:Name="ColorWellLabel" Text="Color" Style="{StaticResource FieldLabel}" Visibility="Collapsed"/>
@@ -271,10 +271,10 @@
 
                 <Border Height="1" Background="{StaticResource BorderBrush}" Margin="12,8,12,0"
                         Visibility="{Binding ElementName=EditorGroupBar, Path=Visibility}"/>
-                <StackPanel x:Name="EditorGroupBar" Orientation="Horizontal" Margin="0,8,0,2" Visibility="Collapsed"
-                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                <Grid x:Name="EditorGroupBar" Margin="0,8,0,2" Visibility="Collapsed"
                             AutomationProperties.Name="Group tools"
                             AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
+                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
@@ -333,8 +333,9 @@
                                      AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
                                      Content="{StaticResource SurveyIcon.Callout}"/>
                     </StackPanel>
+                    </StackPanel>
                 
-                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
@@ -456,8 +457,8 @@
                                                                   SelectionChanged="OnEraserModeChanged"
                                                                   AutomationProperties.Name="Eraser mode"
                                                                   AutomationProperties.HelpText="Partial subtracts from pen and highlighter ink. Full deletes any annotation the eraser hits.">
-                                                            <ComboBoxItem Content="Partial" Tag="Partial"/>
-                                                            <ComboBoxItem Content="Full" Tag="Full"/>
+                                                            <ComboBoxItem Content="Partial erase" Tag="Partial"/>
+                                                            <ComboBoxItem Content="Full erase" Tag="Full"/>
                                                         </ComboBox>
                                                     </StackPanel>
 
@@ -474,7 +475,7 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                                 </StackPanel>
-                </StackPanel>
+                </Grid>
 
             </StackPanel>
         </Border>
