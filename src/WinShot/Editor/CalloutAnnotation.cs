@@ -29,7 +29,7 @@ internal sealed class CalloutAnnotation : Canvas
 
     private readonly Border _box = new()
     {
-        CornerRadius = new CornerRadius(4),
+        CornerRadius = new CornerRadius(2),
         Padding = new Thickness(CalloutLayout.TextPadding),
         SnapsToDevicePixels = true,
     };
@@ -37,8 +37,8 @@ internal sealed class CalloutAnnotation : Canvas
     private readonly TextBlock _label = new()
     {
         TextWrapping = TextWrapping.Wrap,
-        FontFamily = new FontFamily("Segoe UI"),
-        FontWeight = FontWeights.SemiBold,
+        FontFamily = new FontFamily("Arial"),
+        FontWeight = FontWeights.Normal,
     };
 
     public CalloutAnnotation()

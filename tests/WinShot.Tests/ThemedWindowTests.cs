@@ -370,15 +370,12 @@ public class ThemedWindowTests
         var primary = (WrapPanel)editor.FindName("ToolPanel")!;
         var primaryOrder = primary.Children.OfType<FrameworkElement>()
             .Select(el => el.Tag as string)
-            .Where(tag => tag is "Select" or "Draw" or "Shape" or "Text" or "Pixelate" or "Spotlight")
+            .Where(tag => tag is "Pan" or "Select" or "Draw" or "Shape" or "Text" or "Eyedropper" or "Pixelate" or "Spotlight" or "Blur")
             .ToArray();
         Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
 
-        var more = (UniformGrid)editor.FindName("MoreToolPanel")!;
-        var moreOrder = more.Children.OfType<RadioButton>()
-            .Select(rb => (string)rb.Tag)
-            .ToArray();
-        Assert.Equal(EditorShellContract.MoreToolOrder, moreOrder);
+        Assert.Null(editor.FindName("MoreToolPanel"));
+        Assert.Null(editor.FindName("MoreToolsButton"));
 
         string[] namedControls =
         {
@@ -387,7 +384,7 @@ public class ThemedWindowTests
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
-            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
@@ -405,7 +402,7 @@ public class ThemedWindowTests
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
-            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnPin", "BtnCopy", "BtnCenter",
@@ -420,9 +417,9 @@ public class ThemedWindowTests
         Assert.Null(editor.FindName("DragMeHandle"));
 
         var select = (RadioButton)editor.FindName("SelectToolBtn")!;
-        var moreButton = (Button)editor.FindName("MoreToolsButton")!;
+        var pan = (RadioButton)editor.FindName("PanToolBtn")!;
         var copy = (Button)editor.FindName("BtnCopy")!;
-        foreach (Control control in new Control[] { select, moreButton, copy })
+        foreach (Control control in new Control[] { select, pan, copy })
         {
             control.ApplyTemplate();
             Assert.NotNull(control.Template.FindName("FocusRing", control));
@@ -450,7 +447,7 @@ public class ThemedWindowTests
         Assert.Same(viewport, canvasRow.Children.OfType<Grid>().First(g => g.Name == "Viewport"));
         Assert.Equal(4, Panel.GetZIndex(styleBar));
 
-        Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
+        Assert.Equal(Visibility.Visible, styleBar.Visibility);
         Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
         Assert.DoesNotContain(primary.Children.OfType<FrameworkElement>(),
             el => el.Tag as string == "Step");

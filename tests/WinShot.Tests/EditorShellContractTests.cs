@@ -10,16 +10,15 @@ public class EditorShellContractTests
     {
         Assert.Equal(new[]
         {
-            "Select", "Draw", "Shape", "Text", "Pixelate", "Spotlight",
+            "Pan", "Select", "Draw", "Shape", "Text", "Eyedropper", "Pixelate", "Spotlight", "Blur",
         }, EditorShellContract.PrimaryToolOrder);
         Assert.Equal(new[] { "Freehand", "Highlighter", "Eraser" }, EditorShellContract.DrawGroupTools);
         Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" },
             EditorShellContract.ShapeGroupTools);
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.TextGroupTools);
-        Assert.Equal(new[] { "Pan", "CurvedArrow", "Blur", "Eyedropper" },
-            EditorShellContract.MoreToolOrder);
+        Assert.Empty(EditorShellContract.MoreToolOrder);
 
-        string[] uniqueTools = new[] { "Select", "Pixelate", "Spotlight", "Crop" }
+        string[] uniqueTools = new[] { "Pan", "Select", "Eyedropper", "Pixelate", "Spotlight", "Blur", "Crop", "CurvedArrow" }
             .Concat(EditorShellContract.DrawGroupTools)
             .Concat(EditorShellContract.ShapeGroupTools)
             .Concat(EditorShellContract.TextGroupTools)

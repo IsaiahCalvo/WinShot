@@ -199,6 +199,11 @@ public partial class EditorWindow : Window
             AbortMove();
             AbortCurveHandle();
             AbortResize();
+            if (_marqueeSelecting)
+            {
+                _marqueeSelecting = false;
+                HideDragRect();
+            }
         };
         Loaded += (_, _) => FitToView();
         // Loaded can fire before the window has its final size; this catches the first
@@ -208,11 +213,7 @@ public partial class EditorWindow : Window
         // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
         // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
         // until the user takes control.
-        Viewport.SizeChanged += (_, _) =>
-        {
-            if (_pendingInitialFit) FitToView();
-            ClampStyleRail();
-        };
+        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -563,7 +564,6 @@ public partial class EditorWindow : Window
         if (IsLoaded)
         {
             UncheckOtherToolButtons(rb);
-            MoreToolsPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
             UpdateGroupButtonChrome();
@@ -591,7 +591,6 @@ public partial class EditorWindow : Window
         if (FillSolidBtn is not null) FillSolidBtn.IsChecked = true;
         if (IsLoaded)
         {
-            MoreToolsPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
             UpdateGroupButtonChrome();
@@ -609,13 +608,10 @@ public partial class EditorWindow : Window
             foreach (var rb in ShapeGroupPanel.Children.OfType<RadioButton>()) yield return rb;
         if (TextGroupPanel is not null)
             foreach (var rb in TextGroupPanel.Children.OfType<RadioButton>()) yield return rb;
-        if (MoreToolPanel is not null)
-            foreach (var rb in MoreToolPanel.Children.OfType<RadioButton>()) yield return rb;
     }
 
     private void OnDrawGroupClick(object sender, RoutedEventArgs e)
     {
-        MoreToolsPopup.IsOpen = false;
         if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Draw")
             CheckToolButton(_lastDrawTool);
         UpdateContextPanels();
@@ -624,7 +620,6 @@ public partial class EditorWindow : Window
 
     private void OnShapeGroupClick(object sender, RoutedEventArgs e)
     {
-        MoreToolsPopup.IsOpen = false;
         if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Shape")
         {
             if (_lastShapeTool == EditorTool.Rectangle && _filledRectangleMode)
@@ -638,7 +633,6 @@ public partial class EditorWindow : Window
 
     private void OnTextGroupClick(object sender, RoutedEventArgs e)
     {
-        MoreToolsPopup.IsOpen = false;
         if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Text")
             CheckToolButton(_lastTextTool);
         UpdateContextPanels();
@@ -699,9 +693,6 @@ public partial class EditorWindow : Window
                 rb.IsChecked = false;
     }
 
-    private void OnMoreToolsClick(object sender, RoutedEventArgs e) =>
-        MoreToolsPopup.IsOpen = !MoreToolsPopup.IsOpen;
-
     /// <summary>Shows the crop-ratio, text-style, step-mode, arrow-style and effect-strength controls only while their tool is active.</summary>
     private void UpdateContextPanels()
     {
@@ -753,17 +744,10 @@ public partial class EditorWindow : Window
                       CropPanel.Visibility == Visibility.Visible;
         EditorColorBar.Visibility = Show(color);
         EditorFormatBar.Visibility = Show(format);
-        EditorStyleBar.Visibility = Show(color || format);
-        ClampStyleRail();
-    }
-
-    private void ClampStyleRail()
-    {
-        if (EditorStyleBar is null || Viewport is null) return;
-        double available = Math.Max(120, Viewport.ActualHeight - 16);
-        EditorStyleBar.MaxHeight = available;
-        if (EditorStyleScroll is not null)
-            EditorStyleScroll.MaxHeight = Math.Max(100, available - 12);
+        if (SecondaryToolPanel is not null)
+            SecondaryToolPanel.Visibility = Show(color || format);
+        if (EditorStyleBar is not null)
+            EditorStyleBar.Visibility = Visibility.Visible;
     }
 
     private void SyncSizeBox()

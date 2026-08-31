@@ -19,8 +19,8 @@ public partial class EditorWindow : Window
     /// <summary>Which family of handles is currently shown.</summary>
     private enum HandleKind { None, Box, Endpoints, Crop, Callout }
 
-    private const double HandleScreenPx = 9;   // on-screen thumb size, kept constant via /_zoom
-    private const double HandleGrabPx = 11;     // screen-px grab radius for hit testing
+    private const double HandleScreenPx = 12;  // Survey cornerSize
+    private const double HandleGrabPx = 14;    // screen-px grab radius for hit testing
 
     /// <summary>
     /// Builds the handle layout for the current selection: an 8-thumb box frame for
@@ -82,18 +82,20 @@ public partial class EditorWindow : Window
         new Point(b.Left, b.Top + b.Height / 2),        // 7 L
     };
 
-    /// <summary>Callout thumbs: 0=tip, 1=knee, 2=box-TL, 3=box-BR.</summary>
+    /// <summary>Survey callout thumbs: 0=tip, 1=knee, 2=TL, 3=TR, 4=BR, 5=BL.</summary>
     private void LayoutCalloutHandles(AnnotationData meta)
     {
         if (_selected is not CalloutAnnotation callout) { HideHandles(); return; }
         var layout = callout.Layout;
         Vector off = ElementOffset(_selected);
         _handleKind = HandleKind.Callout;
-        EnsureThumbs(4);
+        EnsureThumbs(6);
         PlaceThumb(0, layout.Tip + off);
         PlaceThumb(1, layout.Knee + off);
         PlaceThumb(2, layout.Box.TopLeft + off);
-        PlaceThumb(3, layout.Box.BottomRight + off);
+        PlaceThumb(3, layout.Box.TopRight + off);
+        PlaceThumb(4, layout.Box.BottomRight + off);
+        PlaceThumb(5, layout.Box.BottomLeft + off);
         HandleLayer.Visibility = Visibility.Visible;
     }
 
@@ -136,9 +138,9 @@ public partial class EditorWindow : Window
             var thumb = new Rectangle
             {
                 Fill = new SolidColorBrush(Colors.White),
-                Stroke = (Brush)FindResource("InfoBrush"),
-                RadiusX = 1.5,
-                RadiusY = 1.5,
+                Stroke = new SolidColorBrush(Color.FromRgb(0x3B, 0x82, 0xF6)),
+                RadiusX = 2,
+                RadiusY = 2,
             };
             _handleThumbs.Add(thumb);
             HandleLayer.Children.Add(thumb);
@@ -478,8 +480,10 @@ public partial class EditorWindow : Window
         {
             0 => layout.WithTip(local),
             1 => layout.WithKnee(local),
-            2 => layout.WithBox(new Rect(local, layout.Box.BottomRight)),
-            3 => layout.WithBox(new Rect(layout.Box.TopLeft, local)),
+            2 => layout.WithBox(NewBoundsForHandle(layout.Box, 0, local)),
+            3 => layout.WithBox(NewBoundsForHandle(layout.Box, 1, local)),
+            4 => layout.WithBox(NewBoundsForHandle(layout.Box, 2, local)),
+            5 => layout.WithBox(NewBoundsForHandle(layout.Box, 3, local)),
             _ => layout,
         };
         var (head, _) = AnnotationStyle.HeadsFrom(meta);

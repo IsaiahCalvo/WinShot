@@ -26,12 +26,15 @@ internal static class EditorShellContract
 {
     public static readonly string[] PrimaryToolOrder =
     {
+        "Pan",
         "Select",
         "Draw",
         "Shape",
         "Text",
+        "Eyedropper",
         "Pixelate",
         "Spotlight",
+        "Blur",
     };
 
     public static readonly string[] DrawGroupTools = { "Freehand", "Highlighter", "Eraser" };
@@ -39,13 +42,7 @@ internal static class EditorShellContract
         { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" };
     public static readonly string[] TextGroupTools = { "Text", "Callout" };
 
-    public static readonly string[] MoreToolOrder =
-    {
-        "Pan",
-        "CurvedArrow",
-        "Blur",
-        "Eyedropper",
-    };
+    public static readonly string[] MoreToolOrder = Array.Empty<string>();
 
     // 3 leading actions + grouped annotation tools + Pixelate/Spotlight + More + Save/Done.
     // Counter lives in the Shapes sub-strip, matching Survey. Groups collapse the individual

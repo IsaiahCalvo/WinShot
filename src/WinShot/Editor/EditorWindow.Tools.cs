@@ -71,6 +71,8 @@ public partial class EditorWindow : Window
             visual.Tag = meta;
         }
         PushAddElement(visual);
+        Select(visual);
+        UpdateSelectionVisual();
     }
 
     private void PlaceText(Point pos) => PlaceTextInBox(new Rect(pos.X, pos.Y, 0, 0));

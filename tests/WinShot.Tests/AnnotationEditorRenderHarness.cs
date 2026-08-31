@@ -81,11 +81,9 @@ public class AnnotationEditorRenderHarness
                 RenderElementToPng(colorPicker.Child, Path.Combine(outDir, "editor-after-color-picker.png"));
                 colorPicker.IsOpen = false;
 
-                var moreTools = (System.Windows.Controls.Primitives.Popup)editor.FindName("MoreToolsPopup")!;
-                moreTools.IsOpen = true;
+                var styleBar = (Border)editor.FindName("EditorStyleBar")!;
                 Pump(4);
-                RenderElementToPng(moreTools.Child, Path.Combine(outDir, "editor-after-more-tools-overflow.png"));
-                moreTools.IsOpen = false;
+                RenderElementToPng(styleBar, Path.Combine(outDir, "editor-after-more-tools-overflow.png"));
 
                 UIElement selectedRectangle = AddRepresentativeAnnotations(canvas);
                 Pump(6);

@@ -96,6 +96,11 @@ public partial class EditorWindow : Window
             DragResize(e.GetPosition(AnnotationCanvas));
             return;
         }
+        if (_marqueeSelecting)
+        {
+            ShowDragRect(new Rect(_marqueeStart, e.GetPosition(AnnotationCanvas)), dim: false);
+            return;
+        }
         if (_movingSelection && _selected is not null)
         {
             var posMove = e.GetPosition(AnnotationCanvas);
@@ -187,6 +192,11 @@ public partial class EditorWindow : Window
         if (_activeHandle >= 0)
         {
             EndResize();
+            return;
+        }
+        if (_marqueeSelecting)
+        {
+            EndMarquee(e.GetPosition(AnnotationCanvas));
             return;
         }
         if (_movingSelection)
@@ -650,13 +660,20 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------------------------ select tool
 
+    private bool _marqueeSelecting;
+    private Point _marqueeStart;
+
     private void SelectMouseDown(Point pos, MouseButtonEventArgs e)
     {
         CommitText();
         var hit = HitTestAnnotation(pos);
         if (hit is null)
         {
-            Select(null); // clicking empty space (or the backdrop) deselects
+            Select(null);
+            _marqueeSelecting = true;
+            _marqueeStart = pos;
+            Viewport.CaptureMouse();
+            e.Handled = true;
             return;
         }
         // Double-click any text annotation (Plain/Bold/Huge TextBlock, Outline Path, or
@@ -682,6 +699,26 @@ public partial class EditorWindow : Window
         _moveTotal = new Vector();
         Viewport.CaptureMouse();
         e.Handled = true;
+    }
+
+    private void EndMarquee(Point pos)
+    {
+        _marqueeSelecting = false;
+        HideDragRect();
+        Viewport.ReleaseMouseCapture();
+        var box = new Rect(_marqueeStart, pos);
+        if (box.Width < 4 && box.Height < 4)
+            return;
+        UIElement? hit = null;
+        foreach (UIElement child in AnnotationCanvas.Children)
+        {
+            if (child is TextBox) continue;
+            if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
+            if (GetCanvasBounds(fe).IntersectsWith(box))
+                hit = fe;
+        }
+        if (hit is not null)
+            Select(hit);
     }
 
     private void EndMove()
@@ -744,6 +781,13 @@ public partial class EditorWindow : Window
         {
             SelectionRect.Visibility = Visibility.Collapsed;
             HideHandles();
+            return;
+        }
+        if (_selected is CalloutAnnotation callout)
+        {
+            SelectionRect.Visibility = Visibility.Collapsed;
+            UpdateSelectionHandles();
+            _ = callout;
             return;
         }
         Rect b = GetCanvasBounds(_selected);
