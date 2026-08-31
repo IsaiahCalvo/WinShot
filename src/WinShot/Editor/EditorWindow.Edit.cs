@@ -833,17 +833,23 @@ public partial class EditorWindow : Window
     /// <summary>Copy the flattened image, then close — screenshot-editor Done.</summary>
     private async void OnDone(object sender, RoutedEventArgs e)
     {
-        if (!_sourceOperationActive)
+        if (_sourceOperationActive)
         {
-            try
-            {
-                var flat = Flatten();
-                await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Editor done-copy failed", ex);
-            }
+            ThemedMessageDialog.Show(this, "Still working",
+                "Wait for the image to finish loading, then click Done.");
+            return;
+        }
+        try
+        {
+            var flat = Flatten();
+            await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor done-copy failed", ex);
+            ThemedMessageDialog.Show(this, "Couldn't copy",
+                "WinShot could not copy the edited image. The editor will stay open so you can save or try again.");
+            return;
         }
         Close();
     }

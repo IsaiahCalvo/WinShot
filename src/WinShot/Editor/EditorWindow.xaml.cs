@@ -493,8 +493,8 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Fit mode keeps the combo on Fit/Fit Width even when the computed scale
-    /// happens to be 100%. Free zoom selects an exact preset when there is one.
+    /// One zoom control. Fit/Fit Width live in the combo; the percent label is
+    /// only for free zoom that is not a named preset.
     /// </summary>
     private void SyncZoomPresetChrome()
     {
@@ -512,10 +512,15 @@ public partial class EditorWindow : Window
                 _ => null,
             },
         };
-        if (want is null) return;
+        ZoomLabel.Visibility = want is null ? Visibility.Visible : Visibility.Collapsed;
         _syncingZoomBox = true;
         try
         {
+            if (want is null)
+            {
+                ZoomBox.SelectedIndex = -1;
+                return;
+            }
             foreach (ComboBoxItem item in ZoomBox.Items.OfType<ComboBoxItem>())
                 if ((item.Content as string) == want)
                 {
@@ -818,8 +823,8 @@ public partial class EditorWindow : Window
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(chrome == EditorTool.Rectangle);
         SyncColorWellIndicator();
-        ThicknessLabel.Text = "Size";
-        ThicknessLabel.Visibility = Visibility.Collapsed;
+        ThicknessLabel.Text = chrome == EditorTool.Callout ? "Stroke" : "Size";
+        ThicknessLabel.Visibility = Show(chrome == EditorTool.Callout);
         if (Has(EditorContextControls.Thickness))
             SyncSizeBox();
         if (Has(EditorContextControls.TextStyle))
@@ -1308,6 +1313,7 @@ public partial class EditorWindow : Window
 
     private void OnAlignMenuClick(object sender, RoutedEventArgs e)
     {
+        PaintAlignCells();
         if (AlignPopup is not null)
             AlignPopup.IsOpen = true;
     }
@@ -1356,7 +1362,8 @@ public partial class EditorWindow : Window
         void Paint(Button? btn, bool on)
         {
             if (btn is null) return;
-            btn.Background = on ? (Brush)FindResource("HoverFillBrush") : Brushes.Transparent;
+            btn.Background = on ? (Brush)FindResource("PressedFillBrush") : Brushes.Transparent;
+            btn.BorderBrush = on ? (Brush)FindResource("BorderStrongBrush") : Brushes.Transparent;
         }
         Paint(BoldBtn, _textBold || _textStyle == TextStyle.Bold);
         Paint(ItalicBtn, _textItalic);
@@ -1367,6 +1374,21 @@ public partial class EditorWindow : Window
             foreach (ComboBoxItem item in FontFamilyBox.Items.OfType<ComboBoxItem>())
                 if (item.Tag is string f && f == _textFontFamily)
                     FontFamilyBox.SelectedItem = item;
+        }
+        PaintAlignCells();
+    }
+
+    private void PaintAlignCells()
+    {
+        if (AlignGrid is null) return;
+        string current = $"{_textAlign}|{_textVerticalAlign}";
+        var onBorder = (Brush)FindResource("BorderStrongBrush");
+        var onFill = (Brush)FindResource("PressedFillBrush");
+        foreach (Button cell in AlignGrid.Children.OfType<Button>())
+        {
+            bool on = cell.Tag as string == current;
+            cell.Background = on ? onFill : Brushes.Transparent;
+            cell.BorderBrush = on ? onBorder : Brushes.Transparent;
         }
     }
 

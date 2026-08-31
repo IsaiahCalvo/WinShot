@@ -48,37 +48,71 @@
                         <Popup x:Name="MoreChromePopup" PlacementTarget="{Binding ElementName=MoreChromeBtn}"
                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
-                                    Effect="{StaticResource FloatingShadow}">
-                                <StackPanel Orientation="Horizontal">
-                                    <Button x:Name="RotateCcwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
-                                            ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"
+                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
+                                    Effect="{StaticResource FloatingShadow}" MinWidth="220">
+                                <StackPanel>
+                                    <Button x:Name="RotateCcwBtn" Style="{StaticResource ChromeMenuItem}" Click="OnRotateCcw"
+                                            ToolTip="Rotate 90° counter-clockwise"
                                             AutomationProperties.Name="Rotate counter-clockwise"
-                                            AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise."/>
-                                    <Button x:Name="FlipHorizontalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE13C;"
-                                            ToolTip="Flip horizontal" Click="OnFlipHorizontal" AutomationProperties.Name="Flip horizontal"
-                                            AutomationProperties.HelpText="Flip the source image from left to right."/>
-                                    <Button x:Name="FlipVerticalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE174;"
-                                            ToolTip="Flip vertical" Click="OnFlipVertical" AutomationProperties.Name="Flip vertical"
-                                            AutomationProperties.HelpText="Flip the source image from top to bottom."/>
-                                    <Button x:Name="ResizeImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE740;"
-                                            ToolTip="Resize the image…" Click="OnResizeImage" AutomationProperties.Name="Resize image"
-                                            AutomationProperties.HelpText="Open local source-image resize controls."/>
-                                    <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xEE71;"
-                                            Click="OnAddImage" ToolTip="Add screenshot or image…"
+                                            AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE7AD;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Rotate counter-clockwise" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="FlipHorizontalBtn" Style="{StaticResource ChromeMenuItem}" Click="OnFlipHorizontal"
+                                            ToolTip="Flip horizontal" AutomationProperties.Name="Flip horizontal"
+                                            AutomationProperties.HelpText="Flip the source image from left to right.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE13C;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Flip horizontal" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="FlipVerticalBtn" Style="{StaticResource ChromeMenuItem}" Click="OnFlipVertical"
+                                            ToolTip="Flip vertical" AutomationProperties.Name="Flip vertical"
+                                            AutomationProperties.HelpText="Flip the source image from top to bottom.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE174;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Flip vertical" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="ResizeImageBtn" Style="{StaticResource ChromeMenuItem}" Click="OnResizeImage"
+                                            ToolTip="Resize the image…" AutomationProperties.Name="Resize image"
+                                            AutomationProperties.HelpText="Open local source-image resize controls.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE740;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Resize image…" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="AddImageBtn" Style="{StaticResource ChromeMenuItem}" Click="OnAddImage"
+                                            ToolTip="Add screenshot or image…"
                                             AutomationProperties.Name="Add screenshot or image"
-                                            AutomationProperties.HelpText="Insert one or more local image files as movable annotations."/>
-                                    <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE790;"
-                                            Click="OnAddBackground" ToolTip="Add background"
-                                            AutomationProperties.Name="Add background"
-                                            AutomationProperties.HelpText="Open the local background composer with the current edited image."/>
+                                            AutomationProperties.HelpText="Insert one or more local image files as movable annotations.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xEE71;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Add image…" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="AddBackgroundBtn" Style="{StaticResource ChromeMenuItem}" Click="OnAddBackground"
+                                            ToolTip="Add background" AutomationProperties.Name="Add background"
+                                            AutomationProperties.HelpText="Open the local background composer with the current edited image.">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE790;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Add background" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                             </Border>
                         </Popup>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <StackPanel x:Name="ToolPanel" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid Grid.Column="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel x:Name="ToolPanel" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <RadioButton x:Name="PanToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Pan" Checked="OnToolChecked" ToolTip="Pan"
                                      AutomationProperties.Name="Pan"
@@ -134,7 +168,7 @@
                                      AutomationProperties.HelpText="Line and arrow already bend from the midpoint handle."/>
 
                     </StackPanel>
-                        <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
@@ -241,7 +275,7 @@
                                                                                  Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
                                                                                  ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
                                                                         <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource PillButtonPrimary}"
-                                                                                Content="Use" Click="OnColorPickerApply" AutomationProperties.Name="Use color"/>
+                                                                                Content="Apply" Click="OnColorPickerApply" AutomationProperties.Name="Apply color"/>
                                                                     </Grid>
                                                                     <DockPanel Margin="0,8,0,0">
                                                                         <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" DockPanel.Dock="Left" Margin="0,0,8,0"/>
@@ -268,7 +302,7 @@
 
                                                 
                         </StackPanel>
-                    </StackPanel>
+                    </Grid>
 
                     <StackPanel Grid.Column="2" HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
@@ -353,7 +387,7 @@
                     </StackPanel>
                     </StackPanel>
                 
-                    <StackPanel x:Name="EditorFormatBar" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="8,0,8,0">
+                    <StackPanel x:Name="EditorFormatBar" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="12,0,8,0">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
@@ -414,7 +448,7 @@
                                                                 Click="OnTextItalicClick" ToolTip="Italic" AutomationProperties.Name="Italic"
                                                                 AutomationProperties.HelpText="Toggle italic on new and selected text.">
                                                             <TextBlock Text="I" FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold"
-                                                                       RenderTransformOrigin="0.5,0.5">
+                                                                       Margin="2,0" RenderTransformOrigin="0.5,0.5">
                                                                 <TextBlock.RenderTransform>
                                                                     <SkewTransform AngleX="-12"/>
                                                                 </TextBlock.RenderTransform>
@@ -442,16 +476,34 @@
                                                             <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
                                                                     BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
                                                                     Effect="{StaticResource FloatingShadow}">
-                                                                <UniformGrid Columns="3" Width="84" Height="84">
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|top" Click="OnAlignCellClick" ToolTip="Top left"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|top" Click="OnAlignCellClick" ToolTip="Top center"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|top" Click="OnAlignCellClick" ToolTip="Top right"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|middle" Click="OnAlignCellClick" ToolTip="Middle left"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|middle" Click="OnAlignCellClick" ToolTip="Middle center"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|middle" Click="OnAlignCellClick" ToolTip="Middle right"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|bottom" Click="OnAlignCellClick" ToolTip="Bottom left"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|bottom" Click="OnAlignCellClick" ToolTip="Bottom center"/>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|bottom" Click="OnAlignCellClick" ToolTip="Bottom right"/>
+                                                                <UniformGrid x:Name="AlignGrid" Columns="3" Width="84" Height="84">
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|top" Click="OnAlignCellClick" ToolTip="Top left">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Top"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|top" Click="OnAlignCellClick" ToolTip="Top center">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Top"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|top" Click="OnAlignCellClick" ToolTip="Top right">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Top"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|middle" Click="OnAlignCellClick" ToolTip="Middle left">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Center"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|middle" Click="OnAlignCellClick" ToolTip="Middle center">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|middle" Click="OnAlignCellClick" ToolTip="Middle right">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|bottom" Click="OnAlignCellClick" ToolTip="Bottom left">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Bottom"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|bottom" Click="OnAlignCellClick" ToolTip="Bottom center">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Bottom"/></Grid>
+                                                                    </Button>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|bottom" Click="OnAlignCellClick" ToolTip="Bottom right">
+                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom"/></Grid>
+                                                                    </Button>
                                                                 </UniformGrid>
                                                             </Border>
                                                         </Popup>
@@ -536,18 +588,18 @@
         </Border>
 
         <Grid Grid.Row="1">
-                <Grid x:Name="Viewport" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
+                <Grid x:Name="Viewport" Background="{StaticResource SurfaceBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
               AutomationProperties.Name="Annotation canvas"
               AutomationProperties.HelpText="Source-resolution image canvas. Hold Space or middle-drag to pan; Ctrl+mouse wheel zooms.">
             <Canvas x:Name="SurfaceHost">
                 <Border x:Name="CaptureShadow" IsHitTestVisible="False" Visibility="Collapsed"
-                        Background="{StaticResource WindowBgBrush}"
-                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                        Background="#FF000000"
+                        BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1">
                     <Border.Effect>
-                        <DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270"
-                                          Opacity="0.55" Color="#FF000000" RenderingBias="Performance"/>
+                        <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270"
+                                          Opacity="0.80" Color="#FF000000" RenderingBias="Performance"/>
                     </Border.Effect>
                 </Border>
                 <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
@@ -591,7 +643,8 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
                     <TextBlock x:Name="ZoomLabel" Text="100%" Style="{StaticResource ValueLabel}" MinWidth="42"
-                               TextAlignment="Right" Margin="4,0,8,0" ToolTip="Zoom level"/>
+                               TextAlignment="Right" Margin="4,0,8,0" ToolTip="Zoom level"
+                               Visibility="Collapsed"/>
                     <ComboBox x:Name="ZoomBox" Style="{StaticResource DarkComboBox}" Width="84" SelectedIndex="0"
                               SelectionChanged="OnZoomPresetChanged" ToolTip="Jump to a zoom level"
                               AutomationProperties.Name="Zoom level">

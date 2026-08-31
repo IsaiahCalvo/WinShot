@@ -446,7 +446,7 @@ public class ThemedWindowTests
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Right, formatBar.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Left, formatBar.HorizontalAlignment);
         Assert.Equal(1, Grid.GetColumn(groupTools));
         Assert.Equal(2, Grid.GetColumn(formatBar));
         Assert.Equal(3, groupBar.ColumnDefinitions.Count);
@@ -528,6 +528,11 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "72");
         Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
+        Assert.Equal("Stroke", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
+        Point calloutTools = groupTools.TranslatePoint(new Point(0, 0), groupBar);
+        Point calloutExtras = formatBar.TranslatePoint(new Point(0, 0), groupBar);
+        Assert.True(calloutTools.X + groupTools.ActualWidth <= calloutExtras.X + 0.5,
+            $"Callout tools overlap format extras: tools={calloutTools.X}+{groupTools.ActualWidth} extras={calloutExtras.X}");
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.NotNull(editor.FindName("AlignMenuBtn"));
@@ -722,7 +727,7 @@ public class ThemedWindowTests
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
         Assert.Equal("Fit", (zoomBox.SelectedItem as ComboBoxItem)?.Content);
-        Assert.NotEqual("100%", zoomLabel.Text);
+        Assert.Equal(Visibility.Collapsed, zoomLabel.Visibility);
     }
 
     private static void PinSmoke(EditorWindow editor)
