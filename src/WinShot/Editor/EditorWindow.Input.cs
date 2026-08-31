@@ -81,6 +81,7 @@ public partial class EditorWindow : Window
             ViewTranslate.X += p.X - _panLast.X;
             ViewTranslate.Y += p.Y - _panLast.Y;
             _panLast = p;
+            SyncCaptureShadow();
             return;
         }
         if (_draggingCurveHandle && _pendingCurve is not null)

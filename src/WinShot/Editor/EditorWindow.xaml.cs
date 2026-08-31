@@ -475,14 +475,7 @@ public partial class EditorWindow : Window
     {
         ZoomLabel.Text = $"{Math.Round(_zoom * 100)}%";
         SyncZoomPresetChrome();
-        if (CaptureShadow is not null && _sourceWidth > 0 && _sourceHeight > 0)
-        {
-            CaptureShadow.Visibility = Visibility.Visible;
-            CaptureShadow.Width = Math.Max(1, _sourceWidth * _zoom);
-            CaptureShadow.Height = Math.Max(1, _sourceHeight * _zoom);
-            Canvas.SetLeft(CaptureShadow, ViewTranslate.X);
-            Canvas.SetTop(CaptureShadow, ViewTranslate.Y);
-        }
+        SyncCaptureShadow();
         // Keep helper chrome hairline-thin on screen at any zoom; the dash
         // pattern is in thickness units, so it compensates automatically.
         double t = 1.5 / _zoom;
@@ -512,15 +505,18 @@ public partial class EditorWindow : Window
                 _ => null,
             },
         };
-        ZoomLabel.Visibility = want is null ? Visibility.Visible : Visibility.Collapsed;
         _syncingZoomBox = true;
         try
         {
             if (want is null)
             {
+                ZoomBox.Visibility = Visibility.Collapsed;
+                ZoomLabel.Visibility = Visibility.Visible;
                 ZoomBox.SelectedIndex = -1;
                 return;
             }
+            ZoomBox.Visibility = Visibility.Visible;
+            ZoomLabel.Visibility = Visibility.Collapsed;
             foreach (ComboBoxItem item in ZoomBox.Items.OfType<ComboBoxItem>())
                 if ((item.Content as string) == want)
                 {
@@ -529,6 +525,16 @@ public partial class EditorWindow : Window
                 }
         }
         finally { _syncingZoomBox = false; }
+    }
+
+    private void SyncCaptureShadow()
+    {
+        if (CaptureShadow is null || _sourceWidth < 1 || _sourceHeight < 1) return;
+        CaptureShadow.Visibility = Visibility.Visible;
+        CaptureShadow.Width = Math.Max(1, _sourceWidth * _zoom);
+        CaptureShadow.Height = Math.Max(1, _sourceHeight * _zoom);
+        Canvas.SetLeft(CaptureShadow, ViewTranslate.X);
+        Canvas.SetTop(CaptureShadow, ViewTranslate.Y);
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();
@@ -547,12 +553,14 @@ public partial class EditorWindow : Window
         {
             // Shift+wheel scrolls horizontally.
             ViewTranslate.X += e.Delta;
+            SyncCaptureShadow();
         }
         else
         {
             // Plain wheel scrolls vertically — the natural way to move through a tall scrolling
             // capture. (Ctrl+wheel still zooms.)
             ViewTranslate.Y += e.Delta;
+            SyncCaptureShadow();
         }
         e.Handled = true;
     }

@@ -533,6 +533,11 @@ public class ThemedWindowTests
         Point calloutExtras = formatBar.TranslatePoint(new Point(0, 0), groupBar);
         Assert.True(calloutTools.X + groupTools.ActualWidth <= calloutExtras.X + 0.5,
             $"Callout tools overlap format extras: tools={calloutTools.X}+{groupTools.ActualWidth} extras={calloutExtras.X}");
+        var save = (Button)editor.FindName("BtnSave")!;
+        Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
+        Point saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
+            $"Callout Stroke sits on Save as…: stroke={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.NotNull(editor.FindName("AlignMenuBtn"));
