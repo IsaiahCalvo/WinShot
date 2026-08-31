@@ -101,6 +101,19 @@ public partial class EditorWindow : Window
             ShowDragRect(new Rect(_marqueeStart, e.GetPosition(AnnotationCanvas)), dim: false);
             return;
         }
+        if (_movingCalloutBox && _selected is CalloutAnnotation boxCallout)
+        {
+            var posMove = e.GetPosition(AnnotationCanvas);
+            var d = posMove - _moveLast;
+            if (d.X != 0 || d.Y != 0)
+            {
+                NudgeCalloutBox(boxCallout, d.X, d.Y);
+                _moveTotal += d;
+                _moveLast = posMove;
+                UpdateSelectionVisual();
+            }
+            return;
+        }
         if (_movingSelection && _selected is not null)
         {
             var posMove = e.GetPosition(AnnotationCanvas);
@@ -200,7 +213,7 @@ public partial class EditorWindow : Window
             EndMarquee(e.GetPosition(AnnotationCanvas));
             return;
         }
-        if (_movingSelection)
+        if (_movingSelection || _movingCalloutBox)
         {
             EndMove();
             return;
@@ -375,7 +388,13 @@ public partial class EditorWindow : Window
                     return;
                 }
             }
-            _movingSelection = true;
+            if (existing is CalloutAnnotation existingCallout && CalloutBoxContains(existingCallout, pos))
+            {
+                _movingCalloutBox = true;
+                _calloutBoxBefore = existingCallout.Layout;
+            }
+            else
+                _movingSelection = true;
             _moveLast = pos;
             _moveTotal = new Vector();
             Viewport.CaptureMouse();
@@ -761,7 +780,15 @@ public partial class EditorWindow : Window
             ToggleSelection(hit);
         else if (!(_selection.Count > 1 && _selection.Contains(hit)))
             Select(hit);
-        _movingSelection = _selection.Contains(hit);
+        _movingCalloutBox = false;
+        _calloutBoxBefore = null;
+        if (!additive && hit is CalloutAnnotation calloutHit && CalloutBoxContains(calloutHit, pos))
+        {
+            _movingCalloutBox = true;
+            _calloutBoxBefore = calloutHit.Layout;
+        }
+        else
+            _movingSelection = _selection.Contains(hit);
         _moveLast = pos;
         _moveTotal = new Vector();
         Viewport.CaptureMouse();
@@ -792,6 +819,23 @@ public partial class EditorWindow : Window
 
     private void EndMove()
     {
+        if (_movingCalloutBox)
+        {
+            _movingCalloutBox = false;
+            Viewport.ReleaseMouseCapture();
+            if (_selected is CalloutAnnotation c && _calloutBoxBefore is CalloutLayout before
+                && _moveTotal.Length >= 0.5)
+            {
+                var after = c.Layout;
+                Push(new EditorAction(
+                    undo: () => ApplyCalloutLayout(c, before),
+                    redo: () => ApplyCalloutLayout(c, after)), apply: false);
+            }
+            _calloutBoxBefore = null;
+            _moveTotal = new Vector();
+            UpdateSelectionVisual();
+            return;
+        }
         if (!_movingSelection) return;
         _movingSelection = false;
         Viewport.ReleaseMouseCapture();
@@ -819,6 +863,16 @@ public partial class EditorWindow : Window
 
     private void AbortMove()
     {
+        if (_movingCalloutBox)
+        {
+            _movingCalloutBox = false;
+            if (_selected is CalloutAnnotation c && _calloutBoxBefore is CalloutLayout before)
+                ApplyCalloutLayout(c, before);
+            _calloutBoxBefore = null;
+            _moveTotal = new Vector();
+            UpdateSelectionVisual();
+            return;
+        }
         if (!_movingSelection) return;
         _movingSelection = false;
         if (_selected is not null && (_moveTotal.X != 0 || _moveTotal.Y != 0))
@@ -828,6 +882,42 @@ public partial class EditorWindow : Window
         }
         _moveTotal = new Vector();
         UpdateSelectionVisual();
+    }
+
+    private static bool CalloutBoxContains(CalloutAnnotation callout, Point pos)
+    {
+        Vector off = ElementOffset(callout);
+        var b = callout.Layout.Box;
+        b.Offset(off.X, off.Y);
+        return b.Contains(pos);
+    }
+
+    private void NudgeCalloutBox(CalloutAnnotation callout, double dx, double dy)
+    {
+        var box = callout.Layout.Box;
+        ApplyCalloutLayout(callout, callout.Layout.WithBox(
+            new Rect(box.X + dx, box.Y + dy, box.Width, box.Height)));
+    }
+
+    private void ApplyCalloutLayout(CalloutAnnotation callout, CalloutLayout layout)
+    {
+        if (callout.Tag is not AnnotationData meta) return;
+        var (head, _) = AnnotationStyle.HeadsFrom(meta);
+        var stroke = meta.Color is string hex && TryParseColor(hex, out var sc) ? sc : Colors.White;
+        var fill = AnnotationStyle.FillColorFrom(meta, stroke);
+        callout.Apply(layout, meta.Text ?? callout.Text, stroke, fill, meta.Thickness ?? 2, head,
+            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
+        ApplyTextFormat(callout, meta);
+        var data = AnnotationData.ForCallout(layout, meta.Text ?? "", stroke, fill,
+            meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
+        data.Tx = meta.Tx;
+        data.Ty = meta.Ty;
+        data.Bold = meta.Bold;
+        data.Italic = meta.Italic;
+        data.Underline = meta.Underline;
+        data.Strike = meta.Strike;
+        data.Align = meta.Align;
+        callout.Tag = data;
     }
 
     private IReadOnlyList<UIElement> SelectionList()

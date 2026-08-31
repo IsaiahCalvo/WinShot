@@ -38,11 +38,12 @@ public partial class EditorWindow : Window
         Canvas.SetTop(tb, layout.Box.Y);
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
+        tb.AcceptsReturn = true;
+        tb.TextWrapping = TextWrapping.Wrap;
         tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
         tb.PreviewKeyDown += (_, ev) =>
         {
-            if (ev.Key == Key.Enter) { CommitCalloutText(); ev.Handled = true; }
-            else if (ev.Key == Key.Escape)
+            if (ev.Key == Key.Escape)
             {
                 AnnotationCanvas.Children.Remove(tb);
                 _activeText = null;
@@ -58,8 +59,35 @@ public partial class EditorWindow : Window
         var tb = _activeText;
         if (tb is null || tb.Tag is not CalloutAnnotation visual) return;
         _activeText = null;
-        string text = tb.Text?.Trim() ?? "";
+        string text = tb.Text ?? "";
         AnnotationCanvas.Children.Remove(tb);
+        visual.Label.Visibility = Visibility.Visible;
+
+        if (_calloutReediting)
+        {
+            _calloutReediting = false;
+            string previous = _calloutReeditBefore;
+            if (string.IsNullOrWhiteSpace(text))
+                text = previous;
+            visual.Text = text;
+            if (visual.Tag is AnnotationData re)
+            {
+                var before = re.Clone();
+                re.Text = text;
+                visual.Tag = re;
+                if (before.Text != text)
+                {
+                    Push(new EditorAction(
+                        undo: () => { visual.Text = previous; if (visual.Tag is AnnotationData u) { u.Text = previous; visual.Tag = u; } },
+                        redo: () => { visual.Text = text; if (visual.Tag is AnnotationData r) { r.Text = text; visual.Tag = r; } }),
+                        apply: false);
+                }
+            }
+            Select(visual);
+            UpdateSelectionVisual();
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(text))
         {
             AnnotationCanvas.Children.Remove(visual);
@@ -140,6 +168,9 @@ public partial class EditorWindow : Window
         tb.TextWrapping = TextWrapping.Wrap;
         Canvas.SetLeft(tb, layout.Box.X + off.X);
         Canvas.SetTop(tb, layout.Box.Y + off.Y);
+        visual.Label.Visibility = Visibility.Collapsed;
+        _calloutReediting = true;
+        _calloutReeditBefore = meta.Text ?? visual.Text ?? "";
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
@@ -149,6 +180,8 @@ public partial class EditorWindow : Window
             {
                 AnnotationCanvas.Children.Remove(tb);
                 _activeText = null;
+                visual.Label.Visibility = Visibility.Visible;
+                _calloutReediting = false;
                 ev.Handled = true;
             }
         };
@@ -364,8 +397,15 @@ public partial class EditorWindow : Window
         return inter is not null && !inter.IsEmpty() && inter.Bounds.Width * inter.Bounds.Height > 0.25;
     }
 
-    private static bool HitsEraser(FrameworkElement fe, Geometry cut)
+    private bool HitsEraser(FrameworkElement fe, Geometry cut)
     {
+        if (fe is CalloutAnnotation)
+        {
+            var bounds = GetCanvasBounds(fe);
+            var box = new RectangleGeometry(bounds);
+            var inter = Geometry.Combine(box, cut, GeometryCombineMode.Intersect, Transform.Identity);
+            return inter is not null && !inter.IsEmpty() && inter.Bounds.Width > 0 && inter.Bounds.Height > 0;
+        }
         Rect b = new(
             Canvas.GetLeft(fe) + (double.IsNaN(Canvas.GetLeft(fe)) ? 0 : 0),
             Canvas.GetTop(fe) + (double.IsNaN(Canvas.GetTop(fe)) ? 0 : 0),
@@ -376,9 +416,9 @@ public partial class EditorWindow : Window
         b.Y = (double.IsNaN(Canvas.GetTop(fe)) ? 0 : Canvas.GetTop(fe)) + off.Y;
         if (fe is Path p && p.Data is not null)
             return GeometriesOverlap(p.Data, cut, fe);
-        var box = new RectangleGeometry(b);
-        var inter = Geometry.Combine(box, cut, GeometryCombineMode.Intersect, Transform.Identity);
-        return inter is not null && !inter.IsEmpty() && inter.Bounds.Width > 0 && inter.Bounds.Height > 0;
+        var hit = new RectangleGeometry(b);
+        var overlap = Geometry.Combine(hit, cut, GeometryCombineMode.Intersect, Transform.Identity);
+        return overlap is not null && !overlap.IsEmpty() && overlap.Bounds.Width > 0 && overlap.Bounds.Height > 0;
     }
 
     private void PlaceStep(Point pos)

@@ -146,6 +146,10 @@ public partial class EditorWindow : Window
     private Point _dragStart;
     private Shape? _activeShape;
     private CalloutAnnotation? _previewCallout;
+    private bool _calloutReediting;
+    private string _calloutReeditBefore = "";
+    private bool _movingCalloutBox;
+    private CalloutLayout? _calloutBoxBefore;
     private TextBox? _activeText;
     private SD.Rectangle? _pendingCrop;
 

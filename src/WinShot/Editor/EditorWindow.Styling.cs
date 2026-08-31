@@ -341,6 +341,7 @@ public partial class EditorWindow : Window
             callout.Apply(layout, after.Text ?? callout.Text, stroke, fill,
                 after.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(after),
                 after.FontSize ?? 16, after.FontFamily);
+            ApplyTextFormat(fe, after);
             fe.Tag = after;
             Push(new EditorAction(
                 undo: () =>

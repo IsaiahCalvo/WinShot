@@ -61,6 +61,15 @@ public class CalloutLayoutTests
     }
 
     [Fact]
+    public void FromParts_PushesKneeOutsideTheBox()
+    {
+        var layout = CalloutLayout.FromParts(
+            new Point(0, 20), new Point(70, 30), new Rect(40, 10, 80, 40));
+        Assert.False(layout.Box.Contains(layout.Knee));
+        Assert.True(CalloutLayout.DistanceToBoxEdge(layout.Knee, layout.Box) >= CalloutLayout.MinKneeToBoxEdge - 0.01);
+    }
+
+    [Fact]
     public void FromParts_EnforcesMinimumBoxSize()
     {
         var layout = CalloutLayout.FromParts(

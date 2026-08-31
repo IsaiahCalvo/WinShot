@@ -75,8 +75,16 @@ internal sealed class CalloutAnnotation : Canvas
         var strokeBrush = new SolidColorBrush(stroke);
         var fillBrush = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill);
 
+        var dir = layout.Tip - layout.Knee;
+        if (dir.Length < 0.5) dir = layout.Tip - layout.Join;
+        if (dir.Length < 0.5) dir = new Vector(1, 0);
+        dir.Normalize();
+        double headSize = Math.Max(8, Math.Max(4, thickness) * 3);
+        double trim = head == ArrowheadStyle.None ? 0 : headSize / 3;
+        Point shaftTip = layout.Tip - dir * trim;
+
         var leader = new PathGeometry();
-        var fig = new PathFigure { StartPoint = layout.Tip, IsFilled = false };
+        var fig = new PathFigure { StartPoint = shaftTip, IsFilled = false };
         fig.Segments.Add(new LineSegment(layout.Knee, true));
         fig.Segments.Add(new LineSegment(layout.Join, true));
         leader.Figures.Add(fig);
@@ -129,6 +137,7 @@ internal sealed class CalloutAnnotation : Canvas
         _label.Foreground = strokeBrush;
         _label.TextWrapping = TextWrapping.Wrap;
         _label.IsHitTestVisible = true;
+        _label.Visibility = Visibility.Visible;
     }
 
     public string Text

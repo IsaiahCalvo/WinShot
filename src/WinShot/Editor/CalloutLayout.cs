@@ -14,6 +14,7 @@ internal readonly record struct CalloutLayout(Point Tip, Point Knee, Rect Box, P
     public const double MinBoxHeight = 28;
     public const double MinDrag = 4;
     public const double MinKneeToTip = 11;
+    public const double MinKneeToBoxEdge = 6;
     public const double CreateKneeLength = 40;
     public const double TextPadding = 6;
 
@@ -51,6 +52,7 @@ internal readonly record struct CalloutLayout(Point Tip, Point Knee, Rect Box, P
         double w = Math.Abs(box.Width);
         double h = Math.Abs(box.Height);
         box = new Rect(x, y, Math.Max(MinBoxWidth, w), Math.Max(MinBoxHeight, h));
+        knee = PushKneeOutside(tip, knee, box);
         Point join = ClosestBorderPoint(knee, box);
         if ((knee - tip).Length < MinKneeToTip)
         {
@@ -58,6 +60,7 @@ internal readonly record struct CalloutLayout(Point Tip, Point Knee, Rect Box, P
             if (v.Length < 0.5) v = new Vector(MinKneeToTip, 0);
             v.Normalize();
             knee = tip + v * MinKneeToTip;
+            knee = PushKneeOutside(tip, knee, box);
             join = ClosestBorderPoint(knee, box);
         }
         return new CalloutLayout(tip, knee, box, join);
@@ -83,6 +86,42 @@ internal readonly record struct CalloutLayout(Point Tip, Point Knee, Rect Box, P
         }
 
         return new Point(cx, cy);
+    }
+
+    /// <summary>
+    /// Survey stacked-handle rule: the knee stays outside the box by at least
+    /// one handle radius so thumbs never sit on the fill and the leader never
+    /// cuts through the rectangle.
+    /// </summary>
+    public static Point PushKneeOutside(Point tip, Point knee, Rect box)
+    {
+        Point join = ClosestBorderPoint(knee, box);
+        bool inside = knee.X >= box.Left && knee.X <= box.Right &&
+                      knee.Y >= box.Top && knee.Y <= box.Bottom;
+        double dist = DistanceToBoxEdge(knee, box);
+        if (!inside && dist >= MinKneeToBoxEdge)
+            return knee;
+        Vector outward;
+        if (Math.Abs(join.X - box.Left) <= 0.51) outward = new Vector(-1, 0);
+        else if (Math.Abs(join.X - box.Right) <= 0.51) outward = new Vector(1, 0);
+        else if (Math.Abs(join.Y - box.Top) <= 0.51) outward = new Vector(0, -1);
+        else outward = new Vector(0, 1);
+        _ = tip;
+        return join + outward * MinKneeToBoxEdge;
+    }
+
+    public static double DistanceToBoxEdge(Point point, Rect box)
+    {
+        if (point.X >= box.Left && point.X <= box.Right &&
+            point.Y >= box.Top && point.Y <= box.Bottom)
+        {
+            return Math.Min(
+                Math.Min(point.X - box.Left, box.Right - point.X),
+                Math.Min(point.Y - box.Top, box.Bottom - point.Y));
+        }
+        double dx = Math.Max(0, Math.Max(box.Left - point.X, point.X - box.Right));
+        double dy = Math.Max(0, Math.Max(box.Top - point.Y, point.Y - box.Bottom));
+        return Math.Sqrt(dx * dx + dy * dy);
     }
 
     public Rect Bounds()
