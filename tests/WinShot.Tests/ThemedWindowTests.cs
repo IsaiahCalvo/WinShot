@@ -651,6 +651,11 @@ public class ThemedWindowTests
         Point cropSave = save.TranslatePoint(new Point(0, 0), editor);
         Assert.True(applyOrigin.X + applyCrop.ActualWidth <= cropSave.X + 0.5,
             $"Apply crop sits on Save as…: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
+        Assert.Contains(overflowPanel.Children.OfType<FrameworkElement>(),
+            el => el.Name == "CropCancelBtn");
+        Point toolsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor);
+        Assert.True(applyOrigin.X + 0.5 >= toolsRight.X - 8,
+            $"Apply crop covers tools: apply={applyOrigin.X:0} toolsRight={toolsRight.X:0}");
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;

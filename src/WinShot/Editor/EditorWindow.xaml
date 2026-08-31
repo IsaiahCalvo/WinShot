@@ -320,7 +320,7 @@
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
                                                                 AutomationProperties.Name="Apply crop"/>
-                                                        <Button Style="{StaticResource PillButtonSecondary}" Content="Don't crop" Click="OnCancelCrop"
+                                                        <Button x:Name="CropCancelBtn" Style="{StaticResource PillButtonSecondary}" Content="Don't crop" Click="OnCancelCrop"
                                                                 AutomationProperties.Name="Don't crop"/>
                                                     </StackPanel>
                                                 <StackPanel x:Name="ContextPanel" Orientation="Horizontal" VerticalAlignment="Center">

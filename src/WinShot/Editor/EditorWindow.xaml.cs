@@ -947,7 +947,15 @@ public partial class EditorWindow : Window
         if (TextStylePanel?.Visibility == Visibility.Visible && TextFormatButtons is not null)
             slack = Math.Max(slack, MeasureWidth(TextFormatButtons) + 4);
         if (CropPanel?.Visibility == Visibility.Visible)
-            slack = Math.Max(slack, 96);
+        {
+            double applyW = 0;
+            foreach (FrameworkElement child in CropPanel.Children.OfType<FrameworkElement>())
+                if (AutomationProperties.GetName(child) == "Apply crop")
+                    applyW = MeasureWidth(child);
+            if (applyW > 0)
+                slack = Math.Min(slack, applyW + 8);
+            slack = Math.Max(slack, applyW > 0 ? applyW + 4 : 96);
+        }
         return Math.Max(48, slack);
     }
 
@@ -984,7 +992,8 @@ public partial class EditorWindow : Window
     {
         if (CropPanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
-                yield return inner;
+                if (AutomationProperties.GetName(inner) == "Apply crop")
+                    yield return inner;
         if (TextStylePanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in TextStylePanel.Children.OfType<FrameworkElement>())
             {
@@ -996,6 +1005,10 @@ public partial class EditorWindow : Window
         if (ArrowStylePanel is not null) yield return ArrowStylePanel;
         if (StepModePanel is not null) yield return StepModePanel;
         if (CropRatioPanel is not null) yield return CropRatioPanel;
+        if (CropPanel?.Visibility == Visibility.Visible)
+            foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
+                if (AutomationProperties.GetName(inner) != "Apply crop")
+                    yield return inner;
     }
 
     private EditorTool ChromeTool()
