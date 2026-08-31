@@ -140,4 +140,47 @@
                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"/>
         </Grid>
     </Viewbox>
+
+    <Viewbox x:Key="SurveyIcon.Undo" x:Shared="False" Width="16" Height="16">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9,5 L4,9 L9,13"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M4,9 H14 C17.3,9 20,11.7 20,15 C20,18.3 17.3,21 14,21 H10"/>
+        </Canvas>
+    </Viewbox>
+
+    <Viewbox x:Key="SurveyIcon.Redo" x:Shared="False" Width="16" Height="16">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M15,5 L20,9 L15,13"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M20,9 H10 C6.7,9 4,11.7 4,15 C4,18.3 6.7,21 10,21 H14"/>
+        </Canvas>
+    </Viewbox>
+
+    <Viewbox x:Key="SurveyIcon.Blur" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}"
+                  Data="M12,3 C12,3 6.5,10.5 6.5,15 A5.5,5.5 0 0 0 17.5,15 C17.5,10.5 12,3 12,3 Z"/>
+        </Canvas>
+    </Viewbox>
+
+    <Viewbox x:Key="SurveyIcon.Pixelate" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.5" Canvas.Top="3" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="16" Canvas.Top="3" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="3" Canvas.Top="9.5" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="9.5" Canvas.Top="9.5" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="16" Canvas.Top="9.5" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="16" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.5" Canvas.Top="16" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="16" Canvas.Top="16" Width="5" Height="5"/>
+        </Canvas>
+    </Viewbox>
+
+    <Viewbox x:Key="SurveyIcon.Spotlight" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9,3 H15 L17,8 H7 Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M7,8 L4,21 H20 L17,8"/>
+            <Ellipse Style="{StaticResource SurveyIconFill}" Canvas.Left="10" Canvas.Top="12" Width="4" Height="4"/>
+        </Canvas>
+    </Viewbox>
 </ResourceDictionary>

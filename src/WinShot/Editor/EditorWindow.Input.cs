@@ -107,7 +107,8 @@ public partial class EditorWindow : Window
             var d = posMove - _moveLast;
             if (d.X != 0 || d.Y != 0)
             {
-                MoveElement(_selected, d.X, d.Y);
+                foreach (UIElement el in SelectionList())
+                    MoveElement(el, d.X, d.Y);
                 _moveTotal += d;
                 _moveLast = posMove;
                 UpdateSelectionVisual();
@@ -721,8 +722,12 @@ public partial class EditorWindow : Window
                 return;
             }
         }
-        Select(hit);
-        _movingSelection = true;
+        bool additive = (Keyboard.Modifiers & (ModifierKeys.Shift | ModifierKeys.Control)) != 0;
+        if (additive)
+            ToggleSelection(hit);
+        else if (!(_selection.Count > 1 && _selection.Contains(hit)))
+            Select(hit);
+        _movingSelection = _selection.Contains(hit);
         _moveLast = pos;
         _moveTotal = new Vector();
         Viewport.CaptureMouse();
@@ -737,16 +742,18 @@ public partial class EditorWindow : Window
         var box = new Rect(_marqueeStart, pos);
         if (box.Width < 4 && box.Height < 4)
             return;
-        UIElement? hit = null;
+        var hits = new List<UIElement>();
         foreach (UIElement child in AnnotationCanvas.Children)
         {
             if (child is TextBox) continue;
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
             if (GetCanvasBounds(fe).IntersectsWith(box))
-                hit = fe;
+                hits.Add(fe);
         }
-        if (hit is not null)
-            Select(hit);
+        if (hits.Count == 1)
+            Select(hits[0]);
+        else if (hits.Count > 1)
+            SelectMany(hits);
     }
 
     private void EndMove()
@@ -756,15 +763,16 @@ public partial class EditorWindow : Window
         Viewport.ReleaseMouseCapture();
         if (_selected is not null && _moveTotal.Length >= 0.5)
         {
-            UIElement el = _selected;
+            var moved = SelectionList().ToArray();
             double dx = _moveTotal.X, dy = _moveTotal.Y;
             // The move was applied live during the drag, so record it without re-applying.
             Push(new EditorAction(
-                undo: () => MoveElement(el, -dx, -dy),
-                redo: () => MoveElement(el, dx, dy)), apply: false);
+                undo: () => { foreach (UIElement el in moved) MoveElement(el, -dx, -dy); },
+                redo: () => { foreach (UIElement el in moved) MoveElement(el, dx, dy); }), apply: false);
         }
         _moveTotal = new Vector();
-        RefreshHighlighterFill(_selected);
+        foreach (UIElement el in SelectionList())
+            RefreshHighlighterFill(el);
     }
 
     private void RefreshHighlighterFill(UIElement? el)
@@ -780,9 +788,19 @@ public partial class EditorWindow : Window
         if (!_movingSelection) return;
         _movingSelection = false;
         if (_selected is not null && (_moveTotal.X != 0 || _moveTotal.Y != 0))
-            MoveElement(_selected, -_moveTotal.X, -_moveTotal.Y);
+        {
+            foreach (UIElement el in SelectionList())
+                MoveElement(el, -_moveTotal.X, -_moveTotal.Y);
+        }
         _moveTotal = new Vector();
         UpdateSelectionVisual();
+    }
+
+    private IReadOnlyList<UIElement> SelectionList()
+    {
+        if (_selection.Count > 0) return _selection;
+        if (_selected is null) return Array.Empty<UIElement>();
+        return new[] { _selected };
     }
 
     private void Select(UIElement? element)
@@ -791,7 +809,49 @@ public partial class EditorWindow : Window
         // committing it as one undo entry before the selection moves on.
         if (_opacityElement is not null && !ReferenceEquals(_opacityElement, element))
             CommitOpacityGesture();
+        _selection.Clear();
         _selected = element;
+        if (element is not null)
+            _selection.Add(element);
+        UpdateSelectionVisual();
+        if (IsLoaded)
+        {
+            SyncChromeFromSelection();
+            UpdateContextPanels();
+        }
+    }
+
+    private void SelectMany(IReadOnlyList<UIElement> elements)
+    {
+        if (_opacityElement is not null)
+            CommitOpacityGesture();
+        _selection.Clear();
+        foreach (UIElement el in elements)
+            if (!_selection.Contains(el))
+                _selection.Add(el);
+        _selected = _selection.Count > 0 ? _selection[^1] : null;
+        UpdateSelectionVisual();
+        if (IsLoaded)
+        {
+            SyncChromeFromSelection();
+            UpdateContextPanels();
+        }
+    }
+
+    private void ToggleSelection(UIElement element)
+    {
+        if (_opacityElement is not null && !ReferenceEquals(_opacityElement, element))
+            CommitOpacityGesture();
+        if (_selection.Contains(element))
+        {
+            _selection.Remove(element);
+            _selected = _selection.Count > 0 ? _selection[^1] : null;
+        }
+        else
+        {
+            _selection.Add(element);
+            _selected = element;
+        }
         UpdateSelectionVisual();
         if (IsLoaded)
         {
@@ -808,6 +868,31 @@ public partial class EditorWindow : Window
         {
             SelectionRect.Visibility = Visibility.Collapsed;
             UpdateCropAdjustHandles();
+            return;
+        }
+        if (_selection.Count > 1)
+        {
+            Rect union = Rect.Empty;
+            foreach (UIElement el in _selection)
+            {
+                if (!AnnotationCanvas.Children.Contains(el)) continue;
+                Rect bEl = GetCanvasBounds(el);
+                union = union.IsEmpty ? bEl : Rect.Union(union, bEl);
+            }
+            if (union.IsEmpty)
+            {
+                SelectionRect.Visibility = Visibility.Collapsed;
+                HideHandles();
+                return;
+            }
+            double padMany = 3 / _zoom;
+            union.Inflate(padMany, padMany);
+            Canvas.SetLeft(SelectionRect, union.X);
+            Canvas.SetTop(SelectionRect, union.Y);
+            SelectionRect.Width = union.Width;
+            SelectionRect.Height = union.Height;
+            SelectionRect.Visibility = Visibility.Visible;
+            HideHandles();
             return;
         }
         if (_selected is null || !AnnotationCanvas.Children.Contains(_selected))

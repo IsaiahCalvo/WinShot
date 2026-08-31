@@ -145,8 +145,10 @@ public partial class EditorWindow : Window
     private TextBox? _activeText;
     private SD.Rectangle? _pendingCrop;
 
-    // Selection state (Select tool).
+    // Selection state (Select tool). _selected is the primary (format chrome);
+    // _selection holds every marquee/shift-selected annotation, including primary.
     private UIElement? _selected;
+    private readonly List<UIElement> _selection = new();
     private bool _movingSelection;
     private Point _moveLast;   // content coords
     private Vector _moveTotal; // accumulated drag delta for the undo record
@@ -713,7 +715,7 @@ public partial class EditorWindow : Window
 
         ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
         ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
-        FillPanel.Visibility = Show(Has(EditorContextControls.Fill));
+        FillPanel.Visibility = Visibility.Collapsed;
         OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
         EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
@@ -728,6 +730,7 @@ public partial class EditorWindow : Window
             CloudStyleItem.Visibility = Show(chrome == EditorTool.Rectangle);
         SyncColorWellIndicator();
         ThicknessLabel.Text = "Size";
+        ThicknessLabel.Visibility = Visibility.Collapsed;
         if (Has(EditorContextControls.Thickness))
             SyncSizeBox();
         if (Has(EditorContextControls.TextStyle))
@@ -748,7 +751,7 @@ public partial class EditorWindow : Window
 
         bool color = Has(EditorContextControls.Color);
         bool size = Has(EditorContextControls.Thickness);
-        bool extras = Has(EditorContextControls.Fill) || Has(EditorContextControls.ArrowStyle) ||
+        bool extras = Has(EditorContextControls.ArrowStyle) ||
                       Has(EditorContextControls.EffectStrength) || Has(EditorContextControls.TextStyle) ||
                       Has(EditorContextControls.CropRatio) || Has(EditorContextControls.StepMode) ||
                       Has(EditorContextControls.LineStyle) || Has(EditorContextControls.EraserMode) ||
@@ -759,8 +762,6 @@ public partial class EditorWindow : Window
         if (SecondaryToolPanel is not null)
             SecondaryToolPanel.Visibility = Show(color || size);
         EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text" || extras);
-        if (EditorStyleBar is not null)
-            EditorStyleBar.Visibility = Visibility.Visible;
     }
 
     private EditorTool ChromeTool()

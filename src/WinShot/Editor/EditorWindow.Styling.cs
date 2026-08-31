@@ -306,11 +306,67 @@ public partial class EditorWindow : Window
         after.Align = _textAlign;
         after.VerticalAlign = _textVerticalAlign;
         after.FontSize = _textFontSize;
-        ApplyTextFormat(fe, after);
-        Push(new EditorAction(
-            undo: () => ApplyTextFormat(fe, before),
-            redo: () => ApplyTextFormat(fe, after)), apply: false);
+        after.Style = _textStyle.ToString();
+        if (meta.Type == AnnotationData.TypeText)
+        {
+            if (_textStyle == TextStyle.Huge && before.Style != nameof(TextStyle.Huge))
+                after.FontSize = AnnotationStyle.ClampTextSize(_textFontSize * 2.2);
+            else if (_textStyle != TextStyle.Huge && before.Style == nameof(TextStyle.Huge))
+                after.FontSize = AnnotationStyle.ClampTextSize(_textFontSize / 2.2);
+            var beforeEl = fe;
+            var afterEl = CreateTextVisual(after);
+            CopyPlacement(beforeEl, afterEl);
+            ReplaceAnnotation(beforeEl, afterEl);
+            Push(new EditorAction(
+                undo: () => ReplaceAnnotation(afterEl, beforeEl),
+                redo: () => ReplaceAnnotation(beforeEl, afterEl)), apply: false);
+        }
+        else
+        {
+            ApplyTextFormat(fe, after);
+            Push(new EditorAction(
+                undo: () => ApplyTextFormat(fe, before),
+                redo: () => ApplyTextFormat(fe, after)), apply: false);
+        }
         UpdateSelectionVisual();
+    }
+
+    private FrameworkElement CreateTextVisual(AnnotationData a)
+    {
+        Enum.TryParse(a.Style, out TextStyle style);
+        Color stroke = a.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White;
+        Color fill = AnnotationStyle.FillColorFrom(a, stroke);
+        double fontSize = a.FontSize is double fs && fs > 0 ? fs : 16;
+        double? boxW = a.Rect is { Length: >= 4 } rect ? rect[2] : null;
+        double? boxH = a.Rect is { Length: >= 4 } box ? box[3] : null;
+        var label = AnnotationFactory.CreateStyledTextLabel(
+            a.Text ?? "", new SolidColorBrush(stroke), fontSize, style,
+            a.FontFamily ?? "Segoe UI", a.Bold == true || style == TextStyle.Bold,
+            a.Italic == true, a.Underline == true, a.Strike == true,
+            AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
+            boxW, boxH, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a));
+        label.Tag = a;
+        return label;
+    }
+
+    private static void CopyPlacement(FrameworkElement from, FrameworkElement to)
+    {
+        Canvas.SetLeft(to, Canvas.GetLeft(from));
+        Canvas.SetTop(to, Canvas.GetTop(from));
+        to.RenderTransform = from.RenderTransform is TranslateTransform t
+            ? new TranslateTransform(t.X, t.Y)
+            : from.RenderTransform;
+    }
+
+    private void ReplaceAnnotation(UIElement oldEl, UIElement newEl)
+    {
+        int i = AnnotationCanvas.Children.IndexOf(oldEl);
+        AnnotationCanvas.Children.Remove(oldEl);
+        if (i < 0) AnnotationCanvas.Children.Add(newEl);
+        else AnnotationCanvas.Children.Insert(Math.Min(i, AnnotationCanvas.Children.Count), newEl);
+        if (ReferenceEquals(_selected, oldEl)) _selected = newEl;
+        int si = _selection.IndexOf(oldEl);
+        if (si >= 0) _selection[si] = newEl;
     }
 
     private static void ApplyTextFormat(FrameworkElement fe, AnnotationData meta)
@@ -366,7 +422,10 @@ public partial class EditorWindow : Window
         if (_syncingContext) return;
         if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item &&
             item.Tag is string tag && Enum.TryParse(tag, out TextStyle style))
+        {
             _textStyle = style;
+            if (IsLoaded) RestyleSelectedTextFormat();
+        }
     }
 
     // -------------------------------------------------- arrow style (parity tail)

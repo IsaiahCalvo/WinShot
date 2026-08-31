@@ -428,7 +428,7 @@ public class ThemedWindowTests
             Assert.True(control.IsTabStop);
         }
 
-        var styleBar = (Border)editor.FindName("EditorStyleBar")!;
+        Assert.Null(editor.FindName("EditorStyleBar"));
         var groupBar = (StackPanel)editor.FindName("EditorGroupBar")!;
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
         var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
@@ -440,15 +440,16 @@ public class ThemedWindowTests
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
         var sizeBox = (ComboBox)editor.FindName("SizeBox")!;
         var viewport = (Grid)editor.FindName("Viewport")!;
-        var canvasRow = Assert.IsType<Grid>(styleBar.Parent);
+        var undo = (Button)editor.FindName("BtnUndo")!;
+        var topToolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Center, groupBar.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Left, styleBar.HorizontalAlignment);
-        Assert.Contains(canvasRow.Children.OfType<FrameworkElement>(), el => el.Name == "Viewport");
-        Assert.Same(viewport, canvasRow.Children.OfType<Grid>().First(g => g.Name == "Viewport"));
-        Assert.Equal(4, Panel.GetZIndex(styleBar));
+        Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
+        Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
+            "Rotate must live next to Crop, not over the image.");
+        Assert.DoesNotContain(((Grid)viewport.Parent).Children.OfType<FrameworkElement>(),
+            el => el.Name is "EditorStyleBar");
 
-        Assert.Equal(Visibility.Visible, styleBar.Visibility);
         Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
         Assert.DoesNotContain(primary.Children.OfType<FrameworkElement>(),
             el => el.Tag as string == "Step");
@@ -509,7 +510,7 @@ public class ThemedWindowTests
         ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, color.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
-        Assert.Equal(Visibility.Visible, fill.Visibility);
+        Assert.Equal(Visibility.Collapsed, fill.Visibility);
 
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, effects.Visibility);
@@ -524,6 +525,46 @@ public class ThemedWindowTests
         var toolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.True(toolbar.ActualWidth <= editor.ActualWidth);
         Assert.True(primary.ActualHeight <= 42, $"Primary tools wrapped at minimum width: {primary.ActualHeight}");
+
+        MarqueeSelectsEveryIntersectingAnnotation(editor);
+    }
+
+    private static bool IsLogicalDescendant(DependencyObject root, DependencyObject child)
+    {
+        for (DependencyObject? d = child; d is not null; d = LogicalTreeHelper.GetParent(d))
+            if (ReferenceEquals(d, root)) return true;
+        return false;
+    }
+
+    private static void MarqueeSelectsEveryIntersectingAnnotation(EditorWindow editor)
+    {
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        canvas.Children.Clear();
+        var a = new System.Windows.Shapes.Rectangle { Width = 40, Height = 40, Fill = Brushes.Red };
+        var b = new System.Windows.Shapes.Rectangle { Width = 40, Height = 40, Fill = Brushes.Blue };
+        Canvas.SetLeft(a, 10); Canvas.SetTop(a, 10);
+        Canvas.SetLeft(b, 80); Canvas.SetTop(b, 10);
+        a.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
+        b.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
+        canvas.Children.Add(a);
+        canvas.Children.Add(b);
+        editor.UpdateLayout();
+
+        typeof(EditorWindow).GetField("_marqueeStart",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(editor, new Point(0, 0));
+        typeof(EditorWindow).GetMethod("EndMarquee",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { new Point(140, 60) });
+
+        var selection = (System.Collections.IList)typeof(EditorWindow).GetField("_selection",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(editor)!;
+        Assert.Equal(2, selection.Count);
+        canvas.Children.Clear();
+        typeof(EditorWindow).GetMethod("Select",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { null! });
     }
 
     private static void ApplyBlurUndoRedoSmoke(EditorWindow editor)

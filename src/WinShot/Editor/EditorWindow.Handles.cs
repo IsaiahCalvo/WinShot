@@ -794,15 +794,30 @@ public partial class EditorWindow : Window
     private void DeleteSelected()
     {
         if (_selected is null || _movingSelection) return;
-        UIElement el = _selected;
+        var items = SelectionList()
+            .Select(el => (Element: el, Index: AnnotationCanvas.Children.IndexOf(el)))
+            .Where(t => t.Index >= 0)
+            .OrderBy(t => t.Index)
+            .ToArray();
+        if (items.Length == 0) return;
         Select(null);
+        foreach (var item in items)
+            AnnotationCanvas.Children.Remove(item.Element);
         Push(new EditorAction(
             undo: () =>
             {
-                if (!AnnotationCanvas.Children.Contains(el))
-                    AnnotationCanvas.Children.Add(el);
+                foreach (var item in items)
+                    if (!AnnotationCanvas.Children.Contains(item.Element))
+                    {
+                        int insert = Math.Min(item.Index, AnnotationCanvas.Children.Count);
+                        AnnotationCanvas.Children.Insert(insert, item.Element);
+                    }
             },
-            redo: () => AnnotationCanvas.Children.Remove(el)));
+            redo: () =>
+            {
+                foreach (var item in items)
+                    AnnotationCanvas.Children.Remove(item.Element);
+            }), apply: false);
     }
 
     /// <summary>Where to move the selected annotation in the z-order (child index of AnnotationCanvas).</summary>
@@ -878,12 +893,21 @@ public partial class EditorWindow : Window
     private void NudgeSelected(double dx, double dy)
     {
         if (_selected is null || _movingSelection || _draggingCurveHandle) return;
-        UIElement el = _selected;
-        MoveElement(el, dx, dy);
+        var moved = SelectionList().ToArray();
+        foreach (UIElement el in moved)
+            MoveElement(el, dx, dy);
         UpdateSelectionVisual();
         Push(new EditorAction(
-            undo: () => { MoveElement(el, -dx, -dy); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
-            redo: () => { MoveElement(el, dx, dy); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); }),
+            undo: () =>
+            {
+                foreach (UIElement el in moved) MoveElement(el, -dx, -dy);
+                UpdateSelectionVisual();
+            },
+            redo: () =>
+            {
+                foreach (UIElement el in moved) MoveElement(el, dx, dy);
+                UpdateSelectionVisual();
+            }),
             apply: false);
     }
 

@@ -24,14 +24,33 @@
                     <StackPanel Grid.Column="0" HorizontalAlignment="Left" Orientation="Horizontal" VerticalAlignment="Center">
                         <RadioButton x:Name="CropUtilityBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Crop" Content="&#xE7A8;" Checked="OnToolChecked"
-                                     ToolTip="Crop &amp; resize (C)"
+                                     ToolTip="Crop (C)"
                                      AutomationProperties.Name="Crop and resize"
-                                     AutomationProperties.HelpText="Select Crop with C. Resize image remains in More image actions."/>
-                        <Button x:Name="AddImageBtn" Style="{StaticResource ToolIconButton}" Content="&#xEE71;"
+                                     AutomationProperties.HelpText="Select Crop with C. Rotate, flip, and resize sit next to Crop."/>
+                        <Button x:Name="RotateCcwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
+                                ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"
+                                AutomationProperties.Name="Rotate counter-clockwise"
+                                AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise."/>
+                        <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
+                                RenderTransformOrigin="0.5,0.5" ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
+                                AutomationProperties.Name="Rotate clockwise"
+                                AutomationProperties.HelpText="Rotate the source image 90 degrees clockwise.">
+                            <Button.RenderTransform><ScaleTransform ScaleX="-1"/></Button.RenderTransform>
+                        </Button>
+                        <Button x:Name="FlipHorizontalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE13C;"
+                                ToolTip="Flip horizontal" Click="OnFlipHorizontal" AutomationProperties.Name="Flip horizontal"
+                                AutomationProperties.HelpText="Flip the source image from left to right."/>
+                        <Button x:Name="FlipVerticalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE174;"
+                                ToolTip="Flip vertical" Click="OnFlipVertical" AutomationProperties.Name="Flip vertical"
+                                AutomationProperties.HelpText="Flip the source image from top to bottom."/>
+                        <Button x:Name="ResizeImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE740;"
+                                ToolTip="Resize the image…" Click="OnResizeImage" AutomationProperties.Name="Resize image"
+                                AutomationProperties.HelpText="Open local source-image resize controls."/>
+                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xEE71;"
                                 Click="OnAddImage" ToolTip="Add screenshot or image…"
                                 AutomationProperties.Name="Add screenshot or image"
                                 AutomationProperties.HelpText="Insert one or more local image files as movable annotations."/>
-                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource ToolIconButton}" Content="&#xE790;"
+                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE790;"
                                 Click="OnAddBackground" ToolTip="Add background"
                                 AutomationProperties.Name="Add background"
                                 AutomationProperties.HelpText="Open the local background composer with the current edited image."/>
@@ -39,6 +58,15 @@
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="ToolPanel" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Button x:Name="BtnUndo" Style="{StaticResource CompactToolIconButton}"
+                                ToolTip="Undo (Ctrl+Z)" Click="OnUndo" IsEnabled="False"
+                                AutomationProperties.Name="Undo" AutomationProperties.HelpText="Undo the last action. Shortcut Ctrl+Z."
+                                Content="{StaticResource SurveyIcon.Undo}"/>
+                        <Button x:Name="BtnRedo" Style="{StaticResource CompactToolIconButton}"
+                                ToolTip="Redo (Ctrl+Y)" Click="OnRedo" IsEnabled="False"
+                                AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y."
+                                Content="{StaticResource SurveyIcon.Redo}"/>
+                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <RadioButton x:Name="PanToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Pan" Checked="OnToolChecked" ToolTip="Pan"
                                      AutomationProperties.Name="Pan"
@@ -74,17 +102,20 @@
                                      AutomationProperties.HelpText="Sample a source pixel and make it the current annotation color."/>
 
                         <RadioButton x:Name="PixelateToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Pixelate" Content="&#xE80A;" Checked="OnToolChecked" ToolTip="Pixelate"
+                                     Tag="Pixelate" Checked="OnToolChecked" ToolTip="Pixelate"
                                      AutomationProperties.Name="Pixelate"
-                                     AutomationProperties.HelpText="Apply a randomized local mosaic redaction to a dragged region."/>
+                                     AutomationProperties.HelpText="Apply a randomized local mosaic redaction to a dragged region."
+                                     Content="{StaticResource SurveyIcon.Pixelate}"/>
                         <RadioButton x:Name="SpotlightToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Spotlight" Content="&#xE8FB;" Checked="OnToolChecked" ToolTip="Spotlight"
+                                     Tag="Spotlight" Checked="OnToolChecked" ToolTip="Spotlight"
                                      AutomationProperties.Name="Spotlight"
-                                     AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."/>
+                                     AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."
+                                     Content="{StaticResource SurveyIcon.Spotlight}"/>
                         <RadioButton x:Name="BlurToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Blur" Content="&#xE7E6;" Checked="OnToolChecked" ToolTip="Blur (B)"
+                                     Tag="Blur" Checked="OnToolChecked" ToolTip="Blur (B)"
                                      AutomationProperties.Name="Blur"
-                                     AutomationProperties.HelpText="Apply a smooth local blur to a dragged region. Shortcut B."/>
+                                     AutomationProperties.HelpText="Apply a smooth local blur to a dragged region. Shortcut B."
+                                     Content="{StaticResource SurveyIcon.Blur}"/>
                         <RadioButton x:Name="CurvedArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="CurvedArrow" Checked="OnToolChecked" Visibility="Collapsed"
                                      ToolTip="Curved arrow" AutomationProperties.Name="Curved arrow"
@@ -469,39 +500,6 @@
         </Border>
 
         <Grid Grid.Row="1">
-                                <Border x:Name="EditorStyleBar" Style="{StaticResource FloatingToolbar}"
-                        HorizontalAlignment="Left" VerticalAlignment="Top"
-                        Margin="12,10,0,12" Panel.ZIndex="4"
-                        AutomationProperties.Name="Image actions"
-                        AutomationProperties.HelpText="Rotate, flip, resize, undo, and redo.">
-                    <StackPanel>
-                        <Button x:Name="RotateCcwBtn" Style="{StaticResource ToolIconButton}" Content="&#xE7AD;"
-                                ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"
-                                AutomationProperties.Name="Rotate counter-clockwise"
-                                AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise."/>
-                        <Button x:Name="RotateCwBtn" Style="{StaticResource ToolIconButton}" Content="&#xE7AD;"
-                                RenderTransformOrigin="0.5,0.5" ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
-                                AutomationProperties.Name="Rotate clockwise"
-                                AutomationProperties.HelpText="Rotate the source image 90 degrees clockwise.">
-                            <Button.RenderTransform><ScaleTransform ScaleX="-1"/></Button.RenderTransform>
-                        </Button>
-                        <Button x:Name="FlipHorizontalBtn" Style="{StaticResource ToolIconButton}" Content="&#xE13C;"
-                                ToolTip="Flip horizontal" Click="OnFlipHorizontal" AutomationProperties.Name="Flip horizontal"
-                                AutomationProperties.HelpText="Flip the source image from left to right."/>
-                        <Button x:Name="FlipVerticalBtn" Style="{StaticResource ToolIconButton}" Content="&#xE174;"
-                                ToolTip="Flip vertical" Click="OnFlipVertical" AutomationProperties.Name="Flip vertical"
-                                AutomationProperties.HelpText="Flip the source image from top to bottom."/>
-                        <Button x:Name="ResizeImageBtn" Style="{StaticResource ToolIconButton}" Content="&#xE740;"
-                                ToolTip="Resize the image…" Click="OnResizeImage" AutomationProperties.Name="Resize image"
-                                AutomationProperties.HelpText="Open local source-image resize controls."/>
-                        <Button x:Name="BtnUndo" Style="{StaticResource ToolIconButton}" Content="&#xE7A7;"
-                                ToolTip="Undo (Ctrl+Z)" Click="OnUndo" IsEnabled="False"
-                                AutomationProperties.Name="Undo" AutomationProperties.HelpText="Undo the last action. Shortcut Ctrl+Z."/>
-                        <Button x:Name="BtnRedo" Style="{StaticResource ToolIconButton}" Content="&#xE7A6;"
-                                ToolTip="Redo (Ctrl+Y)" Click="OnRedo" IsEnabled="False"
-                                AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y."/>
-                    </StackPanel>
-                </Border>
                 <Grid x:Name="Viewport" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
