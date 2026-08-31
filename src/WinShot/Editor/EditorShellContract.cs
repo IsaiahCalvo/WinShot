@@ -78,7 +78,7 @@ internal static class EditorShellContract
         EditorTool.Text =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.TextStyle | EditorContextControls.Opacity |
-            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
+            EditorContextControls.FillStrokeTabs,
         EditorTool.Callout =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity |

@@ -132,6 +132,9 @@ public partial class EditorWindow : Window
 
     // View state (zoom/pan). _zoom mirrors ViewScale so math never reads the transform.
     private double _zoom = 1.0;
+    private enum ViewFitMode { Free, Fit, FitWidth }
+    private ViewFitMode _viewFitMode = ViewFitMode.Fit;
+    private bool _syncingZoomBox;
     private bool _panning;
     private Point _panLast; // viewport coords
     private bool _spaceDown;
@@ -225,6 +228,8 @@ public partial class EditorWindow : Window
         // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
         // until the user takes control.
         Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        EditorFormatBar.SizeChanged += (_, _) => ReserveFormatColumn();
+        EditorFormatBar.IsVisibleChanged += (_, _) => ReserveFormatColumn();
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -275,7 +280,6 @@ public partial class EditorWindow : Window
             {
                 UpdateContextPanels();
                 FitEditorCombos();
-                EditorBottomBar.Visibility = Visibility.Visible;
             }));
     }
 
@@ -403,10 +407,10 @@ public partial class EditorWindow : Window
     // --------------------------------------------------------- view (zoom/pan)
 
     /// <summary>
-    /// Fits the WHOLE image into the viewport, centered (never above 100%) — so a tall scrolling
-    /// capture shows top-to-bottom at once instead of only its top. Use <see cref="FitToWidth"/>
-    /// (the "Fit Width" preset) to read a long capture at full width and scroll down it.
-    /// Ctrl+0 / Center button / open all route here.
+    /// Fits the WHOLE image into the viewport, centered. Small captures scale up so the
+    /// paper is the focal point; tall scrolling captures scale down so top-to-bottom is
+    /// visible. Use <see cref="FitToWidth"/> to read a long capture at full width and
+    /// scroll down it. Ctrl+0 / Center button / open all route here.
     /// </summary>
     private void FitToView()
     {
@@ -415,10 +419,11 @@ public partial class EditorWindow : Window
 
         const double margin = 24;
         double fit = Math.Min((vw - margin * 2) / _sourceWidth, (vh - margin * 2) / _sourceHeight);
-        // Fit may legitimately need to go below MinZoom (a 32000px scroll capture in a 650px
-        // viewport fits at ~0.02) — clamping it to MinZoom left only the middle band visible,
-        // which read as "the editor clipped my capture". MinZoom still floors user zooming.
-        _zoom = Math.Clamp(Math.Min(fit, 1.0), Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
+        // Fit may go below MinZoom (a 32000px scroll capture in a 650px viewport fits at
+        // ~0.02) — clamping it to MinZoom left only the middle band visible. MinZoom still
+        // floors user zooming. Small captures scale UP so Fit is not a postage stamp at 100%.
+        _zoom = Math.Clamp(fit, Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
+        _viewFitMode = ViewFitMode.Fit;
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
         ViewTranslate.Y = Math.Round((vh - _sourceHeight * _zoom) / 2);
@@ -431,7 +436,7 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Fits to WIDTH and pins the top, so a long capture is readable and you scroll down
-    /// it (mouse wheel). Capped at 100%.</summary>
+    /// it (mouse wheel). Small captures scale up to fill the width.</summary>
     private void FitToWidth()
     {
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
@@ -440,7 +445,8 @@ public partial class EditorWindow : Window
         const double margin = 24;
         double fitW = (vw - margin * 2) / _sourceWidth;
         // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
-        _zoom = Math.Clamp(Math.Min(fitW, 1.0), Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
+        _zoom = Math.Clamp(fitW, Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
+        _viewFitMode = ViewFitMode.FitWidth;
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
         ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
@@ -454,6 +460,7 @@ public partial class EditorWindow : Window
         newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
         if (Math.Abs(newZoom - _zoom) < 0.00001) return;
         _pendingInitialFit = false; // explicit zoom — stop auto-refitting on resize
+        _viewFitMode = ViewFitMode.Free;
 
         double cx = (anchor.X - ViewTranslate.X) / _zoom;
         double cy = (anchor.Y - ViewTranslate.Y) / _zoom;
@@ -467,6 +474,15 @@ public partial class EditorWindow : Window
     private void OnViewChanged()
     {
         ZoomLabel.Text = $"{Math.Round(_zoom * 100)}%";
+        SyncZoomPresetChrome();
+        if (CaptureShadow is not null && _sourceWidth > 0 && _sourceHeight > 0)
+        {
+            CaptureShadow.Visibility = Visibility.Visible;
+            CaptureShadow.Width = Math.Max(1, _sourceWidth * _zoom);
+            CaptureShadow.Height = Math.Max(1, _sourceHeight * _zoom);
+            Canvas.SetLeft(CaptureShadow, ViewTranslate.X);
+            Canvas.SetTop(CaptureShadow, ViewTranslate.Y);
+        }
         // Keep helper chrome hairline-thin on screen at any zoom; the dash
         // pattern is in thickness units, so it compensates automatically.
         double t = 1.5 / _zoom;
@@ -474,6 +490,40 @@ public partial class EditorWindow : Window
         SelectionRect.StrokeThickness = t;
         UpdateSelectionVisual();
         UpdateCurveHandleVisual();
+    }
+
+    /// <summary>
+    /// Fit mode keeps the combo on Fit/Fit Width even when the computed scale
+    /// happens to be 100%. Free zoom selects an exact preset when there is one.
+    /// </summary>
+    private void SyncZoomPresetChrome()
+    {
+        if (ZoomBox is null) return;
+        string? want = _viewFitMode switch
+        {
+            ViewFitMode.Fit => "Fit",
+            ViewFitMode.FitWidth => "Fit Width",
+            _ => Math.Round(_zoom * 100) switch
+            {
+                50 => "50%",
+                100 => "100%",
+                150 => "150%",
+                200 => "200%",
+                _ => null,
+            },
+        };
+        if (want is null) return;
+        _syncingZoomBox = true;
+        try
+        {
+            foreach (ComboBoxItem item in ZoomBox.Items.OfType<ComboBoxItem>())
+                if ((item.Content as string) == want)
+                {
+                    ZoomBox.SelectedItem = item;
+                    break;
+                }
+        }
+        finally { _syncingZoomBox = false; }
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();
@@ -752,7 +802,8 @@ public partial class EditorWindow : Window
         bool Has(EditorContextControls value) => controls.HasFlag(value);
 
         ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
-        ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
+        // Text font size lives next to the family combo, not as a second "16" on the primary row.
+        ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness) && chrome != EditorTool.Text);
         FillPanel.Visibility = Visibility.Collapsed;
         OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
@@ -773,6 +824,8 @@ public partial class EditorWindow : Window
             SyncSizeBox();
         if (Has(EditorContextControls.TextStyle))
             SyncTextFormatChrome();
+        if (FontSizeBox is not null)
+            FontSizeBox.Visibility = Show(Has(EditorContextControls.TextStyle));
 
         if (Has(EditorContextControls.EffectStrength))
         {
@@ -801,6 +854,23 @@ public partial class EditorWindow : Window
         if (SecondaryToolPanel is not null)
             SecondaryToolPanel.Visibility = Show(color || size);
         EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text" || extras);
+        ReserveFormatColumn();
+    }
+
+    /// <summary>
+    /// Keep the right star at least as wide as the format extras so a centered
+    /// group tool can never paint on top of Solid / font / align.
+    /// </summary>
+    private void ReserveFormatColumn()
+    {
+        if (EditorGroupBar.ColumnDefinitions.Count < 3) return;
+        if (EditorFormatBar.Visibility != Visibility.Visible)
+        {
+            EditorGroupBar.ColumnDefinitions[2].MinWidth = 0;
+            return;
+        }
+        EditorFormatBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        EditorGroupBar.ColumnDefinitions[2].MinWidth = Math.Ceiling(EditorFormatBar.DesiredSize.Width);
     }
 
     private EditorTool ChromeTool()
@@ -962,7 +1032,7 @@ public partial class EditorWindow : Window
             if (string.IsNullOrEmpty(text)) return;
             var ft = new FormattedText(
                 text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-                typeface, 13, Brushes.White, dip);
+                typeface, 12, Brushes.White, dip);
             if (ft.Width > max) max = ft.Width;
         }
         foreach (string s in extra) Consider(s);
@@ -1230,6 +1300,32 @@ public partial class EditorWindow : Window
         if (IsLoaded) RestyleSelectedTextFormat();
     }
 
+    private void OnMoreChromeClick(object sender, RoutedEventArgs e)
+    {
+        if (MoreChromePopup is not null)
+            MoreChromePopup.IsOpen = true;
+    }
+
+    private void OnAlignMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (AlignPopup is not null)
+            AlignPopup.IsOpen = true;
+    }
+
+    private void OnAlignCellClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.Tag is not string tag) return;
+        string[] parts = tag.Split('|');
+        if (parts.Length != 2) return;
+        _textAlign = parts[0];
+        _textVerticalAlign = parts[1];
+        if (AlignPopup is not null)
+            AlignPopup.IsOpen = false;
+        SelectComboByTag(AlignBox, _textAlign);
+        SelectComboByTag(VerticalAlignBox, _textVerticalAlign);
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
     private void SyncTextFormatChrome()
     {
         if (FontFamilyBox is not null && FontFamilyBox.Items.Count == 0)
@@ -1260,7 +1356,7 @@ public partial class EditorWindow : Window
         void Paint(Button? btn, bool on)
         {
             if (btn is null) return;
-            btn.Background = on ? (Brush)FindResource("AccentBrush") : Brushes.Transparent;
+            btn.Background = on ? (Brush)FindResource("HoverFillBrush") : Brushes.Transparent;
         }
         Paint(BoldBtn, _textBold || _textStyle == TextStyle.Bold);
         Paint(ItalicBtn, _textItalic);

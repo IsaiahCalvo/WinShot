@@ -53,6 +53,8 @@ public class EditorShellContractTests
             .HasFlag(EditorContextControls.ArrowStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)
             .HasFlag(EditorContextControls.TextStyle));
+        Assert.False(EditorShellContract.ContextFor(EditorTool.Text, false)
+            .HasFlag(EditorContextControls.LineStyle));
         Assert.Equal(EditorContextControls.EffectStrength,
             EditorShellContract.ContextFor(EditorTool.Pixelate, false));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Step, false)

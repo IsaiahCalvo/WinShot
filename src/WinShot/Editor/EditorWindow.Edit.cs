@@ -608,6 +608,7 @@ public partial class EditorWindow : Window
     /// <summary>Bottom-bar zoom preset dropdown: Fit / 50% / 100% / 150% / 200%.</summary>
     private void OnZoomPresetChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingZoomBox) return;
         if (ZoomBox.SelectedItem is not ComboBoxItem item) return;
         string choice = (item.Content as string) ?? "Fit";
         if (choice == "Fit")
@@ -828,4 +829,22 @@ public partial class EditorWindow : Window
     }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>Copy the flattened image, then close — screenshot-editor Done.</summary>
+    private async void OnDone(object sender, RoutedEventArgs e)
+    {
+        if (!_sourceOperationActive)
+        {
+            try
+            {
+                var flat = Flatten();
+                await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Editor done-copy failed", ex);
+            }
+        }
+        Close();
+    }
 }

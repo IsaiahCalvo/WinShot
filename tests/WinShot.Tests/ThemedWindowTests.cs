@@ -96,6 +96,7 @@ public class ThemedWindowTests
                 composer.Close();
 
                 EditorFitsTallImageSmoke(settings, history);
+                EditorFitsSmallImageSmoke(settings, history);
 
                 app.Shutdown();
             }
@@ -406,7 +407,7 @@ public class ThemedWindowTests
             "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
-            "BtnPin", "BtnCopy", "BtnCenter",
+            "BtnPin", "BtnCopy", "BtnCenter", "MoreChromeBtn", "AlignMenuBtn",
         };
         foreach (string name in iconOnlyControls)
         {
@@ -446,6 +447,9 @@ public class ThemedWindowTests
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Right, formatBar.HorizontalAlignment);
+        Assert.Equal(1, Grid.GetColumn(groupTools));
+        Assert.Equal(2, Grid.GetColumn(formatBar));
+        Assert.Equal(3, groupBar.ColumnDefinitions.Count);
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");
@@ -505,7 +509,14 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "16");
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "72");
-        Assert.NotNull(editor.FindName("FontSizeBox"));
+        var fontSizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
+        Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
+        Assert.Equal(Visibility.Collapsed, thickness.Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
+        Point toolsOrigin = groupTools.TranslatePoint(new Point(0, 0), groupBar);
+        Point extrasOrigin = formatBar.TranslatePoint(new Point(0, 0), groupBar);
+        Assert.True(toolsOrigin.X + groupTools.ActualWidth <= extrasOrigin.X + 0.5,
+            $"Group tools overlap format extras: tools={toolsOrigin.X}+{groupTools.ActualWidth} extras={extrasOrigin.X}");
 
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
@@ -515,8 +526,11 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "50");
         Assert.DoesNotContain(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "72");
+        Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
+        Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
+        Assert.NotNull(editor.FindName("AlignMenuBtn"));
         Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName((Button)editor.FindName("BoldBtn")!)));
 
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
@@ -677,6 +691,38 @@ public class ThemedWindowTests
         // visible, not opened at 1:1 or fit-to-width showing only the top slice.
         Assert.True(zoom * imgW <= vw + 1 && zoom * 4000 <= vh + 1,
             $"tall image not fit-whole on open: zoom={zoom}, scaled={zoom * imgW}x{zoom * 4000}, viewport={vw}x{vh}");
+    }
+
+    /// <summary>
+    /// A tiny capture must scale UP on Fit so the paper is the work, not a postage
+    /// stamp in an empty viewport. 100% is a zoom preset, not what Fit means.
+    /// </summary>
+    private static void EditorFitsSmallImageSmoke(SettingsService settings, HistoryService history)
+    {
+        const int imgW = 80, imgH = 50;
+        var small = new SD.Bitmap(imgW, imgH);
+        using (var g = SD.Graphics.FromImage(small)) g.Clear(SD.Color.CornflowerBlue);
+
+        var editor = EditorWindow.CreateForCapture(small, settings, history);
+        editor.Show();
+        for (int i = 0; i < 6; i++) PumpDispatcherOnce();
+
+        var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
+        double vw = viewport.ActualWidth, vh = viewport.ActualHeight;
+        double zoom = (double)typeof(EditorWindow)
+            .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(editor)!;
+        var zoomBox = (ComboBox)editor.FindName("ZoomBox")!;
+        var zoomLabel = (TextBlock)editor.FindName("ZoomLabel")!;
+
+        editor.Close();
+
+        Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
+        Assert.True(zoom > 1.05, $"tiny capture stayed at native size: zoom={zoom}, viewport={vw}x{vh}");
+        Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
+            $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
+        Assert.Equal("Fit", (zoomBox.SelectedItem as ComboBoxItem)?.Content);
+        Assert.NotEqual("100%", zoomLabel.Text);
     }
 
     private static void PinSmoke(EditorWindow editor)

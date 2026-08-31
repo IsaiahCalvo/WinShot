@@ -35,33 +35,46 @@
                                 Click="OnCropClick" ToolTip="Crop (C)"
                                 AutomationProperties.Name="Crop and resize"
                                 AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C."/>
-                        <Button x:Name="RotateCcwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
-                                ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"
-                                AutomationProperties.Name="Rotate counter-clockwise"
-                                AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise."/>
                         <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
                                 RenderTransformOrigin="0.5,0.5" ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
                                 AutomationProperties.Name="Rotate clockwise"
                                 AutomationProperties.HelpText="Rotate the source image 90 degrees clockwise.">
                             <Button.RenderTransform><ScaleTransform ScaleX="-1"/></Button.RenderTransform>
                         </Button>
-                        <Button x:Name="FlipHorizontalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE13C;"
-                                ToolTip="Flip horizontal" Click="OnFlipHorizontal" AutomationProperties.Name="Flip horizontal"
-                                AutomationProperties.HelpText="Flip the source image from left to right."/>
-                        <Button x:Name="FlipVerticalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE174;"
-                                ToolTip="Flip vertical" Click="OnFlipVertical" AutomationProperties.Name="Flip vertical"
-                                AutomationProperties.HelpText="Flip the source image from top to bottom."/>
-                        <Button x:Name="ResizeImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE740;"
-                                ToolTip="Resize the image…" Click="OnResizeImage" AutomationProperties.Name="Resize image"
-                                AutomationProperties.HelpText="Open local source-image resize controls."/>
-                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xEE71;"
-                                Click="OnAddImage" ToolTip="Add screenshot or image…"
-                                AutomationProperties.Name="Add screenshot or image"
-                                AutomationProperties.HelpText="Insert one or more local image files as movable annotations."/>
-                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE790;"
-                                Click="OnAddBackground" ToolTip="Add background"
-                                AutomationProperties.Name="Add background"
-                                AutomationProperties.HelpText="Open the local background composer with the current edited image."/>
+                        <Button x:Name="MoreChromeBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE712;"
+                                Click="OnMoreChromeClick" ToolTip="More"
+                                AutomationProperties.Name="More image tools"
+                                AutomationProperties.HelpText="Rotate the other way, flip, resize, add image, or add a background."/>
+                        <Popup x:Name="MoreChromePopup" PlacementTarget="{Binding ElementName=MoreChromeBtn}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
+                                    Effect="{StaticResource FloatingShadow}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="RotateCcwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
+                                            ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"
+                                            AutomationProperties.Name="Rotate counter-clockwise"
+                                            AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise."/>
+                                    <Button x:Name="FlipHorizontalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE13C;"
+                                            ToolTip="Flip horizontal" Click="OnFlipHorizontal" AutomationProperties.Name="Flip horizontal"
+                                            AutomationProperties.HelpText="Flip the source image from left to right."/>
+                                    <Button x:Name="FlipVerticalBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE174;"
+                                            ToolTip="Flip vertical" Click="OnFlipVertical" AutomationProperties.Name="Flip vertical"
+                                            AutomationProperties.HelpText="Flip the source image from top to bottom."/>
+                                    <Button x:Name="ResizeImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE740;"
+                                            ToolTip="Resize the image…" Click="OnResizeImage" AutomationProperties.Name="Resize image"
+                                            AutomationProperties.HelpText="Open local source-image resize controls."/>
+                                    <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xEE71;"
+                                            Click="OnAddImage" ToolTip="Add screenshot or image…"
+                                            AutomationProperties.Name="Add screenshot or image"
+                                            AutomationProperties.HelpText="Insert one or more local image files as movable annotations."/>
+                                    <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE790;"
+                                            Click="OnAddBackground" ToolTip="Add background"
+                                            AutomationProperties.Name="Add background"
+                                            AutomationProperties.HelpText="Open the local background composer with the current edited image."/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -263,9 +276,9 @@
                                 AutomationProperties.Name="Save as"
                                 AutomationProperties.HelpText="Choose a local export file. Shortcut Ctrl+Shift+S."/>
                         <Button x:Name="BtnDone" Style="{StaticResource PillButtonPrimary}"
-                                Content="Done" Click="OnClose" ToolTip="Finish and close the editor"
+                                Content="Done" Click="OnDone" ToolTip="Copy and close"
                                 AutomationProperties.Name="Done"
-                                AutomationProperties.HelpText="Finish editing and close this window."/>
+                                AutomationProperties.HelpText="Copy the edited image to the clipboard and close the editor."/>
                     </StackPanel>
                 </Grid>
 
@@ -274,60 +287,65 @@
                 <Grid x:Name="EditorGroupBar" Margin="0,8,0,2" Visibility="Collapsed"
                             AutomationProperties.Name="Group tools"
                             AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
-                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel x:Name="EditorGroupTools" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
                                      AutomationProperties.Name="Pen"
                                      AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."
                                      Content="{StaticResource SurveyIcon.Pen}"/>
-                        <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter (H)"
                                      AutomationProperties.Name="Highlighter"
                                      AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
                                      Content="{StaticResource SurveyIcon.Highlighter}"/>
-                        <RadioButton x:Name="EraserToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="EraserToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Eraser" Checked="OnToolChecked" ToolTip="Eraser"
                                      AutomationProperties.Name="Eraser"
                                      AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink. Full erase deletes the annotation under the stroke."
                                      Content="{StaticResource SurveyIcon.Eraser}"/>
                     </StackPanel>
                     <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Rectangle" Checked="OnToolChecked"
                                      ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
                                      AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
                                      Content="{StaticResource SurveyIcon.Rect}"/>
-                        <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="FilledRectangle" Checked="OnFilledRectangleToolChecked"
                                      ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
                                      AutomationProperties.HelpText="Draw a solid filled rectangle using the current fill color."
                                      Content="{StaticResource SurveyIcon.FilledRect}"/>
-                        <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse (E)"
                                      AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."
                                      Content="{StaticResource SurveyIcon.Ellipse}"/>
-                        <RadioButton x:Name="LineToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="LineToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Line" Checked="OnToolChecked" ToolTip="Line (L)"
                                      AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."
                                      Content="{StaticResource SurveyIcon.Line}"/>
-                        <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow (A)"
                                      AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."
                                      Content="{StaticResource SurveyIcon.Arrow}"/>
-                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Step" Checked="OnToolChecked" ToolTip="Counter (S)"
                                      AutomationProperties.Name="Counter"
                                      AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."
                                      Content="{StaticResource SurveyIcon.Counter}"/>
                     </StackPanel>
                     <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="TextToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="TextToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Text" Checked="OnToolChecked" ToolTip="Text (T)"
                                      AutomationProperties.Name="Text"
                                      AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
                                      Content="{StaticResource SurveyIcon.Text}"/>
-                        <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Callout" Checked="OnToolChecked" ToolTip="Callout (Q)"
                                      AutomationProperties.Name="Callout"
                                      AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
@@ -335,7 +353,7 @@
                     </StackPanel>
                     </StackPanel>
                 
-                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0">
+                    <StackPanel x:Name="EditorFormatBar" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="8,0,8,0">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
@@ -387,28 +405,65 @@
                                                                   SelectionChanged="OnFontSizeBoxChanged" AutomationProperties.Name="Font size"
                                                                   AutomationProperties.HelpText="Font size for text and callout labels."/>
                                                         <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
-                                                        <Button x:Name="BoldBtn" Style="{StaticResource CompactToolIconButton}" Content="B" FontFamily="Segoe UI" FontWeight="Bold"
+                                                        <Button x:Name="BoldBtn" Style="{StaticResource CompactFormatButton}" FontWeight="Bold"
                                                                 Click="OnTextBoldClick" ToolTip="Bold" AutomationProperties.Name="Bold"
-                                                                AutomationProperties.HelpText="Toggle bold on new and selected text."/>
-                                                        <Button x:Name="ItalicBtn" Style="{StaticResource CompactToolIconButton}" Content="I" FontFamily="Segoe UI" FontStyle="Italic"
+                                                                AutomationProperties.HelpText="Toggle bold on new and selected text.">
+                                                            <TextBlock Text="B" FontFamily="Segoe UI" FontSize="13" FontWeight="Bold"/>
+                                                        </Button>
+                                                        <Button x:Name="ItalicBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextItalicClick" ToolTip="Italic" AutomationProperties.Name="Italic"
-                                                                AutomationProperties.HelpText="Toggle italic on new and selected text."/>
-                                                        <Button x:Name="UnderlineBtn" Style="{StaticResource CompactToolIconButton}" Content="U" FontFamily="Segoe UI"
+                                                                AutomationProperties.HelpText="Toggle italic on new and selected text.">
+                                                            <TextBlock Text="I" FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold"
+                                                                       RenderTransformOrigin="0.5,0.5">
+                                                                <TextBlock.RenderTransform>
+                                                                    <SkewTransform AngleX="-12"/>
+                                                                </TextBlock.RenderTransform>
+                                                            </TextBlock>
+                                                        </Button>
+                                                        <Button x:Name="UnderlineBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextUnderlineClick" ToolTip="Underline" AutomationProperties.Name="Underline"
-                                                                AutomationProperties.HelpText="Toggle underline on new and selected text."/>
-                                                        <Button x:Name="StrikeBtn" Style="{StaticResource CompactToolIconButton}" Content="S" FontFamily="Segoe UI"
+                                                                AutomationProperties.HelpText="Toggle underline on new and selected text.">
+                                                            <TextBlock Text="U" FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold" TextDecorations="Underline"/>
+                                                        </Button>
+                                                        <Button x:Name="StrikeBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextStrikeClick" ToolTip="Strikethrough" AutomationProperties.Name="Strikethrough"
-                                                                AutomationProperties.HelpText="Toggle strikethrough on new and selected text."/>
+                                                                AutomationProperties.HelpText="Toggle strikethrough on new and selected text.">
+                                                            <TextBlock Text="S" FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold" TextDecorations="Strikethrough"/>
+                                                        </Button>
                                                         </StackPanel>
+                                                        <Button x:Name="AlignMenuBtn" Style="{StaticResource CompactFormatButton}"
+                                                                Click="OnAlignMenuClick" ToolTip="Text alignment"
+                                                                AutomationProperties.Name="Text alignment"
+                                                                AutomationProperties.HelpText="Choose horizontal and vertical alignment from a 3 by 3 grid.">
+                                                            <TextBlock Text="&#xE8E4;" FontFamily="{StaticResource IconFont}" FontSize="13"/>
+                                                        </Button>
+                                                        <Popup x:Name="AlignPopup" PlacementTarget="{Binding ElementName=AlignMenuBtn}"
+                                                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
+                                                                    Effect="{StaticResource FloatingShadow}">
+                                                                <UniformGrid Columns="3" Width="84" Height="84">
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|top" Click="OnAlignCellClick" ToolTip="Top left"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|top" Click="OnAlignCellClick" ToolTip="Top center"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|top" Click="OnAlignCellClick" ToolTip="Top right"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|middle" Click="OnAlignCellClick" ToolTip="Middle left"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|middle" Click="OnAlignCellClick" ToolTip="Middle center"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|middle" Click="OnAlignCellClick" ToolTip="Middle right"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|bottom" Click="OnAlignCellClick" ToolTip="Bottom left"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|bottom" Click="OnAlignCellClick" ToolTip="Bottom center"/>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|bottom" Click="OnAlignCellClick" ToolTip="Bottom right"/>
+                                                                </UniformGrid>
+                                                            </Border>
+                                                        </Popup>
                                                         <ComboBox x:Name="AlignBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
-                                                                  SelectedIndex="0"
+                                                                  SelectedIndex="0" Visibility="Collapsed"
                                                                   SelectionChanged="OnTextAlignChanged" AutomationProperties.Name="Text align">
                                                             <ComboBoxItem Content="Left" Tag="left"/>
                                                             <ComboBoxItem Content="Center" Tag="center"/>
                                                             <ComboBoxItem Content="Right" Tag="right"/>
                                                         </ComboBox>
                                                         <ComboBox x:Name="VerticalAlignBox" Style="{StaticResource DarkComboBox}"
-                                                                  SelectedIndex="0"
+                                                                  SelectedIndex="0" Visibility="Collapsed"
                                                                   SelectionChanged="OnVerticalAlignChanged" AutomationProperties.Name="Vertical align"
                                                                   AutomationProperties.HelpText="Top, middle, or bottom align inside a sized text box.">
                                                             <ComboBoxItem Content="Top" Tag="top"/>
@@ -487,6 +542,14 @@
               AutomationProperties.Name="Annotation canvas"
               AutomationProperties.HelpText="Source-resolution image canvas. Hold Space or middle-drag to pan; Ctrl+mouse wheel zooms.">
             <Canvas x:Name="SurfaceHost">
+                <Border x:Name="CaptureShadow" IsHitTestVisible="False" Visibility="Collapsed"
+                        Background="{StaticResource WindowBgBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270"
+                                          Opacity="0.55" Color="#FF000000" RenderingBias="Performance"/>
+                    </Border.Effect>
+                </Border>
                 <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
                       Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
                     <Grid.RenderTransform>
@@ -523,7 +586,7 @@
         </Grid>
 
         <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"
-                Margin="12,6,12,12" Visibility="Collapsed">
+                Margin="12,6,12,12">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
