@@ -560,9 +560,6 @@ public partial class EditorWindow : Window
         {
             UncheckOtherToolButtons(rb);
             MoreToolsPopup.IsOpen = false;
-            DrawGroupPopup.IsOpen = false;
-            ShapeGroupPopup.IsOpen = false;
-            TextGroupPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
             UpdateGroupButtonChrome();
@@ -591,9 +588,6 @@ public partial class EditorWindow : Window
         if (IsLoaded)
         {
             MoreToolsPopup.IsOpen = false;
-            DrawGroupPopup.IsOpen = false;
-            ShapeGroupPopup.IsOpen = false;
-            TextGroupPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
             UpdateGroupButtonChrome();
@@ -617,38 +611,34 @@ public partial class EditorWindow : Window
 
     private void OnDrawGroupClick(object sender, RoutedEventArgs e)
     {
-        bool already = EditorShellContract.GroupFor(_tool, _filledRectangleMode) == "Draw";
-        if (!already) CheckToolButton(_lastDrawTool);
-        DrawGroupPopup.IsOpen = !DrawGroupPopup.IsOpen;
-        ShapeGroupPopup.IsOpen = false;
-        TextGroupPopup.IsOpen = false;
         MoreToolsPopup.IsOpen = false;
+        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Draw")
+            CheckToolButton(_lastDrawTool);
+        UpdateContextPanels();
+        UpdateGroupButtonChrome();
     }
 
     private void OnShapeGroupClick(object sender, RoutedEventArgs e)
     {
-        bool already = EditorShellContract.GroupFor(_tool, _filledRectangleMode) == "Shape";
-        if (!already)
+        MoreToolsPopup.IsOpen = false;
+        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Shape")
         {
             if (_lastShapeTool == EditorTool.Rectangle && _filledRectangleMode)
                 FilledRectangleToolBtn.IsChecked = true;
             else
                 CheckToolButton(_lastShapeTool);
         }
-        ShapeGroupPopup.IsOpen = !ShapeGroupPopup.IsOpen;
-        DrawGroupPopup.IsOpen = false;
-        TextGroupPopup.IsOpen = false;
-        MoreToolsPopup.IsOpen = false;
+        UpdateContextPanels();
+        UpdateGroupButtonChrome();
     }
 
     private void OnTextGroupClick(object sender, RoutedEventArgs e)
     {
-        bool already = EditorShellContract.GroupFor(_tool, _filledRectangleMode) == "Text";
-        if (!already) CheckToolButton(_lastTextTool);
-        TextGroupPopup.IsOpen = !TextGroupPopup.IsOpen;
-        DrawGroupPopup.IsOpen = false;
-        ShapeGroupPopup.IsOpen = false;
         MoreToolsPopup.IsOpen = false;
+        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Text")
+            CheckToolButton(_lastTextTool);
+        UpdateContextPanels();
+        UpdateGroupButtonChrome();
     }
 
     private void RememberGroupTool(EditorTool tool)
@@ -741,9 +731,23 @@ public partial class EditorWindow : Window
             SyncEffectStrengthButtons(_tool == EditorTool.Blur ? _blurStrength : _pixelateStrength);
         }
 
-        EditorStyleBar.Visibility = controls == EditorContextControls.None
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        string group = EditorShellContract.GroupFor(_tool, _filledRectangleMode);
+        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text");
+        DrawGroupPanel.Visibility = Show(group == "Draw");
+        ShapeGroupPanel.Visibility = Show(group == "Shape");
+        TextGroupPanel.Visibility = Show(group == "Text");
+
+        bool color = Has(EditorContextControls.Color);
+        bool format = Has(EditorContextControls.Thickness) || Has(EditorContextControls.Fill) ||
+                      Has(EditorContextControls.Opacity) || Has(EditorContextControls.ArrowStyle) ||
+                      Has(EditorContextControls.EffectStrength) || Has(EditorContextControls.TextStyle) ||
+                      Has(EditorContextControls.CropRatio) || Has(EditorContextControls.StepMode) ||
+                      Has(EditorContextControls.LineStyle) || Has(EditorContextControls.EraserMode) ||
+                      CropPanel.Visibility == Visibility.Visible;
+        EditorColorBar.Visibility = Show(color);
+        EditorFormatBar.Visibility = Show(format);
+        EditorColorBar.Margin = format ? new Thickness(0, 0, 0, 8) : new Thickness(0);
+        EditorStyleBar.Visibility = Show(color || format);
     }
 
     private void SyncSizeBox()
@@ -1004,7 +1008,6 @@ public partial class EditorWindow : Window
     private void OnShapeCounterClick(object sender, RoutedEventArgs e)
     {
         StepToolBtn.IsChecked = true;
-        ShapeGroupPopup.IsOpen = false;
     }
 
     private void SyncTextFormatChrome()

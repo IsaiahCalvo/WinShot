@@ -430,7 +430,10 @@ public class ThemedWindowTests
             Assert.True(control.IsTabStop);
         }
 
-        var styleBar = (DockPanel)editor.FindName("EditorStyleBar")!;
+        var styleBar = (StackPanel)editor.FindName("EditorStyleBar")!;
+        var groupBar = (StackPanel)editor.FindName("EditorGroupBar")!;
+        var colorBar = (DockPanel)editor.FindName("EditorColorBar")!;
+        var formatBar = (DockPanel)editor.FindName("EditorFormatBar")!;
         var color = (StackPanel)editor.FindName("ColorPanel")!;
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
         var fill = (StackPanel)editor.FindName("FillPanel")!;
@@ -440,7 +443,12 @@ public class ThemedWindowTests
         var sizeBox = (ComboBox)editor.FindName("SizeBox")!;
 
         Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
+        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, groupBar.Visibility);
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Visible, colorBar.Visibility);
+        Assert.Equal(Visibility.Visible, formatBar.Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
@@ -451,6 +459,8 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "50");
 
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
         Assert.Equal("Size", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "16");

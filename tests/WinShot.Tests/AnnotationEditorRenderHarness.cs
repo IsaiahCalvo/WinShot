@@ -56,23 +56,17 @@ public class AnnotationEditorRenderHarness
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-primary-shell.png"));
 
-                var drawGroup = (System.Windows.Controls.Primitives.Popup)editor.FindName("DrawGroupPopup")!;
-                drawGroup.IsOpen = true;
+                ((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked = true;
                 Pump(4);
-                RenderElementToPng(drawGroup.Child, Path.Combine(outDir, "editor-after-draw-group.png"));
-                drawGroup.IsOpen = false;
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-draw-group.png"));
 
-                var shapeGroup = (System.Windows.Controls.Primitives.Popup)editor.FindName("ShapeGroupPopup")!;
-                shapeGroup.IsOpen = true;
+                ((RadioButton)editor.FindName("RectangleToolBtn")!).IsChecked = true;
                 Pump(4);
-                RenderElementToPng(shapeGroup.Child, Path.Combine(outDir, "editor-after-shape-group.png"));
-                shapeGroup.IsOpen = false;
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-shape-group.png"));
 
-                var textGroup = (System.Windows.Controls.Primitives.Popup)editor.FindName("TextGroupPopup")!;
-                textGroup.IsOpen = true;
+                ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
                 Pump(4);
-                RenderElementToPng(textGroup.Child, Path.Combine(outDir, "editor-after-text-group.png"));
-                textGroup.IsOpen = false;
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-text-group.png"));
 
                 var filledRectangle = (RadioButton)editor.FindName("FilledRectangleToolBtn")!;
                 filledRectangle.IsChecked = true;
