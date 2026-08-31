@@ -110,7 +110,6 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel x:Name="ToolPanel" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -169,7 +168,10 @@
                                      AutomationProperties.HelpText="Line and arrow already bend from the midpoint handle."/>
 
                     </StackPanel>
-                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0">
+                    </Grid>
+
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
@@ -506,10 +508,20 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                                 </StackPanel>
+                        <Button x:Name="FormatOverflowBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE10C;"
+                                Click="OnFormatOverflowClick" ToolTip="More format"
+                                Visibility="Collapsed"
+                                AutomationProperties.Name="More format"
+                                AutomationProperties.HelpText="Font, line style, and other format controls that do not fit on the row."/>
+                        <Popup x:Name="FormatOverflowPopup" PlacementTarget="{Binding ElementName=FormatOverflowBtn}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
+                                    Effect="{StaticResource FloatingShadow}">
+                                <StackPanel x:Name="FormatOverflowPanel" Orientation="Horizontal"/>
+                            </Border>
+                        </Popup>
                         </StackPanel>
-                    </Grid>
-
-                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
                                 Content="Save as…" Click="OnSave" ToolTip="Save as… (Ctrl+Shift+S)"
                                 AutomationProperties.Name="Save as"

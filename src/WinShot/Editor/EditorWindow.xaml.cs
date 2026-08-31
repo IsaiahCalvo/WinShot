@@ -222,7 +222,11 @@ public partial class EditorWindow : Window
         Loaded += (_, _) => FitToView();
         // Loaded can fire before the window has its final size; this catches the first
         // laid-out frame for the initial fit.
-        SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        SizeChanged += (_, _) =>
+        {
+            if (_pendingInitialFit) FitToView();
+            PackFormatOverflow();
+        };
         // The WINDOW can stop resizing while the VIEWPORT keeps shrinking as the toolbars / zoom
         // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
         // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
@@ -857,6 +861,54 @@ public partial class EditorWindow : Window
         EditorFormatBar.Visibility = Visibility.Visible;
         EditorGroupToolsHost.Visibility = Visibility.Visible;
         EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text");
+        Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
+    }
+
+    private void OnFormatOverflowClick(object sender, RoutedEventArgs e)
+    {
+        if (FormatOverflowPopup is not null)
+            FormatOverflowPopup.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Keep color + size on the strip. Extras that would run through Save as…
+    /// move into the same-row overflow flyout.
+    /// </summary>
+    private void PackFormatOverflow()
+    {
+        if (FormatOverflowPanel is null || ContextPanel is null || FormatOverflowBtn is null) return;
+        while (FormatOverflowPanel.Children.Count > 0)
+        {
+            var child = FormatOverflowPanel.Children[0];
+            FormatOverflowPanel.Children.RemoveAt(0);
+            ContextPanel.Children.Add(child);
+        }
+        FormatOverflowBtn.Visibility = Visibility.Collapsed;
+        const double max = 200;
+        var overflow = new List<UIElement>();
+        double used = 0;
+        foreach (UIElement child in ContextPanel.Children)
+        {
+            if (child.Visibility != Visibility.Visible) continue;
+            child.Measure(new Size(double.PositiveInfinity, 40));
+            double w = child.DesiredSize.Width;
+            if (used + w <= max) used += w;
+            else overflow.Add(child);
+        }
+        if (CropPanel is not null && CropPanel.Visibility == Visibility.Visible)
+        {
+            CropPanel.Measure(new Size(double.PositiveInfinity, 40));
+            if (used + CropPanel.DesiredSize.Width > max)
+                overflow.Add(CropPanel);
+        }
+        foreach (UIElement child in overflow)
+        {
+            if (child is FrameworkElement { Parent: Panel parent })
+                parent.Children.Remove(child);
+            FormatOverflowPanel.Children.Add(child);
+        }
+        FormatOverflowBtn.Visibility = FormatOverflowPanel.Children.Count > 0
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private EditorTool ChromeTool()

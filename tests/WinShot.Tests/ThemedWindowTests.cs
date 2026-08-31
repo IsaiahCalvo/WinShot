@@ -407,7 +407,7 @@ public class ThemedWindowTests
             "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
-            "BtnPin", "BtnCopy", "BtnCenter", "MoreChromeBtn", "AlignMenuBtn",
+            "BtnPin", "BtnCopy", "BtnCenter", "MoreChromeBtn", "AlignMenuBtn", "FormatOverflowBtn",
         };
         foreach (string name in iconOnlyControls)
         {
@@ -542,6 +542,10 @@ public class ThemedWindowTests
         Point saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
         Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
             $"Callout size sits on Save as…: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
+        editor.UpdateLayout();
+        Point formatOrigin = formatBar.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(formatOrigin.X + formatBar.ActualWidth <= saveOrigin.X + 0.5,
+            $"Format extras sit on Save as…: format={formatOrigin.X}+{formatBar.ActualWidth} save={saveOrigin.X}");
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.NotNull(editor.FindName("AlignMenuBtn"));
