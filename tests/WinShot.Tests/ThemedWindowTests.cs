@@ -446,13 +446,14 @@ public class ThemedWindowTests
         var undo = (Button)editor.FindName("BtnUndo")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Left, groupTools.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
         var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
-        Assert.True(toolsHost.MinWidth >= 180, "Group tools slot must stay as wide as Shapes so Draw/Text do not jump.");
+        Assert.True(toolsHost.MinWidth < 40, "Group tools must size to the visible chips, not a reserved blank slot.");
+        Assert.Equal(HorizontalAlignment.Stretch, groupBar.HorizontalAlignment);
         Assert.True(IsLogicalDescendant(topToolbar, formatBar),
             "Format chrome must sit on the primary row next to color and size, like Survey.");
         Assert.False(IsLogicalDescendant(topToolbar, groupBar),
-            "Group tools must overlay the canvas so they do not shrink the image.");
+            "Group tools sit in a chrome strip over the canvas so they do not shrink the image.");
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");
@@ -480,6 +481,10 @@ public class ThemedWindowTests
         PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
         double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
+        double arrowBarW = groupBar.ActualWidth;
+        double arrowToolsW = groupTools.ActualWidth;
+        Assert.True(Math.Abs(arrowToolsX - (arrowBarW - arrowToolsW) / 2) < 4,
+            $"Shape group is not centered in the chrome strip: x={arrowToolsX:0} bar={arrowBarW:0} tools={arrowToolsW:0}");
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Arrow vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
@@ -534,8 +539,12 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
         Point toolsOrigin = groupTools.TranslatePoint(new Point(0, 0), groupBar);
-        Assert.True(Math.Abs(toolsOrigin.X - arrowToolsX) < 2,
-            $"Group tools jumped when switching Arrow → Text: {arrowToolsX:0} → {toolsOrigin.X:0}");
+        double textBarW = groupBar.ActualWidth;
+        double textToolsW = groupTools.ActualWidth;
+        Assert.True(Math.Abs(toolsOrigin.X - (textBarW - textToolsW) / 2) < 4,
+            $"Text group is not centered in the chrome strip: x={toolsOrigin.X:0} bar={textBarW:0} tools={textToolsW:0}");
+        Assert.True(textToolsW < arrowToolsW - 8,
+            $"Text group still occupies the Shapes-width blank slot: text={textToolsW:0} shapes={arrowToolsW:0}");
         var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;
         Point wellOrigin = well.TranslatePoint(new Point(0, 0), editor);
         Point sizeOrigin = ((FrameworkElement)sizeBox).TranslatePoint(new Point(0, 0), editor);

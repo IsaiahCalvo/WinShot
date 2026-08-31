@@ -579,16 +579,15 @@
                 </Grid>
             </Canvas>
         </Grid>
-                <Border x:Name="EditorGroupBar" HorizontalAlignment="Center" VerticalAlignment="Top"
-                        Margin="0,10,0,0" Padding="6,4" CornerRadius="8"
-                        Background="{StaticResource FloatingBgBrush}"
-                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                        Effect="{StaticResource FloatingShadow}"
+                <Border x:Name="EditorGroupBar" HorizontalAlignment="Stretch" VerticalAlignment="Top"
+                        Margin="0" Padding="0,3" CornerRadius="0"
+                        Background="{StaticResource WindowBgBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="0"
                         Visibility="Collapsed"
                         AutomationProperties.Name="Group tools"
                         AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
-                    <Border x:Name="EditorGroupToolsHost" MinWidth="188">
-                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <Border x:Name="EditorGroupToolsHost" HorizontalAlignment="Center">
+                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
