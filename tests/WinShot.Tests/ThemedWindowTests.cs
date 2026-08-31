@@ -370,7 +370,7 @@ public class ThemedWindowTests
         var primary = (WrapPanel)editor.FindName("ToolPanel")!;
         var primaryOrder = primary.Children.OfType<FrameworkElement>()
             .Select(el => el.Tag as string)
-            .Where(tag => tag is "Select" or "Draw" or "Shape" or "Text" or "Pixelate" or "Spotlight" or "Step")
+            .Where(tag => tag is "Select" or "Draw" or "Shape" or "Text" or "Pixelate" or "Spotlight")
             .ToArray();
         Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
 
@@ -385,7 +385,7 @@ public class ThemedWindowTests
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
             "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "ShapeCounterBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
@@ -403,7 +403,7 @@ public class ThemedWindowTests
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
             "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "ShapeCounterBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
@@ -452,6 +452,10 @@ public class ThemedWindowTests
 
         Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
         Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        Assert.DoesNotContain(primary.Children.OfType<FrameworkElement>(),
+            el => el.Tag as string == "Step");
+        Assert.Contains(((StackPanel)editor.FindName("ShapeGroupPanel")!).Children.OfType<RadioButton>(),
+            rb => rb.Tag as string == "Step");
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);

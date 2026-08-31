@@ -34,24 +34,28 @@
 
                     <WrapPanel x:Name="ToolPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <RadioButton x:Name="SelectToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Select" Content="&#xE8B0;" Checked="OnToolChecked" IsChecked="True"
+                                     Tag="Select" Checked="OnToolChecked" IsChecked="True"
                                      ToolTip="Cursor (V)" AutomationProperties.Name="Cursor"
-                                     AutomationProperties.HelpText="Select, move, resize, reorder, or delete annotations. Shortcut V."/>
+                                     AutomationProperties.HelpText="Select, move, resize, reorder, or delete annotations. Shortcut V."
+                                     Content="{StaticResource SurveyIcon.Cursor}"/>
 
-                        <Button x:Name="DrawGroupBtn" Style="{StaticResource ToolIconButton}" Content="&#xE70F;"
+                        <Button x:Name="DrawGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnDrawGroupClick" Tag="Draw" ToolTip="Draw"
                                 AutomationProperties.Name="Draw"
-                                AutomationProperties.HelpText="Pen, highlighter, and eraser. Opens the draw tools on the row below. Shortcut P or H."/>
+                                AutomationProperties.HelpText="Pen, highlighter, and eraser. Opens the draw tools on the row below. Shortcut P or H."
+                                Content="{StaticResource SurveyIcon.Pen}"/>
 
-                        <Button x:Name="ShapeGroupBtn" Style="{StaticResource ToolIconButton}" Content="&#xE739;"
+                        <Button x:Name="ShapeGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnShapeGroupClick" Tag="Shape" ToolTip="Shapes"
                                 AutomationProperties.Name="Shapes"
-                                AutomationProperties.HelpText="Rectangle, ellipse, line, and arrow. Opens the shape tools on the row below."/>
+                                AutomationProperties.HelpText="Rectangle, ellipse, line, arrow, and counter. Opens the shape tools on the row below."
+                                Content="{StaticResource SurveyIcon.Rect}"/>
 
-                        <Button x:Name="TextGroupBtn" Style="{StaticResource ToolIconButton}" Content="&#xE8D2;"
+                        <Button x:Name="TextGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnTextGroupClick" Tag="Text" ToolTip="Text"
                                 AutomationProperties.Name="Text"
-                                AutomationProperties.HelpText="Text box and callout. Opens the text tools on the row below."/>
+                                AutomationProperties.HelpText="Text box and callout. Opens the text tools on the row below."
+                                Content="{StaticResource SurveyIcon.Text}"/>
 
                         <RadioButton x:Name="PixelateToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Pixelate" Content="&#xE80A;" Checked="OnToolChecked" ToolTip="Pixelate"
@@ -61,10 +65,6 @@
                                      Tag="Spotlight" Content="&#xE8FB;" Checked="OnToolChecked" ToolTip="Spotlight"
                                      AutomationProperties.Name="Spotlight"
                                      AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."/>
-                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Step" Content="&#xE8EF;" Checked="OnToolChecked" ToolTip="Counter (S)"
-                                     AutomationProperties.Name="Counter"
-                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."/>
                         <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <Button x:Name="MoreToolsButton" Style="{StaticResource ToolIconButton}" Content="&#xE712;"
@@ -94,50 +94,61 @@
                             AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Freehand" Content="&#xE70F;" Checked="OnToolChecked" ToolTip="Pen (P)"
+                                     Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
                                      AutomationProperties.Name="Pen"
-                                     AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."/>
+                                     AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."
+                                     Content="{StaticResource SurveyIcon.Pen}"/>
                         <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Highlighter" Content="&#xE891;" Checked="OnToolChecked" ToolTip="Highlighter (H)"
+                                     Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter (H)"
                                      AutomationProperties.Name="Highlighter"
-                                     AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."/>
+                                     AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
+                                     Content="{StaticResource SurveyIcon.Highlighter}"/>
                         <RadioButton x:Name="EraserToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Eraser" Content="&#xE75C;" Checked="OnToolChecked" ToolTip="Eraser"
+                                     Tag="Eraser" Checked="OnToolChecked" ToolTip="Eraser"
                                      AutomationProperties.Name="Eraser"
-                                     AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink. Full erase deletes the annotation under the stroke."/>
+                                     AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink. Full erase deletes the annotation under the stroke."
+                                     Content="{StaticResource SurveyIcon.Eraser}"/>
                     </StackPanel>
                     <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Rectangle" Content="&#xE739;" Checked="OnToolChecked"
+                                     Tag="Rectangle" Checked="OnToolChecked"
                                      ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
-                                     AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."/>
+                                     AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
+                                     Content="{StaticResource SurveyIcon.Rect}"/>
                         <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="FilledRectangle" Content="&#xE73B;" Checked="OnFilledRectangleToolChecked"
+                                     Tag="FilledRectangle" Checked="OnFilledRectangleToolChecked"
                                      ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
-                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current fill color."/>
+                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current fill color."
+                                     Content="{StaticResource SurveyIcon.FilledRect}"/>
                         <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Ellipse" Content="&#xEA3A;" Checked="OnToolChecked" ToolTip="Ellipse (E)"
-                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."/>
+                                     Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse (E)"
+                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."
+                                     Content="{StaticResource SurveyIcon.Ellipse}"/>
                         <RadioButton x:Name="LineToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Line" Content="&#xE738;" Checked="OnToolChecked" ToolTip="Line (L)"
-                                     AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."/>
+                                     Tag="Line" Checked="OnToolChecked" ToolTip="Line (L)"
+                                     AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."
+                                     Content="{StaticResource SurveyIcon.Line}"/>
                         <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Arrow" Content="&#xE72A;" Checked="OnToolChecked" ToolTip="Arrow (A)"
-                                     AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."/>
-                        <Button x:Name="ShapeCounterBtn" Style="{StaticResource ToolIconButton}" Content="&#xE8EF;"
-                                Click="OnShapeCounterClick" ToolTip="Counter (S)"
-                                AutomationProperties.Name="Counter"
-                                AutomationProperties.HelpText="Place sequential number or letter badges. Same as the Counter tool on the primary row."/>
+                                     Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow (A)"
+                                     AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."
+                                     Content="{StaticResource SurveyIcon.Arrow}"/>
+                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                                     Tag="Step" Checked="OnToolChecked" ToolTip="Counter (S)"
+                                     AutomationProperties.Name="Counter"
+                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."
+                                     Content="{StaticResource SurveyIcon.Counter}"/>
                     </StackPanel>
                     <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="TextToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Text" Content="&#xE8D2;" Checked="OnToolChecked" ToolTip="Text (T)"
+                                     Tag="Text" Checked="OnToolChecked" ToolTip="Text (T)"
                                      AutomationProperties.Name="Text"
-                                     AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."/>
+                                     AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
+                                     Content="{StaticResource SurveyIcon.Text}"/>
                         <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Callout" Content="&#xE8BD;" Checked="OnToolChecked" ToolTip="Callout (Q)"
+                                     Tag="Callout" Checked="OnToolChecked" ToolTip="Callout (Q)"
                                      AutomationProperties.Name="Callout"
-                                     AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."/>
+                                     AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
+                                     Content="{StaticResource SurveyIcon.Callout}"/>
                     </StackPanel>
                 </StackPanel>
 

@@ -10,16 +10,16 @@ public class EditorShellContractTests
     {
         Assert.Equal(new[]
         {
-            "Select", "Draw", "Shape", "Text", "Pixelate", "Spotlight", "Step",
+            "Select", "Draw", "Shape", "Text", "Pixelate", "Spotlight",
         }, EditorShellContract.PrimaryToolOrder);
         Assert.Equal(new[] { "Freehand", "Highlighter", "Eraser" }, EditorShellContract.DrawGroupTools);
-        Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow" },
+        Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" },
             EditorShellContract.ShapeGroupTools);
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.TextGroupTools);
         Assert.Equal(new[] { "Pan", "CurvedArrow", "Blur", "Eyedropper" },
             EditorShellContract.MoreToolOrder);
 
-        string[] uniqueTools = new[] { "Select", "Pixelate", "Spotlight", "Step", "Crop" }
+        string[] uniqueTools = new[] { "Select", "Pixelate", "Spotlight", "Crop" }
             .Concat(EditorShellContract.DrawGroupTools)
             .Concat(EditorShellContract.ShapeGroupTools)
             .Concat(EditorShellContract.TextGroupTools)
@@ -58,6 +58,7 @@ public class EditorShellContractTests
             EditorShellContract.ContextFor(EditorTool.Pixelate, false));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Step, false)
             .HasFlag(EditorContextControls.StepMode));
+        Assert.Equal("Shape", EditorShellContract.GroupFor(EditorTool.Step, false));
         Assert.Equal(EditorContextControls.CropRatio,
             EditorShellContract.ContextFor(EditorTool.Crop, false));
     }

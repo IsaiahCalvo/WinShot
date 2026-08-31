@@ -683,6 +683,9 @@ public partial class EditorWindow : Window
             btn.Background = on
                 ? (Brush)FindResource("AccentBrush")
                 : Brushes.Transparent;
+            btn.Foreground = on
+                ? Brushes.White
+                : (Brush)FindResource("TextPrimaryBrush");
         }
         Paint(DrawGroupBtn, group == "Draw");
         Paint(ShapeGroupBtn, group == "Shape");
@@ -1016,11 +1019,6 @@ public partial class EditorWindow : Window
         if (VerticalAlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
         _textVerticalAlign = align;
         if (IsLoaded) RestyleSelectedTextFormat();
-    }
-
-    private void OnShapeCounterClick(object sender, RoutedEventArgs e)
-    {
-        StepToolBtn.IsChecked = true;
     }
 
     private void SyncTextFormatChrome()

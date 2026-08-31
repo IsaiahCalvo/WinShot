@@ -32,11 +32,11 @@ internal static class EditorShellContract
         "Text",
         "Pixelate",
         "Spotlight",
-        "Step",
     };
 
     public static readonly string[] DrawGroupTools = { "Freehand", "Highlighter", "Eraser" };
-    public static readonly string[] ShapeGroupTools = { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow" };
+    public static readonly string[] ShapeGroupTools =
+        { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" };
     public static readonly string[] TextGroupTools = { "Text", "Callout" };
 
     public static readonly string[] MoreToolOrder =
@@ -47,8 +47,9 @@ internal static class EditorShellContract
         "Eyedropper",
     };
 
-    // 3 leading actions + grouped annotation tools + Pixelate/Spotlight/Step + More + Save/Done.
-    // Groups collapse eight individual 36-DIP radios into three, so the 980-DIP minimum still fits.
+    // 3 leading actions + grouped annotation tools + Pixelate/Spotlight + More + Save/Done.
+    // Counter lives in the Shapes sub-strip, matching Survey. Groups collapse the individual
+    // 36-DIP radios so the 980-DIP minimum still fits.
     public const double PrimaryToolbarLogicalWidth = 872;
     public const double MinimumEditorLogicalWidth = 980;
     public const double ToolbarOuterMargin = 24;
@@ -98,7 +99,8 @@ internal static class EditorShellContract
         tool switch
         {
             EditorTool.Freehand or EditorTool.Highlighter or EditorTool.Eraser => "Draw",
-            EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow => "Shape",
+            EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
+                or EditorTool.Step => "Shape",
             EditorTool.Text or EditorTool.Callout => "Text",
             _ => "",
         };

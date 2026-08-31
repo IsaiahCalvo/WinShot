@@ -17,7 +17,12 @@
          Glyph icons use "Segoe Fluent Icons" (Win11) with fallback to
          "Segoe MDL2 Assets" (Win10). Glyph codepoints live in the XAML that
          consumes ToolButton/CircleActionButton — see UI-SPEC.md for the map.
+         Draw/Shapes/Text annotation tools use Survey SVGs from SurveyToolIcons.xaml.
          ==================================================================== -->
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="SurveyToolIcons.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
 
     <!-- ============================ PALETTE ============================ -->
     <!-- Surfaces (a disciplined 5-step dark elevation scale) -->
@@ -175,11 +180,12 @@
         <Setter Property="FontSize" Value="{StaticResource ToolGlyphSize}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Ellipse x:Name="Bg" Fill="Transparent"/>
+                        <Ellipse x:Name="Bg" Fill="{TemplateBinding Background}"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
