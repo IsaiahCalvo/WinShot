@@ -15,20 +15,8 @@
 
         <Border x:Name="TopToolbar" Grid.Row="0" Style="{StaticResource FloatingToolbar}" Margin="12,12,12,6">
             <StackPanel>
-                <DockPanel x:Name="ToolbarPrimaryRow">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Rectangle Style="{StaticResource ToolbarDivider}" Margin="2,0,8,0"/>
-                        <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
-                                Content="Save as…" Click="OnSave" ToolTip="Save as… (Ctrl+Shift+S)"
-                                AutomationProperties.Name="Save as"
-                                AutomationProperties.HelpText="Choose a local export file. Shortcut Ctrl+Shift+S."/>
-                        <Button x:Name="BtnDone" Style="{StaticResource PillButtonPrimary}"
-                                Content="Done" Click="OnClose" ToolTip="Finish and close the editor"
-                                AutomationProperties.Name="Done"
-                                AutomationProperties.HelpText="Finish editing and close this window."/>
-                    </StackPanel>
-
-                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                <Grid x:Name="ToolbarPrimaryRow">
+                    <StackPanel HorizontalAlignment="Left" Orientation="Horizontal" VerticalAlignment="Center">
                         <RadioButton x:Name="CropUtilityBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Crop" Content="&#xE7A8;" Checked="OnToolChecked"
                                      ToolTip="Crop &amp; resize (C)"
@@ -42,10 +30,9 @@
                                 Click="OnAddBackground" ToolTip="Add background"
                                 AutomationProperties.Name="Add background"
                                 AutomationProperties.HelpText="Open the local background composer with the current edited image."/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
                     </StackPanel>
 
-                    <WrapPanel x:Name="ToolPanel" VerticalAlignment="Center">
+                    <WrapPanel x:Name="ToolPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <RadioButton x:Name="SelectToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Select" Content="&#xE8B0;" Checked="OnToolChecked" IsChecked="True"
                                      ToolTip="Cursor (V)" AutomationProperties.Name="Cursor"
@@ -86,9 +73,23 @@
                                     AutomationProperties.HelpText="Open Pan, Curved Arrow, Blur, Eyedropper, transforms, resize, undo, and redo."/>
                         </StackPanel>
                     </WrapPanel>
-                </DockPanel>
 
-                <StackPanel x:Name="EditorGroupBar" Margin="0,8,0,0" Visibility="Collapsed"
+                    <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
+                                Content="Save as…" Click="OnSave" ToolTip="Save as… (Ctrl+Shift+S)"
+                                AutomationProperties.Name="Save as"
+                                AutomationProperties.HelpText="Choose a local export file. Shortcut Ctrl+Shift+S."/>
+                        <Button x:Name="BtnDone" Style="{StaticResource PillButtonPrimary}"
+                                Content="Done" Click="OnClose" ToolTip="Finish and close the editor"
+                                AutomationProperties.Name="Done"
+                                AutomationProperties.HelpText="Finish editing and close this window."/>
+                    </StackPanel>
+                </Grid>
+
+                <Border Height="1" Background="{StaticResource BorderBrush}" Margin="12,8,12,0"
+                        Visibility="{Binding ElementName=EditorGroupBar, Path=Visibility}"/>
+                <StackPanel x:Name="EditorGroupBar" Margin="0,8,0,2" Visibility="Collapsed"
+                            HorizontalAlignment="Center"
                             AutomationProperties.Name="Group tools"
                             AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
@@ -197,11 +198,23 @@
                         </StackPanel>
                     </Border>
                 </Popup>
+            </StackPanel>
+        </Border>
 
-                <StackPanel x:Name="EditorStyleBar" Margin="0,8,0,0" Visibility="Collapsed">
-                    <DockPanel x:Name="EditorColorBar" Margin="0,0,0,8" LastChildFill="True">
-                        <StackPanel x:Name="ColorPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center" Margin="0,0,8,0">
+        <Grid Grid.Row="1">
+                <Border x:Name="EditorStyleBar" Style="{StaticResource FloatingToolbar}"
+                        HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Width="248" Margin="12,10,0,12" Visibility="Collapsed"
+                        MaxHeight="720" Panel.ZIndex="4"
+                        AutomationProperties.Name="Formatting rail"
+                        AutomationProperties.HelpText="Color, size, opacity, and formatting for the selected annotation tool.">
+                    <ScrollViewer x:Name="EditorStyleScroll" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled" MaxHeight="700"
+                                  Padding="2,0,4,4">
+                    <StackPanel>
+                    <StackPanel x:Name="EditorColorBar">
+                        <StackPanel x:Name="ColorPanel" Visibility="Collapsed">
+                            <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,0,0,8">
                                 <RadioButton x:Name="StrokeWellBtn" Style="{StaticResource ToolButton}" GroupName="ColorWell" Tag="Stroke"
                                              Content="Border" FontFamily="Segoe UI" FontSize="12" IsChecked="True"
                                              Checked="OnColorWellChecked" AutomationProperties.Name="Border color"
@@ -211,10 +224,13 @@
                                              Checked="OnColorWellChecked" AutomationProperties.Name="Fill color"
                                              AutomationProperties.HelpText="Edit the fill color and opacity independently of the border."/>
                             </StackPanel>
-                            <TextBlock x:Name="ColorWellLabel" Text="Color" Style="{StaticResource FieldLabel}" Margin="2,0,4,0"/>
+                            <DockPanel Margin="0,0,0,8">
+                            <TextBlock x:Name="ColorWellLabel" Text="Color" Style="{StaticResource FieldLabel}" Margin="0,0,8,0"/>
                             <Ellipse x:Name="CurrentColorIndicator" Width="16" Height="16" Fill="{StaticResource AnnotationRedBrush}"
-                                     Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1" Margin="2,0,8,0"
-                                     VerticalAlignment="Center" ToolTip="Current color"/>
+                                     Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"
+                                     HorizontalAlignment="Right" VerticalAlignment="Center" ToolTip="Current color"/>
+                            </DockPanel>
+                            <WrapPanel>
                             <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF453A" ToolTip="Red" Checked="OnColorChecked" IsChecked="True" AutomationProperties.Name="Red"/>
                             <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FF9500" ToolTip="Orange" Checked="OnColorChecked" AutomationProperties.Name="Orange"/>
                             <RadioButton Style="{StaticResource ColorSwatch}" GroupName="Color" Background="#FFCC00" ToolTip="Yellow" Checked="OnColorChecked" AutomationProperties.Name="Yellow"/>
@@ -236,7 +252,7 @@
                                 </RadioButton.Background>
                             </RadioButton>
                             <Popup x:Name="ColorPickerPopup" PlacementTarget="{Binding ElementName=CustomSwatch}"
-                                   Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                   Placement="Right" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                                 <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
                                         BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
                                         Effect="{StaticResource FloatingShadow}">
@@ -312,31 +328,33 @@
                                     </StackPanel>
                                 </Border>
                             </Popup>
-                        </StackPanel>
-                    </DockPanel>
-
-                    <DockPanel x:Name="EditorFormatBar" LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <StackPanel x:Name="CropPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
-                                    AutomationProperties.Name="Apply crop"/>
-                            <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" Click="OnCancelCrop"
-                                    AutomationProperties.Name="Cancel crop"/>
+                            </WrapPanel>
                         </StackPanel>
                     </StackPanel>
-                    <WrapPanel x:Name="ContextPanel" VerticalAlignment="Center">
-                        <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock x:Name="ThicknessLabel" Text="Size" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
-                            <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}" Width="64"
+
+                    <StackPanel x:Name="EditorFormatBar">
+                        <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,4,0,10"
+                                Visibility="{Binding ElementName=EditorColorBar, Path=Visibility}"/>
+                        <StackPanel x:Name="CropPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
+                                    Margin="0,0,0,6" HorizontalAlignment="Stretch"
+                                    AutomationProperties.Name="Apply crop"/>
+                            <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" Click="OnCancelCrop"
+                                    HorizontalAlignment="Stretch"
+                                    AutomationProperties.Name="Cancel crop"/>
+                        </StackPanel>
+                    <StackPanel x:Name="ContextPanel">
+                        <StackPanel x:Name="ThicknessPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock x:Name="ThicknessLabel" Text="Size" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}"
                                       SelectionChanged="OnSizeBoxChanged"
                                       AutomationProperties.Name="Annotation size"
                                       AutomationProperties.HelpText="Survey size presets. Stroke tools use 1–50; text uses 8–72."/>
                         </StackPanel>
 
-                        <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Arrow" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" Width="128" SelectedIndex="1"
+                        <StackPanel x:Name="ArrowStylePanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Arrow" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" SelectedIndex="1"
                                       SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrowhead">
                                 <ComboBoxItem Content="None" Tag="none"/>
                                 <ComboBoxItem Content="Solid triangle" Tag="solidTriangle"/>
@@ -348,9 +366,9 @@
                             </ComboBox>
                         </StackPanel>
 
-                        <StackPanel x:Name="LineStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="LineStyleBox" Style="{StaticResource DarkComboBox}" Width="96" SelectedIndex="0"
+                        <StackPanel x:Name="LineStylePanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="LineStyleBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
                                       SelectionChanged="OnLineStyleChanged" AutomationProperties.Name="Line style">
                                 <ComboBoxItem Content="Solid" Tag="solid"/>
                                 <ComboBoxItem Content="Dashed" Tag="dashed"/>
@@ -359,26 +377,29 @@
                             </ComboBox>
                         </StackPanel>
 
-                        <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock x:Name="EffectStrengthLabel" Text="Strength" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                        <StackPanel x:Name="EffectStrengthPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock x:Name="EffectStrengthLabel" Text="Strength" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <StackPanel Orientation="Horizontal">
                             <RadioButton x:Name="StrengthLightBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Light" Content="S"
                                          FontFamily="Segoe UI" FontSize="13" ToolTip="Light" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Light"/>
                             <RadioButton x:Name="StrengthMediumBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Medium" Content="M"
                                          FontFamily="Segoe UI" FontSize="13" ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
                             <RadioButton x:Name="StrengthStrongBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Strong" Content="L"
                                          FontFamily="Segoe UI" FontSize="13" ToolTip="Strong" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Strong"/>
+                            </StackPanel>
                         </StackPanel>
 
-                        <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="TextStyleBox" Style="{StaticResource DarkComboBox}" Width="92" SelectedIndex="0"
+                        <StackPanel x:Name="TextStylePanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Style" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="TextStyleBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
+                                      Margin="0,0,0,6"
                                       SelectionChanged="OnTextStyleChanged" AutomationProperties.Name="Text style">
                                 <ComboBoxItem Content="Plain" Tag="Plain"/><ComboBoxItem Content="Bold" Tag="Bold"/><ComboBoxItem Content="Outline" Tag="Outline"/>
                                 <ComboBoxItem Content="Pill" Tag="Pill"/><ComboBoxItem Content="Huge" Tag="Huge"/>
                             </ComboBox>
-                            <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Width="120" Margin="6,0,0,0"
+                            <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Margin="0,0,0,6"
                                       SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                             <Button x:Name="BoldBtn" Style="{StaticResource ToolIconButton}" Content="B" FontFamily="Segoe UI" FontWeight="Bold"
                                     Click="OnTextBoldClick" ToolTip="Bold" AutomationProperties.Name="Bold"
                                     AutomationProperties.HelpText="Toggle bold on new and selected text."/>
@@ -391,13 +412,14 @@
                             <Button x:Name="StrikeBtn" Style="{StaticResource ToolIconButton}" Content="S" FontFamily="Segoe UI"
                                     Click="OnTextStrikeClick" ToolTip="Strikethrough" AutomationProperties.Name="Strikethrough"
                                     AutomationProperties.HelpText="Toggle strikethrough on new and selected text."/>
-                            <ComboBox x:Name="AlignBox" Style="{StaticResource DarkComboBox}" Width="88" Margin="6,0,0,0"
+                            </StackPanel>
+                            <ComboBox x:Name="AlignBox" Style="{StaticResource DarkComboBox}" Margin="0,0,0,6"
                                       SelectionChanged="OnTextAlignChanged" AutomationProperties.Name="Text align">
                                 <ComboBoxItem Content="Left" Tag="left"/>
                                 <ComboBoxItem Content="Center" Tag="center"/>
                                 <ComboBoxItem Content="Right" Tag="right"/>
                             </ComboBox>
-                            <ComboBox x:Name="VerticalAlignBox" Style="{StaticResource DarkComboBox}" Width="88" Margin="6,0,0,0"
+                            <ComboBox x:Name="VerticalAlignBox" Style="{StaticResource DarkComboBox}"
                                       SelectionChanged="OnVerticalAlignChanged" AutomationProperties.Name="Vertical align"
                                       AutomationProperties.HelpText="Top, middle, or bottom align inside a sized text box.">
                                 <ComboBoxItem Content="Top" Tag="top"/>
@@ -406,17 +428,18 @@
                             </ComboBox>
                         </StackPanel>
 
-                        <StackPanel x:Name="CropRatioPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Ratio" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="CropRatioBox" Style="{StaticResource DarkComboBox}" Width="88" SelectedIndex="0"
+                        <StackPanel x:Name="CropRatioPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Ratio" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="CropRatioBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
                                       SelectionChanged="OnCropRatioChanged" AutomationProperties.Name="Crop ratio">
                                 <ComboBoxItem Content="Free" Tag=""/><ComboBoxItem Content="1:1" Tag="1:1"/><ComboBoxItem Content="4:3" Tag="4:3"/>
                                 <ComboBoxItem Content="16:9" Tag="16:9"/><ComboBoxItem Content="9:16" Tag="9:16"/>
                             </ComboBox>
                         </StackPanel>
 
-                        <StackPanel x:Name="StepModePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Count" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                        <StackPanel x:Name="StepModePanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Count" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <StackPanel Orientation="Horizontal">
                             <RadioButton x:Name="StepNumberBtn" Style="{StaticResource ToolButton}" GroupName="StepMode" Tag="Number" Content="1"
                                          FontFamily="Segoe UI" FontSize="13" ToolTip="Number badges" Checked="OnStepModeChecked" IsChecked="True"
                                          AutomationProperties.Name="Number badges"/>
@@ -425,10 +448,12 @@
                                          AutomationProperties.Name="Letter badges"/>
                             <Button Style="{StaticResource PillButtonSecondary}" Content="Reset to 1" ToolTip="Reset counter"
                                     Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>
+                            </StackPanel>
                         </StackPanel>
 
-                        <StackPanel x:Name="FillPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Fill" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
+                        <StackPanel x:Name="FillPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Fill" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <StackPanel Orientation="Horizontal">
                             <RadioButton x:Name="FillNoneBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="None" Content="&#xE739;" ToolTip="No fill"
                                          Checked="OnFillChecked" IsChecked="True" AutomationProperties.Name="No fill"
                                          AutomationProperties.HelpText="Draw shapes with an outline and no fill."/>
@@ -438,11 +463,12 @@
                             <RadioButton x:Name="FillSolidBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;" ToolTip="Solid fill"
                                          Checked="OnFillChecked" AutomationProperties.Name="Solid fill"
                                          AutomationProperties.HelpText="Draw shapes with a solid fill."/>
+                            </StackPanel>
                         </StackPanel>
 
-                        <StackPanel x:Name="EraserModePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock Text="Erase" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                        <StackPanel x:Name="EraserModePanel" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Erase" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                            <StackPanel Orientation="Horizontal">
                             <RadioButton x:Name="EraserPartialBtn" Style="{StaticResource ToolButton}" GroupName="EraserMode" Tag="Partial"
                                          Content="Part" FontFamily="Segoe UI" FontSize="12" IsChecked="True"
                                          Checked="OnEraserModeChecked" ToolTip="Partial erase (ink only)"
@@ -453,24 +479,27 @@
                                          Checked="OnEraserModeChecked" ToolTip="Full erase"
                                          AutomationProperties.Name="Full erase"
                                          AutomationProperties.HelpText="Delete any annotation the eraser hits."/>
+                            </StackPanel>
                         </StackPanel>
 
-                        <StackPanel x:Name="OpacityPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                            <Slider x:Name="OpacitySlider" Style="{StaticResource DarkSlider}" Width="92" Minimum="0" Maximum="100" Value="100"
+                        <StackPanel x:Name="OpacityPanel" Visibility="Collapsed" Margin="0,0,0,4">
+                            <DockPanel Margin="0,0,0,4">
+                            <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" DockPanel.Dock="Left"/>
+                            <TextBlock x:Name="OpacityValue" Text="100%" Style="{StaticResource ValueLabel}" MinWidth="38"
+                                       TextAlignment="Right" HorizontalAlignment="Right"/>
+                            </DockPanel>
+                            <Slider x:Name="OpacitySlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="100" Value="100"
                                     SmallChange="5" LargeChange="25" TickFrequency="25" IsSnapToTickEnabled="False"
                                     ValueChanged="OnOpacityChanged" PreviewMouseUp="OnOpacitySliderReleased" LostMouseCapture="OnOpacitySliderReleased"
                                     KeyUp="OnOpacitySliderReleased" ToolTip="Annotation opacity" AutomationProperties.Name="Annotation opacity"/>
-                            <TextBlock x:Name="OpacityValue" Text="100%" Style="{StaticResource ValueLabel}" MinWidth="38"
-                                       TextAlignment="Right" Margin="6,0,0,0"/>
                         </StackPanel>
-                    </WrapPanel>
-                    </DockPanel>
-                </StackPanel>
-            </StackPanel>
-        </Border>
+                    </StackPanel>
+                    </StackPanel>
+                    </StackPanel>
+                    </ScrollViewer>
+                </Border>
 
-        <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
+        <Grid x:Name="Viewport" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
               AutomationProperties.Name="Annotation canvas"
@@ -508,6 +537,7 @@
                     </Canvas>
                 </Grid>
             </Canvas>
+        </Grid>
         </Grid>
 
         <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"

@@ -430,10 +430,10 @@ public class ThemedWindowTests
             Assert.True(control.IsTabStop);
         }
 
-        var styleBar = (StackPanel)editor.FindName("EditorStyleBar")!;
+        var styleBar = (Border)editor.FindName("EditorStyleBar")!;
         var groupBar = (StackPanel)editor.FindName("EditorGroupBar")!;
-        var colorBar = (DockPanel)editor.FindName("EditorColorBar")!;
-        var formatBar = (DockPanel)editor.FindName("EditorFormatBar")!;
+        var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
+        var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
         var color = (StackPanel)editor.FindName("ColorPanel")!;
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
         var fill = (StackPanel)editor.FindName("FillPanel")!;
@@ -441,6 +441,14 @@ public class ThemedWindowTests
         var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
         var sizeBox = (ComboBox)editor.FindName("SizeBox")!;
+        var viewport = (Grid)editor.FindName("Viewport")!;
+        var canvasRow = Assert.IsType<Grid>(styleBar.Parent);
+        Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Center, groupBar.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Left, styleBar.HorizontalAlignment);
+        Assert.Contains(canvasRow.Children.OfType<FrameworkElement>(), el => el.Name == "Viewport");
+        Assert.Same(viewport, canvasRow.Children.OfType<Grid>().First(g => g.Name == "Viewport"));
+        Assert.Equal(4, Panel.GetZIndex(styleBar));
 
         Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
         Assert.Equal(Visibility.Collapsed, groupBar.Visibility);

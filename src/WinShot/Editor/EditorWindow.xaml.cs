@@ -208,7 +208,11 @@ public partial class EditorWindow : Window
         // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
         // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
         // until the user takes control.
-        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        Viewport.SizeChanged += (_, _) =>
+        {
+            if (_pendingInitialFit) FitToView();
+            ClampStyleRail();
+        };
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -746,8 +750,17 @@ public partial class EditorWindow : Window
                       CropPanel.Visibility == Visibility.Visible;
         EditorColorBar.Visibility = Show(color);
         EditorFormatBar.Visibility = Show(format);
-        EditorColorBar.Margin = format ? new Thickness(0, 0, 0, 8) : new Thickness(0);
         EditorStyleBar.Visibility = Show(color || format);
+        ClampStyleRail();
+    }
+
+    private void ClampStyleRail()
+    {
+        if (EditorStyleBar is null || Viewport is null) return;
+        double available = Math.Max(120, Viewport.ActualHeight - 16);
+        EditorStyleBar.MaxHeight = available;
+        if (EditorStyleScroll is not null)
+            EditorStyleScroll.MaxHeight = Math.Max(100, available - 12);
     }
 
     private void SyncSizeBox()
