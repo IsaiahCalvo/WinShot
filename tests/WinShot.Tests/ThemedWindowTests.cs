@@ -367,7 +367,7 @@ public class ThemedWindowTests
 
     private static void EditorShellContractSmoke(EditorWindow editor)
     {
-        var primary = (WrapPanel)editor.FindName("ToolPanel")!;
+        var primary = (StackPanel)editor.FindName("ToolPanel")!;
         var primaryOrder = primary.Children.OfType<FrameworkElement>()
             .Select(el => el.Tag as string)
             .Where(tag => tag is "Pan" or "Select" or "Draw" or "Shape" or "Text" or "Eyedropper" or "Pixelate" or "Spotlight" or "Blur")
@@ -468,6 +468,14 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "50");
 
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
+        editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        editor.UpdateLayout();
+        var top = (Border)editor.FindName("TopToolbar")!;
+        var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
+        Assert.True(primaryRow.ActualHeight <= 48,
+            $"Primary row grew instead of staying one line: {primaryRow.ActualHeight}");
+        Assert.True(top.ActualHeight <= 120,
+            $"Top chrome stacked too many rows with Text selected: {top.ActualHeight}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
         Assert.Equal("Size", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);

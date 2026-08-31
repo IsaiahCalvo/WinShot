@@ -703,7 +703,7 @@ public partial class EditorWindow : Window
         ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
         ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
         FillPanel.Visibility = Show(Has(EditorContextControls.Fill));
-        OpacityPanel.Visibility = Show(Has(EditorContextControls.Opacity));
+        OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
         EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
@@ -712,8 +712,7 @@ public partial class EditorWindow : Window
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
         EraserModePanel.Visibility = Show(Has(EditorContextControls.EraserMode));
-        ColorWellLabel.Visibility = Show(!Has(EditorContextControls.FillStrokeTabs));
-        ColorWellLabel.Text = "Color";
+        ColorWellLabel.Visibility = Visibility.Collapsed;
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(_tool == EditorTool.Rectangle);
         SyncColorWellIndicator();
@@ -730,22 +729,23 @@ public partial class EditorWindow : Window
         }
 
         string group = EditorShellContract.GroupFor(_tool, _filledRectangleMode);
-        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text");
         DrawGroupPanel.Visibility = Show(group == "Draw");
         ShapeGroupPanel.Visibility = Show(group == "Shape");
         TextGroupPanel.Visibility = Show(group == "Text");
 
         bool color = Has(EditorContextControls.Color);
-        bool format = Has(EditorContextControls.Thickness) || Has(EditorContextControls.Fill) ||
-                      Has(EditorContextControls.Opacity) || Has(EditorContextControls.ArrowStyle) ||
+        bool size = Has(EditorContextControls.Thickness);
+        bool extras = Has(EditorContextControls.Fill) || Has(EditorContextControls.ArrowStyle) ||
                       Has(EditorContextControls.EffectStrength) || Has(EditorContextControls.TextStyle) ||
                       Has(EditorContextControls.CropRatio) || Has(EditorContextControls.StepMode) ||
                       Has(EditorContextControls.LineStyle) || Has(EditorContextControls.EraserMode) ||
+                      Has(EditorContextControls.FillStrokeTabs) ||
                       CropPanel.Visibility == Visibility.Visible;
         EditorColorBar.Visibility = Show(color);
-        EditorFormatBar.Visibility = Show(format);
+        EditorFormatBar.Visibility = Show(extras);
         if (SecondaryToolPanel is not null)
-            SecondaryToolPanel.Visibility = Show(color || format);
+            SecondaryToolPanel.Visibility = Show(color || size);
+        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text" || extras);
         if (EditorStyleBar is not null)
             EditorStyleBar.Visibility = Visibility.Visible;
     }
