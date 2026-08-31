@@ -503,6 +503,16 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "16");
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "72");
+        Assert.NotNull(editor.FindName("FontSizeBox"));
+
+        ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
+            item => item.Content is string s && s == "1");
+        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
+            item => item.Content is string s && s == "50");
+        Assert.DoesNotContain(sizeBox.Items.OfType<ComboBoxItem>(),
+            item => item.Content is string s && s == "72");
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName((Button)editor.FindName("BoldBtn")!)));

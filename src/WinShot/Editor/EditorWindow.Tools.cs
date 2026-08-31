@@ -21,12 +21,13 @@ public partial class EditorWindow : Window
         var layout = CalloutLayout.FromDrag(tip, boxOrigin);
         var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
         double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
+        double thickness = AnnotationStyle.ClampSize(_shapeSize);
         var visual = AnnotationFactory.CreateCallout(
-            layout, "", stroke, fill, _thickness, _arrowhead,
-            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize);
+            layout, "", stroke, fill, thickness, _arrowhead,
+            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize, _textFontFamily);
         visual.Tag = AnnotationData.ForCallout(
-            layout, "", stroke, fill, _thickness, _arrowhead,
-            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize);
+            layout, "", stroke, fill, thickness, _arrowhead,
+            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize, _textFontFamily);
         AnnotationCanvas.Children.Add(visual);
 
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(stroke), fontSize);

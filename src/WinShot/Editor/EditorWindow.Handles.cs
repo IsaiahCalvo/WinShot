@@ -138,7 +138,7 @@ public partial class EditorWindow : Window
             var thumb = new Rectangle
             {
                 Fill = new SolidColorBrush(Colors.White),
-                Stroke = new SolidColorBrush(Color.FromRgb(0x3B, 0x82, 0xF6)),
+                Stroke = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE2)),
                 RadiusX = 2,
                 RadiusY = 2,
             };
@@ -490,9 +490,9 @@ public partial class EditorWindow : Window
         var stroke = meta.Color is string hex && TryParseColor(hex, out var sc) ? sc : Colors.White;
         var fill = AnnotationStyle.FillColorFrom(meta, stroke);
         callout.Apply(next, meta.Text ?? "", stroke, fill, meta.Thickness ?? 2, head,
-            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16);
+            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
         var data = AnnotationData.ForCallout(next, meta.Text ?? "", stroke, fill,
-            meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16);
+            meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
         data.Tx = meta.Tx;
         data.Ty = meta.Ty;
         callout.Tag = data;
@@ -622,7 +622,7 @@ public partial class EditorWindow : Window
                     var stroke = snap.Meta.Color is string hx && TryParseColor(hx, out var sc) ? sc : Colors.White;
                     callout.Apply(layout, snap.Meta.Text ?? "", stroke, AnnotationStyle.FillColorFrom(snap.Meta, stroke),
                         snap.Meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(snap.Meta),
-                        snap.Meta.FontSize ?? 16);
+                        snap.Meta.FontSize ?? 16, snap.Meta.FontFamily);
                     meta = snap.Meta.Clone();
                 }
                 break;

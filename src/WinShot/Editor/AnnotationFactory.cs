@@ -604,10 +604,10 @@ internal static class AnnotationFactory
 
     public static CalloutAnnotation CreateCallout(
         CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
-        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize)
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null)
     {
         var visual = new CalloutAnnotation();
-        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize);
+        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize, fontFamily);
         return visual;
     }
 }

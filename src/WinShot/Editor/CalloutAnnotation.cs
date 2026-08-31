@@ -12,12 +12,22 @@ namespace WinShot.Editor;
 /// </summary>
 internal sealed class CalloutAnnotation : Canvas
 {
+    private readonly Path _hit = new()
+    {
+        Stroke = Brushes.Transparent,
+        Fill = null,
+        StrokeThickness = 16,
+        StrokeStartLineCap = PenLineCap.Round,
+        StrokeEndLineCap = PenLineCap.Round,
+        StrokeLineJoin = PenLineJoin.Round,
+    };
+
     private readonly Path _leader = new()
     {
         StrokeLineJoin = PenLineJoin.Round,
         StrokeStartLineCap = PenLineCap.Round,
         StrokeEndLineCap = PenLineCap.Round,
-        Fill = Brushes.Transparent,
+        Fill = null,
     };
 
     private readonly Path _head = new()
@@ -45,7 +55,9 @@ internal sealed class CalloutAnnotation : Canvas
     {
         IsHitTestVisible = true;
         Background = null;
+        ClipToBounds = false;
         _box.Child = _label;
+        Children.Add(_hit);
         Children.Add(_leader);
         Children.Add(_head);
         Children.Add(_box);
@@ -57,7 +69,7 @@ internal sealed class CalloutAnnotation : Canvas
 
     public void Apply(
         CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
-        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize)
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null)
     {
         Layout = layout;
         var strokeBrush = new SolidColorBrush(stroke);
@@ -69,9 +81,12 @@ internal sealed class CalloutAnnotation : Canvas
         fig.Segments.Add(new LineSegment(layout.Join, true));
         leader.Figures.Add(fig);
         _leader.Data = leader;
+        _leader.Fill = null;
         _leader.Stroke = strokeBrush;
         _leader.StrokeThickness = Math.Max(1, thickness);
         AnnotationFactory.ApplyDash(_leader, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
+        _hit.Data = leader;
+        _hit.StrokeThickness = Math.Max(16, thickness + 12);
 
         var v = layout.Tip - layout.Knee;
         if (v.Length < 0.5) v = layout.Tip - layout.Join;
@@ -81,7 +96,7 @@ internal sealed class CalloutAnnotation : Canvas
         // Rebuild a one-head geometry at the tip pointing along tip-from-knee.
         Point dummyFrom = layout.Tip - v;
         var full = AnnotationFactory.ArrowGeometry(
-            dummyFrom, layout.Tip, thickness, head, ArrowheadStyle.None);
+            dummyFrom, layout.Tip, Math.Max(4, thickness), head, ArrowheadStyle.None);
         if (full is PathGeometry pg && pg.Figures.Count > 1)
         {
             var onlyHead = new PathGeometry();
@@ -102,6 +117,7 @@ internal sealed class CalloutAnnotation : Canvas
         _box.BorderBrush = strokeBrush;
         _box.BorderThickness = new Thickness(Math.Max(1, thickness));
         _box.Background = fillBrush;
+        _box.IsHitTestVisible = true;
         _box.Width = layout.Box.Width;
         _box.Height = layout.Box.Height;
         SetLeft(_box, layout.Box.X);
@@ -109,8 +125,10 @@ internal sealed class CalloutAnnotation : Canvas
 
         _label.Text = text;
         _label.FontSize = fontSize;
+        _label.FontFamily = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? "Arial" : fontFamily);
         _label.Foreground = strokeBrush;
         _label.TextWrapping = TextWrapping.Wrap;
+        _label.IsHitTestVisible = true;
     }
 
     public string Text

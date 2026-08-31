@@ -124,7 +124,7 @@ public partial class EditorWindow : Window
             if (thickness is not null) meta.Thickness = t;
             if (fill is not null) meta.Fill = f.ToString();
             if (fillColor is not null || Meta.Type is AnnotationData.TypeRectangle
-                or AnnotationData.TypeEllipse or AnnotationData.TypeText)
+                or AnnotationData.TypeEllipse or AnnotationData.TypeText or AnnotationData.TypeCallout)
                 meta.FillColor = ToHex(fc);
             return new StyleSnapshot(c, t, f, fc, meta);
         }
@@ -223,7 +223,7 @@ public partial class EditorWindow : Window
                     var (head, _) = AnnotationStyle.HeadsFrom(snap.Meta);
                     callout.Apply(layout, snap.Meta.Text ?? callout.Text, snap.StrokeColor, snap.FillColor,
                         snap.Thickness, head, AnnotationStyle.LineStyleFrom(snap.Meta),
-                        snap.Meta.FontSize ?? 16);
+                        snap.Meta.FontSize ?? 16, snap.Meta.FontFamily);
                 }
                 break;
             case AnnotationData.TypeText:
@@ -324,6 +324,42 @@ public partial class EditorWindow : Window
             Push(new EditorAction(
                 undo: () => ReplaceAnnotation(afterEl, beforeEl),
                 redo: () => ReplaceAnnotation(beforeEl, afterEl)), apply: false);
+        }
+        else if (fe is CalloutAnnotation callout)
+        {
+            var stroke = after.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White;
+            var fill = AnnotationStyle.FillColorFrom(after, stroke);
+            var (head, _) = AnnotationStyle.HeadsFrom(after);
+            var layout = callout.Layout;
+            callout.Apply(layout, after.Text ?? callout.Text, stroke, fill,
+                after.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(after),
+                after.FontSize ?? 16, after.FontFamily);
+            fe.Tag = after;
+            Push(new EditorAction(
+                undo: () =>
+                {
+                    if (fe is CalloutAnnotation c0)
+                    {
+                        var s = before.Color is string h && TryParseColor(h, out var col) ? col : Colors.White;
+                        var f = AnnotationStyle.FillColorFrom(before, s);
+                        var (hd, _) = AnnotationStyle.HeadsFrom(before);
+                        c0.Apply(c0.Layout, before.Text ?? c0.Text, s, f, before.Thickness ?? 2, hd,
+                            AnnotationStyle.LineStyleFrom(before), before.FontSize ?? 16, before.FontFamily);
+                        fe.Tag = before;
+                    }
+                },
+                redo: () =>
+                {
+                    if (fe is CalloutAnnotation c1)
+                    {
+                        var s = after.Color is string h && TryParseColor(h, out var col) ? col : Colors.White;
+                        var f = AnnotationStyle.FillColorFrom(after, s);
+                        var (hd, _) = AnnotationStyle.HeadsFrom(after);
+                        c1.Apply(c1.Layout, after.Text ?? c1.Text, s, f, after.Thickness ?? 2, hd,
+                            AnnotationStyle.LineStyleFrom(after), after.FontSize ?? 16, after.FontFamily);
+                        fe.Tag = after;
+                    }
+                }), apply: false);
         }
         else
         {

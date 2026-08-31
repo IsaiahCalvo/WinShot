@@ -145,6 +145,7 @@ public partial class EditorWindow : Window
     private bool _pendingInitialFit;
     private Point _dragStart;
     private Shape? _activeShape;
+    private CalloutAnnotation? _previewCallout;
     private TextBox? _activeText;
     private SD.Rectangle? _pendingCrop;
 
@@ -828,7 +829,8 @@ public partial class EditorWindow : Window
                 {
                     case AnnotationData.TypeHighlighter: _highlighterSize = th; break;
                     case AnnotationData.TypeFreehand: _penSize = th; break;
-                    case AnnotationData.TypeText or AnnotationData.TypeCallout: break;
+                    case AnnotationData.TypeText: break;
+                    case AnnotationData.TypeCallout: _shapeSize = th; break;
                     default: _shapeSize = th; break;
                 }
             }
@@ -886,7 +888,7 @@ public partial class EditorWindow : Window
     private void SyncSizeBox()
     {
         if (SizeBox is null) return;
-        bool text = ChromeTool() is EditorTool.Text or EditorTool.Callout;
+        bool text = ChromeTool() is EditorTool.Text;
         int[] presets = _tool == EditorTool.Eraser
             ? AnnotationStyle.EraserSizePresets
             : text ? AnnotationStyle.TextSizePresets : AnnotationStyle.SizePresets;
@@ -964,6 +966,7 @@ public partial class EditorWindow : Window
         FitComboToLongestItem(ArrowStyleBox);
         FitComboToLongestItem(LineStyleBox);
         FitComboToLongestItem(FontFamilyBox);
+        FitComboToLongestItem(FontSizeBox);
         FitComboToLongestItem(AlignBox);
         FitComboToLongestItem(VerticalAlignBox);
         FitComboToLongestItem(CropRatioBox);
@@ -977,7 +980,8 @@ public partial class EditorWindow : Window
     {
         EditorTool.Highlighter => _highlighterSize,
         EditorTool.Eraser => _eraserSize,
-        EditorTool.Text or EditorTool.Callout => _textFontSize,
+        EditorTool.Text => _textFontSize,
+        EditorTool.Callout => _shapeSize,
         EditorTool.Freehand => _penSize,
         EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
             or EditorTool.CurvedArrow or EditorTool.Step => _shapeSize,
@@ -990,7 +994,8 @@ public partial class EditorWindow : Window
         {
             case EditorTool.Highlighter: _highlighterSize = AnnotationStyle.HighlighterWidth(size); break;
             case EditorTool.Eraser: _eraserSize = AnnotationStyle.ClampEraserSize(size); break;
-            case EditorTool.Text or EditorTool.Callout: _textFontSize = AnnotationStyle.ClampTextSize(size); break;
+            case EditorTool.Text: _textFontSize = AnnotationStyle.ClampTextSize(size); break;
+            case EditorTool.Callout: _shapeSize = AnnotationStyle.ClampSize(size); break;
             case EditorTool.Freehand: _penSize = AnnotationStyle.ClampSize(size); break;
             default: _shapeSize = AnnotationStyle.ClampSize(size); break;
         }
@@ -1003,7 +1008,7 @@ public partial class EditorWindow : Window
         double size = item.Tag is double d ? d : AnnotationStyle.DefaultPenSize;
         RememberSize(size);
         if (!IsLoaded) return;
-        if (ChromeTool() is EditorTool.Text or EditorTool.Callout)
+        if (ChromeTool() is EditorTool.Text)
             RestyleSelectedTextFormat();
         else
         {
@@ -1154,6 +1159,14 @@ public partial class EditorWindow : Window
         if (IsLoaded) RestyleSelectedTextFormat();
     }
 
+    private void OnFontSizeBoxChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingContext || _syncingSizeBox) return;
+        if (FontSizeBox?.SelectedItem is not ComboBoxItem item || item.Tag is not double size) return;
+        _textFontSize = AnnotationStyle.ClampTextSize(size);
+        if (IsLoaded) RestyleSelectedTextFormat();
+    }
+
     private void OnTextBoldClick(object sender, RoutedEventArgs e)
     {
         _textBold = !_textBold;
@@ -1206,6 +1219,24 @@ public partial class EditorWindow : Window
                 FontFamilyBox.Items.Add(new ComboBoxItem { Content = family, Tag = family });
             FontFamilyBox.SelectedIndex = 0;
             FitComboToLongestItem(FontFamilyBox);
+        }
+        if (FontSizeBox is not null && FontSizeBox.Items.Count == 0)
+        {
+            foreach (int n in AnnotationStyle.TextSizePresets)
+                FontSizeBox.Items.Add(new ComboBoxItem { Content = n.ToString(), Tag = (double)n });
+            FitComboToLongestItem(FontSizeBox);
+        }
+        if (FontSizeBox is not null)
+        {
+            bool restore = _syncingContext;
+            _syncingContext = true;
+            try
+            {
+                foreach (ComboBoxItem item in FontSizeBox.Items.OfType<ComboBoxItem>())
+                    if (item.Tag is double n && (int)n == AnnotationStyle.ClampTextSize(_textFontSize))
+                        FontSizeBox.SelectedItem = item;
+            }
+            finally { _syncingContext = restore; }
         }
         void Paint(Button? btn, bool on)
         {

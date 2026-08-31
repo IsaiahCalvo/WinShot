@@ -382,6 +382,9 @@
                                                     <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
                                                                   SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
+                                                        <ComboBox x:Name="FontSizeBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
+                                                                  SelectionChanged="OnFontSizeBoxChanged" AutomationProperties.Name="Font size"
+                                                                  AutomationProperties.HelpText="Font size for text and callout labels."/>
                                                         <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
                                                         <Button x:Name="BoldBtn" Style="{StaticResource CompactToolIconButton}" Content="B" FontFamily="Segoe UI" FontWeight="Bold"
                                                                 Click="OnTextBoldClick" ToolTip="Bold" AutomationProperties.Name="Bold"

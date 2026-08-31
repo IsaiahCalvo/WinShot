@@ -143,7 +143,7 @@ internal sealed class AnnotationData
 
     public static AnnotationData ForCallout(
         CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
-        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize) => new()
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null) => new()
     {
         Type = TypeCallout,
         Points = new[]
@@ -160,6 +160,7 @@ internal sealed class AnnotationData
         LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
         Text = text,
         FontSize = fontSize,
+        FontFamily = fontFamily,
     };
 
     public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) =>
@@ -428,7 +429,7 @@ internal static class ProjectSerializer
                 double fontSize = a.FontSize is double fs && fs > 0 ? fs : 16;
                 return AnnotationFactory.CreateCallout(
                     layout, a.Text ?? "", stroke, fill, RequireThickness(a),
-                    head, AnnotationStyle.LineStyleFrom(a), fontSize);
+                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily);
             }
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:

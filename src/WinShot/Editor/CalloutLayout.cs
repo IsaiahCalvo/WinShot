@@ -25,14 +25,23 @@ internal readonly record struct CalloutLayout(Point Tip, Point Knee, Rect Box, P
         return FromParts(tip, DefaultKnee(tip, box), box);
     }
 
+    /// <summary>
+    /// Survey L-shape: knee sits at the text-box vertical center, halfway in X
+    /// between the tip and the nearer vertical edge of the box.
+    /// </summary>
     public static Point DefaultKnee(Point tip, Rect box)
     {
-        Point center = new(box.X + box.Width / 2, box.Y + box.Height / 2);
-        Vector v = center - tip;
-        if (v.Length < 1) v = new Vector(CreateKneeLength, -CreateKneeLength * 0.5);
-        v.Normalize();
-        double length = Math.Max(MinKneeToTip, CreateKneeLength);
-        return tip + v * length;
+        double midY = box.Y + box.Height / 2;
+        double edgeX = tip.X >= box.X + box.Width / 2 ? box.Right : box.Left;
+        var knee = new Point((tip.X + edgeX) / 2, midY);
+        if ((knee - tip).Length < MinKneeToTip)
+        {
+            var v = new Vector(edgeX - tip.X, midY - tip.Y);
+            if (v.Length < 0.5) v = new Vector(CreateKneeLength, 0);
+            v.Normalize();
+            knee = tip + v * MinKneeToTip;
+        }
+        return knee;
     }
 
     public static CalloutLayout FromParts(Point tip, Point knee, Rect box)

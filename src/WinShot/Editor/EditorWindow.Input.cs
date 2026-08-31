@@ -130,7 +130,7 @@ public partial class EditorWindow : Window
                 arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness, _arrowhead, _startArrowhead);
                 break;
             case EditorTool.Callout:
-                ShowDragRect(new Rect(_dragStart, pos), dim: false);
+                UpdateCalloutPreview(_dragStart, pos);
                 break;
             case EditorTool.Text:
                 ShowDragRect(ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld), dim: false);
@@ -242,8 +242,11 @@ public partial class EditorWindow : Window
                 return;
             case EditorTool.Callout:
                 HideDragRect();
-                if ((pos - _dragStart).Length < CalloutLayout.MinDrag) return;
-                CommitCallout(_dragStart, pos);
+                ClearCalloutPreview();
+                Point boxOrigin = pos;
+                if ((pos - _dragStart).Length < CalloutLayout.MinDrag)
+                    boxOrigin = new Point(_dragStart.X + 80, _dragStart.Y - CalloutLayout.DefaultBoxHeight / 2);
+                CommitCallout(_dragStart, boxOrigin);
                 return;
             case EditorTool.CurvedArrow:
                 if (shape is not Path curve) return;
@@ -567,7 +570,38 @@ public partial class EditorWindow : Window
             AnnotationCanvas.Children.Remove(_activeShape);
             _activeShape = null;
         }
+        ClearCalloutPreview();
         if (_pendingCrop is null) HideDragRect();
+    }
+
+    private void UpdateCalloutPreview(Point tip, Point boxOrigin)
+    {
+        var layout = CalloutLayout.FromDrag(tip, boxOrigin);
+        var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
+        double thickness = AnnotationStyle.ClampSize(_shapeSize);
+        double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
+        if (_previewCallout is null)
+        {
+            _previewCallout = AnnotationFactory.CreateCallout(
+                layout, "", stroke, fill, thickness, _arrowhead,
+                _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle,
+                fontSize, _textFontFamily);
+            _previewCallout.IsHitTestVisible = false;
+            AnnotationCanvas.Children.Add(_previewCallout);
+        }
+        else
+        {
+            _previewCallout.Apply(layout, "", stroke, fill, thickness, _arrowhead,
+                _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle,
+                fontSize, _textFontFamily);
+        }
+    }
+
+    private void ClearCalloutPreview()
+    {
+        if (_previewCallout is null) return;
+        AnnotationCanvas.Children.Remove(_previewCallout);
+        _previewCallout = null;
     }
 
     private Point ClampToSurface(Point p) =>
