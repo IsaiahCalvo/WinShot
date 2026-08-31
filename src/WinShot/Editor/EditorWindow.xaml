@@ -128,19 +128,19 @@
                         <Button x:Name="DrawGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnDrawGroupClick" Tag="Draw" ToolTip="Draw"
                                 AutomationProperties.Name="Draw"
-                                AutomationProperties.HelpText="Pen, highlighter, and eraser. Opens the draw tools on the row below. Shortcut P or H."
+                                AutomationProperties.HelpText="Pen, highlighter, and eraser. Shortcut P or H."
                                 Content="{StaticResource SurveyIcon.Pen}"/>
 
                         <Button x:Name="ShapeGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnShapeGroupClick" Tag="Shape" ToolTip="Shapes"
                                 AutomationProperties.Name="Shapes"
-                                AutomationProperties.HelpText="Rectangle, ellipse, line, arrow, and counter. Opens the shape tools on the row below."
+                                AutomationProperties.HelpText="Rectangle, ellipse, line, arrow, and counter."
                                 Content="{StaticResource SurveyIcon.Rect}"/>
 
                         <Button x:Name="TextGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnTextGroupClick" Tag="Text" ToolTip="Text"
                                 AutomationProperties.Name="Text"
-                                AutomationProperties.HelpText="Text box and callout. Opens the text tools on the row below."
+                                AutomationProperties.HelpText="Text box and callout."
                                 Content="{StaticResource SurveyIcon.Text}"/>
 
                         <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
@@ -169,7 +169,7 @@
                                      AutomationProperties.HelpText="Line and arrow already bend from the midpoint handle."/>
 
                     </StackPanel>
-                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0" MinWidth="220">
+                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
@@ -293,9 +293,9 @@
                                                         </WrapPanel>
                                                     </StackPanel>
                                                 </StackPanel>
-                            <Grid MinWidth="130" VerticalAlignment="Center" Margin="0,0,8,0">
+                            <Grid MinWidth="52" VerticalAlignment="Center" Margin="0,0,8,0">
                             <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
-                                                        <TextBlock x:Name="ThicknessLabel" Text="Stroke" Style="{StaticResource FieldLabel}" Margin="8,0,6,0" MinWidth="48"/>
+                                                        <TextBlock x:Name="ThicknessLabel" Text="Stroke" Style="{StaticResource FieldLabel}" Margin="0,0,6,0" Visibility="Collapsed"/>
                                                         <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}"
                                                                   SelectionChanged="OnSizeBoxChanged"
                                                                   AutomationProperties.Name="Annotation size"
@@ -312,92 +312,7 @@
                                                         </ComboBox>
                                                     </StackPanel>
                             </Grid>
-
-                                                
-                        </StackPanel>
-                    </Grid>
-
-                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
-                                Content="Save as…" Click="OnSave" ToolTip="Save as… (Ctrl+Shift+S)"
-                                AutomationProperties.Name="Save as"
-                                AutomationProperties.HelpText="Choose a local export file. Shortcut Ctrl+Shift+S."/>
-                        <Button x:Name="BtnDone" Style="{StaticResource PillButtonPrimary}"
-                                Content="Done" Click="OnDone" ToolTip="Copy and close"
-                                AutomationProperties.Name="Done"
-                                AutomationProperties.HelpText="Copy the edited image to the clipboard and close the editor."/>
-                    </StackPanel>
-                </Grid>
-
-                <Border Height="1" Background="{StaticResource BorderBrush}" Margin="12,8,12,0"
-                        Visibility="{Binding ElementName=EditorGroupBar, Path=Visibility}"/>
-                <StackPanel x:Name="EditorGroupBar" Margin="0,8,0,2" Visibility="Collapsed"
-                            AutomationProperties.Name="Group tools"
-                            AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
-                    <Border x:Name="EditorGroupToolsHost" MinWidth="188" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
-                    <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
-                                     AutomationProperties.Name="Pen"
-                                     AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."
-                                     Content="{StaticResource SurveyIcon.Pen}"/>
-                        <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter (H)"
-                                     AutomationProperties.Name="Highlighter"
-                                     AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
-                                     Content="{StaticResource SurveyIcon.Highlighter}"/>
-                        <RadioButton x:Name="EraserToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Eraser" Checked="OnToolChecked" ToolTip="Eraser"
-                                     AutomationProperties.Name="Eraser"
-                                     AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink. Full erase deletes the annotation under the stroke."
-                                     Content="{StaticResource SurveyIcon.Eraser}"/>
-                    </StackPanel>
-                    <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Rectangle" Checked="OnToolChecked"
-                                     ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
-                                     AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
-                                     Content="{StaticResource SurveyIcon.Rect}"/>
-                        <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="FilledRectangle" Checked="OnFilledRectangleToolChecked"
-                                     ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
-                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current fill color."
-                                     Content="{StaticResource SurveyIcon.FilledRect}"/>
-                        <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse (E)"
-                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."
-                                     Content="{StaticResource SurveyIcon.Ellipse}"/>
-                        <RadioButton x:Name="LineToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Line" Checked="OnToolChecked" ToolTip="Line (L)"
-                                     AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."
-                                     Content="{StaticResource SurveyIcon.Line}"/>
-                        <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow (A)"
-                                     AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."
-                                     Content="{StaticResource SurveyIcon.Arrow}"/>
-                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Step" Checked="OnToolChecked" ToolTip="Counter (S)"
-                                     AutomationProperties.Name="Counter"
-                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."
-                                     Content="{StaticResource SurveyIcon.Counter}"/>
-                    </StackPanel>
-                    <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="TextToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Text" Checked="OnToolChecked" ToolTip="Text (T)"
-                                     AutomationProperties.Name="Text"
-                                     AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
-                                     Content="{StaticResource SurveyIcon.Text}"/>
-                        <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
-                                     Tag="Callout" Checked="OnToolChecked" ToolTip="Callout (Q)"
-                                     AutomationProperties.Name="Callout"
-                                     AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
-                                     Content="{StaticResource SurveyIcon.Callout}"/>
-                    </StackPanel>
-                    </StackPanel>
-                    </Border>
-                    <Border x:Name="EditorFormatHost" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,6,0,0">
-                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
@@ -591,9 +506,20 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                                 </StackPanel>
-                    </Border>
-                </StackPanel>
+                        </StackPanel>
+                    </Grid>
 
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="BtnSave" Style="{StaticResource PillButtonSecondary}"
+                                Content="Save as…" Click="OnSave" ToolTip="Save as… (Ctrl+Shift+S)"
+                                AutomationProperties.Name="Save as"
+                                AutomationProperties.HelpText="Choose a local export file. Shortcut Ctrl+Shift+S."/>
+                        <Button x:Name="BtnDone" Style="{StaticResource PillButtonPrimary}"
+                                Content="Done" Click="OnDone" ToolTip="Copy and close"
+                                AutomationProperties.Name="Done"
+                                AutomationProperties.HelpText="Copy the edited image to the clipboard and close the editor."/>
+                    </StackPanel>
+                </Grid>
             </StackPanel>
         </Border>
 
@@ -645,6 +571,77 @@
                 </Grid>
             </Canvas>
         </Grid>
+                <Border x:Name="EditorGroupBar" HorizontalAlignment="Center" VerticalAlignment="Top"
+                        Margin="0,10,0,0" Padding="6,4" CornerRadius="8"
+                        Background="{StaticResource FloatingBgBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                        Effect="{StaticResource FloatingShadow}"
+                        Visibility="Collapsed"
+                        AutomationProperties.Name="Group tools"
+                        AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
+                    <Border x:Name="EditorGroupToolsHost" MinWidth="188">
+                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                        <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
+                                     AutomationProperties.Name="Pen"
+                                     AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."
+                                     Content="{StaticResource SurveyIcon.Pen}"/>
+                        <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter (H)"
+                                     AutomationProperties.Name="Highlighter"
+                                     AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
+                                     Content="{StaticResource SurveyIcon.Highlighter}"/>
+                        <RadioButton x:Name="EraserToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Eraser" Checked="OnToolChecked" ToolTip="Eraser"
+                                     AutomationProperties.Name="Eraser"
+                                     AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink. Full erase deletes the annotation under the stroke."
+                                     Content="{StaticResource SurveyIcon.Eraser}"/>
+                    </StackPanel>
+                    <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                        <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Rectangle" Checked="OnToolChecked"
+                                     ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
+                                     AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
+                                     Content="{StaticResource SurveyIcon.Rect}"/>
+                        <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="FilledRectangle" Checked="OnFilledRectangleToolChecked"
+                                     ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
+                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current fill color."
+                                     Content="{StaticResource SurveyIcon.FilledRect}"/>
+                        <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse (E)"
+                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."
+                                     Content="{StaticResource SurveyIcon.Ellipse}"/>
+                        <RadioButton x:Name="LineToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Line" Checked="OnToolChecked" ToolTip="Line (L)"
+                                     AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."
+                                     Content="{StaticResource SurveyIcon.Line}"/>
+                        <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow (A)"
+                                     AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."
+                                     Content="{StaticResource SurveyIcon.Arrow}"/>
+                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Step" Checked="OnToolChecked" ToolTip="Counter (S)"
+                                     AutomationProperties.Name="Counter"
+                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."
+                                     Content="{StaticResource SurveyIcon.Counter}"/>
+                    </StackPanel>
+                    <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                        <RadioButton x:Name="TextToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Text" Checked="OnToolChecked" ToolTip="Text (T)"
+                                     AutomationProperties.Name="Text"
+                                     AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
+                                     Content="{StaticResource SurveyIcon.Text}"/>
+                        <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
+                                     Tag="Callout" Checked="OnToolChecked" ToolTip="Callout (Q)"
+                                     AutomationProperties.Name="Callout"
+                                     AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
+                                     Content="{StaticResource SurveyIcon.Callout}"/>
+                    </StackPanel>
+                    </StackPanel>
+                    </Border>
+                </Border>
         </Grid>
 
         <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"

@@ -446,12 +446,12 @@ public class ThemedWindowTests
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Left, groupTools.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Center, formatBar.HorizontalAlignment);
         var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
-        var formatHost = (FrameworkElement)editor.FindName("EditorFormatHost")!;
-        Assert.Equal(HorizontalAlignment.Center, toolsHost.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Center, formatHost.HorizontalAlignment);
         Assert.True(toolsHost.MinWidth >= 180, "Group tools slot must stay as wide as Shapes so Draw/Text do not jump.");
+        Assert.True(IsLogicalDescendant(topToolbar, formatBar),
+            "Format chrome must sit on the primary row next to color and size, like Survey.");
+        Assert.False(IsLogicalDescendant(topToolbar, groupBar),
+            "Group tools must overlay the canvas so they do not shrink the image.");
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");
@@ -468,8 +468,6 @@ public class ThemedWindowTests
         editor.UpdateLayout();
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
         double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
-        double arrowToolPanelX = primary.TranslatePoint(new Point(0, 0), editor).X;
-        double arrowWellX = ((FrameworkElement)editor.FindName("ColorWellBtn")!).TranslatePoint(new Point(0, 0), editor).X;
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Visible, colorBar.Visibility);
         Assert.Equal(Visibility.Visible, formatBar.Visibility);
@@ -507,12 +505,11 @@ public class ThemedWindowTests
         var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
         Assert.True(primaryRow.ActualHeight <= 48,
             $"Primary row grew instead of staying one line: {primaryRow.ActualHeight}");
-        Assert.True(top.ActualHeight <= 140,
-            $"Top chrome stacked too many rows with Text selected: {top.ActualHeight}");
+        Assert.True(top.ActualHeight <= 56,
+            $"Top chrome grew extra rows with Text selected: {top.ActualHeight}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
-        Assert.Equal("Stroke", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
-        Assert.Equal(Visibility.Hidden, ((TextBlock)editor.FindName("ThicknessLabel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((TextBlock)editor.FindName("ThicknessLabel")!).Visibility);
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "16");
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
@@ -522,11 +519,13 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
         Point toolsOrigin = groupTools.TranslatePoint(new Point(0, 0), groupBar);
-        Point extrasOrigin = formatBar.TranslatePoint(new Point(0, 0), groupBar);
-        Assert.True(toolsOrigin.Y + groupTools.ActualHeight <= extrasOrigin.Y + 0.5,
-            $"Group tools overlap format extras: toolsY={toolsOrigin.Y}+{groupTools.ActualHeight} extrasY={extrasOrigin.Y}");
         Assert.True(Math.Abs(toolsOrigin.X - arrowToolsX) < 2,
             $"Group tools jumped when switching Arrow → Text: {arrowToolsX:0} → {toolsOrigin.X:0}");
+        var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;
+        Point wellOrigin = well.TranslatePoint(new Point(0, 0), editor);
+        Point sizeOrigin = ((FrameworkElement)sizeBox).TranslatePoint(new Point(0, 0), editor);
+        Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 16,
+            $"Color well and size combo have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
 
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
@@ -538,22 +537,11 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "72");
         Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
-        Assert.Equal("Stroke", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
-        Point calloutTools = groupTools.TranslatePoint(new Point(0, 0), groupBar);
-        Point calloutExtras = formatBar.TranslatePoint(new Point(0, 0), groupBar);
-        Assert.True(calloutTools.Y + groupTools.ActualHeight <= calloutExtras.Y + 0.5,
-            $"Callout tools overlap format extras: toolsY={calloutTools.Y}+{groupTools.ActualHeight} extrasY={calloutExtras.Y}");
         var save = (Button)editor.FindName("BtnSave")!;
         Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
         Point saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
         Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
-            $"Callout Stroke sits on Save as…: stroke={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
-        double calloutToolPanelX = primary.TranslatePoint(new Point(0, 0), editor).X;
-        double calloutWellX = ((FrameworkElement)editor.FindName("ColorWellBtn")!).TranslatePoint(new Point(0, 0), editor).X;
-        Assert.True(Math.Abs(calloutToolPanelX - arrowToolPanelX) < 1,
-            $"Primary tools jumped Arrow → Callout: {arrowToolPanelX:0.0} → {calloutToolPanelX:0.0}");
-        Assert.True(Math.Abs(calloutWellX - arrowWellX) < 1,
-            $"Color well jumped Arrow → Callout: {arrowWellX:0.0} → {calloutWellX:0.0}");
+            $"Callout size sits on Save as…: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.NotNull(editor.FindName("AlignMenuBtn"));
@@ -585,7 +573,7 @@ public class ThemedWindowTests
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
         Assert.Equal(Visibility.Visible, effects.Visibility);
-        Assert.Equal(Visibility.Hidden, color.Visibility);
+        Assert.Equal(Visibility.Collapsed, color.Visibility);
         var effectBox = (FrameworkElement)editor.FindName("EffectStrengthBox")!;
         Point effectOrigin = effectBox.TranslatePoint(new Point(0, 0), editor);
         Point pixelateSave = ((FrameworkElement)editor.FindName("BtnSave")!).TranslatePoint(new Point(0, 0), editor);

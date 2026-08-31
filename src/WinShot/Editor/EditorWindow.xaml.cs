@@ -812,17 +812,12 @@ public partial class EditorWindow : Window
         static Visibility Show(bool show) => show ? Visibility.Visible : Visibility.Collapsed;
         bool Has(EditorContextControls value) => controls.HasFlag(value);
 
-        static Visibility Slot(bool show) => show ? Visibility.Visible : Visibility.Hidden;
-        ColorPanel.Visibility = Slot(Has(EditorContextControls.Color));
-        // Size stays on the primary row for every tool that has one, including Text
-        // (font size). Callout is the exception: primary Size is stroke, FontSizeBox
-        // next to the family is the label. Hidden (not Collapsed) so Arrow→Callout
-        // cannot reflow the well and the size combo.
-        ThicknessPanel.Visibility = Slot(Has(EditorContextControls.Thickness));
+        ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
+        ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
         FillPanel.Visibility = Visibility.Collapsed;
         OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
-        EffectStrengthPanel.Visibility = Slot(Has(EditorContextControls.EffectStrength));
+        EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
@@ -833,8 +828,7 @@ public partial class EditorWindow : Window
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(chrome == EditorTool.Rectangle);
         SyncColorWellIndicator();
-        ThicknessLabel.Text = "Stroke";
-        ThicknessLabel.Visibility = chrome == EditorTool.Callout ? Visibility.Visible : Visibility.Hidden;
+        ThicknessLabel.Visibility = Visibility.Collapsed;
         if (Has(EditorContextControls.Thickness))
             SyncSizeBox();
         if (Has(EditorContextControls.TextStyle))
@@ -860,14 +854,9 @@ public partial class EditorWindow : Window
         EditorColorBar.Visibility = Visibility.Visible;
         if (SecondaryToolPanel is not null)
             SecondaryToolPanel.Visibility = Visibility.Visible;
-        bool formatBits = Has(EditorContextControls.ArrowStyle) ||
-                          Has(EditorContextControls.TextStyle) || Has(EditorContextControls.LineStyle) ||
-                          Has(EditorContextControls.EraserMode) || Has(EditorContextControls.StepMode) ||
-                          Has(EditorContextControls.CropRatio) || CropPanel.Visibility == Visibility.Visible;
         EditorFormatBar.Visibility = Visibility.Visible;
-        EditorFormatHost.Visibility = Show(formatBits);
-        EditorGroupToolsHost.Visibility = Show(group is "Draw" or "Shape" or "Text");
-        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text" || formatBits);
+        EditorGroupToolsHost.Visibility = Visibility.Visible;
+        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text");
     }
 
     private EditorTool ChromeTool()
