@@ -329,16 +329,10 @@
 
                 <Border Height="1" Background="{StaticResource BorderBrush}" Margin="12,8,12,0"
                         Visibility="{Binding ElementName=EditorGroupBar, Path=Visibility}"/>
-                <Grid x:Name="EditorGroupBar" Margin="0,8,0,2" Visibility="Collapsed"
+                <StackPanel x:Name="EditorGroupBar" Margin="0,8,0,2" Visibility="Collapsed"
                             AutomationProperties.Name="Group tools"
                             AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Border x:Name="EditorGroupToolsHost" Grid.Column="1" MinWidth="188" VerticalAlignment="Center">
+                    <Border x:Name="EditorGroupToolsHost" MinWidth="188" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
@@ -400,8 +394,8 @@
                     </StackPanel>
                     </StackPanel>
                     </Border>
-                    <Border x:Name="EditorFormatHost" Grid.Column="2" MinWidth="360" VerticalAlignment="Center">
-                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="16,0,8,0">
+                    <Border x:Name="EditorFormatHost" MinHeight="28" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,6,0,0">
+                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
@@ -596,7 +590,7 @@
                                                 </StackPanel>
                                                 </StackPanel>
                     </Border>
-                </Grid>
+                </StackPanel>
 
             </StackPanel>
         </Border>

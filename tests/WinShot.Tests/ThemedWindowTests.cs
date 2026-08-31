@@ -430,7 +430,7 @@ public class ThemedWindowTests
         }
 
         Assert.Null(editor.FindName("EditorStyleBar"));
-        var groupBar = (Grid)editor.FindName("EditorGroupBar")!;
+        var groupBar = (FrameworkElement)editor.FindName("EditorGroupBar")!;
         var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
         var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
@@ -446,14 +446,12 @@ public class ThemedWindowTests
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Left, groupTools.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Left, formatBar.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Center, formatBar.HorizontalAlignment);
         var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
         var formatHost = (FrameworkElement)editor.FindName("EditorFormatHost")!;
-        Assert.Equal(1, Grid.GetColumn(toolsHost));
-        Assert.Equal(2, Grid.GetColumn(formatHost));
-        Assert.Equal(4, groupBar.ColumnDefinitions.Count);
+        Assert.Equal(HorizontalAlignment.Center, toolsHost.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Center, formatHost.HorizontalAlignment);
         Assert.True(toolsHost.MinWidth >= 180, "Group tools slot must stay as wide as Shapes so Draw/Text do not jump.");
-        Assert.True(formatHost.MinWidth >= 300, "Format slot must stay reserved so extras cannot hang on the window's right.");
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");
@@ -507,7 +505,7 @@ public class ThemedWindowTests
         var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
         Assert.True(primaryRow.ActualHeight <= 48,
             $"Primary row grew instead of staying one line: {primaryRow.ActualHeight}");
-        Assert.True(top.ActualHeight <= 120,
+        Assert.True(top.ActualHeight <= 140,
             $"Top chrome stacked too many rows with Text selected: {top.ActualHeight}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
@@ -522,11 +520,8 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
         Point toolsOrigin = groupTools.TranslatePoint(new Point(0, 0), groupBar);
         Point extrasOrigin = formatBar.TranslatePoint(new Point(0, 0), groupBar);
-        Assert.True(toolsOrigin.X + groupTools.ActualWidth <= extrasOrigin.X + 0.5,
-            $"Group tools overlap format extras: tools={toolsOrigin.X}+{groupTools.ActualWidth} extras={extrasOrigin.X}");
-        Assert.True(formatHost.TranslatePoint(new Point(formatHost.ActualWidth, 0), groupBar).X
-                    < groupBar.ActualWidth - 24,
-            "Text format must sit next to the group tools, not against the window's right edge.");
+        Assert.True(toolsOrigin.Y + groupTools.ActualHeight <= extrasOrigin.Y + 0.5,
+            $"Group tools overlap format extras: toolsY={toolsOrigin.Y}+{groupTools.ActualHeight} extrasY={extrasOrigin.Y}");
         Assert.True(Math.Abs(toolsOrigin.X - arrowToolsX) < 2,
             $"Group tools jumped when switching Arrow → Text: {arrowToolsX:0} → {toolsOrigin.X:0}");
 
@@ -543,8 +538,8 @@ public class ThemedWindowTests
         Assert.Equal("Stroke", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
         Point calloutTools = groupTools.TranslatePoint(new Point(0, 0), groupBar);
         Point calloutExtras = formatBar.TranslatePoint(new Point(0, 0), groupBar);
-        Assert.True(calloutTools.X + groupTools.ActualWidth <= calloutExtras.X + 0.5,
-            $"Callout tools overlap format extras: tools={calloutTools.X}+{groupTools.ActualWidth} extras={calloutExtras.X}");
+        Assert.True(calloutTools.Y + groupTools.ActualHeight <= calloutExtras.Y + 0.5,
+            $"Callout tools overlap format extras: toolsY={calloutTools.Y}+{groupTools.ActualHeight} extrasY={calloutExtras.Y}");
         var save = (Button)editor.FindName("BtnSave")!;
         Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
         Point saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
