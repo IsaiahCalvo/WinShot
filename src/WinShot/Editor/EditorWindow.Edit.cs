@@ -602,6 +602,8 @@ public partial class EditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Editor copy failed", ex);
+            ThemedMessageDialog.Show(this, "Couldn't copy",
+                "WinShot could not copy the edited image. Try again or use Save as…");
         }
     }
 

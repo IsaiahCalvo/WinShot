@@ -220,13 +220,46 @@
         <Setter Property="Margin" Value="1,0"/>
     </Style>
 
-    <!-- Sub-strip radios. 28px so a selected tool disc matches the 24px format
-         combos instead of sitting on top of them as a 36px blob. -->
+    <!-- Sub-strip radios. 28px rounded chips, not accent discs. -->
     <Style x:Key="CompactToolButton" TargetType="ToggleButton" BasedOn="{StaticResource ToolButton}">
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="1,0"/>
         <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid>
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
+                                BorderBrush="Transparent" BorderThickness="1"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                          TextElement.FontSize="{TemplateBinding FontSize}"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        <Border x:Name="FocusRing" Background="Transparent" BorderBrush="Transparent"
+                                BorderThickness="2" CornerRadius="6" Margin="0"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedFillBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedFillBrush}"/>
+                            <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- B/I/U/S and align trigger: 28×24 rounded rects, not tool discs. -->
