@@ -228,8 +228,6 @@ public partial class EditorWindow : Window
         // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
         // until the user takes control.
         Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
-        EditorFormatBar.SizeChanged += (_, _) => ReserveFormatColumn();
-        EditorFormatBar.IsVisibleChanged += (_, _) => ReserveFormatColumn();
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -815,8 +813,10 @@ public partial class EditorWindow : Window
         bool Has(EditorContextControls value) => controls.HasFlag(value);
 
         ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
-        // Text font size lives next to the family combo, not as a second "16" on the primary row.
-        ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness) && chrome != EditorTool.Text);
+        // Size stays on the primary row for every tool that has one, including Text
+        // (font size). Callout is the exception: primary Size is stroke, FontSizeBox
+        // next to the family is the label.
+        ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
         FillPanel.Visibility = Visibility.Collapsed;
         OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
@@ -838,7 +838,7 @@ public partial class EditorWindow : Window
         if (Has(EditorContextControls.TextStyle))
             SyncTextFormatChrome();
         if (FontSizeBox is not null)
-            FontSizeBox.Visibility = Show(Has(EditorContextControls.TextStyle));
+            FontSizeBox.Visibility = Show(chrome == EditorTool.Callout);
 
         if (Has(EditorContextControls.EffectStrength))
         {
@@ -856,34 +856,11 @@ public partial class EditorWindow : Window
         TextGroupPanel.Visibility = Show(group == "Text");
 
         bool color = Has(EditorContextControls.Color);
-        bool size = Has(EditorContextControls.Thickness);
-        bool extras = Has(EditorContextControls.ArrowStyle) ||
-                      Has(EditorContextControls.EffectStrength) || Has(EditorContextControls.TextStyle) ||
-                      Has(EditorContextControls.CropRatio) || Has(EditorContextControls.StepMode) ||
-                      Has(EditorContextControls.LineStyle) || Has(EditorContextControls.EraserMode) ||
-                      CropPanel.Visibility == Visibility.Visible;
         EditorColorBar.Visibility = Show(color);
-        EditorFormatBar.Visibility = Show(extras);
+        EditorFormatBar.Visibility = Visibility.Visible;
         if (SecondaryToolPanel is not null)
-            SecondaryToolPanel.Visibility = Show(color || size);
-        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text" || extras);
-        ReserveFormatColumn();
-    }
-
-    /// <summary>
-    /// Keep the right star at least as wide as the format extras so a centered
-    /// group tool can never paint on top of Solid / font / align.
-    /// </summary>
-    private void ReserveFormatColumn()
-    {
-        if (EditorGroupBar.ColumnDefinitions.Count < 3) return;
-        if (EditorFormatBar.Visibility != Visibility.Visible)
-        {
-            EditorGroupBar.ColumnDefinitions[2].MinWidth = 0;
-            return;
-        }
-        EditorFormatBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        EditorGroupBar.ColumnDefinitions[2].MinWidth = Math.Ceiling(EditorFormatBar.DesiredSize.Width);
+            SecondaryToolPanel.Visibility = Visibility.Visible;
+        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text");
     }
 
     private EditorTool ChromeTool()
@@ -1388,15 +1365,24 @@ public partial class EditorWindow : Window
 
     private void PaintAlignCells()
     {
-        if (AlignGrid is null) return;
         string current = $"{_textAlign}|{_textVerticalAlign}";
         var onBorder = (Brush)FindResource("BorderStrongBrush");
         var onFill = (Brush)FindResource("PressedFillBrush");
-        foreach (Button cell in AlignGrid.Children.OfType<Button>())
+        var onDot = (Brush)FindResource("TextPrimaryBrush");
+        var offDot = (Brush)FindResource("TextSecondaryBrush");
+        if (AlignGrid is not null)
         {
-            bool on = cell.Tag as string == current;
-            cell.Background = on ? onFill : Brushes.Transparent;
-            cell.BorderBrush = on ? onBorder : Brushes.Transparent;
+            foreach (Button cell in AlignGrid.Children.OfType<Button>())
+            {
+                bool on = cell.Tag as string == current;
+                cell.Background = on ? onFill : Brushes.Transparent;
+                cell.BorderBrush = on ? onBorder : Brushes.Transparent;
+            }
+        }
+        if (AlignTriggerGrid is not null)
+        {
+            foreach (Rectangle dot in AlignTriggerGrid.Children.OfType<Rectangle>())
+                dot.Fill = dot.Tag as string == current ? onDot : offDot;
         }
     }
 

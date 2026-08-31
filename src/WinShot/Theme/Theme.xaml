@@ -600,8 +600,11 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="22"/>
                 </Grid.ColumnDefinitions>
+                <!-- Open V, same language as WinForms DarkDropDown (stroked, round caps). -->
                 <Path Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
-                      Data="M0,0 L8,0 L4,5 Z" Fill="{StaticResource TextSecondaryBrush}"/>
+                      Data="M0,0 L4,4 L8,0" Stroke="{StaticResource TextSecondaryBrush}"
+                      StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round" Fill="Transparent"/>
             </Grid>
         </Border>
         <ControlTemplate.Triggers>

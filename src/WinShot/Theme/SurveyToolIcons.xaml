@@ -132,11 +132,10 @@
     <Viewbox x:Key="SurveyIcon.Counter" x:Shared="False" Width="18" Height="18">
         <Grid Width="24" Height="24">
             <Ellipse Style="{StaticResource SurveyIconStroke}"
-                     Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center"
-                     Margin="2,-2,0,0"/>
+                     Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <TextBlock Text="1" FontSize="10" FontWeight="Bold" FontFamily="Segoe UI"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Margin="2,-2,0,0"
+                       Padding="0,1,0,0"
                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"/>
         </Grid>
     </Viewbox>

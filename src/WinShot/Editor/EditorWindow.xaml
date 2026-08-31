@@ -169,7 +169,7 @@
                                      AutomationProperties.HelpText="Line and arrow already bend from the midpoint handle."/>
 
                     </StackPanel>
-                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0">
+                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0" MinWidth="96">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
@@ -300,6 +300,16 @@
                                                                   AutomationProperties.Name="Annotation size"
                                                                   AutomationProperties.HelpText="Survey size presets. Stroke tools use 1–50; text uses 8–72."/>
                                                     </StackPanel>
+                                                    <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
+                                                        <TextBlock x:Name="EffectStrengthLabel" Text="Blur" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                                                        <ComboBox x:Name="EffectStrengthBox" Style="{StaticResource DarkComboBox}" SelectedIndex="1"
+                                                                  SelectionChanged="OnEffectStrengthChanged" AutomationProperties.Name="Effect strength"
+                                                                  AutomationProperties.HelpText="Light, medium, or strong blur or pixelate.">
+                                                            <ComboBoxItem Content="Light" Tag="Light"/>
+                                                            <ComboBoxItem Content="Medium" Tag="Medium"/>
+                                                            <ComboBoxItem Content="Strong" Tag="Strong"/>
+                                                        </ComboBox>
+                                                    </StackPanel>
 
                                                 
                         </StackPanel>
@@ -325,9 +335,11 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel x:Name="EditorGroupTools" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Border x:Name="EditorGroupToolsHost" Grid.Column="1" MinWidth="188" VerticalAlignment="Center">
+                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource CompactToolButton}" GroupName="Tool"
                                      Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
@@ -387,8 +399,9 @@
                                      Content="{StaticResource SurveyIcon.Callout}"/>
                     </StackPanel>
                     </StackPanel>
-                
-                    <StackPanel x:Name="EditorFormatBar" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="12,0,8,0">
+                    </Border>
+                    <Border x:Name="EditorFormatHost" Grid.Column="2" MinWidth="360" VerticalAlignment="Center">
+                    <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="16,0,8,0">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
@@ -419,17 +432,6 @@
                                                             <ComboBoxItem Content="Dashed" Tag="dashed"/>
                                                             <ComboBoxItem Content="Dotted" Tag="dotted"/>
                                                             <ComboBoxItem x:Name="CloudStyleItem" Content="Cloud" Tag="cloud"/>
-                                                        </ComboBox>
-                                                    </StackPanel>
-
-                                                    <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <TextBlock x:Name="EffectStrengthLabel" Text="Blur" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                                                        <ComboBox x:Name="EffectStrengthBox" Style="{StaticResource DarkComboBox}" SelectedIndex="1"
-                                                                  SelectionChanged="OnEffectStrengthChanged" AutomationProperties.Name="Effect strength"
-                                                                  AutomationProperties.HelpText="Light, medium, or strong blur or pixelate.">
-                                                            <ComboBoxItem Content="Light" Tag="Light"/>
-                                                            <ComboBoxItem Content="Medium" Tag="Medium"/>
-                                                            <ComboBoxItem Content="Strong" Tag="Strong"/>
                                                         </ComboBox>
                                                     </StackPanel>
 
@@ -470,7 +472,17 @@
                                                                 Click="OnAlignMenuClick" ToolTip="Text alignment"
                                                                 AutomationProperties.Name="Text alignment"
                                                                 AutomationProperties.HelpText="Choose horizontal and vertical alignment from a 3 by 3 grid.">
-                                                            <TextBlock Text="&#xE8E4;" FontFamily="{StaticResource IconFont}" FontSize="13"/>
+                                                            <UniformGrid x:Name="AlignTriggerGrid" Columns="3" Width="14" Height="14">
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="left|top"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="center|top"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="right|top"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="left|middle"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="center|middle"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="right|middle"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="left|bottom"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="center|bottom"/>
+                                                                <Rectangle Width="3" Height="3" Margin="0.5" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="right|bottom"/>
+                                                            </UniformGrid>
                                                         </Button>
                                                         <Popup x:Name="AlignPopup" PlacementTarget="{Binding ElementName=AlignMenuBtn}"
                                                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
@@ -583,6 +595,7 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                                 </StackPanel>
+                    </Border>
                 </Grid>
 
             </StackPanel>

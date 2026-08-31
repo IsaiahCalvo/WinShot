@@ -445,11 +445,15 @@ public class ThemedWindowTests
         var undo = (Button)editor.FindName("BtnUndo")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
-        Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Left, groupTools.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Left, formatBar.HorizontalAlignment);
-        Assert.Equal(1, Grid.GetColumn(groupTools));
-        Assert.Equal(2, Grid.GetColumn(formatBar));
-        Assert.Equal(3, groupBar.ColumnDefinitions.Count);
+        var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
+        var formatHost = (FrameworkElement)editor.FindName("EditorFormatHost")!;
+        Assert.Equal(1, Grid.GetColumn(toolsHost));
+        Assert.Equal(2, Grid.GetColumn(formatHost));
+        Assert.Equal(4, groupBar.ColumnDefinitions.Count);
+        Assert.True(toolsHost.MinWidth >= 180, "Group tools slot must stay as wide as Shapes so Draw/Text do not jump.");
+        Assert.True(formatHost.MinWidth >= 300, "Format slot must stay reserved so extras cannot hang on the window's right.");
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");
@@ -462,7 +466,10 @@ public class ThemedWindowTests
         Assert.Contains(((StackPanel)editor.FindName("ShapeGroupPanel")!).Children.OfType<RadioButton>(),
             rb => rb.Tag as string == "Step");
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        editor.UpdateLayout();
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
+        double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Visible, colorBar.Visibility);
         Assert.Equal(Visibility.Visible, formatBar.Visibility);
@@ -510,13 +517,18 @@ public class ThemedWindowTests
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "72");
         var fontSizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
-        Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
-        Assert.Equal(Visibility.Collapsed, thickness.Visibility);
+        Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
+        Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
         Point toolsOrigin = groupTools.TranslatePoint(new Point(0, 0), groupBar);
         Point extrasOrigin = formatBar.TranslatePoint(new Point(0, 0), groupBar);
         Assert.True(toolsOrigin.X + groupTools.ActualWidth <= extrasOrigin.X + 0.5,
             $"Group tools overlap format extras: tools={toolsOrigin.X}+{groupTools.ActualWidth} extras={extrasOrigin.X}");
+        Assert.True(formatHost.TranslatePoint(new Point(formatHost.ActualWidth, 0), groupBar).X
+                    < groupBar.ActualWidth - 24,
+            "Text format must sit next to the group tools, not against the window's right edge.");
+        Assert.True(Math.Abs(toolsOrigin.X - arrowToolsX) < 2,
+            $"Group tools jumped when switching Arrow → Text: {arrowToolsX:0} → {toolsOrigin.X:0}");
 
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
