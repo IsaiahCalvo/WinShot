@@ -47,7 +47,7 @@ internal static class EditorShellContract
     // 3 leading actions + grouped annotation tools + Pixelate/Spotlight + More + Save/Done.
     // Counter lives in the Shapes sub-strip, matching Survey. Groups collapse the individual
     // 36-DIP radios so the 980-DIP minimum still fits.
-    public const double PrimaryToolbarLogicalWidth = 940;
+    public const double PrimaryToolbarLogicalWidth = 872;
     public const double MinimumEditorLogicalWidth = 980;
     public const double ToolbarOuterMargin = 24;
 

@@ -26,35 +26,39 @@ public partial class EditorWindow : Window
     /// </summary>
     private void RestyleSelected(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null, Color? fillColor = null)
     {
-        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
-            return;
-        // Color is irrelevant to a few annotation kinds (spotlight/emoji/image); thickness
-        // and fill only make sense for the shapes that carry them. Skip no-op restyles so
-        // those annotations don't push empty undo entries.
-        if (!CanRestyle(_selected, color, thickness, fill) &&
-            !(opacity is not null && CanSetOpacity(_selected)) &&
-            fillColor is null)
-            return;
+        var targets = SelectionList().OfType<FrameworkElement>()
+            .Where(el => el.Tag is AnnotationData)
+            .Where(el => CanRestyle(el, color, thickness, fill) ||
+                         (opacity is not null && CanSetOpacity(el)) ||
+                         fillColor is not null)
+            .ToList();
+        if (targets.Count == 0) return;
 
-        // A color pick (swatch / eyedropper) is opaque, but the annotation may carry a
-        // reduced alpha — from the highlighter's translucent base or an earlier opacity
-        // change. Preserve that existing alpha so changing the hue never silently resets
-        // opacity. An explicit opacity change (opacity != null) overrides this below.
-        if (color is Color picked && opacity is null && picked.A == 255)
+        var steps = new List<(UIElement Element, StyleSnapshot Before, StyleSnapshot After)>();
+        foreach (FrameworkElement fe in targets)
         {
-            byte fallback = meta.Type == AnnotationData.TypeHighlighter ? (byte)0x80 : (byte)0xFF;
-            byte alpha = meta.Color is string hex0 && TryParseColor(hex0, out var cur) ? cur.A : fallback;
-            color = Color.FromArgb(alpha, picked.R, picked.G, picked.B);
+            var meta = (AnnotationData)fe.Tag!;
+            Color? useColor = color;
+            // A color pick (swatch / eyedropper) is opaque, but the annotation may carry a
+            // reduced alpha — from the highlighter's translucent base or an earlier opacity
+            // change. Preserve that existing alpha so changing the hue never silently resets
+            // opacity. An explicit opacity change (opacity != null) overrides this below.
+            if (useColor is Color picked && opacity is null && picked.A == 255)
+            {
+                byte fallback = meta.Type == AnnotationData.TypeHighlighter ? (byte)0x80 : (byte)0xFF;
+                byte alpha = meta.Color is string hex0 && TryParseColor(hex0, out var cur) ? cur.A : fallback;
+                useColor = Color.FromArgb(alpha, picked.R, picked.G, picked.B);
+            }
+
+            var before = SnapshotStyle(fe, meta);
+            var after = before.With(useColor, thickness, fill, opacity, fillColor);
+            ApplyStyleSnapshot(fe, after);
+            steps.Add((fe, before, after));
         }
 
-        var before = SnapshotStyle(_selected, meta);
-        var after = before.With(color, thickness, fill, opacity, fillColor);
-        ApplyStyleSnapshot(_selected, after);
-
-        UIElement el = _selected;
         Push(new EditorAction(
-            undo: () => ApplyStyleSnapshot(el, before),
-            redo: () => ApplyStyleSnapshot(el, after)), apply: false);
+            undo: () => { foreach (var step in steps) ApplyStyleSnapshot(step.Element, step.Before); },
+            redo: () => { foreach (var step in steps) ApplyStyleSnapshot(step.Element, step.After); }), apply: false);
         UpdateSelectionVisual();
     }
 
@@ -419,6 +423,7 @@ public partial class EditorWindow : Window
 
     private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
     {
+        // Plain/Bold/Outline/Pill/Huge chrome was removed to match Survey (font + B/I/U/S).
         if (_syncingContext) return;
         if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item &&
             item.Tag is string tag && Enum.TryParse(tag, out TextStyle style))

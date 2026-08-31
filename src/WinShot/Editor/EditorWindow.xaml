@@ -22,11 +22,19 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" HorizontalAlignment="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                        <RadioButton x:Name="CropUtilityBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
-                                     Tag="Crop" Content="&#xE7A8;" Checked="OnToolChecked"
-                                     ToolTip="Crop (C)"
-                                     AutomationProperties.Name="Crop and resize"
-                                     AutomationProperties.HelpText="Select Crop with C. Rotate, flip, and resize sit next to Crop."/>
+                        <Button x:Name="BtnUndo" Style="{StaticResource CompactToolIconButton}"
+                                ToolTip="Undo (Ctrl+Z)" Click="OnUndo" IsEnabled="False"
+                                AutomationProperties.Name="Undo" AutomationProperties.HelpText="Undo the last action. Shortcut Ctrl+Z."
+                                Content="{StaticResource SurveyIcon.Undo}"/>
+                        <Button x:Name="BtnRedo" Style="{StaticResource CompactToolIconButton}"
+                                ToolTip="Redo (Ctrl+Y)" Click="OnRedo" IsEnabled="False"
+                                AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y."
+                                Content="{StaticResource SurveyIcon.Redo}"/>
+                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                        <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7A8;"
+                                Click="OnCropClick" ToolTip="Crop (C)"
+                                AutomationProperties.Name="Crop and resize"
+                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C."/>
                         <Button x:Name="RotateCcwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
                                 ToolTip="Rotate 90° counter-clockwise" Click="OnRotateCcw"
                                 AutomationProperties.Name="Rotate counter-clockwise"
@@ -58,15 +66,6 @@
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="ToolPanel" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <Button x:Name="BtnUndo" Style="{StaticResource CompactToolIconButton}"
-                                ToolTip="Undo (Ctrl+Z)" Click="OnUndo" IsEnabled="False"
-                                AutomationProperties.Name="Undo" AutomationProperties.HelpText="Undo the last action. Shortcut Ctrl+Z."
-                                Content="{StaticResource SurveyIcon.Undo}"/>
-                        <Button x:Name="BtnRedo" Style="{StaticResource CompactToolIconButton}"
-                                ToolTip="Redo (Ctrl+Y)" Click="OnRedo" IsEnabled="False"
-                                AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y."
-                                Content="{StaticResource SurveyIcon.Redo}"/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <RadioButton x:Name="PanToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Pan" Checked="OnToolChecked" ToolTip="Pan"
                                      AutomationProperties.Name="Pan"
@@ -126,11 +125,11 @@
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
-                                                        <Button x:Name="ColorWellBtn" Style="{StaticResource ToolIconButton}"
+                                                        <Button x:Name="ColorWellBtn" Style="{StaticResource CompactToolIconButton}" Width="24" Height="24" Margin="4,0,2,0"
                                                                 Click="OnCustomSwatchClick" ToolTip="Color"
                                                                 AutomationProperties.Name="Color"
                                                                 AutomationProperties.HelpText="Open the color picker.">
-                                                            <Ellipse x:Name="CurrentColorIndicator" Width="16" Height="16" Fill="{StaticResource AnnotationRedBrush}"
+                                                            <Ellipse x:Name="CurrentColorIndicator" Width="14" Height="14" Fill="{StaticResource AnnotationRedBrush}"
                                                                      Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"
                                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                         </Button>
@@ -162,6 +161,19 @@
                                                                     BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
                                                                     Effect="{StaticResource FloatingShadow}">
                                                                 <StackPanel Width="248">
+                                                                    <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,8">
+                                                                            <RadioButton x:Name="StrokeWellBtn" GroupName="ColorWell" Tag="Stroke"
+                                                                                         Content="Border" FontFamily="Segoe UI" FontSize="12" Height="24" Padding="8,0"
+                                                                                         Foreground="{StaticResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0"
+                                                                                         IsChecked="True"
+                                                                                         Checked="OnColorWellChecked" AutomationProperties.Name="Border color"
+                                                                                         AutomationProperties.HelpText="Edit the stroke or border color and opacity."/>
+                                                                            <RadioButton x:Name="FillWellBtn" GroupName="ColorWell" Tag="Fill"
+                                                                                         Content="Fill" FontFamily="Segoe UI" FontSize="12" Height="24" Padding="8,0"
+                                                                                         Foreground="{StaticResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0"
+                                                                                         Checked="OnColorWellChecked" AutomationProperties.Name="Fill color"
+                                                                                         AutomationProperties.HelpText="Edit the fill color and opacity independently of the border."/>
+                                                                    </StackPanel>
                                                                     <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
                                                                     <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
                                                                     <Canvas x:Name="ColorPickerSv" Width="232" Height="110" Margin="0,0,8,0" Cursor="Cross"
@@ -238,7 +250,7 @@
                                                 </StackPanel>
                             <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <TextBlock x:Name="ThicknessLabel" Text="Size" Style="{StaticResource FieldLabel}" Margin="8,0,6,0"/>
-                                                        <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}" Width="56"
+                                                        <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}" Width="44"
                                                                   SelectionChanged="OnSizeBoxChanged"
                                                                   AutomationProperties.Name="Annotation size"
                                                                   AutomationProperties.HelpText="Survey size presets. Stroke tools use 1–50; text uses 8–72."/>
@@ -326,19 +338,6 @@
                     </StackPanel>
                 
                     <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center">
-                                                    <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                            <RadioButton x:Name="StrokeWellBtn" GroupName="ColorWell" Tag="Stroke"
-                                                                         Content="Border" FontFamily="Segoe UI" FontSize="12" Height="24" Padding="8,0"
-                                                                         Foreground="{StaticResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0"
-                                                                         IsChecked="True"
-                                                                         Checked="OnColorWellChecked" AutomationProperties.Name="Border color"
-                                                                         AutomationProperties.HelpText="Edit the stroke or border color and opacity."/>
-                                                            <RadioButton x:Name="FillWellBtn" GroupName="ColorWell" Tag="Fill"
-                                                                         Content="Fill" FontFamily="Segoe UI" FontSize="12" Height="24" Padding="8,0"
-                                                                         Foreground="{StaticResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0"
-                                                                         Checked="OnColorWellChecked" AutomationProperties.Name="Fill color"
-                                                                         AutomationProperties.HelpText="Edit the fill color and opacity independently of the border."/>
-                                                    </StackPanel>
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
@@ -387,13 +386,6 @@
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <TextBlock Text="Text" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
-                                                        <ComboBox x:Name="TextStyleBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
-                                                                  Width="80" Margin="0,0,6,0"
-                                                                  SelectionChanged="OnTextStyleChanged" AutomationProperties.Name="Text style">
-                                                            <ComboBoxItem Content="Plain" Tag="Plain"/><ComboBoxItem Content="Bold" Tag="Bold"/><ComboBoxItem Content="Outline" Tag="Outline"/>
-                                                            <ComboBoxItem Content="Pill" Tag="Pill"/><ComboBoxItem Content="Huge" Tag="Huge"/>
-                                                        </ComboBox>
                                                         <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Width="110" Margin="0,0,6,0"
                                                                   SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
                                                         <StackPanel Orientation="Horizontal" Margin="0,0,6,0">

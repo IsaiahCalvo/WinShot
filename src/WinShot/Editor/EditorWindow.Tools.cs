@@ -524,10 +524,10 @@ public partial class EditorWindow : Window
         if (_sourceOperationActive) return;
         if (_pendingCrop is not SD.Rectangle region)
         {
-            ClearCropPreview();
+            ClearCropPreview(restoreTool: true);
             return;
         }
-        ClearCropPreview();
+        ClearCropPreview(restoreTool: true);
 
         SD.Bitmap before = _source;
         SD.Bitmap after;
@@ -565,7 +565,7 @@ public partial class EditorWindow : Window
             }), apply: false);
     }
 
-    private void OnCancelCrop(object sender, RoutedEventArgs e) => ClearCropPreview();
+    private void OnCancelCrop(object sender, RoutedEventArgs e) => ClearCropPreview(restoreTool: true);
 
     private async Task OnSourceReplacedAsync()
     {

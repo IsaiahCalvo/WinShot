@@ -516,8 +516,11 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, effects.Visibility);
         Assert.Equal(Visibility.Collapsed, color.Visibility);
 
-        ((RadioButton)editor.FindName("CropUtilityBtn")!).IsChecked = true;
+        typeof(EditorWindow).GetMethod("OnCropClick",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { editor, new RoutedEventArgs() });
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
+        Assert.Equal(true, ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked);
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;

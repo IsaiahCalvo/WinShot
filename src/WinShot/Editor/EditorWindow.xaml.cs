@@ -92,7 +92,10 @@ public partial class EditorWindow : Window
     private EditorTool _lastTextTool = EditorTool.Text;
     private Color _colorBeforeHighlighter;
     private double _opacityBeforeHighlighter = 1;
+    private Color _highlighterColor = Color.FromRgb(0xFF, 0xFF, 0x00);
+    private double _highlighterOpacity = 0.5;
     private bool _highlighterArmed;
+    private EditorTool _toolBeforeCrop = EditorTool.Select;
     private bool _eraserPartial = true;
     private double _eraserSize = 10;
     private readonly List<Point> _eraserPoints = new();
@@ -605,7 +608,6 @@ public partial class EditorWindow : Window
 
     private IEnumerable<RadioButton> ToolButtons()
     {
-        if (CropUtilityBtn is not null) yield return CropUtilityBtn;
         if (ToolPanel is not null)
             foreach (var rb in ToolPanel.Children.OfType<RadioButton>()) yield return rb;
         if (DrawGroupPanel is not null)
@@ -662,15 +664,34 @@ public partial class EditorWindow : Window
             _colorBeforeHighlighter = _color;
             _opacityBeforeHighlighter = _opacity;
             _highlighterArmed = true;
-            SetCurrentColor(Color.FromRgb(0xFF, 0xFF, 0x00));
-            SetOpacityPercent(50, restyle: false);
+            SetCurrentColor(_highlighterColor);
+            SetOpacityPercent(_highlighterOpacity * 100, restyle: false);
         }
         else if (tool != EditorTool.Highlighter && _highlighterArmed)
         {
+            _highlighterColor = _color;
+            _highlighterOpacity = _opacity;
             _highlighterArmed = false;
             SetCurrentColor(_colorBeforeHighlighter);
             SetOpacityPercent(_opacityBeforeHighlighter * 100, restyle: false);
         }
+    }
+
+    private void OnCropClick(object sender, RoutedEventArgs e)
+    {
+        CommitText();
+        CommitPendingCurve();
+        if (_tool == EditorTool.Crop)
+        {
+            ClearCropPreview(restoreTool: true);
+            return;
+        }
+        if (_tool != EditorTool.Crop)
+            _toolBeforeCrop = _tool;
+        _tool = EditorTool.Crop;
+        UpdateCursor();
+        UpdateContextPanels();
+        UpdateGroupButtonChrome();
     }
 
     private void UpdateGroupButtonChrome()
@@ -755,7 +776,6 @@ public partial class EditorWindow : Window
                       Has(EditorContextControls.EffectStrength) || Has(EditorContextControls.TextStyle) ||
                       Has(EditorContextControls.CropRatio) || Has(EditorContextControls.StepMode) ||
                       Has(EditorContextControls.LineStyle) || Has(EditorContextControls.EraserMode) ||
-                      Has(EditorContextControls.FillStrokeTabs) ||
                       CropPanel.Visibility == Visibility.Visible;
         EditorColorBar.Visibility = Show(color);
         EditorFormatBar.Visibility = Show(extras);
@@ -829,7 +849,6 @@ public partial class EditorWindow : Window
                 _lineStyle == LineBorderStyle.Dashed ? "dashed" :
                 _lineStyle == LineBorderStyle.Dotted ? "dotted" : "solid");
             SelectComboByTag(ArrowStyleBox, ArrowTag(_arrowhead));
-            SelectComboByTag(TextStyleBox, _textStyle.ToString());
             SelectComboByTag(AlignBox, _textAlign);
             SelectComboByTag(VerticalAlignBox, _textVerticalAlign);
             if (OpacitySlider is not null)
@@ -958,6 +977,11 @@ public partial class EditorWindow : Window
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
     private void CheckToolButton(EditorTool tool)
     {
+        if (tool == EditorTool.Crop)
+        {
+            OnCropClick(this, new RoutedEventArgs());
+            return;
+        }
         foreach (var rb in ToolButtons())
         {
             if (rb.Tag is string tag &&

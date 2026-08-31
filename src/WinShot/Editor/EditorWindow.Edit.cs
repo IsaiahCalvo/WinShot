@@ -153,7 +153,7 @@ public partial class EditorWindow : Window
         CropDim.Visibility = Visibility.Collapsed;
     }
 
-    private void ClearCropPreview()
+    private void ClearCropPreview(bool restoreTool = false)
     {
         _pendingCrop = null;
         _adjustingCrop = false;
@@ -162,6 +162,13 @@ public partial class EditorWindow : Window
         HideDragRect();
         HideHandles();
         CropPanel.Visibility = Visibility.Collapsed;
+        if (restoreTool && _tool == EditorTool.Crop)
+        {
+            _tool = _toolBeforeCrop == EditorTool.Crop ? EditorTool.Select : _toolBeforeCrop;
+            UpdateCursor();
+            UpdateContextPanels();
+            UpdateGroupButtonChrome();
+        }
     }
 
     // ------------------------------------------------------------- undo/redo
