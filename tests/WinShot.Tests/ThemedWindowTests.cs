@@ -468,6 +468,8 @@ public class ThemedWindowTests
         editor.UpdateLayout();
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
         double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
+        double arrowToolPanelX = primary.TranslatePoint(new Point(0, 0), editor).X;
+        double arrowWellX = ((FrameworkElement)editor.FindName("ColorWellBtn")!).TranslatePoint(new Point(0, 0), editor).X;
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Visible, colorBar.Visibility);
         Assert.Equal(Visibility.Visible, formatBar.Visibility);
@@ -509,7 +511,8 @@ public class ThemedWindowTests
             $"Top chrome stacked too many rows with Text selected: {top.ActualHeight}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
-        Assert.Equal("Size", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
+        Assert.Equal("Stroke", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
+        Assert.Equal(Visibility.Hidden, ((TextBlock)editor.FindName("ThicknessLabel")!).Visibility);
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "16");
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
@@ -545,6 +548,12 @@ public class ThemedWindowTests
         Point saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
         Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
             $"Callout Stroke sits on Save as…: stroke={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
+        double calloutToolPanelX = primary.TranslatePoint(new Point(0, 0), editor).X;
+        double calloutWellX = ((FrameworkElement)editor.FindName("ColorWellBtn")!).TranslatePoint(new Point(0, 0), editor).X;
+        Assert.True(Math.Abs(calloutToolPanelX - arrowToolPanelX) < 1,
+            $"Primary tools jumped Arrow → Callout: {arrowToolPanelX:0.0} → {calloutToolPanelX:0.0}");
+        Assert.True(Math.Abs(calloutWellX - arrowWellX) < 1,
+            $"Color well jumped Arrow → Callout: {arrowWellX:0.0} → {calloutWellX:0.0}");
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.NotNull(editor.FindName("AlignMenuBtn"));
@@ -575,7 +584,7 @@ public class ThemedWindowTests
 
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, effects.Visibility);
-        Assert.Equal(Visibility.Collapsed, color.Visibility);
+        Assert.Equal(Visibility.Hidden, color.Visibility);
 
         typeof(EditorWindow).GetMethod("OnCropClick",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!

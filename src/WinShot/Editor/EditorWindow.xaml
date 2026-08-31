@@ -169,7 +169,7 @@
                                      AutomationProperties.HelpText="Line and arrow already bend from the midpoint handle."/>
 
                     </StackPanel>
-                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0" MinWidth="96">
+                        <StackPanel x:Name="SecondaryToolPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="8,0,0,0" MinWidth="220">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
@@ -294,7 +294,7 @@
                                                     </StackPanel>
                                                 </StackPanel>
                             <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <TextBlock x:Name="ThicknessLabel" Text="Size" Style="{StaticResource FieldLabel}" Margin="8,0,6,0"/>
+                                                        <TextBlock x:Name="ThicknessLabel" Text="Stroke" Style="{StaticResource FieldLabel}" Margin="8,0,6,0" MinWidth="48"/>
                                                         <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}"
                                                                   SelectionChanged="OnSizeBoxChanged"
                                                                   AutomationProperties.Name="Annotation size"
@@ -394,7 +394,7 @@
                     </StackPanel>
                     </StackPanel>
                     </Border>
-                    <Border x:Name="EditorFormatHost" MinHeight="28" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,6,0,0">
+                    <Border x:Name="EditorFormatHost" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,6,0,0">
                     <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
