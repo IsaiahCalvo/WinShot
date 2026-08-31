@@ -44,7 +44,7 @@ internal sealed class CalloutAnnotation : Canvas
     public CalloutAnnotation()
     {
         IsHitTestVisible = true;
-        Background = Brushes.Transparent;
+        Background = null;
         _box.Child = _label;
         Children.Add(_leader);
         Children.Add(_head);

@@ -279,6 +279,7 @@ public partial class EditorWindow : Window
                 if (!AnnotationCanvas.Children.Contains(label))
                     AnnotationCanvas.Children.Add(label);
             }));
+        Select(label);
     }
 
     private void CancelText()

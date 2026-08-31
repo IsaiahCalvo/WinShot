@@ -363,6 +363,7 @@ public partial class EditorWindow : Window
 
     private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingContext) return;
         if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item &&
             item.Tag is string tag && Enum.TryParse(tag, out TextStyle style))
             _textStyle = style;
@@ -377,6 +378,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void OnArrowStyleChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingContext) return;
         if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
             item.Tag is not string tag)
             return;

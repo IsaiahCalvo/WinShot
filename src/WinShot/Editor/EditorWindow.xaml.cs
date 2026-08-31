@@ -66,6 +66,7 @@ public partial class EditorWindow : Window
     private double _shapeSize = AnnotationStyle.DefaultShapeSize;
     private double _textFontSize = AnnotationStyle.DefaultTextSize;
     private bool _syncingSizeBox;
+    private bool _syncingContext;
     private string _textFontFamily = "Segoe UI";
     private bool _textBold;
     private bool _textItalic;
@@ -544,7 +545,10 @@ public partial class EditorWindow : Window
         {
             CommitText();
             CommitPendingCurve();
-            Select(null);
+            // Keep the current annotation selected when switching to Select/Pan so
+            // format chrome stays on that object. Arming a draw tool clears it.
+            if (tool is not (EditorTool.Select or EditorTool.Pan))
+                Select(null);
             if (_tool == EditorTool.Crop && tool != EditorTool.Crop)
                 ClearCropPreview();
             if (tool == EditorTool.Eyedropper && _tool != EditorTool.Eyedropper)
@@ -669,7 +673,9 @@ public partial class EditorWindow : Window
 
     private void UpdateGroupButtonChrome()
     {
-        string group = EditorShellContract.GroupFor(_tool, _filledRectangleMode);
+        string group = _tool is EditorTool.Select or EditorTool.Pan
+            ? EditorShellContract.GroupFor(ChromeTool(), ChromeFilledRectangle())
+            : EditorShellContract.GroupFor(_tool, _filledRectangleMode);
         void Paint(Button btn, bool on)
         {
             if (btn is null) return;
@@ -693,10 +699,15 @@ public partial class EditorWindow : Window
                 rb.IsChecked = false;
     }
 
-    /// <summary>Shows the crop-ratio, text-style, step-mode, arrow-style and effect-strength controls only while their tool is active.</summary>
+    /// <summary>
+    /// Format chrome follows the selected annotation when one is selected (Survey
+    /// contextTool), otherwise the drawing tool. Group radios still follow the drawing tool.
+    /// </summary>
     private void UpdateContextPanels()
     {
-        EditorContextControls controls = EditorShellContract.ContextFor(_tool, _filledRectangleMode);
+        EditorTool chrome = ChromeTool();
+        bool filled = ChromeFilledRectangle();
+        EditorContextControls controls = EditorShellContract.ContextFor(chrome, filled);
         static Visibility Show(bool show) => show ? Visibility.Visible : Visibility.Collapsed;
         bool Has(EditorContextControls value) => controls.HasFlag(value);
 
@@ -714,7 +725,7 @@ public partial class EditorWindow : Window
         EraserModePanel.Visibility = Show(Has(EditorContextControls.EraserMode));
         ColorWellLabel.Visibility = Visibility.Collapsed;
         if (CloudStyleItem is not null)
-            CloudStyleItem.Visibility = Show(_tool == EditorTool.Rectangle);
+            CloudStyleItem.Visibility = Show(chrome == EditorTool.Rectangle);
         SyncColorWellIndicator();
         ThicknessLabel.Text = "Size";
         if (Has(EditorContextControls.Thickness))
@@ -724,11 +735,13 @@ public partial class EditorWindow : Window
 
         if (Has(EditorContextControls.EffectStrength))
         {
-            EffectStrengthLabel.Text = _tool == EditorTool.Blur ? "Blur" : "Pixelate";
-            SyncEffectStrengthButtons(_tool == EditorTool.Blur ? _blurStrength : _pixelateStrength);
+            EffectStrengthLabel.Text = chrome == EditorTool.Blur ? "Blur" : "Pixelate";
+            SyncEffectStrengthButtons(chrome == EditorTool.Blur ? _blurStrength : _pixelateStrength);
         }
 
-        string group = EditorShellContract.GroupFor(_tool, _filledRectangleMode);
+        string group = _tool is EditorTool.Select or EditorTool.Pan
+            ? EditorShellContract.GroupFor(chrome, filled)
+            : EditorShellContract.GroupFor(_tool, _filledRectangleMode);
         DrawGroupPanel.Visibility = Show(group == "Draw");
         ShapeGroupPanel.Visibility = Show(group == "Shape");
         TextGroupPanel.Visibility = Show(group == "Text");
@@ -750,10 +763,111 @@ public partial class EditorWindow : Window
             EditorStyleBar.Visibility = Visibility.Visible;
     }
 
+    private EditorTool ChromeTool()
+    {
+        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+            EditorShellContract.ToolForAnnotation(meta.Type) is EditorTool mapped)
+            return mapped;
+        return _tool;
+    }
+
+    private bool ChromeFilledRectangle()
+    {
+        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
+            return EditorShellContract.IsFilledRectangle(meta);
+        return _filledRectangleMode;
+    }
+
+    private void SyncChromeFromSelection()
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+            return;
+        _syncingContext = true;
+        _syncingSizeBox = true;
+        try
+        {
+            if (meta.Color is string hex && TryParseColor(hex, out var stroke))
+            {
+                _color = AnnotationStyle.Opaque(stroke);
+                _opacity = stroke.A / 255.0;
+            }
+            if (meta.FillColor is string fillHex && TryParseColor(fillHex, out var fill))
+                _fillColor = fill;
+            if (meta.Fill is string fillName && Enum.TryParse(fillName, out ShapeFillMode fillMode))
+            {
+                _fillMode = fillMode;
+                if (fillMode == ShapeFillMode.None && FillNoneBtn is not null) FillNoneBtn.IsChecked = true;
+                else if (fillMode == ShapeFillMode.Quarter && FillQuarterBtn is not null) FillQuarterBtn.IsChecked = true;
+                else if (fillMode == ShapeFillMode.Solid && FillSolidBtn is not null) FillSolidBtn.IsChecked = true;
+            }
+            if (meta.FontSize is double fs)
+                _textFontSize = AnnotationStyle.ClampTextSize(fs);
+            if (meta.Thickness is double th)
+            {
+                switch (meta.Type)
+                {
+                    case AnnotationData.TypeHighlighter: _highlighterSize = th; break;
+                    case AnnotationData.TypeFreehand: _penSize = th; break;
+                    case AnnotationData.TypeText or AnnotationData.TypeCallout: break;
+                    default: _shapeSize = th; break;
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(meta.FontFamily))
+                _textFontFamily = meta.FontFamily;
+            _textBold = meta.Bold ?? false;
+            _textItalic = meta.Italic ?? false;
+            _textUnderline = meta.Underline ?? false;
+            _textStrike = meta.Strike ?? false;
+            if (!string.IsNullOrWhiteSpace(meta.Align)) _textAlign = meta.Align;
+            if (!string.IsNullOrWhiteSpace(meta.VerticalAlign)) _textVerticalAlign = meta.VerticalAlign;
+            if (meta.Style is string styleName && Enum.TryParse(styleName, out TextStyle textStyle))
+                _textStyle = textStyle;
+            _lineStyle = AnnotationStyle.LineStyleFrom(meta);
+            (_arrowhead, _startArrowhead) = AnnotationStyle.HeadsFrom(meta);
+            SelectComboByTag(LineStyleBox, _lineStyle == LineBorderStyle.Cloud ? "cloud" :
+                _lineStyle == LineBorderStyle.Dashed ? "dashed" :
+                _lineStyle == LineBorderStyle.Dotted ? "dotted" : "solid");
+            SelectComboByTag(ArrowStyleBox, ArrowTag(_arrowhead));
+            SelectComboByTag(TextStyleBox, _textStyle.ToString());
+            SelectComboByTag(AlignBox, _textAlign);
+            SelectComboByTag(VerticalAlignBox, _textVerticalAlign);
+            if (OpacitySlider is not null)
+                OpacitySlider.Value = _opacity * 100;
+            if (OpacityValue is not null)
+                OpacityValue.Text = $"{Math.Round(_opacity * 100)}%";
+        }
+        finally
+        {
+            _syncingSizeBox = false;
+            _syncingContext = false;
+        }
+    }
+
+    private static string ArrowTag(ArrowheadStyle style) => style switch
+    {
+        ArrowheadStyle.None => "none",
+        ArrowheadStyle.VShape => "vShape",
+        ArrowheadStyle.OpenCircle => "openCircle",
+        ArrowheadStyle.OpenTriangle => "openTriangle",
+        ArrowheadStyle.HorizontalLine => "horizontalLine",
+        _ => "solidTriangle",
+    };
+
+    private static void SelectComboByTag(ComboBox? box, string tag)
+    {
+        if (box is null) return;
+        foreach (ComboBoxItem item in box.Items.OfType<ComboBoxItem>())
+            if (item.Tag is string t && string.Equals(t, tag, StringComparison.OrdinalIgnoreCase))
+            {
+                box.SelectedItem = item;
+                return;
+            }
+    }
+
     private void SyncSizeBox()
     {
         if (SizeBox is null) return;
-        bool text = _tool is EditorTool.Text or EditorTool.Callout;
+        bool text = ChromeTool() is EditorTool.Text or EditorTool.Callout;
         int[] presets = _tool == EditorTool.Eraser
             ? AnnotationStyle.EraserSizePresets
             : text ? AnnotationStyle.TextSizePresets : AnnotationStyle.SizePresets;
@@ -786,7 +900,7 @@ public partial class EditorWindow : Window
         }
     }
 
-    private double ActiveSize() => _tool switch
+    private double ActiveSize() => ChromeTool() switch
     {
         EditorTool.Highlighter => _highlighterSize,
         EditorTool.Eraser => _eraserSize,
@@ -799,7 +913,7 @@ public partial class EditorWindow : Window
 
     private void RememberSize(double size)
     {
-        switch (_tool)
+        switch (ChromeTool())
         {
             case EditorTool.Highlighter: _highlighterSize = AnnotationStyle.HighlighterWidth(size); break;
             case EditorTool.Eraser: _eraserSize = AnnotationStyle.ClampEraserSize(size); break;
@@ -812,11 +926,11 @@ public partial class EditorWindow : Window
 
     private void OnSizeBoxChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_syncingSizeBox || SizeBox?.SelectedItem is not ComboBoxItem item) return;
+        if (_syncingSizeBox || _syncingContext || SizeBox?.SelectedItem is not ComboBoxItem item) return;
         double size = item.Tag is double d ? d : AnnotationStyle.DefaultPenSize;
         RememberSize(size);
         if (!IsLoaded) return;
-        if (_tool is EditorTool.Text or EditorTool.Callout)
+        if (ChromeTool() is EditorTool.Text or EditorTool.Callout)
             RestyleSelectedTextFormat();
         else
         {
@@ -865,7 +979,8 @@ public partial class EditorWindow : Window
 
     private void SetCurrentColor(Color color)
     {
-        if (_colorWell == ColorWell.Fill && EditorShellContract.ContextFor(_tool, _filledRectangleMode)
+        if (_syncingContext) { SyncColorWellIndicator(); return; }
+        if (_colorWell == ColorWell.Fill && EditorShellContract.ContextFor(ChromeTool(), ChromeFilledRectangle())
                 .HasFlag(EditorContextControls.FillStrokeTabs))
         {
             _fillColor = AnnotationStyle.Opaque(color);
@@ -907,7 +1022,7 @@ public partial class EditorWindow : Window
     {
         if (CurrentColorIndicator is null) return;
         Color shown = _colorWell == ColorWell.Fill &&
-                      EditorShellContract.ContextFor(_tool, _filledRectangleMode).HasFlag(EditorContextControls.FillStrokeTabs)
+                      EditorShellContract.ContextFor(ChromeTool(), ChromeFilledRectangle()).HasFlag(EditorContextControls.FillStrokeTabs)
             ? CurrentFillBrush()
             : CurrentStrokeBrush();
         if (shown.A == 0)
@@ -926,7 +1041,7 @@ public partial class EditorWindow : Window
     {
         double pct = Math.Clamp(percent, 0, 100);
         if (_colorWell == ColorWell.Fill &&
-            EditorShellContract.ContextFor(_tool, _filledRectangleMode).HasFlag(EditorContextControls.FillStrokeTabs))
+            EditorShellContract.ContextFor(ChromeTool(), ChromeFilledRectangle()).HasFlag(EditorContextControls.FillStrokeTabs))
         {
             _fillOpacity = pct / 100.0;
             if (_fillOpacity <= 0) _fillMode = ShapeFillMode.None;
@@ -950,6 +1065,7 @@ public partial class EditorWindow : Window
 
     private void OnLineStyleChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingContext) return;
         if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item || item.Tag is not string tag)
             return;
         _lineStyle = AnnotationStyle.ParseLineStyle(tag);
@@ -958,6 +1074,7 @@ public partial class EditorWindow : Window
 
     private void OnFontFamilyChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingContext) return;
         if (FontFamilyBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string family) return;
         _textFontFamily = family;
         if (IsLoaded) RestyleSelectedTextFormat();
@@ -993,6 +1110,7 @@ public partial class EditorWindow : Window
 
     private void OnTextAlignChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingContext) return;
         if (AlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
         _textAlign = align;
         if (IsLoaded) RestyleSelectedTextFormat();
@@ -1000,6 +1118,7 @@ public partial class EditorWindow : Window
 
     private void OnVerticalAlignChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingContext) return;
         if (VerticalAlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
         _textVerticalAlign = align;
         if (IsLoaded) RestyleSelectedTextFormat();
@@ -1038,6 +1157,7 @@ public partial class EditorWindow : Window
 
     private void OnFillChecked(object sender, RoutedEventArgs e)
     {
+        if (_syncingContext) return;
         if (sender is RadioButton rb && rb.Tag is string tag && Enum.TryParse(tag, out ShapeFillMode mode))
         {
             _fillMode = mode;

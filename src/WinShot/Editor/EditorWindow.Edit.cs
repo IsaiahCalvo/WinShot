@@ -191,6 +191,7 @@ public partial class EditorWindow : Window
                 if (!AnnotationCanvas.Children.Contains(element))
                     AnnotationCanvas.Children.Add(element);
             }), apply: false);
+        Select(element);
     }
 
     private async void OnUndo(object sender, RoutedEventArgs e) => await UndoAsync();

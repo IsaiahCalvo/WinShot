@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -486,6 +487,20 @@ public class ThemedWindowTests
         Assert.NotNull(editor.FindName("BoldBtn"));
         Assert.NotNull(editor.FindName("FontFamilyBox"));
         Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName((Button)editor.FindName("BoldBtn")!)));
+
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var label = AnnotationFactory.CreateStyledTextLabel("Hello", Brushes.White, 16, TextStyle.Plain);
+        label.Tag = AnnotationData.ForText(new Point(10, 10), "Hello", TextStyle.Plain, 16, Colors.White);
+        canvas.Children.Add(label);
+        typeof(EditorWindow).GetMethod("Select",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { label });
+        editor.UpdateLayout();
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
+        Assert.Equal(Visibility.Visible, color.Visibility);
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),

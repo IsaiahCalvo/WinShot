@@ -351,6 +351,34 @@ public partial class EditorWindow : Window
         CommitText();
         bool inImage = pos.X >= 0 && pos.Y >= 0 && pos.X <= _source.Width && pos.Y <= _source.Height;
 
+        // Clicking an existing mark selects it instead of stacking a new one on top.
+        if (_tool is not (EditorTool.Eraser or EditorTool.Eyedropper or EditorTool.Crop or EditorTool.Pan)
+            && HitTestAnnotation(pos) is { } existing)
+        {
+            Select(existing);
+            if (e.ClickCount == 2 && existing is FrameworkElement fe && fe.Tag is AnnotationData tm)
+            {
+                if (tm.Type == AnnotationData.TypeText)
+                {
+                    BeginTextReEdit(fe);
+                    e.Handled = true;
+                    return;
+                }
+                if (tm.Type == AnnotationData.TypeCallout && fe is CalloutAnnotation callout)
+                {
+                    BeginCalloutReEdit(callout);
+                    e.Handled = true;
+                    return;
+                }
+            }
+            _movingSelection = true;
+            _moveLast = pos;
+            _moveTotal = new Vector();
+            Viewport.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
         if (_tool == EditorTool.Text)
         {
             // Survey: click places a default box; drag sizes the box. A click that
@@ -765,6 +793,11 @@ public partial class EditorWindow : Window
             CommitOpacityGesture();
         _selected = element;
         UpdateSelectionVisual();
+        if (IsLoaded)
+        {
+            SyncChromeFromSelection();
+            UpdateContextPanels();
+        }
     }
 
     private void UpdateSelectionVisual()

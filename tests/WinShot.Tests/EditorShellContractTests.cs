@@ -58,6 +58,10 @@ public class EditorShellContractTests
         Assert.True(EditorShellContract.ContextFor(EditorTool.Step, false)
             .HasFlag(EditorContextControls.StepMode));
         Assert.Equal("Shape", EditorShellContract.GroupFor(EditorTool.Step, false));
+        Assert.Equal(EditorTool.Text, EditorShellContract.ToolForAnnotation(AnnotationData.TypeText));
+        Assert.Equal(EditorTool.Callout, EditorShellContract.ToolForAnnotation(AnnotationData.TypeCallout));
+        Assert.Equal(EditorTool.Arrow, EditorShellContract.ToolForAnnotation(AnnotationData.TypeArrow));
+        Assert.Null(EditorShellContract.ToolForAnnotation(AnnotationData.TypeImage));
         Assert.Equal(EditorContextControls.CropRatio,
             EditorShellContract.ContextFor(EditorTool.Crop, false));
     }

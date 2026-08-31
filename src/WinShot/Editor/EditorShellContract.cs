@@ -101,4 +101,25 @@ internal static class EditorShellContract
             EditorTool.Text or EditorTool.Callout => "Text",
             _ => "",
         };
+
+    /// <summary>Maps a committed annotation to the tool whose format chrome it should show.</summary>
+    public static EditorTool? ToolForAnnotation(string? type) => type switch
+    {
+        AnnotationData.TypeArrow => EditorTool.Arrow,
+        AnnotationData.TypeCurvedArrow => EditorTool.CurvedArrow,
+        AnnotationData.TypeLine => EditorTool.Line,
+        AnnotationData.TypeRectangle => EditorTool.Rectangle,
+        AnnotationData.TypeEllipse => EditorTool.Ellipse,
+        AnnotationData.TypeFreehand => EditorTool.Freehand,
+        AnnotationData.TypeHighlighter => EditorTool.Highlighter,
+        AnnotationData.TypeText => EditorTool.Text,
+        AnnotationData.TypeCallout => EditorTool.Callout,
+        AnnotationData.TypeStep => EditorTool.Step,
+        AnnotationData.TypeSpotlight => EditorTool.Spotlight,
+        _ => null,
+    };
+
+    public static bool IsFilledRectangle(AnnotationData meta) =>
+        meta.Type == AnnotationData.TypeRectangle &&
+        (meta.Fill == nameof(ShapeFillMode.Solid) || meta.Fill == nameof(ShapeFillMode.Quarter));
 }
