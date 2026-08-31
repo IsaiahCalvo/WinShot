@@ -583,8 +583,14 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
 
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
         Assert.Equal(Visibility.Visible, effects.Visibility);
         Assert.Equal(Visibility.Hidden, color.Visibility);
+        var effectBox = (FrameworkElement)editor.FindName("EffectStrengthBox")!;
+        Point effectOrigin = effectBox.TranslatePoint(new Point(0, 0), editor);
+        Point pixelateSave = ((FrameworkElement)editor.FindName("BtnSave")!).TranslatePoint(new Point(0, 0), editor);
+        Assert.True(effectOrigin.X + effectBox.ActualWidth <= pixelateSave.X + 0.5,
+            $"Pixelate Medium sits on Save as…: effect={effectOrigin.X}+{effectBox.ActualWidth} save={pixelateSave.X}");
 
         typeof(EditorWindow).GetMethod("OnCropClick",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
