@@ -699,6 +699,18 @@ public partial class EditorWindow : Window
         GroupRect.Visibility = Visibility.Collapsed;
     }
 
+    /// <summary>
+    /// Drops an in-progress rubber band without selecting anything — Escape, or a lost
+    /// mouse capture (alt-tab, a right-click). Without this the band would stay painted
+    /// on the canvas with no way to clear it.
+    /// </summary>
+    private void AbortMarquee()
+    {
+        if (!_marqueeActive) return;
+        _marqueeActive = false;
+        MarqueeRect.Visibility = Visibility.Collapsed;
+    }
+
     private void EndMove()
     {
         if (!_movingSelection) return;
@@ -734,8 +746,19 @@ public partial class EditorWindow : Window
     {
         if (!_movingSelection) return;
         _movingSelection = false;
-        if (_selected is not null && (_moveTotal.X != 0 || _moveTotal.Y != 0))
-            MoveElement(_selected, -_moveTotal.X, -_moveTotal.Y);
+        if (_moveTotal.X != 0 || _moveTotal.Y != 0)
+        {
+            if (_multiSelected.Count > 1)
+            {
+                foreach (UIElement member in _multiSelected)
+                    MoveElement(member, -_moveTotal.X, -_moveTotal.Y);
+                UpdateMultiSelectionVisual();
+            }
+            else if (_selected is not null)
+            {
+                MoveElement(_selected, -_moveTotal.X, -_moveTotal.Y);
+            }
+        }
         _moveTotal = new Vector();
         UpdateSelectionVisual();
     }

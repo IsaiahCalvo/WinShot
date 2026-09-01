@@ -308,10 +308,21 @@ public partial class EditorWindow : Window
         }
         else if (e.Key == Key.Escape)
         {
-            if (_movingSelection)
+            if (_marqueeActive)
+            {
+                AbortMarquee();
+                Viewport.ReleaseMouseCapture();
+                e.Handled = true;
+            }
+            else if (_movingSelection)
             {
                 AbortMove();
                 Viewport.ReleaseMouseCapture();
+                e.Handled = true;
+            }
+            else if (_multiSelected.Count > 1)
+            {
+                ClearMultiSelection();
                 e.Handled = true;
             }
             else if (_draggingCurveHandle)

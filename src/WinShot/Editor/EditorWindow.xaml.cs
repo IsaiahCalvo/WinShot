@@ -188,6 +188,7 @@ public partial class EditorWindow : Window
             AbortDrag();
             AbortPan();
             AbortMove();
+            AbortMarquee();
             AbortCurveHandle();
             AbortResize();
         };
