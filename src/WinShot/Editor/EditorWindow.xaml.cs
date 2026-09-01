@@ -539,6 +539,7 @@ public partial class EditorWindow : Window
         {
             UncheckOtherToolButtons(rb);
             MoreToolsPopup.IsOpen = false;
+            SizePresetPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
         }
@@ -563,6 +564,7 @@ public partial class EditorWindow : Window
         if (IsLoaded)
         {
             MoreToolsPopup.IsOpen = false;
+            SizePresetPopup.IsOpen = false;
             UpdateCursor();
             UpdateContextPanels();
         }
