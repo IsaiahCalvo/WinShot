@@ -21,6 +21,18 @@ public partial class EditorWindow : Window
 
     private const double HandleScreenPx = 12;  // Survey cornerSize
     private const double HandleGrabPx = 14;    // screen-px grab radius for hit testing
+    private const double RotateHandleScreenPx = 14;
+
+    /// <summary>Handle index reserved for the rotation grip (box thumbs are 0..7).</summary>
+    private const int RotateHandleIndex = 8;
+
+    private Ellipse? _rotateThumb;
+    private Line? _rotateStem;
+
+    // Rotation drag state: the angle when the drag began plus the pointer bearing at grab
+    // time, so picking the grip up off-centre does not snap the mark round.
+    private double _rotateStartAngle;
+    private double _rotateGrabBearing;
 
     /// <summary>
     /// Builds the handle layout for the current selection: an 8-thumb box frame for
@@ -45,6 +57,8 @@ public partial class EditorWindow : Window
                 break;
             case AnnotationData.TypeCallout:
                 LayoutCalloutHandles(meta);
+                // The callout's own knee/arrow handles stay; the grip rides its box.
+                PlaceRotateGrip(fe);
                 break;
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
@@ -52,22 +66,122 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
             case AnnotationData.TypeImage:
-                LayoutBoxHandles(GetCanvasBounds(_selected));
+                LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe));
+                break;
+            case AnnotationData.TypeStep:
+                // A counter has no scale handles — its size is the badge size — but it does
+                // rotate, so it gets the grip on its own.
+                _handleKind = HandleKind.Box;
+                EnsureThumbs(0);
+                PlaceRotateGrip(fe);
+                HandleLayer.Visibility = Visibility.Visible;
                 break;
             default:
-                HideHandles(); // spotlight / emoji / step: move + delete only
+                HideHandles(); // spotlight / emoji: move + delete only
                 break;
         }
     }
 
-    /// <summary>Eight thumbs: corners 0=TL,1=TR,2=BR,3=BL then edge midpoints 4=T,5=R,6=B,7=L.</summary>
-    private void LayoutBoxHandles(Rect b)
+    /// <summary>
+    /// Eight thumbs: corners 0=TL,1=TR,2=BR,3=BL then edge midpoints 4=T,5=R,6=B,7=L, plus
+    /// the rotation grip. When the annotation is rotated every thumb rides the rotated
+    /// frame, so the chrome keeps wrapping the mark instead of boxing it axis-aligned.
+    /// </summary>
+    private void LayoutBoxHandles(Rect b, double angle)
     {
         _handleKind = HandleKind.Box;
+        var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
         var pts = BoxHandlePoints(b);
         EnsureThumbs(pts.Length);
-        for (int i = 0; i < pts.Length; i++) PlaceThumb(i, pts[i]);
+        for (int i = 0; i < pts.Length; i++)
+            PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle));
+
+        var top = new Point(centre.X, b.Top);
+        var grip = new Point(centre.X, b.Top - AnnotationRotation.HandleOffsetScreenPx / _zoom);
+        PlaceRotateThumb(
+            AnnotationRotation.RotatePoint(grip, centre, angle),
+            AnnotationRotation.RotatePoint(top, centre, angle));
+
         HandleLayer.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Puts the grip above an element that has no box frame of its own.</summary>
+    private void PlaceRotateGrip(FrameworkElement fe)
+    {
+        Rect b = UnrotatedCanvasBounds(fe);
+        if (b.Width < 0.5 && b.Height < 0.5) { HideRotateThumb(); return; }
+        double angle = AnnotationTransform.AngleOf(fe);
+        var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
+        var top = new Point(centre.X, b.Top);
+        var grip = new Point(centre.X, b.Top - AnnotationRotation.HandleOffsetScreenPx / _zoom);
+        PlaceRotateThumb(
+            AnnotationRotation.RotatePoint(grip, centre, angle),
+            AnnotationRotation.RotatePoint(top, centre, angle));
+    }
+
+    /// <summary>
+    /// The annotation's canvas bounds as if it were NOT rotated. Rotation turns about this
+    /// rect's centre, so the handle and resize maths stay in a simple axis-aligned frame and
+    /// only map points in and out at the edges.
+    /// </summary>
+    private static Rect UnrotatedCanvasBounds(FrameworkElement fe)
+    {
+        Rect local = AnnotationTransform.LocalBounds(fe);
+        double left = Canvas.GetLeft(fe); if (double.IsNaN(left)) left = 0;
+        double top = Canvas.GetTop(fe); if (double.IsNaN(top)) top = 0;
+        Vector off = AnnotationTransform.OffsetOf(fe);
+        return new Rect(local.X + left + off.X, local.Y + top + off.Y, local.Width, local.Height);
+    }
+
+    private static Point RotationCentre(FrameworkElement fe)
+    {
+        Rect b = UnrotatedCanvasBounds(fe);
+        return new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
+    }
+
+    /// <summary>Maps a canvas point into the annotation's unrotated frame.</summary>
+    private static Point ToUnrotatedFrame(FrameworkElement fe, Point canvasPoint)
+    {
+        double angle = AnnotationTransform.AngleOf(fe);
+        return angle == 0
+            ? canvasPoint
+            : AnnotationRotation.RotatePoint(canvasPoint, RotationCentre(fe), -angle);
+    }
+
+    private void PlaceRotateThumb(Point centre, Point anchor)
+    {
+        if (_rotateThumb is null)
+        {
+            _rotateThumb = new Ellipse
+            {
+                Fill = new SolidColorBrush(Colors.White),
+                Stroke = (Brush)FindResource("InfoBrush"),
+            };
+            _rotateStem = new Line { Stroke = (Brush)FindResource("InfoBrush") };
+            HandleLayer.Children.Add(_rotateStem);
+            HandleLayer.Children.Add(_rotateThumb);
+        }
+
+        double s = RotateHandleScreenPx / _zoom;
+        _rotateThumb.Width = s;
+        _rotateThumb.Height = s;
+        _rotateThumb.StrokeThickness = 1.5 / _zoom;
+        Canvas.SetLeft(_rotateThumb, centre.X - s / 2);
+        Canvas.SetTop(_rotateThumb, centre.Y - s / 2);
+        _rotateThumb.Visibility = Visibility.Visible;
+
+        _rotateStem!.X1 = anchor.X;
+        _rotateStem.Y1 = anchor.Y;
+        _rotateStem.X2 = centre.X;
+        _rotateStem.Y2 = centre.Y;
+        _rotateStem.StrokeThickness = 1 / _zoom;
+        _rotateStem.Visibility = Visibility.Visible;
+    }
+
+    private void HideRotateThumb()
+    {
+        if (_rotateThumb is not null) _rotateThumb.Visibility = Visibility.Collapsed;
+        if (_rotateStem is not null) _rotateStem.Visibility = Visibility.Collapsed;
     }
 
     private static Point[] BoxHandlePoints(Rect b) => new[]
@@ -128,8 +242,7 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>The element's accumulated TranslateTransform offset (moves + crop shifts), or zero.</summary>
-    private static Vector ElementOffset(UIElement element) =>
-        element.RenderTransform is TranslateTransform t ? new Vector(t.X, t.Y) : new Vector(0, 0);
+    private static Vector ElementOffset(UIElement element) => AnnotationTransform.OffsetOf(element);
 
     private void EnsureThumbs(int count)
     {
@@ -168,6 +281,7 @@ public partial class EditorWindow : Window
         _handleKind = HandleKind.None;
         HandleLayer.Visibility = Visibility.Collapsed;
         foreach (var t in _handleThumbs) t.Visibility = Visibility.Collapsed;
+        HideRotateThumb();
     }
 
     /// <summary>Index of the handle near a content point, or -1. Endpoint/box share the same thumb list.</summary>
@@ -186,6 +300,15 @@ public partial class EditorWindow : Window
             double d = (pos - new Point(cx, cy)).Length;
             if (d <= grab && d < bestDist) { bestDist = d; best = i; }
         }
+
+        // The grip wins ties with the top-edge thumb below it: it is the outer of the two,
+        // so the user reached past the frame deliberately to get to it.
+        if (_rotateThumb is { Visibility: Visibility.Visible })
+        {
+            double cx = Canvas.GetLeft(_rotateThumb) + _rotateThumb.Width / 2;
+            double cy = Canvas.GetTop(_rotateThumb) + _rotateThumb.Height / 2;
+            if ((pos - new Point(cx, cy)).Length <= grab) return RotateHandleIndex;
+        }
         return best;
     }
 
@@ -202,7 +325,15 @@ public partial class EditorWindow : Window
             return;
         }
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
+        {
             _resizeBefore = CaptureResizeSnapshot(_selected, meta);
+            if (handle == RotateHandleIndex)
+            {
+                _rotateStartAngle = AnnotationTransform.AngleOf(fe);
+                _rotateGrabBearing = AnnotationRotation.AngleFromPointer(
+                    RotationCentre(fe), Mouse.GetPosition(AnnotationCanvas));
+            }
+        }
     }
 
     private void DragResize(Point pos)
@@ -214,6 +345,13 @@ public partial class EditorWindow : Window
         }
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta || _resizeBefore is null)
             return;
+
+        if (_activeHandle == RotateHandleIndex)
+        {
+            DragRotate(fe, pos);
+            UpdateSelectionVisual();
+            return;
+        }
 
         Rect oldBounds = _resizeBefore.Bounds;
         if (_handleKind == HandleKind.Endpoints)
@@ -230,13 +368,32 @@ public partial class EditorWindow : Window
             ApplyCalloutResize(fe, meta, pos);
         else
         {
-            var next = NewBoundsForHandle(oldBounds, _activeHandle, pos);
+            // Resize runs in the annotation's unrotated frame: map the pointer in, do the
+            // ordinary axis-aligned maths, then put the rotation back about the new centre.
+            double angle = AnnotationTransform.AngleOf(fe);
+            Point local = ToUnrotatedFrame(fe, pos);
+            var next = NewBoundsForHandle(oldBounds, _activeHandle, local);
             if (ShapeConstraint.ShiftHeld)
                 next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next);
             ApplyBoxResize(fe, meta, next);
+            if (angle != 0)
+            {
+                fe.UpdateLayout();
+                AnnotationTransform.SetAngle(fe, angle);
+            }
         }
 
         UpdateSelectionVisual();
+    }
+
+    /// <summary>Live rotation from the grip: bearing, grab offset, then the 45 degree snap rules.</summary>
+    private void DragRotate(FrameworkElement fe, Point pos)
+    {
+        double bearing = AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos);
+        double angle = AnnotationRotation.ResolveDrag(
+            _rotateStartAngle, _rotateGrabBearing, bearing, ShapeConstraint.ShiftHeld);
+        AnnotationTransform.SetAngle(fe, angle);
+        if (fe.Tag is AnnotationData meta) meta.Angle = angle;
     }
 
     private void EndResize()
@@ -515,9 +672,13 @@ public partial class EditorWindow : Window
         public double Tx { get; init; }
         public double Ty { get; init; }
 
+        /// <summary>Rotation at capture time, so undo puts the mark back at its old angle.</summary>
+        public double Angle { get; init; }
+
         public bool NearlyEquals(ResizeSnapshot other)
         {
             if (Math.Abs(Tx - other.Tx) > 0.01 || Math.Abs(Ty - other.Ty) > 0.01) return false;
+            if (Math.Abs(Angle - other.Angle) > 0.01) return false;
             if (FontSize is double a && other.FontSize is double b && Math.Abs(a - b) > 0.01) return false;
             if (Points is { } p && other.Points is { } q)
             {
@@ -545,12 +706,15 @@ public partial class EditorWindow : Window
         return new ResizeSnapshot
         {
             Type = meta.Type,
-            Bounds = GetCanvasBounds(element),
+            // The UNROTATED bounds: rotation turns about this rect's centre, so this is the
+            // frame both the resize maths and undo work in.
+            Bounds = element is FrameworkElement box ? UnrotatedCanvasBounds(box) : GetCanvasBounds(element),
             Points = pts,
             FontSize = CurrentFontSize(element),
             Meta = meta.Clone(),
             Tx = off.X,
             Ty = off.Y,
+            Angle = AnnotationTransform.AngleOf(element),
         };
     }
 
@@ -640,18 +804,27 @@ public partial class EditorWindow : Window
                 break;
         }
 
+        // Every branch above rebuilt the element unrotated; put the captured angle back.
+        if (Math.Abs(snap.Angle) > 0.01)
+        {
+            fe.UpdateLayout();
+            AnnotationTransform.SetAngle(fe, snap.Angle);
+        }
+        meta.Angle = snap.Angle;
+
         fe.Tag = meta;
     }
 
     /// <summary>Folds an element's TranslateTransform offset into its Canvas.Left/Top and clears the transform.</summary>
     private static void FlattenTransformIntoCanvas(FrameworkElement fe)
     {
-        if (fe.RenderTransform is TranslateTransform t && (t.X != 0 || t.Y != 0))
+        Vector flatOffset = AnnotationTransform.OffsetOf(fe);
+        if (flatOffset.X != 0 || flatOffset.Y != 0)
         {
             double l = Canvas.GetLeft(fe); if (double.IsNaN(l)) l = 0;
             double tp = Canvas.GetTop(fe); if (double.IsNaN(tp)) tp = 0;
-            Canvas.SetLeft(fe, l + t.X);
-            Canvas.SetTop(fe, tp + t.Y);
+            Canvas.SetLeft(fe, l + flatOffset.X);
+            Canvas.SetTop(fe, tp + flatOffset.Y);
         }
         fe.RenderTransform = null;
     }
@@ -938,15 +1111,16 @@ public partial class EditorWindow : Window
     /// <summary>Moves an annotation by composing into its TranslateTransform (same channel crop shifting uses).</summary>
     private static void MoveElement(UIElement element, double dx, double dy)
     {
-        if (element.RenderTransform is TranslateTransform t)
+        if (element is not FrameworkElement fe)
         {
-            t.X += dx;
-            t.Y += dy;
+            if (element.RenderTransform is TranslateTransform plain) { plain.X += dx; plain.Y += dy; }
+            else element.RenderTransform = new TranslateTransform(dx, dy);
+            return;
         }
-        else
-        {
-            element.RenderTransform = new TranslateTransform(dx, dy);
-        }
+
+        // Carries any rotation through untouched.
+        Vector offset = AnnotationTransform.OffsetOf(fe);
+        AnnotationTransform.SetOffset(fe, new Vector(offset.X + dx, offset.Y + dy));
     }
 
 }

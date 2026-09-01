@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -104,6 +104,12 @@ internal sealed class AnnotationData
     public double Tx { get; set; }
 
     public double Ty { get; set; }
+
+    /// <summary>
+    /// Rotation in degrees about the annotation's own centre, clockwise positive.
+    /// Absent/0 in projects written before rotation existed, which read back unrotated.
+    /// </summary>
+    public double Angle { get; set; }
 
     public AnnotationData Clone() => (AnnotationData)MemberwiseClone();
 

@@ -86,6 +86,7 @@ public class ThemedWindowTests
                 editor.Show();
                 EditorShellContractSmoke(editor);
                 ToolRowStabilitySmoke(editor);
+                RotationGripSmoke(editor);
                 ApplyBlurUndoRedoSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
@@ -372,6 +373,74 @@ public class ThemedWindowTests
         }
 
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+    }
+
+    /// <summary>
+    /// Every annotation that can be selected can be rotated — including the counter, which
+    /// carried no handles at all, and the callout, whose own knee handles must not displace
+    /// the grip. The grip is the Ellipse in the handle layer.
+    /// </summary>
+    private static void RotationGripSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var handleLayer = (Canvas)editor.FindName("HandleLayer")!;
+        var selField = type.GetField("_selected", NP)!;
+        var updateVisual = type.GetMethod("UpdateSelectionVisual", NP)!;
+
+        bool GripVisible() => handleLayer.Children.OfType<System.Windows.Shapes.Ellipse>()
+            .Any(e => e.Visibility == Visibility.Visible);
+
+        void SelectAndLayout(FrameworkElement el)
+        {
+            selField.SetValue(editor, el);
+            updateVisual.Invoke(editor, null);
+            editor.UpdateLayout();
+        }
+
+        canvas.Children.Clear();
+
+        // A plain box annotation — the baseline that always had handles.
+        var rect = new System.Windows.Shapes.Rectangle
+        {
+            Width = 90,
+            Height = 60,
+            Tag = new AnnotationData { Type = AnnotationData.TypeRectangle },
+        };
+        Canvas.SetLeft(rect, 20);
+        Canvas.SetTop(rect, 20);
+        canvas.Children.Add(rect);
+        rect.Measure(new Size(90, 60));
+        rect.Arrange(new Rect(0, 0, 90, 60));
+        SelectAndLayout(rect);
+        Assert.True(GripVisible(), "rectangle should carry a rotation grip");
+
+        // The counter: previously fell through to HideHandles, so it could not be rotated.
+        var badge = AnnotationFactory.CreateStepBadge(1, Colors.Red, 4, letters: false);
+        badge.Tag = new AnnotationData { Type = AnnotationData.TypeStep };
+        Canvas.SetLeft(badge, 140);
+        Canvas.SetTop(badge, 40);
+        canvas.Children.Add(badge);
+        badge.Measure(new Size(200, 200));
+        badge.Arrange(new Rect(0, 0, badge.DesiredSize.Width, badge.DesiredSize.Height));
+        SelectAndLayout(badge);
+        Assert.True(GripVisible(), "counter should carry a rotation grip");
+
+        // Rotating it must actually take, and survive a round-trip through the model.
+        AnnotationTransform.SetAngle(badge, 37);
+        Assert.Equal(37, AnnotationTransform.AngleOf(badge), 3);
+        Assert.Equal(new Vector(0, 0), AnnotationTransform.OffsetOf(badge));
+
+        // Moving a rotated mark must not straighten it.
+        AnnotationTransform.SetOffset(badge, new Vector(12, 8));
+        Assert.Equal(37, AnnotationTransform.AngleOf(badge), 3);
+        Assert.Equal(new Vector(12, 8), AnnotationTransform.OffsetOf(badge));
+
+        canvas.Children.Clear();
+        selField.SetValue(editor, null);
+        updateVisual.Invoke(editor, null);
     }
 
     private static void ZOrderReorderSmoke(EditorWindow editor)

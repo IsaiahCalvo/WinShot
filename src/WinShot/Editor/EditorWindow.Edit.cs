@@ -752,16 +752,10 @@ public partial class EditorWindow : Window
                 continue; // transient editor visuals are not part of the project
             var data = meta.Clone();
             data.Z = z++;
-            if (el.RenderTransform is TranslateTransform t)
-            {
-                data.Tx = t.X;
-                data.Ty = t.Y;
-            }
-            else
-            {
-                data.Tx = 0;
-                data.Ty = 0;
-            }
+            Vector savedOffset = AnnotationTransform.OffsetOf(el);
+            data.Tx = savedOffset.X;
+            data.Ty = savedOffset.Y;
+            data.Angle = AnnotationTransform.AngleOf(el);
             if (data.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
             {
                 double l = Canvas.GetLeft(fe); if (double.IsNaN(l)) l = 0;
@@ -812,8 +806,8 @@ public partial class EditorWindow : Window
             foreach (var (data, element) in built)
             {
                 if (element is FrameworkElement fe) fe.Tag = data;
-                if (data.Tx != 0 || data.Ty != 0)
-                    element.RenderTransform = new TranslateTransform(data.Tx, data.Ty);
+                if (element is FrameworkElement target && (data.Tx != 0 || data.Ty != 0 || data.Angle != 0))
+                    AnnotationTransform.Apply(target, new Vector(data.Tx, data.Ty), data.Angle);
                 win.AnnotationCanvas.Children.Add(element);
                 if (data.Type == AnnotationData.TypeStep && data.Number is int n && n >= win._nextStep)
                     win._nextStep = n + 1;

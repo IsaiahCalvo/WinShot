@@ -99,7 +99,7 @@ public partial class EditorWindow : Window
         }
         if (_marqueeSelecting)
         {
-            ShowDragRect(new Rect(_marqueeStart, e.GetPosition(AnnotationCanvas)), dim: false);
+            ShowMarquee(e.GetPosition(AnnotationCanvas));
             return;
         }
         if (_movingCalloutBox && _selected is CalloutAnnotation boxCallout)
@@ -796,20 +796,48 @@ public partial class EditorWindow : Window
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Live rubber band, styled by drag direction: blue and solid dragging right (Window,
+    /// takes only what is wholly inside), green and dashed dragging left (Crossing, takes
+    /// anything it touches). The AutoCAD convention Survey uses — no modifier to remember.
+    /// </summary>
+    private void ShowMarquee(Point pos)
+    {
+        bool window = MarqueeSelection.ModeFor(_marqueeStart, pos) == MarqueeMode.Window;
+        DragRect.Stroke = new SolidColorBrush(window
+            ? Color.FromArgb(0xCC, 0x00, 0x64, 0xFF)
+            : Color.FromArgb(0xCC, 0x00, 0xC8, 0x64));
+        DragRect.Fill = new SolidColorBrush(window
+            ? Color.FromArgb(0x26, 0x00, 0x64, 0xFF)
+            : Color.FromArgb(0x26, 0x00, 0xC8, 0x64));
+        DragRect.StrokeDashArray = window ? null : new DoubleCollection { 5, 5 };
+        ShowDragRect(MarqueeSelection.RectFor(_marqueeStart, pos), dim: false);
+    }
+
+    /// <summary>Puts the drag rectangle back to its ordinary look after a marquee.</summary>
+    private void ResetDragRectStyle()
+    {
+        DragRect.Stroke = (Brush)FindResource("InfoBrush");
+        DragRect.Fill = new SolidColorBrush(Color.FromArgb(0x11, 0x4D, 0xA3, 0xFF));
+        DragRect.StrokeDashArray = new DoubleCollection { 4, 3 };
+    }
+
     private void EndMarquee(Point pos)
     {
         _marqueeSelecting = false;
         HideDragRect();
+        ResetDragRectStyle();
         Viewport.ReleaseMouseCapture();
-        var box = new Rect(_marqueeStart, pos);
-        if (box.Width < 4 && box.Height < 4)
+        var box = MarqueeSelection.RectFor(_marqueeStart, pos);
+        if (!MarqueeSelection.IsDrag(_marqueeStart, pos))
             return;
+        MarqueeMode mode = MarqueeSelection.ModeFor(_marqueeStart, pos);
         var hits = new List<UIElement>();
         foreach (UIElement child in AnnotationCanvas.Children)
         {
             if (child is TextBox) continue;
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
-            if (GetCanvasBounds(fe).IntersectsWith(box))
+            if (MarqueeSelection.Catches(box, GetCanvasBounds(fe), mode))
                 hits.Add(fe);
         }
         if (hits.Count == 1)
@@ -1033,7 +1061,12 @@ public partial class EditorWindow : Window
             _ = callout;
             return;
         }
-        Rect b = GetCanvasBounds(_selected);
+        // Drawn in the annotation's UNROTATED box and turned by the same angle, so the frame
+        // hugs a rotated mark instead of ballooning out to its axis-aligned bounds.
+        double selAngle = _selected is FrameworkElement selFe ? AnnotationTransform.AngleOf(selFe) : 0;
+        Rect b = _selected is FrameworkElement boxFe
+            ? UnrotatedCanvasBounds(boxFe)
+            : GetCanvasBounds(_selected);
         if (b.IsEmpty || (b.Width < 0.01 && b.Height < 0.01))
         {
             SelectionRect.Visibility = Visibility.Collapsed;
@@ -1046,6 +1079,9 @@ public partial class EditorWindow : Window
         Canvas.SetTop(SelectionRect, b.Y);
         SelectionRect.Width = b.Width;
         SelectionRect.Height = b.Height;
+        SelectionRect.RenderTransform = selAngle == 0
+            ? Transform.Identity
+            : new RotateTransform(selAngle, b.Width / 2, b.Height / 2);
         SelectionRect.Visibility = Visibility.Visible;
 
         UpdateSelectionHandles();
