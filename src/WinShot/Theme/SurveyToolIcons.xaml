@@ -50,31 +50,40 @@
         </Canvas>
     </Viewbox>
 
-    <!-- Survey highlighter is a filled marker silhouette (CSS mask of currentColor). -->
+    <!-- Chisel-tip marker over its swipe. Survey's own asset is a PNG mask, so this is
+         drawn in the stroke language the rest of the set uses; a filled silhouette read
+         as a second, fatter Pen. The barrel rotates ONCE — nested rotations are what
+         mangled the old eraser. -->
     <Viewbox x:Key="SurveyIcon.Highlighter" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"
-                  Data="F0 M2.4,15.2 L6.8,9.2 8.2,10.2 19.6,4.6 C20.6,4.1 21.8,4.6 22.2,5.6 L22.8,7.2 C23.2,8.2 22.8,9.3 21.8,9.8 L10.2,15.6 8.8,14.6 5.8,18.6 3.6,17.4 4.8,15.8 Z M9.6,11.2 L8.6,12.6 18.4,7.6 19.2,6.4 Z M12.2,12.4 L11.2,13.8 17.6,10.4 18.4,9.2 Z M14.8,13.6 L13.8,15 16.6,13.4 17.4,12.2 Z">
-                <Path.RenderTransform>
-                    <RotateTransform Angle="-8" CenterX="12" CenterY="12"/>
-                </Path.RenderTransform>
-            </Path>
+            <Canvas>
+                <Canvas.RenderTransform>
+                    <RotateTransform Angle="-20" CenterX="12" CenterY="11"/>
+                </Canvas.RenderTransform>
+                <!-- tall barrel, so the silhouette reads as a marker rather than a block -->
+                <Path Style="{StaticResource SurveyIconStroke}"
+                      Data="M10,1.8 h4.4 a1.4,1.4 0 0 1 1.4,1.4 v7.3 h-7.2 V3.2 A1.4,1.4 0 0 1 10,1.8 Z"/>
+                <!-- collar between barrel and nib -->
+                <Path Style="{StaticResource SurveyIconStroke}" Data="M8.6,10.5 h7.2"/>
+                <!-- chisel nib, flaring wider than the barrel -->
+                <Path Style="{StaticResource SurveyIconStroke}"
+                      Data="M8.6,10.5 h7.2 l1,4.5 a0.9,0.9 0 0 1 -0.9,1.1 H8.5 a0.9,0.9 0 0 1 -0.9,-1.1 Z"/>
+            </Canvas>
+            <!-- the highlighted swipe the marker is laying down -->
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2.6" Data="M4.5,21 H17"/>
         </Canvas>
     </Viewbox>
 
+    <!-- Angled eraser block rubbing along a baseline. The old one nested a 270 and a -45
+         rotation on a tall rect, which rendered as an unreadable diamond. -->
     <Viewbox x:Key="SurveyIcon.Eraser" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Canvas.RenderTransform>
-                <RotateTransform Angle="270" CenterX="12" CenterY="12"/>
-            </Canvas.RenderTransform>
-            <Canvas>
-                <Canvas.RenderTransform>
-                    <RotateTransform Angle="-45" CenterX="12" CenterY="12"/>
-                </Canvas.RenderTransform>
-                <Rectangle Style="{StaticResource SurveyIconStroke}"
-                           Canvas.Left="7" Canvas.Top="4" Width="10" Height="16" RadiusX="2" RadiusY="2"/>
-                <Line Style="{StaticResource SurveyIconStroke}" X1="7" Y1="10" X2="17" Y2="10"/>
-            </Canvas>
+            <Path Style="{StaticResource SurveyIconStroke}"
+                  Data="M7.5,20.5 L3.2,16.2 a2,2 0 0 1 0,-2.8 L12.8,3.8 a2,2 0 0 1 2.8,0 L21.2,9.4 a2,2 0 0 1 0,2.8 L12.9,20.5 Z"/>
+            <!-- the seam where the worn end meets the body -->
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M8.2,8.4 L16.8,17"/>
+            <!-- baseline it erases against -->
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M7.5,20.5 H21.5"/>
         </Canvas>
     </Viewbox>
 
@@ -154,11 +163,15 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Pipette: a bulb head with a squeezed neck and a drip tip. The old outline was a
+         thin diagonal with a tiny cap, which read as a second Pen at 18px. -->
     <Viewbox x:Key="SurveyIcon.Eyedropper" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M15,4 L20,9"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M16,3 L21,8 L19.5,9.5 L14.5,4.5 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M13,7 L5,15 L4,20 L9,19 L17,11"/>
+            <!-- bulb -->
+            <Path Style="{StaticResource SurveyIconStroke}"
+                  Data="M14.6,2.9 a3,3 0 0 1 4.3,4.2 l-2,2 1.1,1.1 a1.6,1.6 0 0 1 0,2.3 l-0.6,0.6 a1.6,1.6 0 0 1 -2.3,0 L9.7,8.6 a1.6,1.6 0 0 1 0,-2.3 l0.6,-0.6 a1.6,1.6 0 0 1 2.3,0 l1.1,1.1 Z"/>
+            <!-- stem down to the tip, with the drip -->
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M11.6,10.5 L4.6,17.5 3.5,21.2 7.2,20.1 14.2,13.1"/>
         </Canvas>
     </Viewbox>
 
@@ -185,16 +198,14 @@
     </Viewbox>
 
     <!-- Source: Theme/Icons/select-all-svgrepo-com.svg (Timothée Giet / SVG Repo, CC BY-SA 4.0) -->
+    <!-- Focus corners around a lit centre. The old glyph was a dashed ring on a 16-grid
+         nudged into place with a huge translate, and read as a marquee, not a spotlight. -->
     <Viewbox x:Key="SurveyIcon.Spotlight" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="16" Height="16">
-            <Canvas.RenderTransform>
-                <TranslateTransform X="-461.714" Y="-531.79"/>
-            </Canvas.RenderTransform>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M461.714,531.79 v4 h1 v-3 h3 v-1 z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M461.714,547.79 v-4 h1 v3 h3 v1 z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M477.714,531.79 v4 h-1 v-3 h-3 v-1 z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M477.714,547.79 v-4 h-1 v3 h-3 v1 z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M470.714,533.877 v1.015 a5,5 0 0 1 1.754,0.73 l0.717,-0.716 a6,6 0 0 0 -2.47,-1.03 z m-2,0.004 a6,6 0 0 0 -2.472,1.023 l0.718,0.719 a5,5 0 0 1 1.754,-0.727 z m5.887,2.437 -0.719,0.719 a5,5 0 0 1 0.727,1.754 h1.015 a6,6 0 0 0 -1.023,-2.473 z m-9.771,0.002 a6,6 0 0 0 -1.03,2.47 h1.016 a5,5 0 0 1 0.73,-1.753 z m-1.026,4.47 a6,6 0 0 0 1.024,2.474 l0.718,-0.72 a5,5 0 0 1 -0.726,-1.753 z m10.809,0 a5,5 0 0 1 -0.73,1.755 l0.716,0.717 a6,6 0 0 0 1.03,-2.471 z m-7.653,3.169 -0.716,0.717 a6,6 0 0 0 2.47,1.029 v-1.016 a5,5 0 0 1 -1.754,-0.73 z m5.508,0 a5,5 0 0 1 -1.754,0.726 v1.016 a6,6 0 0 0 2.473,-1.023 z"/>
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}"
+                  Data="M3.5,8.5 V5.5 a2,2 0 0 1 2,-2 h3 M15.5,3.5 h3 a2,2 0 0 1 2,2 v3 M20.5,15.5 v3 a2,2 0 0 1 -2,2 h-3 M8.5,20.5 h-3 a2,2 0 0 1 -2,-2 v-3"/>
+            <Ellipse Style="{StaticResource SurveyIconFill}"
+                     Canvas.Left="8.4" Canvas.Top="8.4" Width="7.2" Height="7.2"/>
         </Canvas>
     </Viewbox>
 </ResourceDictionary>
