@@ -19,6 +19,8 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
+                        <!-- Reserved below via SecondaryToolPanel.MinWidth so this column's
+                             width does not change with the active tool. -->
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" HorizontalAlignment="Left" Orientation="Horizontal" VerticalAlignment="Center">
@@ -107,12 +109,13 @@
                     </StackPanel>
 
                     <Grid Grid.Column="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel x:Name="ToolPanel" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <!-- Anchored LEFT, the way Survey's bar is. A centered row re-centres
+                         itself every time the format cluster beside it changes width, so the
+                         tools slid sideways on every tool switch — up to 200 DIP between
+                         Select and the Text group. Anchored left they never move, and the
+                         format cluster is free to grow and shrink to the right of them. -->
+                    <StackPanel x:Name="ToolPanel" Orientation="Horizontal" HorizontalAlignment="Left"
+                                VerticalAlignment="Center" Margin="8,0,0,0">
                         <RadioButton x:Name="PanToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
                                      Tag="Pan" Checked="OnToolChecked" ToolTip="Pan"
                                      AutomationProperties.Name="Pan"

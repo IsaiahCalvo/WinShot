@@ -85,6 +85,7 @@ public class ThemedWindowTests
                 var editor = new EditorWindow(NewBitmap(), settings, history);
                 editor.Show();
                 EditorShellContractSmoke(editor);
+                ToolRowStabilitySmoke(editor);
                 ApplyBlurUndoRedoSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
@@ -328,6 +329,51 @@ public class ThemedWindowTests
     /// asserting AnnotationCanvas.Children ends in the right order each time. The Insert-after-Remove
     /// index math is the easy place to get an off-by-one, so it gets a real check.
     /// </summary>
+    /// <summary>
+    /// The tool row must not move when the active tool changes. Format controls appear and
+    /// collapse per tool on the right of the same row; if the tool row's position depends on
+    /// that cluster's width, every switch slides the buttons out from under the cursor.
+    /// </summary>
+    private static void ToolRowStabilitySmoke(EditorWindow editor)
+    {
+        var toolPanel = (FrameworkElement)editor.FindName("ToolPanel")!;
+
+        double Left()
+        {
+            editor.UpdateLayout();
+            return toolPanel.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+        }
+
+        double baseline = Left();
+
+        // Tools whose format cluster differs the most: shapes carry fill and stroke,
+        // pixelate carries strength only, pan carries nothing at all.
+        foreach (string name in new[]
+        {
+            "SelectToolBtn", "PanToolBtn", "PixelateToolBtn",
+            "SpotlightToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+        })
+        {
+            if (editor.FindName(name) is not RadioButton rb) continue;
+            rb.IsChecked = true;
+            double now = Left();
+            Assert.True(Math.Abs(now - baseline) < 0.5,
+                $"tool row moved {now - baseline:0.##}px when selecting {name}");
+        }
+
+        // The group buttons swap the sub-strip, the other thing that shoved the row over.
+        foreach (string name in new[] { "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn" })
+        {
+            if (editor.FindName(name) is not Button b) continue;
+            b.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            double now = Left();
+            Assert.True(Math.Abs(now - baseline) < 0.5,
+                $"tool row moved {now - baseline:0.##}px when opening {name}");
+        }
+
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+    }
+
     private static void ZOrderReorderSmoke(EditorWindow editor)
     {
         const System.Reflection.BindingFlags NP =
@@ -445,7 +491,11 @@ public class ThemedWindowTests
         var viewport = (Grid)editor.FindName("Viewport")!;
         var undo = (Button)editor.FindName("BtnUndo")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
-        Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
+        // Anchored LEFT on purpose. Centred, the row re-centres itself whenever the format
+        // cluster beside it changes width, so the tools slid up to 200 DIP between Select and
+        // the Text group — the buttons moved out from under the cursor on every tool switch.
+        // Survey's bar is left-aligned for the same reason. ToolRowStabilitySmoke pins this.
+        Assert.Equal(HorizontalAlignment.Left, primary.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
         var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
         Assert.True(toolsHost.MinWidth < 40, "Group tools must size to the visible chips, not a reserved blank slot.");
