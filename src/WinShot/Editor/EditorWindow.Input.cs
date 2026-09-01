@@ -631,7 +631,10 @@ public partial class EditorWindow : Window
             HideHandles();
             return;
         }
-        Rect b = GetCanvasBounds(_selected);
+        // The frame is drawn in the annotation's UNROTATED box and then turned by the same
+        // angle, so it hugs a rotated mark instead of ballooning into its axis-aligned box.
+        double angle = _selected is FrameworkElement sel ? AnnotationTransform.AngleOf(sel) : 0;
+        Rect b = _selected is FrameworkElement fe2 ? UnrotatedCanvasBounds(fe2) : GetCanvasBounds(_selected);
         if (b.IsEmpty || (b.Width < 0.01 && b.Height < 0.01))
         {
             SelectionRect.Visibility = Visibility.Collapsed;
@@ -644,6 +647,9 @@ public partial class EditorWindow : Window
         Canvas.SetTop(SelectionRect, b.Y);
         SelectionRect.Width = b.Width;
         SelectionRect.Height = b.Height;
+        SelectionRect.RenderTransform = angle == 0
+            ? Transform.Identity
+            : new RotateTransform(angle, b.Width / 2, b.Height / 2);
         SelectionRect.Visibility = Visibility.Visible;
 
         UpdateSelectionHandles();

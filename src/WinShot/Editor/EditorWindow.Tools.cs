@@ -47,11 +47,9 @@ public partial class EditorWindow : Window
             return;
         Select(null);
         double x = Canvas.GetLeft(label), y = Canvas.GetTop(label);
-        if (label.RenderTransform is TranslateTransform t)
-        {
-            x += t.X;
-            y += t.Y;
-        }
+        Vector labelOffset = AnnotationTransform.OffsetOf(label);
+        x += labelOffset.X;
+        y += labelOffset.Y;
 
         // Removing the old label is its own undoable step; committing the editor
         // pushes the replacement add, so two Ctrl+Z steps restore the original.

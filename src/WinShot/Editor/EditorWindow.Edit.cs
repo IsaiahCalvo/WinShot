@@ -741,16 +741,10 @@ public partial class EditorWindow : Window
                 continue; // transient editor visuals are not part of the project
             var data = meta.Clone();
             data.Z = z++;
-            if (el.RenderTransform is TranslateTransform t)
-            {
-                data.Tx = t.X;
-                data.Ty = t.Y;
-            }
-            else
-            {
-                data.Tx = 0;
-                data.Ty = 0;
-            }
+            Vector offset = AnnotationTransform.OffsetOf(el);
+            data.Tx = offset.X;
+            data.Ty = offset.Y;
+            data.Angle = AnnotationTransform.AngleOf(el);
             if (data.Type == AnnotationData.TypeImage && el is Image img && img.Source is BitmapSource bs)
             {
                 data.ImageIndex = images.Count;
@@ -795,14 +789,30 @@ public partial class EditorWindow : Window
             foreach (var (data, element) in built)
             {
                 if (element is FrameworkElement fe) fe.Tag = data;
-                if (data.Tx != 0 || data.Ty != 0)
-                    element.RenderTransform = new TranslateTransform(data.Tx, data.Ty);
+                if (element is FrameworkElement target && (data.Tx != 0 || data.Ty != 0 || data.Angle != 0))
+                    AnnotationTransform.Apply(target, new Vector(data.Tx, data.Ty), data.Angle);
                 win.AnnotationCanvas.Children.Add(element);
                 if (data.Type == AnnotationData.TypeStep && data.Number is int n && n >= win._nextStep)
                     win._nextStep = n + 1;
             }
             win._projectPath = path;
             win.Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+
+            // A rotation pivot is the element's own centre, which is only known once the
+            // element has been measured. Re-seat the pivots after the first layout pass,
+            // otherwise every restored rotation would spin about (0,0).
+            if (built.Any(b => b.Data.Angle != 0))
+            {
+                win.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+                {
+                    foreach (var (data, element) in built)
+                    {
+                        if (data.Angle != 0 && element is FrameworkElement fe)
+                            AnnotationTransform.SetAngle(fe, data.Angle);
+                    }
+                }));
+            }
+
             return win;
         }
         catch (Exception ex)

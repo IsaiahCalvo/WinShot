@@ -79,6 +79,12 @@ internal sealed class AnnotationData
 
     public double Ty { get; set; }
 
+    /// <summary>
+    /// Rotation in degrees about the annotation's own centre, clockwise positive.
+    /// Absent/0 in projects written before rotation existed, which read back unrotated.
+    /// </summary>
+    public double Angle { get; set; }
+
     public AnnotationData Clone() => (AnnotationData)MemberwiseClone();
 
     // ------------------------------ factory helpers used at commit time
