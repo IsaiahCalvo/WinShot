@@ -811,7 +811,27 @@ public partial class EditorWindow : Window
 
     private void DeleteSelected()
     {
-        if (_selected is null || _movingSelection) return;
+        if (_movingSelection) return;
+
+        // A marquee group deletes as one undoable step.
+        if (_multiSelected.Count > 1)
+        {
+            var members = _multiSelected.ToArray();
+            ClearMultiSelection();
+            Push(new EditorAction(
+                undo: () =>
+                {
+                    foreach (var m in members)
+                        if (!AnnotationCanvas.Children.Contains(m)) AnnotationCanvas.Children.Add(m);
+                },
+                redo: () =>
+                {
+                    foreach (var m in members) AnnotationCanvas.Children.Remove(m);
+                }));
+            return;
+        }
+
+        if (_selected is null) return;
         UIElement el = _selected;
         Select(null);
         Push(new EditorAction(

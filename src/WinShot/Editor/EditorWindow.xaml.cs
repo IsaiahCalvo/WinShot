@@ -127,6 +127,16 @@ public partial class EditorWindow : Window
 
     // Selection state (Select tool).
     private UIElement? _selected;
+
+    /// <summary>
+    /// Marquee multi-selection: two or more annotations picked with a rubber band. The
+    /// group is move-and-delete only; a single pick still goes through <see cref="_selected"/>
+    /// so every existing single-selection path is untouched.
+    /// </summary>
+    private readonly List<UIElement> _multiSelected = new();
+    private bool _marqueeActive;
+    private Point _marqueeStart;
+    private MarqueeMode _marqueeMode = MarqueeMode.Window;
     private bool _movingSelection;
     private Point _moveLast;   // content coords
     private Vector _moveTotal; // accumulated drag delta for the undo record
@@ -521,6 +531,7 @@ public partial class EditorWindow : Window
             CommitText();
             CommitPendingCurve();
             Select(null);
+            ClearMultiSelection();
             if (_tool == EditorTool.Crop && tool != EditorTool.Crop)
                 ClearCropPreview();
             if (tool == EditorTool.Eyedropper && _tool != EditorTool.Eyedropper)
@@ -553,6 +564,7 @@ public partial class EditorWindow : Window
             CommitText();
             CommitPendingCurve();
             Select(null);
+            ClearMultiSelection();
             if (_tool == EditorTool.Crop) ClearCropPreview();
             UncheckOtherToolButtons(rb);
         }

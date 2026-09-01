@@ -304,7 +304,7 @@ public partial class EditorWindow : Window
 
         if (e.Key == Key.Delete)
         {
-            if (_selected is not null) { DeleteSelected(); e.Handled = true; }
+            if (_selected is not null || _multiSelected.Count > 1) { DeleteSelected(); e.Handled = true; }
         }
         else if (e.Key == Key.Escape)
         {

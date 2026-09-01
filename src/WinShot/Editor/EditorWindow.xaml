@@ -356,6 +356,12 @@
                                    StrokeDashArray="4 3" Fill="#114DA3FF" Visibility="Collapsed"/>
                         <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
                                    StrokeDashArray="4 3" Visibility="Collapsed"/>
+                        <!-- Rubber band. Stroke/fill are set per drag: blue solid dragging
+                             right (window), green dashed dragging left (crossing). -->
+                        <Rectangle x:Name="MarqueeRect" StrokeThickness="1" Visibility="Collapsed"/>
+                        <!-- Union frame around a marquee group; softer than a single selection. -->
+                        <Rectangle x:Name="GroupRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
+                                   StrokeDashArray="4 3" Opacity="0.6" Visibility="Collapsed"/>
                         <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
                                  Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
                         <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>

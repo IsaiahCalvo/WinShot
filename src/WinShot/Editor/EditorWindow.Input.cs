@@ -96,6 +96,25 @@ public partial class EditorWindow : Window
             DragResize(e.GetPosition(AnnotationCanvas));
             return;
         }
+        if (_marqueeActive)
+        {
+            UpdateMarquee(e.GetPosition(AnnotationCanvas));
+            return;
+        }
+        if (_movingSelection && _multiSelected.Count > 1)
+        {
+            var posGroup = e.GetPosition(AnnotationCanvas);
+            var dg = posGroup - _moveLast;
+            if (dg.X != 0 || dg.Y != 0)
+            {
+                foreach (UIElement member in _multiSelected)
+                    MoveElement(member, dg.X, dg.Y);
+                _moveTotal += dg;
+                _moveLast = posGroup;
+                UpdateMultiSelectionVisual();
+            }
+            return;
+        }
         if (_movingSelection && _selected is not null)
         {
             var posMove = e.GetPosition(AnnotationCanvas);
@@ -168,6 +187,11 @@ public partial class EditorWindow : Window
             // The handle stays live (and re-draggable) until a click elsewhere commits.
             _draggingCurveHandle = false;
             Viewport.ReleaseMouseCapture();
+            return;
+        }
+        if (_marqueeActive)
+        {
+            EndMarquee(e.GetPosition(AnnotationCanvas));
             return;
         }
         if (_activeHandle >= 0)
@@ -558,9 +582,28 @@ public partial class EditorWindow : Window
         var hit = HitTestAnnotation(pos);
         if (hit is null)
         {
-            Select(null); // clicking empty space (or the backdrop) deselects
+            // Empty canvas starts a rubber band. A drag that never moves far enough is
+            // still just a click, and MarqueeMouseUp deselects for it.
+            Select(null);
+            ClearMultiSelection();
+            _marqueeActive = true;
+            _marqueeStart = pos;
+            Viewport.CaptureMouse();
+            e.Handled = true;
             return;
         }
+
+        // Clicking a member of the group keeps the group and moves the whole set.
+        if (_multiSelected.Count > 1 && _multiSelected.Contains(hit))
+        {
+            _movingSelection = true;
+            _moveLast = pos;
+            _moveTotal = new Vector();
+            Viewport.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+        ClearMultiSelection();
         // Double-click any text annotation (Plain/Bold/Huge TextBlock, Outline Path, or
         // Pill Border) to reopen it for editing; the owning element carries its style.
         if (e.ClickCount == 2 && hit is FrameworkElement fe &&
@@ -578,11 +621,103 @@ public partial class EditorWindow : Window
         e.Handled = true;
     }
 
+    // ------------------------------------------------------------ marquee selection
+
+    /// <summary>Live rubber band: blue solid dragging right, green dashed dragging left.</summary>
+    private void UpdateMarquee(Point pos)
+    {
+        _marqueeMode = MarqueeSelection.ModeFor(_marqueeStart, pos);
+        Rect r = MarqueeSelection.RectFor(_marqueeStart, pos);
+
+        bool window = _marqueeMode == MarqueeMode.Window;
+        MarqueeRect.Stroke = new SolidColorBrush(window
+            ? Color.FromArgb(0xCC, 0x00, 0x64, 0xFF)
+            : Color.FromArgb(0xCC, 0x00, 0xC8, 0x64));
+        MarqueeRect.Fill = new SolidColorBrush(window
+            ? Color.FromArgb(0x26, 0x00, 0x64, 0xFF)
+            : Color.FromArgb(0x26, 0x00, 0xC8, 0x64));
+        MarqueeRect.StrokeDashArray = window ? null : new DoubleCollection { 5, 5 };
+        MarqueeRect.StrokeThickness = 1 / _zoom;
+
+        Canvas.SetLeft(MarqueeRect, r.X);
+        Canvas.SetTop(MarqueeRect, r.Y);
+        MarqueeRect.Width = r.Width;
+        MarqueeRect.Height = r.Height;
+        MarqueeRect.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Resolves the band into a selection: one mark selects normally, several form a group.</summary>
+    private void EndMarquee(Point pos)
+    {
+        _marqueeActive = false;
+        Viewport.ReleaseMouseCapture();
+        MarqueeRect.Visibility = Visibility.Collapsed;
+
+        if (!MarqueeSelection.IsDrag(_marqueeStart, pos))
+            return; // a click on empty canvas: the deselect already happened on mouse-down
+
+        Rect band = MarqueeSelection.RectFor(_marqueeStart, pos);
+        var caught = new List<UIElement>();
+        foreach (UIElement child in AnnotationCanvas.Children)
+        {
+            if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
+            if (MarqueeSelection.Catches(band, GetCanvasBounds(child), _marqueeMode))
+                caught.Add(child);
+        }
+
+        if (caught.Count == 0) { Select(null); return; }
+        if (caught.Count == 1) { Select(caught[0]); return; }
+
+        Select(null);
+        _multiSelected.Clear();
+        _multiSelected.AddRange(caught);
+        UpdateMultiSelectionVisual();
+    }
+
+    /// <summary>The group's union frame — no handles, because a group is move-only for now.</summary>
+    private void UpdateMultiSelectionVisual()
+    {
+        if (_multiSelected.Count < 2) { GroupRect.Visibility = Visibility.Collapsed; return; }
+
+        Rect union = MarqueeSelection.Union(_multiSelected.Select(GetCanvasBounds));
+        if (union.IsEmpty) { GroupRect.Visibility = Visibility.Collapsed; return; }
+
+        double pad = 3 / _zoom;
+        union.Inflate(pad, pad);
+        Canvas.SetLeft(GroupRect, union.X);
+        Canvas.SetTop(GroupRect, union.Y);
+        GroupRect.Width = union.Width;
+        GroupRect.Height = union.Height;
+        GroupRect.StrokeThickness = 1.5 / _zoom;
+        GroupRect.Visibility = Visibility.Visible;
+    }
+
+    private void ClearMultiSelection()
+    {
+        if (_multiSelected.Count == 0) return;
+        _multiSelected.Clear();
+        GroupRect.Visibility = Visibility.Collapsed;
+    }
+
     private void EndMove()
     {
         if (!_movingSelection) return;
         _movingSelection = false;
         Viewport.ReleaseMouseCapture();
+
+        // A group move is one undo step that puts every member back.
+        if (_multiSelected.Count > 1 && _moveTotal.Length >= 0.5)
+        {
+            var members = _multiSelected.ToArray();
+            double gdx = _moveTotal.X, gdy = _moveTotal.Y;
+            Push(new EditorAction(
+                undo: () => { foreach (var m in members) MoveElement(m, -gdx, -gdy); UpdateMultiSelectionVisual(); },
+                redo: () => { foreach (var m in members) MoveElement(m, gdx, gdy); UpdateMultiSelectionVisual(); }),
+                apply: false);
+            _moveTotal = new Vector();
+            return;
+        }
+
         if (_selected is not null && _moveTotal.Length >= 0.5)
         {
             UIElement el = _selected;
@@ -611,6 +746,8 @@ public partial class EditorWindow : Window
         // committing it as one undo entry before the selection moves on.
         if (_opacityElement is not null && !ReferenceEquals(_opacityElement, element))
             CommitOpacityGesture();
+        // Picking one mark replaces any marquee group.
+        if (element is not null) ClearMultiSelection();
         _selected = element;
         UpdateSelectionVisual();
     }
