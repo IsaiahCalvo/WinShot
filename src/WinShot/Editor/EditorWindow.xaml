@@ -218,15 +218,42 @@
                             </Popup>
                         </StackPanel>
 
+                        <!-- Size: a typed whole number plus a preset menu, replacing the old
+                             2 / 4 / 6 buttons. Any value 1-50 is reachable. -->
                         <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                            <TextBlock x:Name="ThicknessLabel" Text="Thickness" Style="{StaticResource FieldLabel}" Margin="0,0,4,0"/>
-                            <RadioButton x:Name="ThicknessThinBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="2" Content="2" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Thin" Checked="OnThicknessChecked" AutomationProperties.Name="Thin"/>
-                            <RadioButton x:Name="ThicknessMediumBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="4" Content="4" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Medium" Checked="OnThicknessChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
-                            <RadioButton x:Name="ThicknessThickBtn" Style="{StaticResource ToolButton}" GroupName="Stroke" Tag="6" Content="6" FontFamily="Segoe UI" FontSize="13"
-                                         ToolTip="Thick" Checked="OnThicknessChecked" AutomationProperties.Name="Thick"/>
+                            <TextBlock x:Name="ThicknessLabel" Text="Width" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
+                            <Border x:Name="SizeFieldBorder" Height="30" Width="70" CornerRadius="{StaticResource RadiusInput}"
+                                    Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" VerticalAlignment="Center">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="SizeBox" Grid.Column="0" Style="{StaticResource BareTextBox}"
+                                             Text="4" TextAlignment="Center" MaxLength="3"
+                                             PreviewTextInput="OnSizeBoxPreviewTextInput"
+                                             TextChanged="OnSizeBoxTextChanged" KeyDown="OnSizeBoxKeyDown"
+                                             LostFocus="OnSizeBoxLostFocus"
+                                             AutomationProperties.Name="Annotation size"
+                                             AutomationProperties.HelpText="Type any whole number from 1 to 50, or choose a preset."/>
+                                    <Button x:Name="SizePresetButton" Grid.Column="1" Style="{StaticResource FieldChevronButton}"
+                                            Content="&#xE70D;" Click="OnSizePresetClick" ToolTip="Size presets"
+                                            AutomationProperties.Name="Size presets"/>
+                                </Grid>
+                            </Border>
+                            <Popup x:Name="SizePresetPopup" PlacementTarget="{Binding ElementName=SizeFieldBorder}"
+                                   Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
+                                        Effect="{StaticResource FloatingShadow}">
+                                    <StackPanel Width="168">
+                                        <TextBlock x:Name="SizePresetHeading" Text="Width" Style="{StaticResource FieldLabel}" Margin="8,2,8,8"/>
+                                        <StackPanel x:Name="SizePresetList"/>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
                         </StackPanel>
 
                         <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">

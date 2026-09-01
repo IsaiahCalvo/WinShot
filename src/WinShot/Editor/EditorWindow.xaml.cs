@@ -61,9 +61,20 @@ public partial class EditorWindow : Window
     private EditorTool _tool = EditorTool.Select;
     private Color _color = Color.FromRgb(0xFF, 0x3B, 0x30);
     private double _thickness = 4;
-    private double _strokeThickness = 4;
-    private double _textThickness = 4;
+
+    /// <summary>
+    /// Per-tool style memory — colour, opacity, fill and size, each remembered against the
+    /// tool that set it. Replaces the old single _strokeThickness / _textThickness pair.
+    /// </summary>
+    private ToolPreferences _toolPrefs = new();
+
     private bool _syncingThicknessButtons;
+
+    /// <summary>Guards the swatch row while a tool switch re-checks it, so no restyle fires.</summary>
+    private bool _syncingColorSwatches;
+
+    /// <summary>Re-entrancy guard for the size field (see ApplySize).</summary>
+    private bool _applyingSize;
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
@@ -592,9 +603,12 @@ public partial class EditorWindow : Window
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
-        ThicknessLabel.Text = _tool == EditorTool.Text ? "Size" : "Thickness";
         if (Has(EditorContextControls.Thickness))
-            SyncThicknessButtons();
+            SyncSizeField();
+
+        // Colour and opacity are per-tool too, so both follow the active tool.
+        if (Has(EditorContextControls.Color))
+            SyncColorFromTool();
 
         if (Has(EditorContextControls.EffectStrength))
         {
@@ -608,37 +622,195 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// The project format keeps the established 2/4/6 thickness values. Text presents the
-    /// corresponding runtime font sizes (19/27/35 pt), while other tools keep stroke values.
-    /// Separate remembered values stop a thick shape from silently making the next text 35 pt.
+    /// Reflects the active tool's remembered size in the size field and its preset menu.
+    /// Each tool keeps its own value (<see cref="ToolPreferences"/>), so switching from a
+    /// 20-wide highlighter to the pen restores 3 rather than carrying 20 across.
     /// </summary>
-    private void SyncThicknessButtons()
+    private void SyncSizeField()
     {
-        bool text = _tool == EditorTool.Text;
-        _thickness = text ? _textThickness : _strokeThickness;
-
-        var buttons = new[] { ThicknessThinBtn, ThicknessMediumBtn, ThicknessThickBtn };
-        string[] contents = text ? new[] { "19", "27", "35" } : new[] { "2", "4", "6" };
-        string[] names = text
-            ? new[] { "19 point text", "27 point text", "35 point text" }
-            : new[] { "Thin stroke", "Medium stroke", "Thick stroke" };
+        _thickness = _toolPrefs.For(_tool).Width;
 
         _syncingThicknessButtons = true;
         try
         {
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                RadioButton button = buttons[i];
-                button.Content = contents[i];
-                button.ToolTip = names[i];
-                AutomationProperties.SetName(button, names[i]);
-                if (button.Tag is string tag && double.TryParse(tag, out double value))
-                    button.IsChecked = Math.Abs(value - _thickness) < 0.01;
-            }
+            string label = AnnotationSize.LabelFor(_tool);
+            ThicknessLabel.Text = label;
+            SizePresetHeading.Text = label;
+            SizeBox.Text = ((int)_thickness).ToString(CultureInfo.InvariantCulture);
+            AutomationProperties.SetName(SizeBox, $"Annotation {label.ToLowerInvariant()}");
+            SyncSizePresetRows();
         }
         finally
         {
             _syncingThicknessButtons = false;
+        }
+    }
+
+    /// <summary>
+    /// Builds the preset menu once, then keeps the checked row in sync. Each row draws a bar
+    /// at the preset's real relative weight so the list reads as thicknesses, not numbers.
+    /// </summary>
+    private void SyncSizePresetRows()
+    {
+        // TextChanged fires while XAML is still parsing (the size box has a literal Text),
+        // which is before the popup's contents exist.
+        if (SizePresetList is null) return;
+
+        if (SizePresetList.Children.Count == 0)
+        {
+            foreach (int preset in AnnotationSize.Presets)
+            {
+                var row = new RadioButton
+                {
+                    Style = (Style)FindResource("SizePresetRow"),
+                    GroupName = "SizePreset",
+                    Tag = preset,
+                    Content = BuildSizePresetContent(preset),
+                };
+                row.Click += OnSizePresetPicked;
+                AutomationProperties.SetName(row, $"Size {preset}");
+                SizePresetList.Children.Add(row);
+            }
+        }
+
+        foreach (RadioButton row in SizePresetList.Children.OfType<RadioButton>())
+            row.IsChecked = row.Tag is int preset && Math.Abs(preset - _thickness) < 0.01;
+    }
+
+    private static Grid BuildSizePresetContent(int preset)
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var bar = new Border
+        {
+            Height = AnnotationSize.PreviewThickness(preset),
+            CornerRadius = new CornerRadius(999),
+            Background = Brushes.White,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+        // The row's Foreground carries the accent/secondary state, so the bar follows it.
+        bar.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding("Foreground")
+        {
+            RelativeSource = new System.Windows.Data.RelativeSource(
+                System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(RadioButton), 1),
+        });
+        Grid.SetColumn(bar, 0);
+        grid.Children.Add(bar);
+
+        var number = new TextBlock
+        {
+            Text = preset.ToString(CultureInfo.InvariantCulture),
+            FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 22,
+            TextAlignment = TextAlignment.Right,
+        };
+        Grid.SetColumn(number, 1);
+        grid.Children.Add(number);
+
+        return grid;
+    }
+
+    private void OnSizePresetClick(object sender, RoutedEventArgs e) =>
+        SizePresetPopup.IsOpen = !SizePresetPopup.IsOpen;
+
+    private void OnSizePresetPicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton { Tag: int preset })
+        {
+            ApplySize(preset);
+            SizePresetPopup.IsOpen = false;
+        }
+    }
+
+    /// <summary>Digits only — the size field never accepts a decimal point or a sign.</summary>
+    private void OnSizeBoxPreviewTextInput(object sender, TextCompositionEventArgs e) =>
+        e.Handled = !e.Text.All(char.IsAsciiDigit);
+
+    private void OnSizeBoxTextChanged(object sender, TextChangedEventArgs e)
+    {
+        // Also fires during XAML parse, before the rest of the style bar is built.
+        if (!IsLoaded || _syncingThicknessButtons) return;
+        // An empty or half-typed box must not snap the size to a default mid-edit.
+        if (AnnotationSize.TryParse(SizeBox.Text, out int value))
+            ApplySize(value, echoToBox: false);
+    }
+
+    private void OnSizeBoxKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is Key.Enter or Key.Escape)
+        {
+            CommitSizeBox();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+            return;
+        }
+
+        // Up/Down nudge by one, with Shift stepping through the preset list.
+        int direction = e.Key switch { Key.Up => 1, Key.Down => -1, _ => 0 };
+        if (direction == 0) return;
+
+        int current = (int)_thickness;
+        int next;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            next = direction > 0
+                ? AnnotationSize.Presets.FirstOrDefault(p => p > current, AnnotationSize.MaxWidth)
+                : AnnotationSize.Presets.LastOrDefault(p => p < current, AnnotationSize.MinWidth);
+        }
+        else
+        {
+            next = current + direction;
+        }
+
+        ApplySize(next);
+        SizeBox.CaretIndex = SizeBox.Text.Length;
+        e.Handled = true;
+    }
+
+    private void OnSizeBoxLostFocus(object sender, RoutedEventArgs e) => CommitSizeBox();
+
+    /// <summary>Normalises whatever is left in the box back to the committed value.</summary>
+    private void CommitSizeBox()
+    {
+        if (AnnotationSize.TryParse(SizeBox.Text, out int value))
+            ApplySize(value);
+        else
+            SyncSizeField(); // junk or empty: put the remembered value back
+    }
+
+    /// <summary>
+    /// Stores a size against the ACTIVE tool and restyles the selection to match.
+    /// </summary>
+    private void ApplySize(int value, bool echoToBox = true)
+    {
+        // Restyling the selection can bounce back through the style bar and re-enter here.
+        // Without this guard that loop is unbounded and takes the process down with it.
+        if (_applyingSize) return;
+
+        int clamped = AnnotationSize.Clamp(value);
+        _toolPrefs.Update(_tool, s => s.WithWidth(clamped));
+        _thickness = clamped;
+
+        _applyingSize = true;
+        _syncingThicknessButtons = true;
+        try
+        {
+            if (echoToBox && SizeBox is not null)
+                SizeBox.Text = clamped.ToString(CultureInfo.InvariantCulture);
+            SyncSizePresetRows();
+            _syncingThicknessButtons = false;
+
+            if (IsLoaded)
+                RestyleSelected(color: null, thickness: clamped, fill: null);
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
+            _applyingSize = false;
         }
     }
 
@@ -674,32 +846,80 @@ public partial class EditorWindow : Window
 
     private void OnColorChecked(object sender, RoutedEventArgs e)
     {
+        if (_syncingColorSwatches) return;
         if (sender is RadioButton rb && rb.Background is SolidColorBrush brush)
             SetCurrentColor(brush.Color);
+    }
+
+    /// <summary>
+    /// Pulls the active tool's remembered colour and opacity into the style bar without
+    /// restyling anything — this runs on a tool switch, not on a user edit.
+    /// </summary>
+    private void SyncColorFromTool()
+    {
+        ToolStyle style = _toolPrefs.For(_tool);
+        _color = style.BorderColor;
+        _opacity = style.BorderAlpha;
+
+        if (CurrentColorIndicator is not null)
+            CurrentColorIndicator.Fill = new SolidColorBrush(style.BorderColor);
+
+        if (OpacitySlider is not null)
+        {
+            _syncingThicknessButtons = true;
+            try
+            {
+                OpacitySlider.Value = style.BorderOpacity;
+                if (OpacityValue is not null)
+                    OpacityValue.Text = $"{style.BorderOpacity}%";
+            }
+            finally
+            {
+                _syncingThicknessButtons = false;
+            }
+        }
+
+        // Reflect the remembered colour on the swatch row so the checked swatch matches.
+        SyncColorSwatches(style.BorderColor);
+    }
+
+    /// <summary>Checks whichever preset swatch matches the colour, or the custom swatch.</summary>
+    private void SyncColorSwatches(Color color)
+    {
+        if (ColorPanel is null) return;
+        RadioButton? match = null;
+        foreach (RadioButton swatch in ColorPanel.Children.OfType<RadioButton>())
+        {
+            if (ReferenceEquals(swatch, CustomSwatch)) continue;
+            if (swatch.Background is SolidColorBrush b && b.Color == color)
+            {
+                match = swatch;
+                break;
+            }
+        }
+
+        _syncingColorSwatches = true;
+        try
+        {
+            if (match is not null) match.IsChecked = true;
+            else if (CustomSwatch is not null) CustomSwatch.IsChecked = true;
+        }
+        finally
+        {
+            _syncingColorSwatches = false;
+        }
     }
 
     private void SetCurrentColor(Color color)
     {
         _color = color;
+        // Colour belongs to the active tool, so the pen stays red when the highlighter turns blue.
+        _toolPrefs.Update(_tool, s => s.WithBorderColor(color));
         // Fires during XAML parse for the default swatch, before the indicator exists.
         if (CurrentColorIndicator is not null)
             CurrentColorIndicator.Fill = new SolidColorBrush(color);
         if (IsLoaded)
             RestyleSelected(color: color, thickness: null, fill: null);
-    }
-
-    private void OnThicknessChecked(object sender, RoutedEventArgs e)
-    {
-        if (sender is RadioButton rb && rb.Tag is string s && double.TryParse(s, out double t))
-        {
-            _thickness = t;
-            if (_tool == EditorTool.Text)
-                _textThickness = t;
-            else
-                _strokeThickness = t;
-            if (IsLoaded && !_syncingThicknessButtons)
-                RestyleSelected(color: null, thickness: t, fill: null);
-        }
     }
 
     private void OnFillChecked(object sender, RoutedEventArgs e)

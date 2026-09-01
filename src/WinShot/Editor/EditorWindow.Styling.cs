@@ -316,6 +316,9 @@ public partial class EditorWindow : Window
         if (OpacityValue is not null)
             OpacityValue.Text = $"{Math.Round(pct)}%";
         if (!IsLoaded) return;
+        // A tool switch drives the slider too; only a real user edit updates the memory.
+        if (_syncingThicknessButtons) return;
+        _toolPrefs.Update(_tool, s => s.WithBorderOpacity((int)Math.Round(pct)));
 
         // Apply live to the selection without pushing undo, capturing a one-time "before" for
         // the whole gesture so the eventual commit is a single reversible step.

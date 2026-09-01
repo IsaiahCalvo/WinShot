@@ -434,9 +434,9 @@ public class ThemedWindowTests
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
         var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
-        var thin = (RadioButton)editor.FindName("ThicknessThinBtn")!;
-        var medium = (RadioButton)editor.FindName("ThicknessMediumBtn")!;
-        var thick = (RadioButton)editor.FindName("ThicknessThickBtn")!;
+        var sizeBox = (TextBox)editor.FindName("SizeBox")!;
+        var sizeLabel = (TextBlock)editor.FindName("ThicknessLabel")!;
+        var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
 
         Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
@@ -444,22 +444,34 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
-        thick.IsChecked = true;
-        Assert.Equal(new[] { "2", "4", "6" },
-            new[] { thin.Content, medium.Content, thick.Content }.Cast<string>());
+        Assert.Equal("Width", sizeLabel.Text);
 
+        // The size field takes any whole number, not just the old 2 / 4 / 6.
+        sizeBox.Text = "17";
+        Assert.Equal("17", sizeBox.Text);
+
+        // Out-of-range input is clamped to the stored value rather than rejected. The box
+        // keeps the raw text while the user is mid-type and normalises on commit, so the
+        // clamp shows up the next time the field is re-synced.
+        sizeBox.Text = "999";
+        ((RadioButton)editor.FindName("LineToolBtn")!).IsChecked = true;
+        ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        Assert.Equal("50", sizeBox.Text);
+        sizeBox.Text = "7";
+
+        // The preset menu offers Survey's twelve widths, each row carrying its value.
+        Assert.Equal(
+            AnnotationSize.Presets,
+            sizePresets.Children.OfType<RadioButton>().Select(r => (int)r.Tag!).ToArray());
+
+        // Each tool keeps its own size: Text is independent of Arrow.
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
-        Assert.Equal("Size", ((TextBlock)editor.FindName("ThicknessLabel")!).Text);
-        Assert.Equal(new[] { "19", "27", "35" },
-            new[] { thin.Content, medium.Content, thick.Content }.Cast<string>());
-        Assert.True(medium.IsChecked);
-        Assert.False(thick.IsChecked);
-        Assert.Equal("27 point text", AutomationProperties.GetName(medium));
+        Assert.Equal("Size", sizeLabel.Text);
+        Assert.Equal("4", sizeBox.Text);
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Equal(new[] { "2", "4", "6" },
-            new[] { thin.Content, medium.Content, thick.Content }.Cast<string>());
-        Assert.True(thick.IsChecked);
+        Assert.Equal("Width", sizeLabel.Text);
+        Assert.Equal("7", sizeBox.Text);
 
         ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, color.Visibility);
