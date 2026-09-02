@@ -11,7 +11,11 @@ internal static class CounterGeometry
 {
     public const double DefaultPointerAngle = 225;
 
-    public static double RadiusFor(double thickness) => Math.Max(4, 11 + thickness * 1.5);
+    /// <summary>
+    /// Survey: <c>COUNTER_RADIUS = Math.max(4, Number(strokeWidth) || 14)</c>
+    /// (PDFViewer.jsx:31610) — the radius IS the toolbar Size value, floored at 4.
+    /// </summary>
+    public static double RadiusFor(double thickness) => Math.Max(4, thickness);
 
     public static double TipDistance(double radius) => radius * 1.5;
 

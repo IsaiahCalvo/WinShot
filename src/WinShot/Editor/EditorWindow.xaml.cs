@@ -64,6 +64,9 @@ public partial class EditorWindow : Window
     private double _thickness = AnnotationStyle.DefaultPenSize;
     private double _penSize = AnnotationStyle.DefaultPenSize;
     private double _shapeSize = AnnotationStyle.DefaultShapeSize;
+    // Survey gives the counter its own persisted size (useDatabase.js:1017) because the Size
+    // box IS the badge radius there, not a stroke width.
+    private double _counterSize = AnnotationStyle.DefaultCounterSize;
     private double _textFontSize = AnnotationStyle.DefaultTextSize;
     private bool _syncingSizeBox;
     private bool _syncingContext;
@@ -216,6 +219,7 @@ public partial class EditorWindow : Window
             if (_marqueeSelecting)
             {
                 _marqueeSelecting = false;
+                _marqueeArmed = false;
                 HideDragRect();
             }
         };
@@ -544,9 +548,8 @@ public partial class EditorWindow : Window
         SyncCaptureShadow();
         // Keep helper chrome hairline-thin on screen at any zoom; the dash
         // pattern is in thickness units, so it compensates automatically.
-        double t = 1.5 / _zoom;
-        DragRect.StrokeThickness = t;
-        SelectionRect.StrokeThickness = t;
+        DragRect.StrokeThickness = 1.5 / _zoom;
+        SelectionRect.StrokeThickness = 2 / _zoom; // Survey selection frame is 2 screen px
         UpdateSelectionVisual();
         UpdateCurveHandleVisual();
     }
@@ -1064,6 +1067,9 @@ public partial class EditorWindow : Window
                     case AnnotationData.TypeFreehand: _penSize = th; break;
                     case AnnotationData.TypeText: break;
                     case AnnotationData.TypeCallout: _shapeSize = th; break;
+                    // Survey puts the counter's RADIUS in the Size box on selection
+                    // (PDFViewer.jsx:3861), not a stroke width.
+                    case AnnotationData.TypeStep: _counterSize = th; break;
                     default: _shapeSize = th; break;
                 }
             }
@@ -1122,9 +1128,12 @@ public partial class EditorWindow : Window
     {
         if (SizeBox is null) return;
         bool text = ChromeTool() is EditorTool.Text;
+        bool counter = ChromeTool() is EditorTool.Step;
         int[] presets = _tool == EditorTool.Eraser
             ? AnnotationStyle.EraserSizePresets
-            : text ? AnnotationStyle.TextSizePresets : AnnotationStyle.SizePresets;
+            : text ? AnnotationStyle.TextSizePresets
+            : counter ? AnnotationStyle.CounterSizePresets
+            : AnnotationStyle.SizePresets;
         _thickness = ActiveSize();
 
         _syncingSizeBox = true;
@@ -1133,7 +1142,9 @@ public partial class EditorWindow : Window
             SizeBox.Items.Clear();
             int current = _tool == EditorTool.Eraser
                 ? AnnotationStyle.ClampEraserSize(_eraserSize)
-                : text ? AnnotationStyle.ClampTextSize(_textFontSize) : AnnotationStyle.ClampSize(_thickness);
+                : text ? AnnotationStyle.ClampTextSize(_textFontSize)
+                : counter ? AnnotationStyle.ClampCounterSize(_counterSize)
+                : AnnotationStyle.ClampSize(_thickness);
             ComboBoxItem? selected = null;
             foreach (int preset in presets)
             {
@@ -1218,8 +1229,9 @@ public partial class EditorWindow : Window
         EditorTool.Text => _textFontSize,
         EditorTool.Callout => _shapeSize,
         EditorTool.Freehand => _penSize,
+        EditorTool.Step => _counterSize,
         EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
-            or EditorTool.CurvedArrow or EditorTool.Step => _shapeSize,
+            or EditorTool.CurvedArrow => _shapeSize,
         _ => _penSize,
     };
 
@@ -1232,6 +1244,7 @@ public partial class EditorWindow : Window
             case EditorTool.Text: _textFontSize = AnnotationStyle.ClampTextSize(size); break;
             case EditorTool.Callout: _shapeSize = AnnotationStyle.ClampSize(size); break;
             case EditorTool.Freehand: _penSize = AnnotationStyle.ClampSize(size); break;
+            case EditorTool.Step: _counterSize = AnnotationStyle.ClampCounterSize(size); break;
             default: _shapeSize = AnnotationStyle.ClampSize(size); break;
         }
         _thickness = ActiveSize();

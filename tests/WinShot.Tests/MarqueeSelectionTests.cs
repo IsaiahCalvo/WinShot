@@ -26,10 +26,12 @@ public class MarqueeSelectionTests
     }
 
     [Theory]
+    // Survey MIN_DRAG_PX is 5 (marqueeSelection.js:42): a 3-4px twitch is still a click.
     [InlineData(0, 0, false)]
     [InlineData(2, 2, false)]
-    [InlineData(3, 0, true)]
-    [InlineData(0, -3, true)]
+    [InlineData(4, 0, false)]
+    [InlineData(5, 0, true)]
+    [InlineData(0, -5, true)]
     [InlineData(40, 40, true)]
     public void ShortDragsStayClicks(double dx, double dy, bool expected)
     {

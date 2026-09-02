@@ -20,8 +20,12 @@ internal static class AnnotationRotation
     /// </summary>
     public const double SnapIncrementDegrees = 15;
 
-    /// <summary>Distance (screen px) from the top edge to the rotation handle's centre.</summary>
-    public const double HandleOffsetScreenPx = 22;
+    /// <summary>
+    /// Floor on the distance from the top edge to the rotation handle's centre. Survey:
+    /// <c>Math.max(36, rotationR + topHandleHalfHeight + minGap)</c>
+    /// (selectionHandleVisibility.js:70-71) — the 36 floor is what is in effect at rest.
+    /// </summary>
+    public const double HandleOffsetScreenPx = 36;
 
     /// <summary>Wraps any angle into (-180, 180].</summary>
     public static double Normalize(double degrees)
@@ -53,12 +57,11 @@ internal static class AnnotationRotation
     /// <summary>
     /// Survey's counter convention: the pin's pointer angle is the plain bearing from the
     /// badge centre to the cursor, 0° = east, clockwise positive (Math.atan2 in degrees).
+    /// Survey's tip handle applies NO snapping and reads no modifier
+    /// (SVGAnnotationLayer.jsx:5183) — the nub follows the cursor continuously.
     /// </summary>
-    public static double PointerAngleFromCursor(Point centre, Point cursor, bool shift)
-    {
-        double raw = Normalize(Math.Atan2(cursor.Y - centre.Y, cursor.X - centre.X) * 180 / Math.PI);
-        return shift ? Quantize(raw) : SnapToNearest(raw);
-    }
+    public static double PointerAngleFromCursor(Point centre, Point cursor) =>
+        Normalize(Math.Atan2(cursor.Y - centre.Y, cursor.X - centre.X) * 180 / Math.PI);
 
     /// <summary>
     /// The angle a rotation-handle drag implies: the bearing from the pivot to the pointer,
@@ -86,14 +89,14 @@ internal static class AnnotationRotation
     }
 
     /// <summary>
-    /// Full drag resolution: bearing, then Shift = hard increment steps, otherwise the soft snap.
-    /// <paramref name="startAngle"/> is the annotation's angle when the drag began and
-    /// <paramref name="grabOffset"/> the bearing difference at grab time, so the mark does
-    /// not jump when the handle is picked up slightly off-centre.
+    /// Full drag resolution. Survey rotates to the ABSOLUTE bearing from the shape centre to
+    /// the pointer with no grab offset (useSVGInteraction.js:2350-2352), so the mark's top
+    /// faces the cursor from the first pointermove. Shift = hard increment steps, otherwise
+    /// the soft snap (WinShot keeps its 15° increment rather than Survey's 45°).
     /// </summary>
-    public static double ResolveDrag(double startAngle, double grabOffset, double pointerAngle, bool shift)
+    public static double ResolveDrag(double pointerAngle, bool shift)
     {
-        double raw = Normalize(startAngle + (pointerAngle - grabOffset));
+        double raw = Normalize(pointerAngle);
         return shift ? Quantize(raw) : SnapToNearest(raw);
     }
 }

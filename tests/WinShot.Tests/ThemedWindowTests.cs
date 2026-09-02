@@ -817,10 +817,12 @@ public class ThemedWindowTests
     {
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
         canvas.Children.Clear();
-        var a = new System.Windows.Shapes.Rectangle { Width = 40, Height = 40, Fill = Brushes.Red };
-        var b = new System.Windows.Shapes.Rectangle { Width = 40, Height = 40, Fill = Brushes.Blue };
-        Canvas.SetLeft(a, 10); Canvas.SetTop(a, 10);
-        Canvas.SetLeft(b, 80); Canvas.SetTop(b, 10);
+        // Both marks stay inside the 80x50 source: Survey clamps the marquee to the page
+        // viewBox, so a band dragged past the image edge stops at the edge.
+        var a = new System.Windows.Shapes.Rectangle { Width = 30, Height = 30, Fill = Brushes.Red };
+        var b = new System.Windows.Shapes.Rectangle { Width = 20, Height = 20, Fill = Brushes.Blue };
+        Canvas.SetLeft(a, 5); Canvas.SetTop(a, 5);
+        Canvas.SetLeft(b, 50); Canvas.SetTop(b, 10);
         a.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
         b.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
         canvas.Children.Add(a);
@@ -830,6 +832,11 @@ public class ThemedWindowTests
         typeof(EditorWindow).GetField("_marqueeStart",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(editor, new Point(0, 0));
+        // Survey latches the band armed once the drag clears MIN_DRAG_PX; EndMarquee reads
+        // that latch rather than re-measuring at release.
+        typeof(EditorWindow).GetField("_marqueeArmed",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(editor, true);
         typeof(EditorWindow).GetMethod("EndMarquee",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object[] { new Point(140, 60) });

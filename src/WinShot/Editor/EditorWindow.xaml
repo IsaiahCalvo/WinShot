@@ -333,8 +333,10 @@
                                                             <ComboBoxItem Content="V-shape" Tag="vShape"/>
                                                             <ComboBoxItem Content="Open circle" Tag="openCircle"/>
                                                             <ComboBoxItem Content="Open triangle" Tag="openTriangle"/>
+                                                            <!-- Survey's vocabulary is exactly these six ARROWHEAD_STYLE_LABELS:
+                                                                 one head, at the end point. The old CleanShot "Double" entry had no
+                                                                 Survey counterpart; the geometry still loads old .winshot files. -->
                                                             <ComboBoxItem Content="Horizontal line" Tag="horizontalLine"/>
-                                                            <ComboBoxItem Content="Double" Tag="Double"/>
                                                         </ComboBox>
                                                     </StackPanel>
 
@@ -561,10 +563,18 @@
                         <Path x:Name="CropDim" Fill="#66000000" Visibility="Collapsed"/>
                         <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
                                    StrokeDashArray="4 3" Fill="#114DA3FF" Visibility="Collapsed"/>
-                        <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                                   StrokeDashArray="4 4" Visibility="Collapsed"/>
+                        <!-- Survey SVGSelectionOverlay.jsx:129-147: #4a90e2, strokeWidth 2,
+                             strokeDasharray '4,4' in absolute px. WPF dash units are multiples
+                             of StrokeThickness, so "2 2" at a 2px stroke is the same 4/4 rhythm. -->
+                        <Rectangle x:Name="SelectionRect" Stroke="#FF4A90E2" StrokeThickness="2"
+                                   StrokeDashArray="2 2" Visibility="Collapsed"/>
                         <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
                                  Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
+                        <!-- Survey's hover halo (SVGAnnotationLayer.jsx:4415-4421 etc.): the mark's
+                             OWN geometry restroked in #4a90e2 at 0.4 opacity, so a pre-click
+                             preview traces the shape instead of boxing it. -->
+                        <Path x:Name="HoverHalo" Stroke="#FF4A90E2" Opacity="0.4" Fill="{x:Null}"
+                              StrokeLineJoin="Round" Visibility="Collapsed"/>
                         <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
                         <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
                                 CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
@@ -585,20 +595,33 @@
                          Fill="Transparent" Stroke="#B8FFFFFF" StrokeThickness="1"/>
                 <Ellipse x:Name="EraserCursor" Width="20" Height="20" IsHitTestVisible="False" Visibility="Collapsed"
                          Fill="#2EFFFFFF" Stroke="#E6111827" StrokeThickness="1"/>
+                <!-- Survey RotationInputField.jsx:563-640: 60x28, bg #181c24, radius 6,
+                     boxShadow '0 4px 12px rgba(0,0,0,0.3)', 1px border #2a3140 that swaps to
+                     #4A9EFF on focus (the only focus affordance — the input's outline is none),
+                     centred 13px/500 value in #e8e2d4 with a 12px #8d96a6 degree suffix, gap 4. -->
                 <Border x:Name="RotationPill" Width="60" Height="28" Background="#FF181C24" BorderBrush="#FF2A3140"
                         BorderThickness="1" CornerRadius="6" Visibility="Collapsed"
                         AutomationProperties.Name="Rotation angle">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource Self}}" Value="True">
+                                    <Setter Property="BorderBrush" Value="#FF4A9EFF"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <Border.Effect>
-                        <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.35"/>
+                        <DropShadowEffect BlurRadius="12" ShadowDepth="4" Direction="270" Opacity="0.3"/>
                     </Border.Effect>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <TextBox x:Name="RotationInput" Width="32" Height="20" Background="Transparent" BorderThickness="0"
-                                 Foreground="{StaticResource TextPrimaryBrush}" CaretBrush="{StaticResource TextPrimaryBrush}"
-                                 FontSize="13" FontWeight="Medium" TextAlignment="Right" Padding="0" VerticalContentAlignment="Center"
+                                 Foreground="#FFE8E2D4" CaretBrush="#FFE8E2D4"
+                                 FontSize="13" FontWeight="Medium" TextAlignment="Center" Padding="0" VerticalContentAlignment="Center"
                                  PreviewTextInput="OnRotationInputText" PreviewKeyDown="OnRotationInputKey"
                                  GotKeyboardFocus="OnRotationInputFocus" LostKeyboardFocus="OnRotationInputBlur"
                                  AutomationProperties.Name="Rotation degrees"/>
-                        <TextBlock Text="°" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="2,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="°" Foreground="#FF8D96A6" FontSize="12" Margin="4,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Border>
             </Canvas>

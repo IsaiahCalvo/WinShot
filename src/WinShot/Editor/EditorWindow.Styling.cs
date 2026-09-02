@@ -254,19 +254,18 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeStep:
                 if (element is Grid badge)
                 {
-                    bool lightFill = 0.299 * snap.StrokeColor.R + 0.587 * snap.StrokeColor.G +
-                                     0.114 * snap.StrokeColor.B > 160;
-                    var contrast = lightFill ? Colors.Black : Colors.White;
+                    // Survey's counter is a filled path with stroke="none" and a label that is
+                    // always numberColor (default white), never luminance-derived.
                     foreach (var child in badge.Children)
                     {
                         if (child is Shape pin)
                         {
                             pin.Fill = stroke;
-                            pin.Stroke = new SolidColorBrush(contrast) { Opacity = 0.85 };
+                            pin.Stroke = null;
                         }
                         else if (child is TextBlock digit)
                         {
-                            digit.Foreground = new SolidColorBrush(contrast);
+                            digit.Foreground = new SolidColorBrush(AnnotationFactory.StepNumberColor);
                         }
                     }
                 }
@@ -512,13 +511,7 @@ public partial class EditorWindow : Window
         if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
             item.Tag is not string tag)
             return;
-        if (tag == "Double")
-        {
-            _arrowStyle = ArrowStyle.Double;
-            _arrowhead = ArrowheadStyle.SolidTriangle;
-            _startArrowhead = ArrowheadStyle.SolidTriangle;
-        }
-        else if (Enum.TryParse(tag, out ArrowStyle legacy))
+        if (Enum.TryParse(tag, out ArrowStyle legacy))
         {
             _arrowStyle = legacy;
             _arrowhead = AnnotationStyle.ParseArrowhead(legacy.ToString(), out _startArrowhead);

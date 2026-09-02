@@ -93,8 +93,15 @@ internal sealed class AnnotationData
 
     public double? FontSize { get; set; }
 
-    /// <summary>Step badge number.</summary>
+    /// <summary>Step badge number. DERIVED — recomputed from creation order after every edit.</summary>
     public int? Number { get; set; }
+
+    /// <summary>
+    /// Creation order for counters. Survey numbers a series by sorting on data.createdAt and
+    /// assigning seriesStart + index (counterNumbering.js:25-65), so deleting a pin renumbers
+    /// the rest. Z-order is not creation order here, hence a stamp of its own.
+    /// </summary>
+    public long? CreatedAt { get; set; }
 
     /// <summary>Index into the project's embedded images/{n}.png entries.</summary>
     [JsonPropertyName("image")]
@@ -223,11 +230,13 @@ internal sealed class AnnotationData
         Text = emoji,
     };
 
-    public static AnnotationData ForStep(Point topLeft, int number, Color color, double thickness) => new()
+    public static AnnotationData ForStep(
+        Point topLeft, int number, Color color, double thickness, long createdAt = 0) => new()
     {
         Type = TypeStep,
         Points = ToArray(new[] { topLeft }),
         Number = number,
+        CreatedAt = createdAt,
         Color = ToHex(color),
         Thickness = thickness,
         PointerAngle = CounterGeometry.DefaultPointerAngle,

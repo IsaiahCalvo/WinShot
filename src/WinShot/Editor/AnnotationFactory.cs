@@ -104,11 +104,14 @@ internal static class AnnotationFactory
         return geometry;
     }
 
+    /// <summary>
+    /// Survey shortens the shaft for the two triangle heads ONLY, by headSize/3
+    /// (lineRenderHelpers.js:261-268). The open circle is centred on the tip, so the shaft
+    /// runs into its centre rather than stopping at the rim like a lollipop stick.
+    /// </summary>
     private static double ShaftTrim(ArrowheadStyle style, double headSize) => style switch
     {
         ArrowheadStyle.SolidTriangle or ArrowheadStyle.OpenTriangle => headSize / 3,
-        ArrowheadStyle.OpenCircle => headSize / 2,
-        ArrowheadStyle.VShape => 0,
         _ => 0,
     };
 
@@ -518,32 +521,43 @@ internal static class AnnotationFactory
         double tipDist = CounterGeometry.TipDistance(radius);
         double size = tipDist * 2;
         Point body = new(tipDist, tipDist);
-        bool lightFill = 0.299 * color.R + 0.587 * color.G + 0.114 * color.B > 160;
-        Color contrast = lightFill ? Colors.Black : Colors.White;
         string caption = letters ? StepLetterLabel(number) : number.ToString();
 
         double font = CounterGeometry.FontSize(radius, caption);
         var badge = new Grid { Width = size, Height = size };
+        // Survey renderCounter draws the pin as ONE filled path with stroke="none"
+        // (svgAnnotationRenderers.jsx:1725) — no ring, ever.
         badge.Children.Add(new Path
         {
             Data = CounterGeometry.Pin(body, radius, pointerAngle),
             Fill = new SolidColorBrush(color),
-            Stroke = new SolidColorBrush(contrast) { Opacity = 0.85 },
-            StrokeThickness = 1.5,
         });
+        // Survey's label colour is data.numberColor with a '#ffffff' fallback — per-series and
+        // never derived from the fill's luminance. The badge Grid's exact centre IS the pin
+        // body, so cell-centring lands the glyphs without a per-glyph width guess.
         badge.Children.Add(new TextBlock
         {
             Text = caption,
-            Foreground = new SolidColorBrush(contrast),
+            Foreground = new SolidColorBrush(StepNumberColor),
             FontWeight = FontWeights.Bold,
             FontSize = font,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(
-                Math.Max(0, body.X - font * caption.Length * 0.32),
-                Math.Max(0, body.Y - font * 0.55), 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
         });
         return badge;
+    }
+
+    /// <summary>Survey's counter label default: '#ffffff' (PDFViewer.jsx:4250, 25614).</summary>
+    public static readonly Color StepNumberColor = Colors.White;
+
+    /// <summary>Rewrites a badge's caption in place after a renumber, refitting the font.</summary>
+    public static void SetStepCaption(Grid badge, int number, bool letters)
+    {
+        if (badge.Children.OfType<TextBlock>().FirstOrDefault() is not { } label) return;
+        string caption = letters ? StepLetterLabel(number) : number.ToString();
+        double radius = badge.Width / 2 / 1.5; // CounterGeometry.TipDistance is radius * 1.5
+        label.Text = caption;
+        label.FontSize = CounterGeometry.FontSize(radius, caption);
     }
 
     public const double TextPadding = 6;
@@ -586,9 +600,9 @@ internal static class AnnotationFactory
         }
         else
         {
-            shape = type == AnnotationData.TypeEllipse
-                ? new Ellipse()
-                : new Rectangle { RadiusX = 2, RadiusY = 2 };
+            // Survey rects are square-cornered (annotationCreationCommit.js:180-181 emits
+            // rx:0/ry:0; renderRect writes no rx at all).
+            shape = type == AnnotationData.TypeEllipse ? new Ellipse() : new Rectangle();
         }
 
         shape.Stroke = new SolidColorBrush(stroke);
@@ -622,10 +636,30 @@ internal static class AnnotationFactory
         return path;
     }
 
+    /// <summary>
+    /// Survey's dash pattern is in ABSOLUTE user units — dashed [6,4], dotted [2,4] straight
+    /// onto SVG stroke-dasharray, unaffected by stroke width (annotationCreationCommit.js:92-107).
+    /// WPF multiplies StrokeDashArray by StrokeThickness, so divide it back out here.
+    /// Must run AFTER StrokeThickness is assigned, and again whenever it changes.
+    /// </summary>
+    /// <remarks>
+    /// Cap follows the shape: lines, arrow shafts and callout leaders carry Survey's
+    /// strokeLinecap:'round'; closed-shape borders (rect/ellipse/text-box chrome) use SVG's
+    /// default butt cap, so a dotted [2,4] border reads as square beads, not round ones.
+    /// </remarks>
     public static void ApplyDash(Shape shape, LineBorderStyle style)
     {
-        shape.StrokeDashArray = AnnotationStyle.DashArray(style);
-        shape.StrokeDashCap = PenLineCap.Round;
+        double[]? pattern = style switch
+        {
+            LineBorderStyle.Dashed => AnnotationStyle.DashedPattern,
+            LineBorderStyle.Dotted => AnnotationStyle.DottedPattern,
+            _ => null,
+        };
+        double t = shape.StrokeThickness > 0 ? shape.StrokeThickness : 1;
+        shape.StrokeDashArray = pattern is null
+            ? null
+            : new DoubleCollection(pattern.Select(v => v / t));
+        shape.StrokeDashCap = shape is Rectangle or Ellipse ? PenLineCap.Flat : PenLineCap.Round;
     }
 
     public static CalloutAnnotation CreateCallout(

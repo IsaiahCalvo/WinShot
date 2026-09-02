@@ -556,22 +556,44 @@ public partial class EditorWindow : Window
         double left = pos.X - badge.Width / 2, top = pos.Y - badge.Height / 2;
         Canvas.SetLeft(badge, left);
         Canvas.SetTop(badge, top);
-        var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
+        var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness, ++_stepClock);
         // Record the caption mode so project reload rebuilds the same number/letter badge.
         if (letters) data.Style = "Letter";
         badge.Tag = data;
         Push(new EditorAction(
-            undo: () =>
-            {
-                AnnotationCanvas.Children.Remove(badge);
-                _nextStep = number;
-            },
+            undo: () => AnnotationCanvas.Children.Remove(badge),
             redo: () =>
             {
                 if (!AnnotationCanvas.Children.Contains(badge))
                     AnnotationCanvas.Children.Add(badge);
-                _nextStep = number + 1;
             }));
+    }
+
+    /// <summary>Monotonic creation stamp handed to each new counter (Survey's data.createdAt).</summary>
+    private long _stepClock;
+
+    /// <summary>
+    /// Survey renumberCounters (counterNumbering.js:25-65): counter numbers are DERIVED, never
+    /// stored monotonically. Sort every pin by creation time and assign 1..n, so deleting #2 of
+    /// 5 leaves 1,2,3,4 rather than 1,3,4,5. Runs after every add, delete, undo and redo.
+    /// </summary>
+    private void RenumberCounters()
+    {
+        var pins = AnnotationCanvas.Children.OfType<Grid>()
+            .Where(g => g.Tag is AnnotationData { Type: AnnotationData.TypeStep })
+            .Select(g => (Badge: g, Meta: (AnnotationData)g.Tag))
+            .OrderBy(p => p.Meta.CreatedAt ?? 0)
+            .ThenBy(p => p.Meta.Number ?? 0)
+            .ToArray();
+        for (int i = 0; i < pins.Length; i++)
+        {
+            var (badge, meta) = pins[i];
+            int number = i + 1;
+            if (meta.Number == number) continue;
+            meta.Number = number;
+            AnnotationFactory.SetStepCaption(badge, number, meta.Style == "Letter");
+        }
+        _nextStep = pins.Length + 1;
     }
 
     // ------------------------------------------------------------------ blur

@@ -389,7 +389,9 @@ public class AnnotationEditorRenderHarness
                 // --- Rotation: hover the grip (pill), drag it (live angle), release. ---
                 Click(0.10, 0.40);
                 Point grip = (Point)typeof(EditorWindow).GetField("_gripContent", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
-                editor.PointerMove(PA(grip)); Pump(3); Shot("pointer-rotation-hover.png");
+                // Survey opens the pill only after 150 ms of hover intent, so dwell on the grip.
+                editor.PointerMove(PA(grip)); Pump(3); Shot("pointer-rotation-hover-early.png");
+                editor.PointerMove(PA(grip)); Pump(14); Shot("pointer-rotation-hover.png");
                 editor.PointerDown(PA(grip)); Pump(1);
                 var rectCentre = new Point(0.23 * W, 0.385 * H);
                 double radius = (grip - rectCentre).Length;
@@ -519,6 +521,101 @@ public class AnnotationEditorRenderHarness
                     $"ring={((FrameworkElement)editor.FindName("EraserCursor")!).Visibility} " +
                     $"halo={((FrameworkElement)editor.FindName("EraserCursorHalo")!).Visibility}");
 
+                // --- Survey shapes parity (this pass). Clean canvas so the chrome is readable. ---
+                Check("SelectToolBtn");
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+
+                // Big rect (all 8 thumbs) + a tiny one (Survey drops to corners, then to br only).
+                Check("RectangleToolBtn");
+                Drag(new[] { (0.08, 0.15), (0.40, 0.50) });
+                Drag(new[] { (0.50, 0.15), (0.535, 0.19) });   // ~39x25 px: corners only
+                Drag(new[] { (0.60, 0.15), (0.607, 0.24) });   // ~8x56 px: br only
+                // Unfilled rects only hit on their border, so click the left edge of each.
+                Check("SelectToolBtn");
+                Click(0.08, 0.32); Shot("pointer-shapes-handles-all.png");
+                Click(0.50, 0.17); Shot("pointer-shapes-handles-corners.png");
+                Click(0.60, 0.20); Shot("pointer-shapes-handles-single.png");
+                Click(0.95, 0.95);
+
+                // Hover halo: the mark's own geometry restroked, no selection.
+                editor.PointerMove(P(0.08, 0.32)); Pump(3);
+                Shot("pointer-hover-halo.png");
+                File.WriteAllText(Path.Combine(outDir, "hover-halo.txt"),
+                    $"visible={((FrameworkElement)editor.FindName("HoverHalo")!).Visibility} " +
+                    $"width={((System.Windows.Shapes.Path)editor.FindName("HoverHalo")!).StrokeThickness}");
+                editor.PointerMove(P(0.95, 0.95)); Pump(3);
+
+                // Dashed / dotted borders: Survey's [6,4] and [2,4] are ABSOLUTE units, so the
+                // rhythm must not change with thickness. Two rects at 2 px and 12 px.
+                var lineStyleBox = (System.Windows.Controls.ComboBox)editor.FindName("LineStyleBox")!;
+                var shapeSizeField = typeof(EditorWindow).GetField("_shapeSize", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                // Deselect first: the line-style combo also restyles the current selection, and
+                // a freshly committed shape is selected.
+                void SelectLineStyle(string tag)
+                {
+                    InvokePrivate(editor, "Select", null);
+                    lineStyleBox.SelectedItem = lineStyleBox.Items.OfType<System.Windows.Controls.ComboBoxItem>()
+                        .First(it => (string?)it.Tag == tag);
+                }
+                Check("RectangleToolBtn");
+                SelectLineStyle("dashed"); Pump(2);
+                shapeSizeField.SetValue(editor, 2.0); Drag(new[] { (0.08, 0.60), (0.45, 0.72) });
+                shapeSizeField.SetValue(editor, 12.0); Drag(new[] { (0.08, 0.78), (0.45, 0.92) });
+                SelectLineStyle("dotted"); Pump(2);
+                shapeSizeField.SetValue(editor, 2.0); Drag(new[] { (0.52, 0.60), (0.92, 0.72) });
+                shapeSizeField.SetValue(editor, 12.0); Drag(new[] { (0.52, 0.78), (0.92, 0.92) });
+                SelectLineStyle("solid"); shapeSizeField.SetValue(editor, 2.0); Pump(2);
+                Shot("pointer-dash-units.png");
+                // The rendered rhythm must be 6/4 (dashed) and 2/4 (dotted) in absolute px at
+                // EVERY thickness — WPF stores the array in thickness multiples.
+                File.WriteAllText(Path.Combine(outDir, "dash-units.txt"),
+                    string.Join(Environment.NewLine, canvas.Children.OfType<System.Windows.Shapes.Rectangle>()
+                        .Where(r2 => r2.Tag is AnnotationData { Type: AnnotationData.TypeRectangle }
+                                     && r2.StrokeDashArray is { Count: > 0 })
+                        .Select(r2 => $"style={AnnotationStyle.LineStyleFrom((AnnotationData)r2.Tag!)} " +
+                                      $"thickness={r2.StrokeThickness} " +
+                                      $"array=[{string.Join(",", r2.StrokeDashArray)}] " +
+                                      $"rendered=[{string.Join(",", r2.StrokeDashArray.Select(v => v * r2.StrokeThickness))}] " +
+                                      $"cap={r2.StrokeDashCap}")));
+
+                // Counters: white caption, no ring, radius = Size, renumbering on delete.
+                Check("SelectToolBtn");
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+                var counterBtn2 = ((StackPanel)editor.FindName("ShapeGroupPanel")!).Children
+                    .OfType<RadioButton>().First(rb => rb.Tag as string == "Step");
+                var counterSizeField = typeof(EditorWindow).GetField("_counterSize", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                counterBtn2.IsChecked = true; Pump(3);
+                foreach (double r in new[] { 8.0, 14.0, 24.0 })
+                {
+                    counterSizeField.SetValue(editor, r);
+                    InvokePrivate(editor, "RememberSize", r);
+                    Click(0.10 + 0.12 * Array.IndexOf(new[] { 8.0, 14.0, 24.0 }, r), 0.30);
+                }
+                counterSizeField.SetValue(editor, 14.0);
+                InvokePrivate(editor, "RememberSize", 14.0);
+                Click(0.50, 0.30); Click(0.62, 0.30);
+                Shot("pointer-counters.png");
+
+                string Captions() => string.Join(",", canvas.Children.OfType<Grid>()
+                    .Where(g2 => g2.Tag is AnnotationData { Type: AnnotationData.TypeStep })
+                    .Select(g2 => g2.Children.OfType<TextBlock>().First().Text));
+                string before = Captions();
+                Check("SelectToolBtn");
+                Click(0.50, 0.30);
+                InvokePrivate(editor, "DeleteSelected");
+                Pump(4);
+                Shot("pointer-counters-renumbered.png");
+                File.WriteAllText(Path.Combine(outDir, "counter-renumber.txt"),
+                    $"before={before} afterDelete={Captions()}");
+
+                // Selected counter: Survey shows ONE dot on the nubbin tip, no bbox / stem / icon.
+                Click(0.10, 0.30); Shot("pointer-counter-chrome.png");
+                File.WriteAllText(Path.Combine(outDir, "counter-chrome.txt"),
+                    $"selectionRect={((FrameworkElement)editor.FindName("SelectionRect")!).Visibility}");
 
                 editor.Close();
                 Pump(2);
@@ -673,6 +770,14 @@ public class AnnotationEditorRenderHarness
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(typeof(EditorWindow).FullName, name);
         return method.Invoke(editor, new[] { argument });
+    }
+
+    private static object? InvokePrivate(EditorWindow editor, string name)
+    {
+        var method = typeof(EditorWindow).GetMethod(name,
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(EditorWindow).FullName, name);
+        return method.Invoke(editor, null);
     }
 
     private static void RenderToPng(Window window, string path, double dpi = 96)

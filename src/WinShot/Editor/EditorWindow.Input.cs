@@ -152,8 +152,15 @@ public partial class EditorWindow : Window
             return;
         }
         if (_activeHandle < 0 && !_dragging && !_movingSelection && !_marqueeSelecting && _handleKind != HandleKind.None)
-            UpdateRotationPillHover(e.GetPosition(AnnotationCanvas));
+        {
+            var hoverPos = e.GetPosition(AnnotationCanvas);
+            UpdateRotationPillHover(hoverPos);
+            // Survey paints a per-handle cursor (rotation-aware resize arrows, crosshair on
+            // the rotation grip, grab on endpoints/tip). Restore the tool cursor on exit.
+            if (!UpdateHandleCursor(hoverPos)) UpdateCursor();
+        }
         UpdateCalloutHover(e.GetPosition(AnnotationCanvas));
+        UpdateHoverHalo(e.GetPosition(AnnotationCanvas));
         UpdateEraserCursor(e.GetPosition(Viewport));
         if (_draggingCurveHandle && _pendingCurve is not null)
         {
@@ -170,7 +177,11 @@ public partial class EditorWindow : Window
         }
         if (_marqueeSelecting)
         {
-            ShowMarquee(e.GetPosition(AnnotationCanvas));
+            var marqueePos = e.GetPosition(AnnotationCanvas);
+            // Survey latches `active` once the drag clears MIN_DRAG_PX and never clears it
+            // (useSVGInteraction.js:1159), and draws no band below the threshold.
+            _marqueeArmed |= MarqueeSelection.IsDrag(_marqueeStart, marqueePos);
+            if (_marqueeArmed) ShowMarquee(marqueePos);
             return;
         }
         if (_movingCalloutBox && _selected is CalloutAnnotation boxCallout)
@@ -189,6 +200,8 @@ public partial class EditorWindow : Window
         if (_movingSelection && _selected is not null)
         {
             var posMove = e.GetPosition(AnnotationCanvas);
+            // Survey drags freely and applies constrainToPage on release, so an off-page
+            // drag snaps back inside on drop rather than sticking at the edge mid-gesture.
             var d = posMove - _moveLast;
             if (d.X != 0 || d.Y != 0)
             {
@@ -211,26 +224,25 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
-                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
-                arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness, _arrowhead, _startArrowhead);
+                // Survey's in-progress guide is shaft-only: no arrowhead until commit
+                // (SVGAnnotationLayer.jsx:4992-5005).
+                arrow.Data = LineCurve.Stroke(_dragStart, pos, null);
                 break;
             case EditorTool.Callout:
                 UpdateCalloutPreview(_dragStart, CalloutLayout.PushBoxOffTip(_dragStart, pos));
                 break;
             case EditorTool.Text:
-                ShowDragRect(ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld), dim: false);
+                ShowDragRect(ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false), dim: false);
                 break;
             case EditorTool.CurvedArrow when _activeShape is Path curve:
-                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
                     _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, pos), pos, _thickness);
                 break;
             case EditorTool.Line when _activeShape is Path linePath:
-                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 linePath.Data = LineCurve.Stroke(_dragStart, pos, null);
                 break;
             case EditorTool.Rectangle or EditorTool.Ellipse when _activeShape is not null:
-                var r = ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld);
+                var r = ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false);
                 Canvas.SetLeft(_activeShape, r.X);
                 Canvas.SetTop(_activeShape, r.Y);
                 _activeShape.Width = Math.Max(1, r.Width);
@@ -310,7 +322,7 @@ public partial class EditorWindow : Window
         {
             case EditorTool.Arrow or EditorTool.Line:
                 if (shape is null) return;
-                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
+                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, snap: false);
                 if ((pos - _dragStart).Length < 3)
                 {
                     AnnotationCanvas.Children.Remove(shape);
@@ -319,6 +331,7 @@ public partial class EditorWindow : Window
                 {
                     if (shape is Path livePath)
                     {
+                        EndLinePreviewStyle(livePath, _tool == EditorTool.Arrow ? livePath.Stroke : null);
                         livePath.Data = _tool == EditorTool.Arrow
                             ? AnnotationFactory.ArrowGeometry(_dragStart, pos, livePath.StrokeThickness, _arrowhead, _startArrowhead)
                             : LineCurve.Stroke(_dragStart, pos, null);
@@ -349,14 +362,17 @@ public partial class EditorWindow : Window
                 return;
             case EditorTool.CurvedArrow:
                 if (shape is not Path curve) return;
-                pos = ShapeConstraint.SnapLineEnd(_dragStart, pos, ShapeConstraint.ShiftHeld);
                 if ((pos - _dragStart).Length < 3) AnnotationCanvas.Children.Remove(curve);
-                else BeginCurveEdit(curve, _dragStart, pos);
+                else
+                {
+                    EndLinePreviewStyle(curve, curve.Stroke);
+                    BeginCurveEdit(curve, _dragStart, pos);
+                }
                 return;
             case EditorTool.Text:
                 HideDragRect();
                 if (!inImageAt(_dragStart)) return;
-                var textBox = ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld);
+                var textBox = ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false);
                 if (textBox.Width < 8 && textBox.Height < 8)
                     PlaceText(_dragStart);
                 else
@@ -364,8 +380,10 @@ public partial class EditorWindow : Window
                 return;
             case EditorTool.Rectangle or EditorTool.Ellipse:
                 if (shape is null) return;
-                var r = ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld);
-                if (r.Width < 3 && r.Height < 3)
+                var r = ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false);
+                // Survey rejects the commit unless BOTH axes exceed 2 px
+                // (annotationCreationCommit.js:150), so no 1x200 sliver survives.
+                if (r.Width <= 2 || r.Height <= 2)
                 {
                     AnnotationCanvas.Children.Remove(shape);
                 }
@@ -568,9 +586,9 @@ public partial class EditorWindow : Window
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
-                    Data = AnnotationFactory.ArrowGeometry(_dragStart, _dragStart, strokeWidth, _arrowhead, _startArrowhead),
+                    Data = LineCurve.Stroke(_dragStart, _dragStart, null),
                 };
-                AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
+                ApplyLinePreviewStyle(_activeShape, strokeWidth);
                 break;
             case EditorTool.CurvedArrow:
                 _activeShape = new Path
@@ -583,7 +601,7 @@ public partial class EditorWindow : Window
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = AnnotationFactory.CurvedArrowGeometry(_dragStart, _dragStart, _dragStart, strokeWidth),
                 };
-                AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
+                ApplyLinePreviewStyle(_activeShape, strokeWidth);
                 break;
             case EditorTool.Line:
                 _activeShape = new Path
@@ -595,7 +613,7 @@ public partial class EditorWindow : Window
                     StrokeLineJoin = PenLineJoin.Round,
                     Data = LineCurve.Stroke(pos, pos, null),
                 };
-                AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
+                ApplyLinePreviewStyle(_activeShape, strokeWidth);
                 break;
             case EditorTool.Rectangle:
                 if (_lineStyle == LineBorderStyle.Cloud)
@@ -610,11 +628,12 @@ public partial class EditorWindow : Window
                 }
                 else
                 {
+                    // Survey commits rx:0/ry:0 and renders <rect> with no rx — square corners
+                    // during the drag and after release (annotationCreationCommit.js:180-181).
                     _activeShape = new Rectangle
                     {
                         Stroke = brush,
                         StrokeThickness = strokeWidth,
-                        RadiusX = 2, RadiusY = 2,
                         Fill = fillBrush,
                     };
                     AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
@@ -893,7 +912,17 @@ public partial class EditorWindow : Window
     // ------------------------------------------------------------ select tool
 
     private bool _marqueeSelecting;
+    private bool _marqueeArmed;
     private Point _marqueeStart;
+
+    /// <summary>
+    /// Survey's post-drag dblclick guard (useSVGInteraction.js:250-257, 770-776): a
+    /// click-to-select followed by a click-and-drag emits a spurious dblclick that must not
+    /// open edit mode. Stamped at every drag-commit exit.
+    /// </summary>
+    private long _justDraggedAt;
+    private const long DoubleClickGuardMs = 400;
+    private const long EditModeCooldownMs = 300;
 
     private void SelectMouseDown(Point pos, PointerArgs e)
     {
@@ -901,8 +930,10 @@ public partial class EditorWindow : Window
         var hit = HitTestAnnotation(pos);
         if (hit is null)
         {
-            Select(null);
+            // Survey does NOT deselect at pointer-down (useSVGInteraction.js:1131-1132) — the
+            // release decides, so a Shift-marquee can add to the existing selection.
             _marqueeSelecting = true;
+            _marqueeArmed = false;
             _marqueeStart = pos;
             Viewport.CaptureMouse();
             e.Handled = true;
@@ -910,7 +941,8 @@ public partial class EditorWindow : Window
         }
         // Double-click any text annotation (Plain/Bold/Huge TextBlock, Outline Path, or
         // Pill Border) to reopen it for editing; the owning element carries its style.
-        if (e.ClickCount == 2 && hit is FrameworkElement fe && fe.Tag is AnnotationData tm)
+        if (e.ClickCount == 2 && Environment.TickCount64 - _justDraggedAt >= DoubleClickGuardMs
+            && hit is FrameworkElement fe && fe.Tag is AnnotationData tm)
         {
             if (tm.Type == AnnotationData.TypeText)
             {
@@ -924,8 +956,22 @@ public partial class EditorWindow : Window
                 e.Handled = true;
                 return;
             }
+            // Survey's bbox edit mode covers counter, line and arrow (and WinShot's curved
+            // arrow, which rides on Survey's 'line'); rect/ellipse/ink are explicit no-ops.
+            if (tm.Type is AnnotationData.TypeStep or AnnotationData.TypeLine
+                    or AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow
+                && Environment.TickCount64 - _editModeLeftAt >= EditModeCooldownMs)
+            {
+                Select(hit);
+                _bboxEditTarget = fe;
+                UpdateSelectionVisual();
+                e.Handled = true;
+                return;
+            }
         }
-        bool additive = (Keyboard.Modifiers & (ModifierKeys.Shift | ModifierKeys.Control)) != 0;
+        // Survey gates the multi-select toggle on Shift alone (useSVGInteraction.js:536);
+        // Ctrl/Cmd is reserved (it means "move the whole callout" there).
+        bool additive = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
         if (additive)
             ToggleSelection(hit);
         else if (!(_selection.Count > 1 && _selection.Contains(hit)))
@@ -952,6 +998,10 @@ public partial class EditorWindow : Window
     /// </summary>
     private void ShowMarquee(Point pos)
     {
+        // Survey clamps the live end point to the page viewBox (useSVGInteraction.js:1148-1151)
+        // so the band never leaves the image, and strokes it at 1 screen px.
+        pos = ClampToSurface(pos);
+        DragRect.StrokeThickness = 1 / _zoom;
         bool window = MarqueeSelection.ModeFor(_marqueeStart, pos) == MarqueeMode.Window;
         DragRect.Stroke = new SolidColorBrush(window
             ? Color.FromArgb(0xCC, 0x00, 0x64, 0xFF)
@@ -963,37 +1013,174 @@ public partial class EditorWindow : Window
         ShowDragRect(MarqueeSelection.RectFor(_marqueeStart, pos), dim: false);
     }
 
+    /// <summary>
+    /// Survey's line/arrow draw-time guide (SVGAnnotationLayer.jsx:4992-5005): translucent,
+    /// dashed 5/5, round caps, no fill and no arrowhead. The solid stroke, the user's own line
+    /// style and the head all appear only on commit.
+    /// </summary>
+    private static void ApplyLinePreviewStyle(Shape shape, double strokeWidth)
+    {
+        shape.Fill = null;
+        shape.Opacity = 0.6;
+        // WPF dash units are multiples of StrokeThickness, so divide to land on 5 px.
+        double t = strokeWidth > 0 ? strokeWidth : 1;
+        shape.StrokeDashArray = new DoubleCollection { 5 / t, 5 / t };
+        shape.StrokeDashCap = PenLineCap.Round;
+    }
+
+    /// <summary>Swaps a line/arrow preview back to its committed look.</summary>
+    private void EndLinePreviewStyle(Shape shape, Brush? fill)
+    {
+        shape.Opacity = 1;
+        shape.Fill = fill;
+        AnnotationFactory.ApplyDash(shape, _lineStyle);
+    }
+
     /// <summary>Puts the drag rectangle back to its ordinary look after a marquee.</summary>
     private void ResetDragRectStyle()
     {
         DragRect.Stroke = (Brush)FindResource("InfoBrush");
         DragRect.Fill = new SolidColorBrush(Color.FromArgb(0x11, 0x4D, 0xA3, 0xFF));
         DragRect.StrokeDashArray = new DoubleCollection { 4, 3 };
+        DragRect.StrokeThickness = 1.5 / _zoom;
     }
 
     private void EndMarquee(Point pos)
     {
+        bool armed = _marqueeArmed;
         _marqueeSelecting = false;
+        _marqueeArmed = false;
         HideDragRect();
         ResetDragRectStyle();
         Viewport.ReleaseMouseCapture();
-        var box = MarqueeSelection.RectFor(_marqueeStart, pos);
-        if (!MarqueeSelection.IsDrag(_marqueeStart, pos))
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        bool alt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+        if (!armed)
+        {
+            // Sub-threshold release is a click: Survey deselects unless Shift is held
+            // (useSVGInteraction.js:2714-2722).
+            if (!shift) Select(null);
             return;
+        }
+        pos = ClampToSurface(pos);
+        var box = MarqueeSelection.RectFor(_marqueeStart, pos);
         MarqueeMode mode = MarqueeSelection.ModeFor(_marqueeStart, pos);
         var hits = new List<UIElement>();
         foreach (UIElement child in AnnotationCanvas.Children)
         {
             if (child is TextBox) continue;
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
-            if (MarqueeSelection.Catches(box, GetCanvasBounds(fe), mode))
+            if (MarqueeSelection.Catches(box, GetCanvasBounds(fe), mode, CanvasGeometryOf(fe)))
                 hits.Add(fe);
         }
-        if (hits.Count == 1)
-            Select(hits[0]);
-        else if (hits.Count > 1)
-            SelectMany(hits);
+
+        // Survey applies the result by modifier — Alt subtracts (and wins over Shift), Shift
+        // unions, neither replaces (useSVGInteraction.js:2782-2828). An empty hit set is a
+        // no-op under a modifier and a full clear without one.
+        if (alt || shift)
+        {
+            if (hits.Count == 0) return;
+            var next = SelectionList().ToList();
+            foreach (UIElement hit in hits)
+            {
+                if (alt) next.Remove(hit);
+                else if (!next.Contains(hit)) next.Add(hit);
+            }
+            if (next.Count == 0) Select(null);
+            else if (next.Count == 1) Select(next[0]);
+            else SelectMany(next);
+            return;
+        }
+        if (hits.Count == 0) Select(null);
+        else if (hits.Count == 1) Select(hits[0]);
+        else SelectMany(hits);
     }
+
+    /// <summary>
+    /// The annotation's own outline in canvas space, widened by its stroke so an unfilled
+    /// ring or a diagonal line is probed as the shape it draws, not as its bounding box.
+    /// Null for elements with no vector geometry (text, images), which fall back to bounds.
+    /// </summary>
+    private static Geometry? CanvasGeometryOf(FrameworkElement fe)
+    {
+        if (fe is not Shape shape || shape.RenderedGeometry is not { } geo || geo.IsEmpty()) return null;
+        double t = Math.Max(1, shape.StrokeThickness);
+        // Survey's doesRectIntersectEllipse honours hasVisiblePaint(fill): an unfilled shape
+        // is tested as a ring, a filled one as a disk (geometryHitTest.js:2135).
+        Geometry probe = HasVisiblePaint(shape.Fill)
+            ? geo.GetFlattenedPathGeometry()
+            : geo.GetWidenedPathGeometry(new Pen(Brushes.Black, t));
+        return ToCanvasSpace(fe, probe);
+    }
+
+    private static bool HasVisiblePaint(Brush? brush) =>
+        brush is not null && brush is not SolidColorBrush { Color.A: 0 };
+
+    /// <summary>Clones <paramref name="geo"/> with the element→canvas transform baked in.</summary>
+    private static Geometry ToCanvasSpace(FrameworkElement fe, Geometry geo)
+    {
+        var clone = geo.Clone();
+        var toCanvas = new TranslateTransform(
+            double.IsNaN(Canvas.GetLeft(fe)) ? 0 : Canvas.GetLeft(fe),
+            double.IsNaN(Canvas.GetTop(fe)) ? 0 : Canvas.GetTop(fe));
+        clone.Transform = new MatrixTransform(
+            Matrix.Multiply((fe.RenderTransform ?? Transform.Identity).Value, toCanvas.Value));
+        return clone;
+    }
+
+    /// <summary>
+    /// Survey's hover halo (SVGAnnotationLayer.jsx:3839-3840 and every shape branch): the
+    /// hovered-but-unselected mark is traced in #4a90e2 at 0.4 opacity, using its OWN geometry
+    /// and rotation rather than a bounding box, so a click's target is obvious before it lands.
+    /// </summary>
+    private void UpdateHoverHalo(Point pos)
+    {
+        UIElement? hovered = _tool == EditorTool.Select && _activeHandle < 0 && !_dragging
+            && !_marqueeSelecting && !_movingSelection
+            ? HitTestAnnotation(pos)
+            : null;
+        if (hovered is null || _selection.Contains(hovered) || hovered is CalloutAnnotation
+            || hovered is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+        {
+            HoverHalo.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        Geometry? geo = fe is Shape s && s.RenderedGeometry is { } rg && !rg.IsEmpty()
+            ? ToCanvasSpace(fe, rg)
+            : meta.Type == AnnotationData.TypeStep
+                ? StepPinGeometry(fe)
+                : null;
+        if (geo is null)
+        {
+            HoverHalo.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        double sw = meta.Thickness ?? (fe is Shape sh ? sh.StrokeThickness : 1);
+        double inv = 1 / _zoom;
+        bool ink = meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
+        HoverHalo.Data = geo;
+        if (ink)
+        {
+            // Survey's filled-outline ink halo: a thin trace plus a 12% wash inside it.
+            HoverHalo.StrokeThickness = Math.Max(1.25 * inv, Math.Min(2 * inv, sw + 0.5));
+            HoverHalo.Fill = new SolidColorBrush(Color.FromArgb(0x1F, 0x4A, 0x90, 0xE2));
+        }
+        else
+        {
+            // Counters hard-code 6; every other shape uses max(6, strokeWidth + 4).
+            HoverHalo.StrokeThickness = meta.Type == AnnotationData.TypeStep ? 6 : Math.Max(6, sw + 4);
+            HoverHalo.Fill = null;
+        }
+        HoverHalo.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>The counter's pin outline in canvas space (its badge Grid holds the Path).</summary>
+    private static Geometry? StepPinGeometry(FrameworkElement fe) =>
+        fe is Grid badge && badge.Children.OfType<Path>().FirstOrDefault()?.Data is { } pin
+            ? ToCanvasSpace(fe, pin)
+            : null;
 
     private void EndMove()
     {
@@ -1024,16 +1211,36 @@ public partial class EditorWindow : Window
         if (!_movingSelection) return;
         _movingSelection = false;
         Viewport.ReleaseMouseCapture();
-        if (_selected is not null && _moveTotal.Length >= 0.5)
+        if (_selected is not null)
         {
             var moved = SelectionList().ToArray();
-            double dx = _moveTotal.X, dy = _moveTotal.Y;
-            // The move was applied live during the drag, so record it without re-applying.
-            Push(new EditorAction(
-                undo: () => { foreach (UIElement el in moved) MoveElement(el, -dx, -dy); },
-                redo: () => { foreach (UIElement el in moved) MoveElement(el, dx, dy); }), apply: false);
+            // Survey's commit gate is per-axis abs > 2 (useSVGInteraction.js:2850). Below it
+            // the drag was applied live but is not a move, so put it back.
+            if (Math.Abs(_moveTotal.X) <= 2 && Math.Abs(_moveTotal.Y) <= 2)
+            {
+                foreach (UIElement el in moved) MoveElement(el, -_moveTotal.X, -_moveTotal.Y);
+                UpdateSelectionVisual();
+            }
+            else
+            {
+                // Survey constrainToPage (svgTransformMath.js:51-56): pull the selection's
+                // absolute bbox back inside the page before the commit is recorded.
+                Vector fix = ClampSelectionToSurface(moved);
+                if (fix.X != 0 || fix.Y != 0)
+                {
+                    foreach (UIElement el in moved) MoveElement(el, fix.X, fix.Y);
+                    _moveTotal += fix;
+                    UpdateSelectionVisual();
+                }
+                double dx = _moveTotal.X, dy = _moveTotal.Y;
+                // The move was applied live during the drag, so record it without re-applying.
+                Push(new EditorAction(
+                    undo: () => { foreach (UIElement el in moved) MoveElement(el, -dx, -dy); },
+                    redo: () => { foreach (UIElement el in moved) MoveElement(el, dx, dy); }), apply: false);
+            }
         }
         _moveTotal = new Vector();
+        _justDraggedAt = Environment.TickCount64;
         foreach (UIElement el in SelectionList())
             RefreshHighlighterFill(el);
     }
@@ -1178,6 +1385,7 @@ public partial class EditorWindow : Window
         // committing it as one undo entry before the selection moves on.
         if (_opacityElement is not null && !ReferenceEquals(_opacityElement, element))
             CommitOpacityGesture();
+        LeaveBboxEditMode(element);
         _selection.Clear();
         _selected = element;
         if (element is not null)
@@ -1190,10 +1398,22 @@ public partial class EditorWindow : Window
         }
     }
 
+    /// <summary>
+    /// Drops bbox edit mode when the selection moves off its target, stamping Survey's 300 ms
+    /// re-entry cooldown so the dismissing click cannot immediately reopen it.
+    /// </summary>
+    private void LeaveBboxEditMode(UIElement? nextSelection)
+    {
+        if (_bboxEditTarget is null || ReferenceEquals(_bboxEditTarget, nextSelection)) return;
+        _bboxEditTarget = null;
+        _editModeLeftAt = Environment.TickCount64;
+    }
+
     private void SelectMany(IReadOnlyList<UIElement> elements)
     {
         if (_opacityElement is not null)
             CommitOpacityGesture();
+        LeaveBboxEditMode(null);
         _selection.Clear();
         foreach (UIElement el in elements)
             if (!_selection.Contains(el))
@@ -1231,6 +1451,9 @@ public partial class EditorWindow : Window
 
     private void UpdateSelectionVisual()
     {
+        // Survey's halo is hovered-AND-unselected, so any selection change clears it; the next
+        // pointer move re-derives it.
+        if (HoverHalo is not null) HoverHalo.Visibility = Visibility.Collapsed;
         // The crop-adjust overlay owns the handles while a pending crop is being fine-tuned;
         // don't let the selection refresh stomp it.
         if (_adjustingCrop || (_handleKind == HandleKind.Crop && _pendingCrop is not null))
@@ -1239,6 +1462,9 @@ public partial class EditorWindow : Window
             UpdateCropAdjustHandles();
             return;
         }
+        // Survey's group union frame is the same overlay at strokeOpacity 0.6, a deliberate
+        // contrast with the opaque single-selection frame (SVGAnnotationLayer.jsx:5875-5891).
+        SelectionRect.Opacity = _selection.Count > 1 ? 0.6 : 1.0;
         if (_selection.Count > 1)
         {
             Rect union = Rect.Empty;
@@ -1254,7 +1480,8 @@ public partial class EditorWindow : Window
                 HideHandles();
                 return;
             }
-            double padMany = 3 / _zoom;
+            // Survey's overlay padding is 2 page units, so it scales with zoom like the mark.
+            const double padMany = 2;
             union.Inflate(padMany, padMany);
             Canvas.SetLeft(SelectionRect, union.X);
             Canvas.SetTop(SelectionRect, union.Y);
@@ -1289,7 +1516,7 @@ public partial class EditorWindow : Window
             HideHandles();
             return;
         }
-        double pad = 3 / _zoom;
+        const double pad = 2;
         b.Inflate(pad, pad);
         Canvas.SetLeft(SelectionRect, b.X);
         Canvas.SetTop(SelectionRect, b.Y);
@@ -1300,11 +1527,36 @@ public partial class EditorWindow : Window
             : new RotateTransform(selAngle, b.Width / 2, b.Height / 2);
         // Survey draws no box around a line, arrow or curve — the two endpoint handles ARE
         // the selection. A dashed rectangle around a diagonal line just looked like a hit box.
-        bool lineLike = _selected is FrameworkElement { Tag: AnnotationData lm }
-            && lm.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow;
+        // A selected counter is the same: one dot on the nubbin tip and nothing else
+        // (SVGAnnotationLayer.jsx:5106-5164).
+        bool lineLike = !ReferenceEquals(_bboxEditTarget, _selected)
+            && _selected is FrameworkElement { Tag: AnnotationData lm }
+            && lm.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow
+                or AnnotationData.TypeCurvedArrow or AnnotationData.TypeStep;
         SelectionRect.Visibility = lineLike ? Visibility.Collapsed : Visibility.Visible;
 
         UpdateSelectionHandles();
+    }
+
+    /// <summary>
+    /// Survey constrainToPage (svgTransformMath.js:51-56): the correction that brings the
+    /// union of <paramref name="elements"/> back inside the screenshot, or zero.
+    /// </summary>
+    private Vector ClampSelectionToSurface(IReadOnlyList<UIElement> elements)
+    {
+        Rect union = Rect.Empty;
+        foreach (UIElement el in elements)
+        {
+            if (!AnnotationCanvas.Children.Contains(el)) continue;
+            Rect b = GetCanvasBounds(el);
+            if (b.IsEmpty) continue;
+            union = union.IsEmpty ? b : Rect.Union(union, b);
+        }
+        if (union.IsEmpty) return default;
+        double w = _source.Width, h = _source.Height;
+        double dx = union.Left < 0 ? -union.Left : (union.Right > w ? w - union.Right : 0);
+        double dy = union.Top < 0 ? -union.Top : (union.Bottom > h ? h - union.Bottom : 0);
+        return new Vector(dx, dy);
     }
 
     /// <summary>Bounds of an annotation in canvas coordinates, including its own render transform.</summary>

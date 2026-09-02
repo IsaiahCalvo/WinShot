@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 
 namespace WinShot.Editor;
 
@@ -21,8 +22,8 @@ internal enum MarqueeMode
 /// </summary>
 internal static class MarqueeSelection
 {
-    /// <summary>A drag shorter than this (content px) is a click, not a marquee.</summary>
-    public const double MinDragPx = 3;
+    /// <summary>A drag shorter than this (content px) is a click, not a marquee. Survey MIN_DRAG_PX.</summary>
+    public const double MinDragPx = 5;
 
     /// <summary>Window when the drag ran left→right, Crossing when it ran right→left.</summary>
     public static MarqueeMode ModeFor(Point start, Point current) =>
@@ -40,15 +41,21 @@ internal static class MarqueeSelection
         Math.Abs(current.X - start.X) >= MinDragPx || Math.Abs(current.Y - start.Y) >= MinDragPx;
 
     /// <summary>
-    /// Whether an annotation's bounds are caught by the marquee.
-    /// Window needs full containment; Crossing needs only a touch.
+    /// Whether an annotation is caught by the marquee (Survey marqueeSelection.js:215-235).
+    /// Window is a plain AABB containment of the mark's true geometry bounds. Crossing does
+    /// the same cheap bbox reject (isBBoxOverlapping) and then a REAL geometry probe, so a
+    /// band clipping only the empty corner of a diagonal line's box misses it — the classic
+    /// AutoCAD false positive.
     /// </summary>
-    public static bool Catches(Rect marquee, Rect bounds, MarqueeMode mode)
+    /// <param name="geometry">The mark's outline in canvas space, or null to fall back to bounds.</param>
+    public static bool Catches(Rect marquee, Rect bounds, MarqueeMode mode, Geometry? geometry = null)
     {
         if (bounds.IsEmpty) return false;
-        return mode == MarqueeMode.Window
-            ? marquee.Contains(bounds)
-            : marquee.IntersectsWith(bounds);
+        if (mode == MarqueeMode.Window) return marquee.Contains(bounds);
+        if (!marquee.IntersectsWith(bounds)) return false;
+        if (geometry is null) return true;
+        var band = new RectangleGeometry(marquee);
+        return geometry.FillContainsWithDetail(band) != IntersectionDetail.Empty;
     }
 
     /// <summary>The union of every selected annotation's bounds — the group frame.</summary>

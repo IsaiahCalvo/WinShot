@@ -178,6 +178,9 @@ public partial class EditorWindow : Window
         if (apply) action.Redo();
         _undoStack.Push(action);
         DiscardRedoStack();
+        // Survey re-derives counter numbers after EVERY mutation, not just creation
+        // (PDFViewer.jsx:24220/24240, annotationEraseCommitPlan.js:173).
+        RenumberCounters();
         UpdateUndoRedoButtons();
     }
 
@@ -219,6 +222,7 @@ public partial class EditorWindow : Window
         if (_undoStack.Count == 0) return;
         var action = _undoStack.Pop();
         await action.UndoAsync();
+        RenumberCounters();
         _redoStack.Push(action);
         UpdateUndoRedoButtons();
     }
@@ -231,6 +235,7 @@ public partial class EditorWindow : Window
         Select(null);
         var action = _redoStack.Pop();
         await action.RedoAsync();
+        RenumberCounters();
         _undoStack.Push(action);
         UpdateUndoRedoButtons();
     }
@@ -321,13 +326,21 @@ public partial class EditorWindow : Window
             return;
         }
 
-        if (e.Key == Key.Delete)
+        // Survey treats Backspace as an exact synonym for Delete (SVGAnnotationLayer.jsx:839).
+        if (e.Key is Key.Delete or Key.Back)
         {
             if (_selected is not null) { DeleteSelected(); e.Handled = true; }
         }
         else if (e.Key == Key.Escape)
         {
-            if (_movingSelection)
+            // Esc leaves Survey's bbox edit mode first, before any other Escape meaning.
+            if (_bboxEditTarget is not null && !_movingSelection && _activeHandle < 0)
+            {
+                LeaveBboxEditMode(null);
+                UpdateSelectionVisual();
+                e.Handled = true;
+            }
+            else if (_movingSelection)
             {
                 AbortMove();
                 Viewport.ReleaseMouseCapture();

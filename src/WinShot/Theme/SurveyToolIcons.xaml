@@ -216,11 +216,17 @@
             <Ellipse Style="{StaticResource SurveyIconFill}" Canvas.Left="10.5" Canvas.Top="17.5" Width="3" Height="3"/>
         </Canvas>
     </Viewbox>
-    <Viewbox x:Key="SurveyIcon.Rotate" x:Shared="False" Width="18" Height="18">
+    <!-- Survey src/assets/rotate-icon.svg, verbatim: six paths on a 24x24 box,
+         stroke-width 2, round caps/joins. Sized by the host ContentControl (the
+         rotation grip scales it to 70% of the circle), so no fixed Viewbox size. -->
+    <Viewbox x:Key="SurveyIcon.Rotate" x:Shared="False">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M1,4 V10 H7"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M23,20 V14 H17"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M20.49,9 C19.7967,7.04557 18.4615,5.36328 16.6618,4.21405 C14.8621,3.06482 12.6915,2.51013 10.5,2.63024 C8.30846,2.75035 6.19479,3.53998 4.5,4.9 M3.51,15 C4.20334,16.9544 5.53847,18.6367 7.33818,19.786 C9.13789,20.9352 11.3085,21.4899 13.5,21.3698 C15.6915,21.2496 17.8052,20.46 19.5,19.1"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M22,12 L19,15 L16,12"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M2,12 L5,9 L8,12"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M19.016,14 V12.05 A7.05,7.05 0 0 0 8,6.22"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M16.016,17.845 A7.05,7.05 0 0 1 5,12.015 V10"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M5,10 V9"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M19,15 V14"/>
         </Canvas>
     </Viewbox>
     <Viewbox x:Key="SurveyIcon.FlipH" x:Shared="False" Width="18" Height="18">

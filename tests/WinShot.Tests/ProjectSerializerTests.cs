@@ -179,7 +179,10 @@ public class ProjectSerializerTests
                 Assert.Equal(2, geometry.Figures.Count);
                 Assert.False(geometry.Figures[1].IsFilled);
                 Assert.NotNull(arrow.StrokeDashArray);
-                Assert.Equal(new[] { 6d, 4d }, arrow.StrokeDashArray.ToArray());
+                // Survey's [6,4] is in ABSOLUTE user units; WPF multiplies the array by
+                // StrokeThickness, so at thickness 4 the stored array is [1.5, 1] and the
+                // rendered dash is still 6 on / 4 off.
+                Assert.Equal(new[] { 1.5d, 1d }, arrow.StrokeDashArray.ToArray());
 
                 var callout = Assert.IsType<CalloutAnnotation>(ProjectSerializer.CreateElement(
                     AnnotationData.ForCallout(

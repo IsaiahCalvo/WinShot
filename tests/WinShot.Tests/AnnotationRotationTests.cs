@@ -84,36 +84,31 @@ public class AnnotationRotationTests
     }
 
     [Fact]
-    public void ResolveDrag_KeepsTheGrabOffsetSoTheMarkDoesNotJump()
+    public void ResolveDrag_TakesTheAbsoluteBearingWithNoGrabOffset()
     {
-        // Grabbed the handle at a bearing of 10° while the shape sat at 0°.
-        // Moving the pointer to 40° should advance the shape by 30°, not to 40°.
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 10, pointerAngle: 40, shift: false);
-        Assert.Equal(30, result, 6);
+        // Survey rotates to the bearing from the shape centre to the pointer with no grab
+        // offset (useSVGInteraction.js:2350-2352): the top faces the cursor immediately.
+        double result = AnnotationRotation.ResolveDrag(pointerAngle: 40, shift: false);
+        Assert.Equal(40, result, 6);
     }
 
     [Fact]
     public void ResolveDrag_SoftSnapsNearAnIncrement()
     {
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 0, pointerAngle: 44, shift: false);
+        double result = AnnotationRotation.ResolveDrag(pointerAngle: 44, shift: false);
         Assert.Equal(45, result, 6);
 
-        double fine = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 0, pointerAngle: 16, shift: false);
+        double fine = AnnotationRotation.ResolveDrag(pointerAngle: 16, shift: false);
         Assert.Equal(15, fine, 6);
     }
 
     [Fact]
     public void ResolveDrag_WithShiftAlwaysLandsOnAnIncrement()
     {
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 0, pointerAngle: 38, shift: true);
+        double result = AnnotationRotation.ResolveDrag(pointerAngle: 38, shift: true);
         Assert.Equal(45, result, 6);
 
-        double back = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 0, pointerAngle: 7, shift: true);
+        double back = AnnotationRotation.ResolveDrag(pointerAngle: 7, shift: true);
         Assert.Equal(0, back, 6);
     }
 
@@ -126,14 +121,24 @@ public class AnnotationRotationTests
     public void PointerAngleFromCursor_IsEastBasedLikeSurveysCounter(double dx, double dy, double expected)
     {
         var c = new Point(100, 100);
-        Assert.Equal(expected, AnnotationRotation.PointerAngleFromCursor(c, new Point(100 + dx, 100 + dy), shift: false), 6);
+        Assert.Equal(expected, AnnotationRotation.PointerAngleFromCursor(c, new Point(100 + dx, 100 + dy)), 6);
+    }
+
+    [Fact]
+    public void PointerAngleFromCursor_NeverSnaps()
+    {
+        // Survey's counter tip handle applies no snapping and reads no modifier
+        // (SVGAnnotationLayer.jsx:5183): the nub follows the cursor continuously.
+        var c = new Point(100, 100);
+        double rad = 16 * Math.PI / 180;
+        var cursor = new Point(100 + Math.Cos(rad) * 50, 100 + Math.Sin(rad) * 50);
+        Assert.Equal(16, AnnotationRotation.PointerAngleFromCursor(c, cursor), 6);
     }
 
     [Fact]
     public void ResolveDrag_WrapsPastHalfATurn()
     {
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 170, grabOffset: 0, pointerAngle: 30, shift: false);
+        double result = AnnotationRotation.ResolveDrag(pointerAngle: 200, shift: false);
         Assert.Equal(-160, result, 6);
     }
 }
