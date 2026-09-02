@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -549,6 +549,8 @@ public class ThemedWindowTests
 
         Assert.Null(editor.FindName("EditorStyleBar"));
         var groupBar = (FrameworkElement)editor.FindName("EditorGroupBar")!;
+        // The strip row is fixed chrome (Survey's 34px sub-row); only its chips host toggles.
+        var groupHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
         var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
         var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
@@ -580,7 +582,7 @@ public class ThemedWindowTests
         Assert.DoesNotContain(((Grid)viewport.Parent).Children.OfType<FrameworkElement>(),
             el => el.Name is "EditorStyleBar");
 
-        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        Assert.Equal(Visibility.Collapsed, groupHost.Visibility);
         Assert.DoesNotContain(primary.Children.OfType<FrameworkElement>(),
             el => el.Tag as string == "Step");
         Assert.Contains(((StackPanel)editor.FindName("ShapeGroupPanel")!).Children.OfType<RadioButton>(),
@@ -599,7 +601,7 @@ public class ThemedWindowTests
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
         PackEditorFormat(editor);
-        Assert.Equal(Visibility.Visible, groupBar.Visibility);
+        Assert.Equal(Visibility.Visible, groupHost.Visibility);
         double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
         double arrowBarW = groupBar.ActualWidth;
         double arrowToolsW = groupTools.ActualWidth;

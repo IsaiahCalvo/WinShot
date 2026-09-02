@@ -190,8 +190,10 @@
                 <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
                             BorderBrush="Transparent" BorderThickness="1">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        <!-- Survey's sub-row glyphs are 20px; the shared icon resources are 18. -->
+                        <Viewbox Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Viewbox>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -323,8 +325,8 @@
 
     <!-- Right rail: 32x28 rounded buttons stacked vertically, 18px glyphs. -->
     <Style x:Key="RailButton" TargetType="Button">
-        <Setter Property="Width" Value="32"/>
-        <Setter Property="Height" Value="28"/>
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="24"/>
         <Setter Property="Margin" Value="0,2"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Background" Value="Transparent"/>
@@ -355,13 +357,14 @@
     <!-- Survey's zoom input: a bare number field, underlined only while it has focus. -->
     <Style x:Key="RailZoomBox" TargetType="TextBox">
         <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="22"/>
+        <Setter Property="Height" Value="18"/>
         <Setter Property="Margin" Value="0,1"/>
         <Setter Property="Padding" Value="0"/>
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="Medium"/>
         <Setter Property="TextAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
         <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>

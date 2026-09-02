@@ -87,6 +87,7 @@ public partial class EditorWindow : Window
         }
         if (_activeHandle < 0 && !_dragging && !_movingSelection && !_marqueeSelecting && _handleKind != HandleKind.None)
             UpdateRotationPillHover(e.GetPosition(AnnotationCanvas));
+        UpdateEraserCursor(e.GetPosition(Viewport));
         if (_draggingCurveHandle && _pendingCurve is not null)
         {
             _curveControl = e.GetPosition(AnnotationCanvas);
@@ -170,7 +171,14 @@ public partial class EditorWindow : Window
                 if (_activeShape is Path cloudPath && _lineStyle == LineBorderStyle.Cloud)
                     cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height));
                 break;
-            case EditorTool.Freehand or EditorTool.Highlighter when _activeShape is Polyline stroke:
+            case EditorTool.Freehand when _activeShape is Path pen && _penPoints is not null:
+                if ((pos - _penPoints[^1]).Length > PaperInk.LiveMinDistance)
+                {
+                    _penPoints.Add(pos);
+                    pen.Data = FreehandStroke.Outline(_penPoints, _penWidth, complete: false);
+                }
+                break;
+            case EditorTool.Highlighter when _activeShape is Polyline stroke:
                 if (stroke.Points.Count == 0 || (pos - stroke.Points[^1]).Length > PaperInk.LiveMinDistance)
                     stroke.Points.Add(pos);
                 break;
@@ -305,6 +313,18 @@ public partial class EditorWindow : Window
                         _tool == EditorTool.Rectangle ? AnnotationData.TypeRectangle : AnnotationData.TypeEllipse,
                         bounds, strokeColor, shape.StrokeThickness, _fillMode, fillColor, lineStyle);
                     PushAddElement(shape);
+                }
+                return;
+            case EditorTool.Freehand when shape is Path pen && _penPoints is { Count: >= 1 }:
+                {
+                    var pts = PaperInk.Compact(_penPoints);
+                    AnnotationCanvas.Children.Remove(pen);
+                    Color penColor = pen.Fill is SolidColorBrush pb ? pb.Color : _color;
+                    var ink = AnnotationFactory.CreateInk(pts, penColor, _penWidth, highlighter: false);
+                    ink.Tag = AnnotationData.ForStroke(AnnotationData.TypeFreehand, pts, penColor, _penWidth);
+                    AnnotationCanvas.Children.Add(ink);
+                    PushAddElement(ink);
+                    _penPoints = null;
                 }
                 return;
             case EditorTool.Freehand or EditorTool.Highlighter:
@@ -538,14 +558,16 @@ public partial class EditorWindow : Window
                 Canvas.SetTop(_activeShape, pos.Y);
                 break;
             case EditorTool.Freehand:
-                _activeShape = new Polyline
+                // perfect-freehand ink: a filled, pressure-shaped outline rebuilt as the
+                // pointer moves, so the live stroke looks exactly like the committed one.
+                _penPoints = new List<Point> { pos };
+                _penWidth = AnnotationStyle.ClampSize(_penSize);
+                _activeShape = new Path
                 {
-                    Stroke = brush,
-                    StrokeThickness = AnnotationStyle.ClampSize(_penSize),
-                    StrokeLineJoin = PenLineJoin.Round,
-                    StrokeStartLineCap = PenLineCap.Round,
-                    StrokeEndLineCap = PenLineCap.Round,
-                    Points = new PointCollection { pos },
+                    Fill = brush,
+                    Stroke = Brushes.Transparent,
+                    StrokeThickness = 0,
+                    Data = FreehandStroke.Outline(_penPoints, _penWidth, complete: false),
                 };
                 break;
             case EditorTool.Highlighter:
@@ -583,6 +605,26 @@ public partial class EditorWindow : Window
         pos.X >= 0 && pos.Y >= 0 && pos.X <= _source.Width && pos.Y <= _source.Height;
 
     /// <summary>Stroke color of a committed shape — the project metadata's source of truth.</summary>
+    private List<Point>? _penPoints;
+    private double _penWidth;
+
+    /// <summary>Survey's eraser cursor: rgba(128,128,128,.2) disc, 2px*scale border, eraser diameter on screen.</summary>
+    private void UpdateEraserCursor(Point viewportPos)
+    {
+        if (EraserCursor is null) return;
+        if (_tool != EditorTool.Eraser || _panning || _spaceDown)
+        {
+            EraserCursor.Visibility = Visibility.Collapsed;
+            return;
+        }
+        double d = AnnotationStyle.ClampEraserSize(_eraserSize) * _zoom;
+        EraserCursor.Width = EraserCursor.Height = d;
+        EraserCursor.StrokeThickness = Math.Max(1, 2 * _zoom);
+        Canvas.SetLeft(EraserCursor, viewportPos.X - d / 2);
+        Canvas.SetTop(EraserCursor, viewportPos.Y - d / 2);
+        EraserCursor.Visibility = Visibility.Visible;
+    }
+
     private static Color StrokeColorOf(Shape shape) =>
         shape.Stroke is SolidColorBrush brush ? brush.Color : Colors.White;
 

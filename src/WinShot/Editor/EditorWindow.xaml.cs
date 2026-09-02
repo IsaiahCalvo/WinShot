@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -98,7 +98,7 @@ public partial class EditorWindow : Window
     private bool _highlighterArmed;
     private EditorTool _toolBeforeCrop = EditorTool.Select;
     private bool _eraserPartial = true;
-    private double _eraserSize = 10;
+    private double _eraserSize = 20; // Survey default
     private readonly List<Point> _eraserPoints = new();
     private double _pickerHue;
     private double _pickerSat = 1;
@@ -420,7 +420,7 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return; // viewport not ready; retry on next trigger
 
-        const double margin = 24;
+        const double margin = 12; // Survey fit-page breathing room
         double fit = Math.Min((vw - margin * 2) / _sourceWidth, (vh - margin * 2) / _sourceHeight);
         // Fit may go below MinZoom (a 32000px scroll capture in a 650px viewport fits at
         // ~0.02) — clamping it to MinZoom left only the middle band visible. MinZoom still
@@ -445,7 +445,7 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
 
-        const double margin = 24;
+        const double margin = 12; // Survey fit-page breathing room
         double fitW = (vw - margin * 2) / _sourceWidth;
         // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
         _zoom = Math.Clamp(fitW, Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
@@ -463,7 +463,7 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
 
-        const double margin = 24;
+        const double margin = 12; // Survey fit-page breathing room
         double fitH = (vh - margin * 2) / _sourceHeight;
         _zoom = Math.Clamp(fitH, Math.Min(MinZoom, Math.Max(fitH, 0.001)), MaxZoom);
         _viewFitMode = ViewFitMode.FitHeight;
@@ -889,7 +889,7 @@ public partial class EditorWindow : Window
             SecondaryToolPanel.Visibility = Show(props);
         EditorFormatBar.Visibility = Visibility.Visible;
         EditorGroupToolsHost.Visibility = Visibility.Visible;
-        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text" or "Effects");
+        EditorGroupToolsHost.Visibility = Show(group is "Draw" or "Shape" or "Text" or "Effects");
         Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
     }
 

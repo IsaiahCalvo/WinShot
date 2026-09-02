@@ -527,7 +527,11 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="48"/>
             </Grid.ColumnDefinitions>
-                <Grid x:Name="Viewport" Background="{StaticResource SurfaceBrush}" ClipToBounds="True"
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+                <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource SurfaceBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
               AutomationProperties.Name="Annotation canvas"
@@ -574,6 +578,8 @@
                 </Grid>
             </Canvas>
             <Canvas x:Name="OverlayCanvas">
+                <Ellipse x:Name="EraserCursor" Width="20" Height="20" IsHitTestVisible="False" Visibility="Collapsed"
+                         Fill="#33808080" Stroke="#99646464" StrokeThickness="2"/>
                 <Border x:Name="RotationPill" Width="60" Height="28" Background="#FF181C24" BorderBrush="#FF2A3140"
                         BorderThickness="1" CornerRadius="6" Visibility="Collapsed"
                         AutomationProperties.Name="Rotation angle">
@@ -592,14 +598,13 @@
                 </Border>
             </Canvas>
         </Grid>
-                <Border x:Name="EditorGroupBar" HorizontalAlignment="Stretch" VerticalAlignment="Top"
-                        Margin="0" Padding="0,3" CornerRadius="0"
+                <Border x:Name="EditorGroupBar" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                        Margin="0" Padding="0,2" CornerRadius="0"
                         Background="{StaticResource WindowBgBrush}"
                         BorderBrush="{StaticResource BorderBrush}" BorderThickness="0"
-                        Visibility="Collapsed"
                         AutomationProperties.Name="Group tools"
                         AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
-                    <Border x:Name="EditorGroupToolsHost" HorizontalAlignment="Center">
+                    <Border x:Name="EditorGroupToolsHost" HorizontalAlignment="Center" Visibility="Collapsed">
                     <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
@@ -676,59 +681,64 @@
                 </Border>
             <!-- Survey's collapsed right rail (48px): zoom in, click-to-type percentage, zoom
                  out, divider, then the fit trigger whose menu flies out to the left. -->
-            <Border x:Name="ZoomRail" Grid.Column="1" Background="{StaticResource WindowBgBrush}"
+            <Border x:Name="ZoomRail" Grid.Column="1" Grid.RowSpan="2" Background="{StaticResource WindowBgBrush}"
                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0"
                     AutomationProperties.Name="Zoom rail">
-                <StackPanel Margin="0,8,0,0" HorizontalAlignment="Center">
-                    <Button x:Name="BtnZoomIn" Style="{StaticResource RailButton}" Click="OnZoomIn"
-                            ToolTip="Zoom in" AutomationProperties.Name="Zoom in"
-                            AutomationProperties.HelpText="Zoom in one step about the centre of the view."
-                            Content="{StaticResource SurveyIcon.Plus}"/>
-                    <TextBox x:Name="ZoomBox" Style="{StaticResource RailZoomBox}" Text="100%"
-                             ToolTip="Zoom level. Click to type a percentage." AutomationProperties.Name="Zoom level"
-                             PreviewTextInput="OnZoomBoxTextInput" PreviewKeyDown="OnZoomBoxKeyDown"
-                             GotKeyboardFocus="OnZoomBoxFocus" LostKeyboardFocus="OnZoomBoxBlur"/>
-                    <Button x:Name="BtnZoomOut" Style="{StaticResource RailButton}" Click="OnZoomOut"
-                            ToolTip="Zoom out" AutomationProperties.Name="Zoom out"
-                            AutomationProperties.HelpText="Zoom out one step about the centre of the view."
-                            Content="{StaticResource SurveyIcon.Minus}"/>
-                    <Rectangle Height="1" Fill="{StaticResource BorderBrush}" Margin="6,6"/>
-                    <Button x:Name="FitMenuBtn" Style="{StaticResource RailButton}" Width="36" Click="OnFitMenuClick"
-                            ToolTip="Fit page" AutomationProperties.Name="Fit options"
-                            AutomationProperties.HelpText="Choose fit page, fit width, or fit height.">
-                        <StackPanel Orientation="Horizontal">
-                            <ContentControl x:Name="FitModeIcon" Content="{StaticResource SurveyIcon.FitPage}" Width="15" Height="15" VerticalAlignment="Center"/>
-                            <ContentControl Content="{StaticResource SurveyIcon.ChevronLeft}" Width="10" Height="10" VerticalAlignment="Center" Opacity="0.7"/>
-                        </StackPanel>
-                    </Button>
-                    <Popup x:Name="FitMenuPopup" PlacementTarget="{Binding ElementName=FitMenuBtn}"
-                           Placement="Left" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                        <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="2" Margin="12,0,6,12"
-                                MinWidth="150" Effect="{StaticResource FloatingShadow}">
-                            <StackPanel>
-                                <Button x:Name="FitPageItem" Style="{StaticResource MenuRowButton}" Click="OnFitPage" AutomationProperties.Name="Fit page">
-                                    <StackPanel Orientation="Horizontal">
-                                        <ContentControl Content="{StaticResource SurveyIcon.FitPage}" Width="16" Height="16"/>
-                                        <TextBlock Text="Fit page" Margin="6,0,0,0" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
-                                <Button x:Name="FitWidthItem" Style="{StaticResource MenuRowButton}" Click="OnFitWidth" AutomationProperties.Name="Fit width">
-                                    <StackPanel Orientation="Horizontal">
-                                        <ContentControl Content="{StaticResource SurveyIcon.FitWidth}" Width="16" Height="16"/>
-                                        <TextBlock Text="Fit width" Margin="6,0,0,0" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
-                                <Button x:Name="FitHeightItem" Style="{StaticResource MenuRowButton}" Click="OnFitHeight" AutomationProperties.Name="Fit height">
-                                    <StackPanel Orientation="Horizontal">
-                                        <ContentControl Content="{StaticResource SurveyIcon.FitHeight}" Width="16" Height="16"/>
-                                        <TextBlock Text="Fit height" Margin="6,0,0,0" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
+                <!-- Survey's rail footer: zoom / fit live at the BOTTOM of the rail. -->
+                <Border VerticalAlignment="Bottom" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,8">
+                    <StackPanel HorizontalAlignment="Center">
+                        <Button x:Name="BtnZoomIn" Style="{StaticResource RailButton}" Click="OnZoomIn"
+                                ToolTip="Zoom in" AutomationProperties.Name="Zoom in"
+                                AutomationProperties.HelpText="Zoom in one step about the centre of the view.">
+                            <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Plus}"/></Viewbox>
+                        </Button>
+                        <TextBox x:Name="ZoomBox" Style="{StaticResource RailZoomBox}" Text="100%"
+                                 ToolTip="Zoom level. Click to type a percentage." AutomationProperties.Name="Zoom level"
+                                 PreviewTextInput="OnZoomBoxTextInput" PreviewKeyDown="OnZoomBoxKeyDown"
+                                 GotKeyboardFocus="OnZoomBoxFocus" LostKeyboardFocus="OnZoomBoxBlur"/>
+                        <Button x:Name="BtnZoomOut" Style="{StaticResource RailButton}" Click="OnZoomOut"
+                                ToolTip="Zoom out" AutomationProperties.Name="Zoom out"
+                                AutomationProperties.HelpText="Zoom out one step about the centre of the view.">
+                            <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Minus}"/></Viewbox>
+                        </Button>
+                        <Rectangle Width="24" Height="1" Fill="{StaticResource BorderBrush}" Margin="0,4"/>
+                        <Button x:Name="FitMenuBtn" Style="{StaticResource RailButton}" Width="36" Height="28" Click="OnFitMenuClick"
+                                ToolTip="Fit page" AutomationProperties.Name="Fit options"
+                                AutomationProperties.HelpText="Choose fit page, fit width, or fit height.">
+                            <StackPanel Orientation="Horizontal">
+                                <ContentControl x:Name="FitModeIcon" Content="{StaticResource SurveyIcon.FitPage}" Width="15" Height="15" VerticalAlignment="Center"/>
+                                <ContentControl Content="{StaticResource SurveyIcon.ChevronLeft}" Width="10" Height="10" VerticalAlignment="Center" Opacity="0.7"/>
                             </StackPanel>
-                        </Border>
-                    </Popup>
-                </StackPanel>
+                        </Button>
+                        <Popup x:Name="FitMenuPopup" PlacementTarget="{Binding ElementName=FitMenuBtn}"
+                               Placement="Left" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="2" Margin="12,0,6,12"
+                                    MinWidth="140" Effect="{StaticResource FloatingShadow}">
+                                <StackPanel>
+                                    <Button x:Name="FitPageItem" Style="{StaticResource MenuRowButton}" Click="OnFitPage" AutomationProperties.Name="Fit page">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ContentControl Content="{StaticResource SurveyIcon.FitPage}" Width="16" Height="16"/>
+                                            <TextBlock Text="Fit page" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="FitWidthItem" Style="{StaticResource MenuRowButton}" Click="OnFitWidth" AutomationProperties.Name="Fit width">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ContentControl Content="{StaticResource SurveyIcon.FitWidth}" Width="16" Height="16"/>
+                                            <TextBlock Text="Fit width" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="FitHeightItem" Style="{StaticResource MenuRowButton}" Click="OnFitHeight" AutomationProperties.Name="Fit height">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ContentControl Content="{StaticResource SurveyIcon.FitHeight}" Width="16" Height="16"/>
+                                            <TextBlock Text="Fit height" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </StackPanel>
+                </Border>
             </Border>
         </Grid>
 

@@ -609,7 +609,9 @@ internal static class AnnotationFactory
     {
         var path = new Path
         {
-            Data = PaperInk.Outline(points, width),
+            // Pen = perfect-freehand's pressure-shaped outline; highlighter = Survey's
+            // constant-width swept disk (multiplied at flatten).
+            Data = highlighter ? PaperInk.Outline(points, width) : FreehandStroke.Outline(points, width, complete: true),
             Fill = new SolidColorBrush(color),
             Stroke = Brushes.Transparent,
             StrokeThickness = 0,
