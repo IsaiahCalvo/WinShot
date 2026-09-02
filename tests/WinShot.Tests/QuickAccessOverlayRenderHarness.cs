@@ -93,6 +93,7 @@ public class QuickAccessOverlayRenderHarness
                 RenderState(wide, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-wide-idle.png"));
                 RenderState(tall, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-tall-idle.png"));
                 RenderStackMotion(source, settings, outDir);
+                RenderStatusFlash(source, settings, "Text copied", Path.Combine(outDir, "card-flash-text-copied.png"));
             }
             catch (Exception ex)
             {
@@ -154,6 +155,16 @@ public class QuickAccessOverlayRenderHarness
             Invoke(overlay, "SetHovering", true);
         if (hoverButton >= 0)
             Invoke(overlay, "SetHover", hoverButton);
+        Render(overlay, path);
+    }
+
+    /// <summary>The card mid-flash: blurred thumbnail with the message over it.</summary>
+    private static void RenderStatusFlash(SD.Bitmap source, SettingsService settings, string message, string path)
+    {
+        using var overlay = FastQuickActionsWindow.CreateForTheme(source, settings, QuickAccessOverlayTheme.Dark);
+        overlay.CreateControl();
+        SetPreviewBitmaps(overlay, source);
+        overlay.FlashStatus(message);
         Render(overlay, path);
     }
 

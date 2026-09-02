@@ -1214,7 +1214,10 @@ public partial class App : Application
                 await RunOcrToClipboard(crop, anchor);
         });
 
-    private async Task RunOcrToClipboard(SD.Bitmap bmp, SD.Point? anchor = null)
+    private async Task RunOcrToClipboard(
+        SD.Bitmap bmp,
+        SD.Point? anchor = null,
+        FastQuickActionsWindow? card = null)
     {
         try
         {
@@ -1225,12 +1228,18 @@ public partial class App : Application
             OcrClipboardPayload? payload = OcrClipboardFormatter.Build(result);
             if (payload is null)
             {
-                ShowOcrToast("Nothing found", "No text or codes in the selection.", anchor, onOpen: null);
+                if (card is not null)
+                    card.FlashStatus("No text found");
+                else
+                    ShowOcrToast("Nothing found", "No text or codes in the selection.", anchor, onOpen: null);
                 return;
             }
 
             await CaptureService.SetTextToClipboardAsync(payload.ClipboardText);
-            ShowOcrToast(payload.BalloonTitle, payload.Preview, anchor, BuildOpenAction(payload.ClipboardText));
+            if (card is not null)
+                card.FlashStatus("Text copied");
+            else
+                ShowOcrToast(payload.BalloonTitle, payload.Preview, anchor, BuildOpenAction(payload.ClipboardText));
         }
         catch (InvalidOperationException ex)
         {
@@ -1373,7 +1382,9 @@ public partial class App : Application
         try
         {
             using var image = overlay.CloneImage();
-            await RunOcrToClipboard(image);
+            // The card is right there and holds the image the text came from, so it says so
+            // itself instead of raising a toast somewhere else on screen.
+            await RunOcrToClipboard(image, card: overlay);
         }
         catch (Exception ex)
         {

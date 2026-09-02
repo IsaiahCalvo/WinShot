@@ -247,6 +247,31 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
+    public void StatusFlashClearsItselfAndFreesItsTimer()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var type = typeof(FastQuickActionsWindow);
+            var message = type.GetField("_flashMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var timer = type.GetField("_flashTimer", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            overlay.FlashStatus("Text copied");
+            Assert.Equal("Text copied", message.GetValue(overlay));
+            Assert.NotNull(timer.GetValue(overlay));
+
+            type.GetMethod("EndStatusFlash", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(overlay, null);
+
+            Assert.Null(message.GetValue(overlay));
+            Assert.Null(timer.GetValue(overlay));
+            Assert.Equal(0d, (double)type.GetField("_flashAmount", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay)!);
+        });
+    }
+
+    [Fact]
     public void EveryIconedRowResolvesItsGlyph()
     {
         RunSta(() =>

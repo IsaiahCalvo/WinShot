@@ -18,6 +18,9 @@ public sealed class FastQuickActionsWindow : WF.Form
     private const int CsDropShadow = 0x00020000;
     private const int WmNclbuttondown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
+    // Long enough to read three words, short enough not to be in the way.
+    private const int FlashHoldMs = 1300;
+    private const int FlashFadeMs = 420;
 
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
@@ -58,6 +61,9 @@ public sealed class FastQuickActionsWindow : WF.Form
     private string? _tempDragPath;
     private string? _historyPath;
     private int _imageVersion;
+    private string? _flashMessage;
+    private double _flashAmount;
+    private WF.Timer? _flashTimer;
     private bool _hovering;
     private int _hoverButton = -1;
     private int _pressedButton = -1;
@@ -183,6 +189,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // Restore-last reopens captures as images, so a media file never qualifies.
             if (_historyPath is not null && _mediaFilePath is null)
                 PushRecentlyClosed(_historyPath);
+            EndStatusFlash();
             DisposeImageWhenUnused();
             ReflowOpenWindowsAnimated();
         };
@@ -340,8 +347,11 @@ public sealed class FastQuickActionsWindow : WF.Form
             g.FillPath(fill, cardPath);
 
         DrawThumbnail(g, _hovering);
+        DrawStatusFlash(g);
 
-        if (_hovering)
+        // The hover chrome stays out of the way while a message is up — the cursor is
+        // usually still over the card from the menu click that triggered it.
+        if (_hovering && _flashMessage is null)
         {
             using (var scrim = new SD.SolidBrush(_visuals.HoverTint))
             using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
@@ -448,6 +458,116 @@ public sealed class FastQuickActionsWindow : WF.Form
             // 25px in the 512px HTML reference scales to roughly 9px on this 192px card.
             LabelFont = ThemePalette.UiFont(7f),
         });
+
+    /// <summary>
+    /// Blurs the thumbnail and prints a short line over it for a beat, then clears. Used
+    /// where a tray toast would be more ceremony than the message deserves — "Text copied"
+    /// belongs on the thing the text came from.
+    /// </summary>
+    public void FlashStatus(string message)
+    {
+        if (_closed || IsDisposed) return;
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(() => FlashStatus(message)));
+            return;
+        }
+
+        _flashMessage = message;
+        _flashAmount = 1.0;
+        PauseAutoCloseTimer();
+
+        _flashTimer?.Stop();
+        _flashTimer?.Dispose();
+        _flashTimer = new WF.Timer { Interval = 30 };
+        long start = Environment.TickCount64;
+        _flashTimer.Tick += (_, _) =>
+        {
+            long elapsed = Environment.TickCount64 - start;
+            if (elapsed <= FlashHoldMs)
+                return;
+
+            double fade = (elapsed - FlashHoldMs) / (double)FlashFadeMs;
+            if (fade >= 1.0)
+            {
+                EndStatusFlash();
+                return;
+            }
+            _flashAmount = 1.0 - Motion.EaseInOutSine(fade);
+            if (!_closed && !IsDisposed)
+                Invalidate(_cardRect);
+        };
+        _flashTimer.Start();
+        Invalidate(_cardRect);
+    }
+
+    private void EndStatusFlash()
+    {
+        _flashTimer?.Stop();
+        _flashTimer?.Dispose();
+        _flashTimer = null;
+        _flashAmount = 0;
+        _flashMessage = null;
+        if (_closed || IsDisposed)
+            return;
+        Invalidate(_cardRect);
+        if (!_hovering)
+            ResumeAutoCloseTimer();
+    }
+
+    private void DrawStatusFlash(SD.Graphics g)
+    {
+        if (_flashMessage is null || _flashAmount <= 0.01)
+            return;
+
+        int alpha = (int)Math.Round(255 * Math.Clamp(_flashAmount, 0, 1));
+        using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
+        GraphicsState state = g.Save();
+        try
+        {
+            g.SetClip(clip, CombineMode.Intersect);
+            DrawBlurredOverlay(g, alpha);
+
+            // A veil under the text: a blurred screenshot is still busy enough to swallow it.
+            using (var veil = new SD.SolidBrush(SD.Color.FromArgb(alpha * 150 / 255, 0, 0, 0)))
+                g.FillRectangle(veil, _cardRect);
+
+            using var font = ThemePalette.UiFont(Math.Max(8f, _cardRect.Height * 0.075f), SD.FontStyle.Bold);
+            using var text = new SD.SolidBrush(SD.Color.FromArgb(alpha, _visuals.Glyph));
+            using var format = new SD.StringFormat
+            {
+                Alignment = SD.StringAlignment.Center,
+                LineAlignment = SD.StringAlignment.Center,
+                Trimming = SD.StringTrimming.EllipsisCharacter,
+            };
+            g.DrawString(_flashMessage, font, text, _cardRect, format);
+        }
+        finally
+        {
+            g.Restore(state);
+        }
+    }
+
+    private void DrawBlurredOverlay(SD.Graphics g, int alpha)
+    {
+        lock (_previewSync)
+        {
+            SD.Bitmap? blurred = _previewClosed ? null : _blurredPreview;
+            if (blurred is null)
+                return;
+
+            var matrix = new ColorMatrix { Matrix33 = alpha / 255f };
+            using var attributes = new ImageAttributes();
+            attributes.SetColorMatrix(matrix);
+            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+            g.DrawImage(
+                blurred,
+                _thumbRect,
+                0, 0, blurred.Width, blurred.Height,
+                SD.GraphicsUnit.Pixel,
+                attributes);
+        }
+    }
 
     private void DrawThumbnail(SD.Graphics g, bool blurred)
     {

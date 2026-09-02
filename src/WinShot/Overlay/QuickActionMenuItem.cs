@@ -15,14 +15,12 @@ namespace WinShot.Overlay;
 internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 {
     internal const int GlyphSize = 16;
-    // The drop-down forces an 8px left inset of its own, so the row's own left pad is
-    // small; together they match the right pad and the menu reads evenly inset.
-    private const int PadLeft = 4;
-    private const int PadRight = 11;
-    private const int GlyphGap = 9;
-    private const int ShortcutGap = 24;
-    private const int ArrowWidth = 16;
-    private const int MinHeight = 24;
+    private const int PadLeft = 5;
+    private const int PadRight = 9;
+    private const int GlyphGap = 8;
+    private const int ShortcutGap = 16;
+    private const int ArrowWidth = 14;
+    private const int MinHeight = 21;
 
     private readonly Action _action;
     private readonly SD.Bitmap? _glyph;
@@ -65,7 +63,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
     public override SD.Size GetPreferredSize(SD.Size constrainingSize)
     {
         SD.Size own = OwnSize();
-        int width = Owner is QuickActionsContextMenu menu ? menu.RowWidth : own.Width;
+        int width = Owner is QuickActionsContextMenu menu ? menu.TargetRowWidth : own.Width;
         return new SD.Size(Math.Max(width, own.Width), own.Height);
     }
 
@@ -79,7 +77,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
             width += ShortcutGap + Measure(Shortcut).Width;
         if (HasDropDownItems)
             width += ShortcutGap + ArrowWidth;
-        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 8));
+        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 5));
         return _ownSize.Value;
     }
 
@@ -179,6 +177,7 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     private const int HorizontalGutter = 4;
 
     private int? _rowWidth;
+    private bool _stretchingRows;
 
     internal QuickActionsContextMenu()
     {
@@ -192,7 +191,15 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     /// padding during layout — 8 on the left, 1 on the right — which left the highlight
     /// touching one border and short of the other.
     /// </summary>
-    protected override WF.Padding DefaultPadding => new(HorizontalGutter, 3, HorizontalGutter, 3);
+    protected override WF.Padding DefaultPadding => new(HorizontalGutter, 2, HorizontalGutter, 2);
+
+    /// <summary>
+    /// The width every row is given: the widest row's own width, or the drop-down's inner
+    /// width when that turned out wider. Without the second half a row can end up narrower
+    /// than the menu, and the row's highlight then stops short of the right edge — which is
+    /// exactly how it looked before.
+    /// </summary>
+    internal int TargetRowWidth => Math.Max(RowWidth, ClientSize.Width - Padding.Horizontal);
 
     /// <summary>The width every row reports, measured once. Layout asks constantly.</summary>
     internal int RowWidth
@@ -253,6 +260,27 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     {
         base.OnLayoutCompleted(e);
         PopupChrome.ApplyRegion(this, Radius);
+
+        // The drop-down can settle wider than the rows asked for; one more pass hands them
+        // that width so every highlight spans the menu. Guarded: this re-enters layout.
+        if (_stretchingRows)
+            return;
+        int target = TargetRowWidth;
+        bool shortRow = false;
+        foreach (WF.ToolStripItem item in Items)
+            shortRow |= item is QuickActionMenuItem && item.Width != target;
+        if (!shortRow)
+            return;
+
+        _stretchingRows = true;
+        try
+        {
+            PerformLayout();
+        }
+        finally
+        {
+            _stretchingRows = false;
+        }
     }
 
     protected override void OnResize(EventArgs e)
