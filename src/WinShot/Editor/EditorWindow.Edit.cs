@@ -607,29 +607,6 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Bottom-bar zoom preset dropdown: Fit / 50% / 100% / 150% / 200%.</summary>
-    private void OnZoomPresetChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_syncingZoomBox) return;
-        if (ZoomBox.SelectedItem is not ComboBoxItem item) return;
-        string choice = (item.Content as string) ?? "Fit";
-        if (choice == "Fit")
-        {
-            FitToView();
-            return;
-        }
-        if (choice == "Fit Width")
-        {
-            FitToWidth();
-            return;
-        }
-        if (double.TryParse(choice.TrimEnd('%'), NumberStyles.Number, CultureInfo.InvariantCulture, out double pct)
-            && Viewport.ActualWidth > 1 && Viewport.ActualHeight > 1)
-        {
-            ZoomAt(new Point(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2), pct / 100.0);
-        }
-    }
-
     /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>
     private void OnPin(object sender, RoutedEventArgs e)
     {

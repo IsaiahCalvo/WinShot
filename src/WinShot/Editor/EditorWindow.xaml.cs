@@ -91,6 +91,7 @@ public partial class EditorWindow : Window
     private EditorTool _lastDrawTool = EditorTool.Freehand;
     private EditorTool _lastShapeTool = EditorTool.Rectangle;
     private EditorTool _lastTextTool = EditorTool.Text;
+    private EditorTool _lastEffectsTool = EditorTool.Blur;
     private Color _colorBeforeHighlighter;
     private double _opacityBeforeHighlighter = 1;
     private Color _highlighterColor = Color.FromRgb(0xFF, 0xFF, 0x00);
@@ -133,9 +134,9 @@ public partial class EditorWindow : Window
 
     // View state (zoom/pan). _zoom mirrors ViewScale so math never reads the transform.
     private double _zoom = 1.0;
-    private enum ViewFitMode { Free, Fit, FitWidth }
+    private enum ViewFitMode { Free, Fit, FitWidth, FitHeight }
     private ViewFitMode _viewFitMode = ViewFitMode.Fit;
-    private bool _syncingZoomBox;
+
     private bool _panning;
     private Point _panLast; // viewport coords
     private bool _spaceDown;
@@ -457,6 +458,40 @@ public partial class EditorWindow : Window
         OnViewChanged();
     }
 
+    /// <summary>Fits to HEIGHT, centred horizontally — Survey's third fit mode.</summary>
+    private void FitToHeight()
+    {
+        double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
+        if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
+
+        const double margin = 24;
+        double fitH = (vh - margin * 2) / _sourceHeight;
+        _zoom = Math.Clamp(fitH, Math.Min(MinZoom, Math.Max(fitH, 0.001)), MaxZoom);
+        _viewFitMode = ViewFitMode.FitHeight;
+        ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
+        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
+        ViewTranslate.Y = Math.Round((vh - _sourceHeight * _zoom) / 2);
+        _pendingInitialFit = false;
+        OnViewChanged();
+    }
+
+    /// <summary>Survey's TOOLBAR_ZOOM_STEP_FACTOR: each click is a quarter step about the viewport centre.</summary>
+    private const double ZoomStepFactor = 1.25;
+
+    private Point ViewportCentre() => new(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2);
+
+    private void OnZoomIn(object sender, RoutedEventArgs e) => ZoomAt(ViewportCentre(), _zoom * ZoomStepFactor);
+
+    private void OnZoomOut(object sender, RoutedEventArgs e) => ZoomAt(ViewportCentre(), _zoom / ZoomStepFactor);
+
+    private void OnFitMenuClick(object sender, RoutedEventArgs e) => FitMenuPopup.IsOpen = !FitMenuPopup.IsOpen;
+
+    private void OnFitPage(object sender, RoutedEventArgs e) { FitMenuPopup.IsOpen = false; FitToView(); }
+
+    private void OnFitWidth(object sender, RoutedEventArgs e) { FitMenuPopup.IsOpen = false; FitToWidth(); }
+
+    private void OnFitHeight(object sender, RoutedEventArgs e) { FitMenuPopup.IsOpen = false; FitToHeight(); }
+
     /// <summary>Zooms so the content point under <paramref name="anchor"/> (viewport coords) stays put.</summary>
     private void ZoomAt(Point anchor, double newZoom)
     {
@@ -489,45 +524,25 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// One zoom control. Fit/Fit Width live in the combo; the percent label is
-    /// only for free zoom that is not a named preset.
+    /// Survey's zoom cluster: −/+ around a live percentage, and a fit trigger that shows the
+    /// current fit mode's icon and label. Nothing here changes width per tool.
     /// </summary>
     private void SyncZoomPresetChrome()
     {
-        if (ZoomBox is null) return;
-        string? want = _viewFitMode switch
+        if (FitModeLabel is null || FitModeIcon is null) return;
+        (string label, string icon) = _viewFitMode switch
         {
-            ViewFitMode.Fit => "Fit",
-            ViewFitMode.FitWidth => "Fit Width",
-            _ => Math.Round(_zoom * 100) switch
-            {
-                50 => "50%",
-                100 => "100%",
-                150 => "150%",
-                200 => "200%",
-                _ => null,
-            },
+            ViewFitMode.Fit => ("Fit page", "SurveyIcon.FitPage"),
+            ViewFitMode.FitWidth => ("Fit width", "SurveyIcon.FitWidth"),
+            ViewFitMode.FitHeight => ("Fit height", "SurveyIcon.FitHeight"),
+            _ => ("Manual", "SurveyIcon.FitPage"),
         };
-        _syncingZoomBox = true;
-        try
-        {
-            if (want is null)
-            {
-                ZoomBox.Visibility = Visibility.Collapsed;
-                ZoomLabel.Visibility = Visibility.Visible;
-                ZoomBox.SelectedIndex = -1;
-                return;
-            }
-            ZoomBox.Visibility = Visibility.Visible;
-            ZoomLabel.Visibility = Visibility.Collapsed;
-            foreach (ComboBoxItem item in ZoomBox.Items.OfType<ComboBoxItem>())
-                if ((item.Content as string) == want)
-                {
-                    ZoomBox.SelectedItem = item;
-                    break;
-                }
-        }
-        finally { _syncingZoomBox = false; }
+        FitModeLabel.Text = label;
+        FitModeIcon.Content = FindResource(icon);
+        FitModeLabel.Opacity = _viewFitMode == ViewFitMode.Free ? 0.6 : 1;
+        foreach (var (item, mode) in new[] { (FitPageItem, ViewFitMode.Fit), (FitWidthItem, ViewFitMode.FitWidth), (FitHeightItem, ViewFitMode.FitHeight) })
+            if (item is not null)
+                item.Foreground = (Brush)FindResource(_viewFitMode == mode ? "TextPrimaryBrush" : "TextSecondaryBrush");
     }
 
     private void SyncCaptureShadow()
@@ -719,6 +734,14 @@ public partial class EditorWindow : Window
         UpdateGroupButtonChrome();
     }
 
+    private void OnEffectsGroupClick(object sender, RoutedEventArgs e)
+    {
+        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Effects")
+            CheckToolButton(_lastEffectsTool);
+        UpdateContextPanels();
+        UpdateGroupButtonChrome();
+    }
+
     private void RememberGroupTool(EditorTool tool)
     {
         switch (EditorShellContract.GroupFor(tool, _filledRectangleMode))
@@ -726,6 +749,7 @@ public partial class EditorWindow : Window
             case "Draw": _lastDrawTool = tool; break;
             case "Shape": _lastShapeTool = tool; break;
             case "Text": _lastTextTool = tool; break;
+            case "Effects": _lastEffectsTool = tool; break;
         }
     }
 
@@ -784,6 +808,7 @@ public partial class EditorWindow : Window
         Paint(DrawGroupBtn, group == "Draw");
         Paint(ShapeGroupBtn, group == "Shape");
         Paint(TextGroupBtn, group == "Text");
+        Paint(EffectsGroupBtn, group == "Effects");
         PaintCropChrome(_tool == EditorTool.Crop);
     }
 
@@ -855,6 +880,7 @@ public partial class EditorWindow : Window
         DrawGroupPanel.Visibility = Show(group == "Draw");
         ShapeGroupPanel.Visibility = Show(group == "Shape");
         TextGroupPanel.Visibility = Show(group == "Text");
+        EffectsGroupPanel.Visibility = Show(group == "Effects");
 
         EditorColorBar.Visibility = Visibility.Visible;
         if (SizeEffectHost is not null)
@@ -868,7 +894,7 @@ public partial class EditorWindow : Window
             SecondaryToolPanel.Visibility = Show(props);
         EditorFormatBar.Visibility = Visibility.Visible;
         EditorGroupToolsHost.Visibility = Visibility.Visible;
-        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text");
+        EditorGroupBar.Visibility = Show(group is "Draw" or "Shape" or "Text" or "Effects");
         Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
     }
 
@@ -937,7 +963,9 @@ public partial class EditorWindow : Window
             : Math.Max(0, ActualWidth - 24);
         double col0 = MeasureWidth(BtnUndo?.Parent as FrameworkElement);
         double tools = MeasureWidth(ToolPanel);
-        double right = MeasureWidth(BtnSave) + MeasureWidth(BtnDone) + 8;
+        // Save/Done moved to the bottom bar; the right edge is now the zoom cluster.
+        double right = MeasureWidth(BtnZoomOut) + MeasureWidth(ZoomLabel) + MeasureWidth(BtnZoomIn)
+            + MeasureWidth(FitMenuBtn) + 24;
         if (ColorPanel?.Visibility == Visibility.Visible)
             right += MeasureWidth(ColorPanel);
         if (SizeEffectHost?.Visibility == Visibility.Visible)
@@ -1200,7 +1228,7 @@ public partial class EditorWindow : Window
         FitComboToLongestItem(EraserModeBox);
         FitComboToLongestItem(EffectStrengthBox);
         FitComboToLongestItem(StepModeBox);
-        FitComboToLongestItem(ZoomBox);
+
     }
 
     private double ActiveSize() => ChromeTool() switch

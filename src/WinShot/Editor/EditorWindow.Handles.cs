@@ -69,11 +69,12 @@ public partial class EditorWindow : Window
                 LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe));
                 break;
             case AnnotationData.TypeStep:
-                // A counter has no scale handles — its size is the badge size — but it does
-                // rotate, so it gets the grip on its own.
+                // Survey's counter: no scale handles, and rotation means aiming the pin's
+                // pointer, not spinning the badge. The grip sits out past the tip, on the
+                // pointer's own bearing, so it reads as "drag the point around".
                 _handleKind = HandleKind.Box;
                 EnsureThumbs(0);
-                PlaceRotateGrip(fe);
+                PlaceCounterGrip(fe, meta);
                 HandleLayer.Visibility = Visibility.Visible;
                 break;
             default:
@@ -103,6 +104,20 @@ public partial class EditorWindow : Window
             AnnotationRotation.RotatePoint(top, centre, angle));
 
         HandleLayer.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Counter grip: beyond the pin tip, along the pointer bearing (0 = east).</summary>
+    private void PlaceCounterGrip(FrameworkElement fe, AnnotationData meta)
+    {
+        Rect b = UnrotatedCanvasBounds(fe);
+        if (b.Width < 0.5 && b.Height < 0.5) { HideRotateThumb(); return; }
+        double angle = (meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle) * Math.PI / 180;
+        var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
+        double tipDist = b.Width / 2;
+        var tip = new Point(centre.X + Math.Cos(angle) * tipDist, centre.Y + Math.Sin(angle) * tipDist);
+        double gripDist = tipDist + AnnotationRotation.HandleOffsetScreenPx / _zoom;
+        var grip = new Point(centre.X + Math.Cos(angle) * gripDist, centre.Y + Math.Sin(angle) * gripDist);
+        PlaceRotateThumb(grip, tip);
     }
 
     /// <summary>Puts the grip above an element that has no box frame of its own.</summary>
@@ -386,9 +401,20 @@ public partial class EditorWindow : Window
         UpdateSelectionVisual();
     }
 
-    /// <summary>Live rotation from the grip: bearing, grab offset, then the 45 degree snap rules.</summary>
+    /// <summary>Live rotation from the grip: bearing, grab offset, then the snap rules.</summary>
     private void DragRotate(FrameworkElement fe, Point pos)
     {
+        // Counter: aim the pointer at the cursor (Survey's counterRotateDrag). The badge
+        // itself never turns, so the number stays upright.
+        if (fe is Grid badge && fe.Tag is AnnotationData step && step.Type == AnnotationData.TypeStep)
+        {
+            double pointer = AnnotationRotation.PointerAngleFromCursor(
+                RotationCentre(fe), pos, ShapeConstraint.ShiftHeld);
+            AnnotationFactory.SetStepPointerAngle(badge, pointer);
+            step.PointerAngle = pointer;
+            return;
+        }
+
         double bearing = AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos);
         double angle = AnnotationRotation.ResolveDrag(
             _rotateStartAngle, _rotateGrabBearing, bearing, ShapeConstraint.ShiftHeld);
@@ -714,7 +740,9 @@ public partial class EditorWindow : Window
             Meta = meta.Clone(),
             Tx = off.X,
             Ty = off.Y,
-            Angle = AnnotationTransform.AngleOf(element),
+            Angle = meta.Type == AnnotationData.TypeStep
+                ? meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle
+                : AnnotationTransform.AngleOf(element),
         };
     }
 
@@ -804,13 +832,21 @@ public partial class EditorWindow : Window
                 break;
         }
 
-        // Every branch above rebuilt the element unrotated; put the captured angle back.
-        if (Math.Abs(snap.Angle) > 0.01)
+        if (snap.Type == AnnotationData.TypeStep)
         {
-            fe.UpdateLayout();
-            AnnotationTransform.SetAngle(fe, snap.Angle);
+            if (fe is Grid badge) AnnotationFactory.SetStepPointerAngle(badge, snap.Angle);
+            meta.PointerAngle = snap.Angle;
         }
-        meta.Angle = snap.Angle;
+        else
+        {
+            // Every branch above rebuilt the element unrotated; put the captured angle back.
+            if (Math.Abs(snap.Angle) > 0.01)
+            {
+                fe.UpdateLayout();
+                AnnotationTransform.SetAngle(fe, snap.Angle);
+            }
+            meta.Angle = snap.Angle;
+        }
 
         fe.Tag = meta;
     }

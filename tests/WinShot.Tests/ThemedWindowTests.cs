@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -488,7 +488,7 @@ public class ThemedWindowTests
         var primary = (StackPanel)editor.FindName("ToolPanel")!;
         var primaryOrder = primary.Children.OfType<FrameworkElement>()
             .Select(el => el.Tag as string)
-            .Where(tag => tag is "Pan" or "Select" or "Draw" or "Shape" or "Text" or "Eyedropper" or "Pixelate" or "Spotlight" or "Blur")
+            .Where(tag => tag is "Pan" or "Select" or "Draw" or "Shape" or "Text" or "Effects")
             .ToArray();
         Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
 
@@ -498,7 +498,7 @@ public class ThemedWindowTests
         string[] namedControls =
         {
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
-            "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn",
+            "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn", "EffectsGroupBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
@@ -506,6 +506,7 @@ public class ThemedWindowTests
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
+            "BtnZoomIn", "BtnZoomOut", "FitMenuBtn", "FitPageItem", "FitWidthItem", "FitHeightItem",
         };
         foreach (string name in namedControls)
         {
@@ -524,6 +525,7 @@ public class ThemedWindowTests
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnPin", "BtnCopy", "BtnCenter", "MoreChromeBtn", "AlignMenuBtn", "FormatOverflowBtn",
+            "EffectsGroupBtn", "BtnSave", "BtnZoomIn", "BtnZoomOut", "FitMenuBtn",
         };
         foreach (string name in iconOnlyControls)
         {
@@ -681,10 +683,10 @@ public class ThemedWindowTests
         Assert.True(IsLogicalDescendant(formatBar, textButtons),
             "B/I/U/S must stay on the primary strip, not the overflow flyout.");
         Assert.True(IsLogicalDescendant(formatBar, bold));
-        Point textSave = ((Button)editor.FindName("BtnSave")!).TranslatePoint(new Point(0, 0), editor);
+        Point textSave = ((FrameworkElement)editor.FindName("BtnZoomOut")!).TranslatePoint(new Point(0, 0), editor);
         Point textSec = secondary.TranslatePoint(new Point(0, 0), editor);
         Assert.True(textSec.X + secondary.ActualWidth <= textSave.X + 0.5,
-            $"Text secondary sits on Save as…: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
+            $"Text secondary runs into the zoom cluster: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
 
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
@@ -697,11 +699,11 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "72");
         Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
-        var save = (Button)editor.FindName("BtnSave")!;
+        var save = (FrameworkElement)editor.FindName("BtnZoomOut")!;
         Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
         Point saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
         Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
-            $"Callout size sits on Save as…: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
+            $"Callout size runs into the zoom cluster: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
         editor.UpdateLayout();
         PackEditorFormat(editor);
         Point formatOrigin = formatBar.TranslatePoint(new Point(0, 0), editor);
@@ -710,7 +712,7 @@ public class ThemedWindowTests
             $"Format extras sit on Save as…: format={formatOrigin.X}+{formatBar.ActualWidth} save={saveOrigin.X}");
         Point calloutSec = secondary.TranslatePoint(new Point(0, 0), editor);
         Assert.True(calloutSec.X + secondary.ActualWidth <= saveOrigin.X + 0.5,
-            $"Callout secondary sits on Save as…: sec={calloutSec.X}+{secondary.ActualWidth} save={saveOrigin.X}");
+            $"Callout secondary runs into the zoom cluster: sec={calloutSec.X}+{secondary.ActualWidth} save={saveOrigin.X}");
         var done = (Button)editor.FindName("BtnDone")!;
         Point doneOrigin = done.TranslatePoint(new Point(0, 0), editor);
         Assert.True(doneOrigin.X + done.ActualWidth <= editor.ActualWidth + 0.5,
@@ -757,9 +759,9 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, color.Visibility);
         var effectBox = (FrameworkElement)editor.FindName("EffectStrengthBox")!;
         Point effectOrigin = effectBox.TranslatePoint(new Point(0, 0), editor);
-        Point pixelateSave = ((FrameworkElement)editor.FindName("BtnSave")!).TranslatePoint(new Point(0, 0), editor);
+        Point pixelateSave = ((FrameworkElement)editor.FindName("BtnZoomOut")!).TranslatePoint(new Point(0, 0), editor);
         Assert.True(effectOrigin.X + effectBox.ActualWidth <= pixelateSave.X + 0.5,
-            $"Pixelate Medium sits on Save as…: effect={effectOrigin.X}+{effectBox.ActualWidth} save={pixelateSave.X}");
+            $"Pixelate Medium runs into the zoom cluster: effect={effectOrigin.X}+{effectBox.ActualWidth} save={pixelateSave.X}");
 
         typeof(EditorWindow).GetMethod("OnCropClick",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -778,7 +780,7 @@ public class ThemedWindowTests
         Point applyOrigin = applyCrop.TranslatePoint(new Point(0, 0), editor);
         Point cropSave = save.TranslatePoint(new Point(0, 0), editor);
         Assert.True(applyOrigin.X + applyCrop.ActualWidth <= cropSave.X + 0.5,
-            $"Apply crop sits on Save as…: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
+            $"Apply crop runs into the zoom cluster: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
         Assert.Contains(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name == "CropCancelBtn");
         Point toolsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor);
@@ -945,7 +947,7 @@ public class ThemedWindowTests
         double zoom = (double)typeof(EditorWindow)
             .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(editor)!;
-        var zoomBox = (ComboBox)editor.FindName("ZoomBox")!;
+        var fitModeLabel = (TextBlock)editor.FindName("FitModeLabel")!;
         var zoomLabel = (TextBlock)editor.FindName("ZoomLabel")!;
 
         editor.Close();
@@ -954,8 +956,9 @@ public class ThemedWindowTests
         Assert.True(zoom > 1.05, $"tiny capture stayed at native size: zoom={zoom}, viewport={vw}x{vh}");
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
-        Assert.Equal("Fit", (zoomBox.SelectedItem as ComboBoxItem)?.Content);
-        Assert.Equal(Visibility.Collapsed, zoomLabel.Visibility);
+        Assert.Equal("Fit page", fitModeLabel.Text);
+        Assert.Equal(Visibility.Visible, zoomLabel.Visibility);
+        Assert.EndsWith("%", zoomLabel.Text);
     }
 
     private static void PinSmoke(EditorWindow editor)

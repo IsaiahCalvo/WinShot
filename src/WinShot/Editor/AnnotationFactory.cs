@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -498,6 +498,19 @@ internal static class AnnotationFactory
     /// Survey teardrop pin: circle + nub at 225° (southwest). Caption is the
     /// number (1, 2, …) or a letter sequence when <paramref name="letters"/> is set.
     /// </summary>
+    /// <summary>
+    /// Turns a counter's pointer to <paramref name="pointerAngle"/> (0 = east, clockwise) in
+    /// place: only the pin path is regenerated, so the number stays upright — Survey's
+    /// counter rotates the tip, never the label.
+    /// </summary>
+    public static void SetStepPointerAngle(Grid badge, double pointerAngle)
+    {
+        if (badge.Children.OfType<Path>().FirstOrDefault() is not { } pin) return;
+        double tipDist = badge.Width / 2;
+        double radius = tipDist / 1.5; // CounterGeometry.TipDistance is radius * 1.5
+        pin.Data = CounterGeometry.Pin(new Point(tipDist, tipDist), radius, pointerAngle);
+    }
+
     public static Grid CreateStepBadge(int number, Color color, double thickness, bool letters,
         double pointerAngle = CounterGeometry.DefaultPointerAngle)
     {

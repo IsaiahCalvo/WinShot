@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using WinShot.Editor;
 using Xunit;
@@ -102,7 +102,9 @@ public class AnnotationToolsAdversarialTests
         Assert.Equal("Shape", EditorShellContract.GroupFor(EditorTool.Rectangle, true));
         Assert.Equal("Text", EditorShellContract.GroupFor(EditorTool.Text, false));
         Assert.Equal("Text", EditorShellContract.GroupFor(EditorTool.Callout, false));
-        Assert.Equal("", EditorShellContract.GroupFor(EditorTool.Pixelate, false));
+        Assert.Equal("Effects", EditorShellContract.GroupFor(EditorTool.Pixelate, false));
+        Assert.Equal("Effects", EditorShellContract.GroupFor(EditorTool.Blur, false));
+        Assert.Equal("", EditorShellContract.GroupFor(EditorTool.Eyedropper, false));
     }
 
     [Fact]

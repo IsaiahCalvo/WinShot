@@ -111,6 +111,13 @@ internal sealed class AnnotationData
     /// </summary>
     public double Angle { get; set; }
 
+    /// <summary>
+    /// Counter (Step) only: which way the pin's pointer aims, degrees, 0 = east, clockwise.
+    /// Survey's counter rotates by turning this tip, not the badge — the number stays
+    /// upright. Null in older projects, which read as the 225° default.
+    /// </summary>
+    public double? PointerAngle { get; set; }
+
     public AnnotationData Clone() => (AnnotationData)MemberwiseClone();
 
     // ------------------------------ factory helpers used at commit time
@@ -218,6 +225,7 @@ internal sealed class AnnotationData
         Number = number,
         Color = ToHex(color),
         Thickness = thickness,
+        PointerAngle = CounterGeometry.DefaultPointerAngle,
     };
 
     public static AnnotationData ForSpotlight(Size outer, Rect hole)
@@ -483,7 +491,8 @@ internal static class ProjectSerializer
                     ?? throw new InvalidDataException("Step annotation is missing its number.");
                 bool letters = string.Equals(a.Style, "Letter", StringComparison.Ordinal);
                 var badge = AnnotationFactory.CreateStepBadge(
-                    number, RequireColor(a), RequireThickness(a), letters);
+                    number, RequireColor(a), RequireThickness(a), letters,
+                    a.PointerAngle ?? CounterGeometry.DefaultPointerAngle);
                 SetPos(badge, pts[0]);
                 return badge;
             }

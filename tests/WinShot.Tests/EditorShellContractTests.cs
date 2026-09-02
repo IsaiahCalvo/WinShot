@@ -1,4 +1,4 @@
-using WinShot.Editor;
+﻿using WinShot.Editor;
 using Xunit;
 
 namespace WinShot.Tests;
@@ -10,15 +10,18 @@ public class EditorShellContractTests
     {
         Assert.Equal(new[]
         {
-            "Pan", "Select", "Draw", "Shape", "Text", "Eyedropper", "Pixelate", "Spotlight", "Blur",
+            "Pan", "Select", "Draw", "Shape", "Text", "Effects",
         }, EditorShellContract.PrimaryToolOrder);
+        Assert.Equal(new[] { "Pixelate", "Spotlight", "Blur" }, EditorShellContract.EffectsGroupTools);
         Assert.Equal(new[] { "Freehand", "Highlighter", "Eraser" }, EditorShellContract.DrawGroupTools);
         Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" },
             EditorShellContract.ShapeGroupTools);
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.TextGroupTools);
         Assert.Empty(EditorShellContract.MoreToolOrder);
 
-        string[] uniqueTools = new[] { "Pan", "Select", "Eyedropper", "Pixelate", "Spotlight", "Blur", "Crop", "CurvedArrow" }
+        // Eyedropper is not on the bar: it lives inside the colour picker.
+        string[] uniqueTools = new[] { "Pan", "Select", "Eyedropper", "Crop", "CurvedArrow" }
+            .Concat(EditorShellContract.EffectsGroupTools)
             .Concat(EditorShellContract.DrawGroupTools)
             .Concat(EditorShellContract.ShapeGroupTools)
             .Concat(EditorShellContract.TextGroupTools)

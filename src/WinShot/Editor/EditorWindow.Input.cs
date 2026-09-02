@@ -307,7 +307,10 @@ public partial class EditorWindow : Window
             case EditorTool.Freehand or EditorTool.Highlighter:
                 if (shape is Polyline stroke && stroke.Points.Count >= 1)
                 {
-                    var pts = AnnotationFactory.SmoothFreehandPoints(stroke.Points);
+                    // Survey commits the raw pointer samples (0.2px dedupe, then compaction) and
+                    // lets the ink outline do the rest. Smoothing here rounded off corners and
+                    // lagged the hand, which is what made the pen feel worse than Survey's.
+                    var pts = PaperInk.Compact(stroke.Points);
                     AnnotationCanvas.Children.Remove(stroke);
                     bool highlighter = _tool == EditorTool.Highlighter;
                     double width = highlighter
@@ -1082,7 +1085,11 @@ public partial class EditorWindow : Window
         SelectionRect.RenderTransform = selAngle == 0
             ? Transform.Identity
             : new RotateTransform(selAngle, b.Width / 2, b.Height / 2);
-        SelectionRect.Visibility = Visibility.Visible;
+        // Survey draws no box around a line, arrow or curve — the two endpoint handles ARE
+        // the selection. A dashed rectangle around a diagonal line just looked like a hit box.
+        bool lineLike = _selected is FrameworkElement { Tag: AnnotationData lm }
+            && lm.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow;
+        SelectionRect.Visibility = lineLike ? Visibility.Collapsed : Visibility.Visible;
 
         UpdateSelectionHandles();
     }

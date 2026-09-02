@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 
 namespace WinShot.Editor;
@@ -11,8 +11,14 @@ namespace WinShot.Editor;
 /// </summary>
 internal static class AnnotationRotation
 {
-    /// <summary>Degrees within which a free drag snaps onto a 45° multiple. Survey's default.</summary>
+    /// <summary>Degrees within which a free drag latches onto a snap increment. Survey's default.</summary>
     public const double SnapThresholdDegrees = 3;
+
+    /// <summary>
+    /// Snap increment. Survey snaps at 45°; Isaiah wants finer control, so 15° — every
+    /// 45° is still a snap point, there are just two more stops in between.
+    /// </summary>
+    public const double SnapIncrementDegrees = 15;
 
     /// <summary>Distance (screen px) from the top edge to the rotation handle's centre.</summary>
     public const double HandleOffsetScreenPx = 22;
@@ -29,19 +35,30 @@ internal static class AnnotationRotation
     }
 
     /// <summary>
-    /// Soft snap: inside the threshold the angle latches onto the nearest 45° multiple,
+    /// Soft snap: inside the threshold the angle latches onto the nearest increment,
     /// outside it the angle passes through untouched. Clean angles without having to
     /// fight the drag for them.
     /// </summary>
-    public static double SnapToNearest45(double degrees, double threshold = SnapThresholdDegrees)
+    public static double SnapToNearest(double degrees, double threshold = SnapThresholdDegrees)
     {
         double a = Normalize(degrees);
-        double nearest = Math.Round(a / 45) * 45;
+        double nearest = Math.Round(a / SnapIncrementDegrees) * SnapIncrementDegrees;
         return Math.Abs(a - nearest) <= threshold ? Normalize(nearest) : a;
     }
 
-    /// <summary>Hard snap for Shift-drag: always the nearest 45° multiple.</summary>
-    public static double QuantizeTo45(double degrees) => Normalize(Math.Round(Normalize(degrees) / 45) * 45);
+    /// <summary>Hard snap for Shift-drag: always the nearest increment.</summary>
+    public static double Quantize(double degrees) =>
+        Normalize(Math.Round(Normalize(degrees) / SnapIncrementDegrees) * SnapIncrementDegrees);
+
+    /// <summary>
+    /// Survey's counter convention: the pin's pointer angle is the plain bearing from the
+    /// badge centre to the cursor, 0° = east, clockwise positive (Math.atan2 in degrees).
+    /// </summary>
+    public static double PointerAngleFromCursor(Point centre, Point cursor, bool shift)
+    {
+        double raw = Normalize(Math.Atan2(cursor.Y - centre.Y, cursor.X - centre.X) * 180 / Math.PI);
+        return shift ? Quantize(raw) : SnapToNearest(raw);
+    }
 
     /// <summary>
     /// The angle a rotation-handle drag implies: the bearing from the pivot to the pointer,
@@ -69,7 +86,7 @@ internal static class AnnotationRotation
     }
 
     /// <summary>
-    /// Full drag resolution: bearing, then Shift = hard 45° steps, otherwise the soft snap.
+    /// Full drag resolution: bearing, then Shift = hard increment steps, otherwise the soft snap.
     /// <paramref name="startAngle"/> is the annotation's angle when the drag began and
     /// <paramref name="grabOffset"/> the bearing difference at grab time, so the mark does
     /// not jump when the handle is picked up slightly off-centre.
@@ -77,7 +94,7 @@ internal static class AnnotationRotation
     public static double ResolveDrag(double startAngle, double grabOffset, double pointerAngle, bool shift)
     {
         double raw = Normalize(startAngle + (pointerAngle - grabOffset));
-        return shift ? QuantizeTo45(raw) : SnapToNearest45(raw);
+        return shift ? Quantize(raw) : SnapToNearest(raw);
     }
 }
 

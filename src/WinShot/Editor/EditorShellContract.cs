@@ -1,4 +1,4 @@
-namespace WinShot.Editor;
+﻿namespace WinShot.Editor;
 
 [Flags]
 internal enum EditorContextControls
@@ -24,6 +24,9 @@ internal enum EditorContextControls
 /// </summary>
 internal static class EditorShellContract
 {
+    // Survey's bar: the two navigation tools, then one button per group. Pixelate,
+    // spotlight and blur are the Effects group; the eyedropper lives inside the colour
+    // picker, where it is used.
     public static readonly string[] PrimaryToolOrder =
     {
         "Pan",
@@ -31,16 +34,14 @@ internal static class EditorShellContract
         "Draw",
         "Shape",
         "Text",
-        "Eyedropper",
-        "Pixelate",
-        "Spotlight",
-        "Blur",
+        "Effects",
     };
 
     public static readonly string[] DrawGroupTools = { "Freehand", "Highlighter", "Eraser" };
     public static readonly string[] ShapeGroupTools =
         { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" };
     public static readonly string[] TextGroupTools = { "Text", "Callout" };
+    public static readonly string[] EffectsGroupTools = { "Pixelate", "Spotlight", "Blur" };
 
     public static readonly string[] MoreToolOrder = Array.Empty<string>();
 
@@ -99,6 +100,7 @@ internal static class EditorShellContract
             EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
                 or EditorTool.Step => "Shape",
             EditorTool.Text or EditorTool.Callout => "Text",
+            EditorTool.Pixelate or EditorTool.Spotlight or EditorTool.Blur => "Effects",
             _ => "",
         };
 
