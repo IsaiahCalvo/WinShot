@@ -58,6 +58,23 @@
                       LogicalName="WinShot.Assets.quick-access-unlock.svg" />
     <EmbeddedResource Include="Assets\quick-access-save.svg"
                       LogicalName="WinShot.Assets.quick-access-save.svg" />
+    <!-- Context-menu glyphs for the quick-actions card's editing rows. -->
+    <EmbeddedResource Include="Assets\quick-access-text.svg"
+                      LogicalName="WinShot.Assets.quick-access-text.svg" />
+    <EmbeddedResource Include="Assets\quick-access-background.svg"
+                      LogicalName="WinShot.Assets.quick-access-background.svg" />
+    <EmbeddedResource Include="Assets\quick-access-rotate-left.svg"
+                      LogicalName="WinShot.Assets.quick-access-rotate-left.svg" />
+    <EmbeddedResource Include="Assets\quick-access-rotate-right.svg"
+                      LogicalName="WinShot.Assets.quick-access-rotate-right.svg" />
+    <EmbeddedResource Include="Assets\quick-access-flip-horizontal.svg"
+                      LogicalName="WinShot.Assets.quick-access-flip-horizontal.svg" />
+    <EmbeddedResource Include="Assets\quick-access-flip-vertical.svg"
+                      LogicalName="WinShot.Assets.quick-access-flip-vertical.svg" />
+    <EmbeddedResource Include="Assets\quick-access-resize.svg"
+                      LogicalName="WinShot.Assets.quick-access-resize.svg" />
+    <EmbeddedResource Include="Assets\quick-access-undo.svg"
+                      LogicalName="WinShot.Assets.quick-access-undo.svg" />
   </ItemGroup>
 
 </Project>

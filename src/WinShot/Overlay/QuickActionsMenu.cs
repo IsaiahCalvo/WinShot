@@ -103,6 +103,37 @@ internal static class QuickActionsMenu
         _ => null,
     };
 
+    /// <summary>
+    /// Undoing a rotate or a flip is just another rotate or flip, so those rows cost
+    /// no memory to reverse — unlike Resize…, which has to keep the old bitmap.
+    /// </summary>
+    internal static SD.RotateFlipType Inverse(SD.RotateFlipType transform) => transform switch
+    {
+        SD.RotateFlipType.Rotate90FlipNone => SD.RotateFlipType.Rotate270FlipNone,
+        SD.RotateFlipType.Rotate270FlipNone => SD.RotateFlipType.Rotate90FlipNone,
+        _ => transform, // a flip is its own inverse
+    };
+
+    /// <summary>
+    /// The glyph for a row, or null for the text-only rows. CleanShot icons only its
+    /// first two groups — the capture actions and the pixel edits — and so do we.
+    /// </summary>
+    internal static string? IconFor(string id) => id switch
+    {
+        Annotate => "quick-access-edit.svg",
+        Pin => "quick-access-pin.svg",
+        ExtractText => "quick-access-text.svg",
+        Background => "quick-access-background.svg",
+        RotateLeft => "quick-access-rotate-left.svg",
+        RotateRight => "quick-access-rotate-right.svg",
+        FlipHorizontal => "quick-access-flip-horizontal.svg",
+        FlipVertical => "quick-access-flip-vertical.svg",
+        Resize => "quick-access-resize.svg",
+        _ => null,
+    };
+
+    internal const string UndoIcon = "quick-access-undo.svg";
+
     /// <summary>Height that keeps <paramref name="source"/>'s aspect at <paramref name="width"/>.</summary>
     internal static int AspectHeight(SD.Size source, int width) =>
         source.Width <= 0 ? 1 : Math.Max(1, (int)Math.Round(width * (double)source.Height / source.Width));

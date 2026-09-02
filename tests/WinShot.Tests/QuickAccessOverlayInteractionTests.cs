@@ -206,12 +206,135 @@ public class QuickAccessOverlayInteractionTests
             var versionField = type.GetField("_imageVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
             run.Invoke(overlay, new object[] { "rotate-right" });
+            PumpUntilRenderIdle(overlay);
 
             using var rotated = overlay.CloneImage();
             Assert.Equal(760, rotated.Width);
             Assert.Equal(1200, rotated.Height);
             Assert.Equal(1, (int)versionField.GetValue(overlay)!);
+            Assert.False(overlay.IsDisposed); // the card stays up so the edit can be undone
         });
+    }
+
+    [Fact]
+    public void UndoRestoresTheImageAndMovesToThePreviousEdit()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var type = typeof(FastQuickActionsWindow);
+            var run = type.GetMethod("RunMenuAction", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var undo = type.GetMethod("UndoLastEdit", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            run.Invoke(overlay, new object[] { "flip-h" });
+            PumpUntilRenderIdle(overlay);
+            run.Invoke(overlay, new object[] { "rotate-right" });
+            PumpUntilRenderIdle(overlay);
+            Assert.Equal("rotate-right", UndoRowId(overlay));
+
+            undo.Invoke(overlay, null);
+            PumpUntilRenderIdle(overlay);
+            using (var afterFirstUndo = overlay.CloneImage())
+            {
+                Assert.Equal(1200, afterFirstUndo.Width);
+                Assert.Equal(760, afterFirstUndo.Height);
+            }
+            Assert.Equal("flip-h", UndoRowId(overlay));
+
+            undo.Invoke(overlay, null);
+            PumpUntilRenderIdle(overlay);
+            Assert.Null(UndoRowId(overlay));
+
+            undo.Invoke(overlay, null); // an empty history is a no-op, not a crash
+            PumpUntilRenderIdle(overlay);
+            Assert.Null(UndoRowId(overlay));
+        });
+    }
+
+    [Fact]
+    public void UndoButtonSitsOnTheRowOfTheLastEdit()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var type = typeof(FastQuickActionsWindow);
+            type.GetMethod("RunMenuAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(overlay, new object[] { "flip-v" });
+            PumpUntilRenderIdle(overlay);
+            type.GetMethod("SyncUndoRow", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(overlay, null);
+
+            var menu = (WF.ContextMenuStrip)type
+                .GetField("_overflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            var showUndo = menu.Items.Cast<WF.ToolStripItem>()
+                .Where(i => i.GetType().Name == "QuickActionMenuItem")
+                .Where(i => (bool)i.GetType()
+                    .GetProperty("ShowUndo", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(i)!)
+                .Select(i => i.Text)
+                .ToArray();
+
+            Assert.Equal(new[] { "Flip vertical" }, showUndo);
+        });
+    }
+
+    [Fact]
+    public void EveryIconedRowResolvesItsGlyph()
+    {
+        RunSta(() =>
+        {
+            string[] ids =
+            [
+                "annotate", "pin", "ocr", "background",
+                "rotate-left", "rotate-right", "flip-h", "flip-v", "resize",
+            ];
+            foreach (string id in ids)
+            {
+                string asset = InvokeIconFor(id) ?? throw new Xunit.Sdk.XunitException($"{id} has no icon");
+                Assert.NotNull(SvgIcons.Get(asset, 16, SD.Color.White));
+            }
+            Assert.NotNull(SvgIcons.Get("quick-access-undo.svg", 16, SD.Color.White));
+            Assert.Null(InvokeIconFor("print"));
+        });
+    }
+
+    private static string? InvokeIconFor(string id) =>
+        (string?)typeof(FastQuickActionsWindow).Assembly
+            .GetType("WinShot.Overlay.QuickActionsMenu")!
+            .GetMethod("IconFor", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { id });
+
+    /// <summary>
+    /// A pixel edit awaits the in-flight thumbnail render before touching the bitmap, and
+    /// that continuation comes back through the WinForms sync context — which needs a
+    /// message pump the unshown test window does not otherwise get.
+    /// </summary>
+    private static void PumpUntilRenderIdle(FastQuickActionsWindow overlay)
+    {
+        var field = typeof(FastQuickActionsWindow)
+            .GetField("_previewTask", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        for (int i = 0; i < 600; i++)
+        {
+            WF.Application.DoEvents();
+            if ((Task?)field.GetValue(overlay) is not { IsCompleted: false })
+                return;
+            Thread.Sleep(5);
+        }
+        throw new Xunit.Sdk.XunitException("The overlay thumbnail render never finished.");
+    }
+
+    private static string? UndoRowId(FastQuickActionsWindow overlay)
+    {
+        var edits = (System.Collections.IList)typeof(FastQuickActionsWindow)
+            .GetField("_edits", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+        if (edits.Count == 0)
+            return null;
+        object last = edits[edits.Count - 1]!;
+        return (string)last.GetType().GetProperty("RowId")!.GetValue(last)!;
     }
 
     [Fact]

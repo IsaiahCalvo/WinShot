@@ -166,6 +166,55 @@ public class QuickActionsMenuTests
         Assert.Equal(1, scaled.Height);
     }
 
+    [Theory]
+    [InlineData(SD.RotateFlipType.Rotate90FlipNone, SD.RotateFlipType.Rotate270FlipNone)]
+    [InlineData(SD.RotateFlipType.Rotate270FlipNone, SD.RotateFlipType.Rotate90FlipNone)]
+    [InlineData(SD.RotateFlipType.RotateNoneFlipX, SD.RotateFlipType.RotateNoneFlipX)]
+    [InlineData(SD.RotateFlipType.RotateNoneFlipY, SD.RotateFlipType.RotateNoneFlipY)]
+    public void InverseReversesEveryTransform(SD.RotateFlipType transform, SD.RotateFlipType expected)
+        => Assert.Equal(expected, QuickActionsMenu.Inverse(transform));
+
+    [Fact]
+    public void ApplyingATransformThenItsInverseRestoresTheBitmap()
+    {
+        using var bitmap = new SD.Bitmap(400, 200);
+        var transform = QuickActionsMenu.TransformFor(QuickActionsMenu.RotateLeft)!.Value;
+
+        bitmap.RotateFlip(transform);
+        Assert.Equal(new SD.Size(200, 400), bitmap.Size);
+        bitmap.RotateFlip(QuickActionsMenu.Inverse(transform));
+
+        Assert.Equal(new SD.Size(400, 200), bitmap.Size);
+    }
+
+    [Fact]
+    public void OnlyTheFirstTwoGroupsCarryIcons()
+    {
+        foreach (var row in QuickActionsMenu.Rows(false, true, true))
+        {
+            if (row.Id == QuickActionsMenu.Separator)
+                continue;
+            bool editingRow = row.Id is QuickActionsMenu.Annotate or QuickActionsMenu.Pin
+                or QuickActionsMenu.ExtractText or QuickActionsMenu.Background
+                or QuickActionsMenu.RotateLeft or QuickActionsMenu.RotateRight
+                or QuickActionsMenu.FlipHorizontal or QuickActionsMenu.FlipVertical
+                or QuickActionsMenu.Resize;
+            Assert.Equal(editingRow, QuickActionsMenu.IconFor(row.Id) is not null);
+        }
+    }
+
+    [Fact]
+    public void EveryIconIsADistinctAsset()
+    {
+        string[] icons = QuickActionsMenu.Rows(false, true, true)
+            .Select(r => QuickActionsMenu.IconFor(r.Id))
+            .Where(i => i is not null)
+            .ToArray()!;
+
+        Assert.Equal(9, icons.Length);
+        Assert.Equal(icons.Length, icons.Distinct().Count());
+    }
+
     [Fact]
     public void FileReadyRejectsMissingAndNullPaths()
     {
