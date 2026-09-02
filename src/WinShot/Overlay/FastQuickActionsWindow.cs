@@ -718,26 +718,11 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void BuildOverflowMenu()
     {
         _overflowMenu.AccessibleName = "More capture actions";
-        foreach (var row in QuickActionsMenu.Rows(
-                     mediaFile: _mediaFilePath is not null,
-                     canEdit: _mediaCanEdit,
-                     canShare: TryIsShareSupported(),
-                     canBlip: TryIsBlipInstalled()))
-        {
-            if (row.Id == QuickActionsMenu.Separator)
-            {
-                _overflowMenu.Items.Add(new WF.ToolStripSeparator());
-                continue;
-            }
-            string id = row.Id;
-            var item = new QuickActionMenuItem(id, row.Text, () => RunMenuAction(id));
-            if (row.Shortcut.Length > 0)
-            {
-                item.ShortcutKeyDisplayString = row.Shortcut;
-                item.ShowShortcutKeys = true;
-            }
-            _overflowMenu.Items.Add(item);
-        }
+        AddMenuRows(_overflowMenu, QuickActionsMenu.Rows(
+            mediaFile: _mediaFilePath is not null,
+            canEdit: _mediaCanEdit,
+            canShare: TryIsShareSupported(),
+            canBlip: TryIsBlipInstalled()));
         // The pre-show measurement can be a few pixels off; correct once the real size
         // is known, so the menu never ends up sitting over the thumbnail.
         _overflowMenu.Opened += (_, _) =>
@@ -800,6 +785,35 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
+    private void AddMenuRows(WF.ToolStrip menu, IEnumerable<QuickActionsMenu.Row> rows)
+    {
+        foreach (var row in rows)
+        {
+            if (row.Id == QuickActionsMenu.Separator)
+            {
+                menu.Items.Add(new WF.ToolStripSeparator());
+                continue;
+            }
+
+            string id = row.Id;
+            var item = new QuickActionMenuItem(id, row.Text, () => RunMenuAction(id));
+            if (row.Shortcut.Length > 0)
+            {
+                item.ShortcutKeyDisplayString = row.Shortcut;
+                item.ShowShortcutKeys = true;
+            }
+            if (row.Children is { Count: > 0 } children)
+            {
+                // Its own QuickActionsContextMenu so the submenu gets the same rounded
+                // chrome and row drawing as the menu it hangs off.
+                var submenu = new QuickActionsContextMenu();
+                AddMenuRows(submenu, children);
+                item.DropDown = submenu;
+            }
+            menu.Items.Add(item);
+        }
+    }
+
     private static bool TryIsBlipInstalled()
     {
         try
@@ -855,7 +869,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 case QuickActionsMenu.MoveToRecycleBin:
                     MoveToRecycleBin();
                     return;
-                case QuickActionsMenu.Share:
+                case QuickActionsMenu.ShareWindows:
                     _ = ShareAsync();
                     return;
                 case QuickActionsMenu.ShareBlip:

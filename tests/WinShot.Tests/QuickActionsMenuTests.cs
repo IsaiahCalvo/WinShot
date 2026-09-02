@@ -36,8 +36,7 @@ public class QuickActionsMenuTests
                 QuickActionsMenu.OpenWith,
                 QuickActionsMenu.ShowInFolder,
                 QuickActionsMenu.MoveToRecycleBin,
-                QuickActionsMenu.ShareBlip,
-                QuickActionsMenu.Share,
+                QuickActionsMenu.ShareGroup,
                 QuickActionsMenu.Close,
             },
             ids);
@@ -64,34 +63,48 @@ public class QuickActionsMenuTests
     public void RecordingWithoutEditorHidesEditRow()
         => Assert.DoesNotContain(QuickActionsMenu.Annotate, Ids(mediaFile: true, canEdit: false));
 
+    private static QuickActionsMenu.Row ShareRow(bool canShare = true, bool canBlip = false) =>
+        QuickActionsMenu.Rows(false, true, canShare, canBlip)
+            .Single(r => r.Id is QuickActionsMenu.ShareGroup or QuickActionsMenu.ShareWindows);
+
     [Fact]
     public void ShareRowDropsOutWhenUnsupported()
-        => Assert.DoesNotContain(QuickActionsMenu.Share, Ids(canShare: false));
+        => Assert.DoesNotContain(QuickActionsMenu.ShareWindows, Ids(canShare: false));
 
     [Fact]
-    public void BlipGetsItsOwnRowBesideTheWindowsShareSheet()
+    public void ShareExpandsToBlipAndTheWindowsSheetWhenBlipIsInstalled()
     {
-        string[] ids = Ids(canBlip: true);
+        QuickActionsMenu.Row share = ShareRow(canBlip: true);
 
-        Assert.Contains(QuickActionsMenu.ShareBlip, ids);
-        Assert.Contains(QuickActionsMenu.Share, ids);
-        // Windows does not see Blip as a share target, so the sheet would never offer it.
+        Assert.Equal(QuickActionsMenu.ShareGroup, share.Id);
+        Assert.Equal("Share", share.Text);
         Assert.Equal(
-            Array.IndexOf(ids, QuickActionsMenu.ShareBlip) + 1,
-            Array.IndexOf(ids, QuickActionsMenu.Share));
+            new[] { QuickActionsMenu.ShareBlip, QuickActionsMenu.ShareWindows },
+            share.Children!.Select(c => c.Id));
     }
 
     [Fact]
-    public void BlipRowIsAbsentWhenBlipIsNotInstalled()
-        => Assert.DoesNotContain(QuickActionsMenu.ShareBlip, Ids(canBlip: false));
+    public void ShareIsAPlainRowWithoutBlip()
+    {
+        // Everyone who installs WinShot from GitHub without Blip lands here: no submenu of
+        // one, and no row naming an app they do not have.
+        QuickActionsMenu.Row share = ShareRow(canBlip: false);
+
+        Assert.Equal(QuickActionsMenu.ShareWindows, share.Id);
+        Assert.Null(share.Children);
+        Assert.DoesNotContain(QuickActionsMenu.ShareBlip, Ids(canBlip: false));
+        Assert.DoesNotContain(
+            QuickActionsMenu.Rows(false, true, true),
+            r => r.Text.Contains("Blip", StringComparison.OrdinalIgnoreCase));
+    }
 
     [Fact]
-    public void BlipStillGetsARowWhenTheWindowsSheetIsUnavailable()
+    public void BlipAloneStillExpandsRatherThanRenamingTheRow()
     {
-        string[] ids = Ids(canShare: false, canBlip: true);
+        QuickActionsMenu.Row share = ShareRow(canShare: false, canBlip: true);
 
-        Assert.Contains(QuickActionsMenu.ShareBlip, ids);
-        Assert.DoesNotContain(QuickActionsMenu.Share, ids);
+        Assert.Equal(QuickActionsMenu.ShareGroup, share.Id);
+        Assert.Equal(new[] { QuickActionsMenu.ShareBlip }, share.Children!.Select(c => c.Id));
     }
 
     [Fact]
@@ -99,15 +112,29 @@ public class QuickActionsMenuTests
     {
         var rows = QuickActionsMenu.Rows(false, true, canShare: false, canBlip: false);
 
-        Assert.DoesNotContain(rows, r => r.Id is QuickActionsMenu.Share or QuickActionsMenu.ShareBlip);
+        Assert.DoesNotContain(rows, r => r.Id is QuickActionsMenu.ShareGroup
+            or QuickActionsMenu.ShareWindows or QuickActionsMenu.ShareBlip);
         // The group's separator must go with it rather than doubling up before Close.
         for (int i = 1; i < rows.Count; i++)
             Assert.False(rows[i].Id == QuickActionsMenu.Separator && rows[i - 1].Id == QuickActionsMenu.Separator);
     }
 
     [Fact]
-    public void RecordingCardOffersBlipToo()
-        => Assert.Contains(QuickActionsMenu.ShareBlip, Ids(mediaFile: true, canBlip: true));
+    public void RecordingCardGetsTheSameShareSubmenu()
+    {
+        var share = QuickActionsMenu.Rows(true, true, true, true).Single(r => r.Id == QuickActionsMenu.ShareGroup);
+
+        Assert.Equal(
+            new[] { QuickActionsMenu.ShareBlip, QuickActionsMenu.ShareWindows },
+            share.Children!.Select(c => c.Id));
+    }
+
+    [Fact]
+    public void OnlyShareExpands()
+    {
+        foreach (var row in QuickActionsMenu.Rows(false, true, true, true))
+            Assert.True(row.Children is null || row.Id == QuickActionsMenu.ShareGroup, row.Id);
+    }
 
     [Fact]
     public void MenuNeverEndsOrStartsWithASeparator()

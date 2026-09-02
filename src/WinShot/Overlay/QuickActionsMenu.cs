@@ -34,11 +34,17 @@ internal static class QuickActionsMenu
     internal const string OpenWith = "open-with";
     internal const string ShowInFolder = "show-in-folder";
     internal const string MoveToRecycleBin = "recycle";
+    internal const string ShareGroup = "share";
     internal const string ShareBlip = "share-blip";
-    internal const string Share = "share";
+    internal const string ShareWindows = "share-windows";
     internal const string Close = "close";
 
-    internal readonly record struct Row(string Id, string Text, string Shortcut = "");
+    /// <summary>A menu row. <paramref name="Children"/> makes it a submenu instead of an action.</summary>
+    internal readonly record struct Row(
+        string Id,
+        string Text,
+        string Shortcut = "",
+        IReadOnlyList<Row>? Children = null);
 
     /// <summary>
     /// The menu, in order. <paramref name="mediaFile"/> is the recording card, which
@@ -79,20 +85,35 @@ internal static class QuickActionsMenu
         rows.Add(new Row(ShowInFolder, "Show in folder"));
         rows.Add(new Row(MoveToRecycleBin, "Move to Recycle Bin"));
 
-        // Blip is its own row, not a Windows share target: Windows does not see it as a
-        // shareable app, so the share sheet alone would never offer it. Same split Clip uses.
-        if (canBlip || canShare)
-        {
-            rows.Add(new Row(Separator, Separator));
-            if (canBlip)
-                rows.Add(new Row(ShareBlip, "Share with Blip"));
-            if (canShare)
-                rows.Add(new Row(Share, "Windows Share…"));
-        }
+        rows.AddRange(ShareRows(canShare, canBlip));
 
         rows.Add(new Row(Separator, Separator));
         rows.Add(new Row(Close, "Close", "Ctrl+W"));
         return rows;
+    }
+
+    /// <summary>
+    /// Windows does not register Blip as a share target, so its sheet can never offer it.
+    /// With Blip installed the row becomes a submenu — Blip, and the Windows sheet — which
+    /// is what Clip does. Without it there is nothing to choose between, so it stays a
+    /// single row that opens the sheet directly rather than a submenu of one.
+    /// </summary>
+    private static IEnumerable<Row> ShareRows(bool canShare, bool canBlip)
+    {
+        if (!canShare && !canBlip)
+            yield break;
+
+        yield return new Row(Separator, Separator);
+        if (!canBlip)
+        {
+            yield return new Row(ShareWindows, "Share…");
+            yield break;
+        }
+
+        var children = new List<Row> { new(ShareBlip, "Blip") };
+        if (canShare)
+            children.Add(new Row(ShareWindows, "Windows Share…"));
+        yield return new Row(ShareGroup, "Share", Children: children);
     }
 
     /// <summary>

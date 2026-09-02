@@ -1,4 +1,5 @@
-﻿using WinShot.Core;
+﻿using System.Drawing.Drawing2D;
+using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -20,6 +21,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
     private const int PadRight = 11;
     private const int GlyphGap = 9;
     private const int ShortcutGap = 24;
+    private const int ArrowWidth = 16;
     private const int MinHeight = 24;
 
     private readonly Action _action;
@@ -41,7 +43,16 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 
     private string Shortcut => ShowShortcutKeys ? ShortcutKeyDisplayString ?? string.Empty : string.Empty;
 
-    protected override void OnClick(EventArgs e) => _action();
+    protected override void OnClick(EventArgs e)
+    {
+        // A submenu row has nothing to run; let the base open its drop-down.
+        if (HasDropDownItems)
+        {
+            base.OnClick(e);
+            return;
+        }
+        _action();
+    }
 
     public override SD.Size GetPreferredSize(SD.Size constrainingSize)
     {
@@ -67,6 +78,8 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
         int width = TextLeft + text.Width + PadRight;
         if (Shortcut.Length > 0)
             width += ShortcutGap + Measure(Shortcut).Width;
+        if (HasDropDownItems)
+            width += ShortcutGap + ArrowWidth;
         return new SD.Size(width, Math.Max(MinHeight, text.Height + 8));
     }
 
@@ -89,7 +102,11 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
             color,
             flags);
 
-        if (Shortcut.Length > 0)
+        if (HasDropDownItems)
+        {
+            DrawSubmenuArrow(g, color);
+        }
+        else if (Shortcut.Length > 0)
         {
             WF.TextRenderer.DrawText(
                 g,
@@ -99,6 +116,30 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
                 ThemePalette.TextSecondary,
                 WF.TextFormatFlags.NoPrefix | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Right);
         }
+    }
+
+    /// <summary>The chevron that says this row expands. Drawn here because the row opts out
+    /// of the stock layout, which would otherwise have drawn it.</summary>
+    private void DrawSubmenuArrow(SD.Graphics g, SD.Color color)
+    {
+        const int arm = 4;
+        int x = Width - PadRight - ArrowWidth / 2;
+        int y = Height / 2;
+        SmoothingMode previous = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new SD.Pen(color, 1.4f)
+        {
+            StartCap = SD.Drawing2D.LineCap.Round,
+            EndCap = SD.Drawing2D.LineCap.Round,
+            LineJoin = LineJoin.Round,
+        };
+        g.DrawLines(pen, new[]
+        {
+            new SD.PointF(x - arm / 2f, y - arm),
+            new SD.PointF(x + arm / 2f, y),
+            new SD.PointF(x - arm / 2f, y + arm),
+        });
+        g.SmoothingMode = previous;
     }
 
     private SD.Size Measure(string value) =>

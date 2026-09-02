@@ -39,8 +39,20 @@ public class QuickAccessOverlayRenderHarness
                 menu.Show(new SD.Point(0, 0));
                 using var bitmap = new SD.Bitmap(menu.Width, menu.Height);
                 menu.DrawToBitmap(bitmap, new SD.Rectangle(0, 0, menu.Width, menu.Height));
-                menu.Close();
                 bitmap.Save(Path.Combine(outDir, "context-menu.png"), SD.Imaging.ImageFormat.Png);
+
+                // The Share submenu, when this machine has Blip and the row expands.
+                foreach (WF.ToolStripItem item in menu.Items)
+                {
+                    if (item is not WF.ToolStripMenuItem { HasDropDownItems: true } parent)
+                        continue;
+                    parent.DropDown.Show(new SD.Point(0, 0));
+                    using var sub = new SD.Bitmap(parent.DropDown.Width, parent.DropDown.Height);
+                    parent.DropDown.DrawToBitmap(sub, new SD.Rectangle(0, 0, sub.Width, sub.Height));
+                    parent.DropDown.Close();
+                    sub.Save(Path.Combine(outDir, $"context-submenu-{item.Text}.png"), SD.Imaging.ImageFormat.Png);
+                }
+                menu.Close();
             }
             catch (Exception ex) { failure = ex; }
         });
