@@ -21,6 +21,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     // Long enough to read three words, short enough not to be in the way.
     private const int FlashHoldMs = 1300;
     private const int FlashFadeMs = 420;
+    /// <summary>Pointer travel that counts as reaching for the card rather than jitter.</summary>
+    private const int FlashDismissSlop = 3;
 
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
@@ -64,6 +66,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private string? _flashMessage;
     private double _flashAmount;
     private WF.Timer? _flashTimer;
+    private SD.Point _flashCursor;
     private bool _hovering;
     private int _hoverButton = -1;
     private int _pressedButton = -1;
@@ -171,7 +174,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         MouseDown += OnOverlayMouseDown;
         MouseMove += OnOverlayMouseMove;
         MouseUp += OnOverlayMouseUp;
-        MouseEnter += (_, _) => SetHovering(true);
+        MouseEnter += (_, _) =>
+        {
+            EndStatusFlash();
+            SetHovering(true);
+        };
         MouseLeave += (_, _) => SetHovering(false);
         KeyDown += OnOverlayKeyDown;
         Shown += (_, _) =>
@@ -509,6 +516,10 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         _flashMessage = message;
         _flashAmount = 1.0;
+        // Where the pointer was when the message went up. Reaching for the card dismisses
+        // it; the pointer merely sitting there — it usually is, the menu was just clicked —
+        // does not, or the message would never be seen.
+        _flashCursor = WF.Cursor.Position;
         PauseAutoCloseTimer();
 
         _flashTimer?.Stop();
@@ -533,6 +544,24 @@ public sealed class FastQuickActionsWindow : WF.Form
         };
         _flashTimer.Start();
         Invalidate(_cardRect);
+    }
+
+    /// <summary>
+    /// Clears a message once the pointer actually travels over the card. Compared against
+    /// the position the message went up at rather than firing on any MouseMove: closing the
+    /// context menu delivers one over a pointer that never moved.
+    /// </summary>
+    private void DismissStatusFlashOnPointerMove()
+    {
+        if (_flashMessage is null)
+            return;
+
+        SD.Point now = WF.Cursor.Position;
+        if (Math.Abs(now.X - _flashCursor.X) <= FlashDismissSlop &&
+            Math.Abs(now.Y - _flashCursor.Y) <= FlashDismissSlop)
+            return;
+
+        EndStatusFlash();
     }
 
     private void EndStatusFlash()
@@ -1649,6 +1678,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private async void OnOverlayMouseMove(object? sender, WF.MouseEventArgs e)
     {
+        DismissStatusFlashOnPointerMove();
         if (!_hovering)
             SetHovering(true);
         SetHover(HitTestButton(e.Location));

@@ -320,6 +320,35 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
+    public void ReachingForTheCardDismissesTheStatusFlash()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var type = typeof(FastQuickActionsWindow);
+            var message = type.GetField("_flashMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var origin = type.GetField("_flashCursor", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var dismiss = type.GetMethod("DismissStatusFlashOnPointerMove", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            // A pointer that has not moved keeps the message up: closing the context menu
+            // delivers a MouseMove over a pointer sitting exactly where it was clicked.
+            overlay.FlashStatus("Text copied");
+            dismiss.Invoke(overlay, null);
+            Assert.Equal("Text copied", message.GetValue(overlay));
+
+            // A pointer that has travelled clears it, so the hover chrome takes over.
+            origin.SetValue(overlay, new SD.Point(-10_000, -10_000));
+            dismiss.Invoke(overlay, null);
+            Assert.Null(message.GetValue(overlay));
+
+            // And with no message up it is a no-op, not a crash.
+            dismiss.Invoke(overlay, null);
+            Assert.Null(message.GetValue(overlay));
+        });
+    }
+
+    [Fact]
     public void StatusFlashClearsItselfAndFreesItsTimer()
     {
         RunSta(() =>
