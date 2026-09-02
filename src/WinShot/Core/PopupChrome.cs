@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -16,13 +16,15 @@ public static class PopupChrome
     /// <summary>Translucent light hairline shared by every dark popup card.</summary>
     public static readonly SD.Color Hairline = ThemePalette.BorderStrong;
 
-    public static void ApplyRegion(WF.Form form, int cornerRadius)
+    /// <summary>Rounds a popup's outline. Takes a Control, not a Form: the quick-actions
+    /// context menu is a ToolStripDropDown and wants the same corners as the cards.</summary>
+    public static void ApplyRegion(WF.Control popup, int cornerRadius)
     {
-        if (form.Width <= 0 || form.Height <= 0)
+        if (popup.Width <= 0 || popup.Height <= 0)
             return;
-        using var path = GdiPaths.RoundedRect(new SD.Rectangle(0, 0, form.Width, form.Height), cornerRadius);
-        form.Region?.Dispose();
-        form.Region = new SD.Region(path);
+        using var path = GdiPaths.RoundedRect(new SD.Rectangle(0, 0, popup.Width, popup.Height), cornerRadius);
+        popup.Region?.Dispose();
+        popup.Region = new SD.Region(path);
     }
 
     public static void DrawBorder(SD.Graphics g, SD.Size clientSize, int cornerRadius)

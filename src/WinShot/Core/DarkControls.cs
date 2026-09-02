@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -295,7 +295,7 @@ public sealed class DarkDropDown : WF.Control
     }
 
     /// <summary>Dark menu styling for the dropdown popup (and reusable elsewhere).</summary>
-    public sealed class DarkMenuRenderer : WF.ToolStripProfessionalRenderer
+    public class DarkMenuRenderer : WF.ToolStripProfessionalRenderer
     {
         public DarkMenuRenderer() : base(new DarkMenuColors())
         {

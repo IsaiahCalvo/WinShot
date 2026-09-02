@@ -718,7 +718,6 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void BuildOverflowMenu()
     {
         _overflowMenu.AccessibleName = "More capture actions";
-        _overflowMenu.Renderer = new DarkDropDown.DarkMenuRenderer();
         foreach (var row in QuickActionsMenu.Rows(
                      mediaFile: _mediaFilePath is not null,
                      canEdit: _mediaCanEdit,

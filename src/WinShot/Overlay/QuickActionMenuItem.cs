@@ -113,12 +113,17 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 /// </summary>
 internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
 {
+    private const int CornerRadius = 8;
+
     internal QuickActionsContextMenu()
     {
         // The rows own their left inset; the drop-down must not add one of its own.
         ShowImageMargin = false;
         Padding = new WF.Padding(0, 2, 0, 2);
+        Renderer = new RoundedMenuRenderer();
     }
+
+    private int Radius => (int)Math.Round(CornerRadius * DeviceDpi / 96.0);
 
     public override SD.Size GetPreferredSize(SD.Size proposedSize)
     {
@@ -131,5 +136,34 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
         }
         size.Width = Math.Max(size.Width, rows + Padding.Horizontal);
         return size;
+    }
+
+    protected override void OnLayoutCompleted(EventArgs e)
+    {
+        base.OnLayoutCompleted(e);
+        PopupChrome.ApplyRegion(this, Radius);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        PopupChrome.ApplyRegion(this, Radius);
+    }
+
+    protected override void OnPaint(WF.PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        // Drawn last so the hairline follows the curve the region cut, matching the
+        // capture card and the app's other popups.
+        PopupChrome.DrawBorder(e.Graphics, ClientSize, Radius, SD.Color.FromArgb(70, 70, 74));
+    }
+
+    /// <summary>The dark menu look, minus its square border — the rounded one is painted
+    /// over the region instead, and a rectangle would lose its corners to the clip.</summary>
+    private sealed class RoundedMenuRenderer : DarkDropDown.DarkMenuRenderer
+    {
+        protected override void OnRenderToolStripBorder(WF.ToolStripRenderEventArgs e)
+        {
+        }
     }
 }
