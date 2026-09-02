@@ -243,6 +243,35 @@
 
     <!-- A plain (non-toggle) round icon button variant for one-shot actions
          that live in the toolbar (e.g. undo/redo/rotate). Same look at rest. -->
+    <!-- Survey chrome tooltip (components/Tooltip.jsx): #181c24 on #2a3140 border, 6px
+         radius, 4x8 padding, 11.5px text, deep shadow, shown promptly. -->
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="#FF181C24"/>
+        <Setter Property="Foreground" Value="#FFE8E2D4"/>
+        <Setter Property="BorderBrush" Value="#FF2A3140"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="HasDropShadow" Value="False"/>
+        <Setter Property="Placement" Value="Bottom"/>
+        <Setter Property="HorizontalOffset" Value="0"/>
+        <Setter Property="VerticalOffset" Value="6"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="8">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270" Opacity="0.5"/>
+                        </Border.Effect>
+                        <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"
+                                          TextElement.FontSize="{TemplateBinding FontSize}"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ToolIconButton" TargetType="Button">
         <Setter Property="Width"  Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Height" Value="{StaticResource ToolButtonSize}"/>

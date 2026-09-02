@@ -1,36 +1,81 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 
 namespace WinShot.Editor;
 
 /// <summary>
-/// Port of perfect-freehand (steveruizok, MIT): turns raw pointer samples into a
-/// pressure-shaped outline polygon. Pressure is simulated from speed, so fast strokes
-/// thin out and slow strokes thicken, with round caps and streamlined (lerped) input.
-/// Options are the library defaults: thinning .5, smoothing .5, streamline .5, no taper.
+/// Port of perfect-freehand's stroke model (steveruizok, MIT): raw pointer samples are
+/// streamlined (lerped toward the previous point) and given a simulated pressure from
+/// speed, so fast parts thin out and slow parts thicken. Options are the library
+/// defaults: thinning .5, smoothing .5, streamline .5, round caps, no taper.
+///
+/// Geometry: instead of the library's single outline polygon (which self-intersects on
+/// loops and sharp turns and leaves winding-zero slivers under any fill rule), the stroke
+/// is the union of a disc polygon at every point plus a tangent quad between neighbours
+/// — a variable-radius swept disc. One GeometryGroup, Nonzero, every piece wound the
+/// same way, so there are no seams and no holes.
 /// </summary>
 internal static class FreehandStroke
 {
     private const double RateOfPressureChange = 0.275;
-    private const double FixedPi = Math.PI + 0.0001;
-    private const int StartCapSegments = 13, EndCapSegments = 29, CornerCapSegments = 13;
-    private const double EndNoiseThreshold = 3, MinStreamlineT = 0.15, StreamlineTRange = 0.85;
-    private const double MinRadius = 0.01, DefaultFirstPressure = 0.25, DefaultPressure = 0.5;
+    private const double MinStreamlineT = 0.15, StreamlineTRange = 0.85;
+    private const double MinRadius = 0.25, DefaultFirstPressure = 0.25, DefaultPressure = 0.5;
+    private const double EndNoiseThreshold = 3;
 
     public const double Thinning = 0.5, Smoothing = 0.5, Streamline = 0.5;
 
     private readonly record struct StrokePoint(Point P, double Pressure, Vector V, double Distance, double Running);
+    private readonly record struct Disc(Point P, double R);
 
-    /// <summary>Filled outline for <paramref name="input"/> at base diameter <paramref name="size"/>.</summary>
-    public static PathGeometry Outline(IList<Point> input, double size, bool complete)
+    /// <summary>Filled stroke for <paramref name="input"/> at base diameter <paramref name="size"/>.</summary>
+    public static Geometry Outline(IList<Point> input, double size, bool complete)
     {
-        var outline = OutlinePoints(StrokePoints(input, size, complete), size);
+        var discs = Discs(StrokePoints(input, size, complete), size);
+        var group = new GeometryGroup { FillRule = FillRule.Nonzero };
+        if (discs.Count == 0) return group;
+        for (int i = 0; i < discs.Count; i++)
+        {
+            AddPolygon(group, DiscPolygon(discs[i]));
+            if (i == 0) continue;
+            var a = discs[i - 1];
+            var b = discs[i];
+            Vector d = b.P - a.P;
+            if (d.Length < 0.01) continue;
+            d.Normalize();
+            var n = new Vector(-d.Y, d.X);
+            AddPolygon(group, new[] { a.P + n * a.R, b.P + n * b.R, b.P - n * b.R, a.P - n * a.R });
+        }
+        group.Freeze();
+        return group;
+    }
+
+    /// <summary>
+    /// Every piece is added with the same winding (positive signed area), so Nonzero
+    /// unions them: overlaps never cancel, joins never show slits.
+    /// </summary>
+    private static void AddPolygon(GeometryGroup group, IList<Point> pts)
+    {
+        double area = 0;
+        for (int i = 0, j = pts.Count - 1; i < pts.Count; j = i++)
+            area += pts[j].X * pts[i].Y - pts[i].X * pts[j].Y;
+        if (area < 0) pts = pts.Reverse().ToList();
+        var fig = new PathFigure { StartPoint = pts[0], IsClosed = true, IsFilled = true };
+        fig.Segments.Add(new PolyLineSegment(pts.Skip(1), false));
         var g = new PathGeometry { FillRule = FillRule.Nonzero };
-        if (outline.Count < 2) return g;
-        var fig = new PathFigure { StartPoint = outline[0], IsClosed = true, IsFilled = true };
-        fig.Segments.Add(new PolyLineSegment(outline.Skip(1), false));
         g.Figures.Add(fig);
-        return g;
+        group.Children.Add(g);
+    }
+
+    private static Point[] DiscPolygon(Disc d)
+    {
+        int n = d.R < 2 ? 8 : d.R < 6 ? 16 : 24;
+        var pts = new Point[n];
+        for (int i = 0; i < n; i++)
+        {
+            double t = i * Math.PI * 2 / n;
+            pts[i] = new Point(d.P.X + d.R * Math.Cos(t), d.P.Y + d.R * Math.Sin(t));
+        }
+        return pts;
     }
 
     private static List<StrokePoint> StrokePoints(IList<Point> points, double size, bool complete)
@@ -72,102 +117,24 @@ internal static class FreehandStroke
         return res;
     }
 
-    private static List<Point> OutlinePoints(List<StrokePoint> points, double size)
+    /// <summary>Per-point radius from simulated pressure (perfect-freehand's getStrokeRadius).</summary>
+    private static List<Disc> Discs(List<StrokePoint> points, double size)
     {
-        var res = new List<Point>();
+        var res = new List<Disc>();
         if (points.Count == 0 || size <= 0) return res;
         double totalLength = points[^1].Running;
-        double minDistance = Math.Pow(size * Smoothing, 2);
-        var left = new List<Point>();
-        var right = new List<Point>();
         double prevPressure = InitialPressure(points, size);
-        double radius = StrokeRadius(size, points[^1].Pressure);
-        double? firstRadius = null;
-        Vector prevVector = points[0].V;
-        Point prevLeft = points[0].P, prevRight = prevLeft;
-        Point tl = prevLeft, tr = prevRight;
-        bool prevSharp = false;
-
         for (int i = 0; i < points.Count; i++)
         {
             var sp = points[i];
             bool isLast = i == points.Count - 1;
             if (!isLast && totalLength - sp.Running < EndNoiseThreshold) continue;
-
             double pressure = SimulatePressure(prevPressure, sp.Distance, size);
-            radius = Math.Max(MinRadius, StrokeRadius(size, pressure));
-            firstRadius ??= radius;
-
-            Vector nextVector = (!isLast ? points[i + 1] : points[i]).V;
-            double nextDpr = !isLast ? Dot(sp.V, nextVector) : 1.0;
-            double prevDpr = Dot(sp.V, prevVector);
-            bool sharp = prevDpr < 0 && !prevSharp;
-            bool nextSharp = nextDpr < 0;
-
-            if (sharp || nextSharp)
-            {
-                // Sharp corner: a rounded cap at this point on both sides.
-                Vector offset = Per(prevVector) * radius;
-                double step = 1.0 / CornerCapSegments;
-                for (double u = 0; u <= 1; u += step)
-                {
-                    tl = Rot(sp.P - offset, sp.P, FixedPi * u); left.Add(tl);
-                    tr = Rot(sp.P + offset, sp.P, FixedPi * -u); right.Add(tr);
-                }
-                prevLeft = tl; prevRight = tr;
-                if (nextSharp) prevSharp = true;
-                continue;
-            }
-            prevSharp = false;
-
-            if (isLast)
-            {
-                Vector off = Per(sp.V) * radius;
-                left.Add(sp.P - off);
-                right.Add(sp.P + off);
-                continue;
-            }
-
-            Vector o = Per(Lerp(nextVector, sp.V, nextDpr)) * radius;
-            tl = sp.P - o;
-            if (i <= 1 || Dist2(prevLeft, tl) > minDistance) { left.Add(tl); prevLeft = tl; }
-            tr = sp.P + o;
-            if (i <= 1 || Dist2(prevRight, tr) > minDistance) { right.Add(tr); prevRight = tr; }
-
+            double radius = Math.Max(MinRadius, StrokeRadius(size, pressure));
+            res.Add(new Disc(sp.P, radius));
             prevPressure = pressure;
-            prevVector = sp.V;
         }
-
-        Point first = points[0].P;
-        if (points.Count == 1 || right.Count == 0 || left.Count == 0)
-            return Dot(first, firstRadius ?? radius);
-        Point last = points[^1].P;
-
-        var startCap = new List<Point>();
-        double capStep = 1.0 / StartCapSegments;
-        for (double u = capStep; u <= 1; u += capStep) startCap.Add(Rot(right[0], first, FixedPi * u));
-
-        var endCap = new List<Point>();
-        Vector dir = Per(-points[^1].V);
-        Point endStart = last + dir * radius;
-        double endStep = 1.0 / EndCapSegments;
-        for (double u = endStep; u < 1; u += endStep) endCap.Add(Rot(endStart, last, FixedPi * 3 * u));
-
-        right.Reverse();
-        res.AddRange(left); res.AddRange(endCap); res.AddRange(right); res.AddRange(startCap);
         return res;
-    }
-
-    private static List<Point> Dot(Point center, double radius)
-    {
-        Point offsetPoint = center + new Vector(1, 1);
-        Vector n = Per(center - offsetPoint);
-        n.Normalize();
-        Point start = center + n * -radius;
-        var pts = new List<Point>();
-        double step = 1.0 / StartCapSegments;
-        for (double u = step; u <= 1; u += step) pts.Add(Rot(start, center, FixedPi * 2 * u));
-        return pts;
     }
 
     /// <summary>Averages the first few points so slow starts don't produce fat blobs.</summary>
@@ -190,15 +157,4 @@ internal static class FreehandStroke
         size * (0.5 - Thinning * (0.5 - pressure));
 
     private static Point Lerp(Point a, Point b, double t) => a + (b - a) * t;
-    private static Vector Lerp(Vector a, Vector b, double t) => a + (b - a) * t;
-    private static Vector Per(Vector a) => new(a.Y, -a.X);
-    private static double Dot(Vector a, Vector b) => a.X * b.X + a.Y * b.Y;
-    private static double Dist2(Point a, Point b) => (a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y);
-
-    private static Point Rot(Point a, Point c, double r)
-    {
-        double s = Math.Sin(r), k = Math.Cos(r);
-        double px = a.X - c.X, py = a.Y - c.Y;
-        return new Point(px * k - py * s + c.X, px * s + py * k + c.Y);
-    }
 }

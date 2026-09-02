@@ -225,7 +225,10 @@ public partial class EditorWindow : Window
                 break;
             case EditorTool.Eraser:
                 if (_eraserPoints.Count == 0 || (pos - _eraserPoints[^1]).Length > 1)
+                {
+                    if (_eraserPoints.Count > 0) EraseLive(_eraserPoints[^1], pos);
                     _eraserPoints.Add(pos);
+                }
                 break;
             case EditorTool.Blur:
             case EditorTool.Pixelate:

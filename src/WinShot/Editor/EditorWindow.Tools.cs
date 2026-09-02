@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -327,14 +327,15 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------------------------- step tool
 
-    private void ApplyEraserStroke()
-    {
-        if (_eraserPoints.Count == 0) return;
-        var cut = PaperInk.EraserStroke(_eraserPoints, _eraserSize);
-        _eraserPoints.Clear();
-        var removed = new List<UIElement>();
-        var inkEdits = new List<(Path path, Geometry before, Geometry after, AnnotationData meta)>();
+    // Erasing is live: every pointer move cuts the segment just drawn out of the ink
+    // under it (Survey behaviour). Originals are remembered per element so the whole
+    // drag becomes one undo step when the pointer is released.
+    private readonly Dictionary<Path, Geometry> _eraseBefore = new();
+    private readonly List<UIElement> _eraseRemoved = new();
 
+    private void EraseLive(Point from, Point to)
+    {
+        var cut = PaperInk.EraserStroke(new[] { from, to }, _eraserSize);
         foreach (UIElement child in AnnotationCanvas.Children.Cast<UIElement>().ToList())
         {
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
@@ -344,40 +345,63 @@ public partial class EditorWindow : Window
             {
                 if (!ink || fe is not Path path || path.Data is null) continue;
                 if (!GeometriesOverlap(path.Data, cut, fe)) continue;
-                var before = path.Data.CloneCurrentValue();
-                var after = PaperInk.Subtract(TranslateGeometry(before, ElementOffset(path)), cut);
+                if (!_eraseBefore.ContainsKey(path))
+                    _eraseBefore[path] = path.Data.CloneCurrentValue();
+                var after = PaperInk.Subtract(TranslateGeometry(path.Data, ElementOffset(path)), cut);
                 after = TranslateGeometry(after, new Vector(-ElementOffset(path).X, -ElementOffset(path).Y));
                 if (PaperInk.IsEmpty(after))
-                    removed.Add(path);
+                {
+                    AnnotationCanvas.Children.Remove(path);
+                    _eraseRemoved.Add(path);
+                }
                 else
-                    inkEdits.Add((path, before, after, meta));
+                {
+                    path.Data = after;
+                }
             }
             else if (HitsEraser(fe, cut))
             {
-                removed.Add(fe);
+                AnnotationCanvas.Children.Remove(fe);
+                _eraseRemoved.Add(fe);
             }
         }
+    }
 
-        foreach (var (path, _, after, _) in inkEdits)
-            path.Data = after;
-        foreach (var el in removed)
-            AnnotationCanvas.Children.Remove(el);
-        if (removed.Count == 0 && inkEdits.Count == 0) return;
+    /// <summary>Pointer released: fold the live edits into one undo step.</summary>
+    private void ApplyEraserStroke()
+    {
+        if (_eraserPoints.Count == 1)
+            EraseLive(_eraserPoints[0], _eraserPoints[0]); // a click erases a dot
+        _eraserPoints.Clear();
+        if (_eraseBefore.Count == 0 && _eraseRemoved.Count == 0) return;
+
+        var removed = _eraseRemoved.ToList();
+        var inkEdits = _eraseBefore
+            .Where(kv => !removed.Contains(kv.Key))
+            .Select(kv => (path: kv.Key, before: kv.Value, after: kv.Key.Data))
+            .ToList();
+        var removedBefore = removed.OfType<Path>().Where(p => _eraseBefore.ContainsKey(p))
+            .ToDictionary(p => p, p => _eraseBefore[p]);
+        _eraseBefore.Clear();
+        _eraseRemoved.Clear();
 
         Push(new EditorAction(
             undo: () =>
             {
                 foreach (var el in removed)
+                {
+                    if (el is Path rp && removedBefore.TryGetValue(rp, out var g)) rp.Data = g;
                     if (!AnnotationCanvas.Children.Contains(el))
                         AnnotationCanvas.Children.Add(el);
-                foreach (var (path, before, _, _) in inkEdits)
+                }
+                foreach (var (path, before, _) in inkEdits)
                     path.Data = before;
             },
             redo: () =>
             {
                 foreach (var el in removed)
                     AnnotationCanvas.Children.Remove(el);
-                foreach (var (path, _, after, _) in inkEdits)
+                foreach (var (path, _, after) in inkEdits)
                     path.Data = after;
             }), apply: false);
     }

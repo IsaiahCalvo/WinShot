@@ -541,7 +541,7 @@
                         Background="#FF000000"
                         BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1">
                     <Border.Effect>
-                        <DropShadowEffect BlurRadius="28" ShadowDepth="10" Direction="270"
+                        <DropShadowEffect BlurRadius="14" ShadowDepth="3" Direction="270"
                                           Opacity="0.80" Color="#FF000000" RenderingBias="Performance"/>
                     </Border.Effect>
                 </Border>

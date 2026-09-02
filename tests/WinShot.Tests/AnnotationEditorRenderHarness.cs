@@ -242,6 +242,15 @@ public class AnnotationEditorRenderHarness
                 void Check(string name) { ((RadioButton)editor.FindName(name)!).IsChecked = true; Pump(3); }
                 void Shot(string name) => RenderToPng(editor, Path.Combine(outDir, name));
 
+                // Fit check: the whole image must sit inside the viewport on open.
+                {
+                    Point tl = canvas.TranslatePoint(new Point(0, 0), viewport);
+                    Point brPt = canvas.TranslatePoint(new Point(W, H), viewport);
+                    File.WriteAllText(Path.Combine(outDir, "fit.txt"),
+                        $"image={tl}..{brPt} viewport={viewport.ActualWidth}x{viewport.ActualHeight}");
+                }
+                Shot("pointer-open.png");
+
                 // Shapes: rect, ellipse, line, arrow, two counters.
                 Check("RectangleToolBtn"); Drag(new[] { (0.10, 0.25), (0.36, 0.52) });
                 Check("EllipseToolBtn"); Drag(new[] { (0.42, 0.25), (0.68, 0.52) });
@@ -268,6 +277,17 @@ public class AnnotationEditorRenderHarness
                 for (int i = 0; i <= 60; i++) { double t = i / 60.0 * Math.PI * 2; loop.Add((0.62 + 0.10 * Math.Cos(t), 0.15 + 0.09 * Math.Sin(t))); }
                 Drag(loop, steps: 1);
                 Shot("pointer-pen.png");
+                // Thick pen (size 12) loop and a highlighter over the dark header, for texture checks.
+                typeof(EditorWindow).GetField("_penSize", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(editor, 12.0);
+                var thick = new List<(double, double)>();
+                for (int i = 0; i <= 80; i++) { double t = i / 80.0 * Math.PI * 2; thick.Add((0.50 + 0.08 * Math.Cos(t) + 0.03 * Math.Cos(3 * t), 0.72 + 0.12 * Math.Sin(t))); }
+                Drag(thick, steps: 1);
+                Drag(new[] { (0.62, 0.62), (0.70, 0.90), (0.78, 0.62), (0.86, 0.90) }, steps: 6);
+                Check("HighlighterToolBtn");
+                Drag(new[] { (0.05, 0.06), (0.55, 0.06) }, steps: 30);
+                Drag(new[] { (0.05, 0.36), (0.40, 0.36) }, steps: 30);
+                Shot("pointer-pen-thick.png");
+                RenderToPng(editor, Path.Combine(outDir, "pointer-pen-thick-200pct.png"), dpi: 192);
 
                 // Text: click to open, type, commit by clicking away, then reselect.
                 Check("TextToolBtn");

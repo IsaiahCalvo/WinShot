@@ -48,14 +48,15 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Highlighter: Survey ships a 128px PNG mask, which goes blotchy at 20px. This is a
+         vector trace of that marker (chisel tip lower-left, body, cap band) in the same
+         1.5px stroked style as the rest of the set, so it stays crisp at any DPI. -->
     <Viewbox x:Key="SurveyIcon.Highlighter" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Rectangle Canvas.Left="-3" Canvas.Top="-2.7" Width="30" Height="29.4"
-                       Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}">
-                <Rectangle.OpacityMask>
-                    <ImageBrush ImageSource="pack://application:,,,/WinShot;component/Theme/Icons/survey-highlighter-mask.png" Stretch="Uniform"/>
-                </Rectangle.OpacityMask>
-            </Rectangle>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.5,16.5 L15.5,10.5 L19.5,14.5 L13.5,20.5 Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M15.5,10.5 L17,9 A1.5,1.5 0 0 1 19.1,9 L21,10.9 A1.5,1.5 0 0 1 21,13 L19.5,14.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.5,16.5 L5.5,18.5 L3.5,21 L6.5,20 L13.5,20.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M3.5,21 L2.5,21.5"/>
         </Canvas>
     </Viewbox>
 
