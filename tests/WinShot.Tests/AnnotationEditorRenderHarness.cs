@@ -2,6 +2,7 @@
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -169,6 +170,134 @@ public class AnnotationEditorRenderHarness
         Assert.Null(failure);
         Assert.True(File.Exists(Path.Combine(outDir, "editor-after-primary-shell.png")),
             "No annotation editor overview PNG was produced.");
+    }
+
+    /// <summary>
+    /// Drives every drawing tool through the editor's pointer seam (no real mouse, no
+    /// visible window) and renders each state, so tool behaviour can be compared against
+    /// Survey without touching the user's desktop. Gated like the render above.
+    /// </summary>
+    [Fact]
+    public void RenderPointerDrivenToolBaseline()
+    {
+        if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_POINTER") != "1")
+            return;
+
+        string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUTPUT")
+            ?? Path.Combine(Path.GetTempPath(), "winshot-annotation-render");
+        Directory.CreateDirectory(outDir);
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var app = Application.Current ?? new Application();
+                app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                ThemeResources.EnsureLoaded();
+
+                var settings = new SettingsService();
+                var history = new HistoryService(settings);
+                var source = CreateSanitizedSource();
+                var editor = new EditorWindow(source, settings, history)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -6000,
+                    Top = -6000,
+                    ShowInTaskbar = false,
+                };
+                editor.Show();
+                Pump(45);
+
+                var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+                var viewport = (FrameworkElement)editor.FindName("Viewport")!;
+                double W = source.Width, H = source.Height;
+
+                EditorWindow.PointerArgs P(double fx, double fy, int clicks = 1)
+                {
+                    var c = new Point(fx * W, fy * H);
+                    return new EditorWindow.PointerArgs(c, canvas.TranslatePoint(c, viewport), MouseButton.Left, clicks);
+                }
+                void Click(double fx, double fy, int clicks = 1)
+                {
+                    editor.PointerDown(P(fx, fy, clicks)); Pump(1);
+                    editor.PointerUp(P(fx, fy)); Pump(3);
+                }
+                void Drag(IList<(double fx, double fy)> pts, int steps = 12)
+                {
+                    editor.PointerDown(P(pts[0].fx, pts[0].fy)); Pump(1);
+                    for (int k = 1; k < pts.Count; k++)
+                        for (int i = 1; i <= steps; i++)
+                        {
+                            double t = i / (double)steps;
+                            editor.PointerMove(P(pts[k - 1].fx + (pts[k].fx - pts[k - 1].fx) * t,
+                                                 pts[k - 1].fy + (pts[k].fy - pts[k - 1].fy) * t));
+                            Pump(1);
+                        }
+                    editor.PointerUp(P(pts[^1].fx, pts[^1].fy)); Pump(3);
+                }
+                void Check(string name) { ((RadioButton)editor.FindName(name)!).IsChecked = true; Pump(3); }
+                void Shot(string name) => RenderToPng(editor, Path.Combine(outDir, name));
+
+                // Shapes: rect, ellipse, line, arrow, two counters.
+                Check("RectangleToolBtn"); Drag(new[] { (0.10, 0.25), (0.36, 0.52) });
+                Check("EllipseToolBtn"); Drag(new[] { (0.42, 0.25), (0.68, 0.52) });
+                Check("LineToolBtn"); Drag(new[] { (0.10, 0.62), (0.36, 0.85) });
+                Check("ArrowToolBtn"); Drag(new[] { (0.42, 0.62), (0.68, 0.85) });
+                var counterBtn = ((StackPanel)editor.FindName("ShapeGroupPanel")!).Children
+                    .OfType<RadioButton>().First(rb => rb.Tag as string == "Step");
+                counterBtn.IsChecked = true; Pump(3);
+                Click(0.80, 0.35); Click(0.80, 0.72);
+                Shot("pointer-shapes.png");
+
+                Check("SelectToolBtn");
+                Click(0.10, 0.40); Shot("pointer-rect-selected.png");
+                Click(0.55, 0.735); Shot("pointer-arrow-selected.png");
+                Click(0.80, 0.35); Shot("pointer-counter-selected.png");
+                Click(0.02, 0.02);
+
+                // Pen: a sine wave with slow and fast sections, then a loop.
+                Check("FreehandToolBtn");
+                var wave = new List<(double, double)>();
+                for (int i = 0; i <= 40; i++) wave.Add((0.10 + 0.30 * i / 40.0, 0.15 + 0.06 * Math.Sin(i / 40.0 * Math.PI * 2)));
+                Drag(wave, steps: 2);
+                var loop = new List<(double, double)>();
+                for (int i = 0; i <= 60; i++) { double t = i / 60.0 * Math.PI * 2; loop.Add((0.62 + 0.10 * Math.Cos(t), 0.15 + 0.09 * Math.Sin(t))); }
+                Drag(loop, steps: 1);
+                Shot("pointer-pen.png");
+
+                // Text: click to open, type, commit by clicking away, then reselect.
+                Check("TextToolBtn");
+                Click(0.10, 0.92); Pump(4);
+                var textBox = canvas.Children.OfType<TextBox>().Last();
+                textBox.Text = "Hello gjpq text"; Pump(3);
+                Shot("pointer-text-editing.png");
+                Click(0.02, 0.02); Pump(4);
+                Shot("pointer-text-committed.png");
+
+                // Callout: drag tip→box, type, commit, select.
+                Check("CalloutToolBtn");
+                Drag(new[] { (0.60, 0.95), (0.85, 0.88) }); Pump(4);
+                var calloutBox = canvas.Children.OfType<TextBox>().Last();
+                calloutBox.Text = "Callout gjpq"; Pump(3);
+                Shot("pointer-callout-editing.png");
+                Click(0.02, 0.02); Pump(4);
+                Check("SelectToolBtn");
+                Click(0.85, 0.88); Shot("pointer-callout-selected.png");
+                Click(0.10, 0.92); Shot("pointer-text-selected.png");
+
+                editor.Close();
+                Pump(2);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw new Xunit.Sdk.XunitException(failure.ToString());
     }
 
     private static SD.Bitmap CreateSanitizedSource()

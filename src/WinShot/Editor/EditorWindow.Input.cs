@@ -16,7 +16,48 @@ public partial class EditorWindow : Window
 {
     // ------------------------------------------------------------ mouse input
 
+    /// <summary>
+    /// In-process pointer seam. The WPF handlers below wrap the real event into this so a
+    /// harness can drive every tool with plain points on the hidden test desktop — no real
+    /// mouse, no visible window. GetPosition mirrors MouseEventArgs for the two elements
+    /// the tools ask about (the canvas in content px, the viewport in screen px).
+    /// </summary>
+    internal sealed class PointerArgs
+    {
+        public PointerArgs(Point canvas, Point viewport, MouseButton button = MouseButton.Left,
+            int clickCount = 1, object? source = null)
+        {
+            Canvas = canvas; Viewport = viewport; ChangedButton = button; ClickCount = clickCount; OriginalSource = source;
+        }
+        public Point Canvas { get; }
+        public Point Viewport { get; }
+        public MouseButton ChangedButton { get; }
+        public int ClickCount { get; }
+        public object? OriginalSource { get; }
+        public bool Handled { get; set; }
+        public Point GetPosition(IInputElement relativeTo) => relativeTo is Canvas ? Canvas : Viewport;
+    }
+
+    private PointerArgs Wrap(MouseEventArgs e, MouseButton button, int clickCount) =>
+        new(e.GetPosition(AnnotationCanvas), e.GetPosition(Viewport), button, clickCount, e.OriginalSource);
+
     private void OnViewportMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        var p = Wrap(e, e.ChangedButton, e.ClickCount);
+        PointerDown(p);
+        if (p.Handled) e.Handled = true;
+    }
+
+    private void OnViewportMouseMove(object sender, MouseEventArgs e) => PointerMove(Wrap(e, MouseButton.Left, 1));
+
+    private void OnViewportMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        var p = Wrap(e, e.ChangedButton, 1);
+        PointerUp(p);
+        if (p.Handled) e.Handled = true;
+    }
+
+    internal void PointerDown(PointerArgs e)
     {
         if (_sourceOperationActive) return;
         if (IsRotationPillSource(e.OriginalSource)) return; // the pill is its own control
@@ -73,7 +114,7 @@ public partial class EditorWindow : Window
         DrawMouseDown(pos, e);
     }
 
-    private void OnViewportMouseMove(object sender, MouseEventArgs e)
+    internal void PointerMove(PointerArgs e)
     {
         if (_sourceOperationActive) return;
         if (_panning)
@@ -199,7 +240,7 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void OnViewportMouseUp(object sender, MouseButtonEventArgs e)
+    internal void PointerUp(PointerArgs e)
     {
         if (_sourceOperationActive) return;
         if (_panning && e.ChangedButton is MouseButton.Middle or MouseButton.Left)
@@ -389,7 +430,7 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void DrawMouseDown(Point pos, MouseButtonEventArgs e)
+    private void DrawMouseDown(Point pos, PointerArgs e)
     {
         bool hadOpenText = _activeText is not null;
         CommitText();
@@ -794,7 +835,7 @@ public partial class EditorWindow : Window
     private bool _marqueeSelecting;
     private Point _marqueeStart;
 
-    private void SelectMouseDown(Point pos, MouseButtonEventArgs e)
+    private void SelectMouseDown(Point pos, PointerArgs e)
     {
         CommitText();
         var hit = HitTestAnnotation(pos);

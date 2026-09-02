@@ -21,7 +21,9 @@ public partial class EditorWindow : Window
 
     private const double HandleScreenPx = 12;  // Survey cornerSize
     private const double HandleGrabPx = 14;    // screen-px grab radius for hit testing
-    private const double RotateHandleScreenPx = 14;
+    private const double RotateHandleScreenPx = 24;  // Survey renderRotationControl size
+    private enum ThumbKind { Corner, PillH, PillV, Square }
+    private ContentControl? _rotateIcon;
 
     /// <summary>Handle index reserved for the rotation grip (box thumbs are 0..7).</summary>
     private const int RotateHandleIndex = 8;
@@ -94,7 +96,11 @@ public partial class EditorWindow : Window
         var pts = BoxHandlePoints(b);
         EnsureThumbs(pts.Length);
         for (int i = 0; i < pts.Length; i++)
-            PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle));
+        {
+            // 0-3 corners, 4=T 6=B horizontal pills, 5=R 7=L vertical pills (Survey mt/mb/ml/mr).
+            ThumbKind kind = i < 4 ? ThumbKind.Corner : (i is 4 or 6 ? ThumbKind.PillH : ThumbKind.PillV);
+            PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle), kind, angle);
+        }
 
         var top = new Point(centre.X, b.Top);
         var grip = new Point(centre.X, b.Top - AnnotationRotation.HandleOffsetScreenPx / _zoom);
@@ -172,17 +178,30 @@ public partial class EditorWindow : Window
                 Stroke = (Brush)FindResource("InfoBrush"),
             };
             _rotateStem = new Line { Stroke = (Brush)FindResource("InfoBrush") };
+            _rotateIcon = new ContentControl
+            {
+                Content = FindResource("SurveyIcon.Rotate"),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x5C, 0x5C, 0x5C)),
+                IsHitTestVisible = false,
+            };
             HandleLayer.Children.Add(_rotateStem);
             HandleLayer.Children.Add(_rotateThumb);
+            HandleLayer.Children.Add(_rotateIcon);
         }
 
         double s = RotateHandleScreenPx / _zoom;
         _rotateThumb.Width = s;
         _rotateThumb.Height = s;
-        _rotateThumb.StrokeThickness = 1.5 / _zoom;
+        _rotateThumb.StrokeThickness = 1 / _zoom;
         Canvas.SetLeft(_rotateThumb, centre.X - s / 2);
         Canvas.SetTop(_rotateThumb, centre.Y - s / 2);
         _rotateThumb.Visibility = Visibility.Visible;
+        double iconSize = s * 0.7; // Survey: icon at 70% of the circle
+        _rotateIcon!.Width = iconSize;
+        _rotateIcon.Height = iconSize;
+        Canvas.SetLeft(_rotateIcon, centre.X - iconSize / 2);
+        Canvas.SetTop(_rotateIcon, centre.Y - iconSize / 2);
+        _rotateIcon.Visibility = Visibility.Visible;
 
         _rotateStem!.X1 = anchor.X;
         _rotateStem.Y1 = anchor.Y;
@@ -201,6 +220,7 @@ public partial class EditorWindow : Window
     {
         HideRotationPill();
         if (_rotateThumb is not null) _rotateThumb.Visibility = Visibility.Collapsed;
+        if (_rotateIcon is not null) _rotateIcon.Visibility = Visibility.Collapsed;
         if (_rotateStem is not null) _rotateStem.Visibility = Visibility.Collapsed;
     }
 
@@ -225,12 +245,12 @@ public partial class EditorWindow : Window
         _handleKind = HandleKind.Callout;
         EnsureThumbs(6);
         // Survey: tip and knee are squares, the four text-box corners are circles.
-        PlaceThumb(0, layout.Tip + off);
-        PlaceThumb(1, layout.Knee + off);
-        PlaceThumb(2, layout.Box.TopLeft + off, round: true);
-        PlaceThumb(3, layout.Box.TopRight + off, round: true);
-        PlaceThumb(4, layout.Box.BottomRight + off, round: true);
-        PlaceThumb(5, layout.Box.BottomLeft + off, round: true);
+        PlaceThumb(0, layout.Tip + off, ThumbKind.Square);
+        PlaceThumb(1, layout.Knee + off, ThumbKind.Square);
+        PlaceThumb(2, layout.Box.TopLeft + off);
+        PlaceThumb(3, layout.Box.TopRight + off);
+        PlaceThumb(4, layout.Box.BottomRight + off);
+        PlaceThumb(5, layout.Box.BottomLeft + off);
         HandleLayer.Visibility = Visibility.Visible;
     }
 
@@ -283,17 +303,29 @@ public partial class EditorWindow : Window
             _handleThumbs[i].Visibility = i < count ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void PlaceThumb(int index, Point center, bool round = false)
+    private void PlaceThumb(int index, Point center, ThumbKind kind = ThumbKind.Corner, double angleDeg = 0)
     {
         if (index < 0 || index >= _handleThumbs.Count) return;
         var thumb = _handleThumbs[index];
         double s = HandleScreenPx / _zoom;
-        thumb.Width = s;
-        thumb.Height = s;
-        thumb.RadiusX = thumb.RadiusY = round ? s / 2 : 2 / _zoom;
+        double pillLong = 36 / _zoom, pillShort = 9.6 / _zoom; // Survey: size*1.5 x size/2.5 at 24
+        (thumb.Width, thumb.Height) = kind switch
+        {
+            ThumbKind.PillH => (pillLong, pillShort),
+            ThumbKind.PillV => (pillShort, pillLong),
+            _ => (s, s),
+        };
+        thumb.RadiusX = thumb.RadiusY = kind switch
+        {
+            ThumbKind.Square => 2 / _zoom,
+            ThumbKind.Corner => s / 2,
+            _ => pillShort / 2,
+        };
+        thumb.RenderTransformOrigin = new Point(0.5, 0.5);
+        thumb.RenderTransform = angleDeg == 0 ? null : new RotateTransform(angleDeg);
         thumb.StrokeThickness = 1.5 / _zoom;
-        Canvas.SetLeft(thumb, center.X - s / 2);
-        Canvas.SetTop(thumb, center.Y - s / 2);
+        Canvas.SetLeft(thumb, center.X - thumb.Width / 2);
+        Canvas.SetTop(thumb, center.Y - thumb.Height / 2);
         thumb.Visibility = Visibility.Visible;
     }
 

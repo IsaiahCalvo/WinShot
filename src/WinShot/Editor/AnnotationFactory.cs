@@ -343,7 +343,7 @@ internal static class AnnotationFactory
             FontWeight = FontWeights.SemiBold,
             Foreground = foreground,
             CaretBrush = foreground,
-            Background = new SolidColorBrush(Color.FromArgb(0x40, 0x00, 0x00, 0x00)),
+            Background = Brushes.Transparent, // Survey edits in place over the page
             BorderBrush = new SolidColorBrush(Color.FromArgb(0xAA, 0x0A, 0x84, 0xFF)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(TextPadding),

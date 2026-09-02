@@ -562,7 +562,7 @@
                         <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
                                    StrokeDashArray="4 3" Fill="#114DA3FF" Visibility="Collapsed"/>
                         <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                                   StrokeDashArray="4 3" Visibility="Collapsed"/>
+                                   StrokeDashArray="4 4" Visibility="Collapsed"/>
                         <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
                                  Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
                         <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
