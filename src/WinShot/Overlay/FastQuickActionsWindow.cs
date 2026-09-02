@@ -34,11 +34,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly bool _loadPreview;
     private readonly QuickAccessOverlayVisuals _visuals;
     private readonly WF.Timer _tooltipTimer = new() { Interval = 300 };
-    private readonly WF.ContextMenuStrip _overflowMenu = new();
+    private readonly QuickActionsContextMenu _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
-    // Reversible pixel edits, oldest first; the last one owns the menu's undo button.
-    private const int MaxUndoSteps = 20;
-    private readonly List<ImageEdit> _edits = new();
     private QuickAccessTooltipWindow? _tooltipWindow;
     private WF.Timer? _exitMotionTimer;
     private WF.Timer? _stackMotionTimer;
@@ -182,7 +179,6 @@ public sealed class FastQuickActionsWindow : WF.Form
             // Restore-last reopens captures as images, so a media file never qualifies.
             if (_historyPath is not null && _mediaFilePath is null)
                 PushRecentlyClosed(_historyPath);
-            DisposeUndoHistory();
             DisposeImageWhenUnused();
             ReflowOpenWindowsAnimated();
         };
@@ -734,7 +730,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 continue;
             }
             string id = row.Id;
-            var item = new QuickActionMenuItem(id, row.Text, () => RunMenuAction(id), UndoLastEdit);
+            var item = new QuickActionMenuItem(id, row.Text, () => RunMenuAction(id));
             if (row.Shortcut.Length > 0)
             {
                 item.ShortcutKeyDisplayString = row.Shortcut;
@@ -742,9 +738,16 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
             _overflowMenu.Items.Add(item);
         }
+        // The pre-show measurement can be a few pixels off; correct once the real size
+        // is known, so the menu never ends up sitting over the thumbnail.
+        _overflowMenu.Opened += (_, _) =>
+        {
+            SD.Point corrected = OverflowMenuOrigin(_overflowMenu.Size);
+            if (_overflowMenu.Location != corrected)
+                _overflowMenu.Location = corrected;
+        };
         _overflowMenu.Opening += (_, _) =>
         {
-            SyncUndoRow();
             SetHovering(true);
             PauseAutoCloseTimer();
         };
@@ -765,11 +768,23 @@ public sealed class FastQuickActionsWindow : WF.Form
         };
     }
 
+    /// <summary>
+    /// Opens the menu beside the card, on the card's own monitor. Letting WinForms place
+    /// it from a card-relative point put it on the primary monitor when the card sat on a
+    /// screen above this one, and over the thumbnail besides.
+    /// </summary>
     private void ShowOverflowMenu()
     {
         SetHovering(true);
-        _overflowMenu.Show(this, new SD.Point(Width / 2, Height / 2));
+        _overflowMenu.Show(OverflowMenuOrigin(_overflowMenu.GetPreferredSize(SD.Size.Empty)),
+            WF.ToolStripDropDownDirection.BelowRight);
     }
+
+    private SD.Point OverflowMenuOrigin(SD.Size menuSize) =>
+        QuickActionsMenu.MenuOrigin(
+            RectangleToScreen(_cardRect),
+            menuSize,
+            WF.Screen.FromRectangle(RectangleToScreen(_cardRect)).WorkingArea);
 
     private static bool TryIsShareSupported()
     {
@@ -835,7 +850,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                     return;
                 default:
                     if (QuickActionsMenu.TransformFor(id) is { } transform)
-                        TransformImage(id, transform);
+                        TransformImage(transform);
                     return;
             }
         }
@@ -850,11 +865,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// the dimensions on a quarter turn, so only the preview has to be re-rendered.
     /// The card stays open, and the row keeps an undo button until the card closes.
     /// </summary>
-    private async void TransformImage(string rowId, SD.RotateFlipType transform)
+    private async void TransformImage(SD.RotateFlipType transform)
     {
         if (!await WaitForRenderIdleAsync()) return;
         _image.RotateFlip(transform);
-        PushEdit(new ImageEdit(rowId, QuickActionsMenu.Inverse(transform), null));
         OnImageChanged();
     }
 
@@ -875,68 +889,15 @@ public sealed class FastQuickActionsWindow : WF.Form
         return !_closed && !IsDisposed;
     }
 
-    /// <summary>
-    /// Swaps in edited pixels. <paramref name="previous"/> keeps the old bitmap alive
-    /// for the undo stack instead of disposing it — only Resize… needs that, because a
-    /// rotate or a flip reverses itself.
-    /// </summary>
-    private void ReplaceImage(SD.Bitmap replacement, string rowId)
+    private void ReplaceImage(SD.Bitmap replacement)
     {
         // Callers reach here only after WaitForRenderIdleAsync, so nothing is reading _image.
         SD.Bitmap previous = _image;
         _image = replacement;
-        PushEdit(new ImageEdit(rowId, null, previous));
+        previous.Dispose();
         OnImageChanged();
     }
 
-    private void PushEdit(ImageEdit edit)
-    {
-        _edits.Add(edit);
-        // A long session of resizes would otherwise pin one full bitmap per step.
-        if (_edits.Count > MaxUndoSteps)
-        {
-            _edits[0].Previous?.Dispose();
-            _edits.RemoveAt(0);
-        }
-    }
-
-    private async void UndoLastEdit()
-    {
-        if (_edits.Count == 0) return;
-        if (!await WaitForRenderIdleAsync() || _edits.Count == 0) return;
-
-        ImageEdit edit = _edits[^1];
-        _edits.RemoveAt(_edits.Count - 1);
-        if (edit.Inverse is { } inverse)
-        {
-            _image.RotateFlip(inverse);
-        }
-        else if (edit.Previous is { } previous)
-        {
-            SD.Bitmap undone = _image;
-            _image = previous;
-            undone.Dispose();
-        }
-        OnImageChanged();
-    }
-
-    /// <summary>Parks the undo button on the row of the edit that would be reverted next.</summary>
-    private void SyncUndoRow()
-    {
-        string? undoRow = _edits.Count > 0 ? _edits[^1].RowId : null;
-        foreach (var item in _overflowMenu.Items.OfType<QuickActionMenuItem>())
-            item.ShowUndo = item.Id == undoRow;
-    }
-
-    private void DisposeUndoHistory()
-    {
-        foreach (ImageEdit edit in _edits)
-            edit.Previous?.Dispose();
-        _edits.Clear();
-    }
-
-    /// <summary>One reversible pixel edit: either an inverse transform or the bitmap it replaced.</summary>
-    private readonly record struct ImageEdit(string RowId, SD.RotateFlipType? Inverse, SD.Bitmap? Previous);
 
     /// <summary>
     /// Re-renders the thumbnail and drops every copy of the old pixels: the temp
@@ -981,7 +942,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (size == _image.Size)
             return;
         if (!await WaitForRenderIdleAsync()) return;
-        ReplaceImage(QuickActionsMenu.Resized(_image, size.Width, size.Height), QuickActionsMenu.Resize);
+        ReplaceImage(QuickActionsMenu.Resized(_image, size.Width, size.Height));
     }
 
     /// <summary>Runs a shell action that needs a real file, saving one first if the capture has none.</summary>

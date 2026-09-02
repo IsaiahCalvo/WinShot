@@ -166,27 +166,6 @@ public class QuickActionsMenuTests
         Assert.Equal(1, scaled.Height);
     }
 
-    [Theory]
-    [InlineData(SD.RotateFlipType.Rotate90FlipNone, SD.RotateFlipType.Rotate270FlipNone)]
-    [InlineData(SD.RotateFlipType.Rotate270FlipNone, SD.RotateFlipType.Rotate90FlipNone)]
-    [InlineData(SD.RotateFlipType.RotateNoneFlipX, SD.RotateFlipType.RotateNoneFlipX)]
-    [InlineData(SD.RotateFlipType.RotateNoneFlipY, SD.RotateFlipType.RotateNoneFlipY)]
-    public void InverseReversesEveryTransform(SD.RotateFlipType transform, SD.RotateFlipType expected)
-        => Assert.Equal(expected, QuickActionsMenu.Inverse(transform));
-
-    [Fact]
-    public void ApplyingATransformThenItsInverseRestoresTheBitmap()
-    {
-        using var bitmap = new SD.Bitmap(400, 200);
-        var transform = QuickActionsMenu.TransformFor(QuickActionsMenu.RotateLeft)!.Value;
-
-        bitmap.RotateFlip(transform);
-        Assert.Equal(new SD.Size(200, 400), bitmap.Size);
-        bitmap.RotateFlip(QuickActionsMenu.Inverse(transform));
-
-        Assert.Equal(new SD.Size(400, 200), bitmap.Size);
-    }
-
     [Fact]
     public void OnlyTheFirstTwoGroupsCarryIcons()
     {
@@ -213,6 +192,65 @@ public class QuickActionsMenuTests
 
         Assert.Equal(9, icons.Length);
         Assert.Equal(icons.Length, icons.Distinct().Count());
+    }
+
+    // The card sits bottom-right on a 1920x1080 monitor whose top-left is (0, -1080) —
+    // the "directly above the laptop" screen in Isaiah's three-monitor stack.
+    private static readonly SD.Rectangle AboveScreen = new(0, -1080, 1920, 1080);
+    private static readonly SD.Rectangle CardOnAboveScreen = new(1700, -240, 192, 120);
+    private static readonly SD.Size MenuSize = new(220, 400);
+
+    [Fact]
+    public void MenuOpensOnTheCardsOwnScreenNotThePrimary()
+    {
+        SD.Point origin = QuickActionsMenu.MenuOrigin(CardOnAboveScreen, MenuSize, AboveScreen);
+
+        Assert.True(AboveScreen.Contains(new SD.Rectangle(origin, MenuSize)));
+        Assert.True(origin.Y < 0, "the menu stayed on the monitor above, not the primary");
+    }
+
+    [Fact]
+    public void MenuSitsLeftOfTheCardWithoutCoveringIt()
+    {
+        SD.Point origin = QuickActionsMenu.MenuOrigin(CardOnAboveScreen, MenuSize, AboveScreen);
+        var menu = new SD.Rectangle(origin, MenuSize);
+
+        Assert.True(menu.Right <= CardOnAboveScreen.Left);
+        Assert.False(menu.IntersectsWith(CardOnAboveScreen));
+        Assert.Equal(CardOnAboveScreen.Bottom, menu.Bottom);
+    }
+
+    [Fact]
+    public void MenuFlipsToTheRightWhenTheLeftWouldRunOffTheScreen()
+    {
+        var card = new SD.Rectangle(8, 400, 192, 120);
+        var screen = new SD.Rectangle(0, 0, 1920, 1080);
+
+        var menu = new SD.Rectangle(QuickActionsMenu.MenuOrigin(card, MenuSize, screen), MenuSize);
+
+        Assert.True(menu.Left >= card.Right);
+        Assert.False(menu.IntersectsWith(card));
+    }
+
+    [Fact]
+    public void MenuStaysOnScreenWhenItCannotClearTheCardOnEitherSide()
+    {
+        var screen = new SD.Rectangle(0, 0, 300, 300);
+        var card = new SD.Rectangle(50, 100, 192, 120);
+
+        var menu = new SD.Rectangle(QuickActionsMenu.MenuOrigin(card, MenuSize, screen), MenuSize);
+
+        Assert.True(menu.Left >= screen.Left && menu.Right <= screen.Right);
+        Assert.Equal(screen.Top, menu.Top);
+    }
+
+    [Fact]
+    public void MenuTallerThanTheScreenStartsAtItsTop()
+    {
+        var screen = new SD.Rectangle(0, -1080, 1920, 1080);
+        SD.Point origin = QuickActionsMenu.MenuOrigin(CardOnAboveScreen, new SD.Size(220, 2000), screen);
+
+        Assert.Equal(screen.Top, origin.Y);
     }
 
     [Fact]

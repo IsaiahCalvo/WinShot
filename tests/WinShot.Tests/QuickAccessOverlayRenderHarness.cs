@@ -5,6 +5,7 @@ using WinShot.Core;
 using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
+using WF = System.Windows.Forms;
 
 namespace WinShot.Tests;
 
@@ -14,6 +15,41 @@ namespace WinShot.Tests;
 /// </summary>
 public class QuickAccessOverlayRenderHarness
 {
+    [Fact]
+    public void RenderContextMenuToPng()
+    {
+        if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_QUICK_ACCESS") != "1")
+            return;
+
+        string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUT")
+            ?? Path.Combine(Path.GetTempPath(), "winshot-quick-access-render");
+        Directory.CreateDirectory(outDir);
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var source = CreateSyntheticCapture();
+                using var overlay = new FastQuickActionsWindow(source, new SettingsService());
+                var menu = (WF.ContextMenuStrip)typeof(FastQuickActionsWindow)
+                    .GetField("_overflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(overlay)!;
+
+                menu.Show(new SD.Point(0, 0));
+                using var bitmap = new SD.Bitmap(menu.Width, menu.Height);
+                menu.DrawToBitmap(bitmap, new SD.Rectangle(0, 0, menu.Width, menu.Height));
+                menu.Close();
+                bitmap.Save(Path.Combine(outDir, "context-menu.png"), SD.Imaging.ImageFormat.Png);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
     [Fact]
     public void RenderIdleAndHoverStatesToPng()
     {

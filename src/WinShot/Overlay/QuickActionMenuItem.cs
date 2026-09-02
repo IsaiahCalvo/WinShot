@@ -1,130 +1,135 @@
-using System.Drawing.Drawing2D;
-using WinShot.Core;
+﻿using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
 namespace WinShot.Overlay;
 
 /// <summary>
-/// One row of the quick-actions card's context menu. Adds two things the stock item
-/// has no notion of: the row's id, and an undo button parked at the right edge of the
-/// row whose edit was applied last — click the glyph to revert, click anywhere else in
-/// the row to run the row again.
+/// One row of the quick-actions card's context menu, drawn end to end rather than by
+/// the stock menu-item layout. The stock one parks icons in a gutter to the left of
+/// every row's text, so the menu reads as two left edges. Here every row's leading
+/// content — a glyph, or the text on the rows that have no glyph — starts on the same
+/// left edge, and only an iconed row's text is indented past its glyph.
 /// </summary>
 internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 {
-    private const int GlyphSize = 16;
-    private const int ZoneWidth = GlyphSize + 12;
+    internal const int GlyphSize = 16;
+    // The drop-down forces an 8px left inset of its own, so the row's own left pad is
+    // small; together they match the right pad and the menu reads evenly inset.
+    private const int PadLeft = 4;
+    private const int PadRight = 11;
+    private const int GlyphGap = 9;
+    private const int ShortcutGap = 24;
+    private const int MinHeight = 24;
 
     private readonly Action _action;
-    private readonly Action _undo;
-    private bool _pointerOverUndo;
-    private bool _showUndo;
+    private readonly SD.Bitmap? _glyph;
 
-    internal QuickActionMenuItem(string id, string text, Action action, Action undo)
+    internal QuickActionMenuItem(string id, string text, Action action)
         : base(text)
     {
         Id = id;
         _action = action;
-        _undo = undo;
         if (QuickActionsMenu.IconFor(id) is { } icon)
-            Image = SvgIcons.Get(icon, GlyphSize, ThemePalette.TextPrimary);
+            _glyph = SvgIcons.Get(icon, GlyphSize, ThemePalette.TextPrimary);
     }
 
     internal string Id { get; }
 
-    /// <summary>Whether this row is the one carrying the undo button right now.</summary>
-    internal bool ShowUndo
-    {
-        get => _showUndo;
-        set
-        {
-            if (_showUndo == value) return;
-            _showUndo = value;
-            _pointerOverUndo = false;
-            // The row got wider or narrower, so the whole drop-down has to re-measure.
-            Owner?.PerformLayout();
-            Invalidate();
-        }
-    }
+    /// <summary>How far this row's text sits from the menu's left edge.</summary>
+    internal int TextLeft => PadLeft + (_glyph is null ? 0 : GlyphSize + GlyphGap);
+
+    private string Shortcut => ShowShortcutKeys ? ShortcutKeyDisplayString ?? string.Empty : string.Empty;
+
+    protected override void OnClick(EventArgs e) => _action();
 
     public override SD.Size GetPreferredSize(SD.Size constrainingSize)
     {
-        SD.Size size = base.GetPreferredSize(constrainingSize);
-        if (_showUndo)
-            size.Width += ZoneWidth;
-        return size;
-    }
-
-    protected override void OnClick(EventArgs e)
-    {
-        // Keyboard activation never sets the hover flag, so Enter always runs the row.
-        if (_pointerOverUndo)
+        SD.Size own = OwnSize();
+        // Every row reports the widest row's width. Overriding GetPreferredSize opts out
+        // of the drop-down's own equalizing pass, and rows of different widths would put
+        // each shortcut at its own right edge instead of in one column.
+        int width = own.Width;
+        if (Owner is not null)
         {
-            _pointerOverUndo = false;
-            _undo();
-            return;
+            foreach (var sibling in Owner.Items)
+            {
+                if (sibling is QuickActionMenuItem row)
+                    width = Math.Max(width, row.OwnSize().Width);
+            }
         }
-        _action();
+        return new SD.Size(width, own.Height);
     }
 
-    protected override void OnMouseMove(WF.MouseEventArgs e)
+    private SD.Size OwnSize()
     {
-        base.OnMouseMove(e);
-        SetPointerOverUndo(_showUndo && UndoBounds().Contains(e.Location));
-    }
-
-    protected override void OnMouseLeave(EventArgs e)
-    {
-        base.OnMouseLeave(e);
-        SetPointerOverUndo(false);
+        SD.Size text = Measure(Text ?? string.Empty);
+        int width = TextLeft + text.Width + PadRight;
+        if (Shortcut.Length > 0)
+            width += ShortcutGap + Measure(Shortcut).Width;
+        return new SD.Size(width, Math.Max(MinHeight, text.Height + 8));
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)
     {
-        base.OnPaint(e);
-        if (!_showUndo) return;
-
-        SD.Rectangle zone = UndoBounds();
+        // Deliberately not base.OnPaint: that is the layout this item exists to replace.
         var g = e.Graphics;
-        if (_pointerOverUndo)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var path = GdiPaths.RoundedRect(zone, zone.Height / 2);
-            using var fill = new SD.SolidBrush(SD.Color.FromArgb(70, ThemePalette.AccentHover));
-            g.FillPath(fill, path);
-        }
+        Owner?.Renderer.DrawMenuItemBackground(new WF.ToolStripItemRenderEventArgs(g, this));
 
-        SD.Bitmap? glyph = SvgIcons.Get(
-            QuickActionsMenu.UndoIcon,
-            GlyphSize,
-            _pointerOverUndo ? ThemePalette.TextPrimary : ThemePalette.TextSecondary);
-        if (glyph is not null)
+        if (_glyph is not null)
+            g.DrawImage(_glyph, PadLeft, (Height - GlyphSize) / 2, GlyphSize, GlyphSize);
+
+        SD.Color color = Enabled ? ThemePalette.TextPrimary : ThemePalette.TextSecondary;
+        var flags = WF.TextFormatFlags.NoPrefix | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Left;
+        WF.TextRenderer.DrawText(
+            g,
+            Text,
+            Font,
+            new SD.Rectangle(TextLeft, 0, Math.Max(0, Width - TextLeft - PadRight), Height),
+            color,
+            flags);
+
+        if (Shortcut.Length > 0)
         {
-            g.DrawImage(
-                glyph,
-                zone.X + (zone.Width - GlyphSize) / 2,
-                zone.Y + (zone.Height - GlyphSize) / 2,
-                GlyphSize,
-                GlyphSize);
+            WF.TextRenderer.DrawText(
+                g,
+                Shortcut,
+                Font,
+                new SD.Rectangle(TextLeft, 0, Math.Max(0, Width - TextLeft - PadRight), Height),
+                ThemePalette.TextSecondary,
+                WF.TextFormatFlags.NoPrefix | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Right);
         }
     }
 
-    /// <summary>The undo hit zone, in the row's own coordinates.</summary>
-    private SD.Rectangle UndoBounds()
+    private SD.Size Measure(string value) =>
+        WF.TextRenderer.MeasureText(value, Font, SD.Size.Empty, WF.TextFormatFlags.NoPrefix);
+}
+
+/// <summary>
+/// The drop-down that hosts <see cref="QuickActionMenuItem"/>. It exists to size itself
+/// to those rows: <see cref="WF.ToolStripDropDownMenu"/> re-derives its width from the
+/// stock text/image/check metrics, so a row that draws its own glyph measures short and
+/// the shortcut column gets clipped off the right edge.
+/// </summary>
+internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
+{
+    internal QuickActionsContextMenu()
     {
-        int height = Math.Min(Height - 2, GlyphSize + 6);
-        return new SD.Rectangle(
-            Math.Max(0, Width - ZoneWidth - 2),
-            Math.Max(0, (Height - height) / 2),
-            ZoneWidth,
-            Math.Max(1, height));
+        // The rows own their left inset; the drop-down must not add one of its own.
+        ShowImageMargin = false;
+        Padding = new WF.Padding(0, 2, 0, 2);
     }
 
-    private void SetPointerOverUndo(bool value)
+    public override SD.Size GetPreferredSize(SD.Size proposedSize)
     {
-        if (_pointerOverUndo == value) return;
-        _pointerOverUndo = value;
-        Invalidate();
+        SD.Size size = base.GetPreferredSize(proposedSize);
+        int rows = 0;
+        foreach (WF.ToolStripItem item in Items)
+        {
+            if (item is QuickActionMenuItem row)
+                rows = Math.Max(rows, row.GetPreferredSize(SD.Size.Empty).Width);
+        }
+        size.Width = Math.Max(size.Width, rows + Padding.Horizontal);
+        return size;
     }
 }

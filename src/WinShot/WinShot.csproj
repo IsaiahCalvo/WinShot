@@ -73,8 +73,6 @@
                       LogicalName="WinShot.Assets.quick-access-flip-vertical.svg" />
     <EmbeddedResource Include="Assets\quick-access-resize.svg"
                       LogicalName="WinShot.Assets.quick-access-resize.svg" />
-    <EmbeddedResource Include="Assets\quick-access-undo.svg"
-                      LogicalName="WinShot.Assets.quick-access-undo.svg" />
   </ItemGroup>
 
 </Project>

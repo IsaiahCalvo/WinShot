@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Printing;
@@ -104,17 +104,6 @@ internal static class QuickActionsMenu
     };
 
     /// <summary>
-    /// Undoing a rotate or a flip is just another rotate or flip, so those rows cost
-    /// no memory to reverse — unlike Resize…, which has to keep the old bitmap.
-    /// </summary>
-    internal static SD.RotateFlipType Inverse(SD.RotateFlipType transform) => transform switch
-    {
-        SD.RotateFlipType.Rotate90FlipNone => SD.RotateFlipType.Rotate270FlipNone,
-        SD.RotateFlipType.Rotate270FlipNone => SD.RotateFlipType.Rotate90FlipNone,
-        _ => transform, // a flip is its own inverse
-    };
-
-    /// <summary>
     /// The glyph for a row, or null for the text-only rows. CleanShot icons only its
     /// first two groups — the capture actions and the pixel edits — and so do we.
     /// </summary>
@@ -132,7 +121,26 @@ internal static class QuickActionsMenu
         _ => null,
     };
 
-    internal const string UndoIcon = "quick-access-undo.svg";
+    /// <summary>
+    /// Where the context menu goes: beside the card on the card's own monitor, never
+    /// over the thumbnail. Left of the card by preference — the card lives in a screen
+    /// corner, so the free space is inboard of it — falling back to the right side when
+    /// the left would run off the monitor. Bottom edges line up.
+    /// </summary>
+    internal static SD.Point MenuOrigin(SD.Rectangle card, SD.Size menu, SD.Rectangle screen)
+    {
+        const int gap = 8;
+        int x = card.Left - gap - menu.Width;
+        if (x < screen.Left)
+            x = card.Right + gap;
+        // Clamp last: on a screen too narrow for either side, staying on the right
+        // monitor matters more than clearing the card.
+        int maxX = Math.Max(screen.Left, screen.Right - menu.Width);
+        int maxY = Math.Max(screen.Top, screen.Bottom - menu.Height);
+        return new SD.Point(
+            Math.Clamp(x, screen.Left, maxX),
+            Math.Clamp(card.Bottom - menu.Height, screen.Top, maxY));
+    }
 
     /// <summary>Height that keeps <paramref name="source"/>'s aspect at <paramref name="width"/>.</summary>
     internal static int AspectHeight(SD.Size source, int width) =>

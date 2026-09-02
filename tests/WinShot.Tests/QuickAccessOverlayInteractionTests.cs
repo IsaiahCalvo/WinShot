@@ -212,72 +212,7 @@ public class QuickAccessOverlayInteractionTests
             Assert.Equal(760, rotated.Width);
             Assert.Equal(1200, rotated.Height);
             Assert.Equal(1, (int)versionField.GetValue(overlay)!);
-            Assert.False(overlay.IsDisposed); // the card stays up so the edit can be undone
-        });
-    }
-
-    [Fact]
-    public void UndoRestoresTheImageAndMovesToThePreviousEdit()
-    {
-        RunSta(() =>
-        {
-            using var bitmap = new SD.Bitmap(1200, 760);
-            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
-            var type = typeof(FastQuickActionsWindow);
-            var run = type.GetMethod("RunMenuAction", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            var undo = type.GetMethod("UndoLastEdit", BindingFlags.Instance | BindingFlags.NonPublic)!;
-
-            run.Invoke(overlay, new object[] { "flip-h" });
-            PumpUntilRenderIdle(overlay);
-            run.Invoke(overlay, new object[] { "rotate-right" });
-            PumpUntilRenderIdle(overlay);
-            Assert.Equal("rotate-right", UndoRowId(overlay));
-
-            undo.Invoke(overlay, null);
-            PumpUntilRenderIdle(overlay);
-            using (var afterFirstUndo = overlay.CloneImage())
-            {
-                Assert.Equal(1200, afterFirstUndo.Width);
-                Assert.Equal(760, afterFirstUndo.Height);
-            }
-            Assert.Equal("flip-h", UndoRowId(overlay));
-
-            undo.Invoke(overlay, null);
-            PumpUntilRenderIdle(overlay);
-            Assert.Null(UndoRowId(overlay));
-
-            undo.Invoke(overlay, null); // an empty history is a no-op, not a crash
-            PumpUntilRenderIdle(overlay);
-            Assert.Null(UndoRowId(overlay));
-        });
-    }
-
-    [Fact]
-    public void UndoButtonSitsOnTheRowOfTheLastEdit()
-    {
-        RunSta(() =>
-        {
-            using var bitmap = new SD.Bitmap(1200, 760);
-            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
-            var type = typeof(FastQuickActionsWindow);
-            type.GetMethod("RunMenuAction", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(overlay, new object[] { "flip-v" });
-            PumpUntilRenderIdle(overlay);
-            type.GetMethod("SyncUndoRow", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(overlay, null);
-
-            var menu = (WF.ContextMenuStrip)type
-                .GetField("_overflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .GetValue(overlay)!;
-            var showUndo = menu.Items.Cast<WF.ToolStripItem>()
-                .Where(i => i.GetType().Name == "QuickActionMenuItem")
-                .Where(i => (bool)i.GetType()
-                    .GetProperty("ShowUndo", BindingFlags.Instance | BindingFlags.NonPublic)!
-                    .GetValue(i)!)
-                .Select(i => i.Text)
-                .ToArray();
-
-            Assert.Equal(new[] { "Flip vertical" }, showUndo);
+            Assert.False(overlay.IsDisposed); // the card stays up, showing the edited capture
         });
     }
 
@@ -296,7 +231,6 @@ public class QuickAccessOverlayInteractionTests
                 string asset = InvokeIconFor(id) ?? throw new Xunit.Sdk.XunitException($"{id} has no icon");
                 Assert.NotNull(SvgIcons.Get(asset, 16, SD.Color.White));
             }
-            Assert.NotNull(SvgIcons.Get("quick-access-undo.svg", 16, SD.Color.White));
             Assert.Null(InvokeIconFor("print"));
         });
     }
@@ -326,16 +260,6 @@ public class QuickAccessOverlayInteractionTests
         throw new Xunit.Sdk.XunitException("The overlay thumbnail render never finished.");
     }
 
-    private static string? UndoRowId(FastQuickActionsWindow overlay)
-    {
-        var edits = (System.Collections.IList)typeof(FastQuickActionsWindow)
-            .GetField("_edits", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(overlay)!;
-        if (edits.Count == 0)
-            return null;
-        object last = edits[edits.Count - 1]!;
-        return (string)last.GetType().GetProperty("RowId")!.GetValue(last)!;
-    }
 
     [Fact]
     public void HoverPausesAndResumesAutoCloseTimer()
