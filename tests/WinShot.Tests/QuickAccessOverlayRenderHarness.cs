@@ -93,6 +93,11 @@ public class QuickAccessOverlayRenderHarness
                 RenderState(wide, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-wide-idle.png"));
                 RenderState(tall, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1, Path.Combine(outDir, "dark-tall-idle.png"));
                 RenderStackMotion(source, settings, outDir);
+                // The case the card edge exists for: a black capture with nothing to
+                // separate it from a black desktop behind the card.
+                using var black = CreateAspectCapture(1200, 760, SD.Color.FromArgb(6, 6, 8));
+                RenderState(black, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1,
+                    Path.Combine(outDir, "dark-black-capture-idle.png"));
                 RenderStatusFlash(source, settings, "Text copied", Path.Combine(outDir, "card-flash-text-copied.png"));
             }
             catch (Exception ex)

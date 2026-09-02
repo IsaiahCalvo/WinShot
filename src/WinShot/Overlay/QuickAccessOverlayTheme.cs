@@ -1,4 +1,4 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 using WinShot.Core;
 
 namespace WinShot.Overlay;
@@ -11,6 +11,9 @@ internal enum QuickAccessOverlayTheme
 
 internal readonly record struct QuickAccessOverlayVisuals(
     SD.Color CardFill,
+    /// <summary>Faint hairline around the card. A capture of a dark window on a dark
+    /// desktop is otherwise its own background, and the card has no visible edge at all.</summary>
+    SD.Color CardEdge,
     SD.Color HoverTint,
     SD.Color ControlFace,
     SD.Color ControlHover,
@@ -33,6 +36,7 @@ internal static class QuickAccessOverlayThemePalette
     {
         QuickAccessOverlayTheme.Light => new(
             CardFill: SD.Color.FromArgb(0xEE, 0xF4, 0xFF),
+            CardEdge: SD.Color.FromArgb(38, 17, 24, 32),
             HoverTint: SD.Color.FromArgb(107, 236, 243, 252),
             ControlFace: SD.Color.FromArgb(204, 255, 255, 255),
             ControlHover: SD.Color.FromArgb(245, 255, 255, 255),
@@ -46,6 +50,7 @@ internal static class QuickAccessOverlayThemePalette
             TooltipText: SD.Color.FromArgb(0x11, 0x18, 0x20)),
         _ => new(
             CardFill: ThemePalette.WindowBg,
+            CardEdge: SD.Color.FromArgb(46, 255, 255, 255),
             HoverTint: SD.Color.FromArgb(140, 15, 18, 25),
             ControlFace: SD.Color.FromArgb(22, 255, 255, 255),
             ControlHover: SD.Color.FromArgb(36, 255, 255, 255),

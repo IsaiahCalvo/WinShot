@@ -275,6 +275,51 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
+    public void CardKeepsAHairlineEdgeOverANearBlackCapture()
+    {
+        RunSta(() =>
+        {
+            using var black = new SD.Bitmap(1200, 760);
+            using (var g = SD.Graphics.FromImage(black))
+                g.Clear(SD.Color.FromArgb(6, 6, 8));
+
+            using var overlay = FastQuickActionsWindow.CreateForTheme(
+                black, new SettingsService(), QuickAccessOverlayTheme.Dark);
+            overlay.CreateControl();
+            using var surface = new SD.Bitmap(overlay.ClientSize.Width, overlay.ClientSize.Height);
+            using (var g = SD.Graphics.FromImage(surface))
+            using (var args = new WF.PaintEventArgs(g, new SD.Rectangle(SD.Point.Empty, surface.Size)))
+            {
+                // An opaque ground first: the card paints onto the desktop, and measuring it
+                // over a transparent bitmap reads back the compositing, not the pixels a
+                // person sees — which made the two edges look different when they are not.
+                g.Clear(SD.Color.Black);
+                typeof(FastQuickActionsWindow).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(overlay, new object[] { args });
+            }
+
+            int middle = surface.Height / 2;
+            int interior = surface.GetPixel(surface.Width / 2, middle).R;
+            int left = Brightest(surface, 0, 3, middle);
+            int right = Brightest(surface, surface.Width - 3, surface.Width, middle);
+
+            // Faint, but a capture this dark has no edge of its own to read.
+            Assert.True(left > interior + 20, $"left edge {left} vs interior {interior}");
+            Assert.Equal(left, right);
+            Assert.True(left < 90, $"the edge is meant to be a hairline, not a frame: {left}");
+            Assert.Equal(interior, Brightest(surface, surface.Width / 2 - 2, surface.Width / 2 + 2, middle));
+        });
+    }
+
+    private static int Brightest(SD.Bitmap surface, int fromX, int toX, int y)
+    {
+        int best = 0;
+        for (int x = Math.Max(0, fromX); x < Math.Min(surface.Width, toX); x++)
+            best = Math.Max(best, surface.GetPixel(x, y).R);
+        return best;
+    }
+
+    [Fact]
     public void StatusFlashClearsItselfAndFreesItsTimer()
     {
         RunSta(() =>

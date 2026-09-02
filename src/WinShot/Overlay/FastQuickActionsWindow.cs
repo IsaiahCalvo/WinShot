@@ -365,6 +365,39 @@ public sealed class FastQuickActionsWindow : WF.Form
                     DrawFocus(g, _buttons[i]);
             }
         }
+
+        DrawCardEdge(g);
+    }
+
+    /// <summary>
+    /// A hairline on the card's own edge, drawn over everything else. The card is mostly
+    /// the capture itself, so a screenshot of something dark sitting on a dark desktop has
+    /// no visible boundary — the shadow alone does not carry it.
+    /// </summary>
+    private void DrawCardEdge(SD.Graphics g)
+    {
+        // PopupChrome's recipe, the same one the app's other popups use: it strokes half a
+        // pixel inside so both edges take the same share of the line. An integer path put
+        // more ink on the left than the right.
+        GraphicsState state = g.Save();
+        try
+        {
+            // One pixel inside the card, not on its boundary: the fill's own edge pixel is
+            // not fully covered, so a stroke laid on the boundary picks up more of the line
+            // on one side than the other. Inset, every side sits on solid fill and reads the
+            // same. Measured — see CardKeepsAHairlineEdgeOverANearBlackCapture.
+            g.TranslateTransform(_cardRect.X + 1, _cardRect.Y + 1);
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            PopupChrome.DrawBorder(
+                g,
+                new SD.Size(Math.Max(1, _cardRect.Width - 2), Math.Max(1, _cardRect.Height - 2)),
+                Math.Max(1, _cornerRadius - 1),
+                _visuals.CardEdge);
+        }
+        finally
+        {
+            g.Restore(state);
+        }
     }
 
     protected override void Dispose(bool disposing)
