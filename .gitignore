@@ -9,3 +9,5 @@ output/
 browser-extension/dist/
 browser-extension/test-results/
 browser-extension/playwright-report/
+# Render-harness output (screenshots for UI reviews) — regenerable, not source.
+artifacts/
