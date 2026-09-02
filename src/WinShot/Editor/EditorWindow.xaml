@@ -1,19 +1,26 @@
 ﻿<Window x:Class="WinShot.Editor.EditorWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WinShot Editor" Background="{StaticResource WindowBgBrush}"
+        Title="WinShot Editor" Background="{StaticResource ChromePopoverBrush}"
         MinWidth="980" MinHeight="520"
         AllowDrop="True" Drop="OnEditorDrop" DragOver="OnEditorDragOver"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
         AutomationProperties.Name="WinShot annotation editor">
-    <Grid Background="{StaticResource WindowBgBrush}">
+    <Grid Background="{StaticResource ChromePopoverBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border x:Name="TopToolbar" Grid.Row="0" Style="{StaticResource FloatingToolbar}" Margin="12,12,12,6">
+        <!-- Survey's top chrome is a full-bleed FLAT strip, not a floating pill:
+             background #181c24, padding 8px 12px, no radius, no border, no
+             shadow, no margin, butting straight onto the 34px sub-row below
+             (AppShell.jsx:1337-1355). -->
+        <Border x:Name="TopToolbar" Grid.Row="0" Margin="0" Padding="12,8" CornerRadius="0"
+                BorderThickness="0" Background="{StaticResource ChromeBgBrush}"
+                TextElement.Foreground="{StaticResource ChromeTextBrush}"
+                SnapsToDevicePixels="True">
             <StackPanel>
                 <Grid x:Name="ToolbarPrimaryRow">
                     <!-- Survey: the tool cluster is centred (justify-content: center); undo/redo
@@ -27,25 +34,26 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" HorizontalAlignment="Left" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="BtnUndo" Style="{StaticResource SurveyDefaultButton}"
-                                ToolTip="Undo (Ctrl+Z)" Click="OnUndo" IsEnabled="False"
+                                ToolTip="Undo" Click="OnUndo" IsEnabled="False"
                                 AutomationProperties.Name="Undo" AutomationProperties.HelpText="Undo the last action. Shortcut Ctrl+Z.">
                             <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Undo}"/></Viewbox>
                         </Button>
                         <Button x:Name="BtnRedo" Style="{StaticResource SurveyDefaultButton}"
-                                ToolTip="Redo (Ctrl+Y)" Click="OnRedo" IsEnabled="False"
+                                ToolTip="Redo" Click="OnRedo" IsEnabled="False"
                                 AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y.">
                             <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Redo}"/></Viewbox>
                         </Button>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7A8;"
-                                Click="OnCropClick" ToolTip="Crop (C)"
+                        <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}"
+                                Click="OnCropClick" ToolTip="Crop"
                                 AutomationProperties.Name="Crop and resize"
-                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C."/>
-                        <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE7AD;"
-                                RenderTransformOrigin="0.5,0.5" ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
+                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C."
+                                Content="{StaticResource SurveyIcon.Crop}"/>
+                        <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}"
+                                ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
                                 AutomationProperties.Name="Rotate clockwise"
                                 AutomationProperties.HelpText="Rotate the source image 90 degrees clockwise.">
-                            <Button.RenderTransform><ScaleTransform ScaleX="-1"/></Button.RenderTransform>
+                            <Viewbox Width="18" Height="18"><ContentControl Content="{StaticResource SurveyIcon.Rotate}"/></Viewbox>
                         </Button>
                         <Button x:Name="MoreChromeBtn" Style="{StaticResource CompactToolIconButton}" Content="{StaticResource SurveyIcon.More}"
                                 Click="OnMoreChromeClick" ToolTip="More"
@@ -53,16 +61,19 @@
                                 AutomationProperties.HelpText="Rotate the other way, flip, resize, add image, or add a background."/>
                         <Popup x:Name="MoreChromePopup" PlacementTarget="{Binding ElementName=MoreChromeBtn}"
                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="6" Margin="0,4,12,12"
-                                    Effect="{StaticResource FloatingShadow}" MinWidth="220">
+                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
+                                    BorderThickness="1" CornerRadius="8" Padding="5" Margin="0,6,36,36"
+                                    Effect="{StaticResource ChromePopoverShadow}" MinWidth="220">
                                 <StackPanel>
                                     <Button x:Name="RotateCcwBtn" Style="{StaticResource ChromeMenuItem}" Click="OnRotateCcw"
                                             ToolTip="Rotate 90° counter-clockwise"
                                             AutomationProperties.Name="Rotate counter-clockwise"
                                             AutomationProperties.HelpText="Rotate the source image 90 degrees counter-clockwise.">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE7AD;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <Viewbox Width="22" Height="16" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                                                <Viewbox.RenderTransform><ScaleTransform ScaleX="-1"/></Viewbox.RenderTransform>
+                                                <ContentControl Content="{StaticResource SurveyIcon.Rotate}"/>
+                                            </Viewbox>
                                             <TextBlock Text="Rotate counter-clockwise" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
@@ -70,7 +81,7 @@
                                             ToolTip="Flip horizontal" AutomationProperties.Name="Flip horizontal"
                                             AutomationProperties.HelpText="Flip the source image from left to right.">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE13C;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <ContentControl Content="{StaticResource SurveyIcon.FlipH}" Width="22" VerticalAlignment="Center"/>
                                             <TextBlock Text="Flip horizontal" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
@@ -78,7 +89,7 @@
                                             ToolTip="Flip vertical" AutomationProperties.Name="Flip vertical"
                                             AutomationProperties.HelpText="Flip the source image from top to bottom.">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE174;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <ContentControl Content="{StaticResource SurveyIcon.FlipV}" Width="22" VerticalAlignment="Center"/>
                                             <TextBlock Text="Flip vertical" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
@@ -86,7 +97,7 @@
                                             ToolTip="Resize the image…" AutomationProperties.Name="Resize image"
                                             AutomationProperties.HelpText="Open local source-image resize controls.">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE740;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <ContentControl Content="{StaticResource SurveyIcon.Resize}" Width="22" VerticalAlignment="Center"/>
                                             <TextBlock Text="Resize image…" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
@@ -95,7 +106,7 @@
                                             AutomationProperties.Name="Add screenshot or image"
                                             AutomationProperties.HelpText="Insert one or more local image files as movable annotations.">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xEE71;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <ContentControl Content="{StaticResource SurveyIcon.AddImage}" Width="22" VerticalAlignment="Center"/>
                                             <TextBlock Text="Add image…" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
@@ -103,7 +114,7 @@
                                             ToolTip="Add background" AutomationProperties.Name="Add background"
                                             AutomationProperties.HelpText="Open the local background composer with the current edited image.">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE790;" FontFamily="{StaticResource IconFont}" FontSize="14" Width="22" VerticalAlignment="Center"/>
+                                            <ContentControl Content="{StaticResource SurveyIcon.Background}" Width="22" VerticalAlignment="Center"/>
                                             <TextBlock Text="Add background" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
@@ -115,16 +126,20 @@
                     <Grid Grid.Column="1">
                     <StackPanel x:Name="ToolPanel" Orientation="Horizontal" HorizontalAlignment="Center"
                                 VerticalAlignment="Center" Margin="0">
-                        <RadioButton x:Name="PanToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <!-- Survey's pan/select pair is `btn btn-icon`, a 28x28 rounded
+                             square with a 16px glyph, wrapped in a 6px-gap block that a
+                             1px x 20px #5a6473 divider closes (AppShell.jsx:1520-1632). -->
+                        <RadioButton x:Name="PanToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
                                      Tag="Pan" Checked="OnToolChecked" ToolTip="Pan"
                                      AutomationProperties.Name="Pan"
                                      AutomationProperties.HelpText="Drag to move the view. Middle-drag or hold Space works with any tool."
                                      Content="{StaticResource SurveyIcon.Pan}"/>
-                        <RadioButton x:Name="SelectToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="SelectToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
                                      Tag="Select" Checked="OnToolChecked" IsChecked="True"
-                                     ToolTip="Cursor (V)" AutomationProperties.Name="Cursor"
+                                     ToolTip="Select" AutomationProperties.Name="Select"
                                      AutomationProperties.HelpText="Select annotations, drag a marquee, move, resize, or delete. Shortcut V."
                                      Content="{StaticResource SurveyIcon.Cursor}"/>
+                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
 
                         <Button x:Name="DrawGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnDrawGroupClick" Tag="Draw" ToolTip="Draw"
@@ -151,7 +166,7 @@
                                 Content="{StaticResource SurveyIcon.Effects}"/>
 
 
-                        <RadioButton x:Name="CurvedArrowToolBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="CurvedArrowToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
                                      Tag="CurvedArrow" Checked="OnToolChecked" Visibility="Collapsed"
                                      ToolTip="Curved arrow" AutomationProperties.Name="Curved arrow"
                                      AutomationProperties.HelpText="Line and arrow already bend from the midpoint handle."/>
@@ -164,13 +179,38 @@
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
-                                                        <Button x:Name="ColorWellBtn" Style="{StaticResource CompactToolIconButton}" Width="24" Height="24" Margin="4,0,2,0"
+                                                        <!-- `.ctx-color-swatch` (styles.css:1613-1637): a full 24px disc on
+                                                             white, an 8px #e8e2d4 checkerboard so translucent colours read
+                                                             correctly, the live colour on top, and a 1px 22%-white OUTER
+                                                             ring. Two extra variants (AppShell.jsx:2016-2124): a 2px
+                                                             stroke-colour ring for rect/ellipse/text/callout, and a centred
+                                                             bold "1" for the counter. -->
+                                                        <Button x:Name="ColorWellBtn" Style="{StaticResource ColorSwatchWell}" Margin="4,0,2,0"
                                                                 Click="OnCustomSwatchClick" ToolTip="Color"
                                                                 AutomationProperties.Name="Color"
                                                                 AutomationProperties.HelpText="Open the color picker.">
-                                                            <Ellipse x:Name="CurrentColorIndicator" Width="20" Height="20" Fill="{StaticResource AnnotationRedBrush}"
-                                                                     Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="2"
-                                                                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                            <Grid Width="24" Height="24">
+                                                                <Ellipse Fill="#FFFFFFFF"/>
+                                                                <Ellipse>
+                                                                    <Ellipse.Fill>
+                                                                        <DrawingBrush TileMode="Tile" Viewport="0,0,8,8" ViewportUnits="Absolute"
+                                                                                      Stretch="None">
+                                                                            <DrawingBrush.Drawing>
+                                                                                <GeometryDrawing Brush="#FFE8E2D4"
+                                                                                                 Geometry="M0,0 H4 V4 H0 Z M4,4 H8 V8 H4 Z"/>
+                                                                            </DrawingBrush.Drawing>
+                                                                        </DrawingBrush>
+                                                                    </Ellipse.Fill>
+                                                                </Ellipse>
+                                                                <Ellipse x:Name="CurrentColorIndicator" Fill="{StaticResource AnnotationRedBrush}"/>
+                                                                <Ellipse x:Name="ColorWellStrokeRing" Visibility="Collapsed"
+                                                                         Stroke="{StaticResource AnnotationRedBrush}" StrokeThickness="2" Margin="1"/>
+                                                                <Ellipse Stroke="#38FFFFFF" StrokeThickness="1"/>
+                                                                <TextBlock x:Name="ColorWellCounterGlyph" Text="1" Visibility="Collapsed"
+                                                                           FontFamily="{StaticResource SurveyArialFont}" FontSize="12" FontWeight="Bold"
+                                                                           Foreground="{StaticResource AnnotationRedBrush}"
+                                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                            </Grid>
                                                         </Button>
                                                         <TextBlock x:Name="ColorWellLabel" Text="Color" Style="{StaticResource FieldLabel}" Visibility="Collapsed"/>
                                                         <WrapPanel Visibility="Collapsed">
@@ -196,9 +236,9 @@
                                                         </RadioButton>
                                                         <Popup x:Name="ColorPickerPopup" PlacementTarget="{Binding ElementName=ColorWellBtn}"
                                                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                                                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
-                                                                    Effect="{StaticResource FloatingShadow}">
+                                                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
+                                                                    BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,6,36,36"
+                                                                    Effect="{StaticResource ChromePopoverShadow}">
                                                                 <StackPanel Width="248">
                                                                     <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,8">
                                                                             <RadioButton x:Name="StrokeWellBtn" Style="{StaticResource StripTab}" GroupName="ColorWell" Tag="Stroke"
@@ -298,14 +338,54 @@
                             <Grid x:Name="SizeEffectHost" MinWidth="52" VerticalAlignment="Center" Margin="0,0,8,0">
                             <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <TextBlock x:Name="ThicknessLabel" Text="Stroke" Style="{StaticResource FieldLabel}" Margin="0,0,6,0" Visibility="Collapsed"/>
-                                                        <ComboBox x:Name="SizeBox" Style="{StaticResource DarkComboBox}"
-                                                                  SelectionChanged="OnSizeBoxChanged"
-                                                                  AutomationProperties.Name="Annotation size"
-                                                                  AutomationProperties.HelpText="Survey size presets. Stroke tools use 1–50; text uses 8–72."/>
+                                                        <!-- AnnotationSizeControl: a 43px editable number input welded to a
+                                                             24x22 chevron cell, opening a 126px preset popover whose rows
+                                                             preview the stroke thickness (AnnotationSizeControl.css:1-136). -->
+                                                        <Border x:Name="SizeField" Height="24" CornerRadius="5" BorderThickness="1"
+                                                                Background="{StaticResource ChromeControlBrush}" BorderBrush="Transparent"
+                                                                SnapsToDevicePixels="True">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Style.Triggers>
+                                                                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                                                            <Setter Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
+                                                                        </Trigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBox x:Name="SizeInput" Style="{StaticResource SizeFieldInput}"
+                                                                         PreviewTextInput="OnSizeInputText" PreviewKeyDown="OnSizeInputKey"
+                                                                         LostKeyboardFocus="OnSizeInputBlur"
+                                                                         AutomationProperties.Name="Annotation size"
+                                                                         AutomationProperties.HelpText="Type a whole number, or pick a preset from the chevron."/>
+                                                                <ToggleButton x:Name="SizePresetsBtn" Style="{StaticResource SizeFieldTrigger}"
+                                                                              ToolTip="Width presets" AutomationProperties.Name="Width presets"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <Popup x:Name="SizePresetsPopup" PlacementTarget="{Binding ElementName=SizeField}"
+                                                               Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True"
+                                                               IsOpen="{Binding IsChecked, ElementName=SizePresetsBtn, Mode=TwoWay}">
+                                                            <Border Width="126" Padding="5" CornerRadius="8" BorderThickness="1"
+                                                                    Background="{StaticResource ChromePopoverBrush}"
+                                                                    BorderBrush="{StaticResource ChromeControlBrush}"
+                                                                    Margin="0,0,36,36" Effect="{StaticResource ChromePopoverShadow}">
+                                                                <StackPanel>
+                                                                    <TextBlock x:Name="SizePresetsHeading" Text="WIDTH" Padding="7,7,9,8"
+                                                                               FontFamily="{StaticResource SurveyArialFont}" FontSize="11" FontWeight="Bold"
+                                                                               Foreground="#FFAEB6C3"/>
+                                                                    <Border Height="1" Background="{StaticResource ChromeHairlineBrush}"/>
+                                                                    <ScrollViewer MaxHeight="420" Margin="0,4,0,0"
+                                                                                  HorizontalScrollBarVisibility="Disabled">
+                                                                        <StackPanel x:Name="SizePresetList"/>
+                                                                    </ScrollViewer>
+                                                                </StackPanel>
+                                                            </Border>
+                                                        </Popup>
                                                     </StackPanel>
                                                     <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <TextBlock x:Name="EffectStrengthLabel" Text="Blur" Style="{StaticResource FieldLabel}" Margin="0,0,6,0" Visibility="Collapsed"/>
-                                                        <ComboBox x:Name="EffectStrengthBox" Style="{StaticResource DarkComboBox}" SelectedIndex="1"
+                                                        <ComboBox x:Name="EffectStrengthBox" Style="{StaticResource SurveyDropdown}" Tag="STRENGTH" SelectedIndex="1"
                                                                   SelectionChanged="OnEffectStrengthChanged" AutomationProperties.Name="Effect strength"
                                                                   AutomationProperties.HelpText="Light, medium, or strong blur or pixelate.">
                                                             <ComboBoxItem Content="Light" Tag="Light"/>
@@ -326,7 +406,7 @@
                                                     
 
                                                     <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource DarkComboBox}" SelectedIndex="1"
+                                                        <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource SurveyDropdown}" Tag="ARROWHEAD" SelectedIndex="1"
                                                                   SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrowhead">
                                                             <ComboBoxItem Content="None" Tag="none"/>
                                                             <ComboBoxItem Content="Solid triangle" Tag="solidTriangle"/>
@@ -341,7 +421,7 @@
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="LineStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <ComboBox x:Name="LineStyleBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
+                                                        <ComboBox x:Name="LineStyleBox" Style="{StaticResource SurveyDropdown}" Tag="LINE STYLE" SelectedIndex="0"
                                                                   SelectionChanged="OnLineStyleChanged" AutomationProperties.Name="Line style">
                                                             <ComboBoxItem Content="Solid" Tag="solid"/>
                                                             <ComboBoxItem Content="Dashed" Tag="dashed"/>
@@ -350,27 +430,54 @@
                                                         </ComboBox>
                                                     </StackPanel>
 
+                                                    <!-- Survey shows a Bump field only for rect + cloud border
+                                                         (AppShell.jsx:2590-2622): 11px #8d96a6 label, 4px gap,
+                                                         36x20 input on #3a4252, radius 5, 12px, centred, 1-20. -->
+                                                    <StackPanel x:Name="CloudBumpPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
+                                                        <TextBlock Text="Bump" Margin="0,0,4,0" VerticalAlignment="Center"
+                                                                   FontFamily="{StaticResource SurveyArialFont}" FontSize="11"
+                                                                   Foreground="{StaticResource ChromeTextMutedBrush}"/>
+                                                        <Border Width="36" Height="20" CornerRadius="5" BorderThickness="1"
+                                                                Background="{StaticResource ChromeControlBrush}" BorderBrush="Transparent">
+                                                            <TextBox x:Name="CloudBumpInput" Style="{StaticResource SizeFieldInput}"
+                                                                     Width="34" Height="18" Text="2" MaxLength="2"
+                                                                     ToolTip="Cloud bump size"
+                                                                     PreviewTextInput="OnSizeInputText" PreviewKeyDown="OnCloudBumpKey"
+                                                                     LostKeyboardFocus="OnCloudBumpBlur"
+                                                                     AutomationProperties.Name="Cloud bump size"/>
+                                                        </Border>
+                                                    </StackPanel>
+
+                                                    <!-- Survey's rich-text row order is font family → font size → B → I →
+                                                         U → S → alignment (AppShell.jsx:1832-2007), portalled into the
+                                                         34px sub-row while an editor is live. UpdateContextPanels
+                                                         reparents this panel into EditorRichTextHost to match. -->
                                                     <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
+                                                        <ComboBox x:Name="FontFamilyBox" Style="{StaticResource SurveyDropdown}" Tag="FONT" Margin="0,0,6,0"
+                                                                  SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
+                                                        <ComboBox x:Name="FontSizeBox" Style="{StaticResource SurveyDropdown}" Tag="FONT SIZE" Margin="0,0,6,0"
+                                                                  SelectionChanged="OnFontSizeBoxChanged" AutomationProperties.Name="Font size"
+                                                                  AutomationProperties.HelpText="Font size for text and callout labels."/>
                                                         <StackPanel x:Name="TextFormatButtons" Orientation="Horizontal" Margin="0,0,6,0">
                                                         <Button x:Name="BoldBtn" Style="{StaticResource CompactFormatButton}" FontWeight="Bold"
                                                                 Click="OnTextBoldClick" ToolTip="Bold" AutomationProperties.Name="Bold"
                                                                 AutomationProperties.HelpText="Toggle bold on new and selected text.">
-                                                            <TextBlock Text="B" FontFamily="Segoe UI" FontSize="13" FontWeight="Bold"/>
+                                                            <TextBlock Text="B" FontFamily="{StaticResource SurveyArialFont}" FontSize="13" FontWeight="Bold"/>
                                                         </Button>
                                                         <Button x:Name="ItalicBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextItalicClick" ToolTip="Italic" AutomationProperties.Name="Italic"
                                                                 AutomationProperties.HelpText="Toggle italic on new and selected text.">
-                                                            <TextBlock Text="I" FontFamily="Segoe UI" FontSize="13" FontStyle="Italic" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="I" FontFamily="{StaticResource SurveyArialFont}" FontSize="13" FontStyle="Italic"/>
                                                         </Button>
                                                         <Button x:Name="UnderlineBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextUnderlineClick" ToolTip="Underline" AutomationProperties.Name="Underline"
                                                                 AutomationProperties.HelpText="Toggle underline on new and selected text.">
-                                                            <TextBlock Text="U" FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold" TextDecorations="Underline"/>
+                                                            <TextBlock Text="U" FontFamily="{StaticResource SurveyArialFont}" FontSize="13" TextDecorations="Underline"/>
                                                         </Button>
                                                         <Button x:Name="StrikeBtn" Style="{StaticResource CompactFormatButton}"
                                                                 Click="OnTextStrikeClick" ToolTip="Strikethrough" AutomationProperties.Name="Strikethrough"
                                                                 AutomationProperties.HelpText="Toggle strikethrough on new and selected text.">
-                                                            <TextBlock Text="S" FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold" TextDecorations="Strikethrough"/>
+                                                            <TextBlock Text="S" FontFamily="{StaticResource SurveyArialFont}" FontSize="13" TextDecorations="Strikethrough"/>
                                                         </Button>
                                                         </StackPanel>
                                                         <Button x:Name="AlignMenuBtn" Style="{StaticResource CompactFormatButton}"
@@ -378,61 +485,62 @@
                                                                 AutomationProperties.Name="Text alignment"
                                                                 AutomationProperties.HelpText="Choose horizontal and vertical alignment from a 3 by 3 grid.">
                                                             <UniformGrid x:Name="AlignTriggerGrid" Columns="3" Width="16" Height="16">
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="left|top"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="center|top"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="right|top"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="left|middle"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="center|middle"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="right|middle"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="left|bottom"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="center|bottom"/>
-                                                                <Rectangle Width="4" Height="4" Margin="1" RadiusX="0.5" Fill="{StaticResource TextSecondaryBrush}" Tag="right|bottom"/>
+                                                                <Grid Tag="left|top"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="center|top"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="right|top"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="left|middle"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="center|middle"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="right|middle"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="left|bottom"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="center|bottom"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                <Grid Tag="right|bottom"><Rectangle Width="6" Height="6" RadiusX="1.5" RadiusY="1.5" Visibility="Collapsed" Fill="{StaticResource SurveyGoldHaloBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Rectangle Width="4" Height="4" RadiusX="1" RadiusY="1" Fill="{StaticResource ChromeDotOffBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                             </UniformGrid>
                                                         </Button>
                                                         <Popup x:Name="AlignPopup" PlacementTarget="{Binding ElementName=AlignMenuBtn}"
                                                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                                                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
-                                                                    Effect="{StaticResource FloatingShadow}">
-                                                                <UniformGrid x:Name="AlignGrid" Columns="3" Width="90" Height="90">
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|top" Click="OnAlignCellClick" ToolTip="Top left">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
+                                                                    BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,6,36,36"
+                                                                    Effect="{StaticResource ChromePopoverShadow}">
+                                                                <!-- 3 x 26px cells + 2 x 4px gaps = 86 (AppShell.jsx:1962-1966). -->
+                                                                <UniformGrid x:Name="AlignGrid" Columns="3" Width="86" Height="86">
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|top" Click="OnAlignCellClick" ToolTip="top left">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|top" Click="OnAlignCellClick" ToolTip="Top center">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|top" Click="OnAlignCellClick" ToolTip="top center">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|top" Click="OnAlignCellClick" ToolTip="Top right">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|top" Click="OnAlignCellClick" ToolTip="top right">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|middle" Click="OnAlignCellClick" ToolTip="Middle left">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|middle" Click="OnAlignCellClick" ToolTip="middle left">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|middle" Click="OnAlignCellClick" ToolTip="Middle center">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|middle" Click="OnAlignCellClick" ToolTip="middle center">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|middle" Click="OnAlignCellClick" ToolTip="Middle right">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|middle" Click="OnAlignCellClick" ToolTip="middle right">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|bottom" Click="OnAlignCellClick" ToolTip="Bottom left">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="left|bottom" Click="OnAlignCellClick" ToolTip="bottom left">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|bottom" Click="OnAlignCellClick" ToolTip="Bottom center">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="center|bottom" Click="OnAlignCellClick" ToolTip="bottom center">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
-                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|bottom" Click="OnAlignCellClick" ToolTip="Bottom right">
-                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                    <Button Style="{StaticResource AlignCellButton}" Tag="right|bottom" Click="OnAlignCellClick" ToolTip="bottom right">
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource ChromeCellDotBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                 </UniformGrid>
                                                             </Border>
                                                         </Popup>
-                                                        <ComboBox x:Name="AlignBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
+                                                        <ComboBox x:Name="AlignBox" Style="{StaticResource SurveyDropdown}" Tag="ALIGN" Margin="0,0,6,0"
                                                                   SelectedIndex="0" Visibility="Collapsed"
                                                                   SelectionChanged="OnTextAlignChanged" AutomationProperties.Name="Text align">
                                                             <ComboBoxItem Content="Left" Tag="left"/>
                                                             <ComboBoxItem Content="Center" Tag="center"/>
                                                             <ComboBoxItem Content="Right" Tag="right"/>
                                                         </ComboBox>
-                                                        <ComboBox x:Name="VerticalAlignBox" Style="{StaticResource DarkComboBox}"
+                                                        <ComboBox x:Name="VerticalAlignBox" Style="{StaticResource SurveyDropdown}" Tag="VERTICAL ALIGN"
                                                                   SelectedIndex="0" Visibility="Collapsed"
                                                                   SelectionChanged="OnVerticalAlignChanged" AutomationProperties.Name="Vertical align"
                                                                   AutomationProperties.HelpText="Top, middle, or bottom align inside a sized text box.">
@@ -440,15 +548,19 @@
                                                             <ComboBoxItem Content="Middle" Tag="middle"/>
                                                             <ComboBoxItem Content="Bottom" Tag="bottom"/>
                                                         </ComboBox>
-                                                        <ComboBox x:Name="FontSizeBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
-                                                                  SelectionChanged="OnFontSizeBoxChanged" AutomationProperties.Name="Font size"
-                                                                  AutomationProperties.HelpText="Font size for text and callout labels."/>
-                                                        <ComboBox x:Name="FontFamilyBox" Style="{StaticResource DarkComboBox}" Margin="0,0,6,0"
-                                                                  SelectionChanged="OnFontFamilyChanged" AutomationProperties.Name="Font"/>
+                                                        <!-- Survey's `Aa` re-edit affordance (AppShell.jsx:2641-2678): height 24,
+                                                             padding 0 8px, radius 5, 13px/600; idle #3a4252 on #e8e2d4, editing
+                                                             gold-on-gold-tint, disabled #5a6473 at 0.5 with a two-state tooltip.
+                                                             It stays VISIBLE-but-disabled when nothing editable is selected. -->
+                                                        <Button x:Name="TextEditBtn" Style="{StaticResource CompactFormatButton}"
+                                                                Width="Auto" Height="24" Padding="8,0" FontWeight="SemiBold"
+                                                                Click="OnEnterTextEdit" Content="Aa" ToolTip="Edit text"
+                                                                AutomationProperties.Name="Edit text"
+                                                                AutomationProperties.HelpText="Re-open the selected text box or callout for editing."/>
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="CropRatioPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <ComboBox x:Name="CropRatioBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
+                                                        <ComboBox x:Name="CropRatioBox" Style="{StaticResource SurveyDropdown}" Tag="RATIO" SelectedIndex="0"
                                                                   SelectionChanged="OnCropRatioChanged" AutomationProperties.Name="Crop ratio">
                                                             <ComboBoxItem Content="Free" Tag=""/><ComboBoxItem Content="1:1" Tag="1:1"/><ComboBoxItem Content="4:3" Tag="4:3"/>
                                                             <ComboBoxItem Content="16:9" Tag="16:9"/><ComboBoxItem Content="9:16" Tag="9:16"/>
@@ -456,13 +568,27 @@
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="StepModePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <ComboBox x:Name="StepModeBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0" Margin="0,0,6,0"
+                                                        <ComboBox x:Name="StepModeBox" Style="{StaticResource SurveyDropdown}" Tag="COUNTER" SelectedIndex="0" Margin="0,0,6,0"
                                                                   SelectionChanged="OnStepModeChanged"
                                                                   AutomationProperties.Name="Counter mode"
                                                                   AutomationProperties.HelpText="Number badges or letter badges.">
                                                             <ComboBoxItem Content="Numbers" Tag="Number"/>
                                                             <ComboBoxItem Content="Letters" Tag="Letter"/>
                                                         </ComboBox>
+                                                        <!-- Survey's Start field (AppShell.jsx:2510-2566): 11px #8d96a6 label,
+                                                             42x20 input on #3a4252, radius 5, 12px, centred, >= 1. -->
+                                                        <TextBlock Text="Start" Margin="0,0,4,0" VerticalAlignment="Center"
+                                                                   FontFamily="{StaticResource SurveyArialFont}" FontSize="11"
+                                                                   Foreground="{StaticResource ChromeTextMutedBrush}"/>
+                                                        <Border Width="42" Height="20" CornerRadius="5" BorderThickness="1" Margin="0,0,6,0"
+                                                                Background="{StaticResource ChromeControlBrush}" BorderBrush="Transparent">
+                                                            <TextBox x:Name="StepStartInput" Style="{StaticResource SizeFieldInput}"
+                                                                     Width="40" Height="18" Text="1"
+                                                                     ToolTip="Start number"
+                                                                     PreviewTextInput="OnSizeInputText" PreviewKeyDown="OnStepStartKey"
+                                                                     LostKeyboardFocus="OnStepStartBlur"
+                                                                     AutomationProperties.Name="Start number"/>
+                                                        </Border>
                                                         <Button Style="{StaticResource PillButtonSecondary}" Content="Reset" ToolTip="Reset counter"
                                                                 Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>
                                                     </StackPanel>
@@ -470,27 +596,20 @@
                                                     <StackPanel x:Name="FillPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <TextBlock Text="Fill" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
                                                         <StackPanel Orientation="Horizontal">
-                                                        <RadioButton x:Name="FillNoneBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="None" Content="&#xE739;" ToolTip="No fill"
+                                                        <RadioButton x:Name="FillNoneBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Fill" Tag="None" Content="{StaticResource SurveyIcon.FillNone}" ToolTip="No fill"
                                                                      Checked="OnFillChecked" IsChecked="True" AutomationProperties.Name="No fill"
                                                                      AutomationProperties.HelpText="Draw shapes with an outline and no fill."/>
-                                                        <RadioButton x:Name="FillQuarterBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Quarter" Content="&#xE7E6;" ToolTip="25% fill"
+                                                        <RadioButton x:Name="FillQuarterBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Fill" Tag="Quarter" Content="{StaticResource SurveyIcon.FillQuarter}" ToolTip="25% fill"
                                                                      Checked="OnFillChecked" AutomationProperties.Name="25 percent fill"
                                                                      AutomationProperties.HelpText="Draw shapes with a translucent 25 percent fill."/>
-                                                        <RadioButton x:Name="FillSolidBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;" ToolTip="Solid fill"
+                                                        <RadioButton x:Name="FillSolidBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Fill" Tag="Solid" Content="{StaticResource SurveyIcon.FillSolid}" ToolTip="Solid fill"
                                                                      Checked="OnFillChecked" AutomationProperties.Name="Solid fill"
                                                                      AutomationProperties.HelpText="Draw shapes with a solid fill."/>
                                                         </StackPanel>
                                                     </StackPanel>
 
-                                                    <StackPanel x:Name="EraserModePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <ComboBox x:Name="EraserModeBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
-                                                                  SelectionChanged="OnEraserModeChanged"
-                                                                  AutomationProperties.Name="Eraser mode"
-                                                                  AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits.">
-                                                            <ComboBoxItem Content="Partial erase" Tag="Partial"/>
-                                                            <ComboBoxItem Content="Full stroke erase" Tag="Full"/>
-                                                        </ComboBox>
-                                                    </StackPanel>
+                                                    <!-- Eraser mode lives in the tool's own split menu (Draw sub-row),
+                                                         exactly as Survey mounts it — there is no top-row combo. -->
 
                                                     <StackPanel x:Name="OpacityPanel" Visibility="Collapsed" Margin="0,0,6,0">
                                                         <DockPanel Margin="0,0,6,0">
@@ -505,16 +624,16 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                                 </StackPanel>
-                        <Button x:Name="FormatOverflowBtn" Style="{StaticResource CompactToolIconButton}" Content="&#xE10C;"
+                        <Button x:Name="FormatOverflowBtn" Style="{StaticResource CompactToolIconButton}" Content="{StaticResource SurveyIcon.More}"
                                 Click="OnFormatOverflowClick" ToolTip="More format"
                                 Visibility="Collapsed"
                                 AutomationProperties.Name="More format"
                                 AutomationProperties.HelpText="Font, line style, and other format controls that do not fit on the row."/>
                         <Popup x:Name="FormatOverflowPopup" PlacementTarget="{Binding ElementName=FormatOverflowBtn}"
                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
-                                    Effect="{StaticResource FloatingShadow}">
+                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
+                                    BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,6,36,36"
+                                    Effect="{StaticResource ChromePopoverShadow}">
                                 <StackPanel x:Name="FormatOverflowPanel" Orientation="Horizontal"/>
                             </Border>
                         </Popup>
@@ -533,7 +652,7 @@
                 <RowDefinition Height="34"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
-                <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource SurfaceBrush}" ClipToBounds="True"
+                <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource ChromePopoverBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
               AutomationProperties.Name="Annotation canvas"
@@ -626,35 +745,85 @@
                 </Border>
             </Canvas>
         </Grid>
+                <!-- PDFViewer.jsx:32014-32032: 34px, #181c24, 1px #2a3140 bottom
+                     hairline, border-box (so the hairline eats into the 34). -->
                 <Border x:Name="EditorGroupBar" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                        Margin="0" Padding="0,2" CornerRadius="0"
-                        Background="{StaticResource WindowBgBrush}"
-                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="0"
+                        Margin="0" Padding="0" CornerRadius="0"
+                        Background="{StaticResource ChromeBgBrush}"
+                        BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,0,0,1"
                         AutomationProperties.Name="Group tools"
                         AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
+                    <Grid>
+                    <!-- Survey's category portal suppresses itself while a rich-text editor
+                         is live and the formatting strip takes the sub-row instead
+                         (AppShell.jsx:1756-1772). -->
+                    <Border x:Name="EditorRichTextHost" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="Collapsed"/>
                     <Border x:Name="EditorGroupToolsHost" HorizontalAlignment="Center" Visibility="Collapsed">
                     <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen (P)"
+                                     Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen"
                                      AutomationProperties.Name="Pen"
                                      AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."
                                      Content="{StaticResource SurveyIcon.Pen}"/>
                         <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter (H)"
+                                     Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter"
                                      AutomationProperties.Name="Highlighter"
                                      AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
                                      Content="{StaticResource SurveyIcon.Highlighter}"/>
-                        <RadioButton x:Name="EraserToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Eraser" Checked="OnToolChecked" ToolTip="Partial erase (E)"
-                                     AutomationProperties.Name="Partial erase"
-                                     AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits. Shortcut E; Shift+E forces partial erase."
-                                     Content="{StaticResource SurveyIcon.Eraser}"/>
+                        <!-- Survey's eraser carries its mode menu INSIDE the button: a 12px
+                             #8d96a6 chevron offset +12px from centre opens a 142px popup with
+                             an "Eraser Type" header and the two modes
+                             (PDFViewer.jsx:32095-32135, 32150-32274). -->
+                        <Grid Margin="4,0">
+                            <RadioButton x:Name="EraserToolBtn" Style="{StaticResource StripToolButton}" GroupName="Tool"
+                                         Tag="Eraser" Checked="OnToolChecked" ToolTip="Partial erase"
+                                         AutomationProperties.Name="Partial erase"
+                                         AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits. Shortcut E; Shift+E forces partial erase."
+                                         Content="{StaticResource SurveyIcon.Eraser}"/>
+                            <Button x:Name="EraserCaretBtn" Click="OnEraserCaretClick" Padding="2" Width="16" Height="16"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,0,0,0"
+                                    Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                    Foreground="{StaticResource ChromeTextMutedBrush}"
+                                    ToolTip="Eraser type" AutomationProperties.Name="Eraser type">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <Viewbox Width="12" Height="12"><ContentControl Content="{StaticResource SurveyIcon.ChevronDown}"/></Viewbox>
+                            </Button>
+                            <Popup x:Name="EraserModePopup" PlacementTarget="{Binding ElementName=EraserToolBtn}"
+                                   Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True">
+                                <Border MinWidth="142" Padding="4" CornerRadius="6" BorderThickness="1"
+                                        Background="#FF1E1E1E" BorderBrush="{StaticResource ChromeHairlineBrush}"
+                                        Margin="0,0,24,24">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.6"/>
+                                    </Border.Effect>
+                                    <StackPanel>
+                                        <TextBlock Text="ERASER TYPE" Padding="8,4" Margin="0,0,0,4"
+                                                   FontFamily="{StaticResource SurveyArialFont}" FontSize="10" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource ChromeTextMutedBrush}"/>
+                                        <Border Height="1" Background="{StaticResource ChromeHairlineBrush}" Margin="0,0,0,4"/>
+                                        <Button x:Name="EraserPartialItem" Style="{StaticResource EraserModeRow}" Tag="Partial"
+                                                Content="Partial erase" Click="OnEraserModeRowClick"
+                                                AutomationProperties.Name="Partial erase"/>
+                                        <Button x:Name="EraserFullItem" Style="{StaticResource EraserModeRow}" Tag="Full"
+                                                Content="Full stroke erase" Click="OnEraserModeRowClick"
+                                                AutomationProperties.Name="Full stroke erase"/>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+                        </Grid>
                     </StackPanel>
                     <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Rectangle" Checked="OnToolChecked"
-                                     ToolTip="Rectangle (R)" AutomationProperties.Name="Rectangle"
+                                     ToolTip="Rectangle" AutomationProperties.Name="Rectangle"
                                      AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
                                      Content="{StaticResource SurveyIcon.Rect}"/>
                         <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
@@ -662,27 +831,27 @@
                                      AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse."
                                      Content="{StaticResource SurveyIcon.Ellipse}"/>
                         <RadioButton x:Name="LineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Line" Checked="OnToolChecked" ToolTip="Line (L)"
+                                     Tag="Line" Checked="OnToolChecked" ToolTip="Line"
                                      AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."
                                      Content="{StaticResource SurveyIcon.Line}"/>
                         <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow (A)"
+                                     Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow"
                                      AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."
                                      Content="{StaticResource SurveyIcon.Arrow}"/>
                         <RadioButton x:Name="StepToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Step" Checked="OnToolChecked" ToolTip="Counter (S)"
+                                     Tag="Step" Checked="OnToolChecked" ToolTip="Counter"
                                      AutomationProperties.Name="Counter"
                                      AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."
                                      Content="{StaticResource SurveyIcon.Counter}"/>
                     </StackPanel>
                     <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="TextToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Text" Checked="OnToolChecked" ToolTip="Text (T)"
+                                     Tag="Text" Checked="OnToolChecked" ToolTip="Text"
                                      AutomationProperties.Name="Text"
                                      AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
                                      Content="{StaticResource SurveyIcon.Text}"/>
                         <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Callout" Checked="OnToolChecked" ToolTip="Callout (Q)"
+                                     Tag="Callout" Checked="OnToolChecked" ToolTip="Callout"
                                      AutomationProperties.Name="Callout"
                                      AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
                                      Content="{StaticResource SurveyIcon.Callout}"/>
@@ -699,51 +868,74 @@
                                      AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."
                                      Content="{StaticResource SurveyIcon.Spotlight}"/>
                         <RadioButton x:Name="BlurToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Blur" Checked="OnToolChecked" ToolTip="Blur (B)"
+                                     Tag="Blur" Checked="OnToolChecked" ToolTip="Blur"
                                      AutomationProperties.Name="Blur"
                                      AutomationProperties.HelpText="Apply a smooth local blur to a dragged region. Shortcut B."
                                      Content="{StaticResource SurveyIcon.Blur}"/>
                     </StackPanel>
                     </StackPanel>
                     </Border>
+                    </Grid>
                 </Border>
             <!-- Survey's collapsed right rail (48px): zoom in, click-to-type percentage, zoom
                  out, divider, then the fit trigger whose menu flies out to the left. -->
-            <Border x:Name="ZoomRail" Grid.Column="1" Grid.RowSpan="2" Background="{StaticResource WindowBgBrush}"
-                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0"
+            <Border x:Name="ZoomRail" Grid.Column="1" Grid.RowSpan="2" Background="{StaticResource ChromeRailBrush}"
+                    BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="1,0,0,0"
                     AutomationProperties.Name="Zoom rail">
-                <!-- Survey's rail footer: zoom / fit live at the BOTTOM of the rail. -->
-                <Border VerticalAlignment="Bottom" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,8">
+                <!-- Survey's rail footer: zoom / fit live at the BOTTOM of the rail,
+                     over a 1px #2a3140 top rule with 8px vertical padding
+                     (AppShell.jsx:3011). Every rail tooltip flies out LEFT so it
+                     clears the 48px rail instead of clipping (Tooltip.jsx:69-71). -->
+                <Border VerticalAlignment="Bottom" BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,1,0,0" Padding="0,8">
                     <StackPanel HorizontalAlignment="Center">
                         <Button x:Name="BtnZoomIn" Style="{StaticResource RailButton}" Click="OnZoomIn"
                                 ToolTip="Zoom in" AutomationProperties.Name="Zoom in"
+                                ToolTipService.Placement="Left" ToolTipService.HorizontalOffset="-8"
                                 AutomationProperties.HelpText="Zoom in one step about the centre of the view.">
                             <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Plus}"/></Viewbox>
                         </Button>
                         <TextBox x:Name="ZoomBox" Style="{StaticResource RailZoomBox}" Text="100%"
-                                 ToolTip="Zoom level. Click to type a percentage." AutomationProperties.Name="Zoom level"
+                                 ToolTip="Zoom level — click to type a percentage" AutomationProperties.Name="Zoom level"
+                                 ToolTipService.Placement="Left" ToolTipService.HorizontalOffset="-8"
                                  PreviewTextInput="OnZoomBoxTextInput" PreviewKeyDown="OnZoomBoxKeyDown"
                                  TextChanged="OnZoomBoxTextChanged" DataObject.Pasting="OnZoomBoxPasting"
                                  GotKeyboardFocus="OnZoomBoxFocus" LostKeyboardFocus="OnZoomBoxBlur"/>
                         <Button x:Name="BtnZoomOut" Style="{StaticResource RailButton}" Click="OnZoomOut"
                                 ToolTip="Zoom out" AutomationProperties.Name="Zoom out"
+                                ToolTipService.Placement="Left" ToolTipService.HorizontalOffset="-8"
                                 AutomationProperties.HelpText="Zoom out one step about the centre of the view.">
                             <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Minus}"/></Viewbox>
                         </Button>
-                        <Rectangle Width="24" Height="1" Fill="{StaticResource BorderBrush}" Margin="0,4"/>
-                        <Button x:Name="FitMenuBtn" Style="{StaticResource RailButton}" Width="36" Height="28" Click="OnFitMenuClick"
-                                ToolTip="Fit page" AutomationProperties.Name="Fit options"
+                        <Rectangle Width="24" Height="1" Fill="{StaticResource ChromeHairlineBrush}" Margin="0,4"/>
+                        <!-- AppShell.jsx:3066-3081: a 36x28 cell with the chevron PINNED to
+                             the left edge on its own 12-unit canvas at 1.8 stroke, and the
+                             fit glyph independently centred at 16px. Both inherit the
+                             button Foreground, which swaps #e8e2d4 / #8d96a6 by fit mode. -->
+                        <Button x:Name="FitMenuBtn" Style="{StaticResource RailFitButton}" Height="28" Click="OnFitMenuClick"
+                                ToolTip="Page fit: Fit page" AutomationProperties.Name="Fit options"
+                                ToolTipService.Placement="Left" ToolTipService.HorizontalOffset="-8"
                                 AutomationProperties.HelpText="Choose fit page, fit width, or fit height.">
-                            <StackPanel Orientation="Horizontal">
-                                <ContentControl x:Name="FitModeIcon" Content="{StaticResource SurveyIcon.FitPage}" Width="15" Height="15" VerticalAlignment="Center"/>
-                                <ContentControl Content="{StaticResource SurveyIcon.ChevronLeft}" Width="10" Height="10" VerticalAlignment="Center" Opacity="0.7"/>
-                            </StackPanel>
+                            <Grid>
+                                <Canvas Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="2,0,0,0">
+                                    <Path Data="M7.5,2.5 L4,6 L7.5,9.5" StrokeThickness="1.8"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                                </Canvas>
+                                <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <ContentControl x:Name="FitModeIcon" Content="{StaticResource SurveyIcon.FitPage}"/>
+                                </Viewbox>
+                            </Grid>
                         </Button>
                         <Popup x:Name="FitMenuPopup" PlacementTarget="{Binding ElementName=FitMenuBtn}"
                                Placement="Left" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                            <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="2" Margin="12,0,6,12"
-                                    MinWidth="140" Effect="{StaticResource FloatingShadow}">
+                            <!-- AppShell.jsx:2984-2999: rgb(30,30,30) on 1px #2a3140,
+                                 radius 2, 0 10px 24px rgba(0,0,0,0.45), padding 2. -->
+                            <Border Background="#FF1E1E1E" BorderBrush="{StaticResource ChromeHairlineBrush}"
+                                    BorderThickness="1" CornerRadius="2" Padding="2" Margin="30,0,6,30"
+                                    MinWidth="140">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="24" ShadowDepth="10" Direction="270" Opacity="0.45"/>
+                                </Border.Effect>
                                 <StackPanel>
                                     <Button x:Name="FitPageItem" Style="{StaticResource MenuRowButton}" Click="OnFitPage" AutomationProperties.Name="Fit page">
                                         <StackPanel Orientation="Horizontal">

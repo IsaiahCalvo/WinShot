@@ -734,7 +734,7 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
             case AnnotationData.TypeImage:
-                ResizeBoxShape(fe, b);
+                ResizeBoxShape(fe, b, _cloudIntensity);
                 break;
             case AnnotationData.TypeText:
                 ResizeTextElement(fe, meta, b);
@@ -821,7 +821,7 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Rectangle/Ellipse: write Canvas.Left/Top + Width/Height directly (drop any move transform into the position).</summary>
-    private static void ResizeBoxShape(FrameworkElement fe, Rect b)
+    private static void ResizeBoxShape(FrameworkElement fe, Rect b, double cloudIntensity)
     {
         FlattenTransformIntoCanvas(fe);
         Canvas.SetLeft(fe, b.X);
@@ -830,7 +830,7 @@ public partial class EditorWindow : Window
         fe.Height = Math.Max(1, b.Height);
         if (fe is Path path && fe.Tag is AnnotationData meta &&
             AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
-            path.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height));
+            path.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height), cloudIntensity);
         if (fe.Tag is AnnotationData data &&
             data.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
         {
@@ -1076,7 +1076,7 @@ public partial class EditorWindow : Window
                 fe.Width = Math.Max(1, snap.Bounds.Width);
                 fe.Height = Math.Max(1, snap.Bounds.Height);
                 if (fe is Path cloud && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
-                    cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height));
+                    cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height), _cloudIntensity);
                 meta.Rect = new[] { snap.Bounds.X, snap.Bounds.Y, snap.Bounds.Width, snap.Bounds.Height };
                 meta.Tx = 0;
                 meta.Ty = 0;

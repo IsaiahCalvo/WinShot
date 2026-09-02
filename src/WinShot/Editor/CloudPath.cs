@@ -9,9 +9,21 @@ namespace WinShot.Editor;
 /// </summary>
 internal static class CloudPath
 {
-    public static PathGeometry ForRectangle(Rect bounds, double intensity = 2)
+    /// <summary>Survey's cloud bump range (AppShell.jsx:2590-2622 clamps 1..20).</summary>
+    public const double MinIntensity = 1;
+    public const double MaxIntensity = 20;
+    public const double DefaultIntensity = 2;
+
+    public static double ClampIntensity(double intensity) =>
+        Math.Clamp(Math.Round(intensity), MinIntensity, MaxIntensity);
+
+    public static PathGeometry ForRectangle(Rect bounds, double intensity = DefaultIntensity,
+        double strokeWidth = 1)
     {
-        double bump = Math.Clamp(intensity * 4, 6, 18);
+        // Survey's radius (pdfAnnotationImporter.js:900-907): max(6, 5 + intensity*3),
+        // then Acrobat's stroke clamp max(radius, 2*strokeWidth).
+        double bump = Math.Max(Math.Max(6, 5 + ClampIntensity(intensity) * 3),
+                               2 * Math.Max(1, strokeWidth));
         var geometry = new PathGeometry();
         var figure = new PathFigure { IsClosed = true, IsFilled = true };
 

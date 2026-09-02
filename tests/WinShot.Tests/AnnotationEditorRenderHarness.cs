@@ -675,6 +675,54 @@ public class AnnotationEditorRenderHarness
                 File.WriteAllText(Path.Combine(outDir, "counter-chrome.txt"),
                     $"selectionRect={((FrameworkElement)editor.FindName("SelectionRect")!).Visibility}");
 
+                // ---- CHROME: Survey's flat strip, gold accent, and the new popovers ----
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+                Check("RectangleToolBtn"); Pump(4);
+                Shot("pointer-chrome-shapes-row.png");
+                // The tool cluster: `.btn-icon` squares, the #5a6473 divider, and the
+                // gold `.btn-active` glyph on the live category button.
+                RenderElementToPng(editor.FindName("ToolPanel") as UIElement,
+                    Path.Combine(outDir, "chrome-tool-cluster.png"));
+
+                // Cloud border reveals the Bump field; the size popover shows preset previews.
+                var lineBox = (ComboBox)editor.FindName("LineStyleBox")!;
+                foreach (ComboBoxItem ci in lineBox.Items.OfType<ComboBoxItem>())
+                    if (ci.Tag as string == "cloud") { lineBox.SelectedItem = ci; break; }
+                InvokePrivate(editor, "UpdateContextPanels");
+                Pump(4);
+                Shot("pointer-chrome-cloud-bump.png");
+                RenderElementToPng(editor.FindName("SizeField") as UIElement,
+                    Path.Combine(outDir, "chrome-size-field.png"));
+                ((System.Windows.Controls.Primitives.ToggleButton)editor.FindName("SizePresetsBtn")!).IsChecked = true;
+                Pump(6);
+                RenderElementToPng(((System.Windows.Controls.Primitives.Popup)editor.FindName("SizePresetsPopup")!).Child,
+                    Path.Combine(outDir, "chrome-size-popover.png"));
+                ((System.Windows.Controls.Primitives.ToggleButton)editor.FindName("SizePresetsBtn")!).IsChecked = false;
+                Pump(3);
+
+                // The annotation dropdown popover: heading rule, 34px rows, is-active wash.
+                var arrowBox = (ComboBox)editor.FindName("ArrowStyleBox")!;
+                Check("ArrowToolBtn"); Pump(4);
+                arrowBox.IsDropDownOpen = true; Pump(8);
+                RenderElementToPng(arrowBox, Path.Combine(outDir, "chrome-dropdown-trigger.png"));
+                arrowBox.IsDropDownOpen = false; Pump(3);
+
+                // Eraser split menu, and the counter colour-swatch variant.
+                Check("FreehandToolBtn"); Pump(3);
+                ((RadioButton)editor.FindName("EraserToolBtn")!).IsChecked = true; Pump(4);
+                ((System.Windows.Controls.Primitives.Popup)editor.FindName("EraserModePopup")!).IsOpen = true;
+                Pump(6);
+                RenderElementToPng(((System.Windows.Controls.Primitives.Popup)editor.FindName("EraserModePopup")!).Child,
+                    Path.Combine(outDir, "chrome-eraser-split-menu.png"));
+                ((System.Windows.Controls.Primitives.Popup)editor.FindName("EraserModePopup")!).IsOpen = false;
+                Pump(3);
+                counterBtn2.IsChecked = true; Pump(4);
+                Shot("pointer-chrome-counter-row.png");
+                RenderElementToPng(editor.FindName("ColorWellBtn") as UIElement,
+                    Path.Combine(outDir, "chrome-color-swatch-counter.png"));
+
                 editor.Close();
                 Pump(2);
             }

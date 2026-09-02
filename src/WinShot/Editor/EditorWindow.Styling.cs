@@ -206,7 +206,7 @@ public partial class EditorWindow : Window
                     var lineStyle = AnnotationStyle.LineStyleFrom(snap.Meta);
                     if (boxLike is Path cloud && lineStyle == LineBorderStyle.Cloud)
                     {
-                        cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, boxLike.Width), Math.Max(1, boxLike.Height)));
+                        cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, boxLike.Width), Math.Max(1, boxLike.Height)), _cloudIntensity);
                         cloud.StrokeDashArray = null;
                     }
                     else

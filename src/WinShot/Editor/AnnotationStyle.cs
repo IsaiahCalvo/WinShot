@@ -45,10 +45,11 @@ internal static class AnnotationStyle
     public static readonly int[] EraserSizePresets = { 1, 4, 8, 12, 16, 24, 32, 48, 64, 80, 100 };
 
     /// <summary>
-    /// Counter presets: the Size box drives the badge radius directly, over Survey's own
-    /// COUNTER_SIZE_MIN 4 .. COUNTER_SIZE_MAX 76 range (utils/annotationSize.js:2-3).
+    /// ANNOTATION_SIZE_PRESETS.counter verbatim (AnnotationSizeControl.jsx:12). The Size
+    /// box drives the badge radius directly, over Survey's own COUNTER_SIZE_MIN 4 ..
+    /// COUNTER_SIZE_MAX 76 range (utils/annotationSize.js:2-3).
     /// </summary>
-    public static readonly int[] CounterSizePresets = { 4, 8, 10, 12, 14, 18, 24, 32, 48, 64, 76 };
+    public static readonly int[] CounterSizePresets = { 5, 8, 12, 16, 24, 32, 48, 64 };
     public const int DefaultCounterSize = 14;
 
     public static int ClampCounterSize(double size) => (int)Math.Clamp(Math.Round(size), 4, 76);

@@ -560,7 +560,10 @@ public class ThemedWindowTests
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
         var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
-        var sizeBox = (ComboBox)editor.FindName("SizeBox")!;
+        // Survey's size control is an editable field plus a preset popover, not a combo
+        // (components/AnnotationSizeControl.jsx).
+        var sizeInput = (TextBox)editor.FindName("SizeInput")!;
+        var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
         var viewport = (Grid)editor.FindName("Viewport")!;
         var undo = (Button)editor.FindName("BtnUndo")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
@@ -617,7 +620,11 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
         Assert.Null(editor.FindName("EraserPartialBtn"));
-        Assert.NotNull(editor.FindName("EraserModeBox"));
+        // Survey keeps eraser mode in the tool's OWN split menu inside the Draw sub-row
+        // (PDFViewer.jsx:32095-32135), not in a top-row combo.
+        Assert.Null(editor.FindName("EraserModeBox"));
+        Assert.NotNull(editor.FindName("EraserModePopup"));
+        Assert.NotNull(editor.FindName("EraserCaretBtn"));
         typeof(EditorWindow).GetMethod("FitEditorCombos",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, null);
@@ -634,10 +641,8 @@ public class ThemedWindowTests
             if (item.Tag as string == "none") { arrowBox.SelectedItem = item; break; }
         editor.UpdateLayout();
         Assert.Equal(arrowWidth, arrowBox.Width);
-        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "2");
-        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "50");
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 2);
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 50);
 
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
@@ -655,10 +660,9 @@ public class ThemedWindowTests
         // Survey's Width control for text is a STROKE width (AppShell.jsx:2464-2482), so the
         // shared size box keeps the stroke presets; the font size lives in FontSizeBox, which
         // — like Survey's rich-text row — is only up while an editor is mounted.
-        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "16");
-        Assert.DoesNotContain(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "72");
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 16);
+        Assert.DoesNotContain(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 72);
+        Assert.False(string.IsNullOrEmpty(sizeInput.Text));
         var fontSizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
@@ -673,9 +677,9 @@ public class ThemedWindowTests
             $"Text group still occupies the Shapes-width blank slot: text={textToolsW:0} shapes={arrowToolsW:0}");
         var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;
         Point wellOrigin = well.TranslatePoint(new Point(0, 0), editor);
-        Point sizeOrigin = ((FrameworkElement)sizeBox).TranslatePoint(new Point(0, 0), editor);
+        Point sizeOrigin = ((FrameworkElement)editor.FindName("SizeField")!).TranslatePoint(new Point(0, 0), editor);
         Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 16,
-            $"Color well and size combo have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
+            $"Color well and size field have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Text vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
         var overflowBtn = (Button)editor.FindName("FormatOverflowBtn")!;
@@ -698,12 +702,9 @@ public class ThemedWindowTests
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
         PackEditorFormat(editor);
-        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "1");
-        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "50");
-        Assert.DoesNotContain(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "72");
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 1);
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 50);
+        Assert.DoesNotContain(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 72);
         // Same rule for callouts: Survey's font-size dropdown belongs to the rich-text row,
         // which only exists while an editor is mounted (TextEditOverlay.jsx:278-318).
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
@@ -754,8 +755,7 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
-            item => item.Content is string s && s == "1");
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 1);
 
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
         editor.UpdateLayout();

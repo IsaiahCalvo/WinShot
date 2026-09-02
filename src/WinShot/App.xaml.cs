@@ -2,6 +2,8 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -43,9 +45,34 @@ public partial class App : Application
     private UpdateCheckResult? _pendingUpdate;
     private bool _updateInProgress;
 
+    /// <summary>
+    /// Survey's shared tooltip shows on mouseenter with ZERO delay; the module exists
+    /// specifically to kill the ~1.5s native chip, because "a control that only answers
+    /// 'what is this?' after a delay reads as having no tooltip at all"
+    /// (components/Tooltip.jsx:22-31, 144-162). WPF's 1000ms default is the same
+    /// anti-pattern, so drop it app-wide, and centre the chip under its target the way
+    /// tooltipAnchorFor('below') does (Tooltip.jsx:73-98) — WPF's Bottom placement is
+    /// left-aligned. ShowDuration is left alone: .NET 8 already defaults to no auto-dismiss.
+    /// </summary>
+    private static void InstallInstantTooltips()
+    {
+        ToolTipService.InitialShowDelayProperty.OverrideMetadata(
+            typeof(FrameworkElement), new FrameworkPropertyMetadata(0));
+        ToolTipService.BetweenShowDelayProperty.OverrideMetadata(
+            typeof(FrameworkElement), new FrameworkPropertyMetadata(0));
+        EventManager.RegisterClassHandler(typeof(ToolTip), ToolTip.OpenedEvent,
+            new RoutedEventHandler(static (sender, _) =>
+            {
+                if (sender is not ToolTip tip || tip.Placement != PlacementMode.Bottom) return;
+                if (tip.PlacementTarget is not FrameworkElement target) return;
+                tip.HorizontalOffset = (target.ActualWidth - tip.ActualWidth) / 2;
+            }));
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        InstallInstantTooltips();
 
         string? incomingCommand = e.Args.Length > 0 ? CommandServer.ParseCommand(e.Args[0]) : null;
 

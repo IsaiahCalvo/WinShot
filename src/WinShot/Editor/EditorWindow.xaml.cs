@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -87,6 +88,8 @@ public partial class EditorWindow : Window
     private System.Windows.Shapes.Rectangle? _textPreview;
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
+    /// <summary>Survey's cloud "Bump" size (AppShell.jsx:2590-2622), clamped 1-20.</summary>
+    private double _cloudIntensity = CloudPath.DefaultIntensity;
     private ShapeFillMode _fillMode = ShapeFillMode.None;
     private TextStyle _textStyle = TextStyle.Plain;
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
@@ -706,10 +709,13 @@ public partial class EditorWindow : Window
         // manual (AppShell.jsx:3072; PDFViewer.jsx:7865-7870).
         FitMenuBtn.ToolTip = $"Page fit: {label}";
         FitModeIcon.Content = FindResource(icon);
-        FitModeIcon.Opacity = _viewFitMode == ViewFitMode.Free ? 0.6 : 1;
+        // AppShell.jsx:3073 recolours the whole cell — chevron included — rather than
+        // dimming the glyph: #e8e2d4 while a fit mode is active, #8d96a6 in manual.
+        FitMenuBtn.Foreground = (Brush)FindResource(
+            _viewFitMode == ViewFitMode.Free ? "ChromeTextMutedBrush" : "ChromeTextBrush");
         foreach (var (item, mode) in new[] { (FitPageItem, ViewFitMode.Fit), (FitWidthItem, ViewFitMode.FitWidth), (FitHeightItem, ViewFitMode.FitHeight) })
             if (item is not null)
-                item.Foreground = (Brush)FindResource(_viewFitMode == mode ? "TextPrimaryBrush" : "TextSecondaryBrush");
+                item.Foreground = (Brush)FindResource(_viewFitMode == mode ? "ChromeTextBrush" : "ChromeTextMutedBrush");
     }
 
     private void SyncCaptureShadow()
@@ -924,14 +930,15 @@ public partial class EditorWindow : Window
         string group = _tool is EditorTool.Select or EditorTool.Pan
             ? EditorShellContract.GroupFor(ChromeTool(), ChromeFilledRectangle())
             : EditorShellContract.GroupFor(_tool, false);
+        // `.btn-active`: transparent box, gold glyph (styles.css:1547-1558).
         void Paint(Button btn, bool on)
         {
             if (btn is null) return;
             btn.Opacity = 1;
             btn.Background = Brushes.Transparent;
             btn.Foreground = on
-                ? (Brush)FindResource("AccentBrush")
-                : (Brush)FindResource("TextPrimaryBrush");
+                ? (Brush)FindResource("SurveyGoldBrush")
+                : (Brush)FindResource("ChromeTextBrush");
         }
         Paint(DrawGroupBtn, group == "Draw");
         Paint(ShapeGroupBtn, group == "Shape");
@@ -944,11 +951,11 @@ public partial class EditorWindow : Window
     {
         if (CropUtilityBtn is null) return;
         CropUtilityBtn.Background = on
-            ? (Brush)FindResource("HoverFillBrush")
+            ? (Brush)FindResource("SurveyGoldHoverTintBrush")
             : Brushes.Transparent;
         CropUtilityBtn.Foreground = on
-            ? (Brush)FindResource("AccentBrush")
-            : (Brush)FindResource("TextPrimaryBrush");
+            ? (Brush)FindResource("SurveyGoldBrush")
+            : (Brush)FindResource("ChromeTextBrush");
     }
 
     private void UncheckOtherToolButtons(RadioButton selected)
@@ -984,10 +991,17 @@ public partial class EditorWindow : Window
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
-        EraserModePanel.Visibility = Show(Has(EditorContextControls.EraserMode));
         ColorWellLabel.Visibility = Visibility.Collapsed;
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(chrome == EditorTool.Rectangle);
+        // Survey gates the Bump field on rect + cloud border (AppShell.jsx:2590).
+        if (CloudBumpPanel is not null)
+            CloudBumpPanel.Visibility = Show(chrome == EditorTool.Rectangle && _lineStyle == LineBorderStyle.Cloud);
+        if (CloudBumpInput is not null && !CloudBumpInput.IsKeyboardFocusWithin)
+            CloudBumpInput.Text = ((int)_cloudIntensity).ToString(CultureInfo.InvariantCulture);
+        if (StepStartInput is not null && !StepStartInput.IsKeyboardFocusWithin)
+            StepStartInput.Text = _nextStep.ToString(CultureInfo.InvariantCulture);
+        SyncTextEditButton();
         SyncColorWellIndicator();
         ThicknessLabel.Visibility = Visibility.Collapsed;
         if (Has(EditorContextControls.Thickness))
@@ -1026,10 +1040,44 @@ public partial class EditorWindow : Window
         if (SecondaryToolPanel is not null)
             SecondaryToolPanel.Visibility = Show(props);
         EditorFormatBar.Visibility = Visibility.Visible;
-        EditorGroupToolsHost.Visibility = Visibility.Visible;
-        EditorGroupToolsHost.Visibility = Show(group is "Draw" or "Shape" or "Text" or "Effects");
+        // Survey portals the rich-text strip into the 34px sub-row and suppresses the
+        // category portal for as long as it is up (AppShell.jsx:1756-1772, 2009).
+        bool richText = TextStylePanel.Visibility == Visibility.Visible;
+        HostRichTextRow(richText);
+        EditorGroupToolsHost.Visibility = Show(!richText && group is "Draw" or "Shape" or "Text" or "Effects");
         Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
     }
+
+    /// <summary>
+    /// Moves the rich-text formatting strip between the top row and the 34px sub-row.
+    /// Survey mounts it in the sub-row (`#chrome-sub-toolbar-host`) only while an editor
+    /// is live; the rest of the time the row belongs to the category chips.
+    /// </summary>
+    private void HostRichTextRow(bool inSubRow)
+    {
+        if (TextStylePanel is null || EditorRichTextHost is null || ContextPanel is null) return;
+        if (inSubRow)
+        {
+            if (ReferenceEquals(EditorRichTextHost.Child, TextStylePanel)) return;
+            _textStyleHomeIndex ??= ContextPanel.Children.IndexOf(TextStylePanel);
+            ContextPanel.Children.Remove(TextStylePanel);
+            TextStylePanel.Margin = new Thickness(0);
+            EditorRichTextHost.Child = TextStylePanel;
+            EditorRichTextHost.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            EditorRichTextHost.Visibility = Visibility.Collapsed;
+            if (!ReferenceEquals(EditorRichTextHost.Child, TextStylePanel)) return;
+            EditorRichTextHost.Child = null;
+            TextStylePanel.Margin = new Thickness(0, 0, 8, 0);
+            ContextPanel.Children.Insert(
+                Math.Clamp(_textStyleHomeIndex ?? ContextPanel.Children.Count, 0, ContextPanel.Children.Count),
+                TextStylePanel);
+        }
+    }
+
+    private int? _textStyleHomeIndex;
 
     private void OnFormatOverflowClick(object sender, RoutedEventArgs e)
     {
@@ -1153,13 +1201,15 @@ public partial class EditorWindow : Window
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) == "Apply crop")
                     yield return inner;
-        if (TextStylePanel?.Visibility == Visibility.Visible)
+        // While the strip is portalled into the 34px sub-row it owns a full-width row of
+        // its own, so nothing in it can overflow the top bar.
+        if (TextStylePanel?.Visibility == Visibility.Visible
+            && !ReferenceEquals(EditorRichTextHost?.Child, TextStylePanel))
             foreach (FrameworkElement inner in TextStylePanel.Children.OfType<FrameworkElement>())
             {
                 if (inner is Popup) continue;
                 yield return inner;
             }
-        if (EraserModePanel is not null) yield return EraserModePanel;
         if (LineStylePanel is not null) yield return LineStylePanel;
         if (ArrowStylePanel is not null) yield return ArrowStylePanel;
         if (StepModePanel is not null) yield return StepModePanel;
@@ -1278,48 +1328,163 @@ public partial class EditorWindow : Window
             }
     }
 
+    /// <summary>
+    /// Survey's AnnotationSizeControl: an editable whole-number field plus a preset
+    /// popover whose rows preview the stroke THICKNESS
+    /// (components/AnnotationSizeControl.jsx:10-190).
+    /// </summary>
+    private int[] ActiveSizePresets() => _tool == EditorTool.Eraser
+        ? AnnotationStyle.EraserSizePresets
+        : ChromeTool() is EditorTool.Step ? AnnotationStyle.CounterSizePresets
+        : AnnotationStyle.SizePresets;
+
+    private int ClampActiveSize(double size) => _tool == EditorTool.Eraser
+        ? AnnotationStyle.ClampEraserSize(size)
+        : ChromeTool() is EditorTool.Step ? AnnotationStyle.ClampCounterSize(size)
+        : AnnotationStyle.ClampSize(size);
+
     private void SyncSizeBox()
     {
-        if (SizeBox is null) return;
-        bool counter = ChromeTool() is EditorTool.Step;
+        if (SizeInput is null) return;
         // Survey's Width control for text is a STROKE width (AppShell.jsx:2464-2482), not the
         // font size; the font size lives in its own dropdown next to B/I/U/S.
-        int[] presets = _tool == EditorTool.Eraser
-            ? AnnotationStyle.EraserSizePresets
-            : counter ? AnnotationStyle.CounterSizePresets
-            : AnnotationStyle.SizePresets;
         _thickness = ActiveSize();
+        int current = ClampActiveSize(_tool == EditorTool.Eraser ? _eraserSize
+            : ChromeTool() is EditorTool.Step ? _counterSize : _thickness);
 
         _syncingSizeBox = true;
         try
         {
-            SizeBox.Items.Clear();
-            int current = _tool == EditorTool.Eraser
-                ? AnnotationStyle.ClampEraserSize(_eraserSize)
-                : counter ? AnnotationStyle.ClampCounterSize(_counterSize)
-                : AnnotationStyle.ClampSize(_thickness);
-            ComboBoxItem? selected = null;
-            foreach (int preset in presets)
+            SizeInput.Text = current.ToString(CultureInfo.InvariantCulture);
+            // label is 'Size' for the counter and the eraser, 'Width' otherwise
+            // (AppShell.jsx:2476).
+            bool sizeLabel = _tool == EditorTool.Eraser || ChromeTool() is EditorTool.Step;
+            string label = sizeLabel ? "Size" : "Width";
+            if (SizePresetsHeading is not null) SizePresetsHeading.Text = label.ToUpperInvariant();
+            if (SizePresetsBtn is not null)
             {
-                var item = new ComboBoxItem { Content = preset.ToString(), Tag = (double)preset };
-                SizeBox.Items.Add(item);
-                if (preset == current) selected = item;
+                SizePresetsBtn.ToolTip = $"{label} presets";
+                System.Windows.Automation.AutomationProperties.SetName(SizePresetsBtn, $"{label} presets");
             }
-            if (selected is null)
-            {
-                selected = new ComboBoxItem { Content = current.ToString(), Tag = (double)current };
-                SizeBox.Items.Insert(0, selected);
-            }
-            SizeBox.SelectedItem = selected;
-            FitComboToLongestItem(SizeBox,
-                AnnotationStyle.SizePresets.Select(n => n.ToString())
-                    .Concat(AnnotationStyle.TextSizePresets.Select(n => n.ToString()))
-                    .Concat(AnnotationStyle.EraserSizePresets.Select(n => n.ToString()))
-                    .ToArray());
+            BuildSizePresetRows(current);
         }
         finally
         {
             _syncingSizeBox = false;
+        }
+    }
+
+    private void BuildSizePresetRows(int current)
+    {
+        if (SizePresetList is null) return;
+        SizePresetList.Children.Clear();
+        int[] presets = ActiveSizePresets();
+        int scaleMin = presets[0], scaleMax = presets[^1];
+        foreach (int preset in presets)
+        {
+            double thickness = SizePreviewThickness(preset, scaleMin, scaleMax);
+            var bar = new Rectangle
+            {
+                Width = 64,
+                Height = thickness,
+                // CSS border-radius:999px clamps to half the short side — a stadium,
+                // not the ellipse WPF would draw from a literal 999 radius.
+                RadiusX = thickness / 2,
+                RadiusY = thickness / 2,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(68) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var preview = new Grid { Height = 22 };
+            preview.Children.Add(bar);
+            row.Children.Add(preview);
+            var numeral = new TextBlock
+            {
+                Text = preset.ToString(CultureInfo.InvariantCulture),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(numeral, 1);
+            row.Children.Add(numeral);
+
+            var button = new Button
+            {
+                Style = (Style)FindResource("SizePresetRow"),
+                Content = row,
+                Tag = (double)preset,
+            };
+            // `.is-active`: #f4f6f8 on #2b313a, persisting under the hover wash.
+            if (preset == current)
+            {
+                button.Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x31, 0x3A));
+                button.Foreground = new SolidColorBrush(Color.FromRgb(0xF4, 0xF6, 0xF8));
+            }
+            // The bar is `background: currentColor`, so it tracks the row foreground.
+            bar.SetBinding(Shape.FillProperty,
+                new Binding(nameof(Control.Foreground)) { Source = button });
+            button.Click += OnSizePresetClick;
+            SizePresetList.Children.Add(button);
+        }
+    }
+
+    /// <summary>
+    /// utils/annotationSize.js getAnnotationSizePreviewThickness: square-root scaling
+    /// into 1..22px so large presets stay distinguishable inside a 34px row.
+    /// </summary>
+    internal static double SizePreviewThickness(double value, double min, double max,
+        double minPixels = 1, double maxPixels = 22)
+    {
+        double safeMin = min, safeMax = Math.Max(min, max);
+        if (safeMax == safeMin) return minPixels;
+        double clamped = Math.Clamp(value, safeMin, safeMax);
+        double ratio = (Math.Sqrt(clamped) - Math.Sqrt(safeMin))
+            / (Math.Sqrt(safeMax) - Math.Sqrt(safeMin));
+        return Math.Round(minPixels + ratio * (maxPixels - minPixels), 2);
+    }
+
+    private void OnSizePresetClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button b || b.Tag is not double size) return;
+        if (SizePresetsBtn is not null) SizePresetsBtn.IsChecked = false;
+        ApplySize(size);
+    }
+
+    // sanitizeAnnotationSizeDraft: at most three digits, nothing else.
+    private void OnSizeInputText(object sender, TextCompositionEventArgs e) =>
+        e.Handled = !e.Text.All(char.IsDigit);
+
+    private void OnSizeInputKey(object sender, KeyEventArgs e)
+    {
+        // Enter blurs, which commits (AnnotationSizeControl.jsx:118).
+        if (e.Key == Key.Enter) { CommitSizeInput(); Viewport.Focus(); e.Handled = true; }
+    }
+
+    private void OnSizeInputBlur(object sender, KeyboardFocusChangedEventArgs e) => CommitSizeInput();
+
+    private void CommitSizeInput()
+    {
+        if (_syncingSizeBox || SizeInput is null) return;
+        double parsed = double.TryParse(SizeInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out double v)
+            ? v
+            : ActiveSize();
+        ApplySize(parsed);
+    }
+
+    private void ApplySize(double size)
+    {
+        double clamped = ClampActiveSize(size);
+        RememberSize(clamped);
+        SyncSizeBox();
+        if (!IsLoaded) return;
+        if (ChromeTool() is EditorTool.Text)
+            RestyleSelectedTextFormat();
+        else
+        {
+            double applied = _tool == EditorTool.Highlighter
+                ? AnnotationStyle.HighlighterWidth(_thickness)
+                : _thickness;
+            RestyleSelected(color: null, thickness: applied, fill: null);
         }
     }
 
@@ -1333,7 +1498,10 @@ public partial class EditorWindow : Window
         double dip = 1;
         try { dip = VisualTreeHelper.GetDpi(box).PixelsPerDip; }
         catch (InvalidOperationException) { /* not in a visual tree yet */ }
-        var typeface = new Typeface("Segoe UI");
+        // SurveyDropdown renders its trigger in Arial SemiBold 12; measuring in the UI
+        // font would under-size the combo and clip the label.
+        var typeface = new Typeface(new FontFamily("Arial"), FontStyles.Normal,
+            FontWeights.SemiBold, FontStretches.Normal);
         double max = 0;
         void Consider(string? text)
         {
@@ -1346,20 +1514,18 @@ public partial class EditorWindow : Window
         foreach (string s in extra) Consider(s);
         foreach (object item in box.Items)
             Consider(item is ComboBoxItem cbi ? cbi.Content?.ToString() : item?.ToString());
-        // DarkComboBox ContentSite margin is 10 left + 24 for the chevron.
+        // SurveyDropdown ContentSite margin is 9 left + 29 for the chevron column.
         double width = Math.Ceiling(max) + 38;
-        if (width < 52) width = 52;
+        // AnnotationDropdown.css:9 min-width: 72px.
+        if (width < 72) width = 72;
         box.MinWidth = width;
         box.Width = width;
     }
 
     private void FitEditorCombos()
     {
-        FitComboToLongestItem(SizeBox,
-            AnnotationStyle.SizePresets.Select(n => n.ToString())
-                .Concat(AnnotationStyle.TextSizePresets.Select(n => n.ToString()))
-                .Concat(AnnotationStyle.EraserSizePresets.Select(n => n.ToString()))
-                .ToArray());
+        // SizeField is a fixed-width composite (43px input + 24px chevron), so it
+        // never needs measuring.
         FitComboToLongestItem(ArrowStyleBox);
         FitComboToLongestItem(LineStyleBox);
         FitComboToLongestItem(FontFamilyBox);
@@ -1367,7 +1533,6 @@ public partial class EditorWindow : Window
         FitComboToLongestItem(AlignBox);
         FitComboToLongestItem(VerticalAlignBox);
         FitComboToLongestItem(CropRatioBox);
-        FitComboToLongestItem(EraserModeBox);
         FitComboToLongestItem(EffectStrengthBox);
         FitComboToLongestItem(StepModeBox);
 
@@ -1401,23 +1566,6 @@ public partial class EditorWindow : Window
             default: _shapeSize = AnnotationStyle.ClampSize(size); break;
         }
         _thickness = ActiveSize();
-    }
-
-    private void OnSizeBoxChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_syncingSizeBox || _syncingContext || SizeBox?.SelectedItem is not ComboBoxItem item) return;
-        double size = item.Tag is double d ? d : AnnotationStyle.DefaultPenSize;
-        RememberSize(size);
-        if (!IsLoaded) return;
-        if (ChromeTool() is EditorTool.Text)
-            RestyleSelectedTextFormat();
-        else
-        {
-            double applied = _tool == EditorTool.Highlighter
-                ? AnnotationStyle.HighlighterWidth(_thickness)
-                : _thickness;
-            RestyleSelected(color: null, thickness: applied, fill: null);
-        }
     }
 
     /// <summary>Reflects the active blur/pixelate strength on the strength combo without re-triggering an apply.</summary>
@@ -1498,22 +1646,49 @@ public partial class EditorWindow : Window
         if (IsLoaded) UpdateContextPanels();
     }
 
+    /// <summary>
+    /// Survey ships three swatch variants (AppShell.jsx:2013-2124): a bare disc for
+    /// pen/highlighter/arrow/line, a disc inside a 2px stroke-colour ring for
+    /// rect/ellipse/text/callout, and a disc with a centred bold "1" for the counter.
+    /// The eraser shows no swatch at all. Transparency is communicated by the
+    /// checkerboard behind the disc, never by a dashed outline.
+    /// </summary>
     private void SyncColorWellIndicator()
     {
         if (CurrentColorIndicator is null) return;
-        Color shown = _colorWell == ColorWell.Fill &&
-                      EditorShellContract.ContextFor(ChromeTool(), ChromeFilledRectangle()).HasFlag(EditorContextControls.FillStrokeTabs)
+        EditorTool chrome = ChromeTool();
+        bool fillTabs = EditorShellContract.ContextFor(chrome, ChromeFilledRectangle())
+            .HasFlag(EditorContextControls.FillStrokeTabs);
+        Color stroke = CurrentStrokeBrush();
+        // In the ring variant the ring always paints the stroke colour and the disc the
+        // fill colour, whichever well the Fill/Border tabs have selected.
+        bool ringed = chrome is EditorTool.Rectangle or EditorTool.Ellipse
+            or EditorTool.Text or EditorTool.Callout;
+        bool counter = chrome is EditorTool.Step;
+        // Ring and counter variants both put the FILL colour in the disc and the stroke
+        // colour in the ring / numeral; the bare variant shows the stroke colour.
+        Color disc = ringed || counter || (_colorWell == ColorWell.Fill && fillTabs)
             ? CurrentFillBrush()
-            : CurrentStrokeBrush();
-        if (shown.A == 0)
+            : stroke;
+        if (ringed && !fillTabs) disc = stroke;
+        CurrentColorIndicator.Fill = new SolidColorBrush(disc);
+
+        if (ColorWellStrokeRing is not null)
         {
-            CurrentColorIndicator.Fill = Brushes.Transparent;
-            CurrentColorIndicator.StrokeDashArray = new DoubleCollection { 2, 2 };
+            ColorWellStrokeRing.Visibility = ringed ? Visibility.Visible : Visibility.Collapsed;
+            ColorWellStrokeRing.Stroke = new SolidColorBrush(stroke);
         }
-        else
+        if (ColorWellCounterGlyph is not null)
         {
-            CurrentColorIndicator.Fill = new SolidColorBrush(shown);
-            CurrentColorIndicator.StrokeDashArray = null;
+            ColorWellCounterGlyph.Visibility = counter ? Visibility.Visible : Visibility.Collapsed;
+            ColorWellCounterGlyph.Foreground = new SolidColorBrush(stroke);
+        }
+        if (ColorWellBtn is not null)
+        {
+            ColorWellBtn.ToolTip = counter ? "Counter colors" : "Color";
+            System.Windows.Automation.AutomationProperties.SetName(
+                ColorWellBtn, counter ? "Counter colors" : "Color");
+            ColorWellBtn.Visibility = chrome == EditorTool.Eraser ? Visibility.Collapsed : Visibility.Visible;
         }
     }
 
@@ -1549,7 +1724,10 @@ public partial class EditorWindow : Window
         if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item || item.Tag is not string tag)
             return;
         _lineStyle = AnnotationStyle.ParseLineStyle(tag);
-        if (IsLoaded) RestyleSelectedLineStyle(_lineStyle);
+        if (!IsLoaded) return;
+        RestyleSelectedLineStyle(_lineStyle);
+        // Survey shows the Bump field only while the cloud border is selected.
+        UpdateContextPanels();
     }
 
     private void OnFontFamilyChanged(object sender, SelectionChangedEventArgs e)
@@ -1643,8 +1821,15 @@ public partial class EditorWindow : Window
     {
         if (FontFamilyBox is not null && FontFamilyBox.Items.Count == 0)
         {
+            // Survey renders each option IN ITS OWN FACE (AppShell.jsx:1841-1845 sets
+            // style:{fontFamily} per option; AnnotationDropdown.jsx:163 applies it).
             foreach (string family in AnnotationStyle.FontFamilies)
-                FontFamilyBox.Items.Add(new ComboBoxItem { Content = family, Tag = family });
+                FontFamilyBox.Items.Add(new ComboBoxItem
+                {
+                    Content = family,
+                    Tag = family,
+                    FontFamily = new FontFamily(family),
+                });
             FontFamilyBox.SelectedIndex = 0;
             FitComboToLongestItem(FontFamilyBox);
         }
@@ -1676,11 +1861,13 @@ public partial class EditorWindow : Window
             }
             finally { _syncingContext = restore; }
         }
+        // AppShell.jsx:1902-1903 — on: rgba(216,168,78,0.18) + #d8a84e;
+        // off: #3a4252 + #e8e2d4.
         void Paint(Button? btn, bool on)
         {
             if (btn is null) return;
-            btn.Background = (Brush)FindResource(on ? "AccentTintBrush" : "SurfaceAltBrush");
-            btn.Foreground = (Brush)FindResource(on ? "AccentBrush" : "TextPrimaryBrush");
+            btn.Background = (Brush)FindResource(on ? "SurveyGoldTintBrush" : "ChromeControlBrush");
+            btn.Foreground = (Brush)FindResource(on ? "SurveyGoldBrush" : "ChromeTextBrush");
         }
         Paint(BoldBtn, _textBold || _textStyle == TextStyle.Bold);
         Paint(ItalicBtn, _textItalic);
@@ -1701,35 +1888,120 @@ public partial class EditorWindow : Window
         // Survey's active cell is accent-on-accent-tint with an accent border, and INACTIVE
         // cells still carry chrome (#14171c on 1px #2a3140) rather than being invisible
         // (AppShell.jsx:1960-2001).
-        var onBorder = (Brush)FindResource("AccentBrush");
-        var onFill = (Brush)FindResource("AccentTintBrush");
-        var offBorder = (Brush)FindResource("BorderBrush");
-        var offFill = (Brush)FindResource("SurfaceAltBrush");
-        var onDot = (Brush)FindResource("AccentBrush");
-        var offDot = (Brush)FindResource("TextSecondaryBrush");
+        var gold = (Brush)FindResource("SurveyGoldBrush");
+        var onFill = (Brush)FindResource("SurveyGoldCellBrush");   // rgba(216,168,78,0.10)
+        var offBorder = (Brush)FindResource("ChromeHairlineBrush"); // #2a3140
+        var offFill = (Brush)FindResource("ChromeCellBrush");       // #14171c
+        var offCellDot = (Brush)FindResource("ChromeCellDotBrush"); // #5a606a
+        var offTriggerDot = (Brush)FindResource("ChromeDotOffBrush"); // rgba(168,176,191,0.4)
         if (AlignGrid is not null)
         {
             foreach (Button cell in AlignGrid.Children.OfType<Button>())
             {
                 bool on = cell.Tag as string == current;
                 cell.Background = on ? onFill : offFill;
-                cell.BorderBrush = on ? onBorder : offBorder;
+                cell.BorderBrush = on ? gold : offBorder;
                 foreach (Shape glyph in ((cell.Content as Panel)?.Children).OfType<Shape>())
-                    glyph.Fill = on ? onDot : offDot;
+                    glyph.Fill = on ? gold : offCellDot;
             }
         }
         if (AlignTriggerGrid is not null)
         {
-            foreach (Rectangle dot in AlignTriggerGrid.Children.OfType<Rectangle>())
-                dot.Fill = dot.Tag as string == current ? onDot : offDot;
+            // Each cell is a Grid: [0] the 6px box-shadow halo, [1] the 4px dot.
+            foreach (Grid cell in AlignTriggerGrid.Children.OfType<Grid>())
+            {
+                bool on = cell.Tag as string == current;
+                var shapes = cell.Children.OfType<Shape>().ToList();
+                if (shapes.Count < 2) continue;
+                shapes[0].Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+                shapes[1].Fill = on ? gold : offTriggerDot;
+            }
         }
     }
 
-    private void OnEraserModeChanged(object sender, SelectionChangedEventArgs e)
+    // ---- cloud bump / counter start / Aa: Survey's small labelled chrome inputs ----
+
+    private void OnCloudBumpKey(object sender, KeyEventArgs e)
     {
-        if (_syncingContext) return;
-        if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item && item.Tag is string tag)
-            SetEraserPartial(tag != "Full");
+        if (e.Key == Key.Enter) { CommitCloudBump(); Viewport.Focus(); e.Handled = true; }
+    }
+
+    private void OnCloudBumpBlur(object sender, KeyboardFocusChangedEventArgs e) => CommitCloudBump();
+
+    private void CommitCloudBump()
+    {
+        if (CloudBumpInput is null) return;
+        double parsed = double.TryParse(CloudBumpInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out double v)
+            ? v
+            : _cloudIntensity;
+        _cloudIntensity = CloudPath.ClampIntensity(parsed);
+        CloudBumpInput.Text = ((int)_cloudIntensity).ToString(CultureInfo.InvariantCulture);
+        if (IsLoaded) RestyleSelectedLineStyle(_lineStyle);
+    }
+
+    private void OnStepStartKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { CommitStepStart(); Viewport.Focus(); e.Handled = true; }
+    }
+
+    private void OnStepStartBlur(object sender, KeyboardFocusChangedEventArgs e) => CommitStepStart();
+
+    private void CommitStepStart()
+    {
+        if (StepStartInput is null) return;
+        // Survey clamps the start number to >= 1 (AppShell.jsx:2540-2556).
+        _nextStep = int.TryParse(StepStartInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v)
+            ? Math.Max(1, v)
+            : _nextStep;
+        StepStartInput.Text = _nextStep.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Survey's `Aa` button re-opens the selected text box or callout for editing —
+    /// the same entry point double-click uses (AppShell.jsx:2641-2678).
+    /// </summary>
+    private void OnEnterTextEdit(object sender, RoutedEventArgs e)
+    {
+        if (_activeText is not null) return;
+        if (_selected is CalloutAnnotation callout) BeginCalloutReEdit(callout);
+        else if (_selected is TextBlock label) BeginTextReEdit(label);
+    }
+
+    /// <summary>
+    /// The Aa button stays visible but disabled with nothing editable selected, and
+    /// carries the gold pressed look while an editor is live.
+    /// </summary>
+    private void SyncTextEditButton()
+    {
+        if (TextEditBtn is null) return;
+        bool editing = _activeText is not null;
+        bool canEdit = editing || _selected is CalloutAnnotation or TextBlock;
+        TextEditBtn.IsEnabled = canEdit;
+        TextEditBtn.Opacity = canEdit ? 1 : 0.5;
+        TextEditBtn.Background = editing
+            ? (Brush)FindResource("SurveyGoldTintBrush")
+            : (Brush)FindResource("ChromeControlBrush");
+        TextEditBtn.Foreground = editing
+            ? (Brush)FindResource("SurveyGoldBrush")
+            : (Brush)FindResource(canEdit ? "ChromeTextBrush" : "ChromeTextDisabledBrush");
+        TextEditBtn.ToolTip = canEdit ? "Edit text" : "Select a text box or callout to edit its text";
+    }
+
+    /// <summary>
+    /// The caret both arms the eraser and toggles its mode popup, exactly as Survey's
+    /// in-button split trigger does (PDFViewer.jsx:32107-32120).
+    /// </summary>
+    private void OnEraserCaretClick(object sender, RoutedEventArgs e)
+    {
+        if (EraserToolBtn is not null) EraserToolBtn.IsChecked = true;
+        if (EraserModePopup is not null) EraserModePopup.IsOpen = !EraserModePopup.IsOpen;
+    }
+
+    private void OnEraserModeRowClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button b || b.Tag is not string tag) return;
+        if (EraserModePopup is not null) EraserModePopup.IsOpen = false;
+        SetEraserPartial(tag != "Full");
     }
 
     /// <summary>
@@ -1740,18 +2012,18 @@ public partial class EditorWindow : Window
     private void SetEraserPartial(bool partial)
     {
         _eraserPartial = partial;
-        bool restore = _syncingContext;
-        _syncingContext = true;
-        try
-        {
-            if (EraserModeBox is not null) EraserModeBox.SelectedIndex = partial ? 0 : 1;
-        }
-        finally { _syncingContext = restore; }
+        // The selected row keeps Survey's #1f2430 wash (PDFViewer.jsx:32170).
+        var selectedRow = new SolidColorBrush(Color.FromRgb(0x1F, 0x24, 0x30));
+        if (EraserPartialItem is not null)
+            EraserPartialItem.Background = partial ? selectedRow : Brushes.Transparent;
+        if (EraserFullItem is not null)
+            EraserFullItem.Background = partial ? Brushes.Transparent : selectedRow;
 
+        // Survey never shows a static "Eraser": the chip IS the mode (PDFViewer.jsx:32080-32082).
         string label = partial ? "Partial erase" : "Full stroke erase";
         if (EraserToolBtn is not null)
         {
-            EraserToolBtn.ToolTip = label + " (E)";
+            EraserToolBtn.ToolTip = label;
             System.Windows.Automation.AutomationProperties.SetName(EraserToolBtn, label);
         }
         // The combo's XAML SelectedIndex fires this before the ctor has assigned _settings.

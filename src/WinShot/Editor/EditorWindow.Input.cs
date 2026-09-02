@@ -259,7 +259,7 @@ public partial class EditorWindow : Window
                 _activeShape.Width = Math.Max(1, r.Width);
                 _activeShape.Height = Math.Max(1, r.Height);
                 if (_activeShape is Path cloudPath && _lineStyle == LineBorderStyle.Cloud)
-                    cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height));
+                    cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height), _cloudIntensity);
                 break;
             case EditorTool.Freehand or EditorTool.Highlighter when _activeShape is Polyline stroke:
                 // Survey appends every coalesced sample clearing the 0.2 page-px dedupe and
@@ -651,7 +651,7 @@ public partial class EditorWindow : Window
                         Stroke = brush,
                         StrokeThickness = strokeWidth,
                         Fill = fillBrush,
-                        Data = CloudPath.ForRectangle(new Rect(0, 0, 1, 1)),
+                        Data = CloudPath.ForRectangle(new Rect(0, 0, 1, 1), _cloudIntensity),
                     };
                 }
                 else

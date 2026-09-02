@@ -90,6 +90,75 @@
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
     <SolidColorBrush x:Key="TopHighlightBrush"  Color="{StaticResource TopHighlightColor}"/>
 
+    <!-- ================= SURVEY EDITOR CHROME PALETTE ==================
+         Survey's annotation chrome is a warm-cream-on-blue-black scheme with a
+         gold accent, NOT the macOS-blue/neutral-grey system above. These tokens
+         are consumed ONLY by the annotation editor's own styles and by
+         Editor/EditorWindow.xaml, so every other WinShot window keeps the
+         palette it already has.
+           gold        AccentColor equivalent  styles.css:139-149, 1547-1558
+           #181c24     top bar + 34px sub-row  AppShell.jsx:1343, 2739
+           #12151c     right rail              AppShell.jsx:2697, 2847, 3093
+           #0d0f14     popovers / backdrop     AppShell.jsx:1277; AnnotationDropdown.css:62
+           #2a3140     hairlines               AppShell.jsx:1560, 3011, 3112
+           #3a4252     control fills           AppShell.jsx:1902, 2555, 2611
+           #5a6473     disabled text AND the in-toolbar 1x20 dividers (:1632, :1744)
+         ================================================================= -->
+    <Color x:Key="SurveyGoldColor">#FFD8A84E</Color>
+    <Color x:Key="SurveyGoldHoverColor">#FFE3BC72</Color>
+    <Color x:Key="SurveyGoldPressedColor">#FFB6904A</Color>
+    <Color x:Key="ChromeBgColor">#FF181C24</Color>
+    <Color x:Key="ChromeRailColor">#FF12151C</Color>
+    <Color x:Key="ChromePopoverColor">#FF0D0F14</Color>
+    <Color x:Key="ChromeHairlineColor">#FF2A3140</Color>
+    <Color x:Key="ChromeControlColor">#FF3A4252</Color>
+    <Color x:Key="ChromeControlHoverColor">#FF454E60</Color>
+    <Color x:Key="ChromeTextColor">#FFE8E2D4</Color>
+    <Color x:Key="ChromeTextMutedColor">#FF8D96A6</Color>
+    <Color x:Key="ChromeTextDisabledColor">#FF5A6473</Color>
+
+    <SolidColorBrush x:Key="SurveyGoldBrush"        Color="{StaticResource SurveyGoldColor}"/>
+    <!-- .btn-active / B-I-U-S on state: rgba(216,168,78,0.18) -->
+    <SolidColorBrush x:Key="SurveyGoldTintBrush"    Color="{StaticResource SurveyGoldColor}" Opacity="0.18"/>
+    <!-- .btn-default:hover / .btn-icon:hover fill: rgba(216,168,78,0.14) -->
+    <SolidColorBrush x:Key="SurveyGoldHoverTintBrush" Color="{StaticResource SurveyGoldColor}" Opacity="0.14"/>
+    <!-- box-shadow 0 0 0 1px rgba(216,168,78,0.35) -->
+    <SolidColorBrush x:Key="SurveyGoldRingBrush"    Color="{StaticResource SurveyGoldColor}" Opacity="0.35"/>
+    <!-- align mini-grid halo: rgba(216,168,78,0.25); align cell fill: 0.10 -->
+    <SolidColorBrush x:Key="SurveyGoldHaloBrush"    Color="{StaticResource SurveyGoldColor}" Opacity="0.25"/>
+    <SolidColorBrush x:Key="SurveyGoldCellBrush"    Color="{StaticResource SurveyGoldColor}" Opacity="0.10"/>
+    <SolidColorBrush x:Key="ChromeBgBrush"          Color="{StaticResource ChromeBgColor}"/>
+    <SolidColorBrush x:Key="ChromeRailBrush"        Color="{StaticResource ChromeRailColor}"/>
+    <SolidColorBrush x:Key="ChromePopoverBrush"     Color="{StaticResource ChromePopoverColor}"/>
+    <SolidColorBrush x:Key="ChromeHairlineBrush"    Color="{StaticResource ChromeHairlineColor}"/>
+    <SolidColorBrush x:Key="ChromeControlBrush"     Color="{StaticResource ChromeControlColor}"/>
+    <SolidColorBrush x:Key="ChromeControlHoverBrush" Color="{StaticResource ChromeControlHoverColor}"/>
+    <SolidColorBrush x:Key="ChromeTextBrush"        Color="{StaticResource ChromeTextColor}"/>
+    <SolidColorBrush x:Key="ChromeTextMutedBrush"   Color="{StaticResource ChromeTextMutedColor}"/>
+    <SolidColorBrush x:Key="ChromeTextDisabledBrush" Color="{StaticResource ChromeTextDisabledColor}"/>
+    <!-- Survey's in-toolbar separator is the disabled-text grey, not the hairline. -->
+    <SolidColorBrush x:Key="ChromeDividerBrush"     Color="{StaticResource ChromeTextDisabledColor}"/>
+    <!-- 3x3 align mini-grid off dot: rgba(168,176,191,0.4) (AppShell.jsx:1952) -->
+    <SolidColorBrush x:Key="ChromeDotOffBrush"      Color="#FFA8B0BF" Opacity="0.4"/>
+    <!-- align popover cell resting fill / off dot (AppShell.jsx:1980, 1998) -->
+    <SolidColorBrush x:Key="ChromeCellBrush"        Color="#FF14171C"/>
+    <SolidColorBrush x:Key="ChromeCellDotBrush"     Color="#FF5A606A"/>
+
+    <!-- Survey's chrome typeface is FONT_FAMILY = '"Helvetica Neue", Helvetica, Arial,
+         sans-serif' (viewerShared.js:327), which resolves to Arial on Windows. Only the
+         places Survey hard-codes that stack use it; `.btn` labels stay on the UI font. -->
+    <FontFamily x:Key="SurveyArialFont">Arial</FontFamily>
+
+    <!-- Survey popover shadow: 0 10px 30px rgba(0,0,0,0.48) (AnnotationDropdown.css:57) -->
+    <DropShadowEffect x:Key="ChromePopoverShadow" BlurRadius="30" ShadowDepth="10"
+                      Direction="270" Opacity="0.48" RenderingBias="Performance"
+                      Color="#FF000000"/>
+    <!-- .btn:hover 0 2px 8px rgba(0,0,0,0.2) / :active 0 1px 4px rgba(0,0,0,0.15) -->
+    <DropShadowEffect x:Key="ChromeLiftShadow" BlurRadius="8" ShadowDepth="2"
+                      Direction="270" Opacity="0.2" Color="#FF000000"/>
+    <DropShadowEffect x:Key="ChromePressShadow" BlurRadius="4" ShadowDepth="1"
+                      Direction="270" Opacity="0.15" Color="#FF000000"/>
+
     <!-- ===================== TOKENS (radii / sizes) ==================== -->
     <CornerRadius x:Key="RadiusButton">8</CornerRadius>
     <CornerRadius x:Key="RadiusCard">14</CornerRadius>
@@ -179,12 +248,12 @@
          ==================================================================== -->
     <Style x:Key="StripToolButton" TargetType="ToggleButton">
         <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="30"/>
+        <!-- 5px padding + 20px icon + 1px border per side = 32 (PDFViewer.jsx:32084-32100). -->
+        <Setter Property="Height" Value="32"/>
         <Setter Property="Margin" Value="0"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
-        <Setter Property="ToolTipService.InitialShowDelay" Value="400"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
@@ -196,15 +265,21 @@
                         </Viewbox>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- `.btn-ghost:hover` (styles.css:200-205). The sub-row cancels the
+                             `.btn` translateY lift (styles.css:115-117) but NOT its shadow. -->
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bg" Property="Background" Value="#0DFFFFFF"/>
                             <Setter TargetName="Bg" Property="BorderBrush" Value="#1AFFFFFF"/>
+                            <Setter TargetName="Bg" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bg" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource SurveyGoldBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource ChromeTextDisabledBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -216,26 +291,23 @@
          MENU ROW BUTTON — one row of a popup menu (Survey's fit menu rows):
          full width, left-aligned, 2px radius, quiet hover.
          ==================================================================== -->
+    <!-- Survey's fit-menu rows (AppShell.jsx:2990-2996): padding 6px 8px, 2px
+         radius, 11px, #8d96a6 (#e8e2d4 for the active mode), and NO hover state
+         at all. SyncZoomPresetChrome sets Foreground per row as a local value. -->
     <Style x:Key="MenuRowButton" TargetType="Button">
-        <Setter Property="Height" Value="30"/>
+        <Setter Property="Height" Value="28"/>
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bg" Background="Transparent" CornerRadius="4" Padding="8,0">
+                    <Border x:Name="Bg" Background="Transparent" CornerRadius="2" Padding="8,6">
                         <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
-                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -246,25 +318,32 @@
     <!-- Survey chrome tooltip (components/Tooltip.jsx): #181c24 on #2a3140 border, 6px
          radius, 4x8 padding, 11.5px text, deep shadow, shown promptly. -->
     <Style TargetType="ToolTip">
-        <Setter Property="Background" Value="#FF181C24"/>
-        <Setter Property="Foreground" Value="#FFE8E2D4"/>
-        <Setter Property="BorderBrush" Value="#FF2A3140"/>
+        <Setter Property="Background" Value="{StaticResource ChromeBgBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ChromeHairlineBrush}"/>
         <Setter Property="FontSize" Value="11.5"/>
-        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <!-- Tooltip.jsx:56 draws the chip in FONT_FAMILY, i.e. Arial on Windows. -->
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
         <Setter Property="Padding" Value="8,4"/>
         <Setter Property="HasDropShadow" Value="False"/>
+        <!-- tooltipAnchorFor 'below': rect.bottom + 10, horizontally centred
+             (Tooltip.jsx:86-98). WPF's Bottom placement is left-aligned, so
+             App.OnStartup centres HorizontalOffset when the chip opens. -->
         <Setter Property="Placement" Value="Bottom"/>
         <Setter Property="HorizontalOffset" Value="0"/>
-        <Setter Property="VerticalOffset" Value="6"/>
+        <Setter Property="VerticalOffset" Value="10"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToolTip">
+                    <!-- Margin 12 leaves room for the 12px-deep shadow to render. -->
                     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="8">
+                            BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="12">
                         <Border.Effect>
-                            <DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270" Opacity="0.5"/>
+                            <!-- TOOLTIP_SURFACE box-shadow: 0 12px 30px rgba(0,0,0,0.5) -->
+                            <DropShadowEffect BlurRadius="30" ShadowDepth="12" Direction="270" Opacity="0.5"/>
                         </Border.Effect>
                         <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"
+                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"/>
                     </Border>
                 </ControlTemplate>
@@ -272,198 +351,272 @@
         </Setter>
     </Style>
 
+    <!-- ====================================================================
+         SURVEY `.btn` — the one chrome button recipe (styles.css:77-149).
+           box       6px radius, 1px transparent border (so :active never resizes)
+           hover     rgba(216,168,78,0.14) fill, #d8a84e border,
+                     0 0 0 1px rgba(216,168,78,0.35) outer ring,
+                     translateY(-1px) + 0 2px 8px rgba(0,0,0,0.2)
+           active    translateY(0) + 0 1px 4px rgba(0,0,0,0.15)
+           disabled  opacity 0.4, cursor not-allowed
+         `.btn-default` (undo/redo, btn-sm) and `.btn-md` (the four category
+         buttons) differ only in metrics, so they share this template.
+         ==================================================================== -->
+    <ControlTemplate x:Key="SurveyButtonTemplate" TargetType="Button">
+        <Grid>
+            <Border x:Name="FocusRing" Margin="-1" CornerRadius="7" BorderThickness="1"
+                    BorderBrush="Transparent" Background="Transparent"/>
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                    Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
+                
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                  TextElement.FontSize="{TemplateBinding FontSize}"
+                                  TextElement.Foreground="{TemplateBinding Foreground}"/>
+            </Border>
+        </Grid>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurveyGoldHoverTintBrush}"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
+                <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource SurveyGoldRingBrush}"/>
+                <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1"/></Setter.Value></Setter>
+                <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
+                <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
+            </Trigger>
+            <!-- :focus-visible { outline: 2px solid #d8a84e } (styles.css:1650-1653) -->
+            <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
+                <Setter TargetName="FocusRing" Property="BorderThickness" Value="2"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4"/>
+                <!-- CSS `cursor: not-allowed`; WPF's nearest is Cursors.No. -->
+                <Setter Property="Cursor" Value="No"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- `.btn.btn-md` (AppShell.jsx:1634-1690): inline padding 4px 10px over
+         min-height 28px, 18px glyph. The four category buttons use it. -->
     <Style x:Key="ToolIconButton" TargetType="Button">
-        <Setter Property="Width"  Value="{StaticResource ToolButtonSize}"/>
-        <Setter Property="Height" Value="{StaticResource ToolButtonSize}"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Padding" Value="10,4"/>
         <Setter Property="Margin" Value="3,0"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
         <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
         <Setter Property="FontSize" Value="{StaticResource ToolGlyphSize}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Ellipse x:Name="Bg" Fill="{TemplateBinding Background}"/>
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
-                                          TextElement.FontSize="{TemplateBinding FontSize}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        <Ellipse x:Name="FocusRing" Fill="Transparent" Stroke="Transparent"
-                                 StrokeThickness="2" Margin="1"/>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource HoverFillBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource PressedFillBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- Survey's `btn btn-default btn-sm`: transparent, 6px radius, accent tint + accent
-         border on hover, 40% opacity when disabled. Undo/redo use it with 14px icons. -->
-    <Style x:Key="SurveyDefaultButton" TargetType="Button">
-        <Setter Property="Height" Value="26"/>
-        <Setter Property="MinWidth" Value="30"/>
-        <Setter Property="Padding" Value="8,4"/>
-        <Setter Property="Margin" Value="0,0,8,0"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="SnapsToDevicePixels" Value="True"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background">
-                                <Setter.Value>
-                                    <SolidColorBrush Color="{StaticResource AccentColor}" Opacity="0.14"/>
-                                </Setter.Value>
-                            </Setter>
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.4"/>
-                            <Setter Property="Cursor" Value="Arrow"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+        <Setter Property="Template" Value="{StaticResource SurveyButtonTemplate}"/>
     </Style>
 
-    <!-- Right rail: 32x28 rounded buttons stacked vertically, 18px glyphs. -->
-    <Style x:Key="RailButton" TargetType="Button">
-        <Setter Property="Width" Value="28"/>
-        <Setter Property="Height" Value="24"/>
-        <Setter Property="Margin" Value="0,2"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="SnapsToDevicePixels" Value="True"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource PressedFillBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- Survey's zoom input: a bare number field, underlined only while it has focus. -->
-    <Style x:Key="RailZoomBox" TargetType="TextBox">
-        <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="18"/>
-        <Setter Property="Margin" Value="0,1"/>
-        <Setter Property="Padding" Value="0"/>
-        <Setter Property="FontSize" Value="10"/>
-        <Setter Property="FontWeight" Value="Medium"/>
-        <Setter Property="TextAlignment" Value="Center"/>
-        <Setter Property="VerticalContentAlignment" Value="Center"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderBrush" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0,0,0,1"/>
-        <Setter Property="Cursor" Value="IBeam"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="TextBox">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}">
-                        <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Margin="0"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- Compact 28px variant so undo/redo/rotate/flip fit Survey's top chrome
-         without wrapping the 980-DIP primary row. -->
+    <!-- `.btn.btn-icon` (styles.css:207-221): a 28x28 square with no padding.
+         WinShot's crop / rotate / more / overflow buttons use it. -->
     <Style x:Key="CompactToolIconButton" TargetType="Button" BasedOn="{StaticResource ToolIconButton}">
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
-        <Setter Property="Margin" Value="1,0"/>
-    </Style>
-
-    <!-- Sub-strip radios. 28px rounded chips, not accent discs. -->
-    <Style x:Key="CompactToolButton" TargetType="ToggleButton" BasedOn="{StaticResource ToolButton}">
-        <Setter Property="Width" Value="28"/>
-        <Setter Property="Height" Value="28"/>
+        <Setter Property="Padding" Value="0"/>
         <Setter Property="Margin" Value="1,0"/>
         <Setter Property="FontSize" Value="14"/>
+    </Style>
+
+    <!-- `.btn.btn-icon` as a ToggleButton/RadioButton — Pan, Select, and the
+         fill radios. Active glyph is `.btn-active` gold on a transparent box. -->
+    <Style x:Key="SurveyIconToggle" TargetType="ToggleButton">
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Margin" Value="3,0"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Grid>
-                        <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
-                                BorderBrush="Transparent" BorderThickness="1"/>
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
-                                          TextElement.FontSize="{TemplateBinding FontSize}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        <Border x:Name="FocusRing" Background="Transparent" BorderBrush="Transparent"
-                                BorderThickness="2" CornerRadius="6" Margin="0"/>
+                        <Border x:Name="FocusRing" Margin="-1" CornerRadius="7" BorderThickness="1"
+                                BorderBrush="Transparent" Background="Transparent"/>
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                RenderTransformOrigin="0.5,0.5">
+                            
+                            <!-- `<Icon size={16}>` (AppShell.jsx:1523); the shared
+                                 resources are 18px Viewboxes, so scale the content. -->
+                            <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <ContentPresenter TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                                  TextElement.FontSize="{TemplateBinding FontSize}"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            </Viewbox>
+                        </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurveyGoldHoverTintBrush}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource SurveyGoldRingBrush}"/>
+                            <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1"/></Setter.Value></Setter>
+                            <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedFillBrush}"/>
+                            <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
+                            <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
+                            <Setter TargetName="FocusRing" Property="BorderThickness" Value="2"/>
                         </Trigger>
+                        <!-- `.btn-active`: transparent box, gold glyph, border stays
+                             1px transparent so the box never changes size. -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedFillBrush}"/>
-                            <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource SurveyGoldBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource ChromeTextDisabledBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Survey's `btn btn-default btn-sm`: min-height 26, inline padding 4px 8px,
+         14px icons. Undo/redo use it. -->
+    <Style x:Key="SurveyDefaultButton" TargetType="Button" BasedOn="{StaticResource ToolIconButton}">
+        <Setter Property="Height" Value="26"/>
+        <Setter Property="MinWidth" Value="30"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="Margin" Value="0,0,8,0"/>
+    </Style>
+
+    <!-- Survey's rail footerBtn (AppShell.jsx:2896-2908): transparent, no border,
+         4px radius, #8d96a6 glyph, and NO hover or pressed state whatsoever.
+         Zoom in/out are 28x28 with a 14px icon (:3013-3028). -->
+    <Style x:Key="RailButton" TargetType="Button">
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Margin" Value="0,2"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <!-- footerBtn disabled: opacity 0.35, cursor not-allowed. -->
+                            <Setter Property="Opacity" Value="0.35"/>
+                            <Setter Property="Cursor" Value="No"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Survey's fit trigger is a 36x28 cell with a 2px radius (AppShell.jsx:3073). -->
+    <Style x:Key="RailFitButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="2">
+                        <ContentPresenter/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Survey's zoom percentage is a BARE button at rest — transparent, no
+         border, no hover (AppShell.jsx:2913-2944) — that swaps for a 36px
+         borderless input on click. WinShot keeps one read-only-until-focused
+         TextBox, so the underline and the hover/focus border colours go. -->
+    <Style x:Key="RailZoomBox" TargetType="TextBox">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Height" Value="18"/>
+        <Setter Property="Margin" Value="0,1"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <!-- font-variant-numeric: tabular-nums, so 90% and 100% do not jitter. -->
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3">
+                        <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Margin="0"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter Property="Cursor" Value="IBeam"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Eraser split-menu rows (PDFViewer.jsx:32164-32178): padding 6px 10px,
+         radius 4, 12px, selected/hover background #1f2430, no other state. -->
+    <Style x:Key="EraserModeRow" TargetType="Button">
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#FF1F2430"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Survey's `.ctx-color-swatch` is a bare 24px disc — no button box, no
+         hover, no border of its own (styles.css:1613-1637). -->
+    <Style x:Key="ColorSwatchWell" TargetType="Button">
+        <Setter Property="Width" Value="24"/>
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <ContentPresenter/>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -480,33 +633,28 @@
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="24"/>
         <Setter Property="Margin" Value="2,0"/>
-        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
         <Setter Property="FontSize" Value="13"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+        <!-- Only the B glyph overrides fontWeight (AppShell.jsx:1880); I/U/S are
+             the browser default 400, so the style must not force SemiBold. -->
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="Background" Value="{StaticResource ChromeControlBrush}"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
+                    <!-- Survey paints NO hover, pressed, or focus state on these
+                         (AppShell.jsx:1896-1912 is the whole style, and styles.css
+                         has no selector that reaches them). -->
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
                             BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource PressedFillBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
-                        </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource ChromeTextDisabledBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -514,11 +662,24 @@
         </Setter>
     </Style>
 
-    <!-- Survey's 3x3 align grid: 26x26 cells, 4px gap, 4px radius (AppShell.jsx:1960-2001). -->
+    <!-- Survey's 3x3 align grid: 26x26 cells, 4px gap, 4px radius, resting fill
+         #14171c on a 1px #2a3140 border (AppShell.jsx:1961-1990). -->
     <Style x:Key="AlignCellButton" TargetType="Button" BasedOn="{StaticResource CompactFormatButton}">
         <Setter Property="Width" Value="26"/>
         <Setter Property="Height" Value="26"/>
         <Setter Property="Margin" Value="2"/>
+        <Setter Property="Background" Value="{StaticResource ChromeCellBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ChromeHairlineBrush}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="ChromeMenuItem" TargetType="Button">
@@ -527,8 +688,8 @@
         <Setter Property="Margin" Value="0,1"/>
         <Setter Property="Padding" Value="8,0,12,0"/>
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
@@ -774,12 +935,14 @@
 
     <!-- Thin vertical divider for separating tool clusters inside a toolbar.
          Use:  <Rectangle Style="{StaticResource ToolbarDivider}"/> -->
+    <!-- Survey: width 1px, height 20px, background #5a6473, margin 0 4px
+         (AppShell.jsx:1632, 1744) — the disabled-text grey, not the hairline. -->
     <Style x:Key="ToolbarDivider" TargetType="Rectangle">
         <Setter Property="Width" Value="1"/>
-        <Setter Property="Height" Value="22"/>
-        <Setter Property="Margin" Value="6,0"/>
+        <Setter Property="Height" Value="20"/>
+        <Setter Property="Margin" Value="4,0"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
-        <Setter Property="Fill" Value="{StaticResource BorderBrush}"/>
+        <Setter Property="Fill" Value="{StaticResource ChromeDividerBrush}"/>
     </Style>
 
     <!-- ============================ LABELS ============================ -->
@@ -890,6 +1053,261 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         SURVEY DROPDOWN — components/AnnotationDropdown.css:8-129, the popover
+         used by every annotation-property combo (arrowhead, line style, font,
+         font size, counter mode, eraser mode, crop ratio, effect strength).
+         DarkComboBox stays as-is for the settings / recorder / composer combos.
+           trigger  min-width 72, height 24, radius 5, #3a4252, 1px transparent
+                    border, 600 12px/22px Helvetica, padding 0 7px 0 9px
+           hover    #fff on #454e60;  :focus-visible border #d8a84e
+           popover  min-width 126, padding 5, #0d0f14, 1px #3a4252, radius 8,
+                    0 10px 30px rgba(0,0,0,.48), 120ms ease-out entry
+           heading  uppercase 11px/700/.065em #aeb6c3 over a 1px #2a3140 rule
+                    (Tag carries the already-uppercased label)
+           option   min-height 34, padding 4px 9px, radius 4, 600 12px/1.2,
+                    #d6dbe3; hover #fff on #252b35; active #f4f6f8 on #2b313a
+         ==================================================================== -->
+    <ControlTemplate x:Key="SurveyDropdownToggleTemplate" TargetType="ToggleButton">
+        <Border x:Name="Bg" Background="{StaticResource ChromeControlBrush}"
+                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="5">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Path x:Name="Caret" Grid.Column="1" Margin="8,0,7,0"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Data="M0,0 L4,4 L8,0" Stroke="#FF9DA6B4"
+                      StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round" Fill="Transparent"/>
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bg" Property="Background" Value="{StaticResource ChromeControlHoverBrush}"/>
+                <Setter TargetName="Caret" Property="Stroke" Value="#FFFFFFFF"/>
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bg" Property="Background" Value="{StaticResource ChromeControlHoverBrush}"/>
+                <Setter TargetName="Caret" Property="Stroke" Value="#FFFFFFFF"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="SurveyDropdownItem" TargetType="ComboBoxItem">
+        <Setter Property="Foreground" Value="#FFD6DBE3"/>
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="Padding" Value="9,4"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBoxItem">
+                    <Border x:Name="Bg" Background="Transparent" CornerRadius="4"
+                            Padding="{TemplateBinding Padding}" MinHeight="{TemplateBinding MinHeight}">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- `.is-active` persists under the hover wash, so IsSelected
+                             comes first and IsHighlighted overrides it. -->
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="#FF2B313A"/>
+                            <Setter Property="Foreground" Value="#FFF4F6F8"/>
+                        </Trigger>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="#FF252B35"/>
+                            <Setter Property="Foreground" Value="#FFFFFFFF"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SurveyDropdown" TargetType="ComboBox">
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="MinWidth" Value="72"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="ItemContainerStyle" Value="{StaticResource SurveyDropdownItem}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <ToggleButton x:Name="Toggle" Template="{StaticResource SurveyDropdownToggleTemplate}"
+                                      BorderBrush="Transparent" Focusable="False" ClickMode="Press"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"/>
+                        <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          Margin="9,0,29,0"
+                                          VerticalAlignment="Center" HorizontalAlignment="Left"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        <!-- Radix sideOffset is 6, not 4. -->
+                        <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="6"
+                               IsOpen="{TemplateBinding IsDropDownOpen}"
+                               AllowsTransparency="True" Focusable="False">
+                            <Border x:Name="Pop" Background="{StaticResource ChromePopoverBrush}"
+                                    BorderBrush="{StaticResource ChromeControlBrush}" BorderThickness="1"
+                                    CornerRadius="8" MinWidth="126" Padding="5" Margin="0,0,30,30"
+                                    Effect="{StaticResource ChromePopoverShadow}"
+                                    RenderTransformOrigin="0.5,0">
+                                <Border.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="PopScale" ScaleX="0.98" ScaleY="0.98"/>
+                                        <TranslateTransform x:Name="PopSlide" Y="-2"/>
+                                    </TransformGroup>
+                                </Border.RenderTransform>
+                                <StackPanel>
+                                    <TextBlock x:Name="Heading" Padding="7,7,9,8" FontSize="11" FontWeight="Bold"
+                                               Foreground="#FFAEB6C3"
+                                               Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
+                                    <Border x:Name="HeadingRule" Height="1" Background="{StaticResource ChromeHairlineBrush}"/>
+                                    <ScrollViewer MaxHeight="280" Margin="0,4,0,0">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger SourceName="PART_Popup" Property="IsOpen" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Pop" Storyboard.TargetProperty="Opacity"
+                                                         From="0" To="1" Duration="0:0:0.12"/>
+                                        <DoubleAnimation Storyboard.TargetName="PopSlide" Storyboard.TargetProperty="Y"
+                                                         From="-2" To="0" Duration="0:0:0.12">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="PopScale" Storyboard.TargetProperty="ScaleX"
+                                                         From="0.98" To="1" Duration="0:0:0.12">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="PopScale" Storyboard.TargetProperty="ScaleY"
+                                                         From="0.98" To="1" Duration="0:0:0.12">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                        </Trigger>
+                        <!-- No Tag, no heading (and no rule under it). -->
+                        <Trigger Property="Tag" Value="{x:Null}">
+                            <Setter TargetName="Heading" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="HeadingRule" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Toggle" Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         ANNOTATION SIZE FIELD — components/AnnotationSizeControl.css:1-136.
+         An editable 43px number input welded to a 24x22 chevron cell that opens
+         a 126px preset popover whose rows preview the stroke THICKNESS.
+         ==================================================================== -->
+    <Style x:Key="SizeFieldInput" TargetType="TextBox">
+        <Setter Property="Width" Value="43"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Padding" Value="5,0"/>
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="MaxLength" Value="3"/>
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource ChromeTextBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border Background="{TemplateBinding Background}">
+                        <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SizeFieldTrigger" TargetType="ToggleButton">
+        <Setter Property="Width" Value="24"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Foreground" Value="#FF9DA6B4"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid>
+                        <Border x:Name="Bg" Background="#1F000000"/>
+                        <Border Width="1" HorizontalAlignment="Left" Background="#14FFFFFF"/>
+                        <Path x:Name="Caret" HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Data="M1,1 L5,5 L9,1" Stroke="{TemplateBinding Foreground}"
+                              StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round" Fill="Transparent"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="#14FFFFFF"/>
+                            <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="#14FFFFFF"/>
+                            <Setter Property="Foreground" Value="{StaticResource ChromeTextBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SizePresetRow" TargetType="Button">
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Padding" Value="7,4"/>
+        <Setter Property="FontFamily" Value="{StaticResource SurveyArialFont}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
+        <Setter Property="Foreground" Value="#FFD6DBE3"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="4"
+                            Padding="{TemplateBinding Padding}" MinHeight="{TemplateBinding MinHeight}">
+                        <ContentPresenter VerticalAlignment="Center"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="#FF252B35"/>
+                            <Setter Property="Foreground" Value="#FFFFFFFF"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -1113,20 +1531,20 @@
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
-                        <Ellipse x:Name="Ring" Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1.5"/>
+                        <Ellipse x:Name="FocusRing" Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1.5"/>
                         <Ellipse Width="14" Height="14" Fill="{TemplateBinding Background}"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource TextSecondaryBrush}"/>
+                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource TextSecondaryBrush}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="White"/>
-                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2"/>
+                            <Setter TargetName="FocusRing" Property="Stroke" Value="White"/>
+                            <Setter TargetName="FocusRing" Property="StrokeThickness" Value="2"/>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource InfoBrush}"/>
-                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2.5"/>
+                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
+                            <Setter TargetName="FocusRing" Property="StrokeThickness" Value="2.5"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
