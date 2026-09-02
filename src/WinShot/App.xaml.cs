@@ -138,6 +138,10 @@ public partial class App : Application
         // the process and every capture session opts out on the strength of it.
         BorderlessCaptureAccess.RequestOnce();
 
+        // Building the Windows OCR engine is a one-time cost; do it now rather than on
+        // whoever presses the Extract text hotkey first.
+        OcrService.Warm();
+
         if (_settings.Current.CheckForUpdatesOnStartup)
             _ = StartupUpdateCheckAsync();
 

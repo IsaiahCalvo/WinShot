@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
@@ -34,6 +34,29 @@ public static class OcrService
 
     private static OcrEngine? _engine;
     private static bool _engineInitialized;
+
+    private const double MaxInitialUpscale = 4.0;
+    private const int OcrTargetLongSide = 1600;
+
+    /// <summary>Below this, an empty read might still be a glyph-size problem worth a
+    /// second pass; at or above it, it is genuinely a picture with no text.</summary>
+    private const int RetryLongSideFloor = 800;
+
+    /// <summary>
+    /// Builds the OCR engine ahead of the first capture. Creating it is a one-time cost
+    /// that otherwise lands on whoever presses the hotkey first.
+    /// </summary>
+    public static void Warm() => Task.Run(() =>
+    {
+        try
+        {
+            GetEngine();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("OCR engine warm-up failed", ex);
+        }
+    });
 
     /// <summary>
     /// Runs barcode detection and OCR over <paramref name="bmp"/>.
@@ -104,6 +127,7 @@ public static class OcrService
                 BgraSnapshot ocrSnapshot = Math.Abs(snapScale - fitScale) < 0.01
                     ? snapshot
                     : await Task.Run(() => SnapshotAtScale(bmp, snapScale));
+                snapshotMs += Math.Abs(snapScale - fitScale) < 0.01 ? 0 : step.ElapsedMilliseconds;
 
                 step.Restart();
                 using (SoftwareBitmap softwareBitmap = ToSoftwareBitmap(ocrSnapshot))
@@ -117,10 +141,10 @@ public static class OcrService
 
                 if (!string.IsNullOrWhiteSpace(text))
                     break;
-                double next = Math.Min(scale * 2, OcrEngine.MaxImageDimension / (double)Math.Max(bmp.Width, bmp.Height));
-                if (next < scale * 1.25)
-                    break; // no meaningful headroom left
+                if (!ShouldRetryLarger(bmp.Width, bmp.Height, scale, out double next))
+                    break;
                 scale = next;
+                step.Restart();
             }
 
             var fastBarcode = await fastBarcodeTask;
@@ -139,14 +163,37 @@ public static class OcrService
         }
     }
 
+    /// <summary>
+    /// Whether an empty read is worth one more pass at a bigger scale, and at what scale.
+    ///
+    /// This loop used to double until it hit the engine's dimension cap. On a 218x224 crop
+    /// with no text in it that was three passes ending on a 2528x2598 upscale — 6.4 seconds
+    /// to answer "nothing here", which is the one answer that has to be quick. A retry only
+    /// pays when the first pass was clamped by <see cref="InitialOcrScale"/>'s 4x ceiling
+    /// and the result is still small enough that glyphs may sit under the engine's ~20px
+    /// floor; past that the first pass has already seen everything a second one would.
+    /// </summary>
+    internal static bool ShouldRetryLarger(int width, int height, double scale, out double next)
+    {
+        next = 0;
+        int maxSide = Math.Max(width, height);
+        if (scale < MaxInitialUpscale - 0.01)
+            return false; // the first pass already reached its target size
+        if (maxSide * scale >= RetryLongSideFloor)
+            return false; // already big enough that small glyphs were not the problem
+
+        next = Math.Min(scale * 2, OcrEngine.MaxImageDimension / (double)maxSide);
+        return next >= scale * 1.25;
+    }
+
     /// <summary>Scale for the first OCR pass: small captures are magnified
     /// (up to 4x, toward a ~1600 px long side) so typical screen text clears
     /// the engine's minimum glyph size; oversized captures shrink to fit
     /// <see cref="OcrEngine.MaxImageDimension"/>.</summary>
-    private static double InitialOcrScale(int width, int height)
+    internal static double InitialOcrScale(int width, int height)
     {
         int maxSide = Math.Max(width, height);
-        double upscale = Math.Clamp(1600.0 / maxSide, 1.0, 4.0);
+        double upscale = Math.Clamp(OcrTargetLongSide / (double)maxSide, 1.0, MaxInitialUpscale);
         return Math.Min(upscale, OcrEngine.MaxImageDimension / (double)maxSide);
     }
 
