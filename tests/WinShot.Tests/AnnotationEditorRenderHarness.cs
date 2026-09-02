@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -311,7 +311,12 @@ public class AnnotationEditorRenderHarness
                 Point tip = CalloutPt(l => l.Tip);
                 DragAbs(tip, tip + new Vector(-0.08 * W, 0.03 * H)); Shot("pointer-callout-tip.png");
                 Point br = CalloutPt(l => l.Box.BottomRight);
+                var boxBefore = calloutEl.Layout.Box;
+                var hitField = typeof(EditorWindow).GetMethod("HitTestHandle", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                int hitIndex = (int)hitField.Invoke(editor, new object[] { br })!;
                 DragAbs(br, br + new Vector(0.05 * W, 0.03 * H)); Shot("pointer-callout-resize.png");
+                File.WriteAllText(Path.Combine(outDir, "callout-resize.txt"),
+                    $"hit={hitIndex} br={br} before={boxBefore} after={calloutEl.Layout.Box} offset={AnnotationTransform.OffsetOf(calloutEl)} W={W} H={H}");
                 Point boxCentre = CalloutPt(l => new Point(l.Box.X + l.Box.Width / 2, l.Box.Y + l.Box.Height / 2));
                 DragAbs(boxCentre, boxCentre + new Vector(-0.06 * W, -0.10 * H)); Shot("pointer-callout-moved.png");
                 Click(0.02, 0.02);
