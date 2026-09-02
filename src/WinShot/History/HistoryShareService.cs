@@ -1,14 +1,24 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using WinShot.Core;
 using Windows.Storage;
 using WinDataPackageOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation;
 using WinDataRequestedEventArgs = Windows.ApplicationModel.DataTransfer.DataRequestedEventArgs;
 using WinDataTransferManager = Windows.ApplicationModel.DataTransfer.DataTransferManager;
 
 namespace WinShot.History;
+
+public enum BlipShareResult
+{
+    Opened,
+    NothingToShare,
+    /// <summary>Blip is up but its handoff socket is gone; only restarting Blip fixes it.</summary>
+    NeedsRestart,
+    Failed,
+}
 
 internal static class HistoryShareService
 {
@@ -33,13 +43,58 @@ internal static class HistoryShareService
     internal static IReadOnlyList<string> BlipArguments(IEnumerable<string> paths) =>
         paths.SelectMany(static path => new[] { "--file", path }).ToArray();
 
-    public static void ShareWithBlip(IReadOnlyList<string> paths)
+    internal const string BlipProcessName = "Blip";
+
+    /// <summary>
+    /// True when Blip is running but cannot be handed anything, so launching it would only
+    /// raise Blip's own "SingleInstance failure" dialog.
+    ///
+    /// Blip is single-instance: <c>blip.exe --file ...</c> starts a second process that passes
+    /// its arguments to the running one over a socket at
+    /// <c>%TEMP%\net.blip.desktop\ui.sock</c> and exits. The lock file beside it is held open
+    /// for the life of the primary instance so it survives, but the socket file is not, and
+    /// Windows temp cleanup eventually deletes it out from under a long-running Blip. After
+    /// that every launch — from here, from Explorer, from the Start menu — finds the lock,
+    /// fails to reach a socket that is gone, and dies. Restarting Blip recreates it.
+    ///
+    /// Diagnosed in Clip (<c>Clip.Core.BlipShareLaunchPlan</c>); WinShot cannot repair it from
+    /// outside Blip either, but it can refuse to launch into it and say why.
+    /// </summary>
+    public static bool IsBlipHandoffBroken() => IsBlipHandoffBroken(
+        Process.GetProcessesByName(BlipProcessName).Length > 0,
+        BlipHandoffSocketPath(),
+        File.Exists);
+
+    internal static bool IsBlipHandoffBroken(bool blipIsRunning, string socketPath, Func<string, bool> fileExists)
+        => blipIsRunning && !fileExists(socketPath);
+
+    internal static string BlipHandoffSocketPath() =>
+        Path.Combine(Path.GetTempPath(), "net.blip.desktop", "ui.sock");
+
+    /// <summary>
+    /// Hands the files to Blip, or reports why it did not. The caller shows the message —
+    /// the History window and the capture card surface it differently.
+    /// </summary>
+    public static BlipShareResult ShareWithBlip(IReadOnlyList<string> paths)
     {
-        if (paths.Count == 0) return;
-        var start = new ProcessStartInfo(BlipExecutableName) { UseShellExecute = true };
-        foreach (string argument in BlipArguments(paths))
-            start.ArgumentList.Add(argument);
-        Process.Start(start);
+        if (paths.Count == 0)
+            return BlipShareResult.NothingToShare;
+        if (IsBlipHandoffBroken())
+            return BlipShareResult.NeedsRestart;
+
+        try
+        {
+            var start = new ProcessStartInfo(BlipExecutableName) { UseShellExecute = true };
+            foreach (string argument in BlipArguments(paths))
+                start.ArgumentList.Add(argument);
+            Process.Start(start);
+            return BlipShareResult.Opened;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Blip share failed", ex);
+            return BlipShareResult.Failed;
+        }
     }
 
     public static bool IsWindowsShareSupported() => WinDataTransferManager.IsSupported();

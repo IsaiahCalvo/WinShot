@@ -721,7 +721,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         foreach (var row in QuickActionsMenu.Rows(
                      mediaFile: _mediaFilePath is not null,
                      canEdit: _mediaCanEdit,
-                     canShare: TryIsShareSupported()))
+                     canShare: TryIsShareSupported(),
+                     canBlip: TryIsBlipInstalled()))
         {
             if (row.Id == QuickActionsMenu.Separator)
             {
@@ -799,6 +800,19 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
+    private static bool TryIsBlipInstalled()
+    {
+        try
+        {
+            return HistoryShareService.IsBlipInstalled();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Blip install probe failed", ex);
+            return false;
+        }
+    }
+
     private void RunMenuAction(string id)
     {
         try
@@ -843,6 +857,9 @@ public sealed class FastQuickActionsWindow : WF.Form
                     return;
                 case QuickActionsMenu.Share:
                     _ = ShareAsync();
+                    return;
+                case QuickActionsMenu.ShareBlip:
+                    _ = ShareWithBlipAsync();
                     return;
                 case QuickActionsMenu.Close:
                     Close();
@@ -957,6 +974,45 @@ public sealed class FastQuickActionsWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Quick-actions file action failed", ex);
+        }
+    }
+
+    private async Task ShareWithBlipAsync()
+    {
+        try
+        {
+            string path = _mediaFilePath ?? await EnsureDragFileAsync();
+            if (_closed || IsDisposed) return;
+            switch (HistoryShareService.ShareWithBlip(new[] { path }))
+            {
+                case BlipShareResult.Opened:
+                    Close();
+                    return;
+                case BlipShareResult.NeedsRestart:
+                    ShowShareToast("Blip can't receive shares", "Restart Blip and try again.");
+                    return;
+                default:
+                    ShowShareToast("Blip share failed", "The capture was not handed to Blip.");
+                    return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Blip share failed", ex);
+        }
+    }
+
+    /// <summary>Reuses the OCR toast — it is the app's generic anchored dark notice.</summary>
+    private void ShowShareToast(string title, string message)
+    {
+        try
+        {
+            SD.Rectangle card = RectangleToScreen(_cardRect);
+            new Ocr.OcrToastWindow(title, message, new SD.Point(card.Left, card.Top), null).Show();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Share toast failed", ex);
         }
     }
 

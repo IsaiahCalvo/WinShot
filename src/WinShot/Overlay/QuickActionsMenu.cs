@@ -34,6 +34,7 @@ internal static class QuickActionsMenu
     internal const string OpenWith = "open-with";
     internal const string ShowInFolder = "show-in-folder";
     internal const string MoveToRecycleBin = "recycle";
+    internal const string ShareBlip = "share-blip";
     internal const string Share = "share";
     internal const string Close = "close";
 
@@ -43,7 +44,7 @@ internal static class QuickActionsMenu
     /// The menu, in order. <paramref name="mediaFile"/> is the recording card, which
     /// fronts a finished mp4/gif: no pixel edits, and Open/Edit act on the file.
     /// </summary>
-    internal static IReadOnlyList<Row> Rows(bool mediaFile, bool canEdit, bool canShare)
+    internal static IReadOnlyList<Row> Rows(bool mediaFile, bool canEdit, bool canShare, bool canBlip = false)
     {
         var rows = new List<Row>();
 
@@ -78,10 +79,15 @@ internal static class QuickActionsMenu
         rows.Add(new Row(ShowInFolder, "Show in folder"));
         rows.Add(new Row(MoveToRecycleBin, "Move to Recycle Bin"));
 
-        if (canShare)
+        // Blip is its own row, not a Windows share target: Windows does not see it as a
+        // shareable app, so the share sheet alone would never offer it. Same split Clip uses.
+        if (canBlip || canShare)
         {
             rows.Add(new Row(Separator, Separator));
-            rows.Add(new Row(Share, "Share…"));
+            if (canBlip)
+                rows.Add(new Row(ShareBlip, "Share with Blip"));
+            if (canShare)
+                rows.Add(new Row(Share, "Windows Share…"));
         }
 
         rows.Add(new Row(Separator, Separator));

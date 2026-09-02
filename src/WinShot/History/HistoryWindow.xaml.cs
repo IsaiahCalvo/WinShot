@@ -788,7 +788,19 @@ public partial class HistoryWindow : Window
         if (HistoryShareService.IsBlipInstalled())
         {
             var blip = new MenuItem { Header = "Blip", Style = (Style)FindResource("DarkMenuItem") };
-            blip.Click += (_, _) => HistoryShareService.ShareWithBlip(paths);
+            blip.Click += (_, _) =>
+            {
+                switch (HistoryShareService.ShareWithBlip(paths))
+                {
+                    case BlipShareResult.NeedsRestart:
+                        ThemedMessageDialog.Show(this, "Blip can't receive shares",
+                            "Blip is running but is no longer accepting handoffs. Restart Blip and try again.");
+                        break;
+                    case BlipShareResult.Failed:
+                        ThemedMessageDialog.Show(this, "Share failed", "WinShot could not hand these files to Blip.");
+                        break;
+                }
+            };
             menu.Items.Add(blip);
         }
 
