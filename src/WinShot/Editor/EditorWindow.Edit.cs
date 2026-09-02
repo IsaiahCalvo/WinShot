@@ -189,7 +189,12 @@ public partial class EditorWindow : Window
             _redoStack.Pop().Discard();
     }
 
-    private void PushAddElement(UIElement element)
+    /// <summary>
+    /// Records a newly drawn annotation. <paramref name="select"/> is false for freehand
+    /// ink: Survey deliberately leaves pen and highlighter strokes unselected so continuous
+    /// drawing is not interrupted (PageAnnotationLayer.jsx:5246-5247).
+    /// </summary>
+    private void PushAddElement(UIElement element, bool select = true)
     {
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(element),
@@ -198,7 +203,7 @@ public partial class EditorWindow : Window
                 if (!AnnotationCanvas.Children.Contains(element))
                     AnnotationCanvas.Children.Add(element);
             }), apply: false);
-        Select(element);
+        if (select) Select(element);
     }
 
     private async void OnUndo(object sender, RoutedEventArgs e) => await UndoAsync();
@@ -234,6 +239,9 @@ public partial class EditorWindow : Window
     {
         BtnUndo.IsEnabled = _undoStack.Count > 0;
         BtnRedo.IsEnabled = _redoStack.Count > 0;
+        // Every undoable mutation funnels through here (Push / UndoAsync / RedoAsync), so
+        // this is where a highlighter's backdrop can have changed underneath it.
+        RefreshHighlighters();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -304,7 +312,10 @@ public partial class EditorWindow : Window
 
         // Single-letter tool shortcuts (no modifiers). Ignored while a curved arrow is
         // mid-edit so Escape/commit stays the only way out of that transient mode.
-        if (Keyboard.Modifiers == ModifierKeys.None && _pendingCurve is null && TrySelectToolByKey(e.Key))
+        // Survey's only modified tool letter is Shift+E (eraser, forced to partial); every
+        // other letter still requires no modifiers (PDFViewer.jsx:23348-23373).
+        if (onlyShiftOrNone && _pendingCurve is null &&
+            TrySelectToolByKey(e.Key, (Keyboard.Modifiers & ModifierKeys.Shift) != 0))
         {
             e.Handled = true;
             return;

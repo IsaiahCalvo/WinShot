@@ -1226,14 +1226,26 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Maps a single-letter shortcut to a tool, mirroring the toolbar toggle. Returns false if unmapped.</summary>
-    private bool TrySelectToolByKey(Key key)
+    /// <summary>
+    /// Survey's letter chain (PDFViewer.jsx:23322-23373): V, P, H, E, Shift+E, T, Q, L, A, C.
+    /// E is the eraser and leaves its mode alone; Shift+E is the eraser forced to partial.
+    /// Survey has an ellipse tool but no key for it, so E belongs to the eraser here too.
+    /// </summary>
+    private bool TrySelectToolByKey(Key key, bool shift = false)
     {
+        if (shift)
+        {
+            if (key != Key.E) return false;
+            CheckToolButton(EditorTool.Eraser);
+            SetEraserPartial(true);
+            return true;
+        }
         EditorTool? tool = key switch
         {
             Key.V => EditorTool.Select,
             Key.A => EditorTool.Arrow,
             Key.R => EditorTool.Rectangle,
-            Key.E => EditorTool.Ellipse,
+            Key.E => EditorTool.Eraser,
             Key.L => EditorTool.Line,
             Key.T => EditorTool.Text,
             Key.P => EditorTool.Freehand, // Pen / Draw

@@ -51,10 +51,21 @@ internal static class AnnotationStyle
 
     public const int DefaultPenSize = 3;
     public const int DefaultShapeSize = 2;
-    public const int DefaultHighlighterSize = 20;
     public const int DefaultTextSize = 16;
     public const int HighlighterMin = 8;
 
+    /// <summary>
+    /// Survey's highlighter paint is a hard-coded constant, not the colour picker:
+    /// highlightColor="rgba(255, 193, 7, 0.3)" (PDFViewer.jsx:31380), selected by
+    /// `tool === 'highlighter' ? highlightColor : strokeColor` at commit
+    /// (annotationCreationCommit.js:292) and in the live preview.
+    /// </summary>
+    public static readonly Color HighlighterColor = Color.FromArgb(0x4D, 0xFF, 0xC1, 0x07);
+
+    /// <summary>
+    /// Survey has no highlighter width of its own: it reuses the shared strokeWidth
+    /// and draws at Math.max(strokeWidth, 8) (annotationCreationCommit.js:293).
+    /// </summary>
     public static int HighlighterWidth(double size) =>
         Math.Max(HighlighterMin, ClampSize(size));
 

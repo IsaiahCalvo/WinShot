@@ -419,19 +419,30 @@ public partial class EditorWindow : Window
 
     private void EraseLive(Point from, Point to)
     {
-        var cut = PaperInk.EraserStroke(new[] { from, to }, _eraserSize);
+        // Radius and mode come from the pointer-down snapshot, never the live toolbar
+        // (FabricEraserCanvas.jsx:2146-2152).
+        var cut = PaperInk.EraserStroke(new[] { from, to }, _gestureEraserSize);
         foreach (UIElement child in AnnotationCanvas.Children.Cast<UIElement>().ToList())
         {
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
                 continue;
-            bool ink = meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
-            if (_eraserPartial)
+            // Survey getEraserOperation: 'partial' only for true freehand ink; everything
+            // else resolves to 'entire' and is deleted whole by the same partial-mode
+            // gesture (eraserPolicy.js:52-75, PageAnnotationLayer.jsx:6668-6684).
+            bool partial = _gestureEraserPartial
+                && meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter
+                && fe is Path { Data: not null };
+            if (partial)
             {
-                if (!ink || fe is not Path path || path.Data is null) continue;
-                if (!GeometriesOverlap(path.Data, cut, fe)) continue;
+                var path = (Path)fe;
+                if (!GeometriesOverlap(path.Data!, cut, fe)) continue;
                 if (!_eraseBefore.ContainsKey(path))
-                    _eraseBefore[path] = path.Data.CloneCurrentValue();
-                var after = PaperInk.Subtract(TranslateGeometry(path.Data, ElementOffset(path)), cut);
+                    _eraseBefore[path] = path.Data!.CloneCurrentValue();
+                var after = PaperInk.Subtract(TranslateGeometry(path.Data!, ElementOffset(path)), cut);
+                // Survey culls the hairline crescents boolean subtraction leaves behind
+                // (cullInkSliverPolygons, paperAnnotationGeometry.js:1586-1615) using the
+                // annotation's own sourceWidth, then decides emptiness from what survives.
+                after = PaperInk.CullSlivers(after, meta.Thickness ?? 1);
                 after = TranslateGeometry(after, new Vector(-ElementOffset(path).X, -ElementOffset(path).Y));
                 if (PaperInk.IsEmpty(after))
                 {
@@ -451,11 +462,15 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Pointer released: fold the live edits into one undo step.</summary>
-    private void ApplyEraserStroke()
+    /// <summary>
+    /// Pointer released: cut the final segment up to the release position (Survey's
+    /// finishPointer, FabricEraserCanvas.jsx:2223-2232) and fold the live edits into one
+    /// undo step. The press itself already carved, so a click needs no extra dot here.
+    /// </summary>
+    private void ApplyEraserStroke(Point release)
     {
-        if (_eraserPoints.Count == 1)
-            EraseLive(_eraserPoints[0], _eraserPoints[0]); // a click erases a dot
+        if (_eraserPoints.Count > 0 && (release - _eraserPoints[^1]).Length >= PaperInk.LiveMinDistance)
+            EraseLive(_eraserPoints[^1], release);
         _eraserPoints.Clear();
         if (_eraseBefore.Count == 0 && _eraseRemoved.Count == 0) return;
 
@@ -500,9 +515,13 @@ public partial class EditorWindow : Window
 
     private static bool GeometriesOverlap(Geometry ink, Geometry cut, FrameworkElement owner)
     {
+        // Survey decides overlap by real geometric intersection, with bounds used only as
+        // a fast-reject that can never drop a true hit (paperAnnotationGeometry.js:2396-2421;
+        // eraserBoundsPrefilter.js:5-20). A bounding-box area proxy is neither an upper nor
+        // a lower bound on the intersection, so any non-empty intersection counts.
         var world = TranslateGeometry(ink, ElementOffset(owner));
         var inter = Geometry.Combine(world, cut, GeometryCombineMode.Intersect, Transform.Identity);
-        return inter is not null && !inter.IsEmpty() && inter.Bounds.Width * inter.Bounds.Height > 0.25;
+        return inter is not null && !inter.IsEmpty();
     }
 
     private bool HitsEraser(FrameworkElement fe, Geometry cut)

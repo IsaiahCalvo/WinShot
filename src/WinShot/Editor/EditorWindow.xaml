@@ -484,9 +484,9 @@
                                                         <ComboBox x:Name="EraserModeBox" Style="{StaticResource DarkComboBox}" SelectedIndex="0"
                                                                   SelectionChanged="OnEraserModeChanged"
                                                                   AutomationProperties.Name="Eraser mode"
-                                                                  AutomationProperties.HelpText="Partial subtracts from pen and highlighter ink. Full deletes any annotation the eraser hits.">
+                                                                  AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits.">
                                                             <ComboBoxItem Content="Partial erase" Tag="Partial"/>
-                                                            <ComboBoxItem Content="Full erase" Tag="Full"/>
+                                                            <ComboBoxItem Content="Full stroke erase" Tag="Full"/>
                                                         </ComboBox>
                                                     </StackPanel>
 
@@ -578,8 +578,13 @@
                 </Grid>
             </Canvas>
             <Canvas x:Name="OverlayCanvas">
+                <!-- Survey's eraser ring (FabricEraserCanvas.jsx:2435-2450): rgba(255,255,255,.18)
+                     fill, 1px rgba(17,24,39,.9) border, 1px rgba(255,255,255,.72) outer halo.
+                     Both rings stay hairlines at any zoom; only the diameter scales. -->
+                <Ellipse x:Name="EraserCursorHalo" Width="22" Height="22" IsHitTestVisible="False" Visibility="Collapsed"
+                         Fill="Transparent" Stroke="#B8FFFFFF" StrokeThickness="1"/>
                 <Ellipse x:Name="EraserCursor" Width="20" Height="20" IsHitTestVisible="False" Visibility="Collapsed"
-                         Fill="#33808080" Stroke="#99646464" StrokeThickness="2"/>
+                         Fill="#2EFFFFFF" Stroke="#E6111827" StrokeThickness="1"/>
                 <Border x:Name="RotationPill" Width="60" Height="28" Background="#FF181C24" BorderBrush="#FF2A3140"
                         BorderThickness="1" CornerRadius="6" Visibility="Collapsed"
                         AutomationProperties.Name="Rotation angle">
@@ -618,9 +623,9 @@
                                      AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
                                      Content="{StaticResource SurveyIcon.Highlighter}"/>
                         <RadioButton x:Name="EraserToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Eraser" Checked="OnToolChecked" ToolTip="Eraser"
-                                     AutomationProperties.Name="Eraser"
-                                     AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink. Full erase deletes the annotation under the stroke."
+                                     Tag="Eraser" Checked="OnToolChecked" ToolTip="Partial erase (E)"
+                                     AutomationProperties.Name="Partial erase"
+                                     AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits. Shortcut E; Shift+E forces partial erase."
                                      Content="{StaticResource SurveyIcon.Eraser}"/>
                     </StackPanel>
                     <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
@@ -630,8 +635,8 @@
                                      AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
                                      Content="{StaticResource SurveyIcon.Rect}"/>
                         <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse (E)"
-                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."
+                                     Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse"
+                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse."
                                      Content="{StaticResource SurveyIcon.Ellipse}"/>
                         <RadioButton x:Name="LineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Line" Checked="OnToolChecked" ToolTip="Line (L)"

@@ -450,6 +450,75 @@ public class AnnotationEditorRenderHarness
                 Check("SpotlightToolBtn"); Drag(new[] { (0.05, 0.05), (0.40, 0.30) }); Pump(30);
                 Shot("pointer-spotlight.png");
 
+                // --- Ink parity (Survey one-to-one). Clean canvas so seams are readable. ---
+                Check("SelectToolBtn");
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+
+                // Constant-width pen at 3 / 12 / 30: a tight zig-zag (joins) and a
+                // self-crossing X (the union must stay solid, no even-odd hole).
+                var penSizeField = typeof(EditorWindow).GetField("_penSize", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                Check("FreehandToolBtn");
+                double[] penWidths = { 3, 12, 30 };
+                for (int wi = 0; wi < penWidths.Length; wi++)
+                {
+                    penSizeField.SetValue(editor, penWidths[wi]);
+                    double y0 = 0.10 + wi * 0.28;
+                    Drag(new[] { (0.06, y0), (0.12, y0 + 0.10), (0.18, y0), (0.24, y0 + 0.10), (0.30, y0) }, steps: 4);
+                    Drag(new[] { (0.36, y0), (0.48, y0 + 0.12), (0.48, y0), (0.36, y0 + 0.12) }, steps: 6);
+                }
+                Shot("pointer-ink-pen-widths.png");
+                RenderToPng(editor, Path.Combine(outDir, "pointer-ink-pen-widths-200pct.png"), dpi: 192);
+
+                // Highlighter: fixed rgba(255,193,7,.3) at max(sharedWidth, 8), multiply,
+                // and a self-crossing loop that must not punch a hole.
+                penSizeField.SetValue(editor, 3.0);
+                Check("HighlighterToolBtn");
+                Drag(new[] { (0.55, 0.10), (0.92, 0.10) }, steps: 20);
+                Drag(new[] { (0.55, 0.22), (0.92, 0.34), (0.92, 0.22), (0.55, 0.34) }, steps: 10);
+                Shot("pointer-ink-highlighter.png");
+
+                var inkPaths = canvas.Children.OfType<System.Windows.Shapes.Path>()
+                    .Where(q => q.Tag is AnnotationData { Type: AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter })
+                    .ToList();
+                var selectedAfterInk = typeof(EditorWindow)
+                    .GetField("_selected", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor);
+                File.WriteAllText(Path.Combine(outDir, "ink-commit.txt"),
+                    $"selectedAfterInk={selectedAfterInk?.GetType().Name ?? "null"}" + Environment.NewLine +
+                    string.Join(Environment.NewLine, inkPaths.Select(q =>
+                    {
+                        var m = (AnnotationData)q.Tag!;
+                        return $"type={m.Type} width={m.Thickness} color={m.Color} " +
+                               $"fill={q.Fill.GetType().Name} bounds={q.Data!.Bounds} " +
+                               $"fillRule={((PathGeometry)q.Data).FillRule}";
+                    })));
+
+                // Eraser: the ring is the only cursor, a stationary press already carves,
+                // and in PARTIAL mode a non-ink annotation is deleted WHOLE in the same
+                // gesture (Survey's 'partial else entire').
+                Check("RectangleToolBtn"); Drag(new[] { (0.58, 0.62), (0.90, 0.86) });
+                Check("EraserToolBtn"); Pump(3);
+                editor.PointerMove(P(0.20, 0.50)); Pump(3);
+                Shot("pointer-eraser-cursor.png");
+                int childrenBeforeErase = canvas.Children.Count;
+                var pressTarget = inkPaths[0];
+                double pressAreaBefore = pressTarget.Data!.GetArea();
+                Click(0.12, 0.20);                       // press without moving must carve
+                double pressAreaAfter = pressTarget.Data!.GetArea();
+                Shot("pointer-eraser-press.png");
+                Drag(new[] { (0.04, 0.44), (0.50, 0.50) }, steps: 24);
+                Shot("pointer-eraser-partial-ink.png");
+                Drag(new[] { (0.60, 0.70), (0.70, 0.74) }, steps: 8);
+                Shot("pointer-eraser-partial-atomic.png");
+                File.WriteAllText(Path.Combine(outDir, "eraser.txt"),
+                    $"before={childrenBeforeErase} after={canvas.Children.Count} " +
+                    $"pressArea={pressAreaBefore}->{pressAreaAfter} " +
+                    $"rects={canvas.Children.OfType<System.Windows.Shapes.Rectangle>().Count()} " +
+                    $"cursor={((FrameworkElement)editor.FindName("EditorSurface")!).Cursor} " +
+                    $"ring={((FrameworkElement)editor.FindName("EraserCursor")!).Visibility} " +
+                    $"halo={((FrameworkElement)editor.FindName("EraserCursorHalo")!).Visibility}");
+
 
                 editor.Close();
                 Pump(2);

@@ -75,16 +75,78 @@ internal static class HighlighterBlend
         }
     }
 
+    /// <summary>
+    /// Everything painted BELOW <paramref name="target"/>: the screenshot plus every
+    /// annotation under it, exactly as the live canvas shows them. Survey's
+    /// mix-blend-mode:multiply blends a highlighter against the page AND every earlier
+    /// sibling in the same SVG (svgAnnotationRenderers.jsx:272; the SVG root sets no
+    /// isolation), so this - not the bare screenshot - is a highlighter's backdrop.
+    /// </summary>
+    public static SD.Bitmap BackdropUnder(
+        FrameworkElement canvasHost, UIElement screenshot, Canvas annotations, UIElement target,
+        int pixelWidth, int pixelHeight)
+    {
+        var children = annotations.Children.Cast<UIElement>().ToList();
+        int limit = children.IndexOf(target);
+        if (limit < 0) limit = children.Count;
+        var previous = children.Select(el => el.Visibility).ToArray();
+        var shotWas = screenshot.Visibility;
+        try
+        {
+            screenshot.Visibility = Visibility.Visible;
+            for (int i = limit; i < children.Count; i++)
+                children[i].Visibility = Visibility.Hidden;
+            canvasHost.UpdateLayout();
+            return BitmapEffects.RenderVisual(canvasHost, pixelWidth, pixelHeight);
+        }
+        finally
+        {
+            screenshot.Visibility = shotWas;
+            for (int i = 0; i < children.Count; i++)
+                children[i].Visibility = previous[i];
+            canvasHost.UpdateLayout();
+        }
+    }
+
+    /// <summary>
+    /// Live-preview paint for the in-flight highlighter polyline: the whole screenshot
+    /// multiplied by the highlighter colour, mapped 1:1 onto the canvas. Survey's drag
+    /// preview already carries mixBlendMode:'multiply' at the colour and width the commit
+    /// will use (SVGAnnotationLayer.jsx:5028-5039), so the stroke must not change
+    /// appearance on release. Composited once at pointer-down, then only re-clipped.
+    /// </summary>
+    public static Brush PreviewBrush(SD.Bitmap screenshot, Color color)
+    {
+        if (screenshot.Width < 1 || screenshot.Height < 1)
+            return new SolidColorBrush(color);
+        using var dest = screenshot.Clone(
+            new SD.Rectangle(0, 0, screenshot.Width, screenshot.Height), SDPixel.Format32bppArgb);
+        using var overlay = new SD.Bitmap(dest.Width, dest.Height, SDPixel.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(overlay))
+            g.Clear(SD.Color.FromArgb(color.A, color.R, color.G, color.B));
+        MultiplyOnto(dest, overlay);
+        return new ImageBrush(ToBitmapSource(dest))
+        {
+            Stretch = Stretch.Fill,
+            ViewportUnits = BrushMappingMode.Absolute,
+            Viewport = new Rect(0, 0, dest.Width, dest.Height),
+            AlignmentX = AlignmentX.Left,
+            AlignmentY = AlignmentY.Top,
+        };
+    }
+
     public static bool IsHighlighter(UIElement el) =>
         el is FrameworkElement fe && fe.Tag is AnnotationData meta &&
         meta.Type == AnnotationData.TypeHighlighter;
 
     /// <summary>
-    /// Live canvas fill: the Path is clipped to the ink, and the fill is the
-    /// screenshot crop multiplied by the highlighter color — the same CSS
-    /// formula Flatten uses. Rebuild after a move; Flatten remains authoritative.
+    /// Live canvas fill: the Path is clipped to the ink, and the fill is the crop of
+    /// <paramref name="backdrop"/> under it multiplied by the highlighter color - the same
+    /// CSS formula Flatten uses. Pass the composite from <see cref="BackdropUnder"/> so the
+    /// blend sees the annotations below the ink, not just the page. Rebuild after a move;
+    /// Flatten remains authoritative.
     /// </summary>
-    public static void ApplyLiveFill(System.Windows.Shapes.Path ink, SD.Bitmap screenshot, Color color)
+    public static void ApplyLiveFill(System.Windows.Shapes.Path ink, SD.Bitmap backdrop, Color color)
     {
         if (ink.Data is null)
         {
@@ -93,7 +155,7 @@ internal static class HighlighterBlend
         }
 
         Rect bounds = ink.Data.Bounds;
-        if (bounds.Width < 1 || bounds.Height < 1 || screenshot.Width < 1)
+        if (bounds.Width < 1 || bounds.Height < 1 || backdrop.Width < 1)
         {
             ink.Fill = new SolidColorBrush(color);
             return;
@@ -104,30 +166,20 @@ internal static class HighlighterBlend
         int w = Math.Max(1, (int)Math.Ceiling(bounds.Width) + 1);
         int h = Math.Max(1, (int)Math.Ceiling(bounds.Height) + 1);
         var crop = new SD.Rectangle(x, y, w, h);
-        crop.Intersect(new SD.Rectangle(0, 0, screenshot.Width, screenshot.Height));
+        crop.Intersect(new SD.Rectangle(0, 0, backdrop.Width, backdrop.Height));
         if (crop.Width < 1 || crop.Height < 1)
         {
             ink.Fill = new SolidColorBrush(color);
             return;
         }
 
-        using var dest = screenshot.Clone(crop, SDPixel.Format32bppArgb);
+        using var dest = backdrop.Clone(crop, SDPixel.Format32bppArgb);
         using var overlay = new SD.Bitmap(crop.Width, crop.Height, SDPixel.Format32bppArgb);
         using (var g = SD.Graphics.FromImage(overlay))
             g.Clear(SD.Color.FromArgb(color.A, color.R, color.G, color.B));
         MultiplyOnto(dest, overlay);
 
-        using var ms = new System.IO.MemoryStream();
-        dest.Save(ms, SD.Imaging.ImageFormat.Png);
-        ms.Position = 0;
-        var bmp = new BitmapImage();
-        bmp.BeginInit();
-        bmp.CacheOption = BitmapCacheOption.OnLoad;
-        bmp.StreamSource = ms;
-        bmp.EndInit();
-        bmp.Freeze();
-
-        ink.Fill = new ImageBrush(bmp)
+        ink.Fill = new ImageBrush(ToBitmapSource(dest))
         {
             Stretch = Stretch.Fill,
             ViewportUnits = BrushMappingMode.Absolute,
@@ -135,6 +187,20 @@ internal static class HighlighterBlend
             AlignmentX = AlignmentX.Left,
             AlignmentY = AlignmentY.Top,
         };
+    }
+
+    private static BitmapSource ToBitmapSource(SD.Bitmap bitmap)
+    {
+        using var ms = new System.IO.MemoryStream();
+        bitmap.Save(ms, SD.Imaging.ImageFormat.Png);
+        ms.Position = 0;
+        var bmp = new BitmapImage();
+        bmp.BeginInit();
+        bmp.CacheOption = BitmapCacheOption.OnLoad;
+        bmp.StreamSource = ms;
+        bmp.EndInit();
+        bmp.Freeze();
+        return bmp;
     }
 
     /// <summary>Unit-testable pixel formula for one channel.</summary>

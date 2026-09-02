@@ -25,11 +25,20 @@ public partial class EditorWindow : Window
     internal sealed class PointerArgs
     {
         public PointerArgs(Point canvas, Point viewport, MouseButton button = MouseButton.Left,
-            int clickCount = 1, object? source = null)
+            int clickCount = 1, object? source = null, IReadOnlyList<Point>? canvasSamples = null)
         {
             Canvas = canvas; Viewport = viewport; ChangedButton = button; ClickCount = clickCount; OriginalSource = source;
+            CanvasSamples = canvasSamples is { Count: > 0 } ? canvasSamples : new[] { canvas };
         }
         public Point Canvas { get; }
+
+        /// <summary>
+        /// Every sub-frame sample this event carried, in canvas coordinates. Survey feeds its
+        /// ink tools getCoalescedEvents() (SVGAnnotationLayer.jsx:733-741) so a 120-240Hz pen
+        /// contributes all of its points; WPF's equivalent is the stylus packet buffer. A plain
+        /// mouse move has no history API, so it contributes exactly one sample.
+        /// </summary>
+        public IReadOnlyList<Point> CanvasSamples { get; }
         public Point Viewport { get; }
         public MouseButton ChangedButton { get; }
         public int ClickCount { get; }
@@ -39,7 +48,23 @@ public partial class EditorWindow : Window
     }
 
     private PointerArgs Wrap(MouseEventArgs e, MouseButton button, int clickCount) =>
-        new(e.GetPosition(AnnotationCanvas), e.GetPosition(Viewport), button, clickCount, e.OriginalSource);
+        new(e.GetPosition(AnnotationCanvas), e.GetPosition(Viewport), button, clickCount, e.OriginalSource,
+            CoalescedSamples(e));
+
+    /// <summary>Stylus/touch packets behind this move, if any - WPF's coalesced events.</summary>
+    private IReadOnlyList<Point>? CoalescedSamples(MouseEventArgs e)
+    {
+        if (e.StylusDevice is null) return null;
+        try
+        {
+            var packets = e.StylusDevice.GetStylusPoints(AnnotationCanvas);
+            if (packets is null || packets.Count == 0) return null;
+            var pts = new List<Point>(packets.Count);
+            foreach (var sp in packets) pts.Add(sp.ToPoint());
+            return pts;
+        }
+        catch (InvalidOperationException) { return null; }
+    }
 
     private void OnViewportMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -213,22 +238,21 @@ public partial class EditorWindow : Window
                 if (_activeShape is Path cloudPath && _lineStyle == LineBorderStyle.Cloud)
                     cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height));
                 break;
-            case EditorTool.Freehand when _activeShape is Path pen && _penPoints is not null:
-                if ((pos - _penPoints[^1]).Length > PaperInk.LiveMinDistance)
-                {
-                    _penPoints.Add(pos);
-                    pen.Data = FreehandStroke.Outline(_penPoints, _penWidth, complete: false);
-                }
-                break;
-            case EditorTool.Highlighter when _activeShape is Polyline stroke:
-                if (stroke.Points.Count == 0 || (pos - stroke.Points[^1]).Length > PaperInk.LiveMinDistance)
-                    stroke.Points.Add(pos);
+            case EditorTool.Freehand or EditorTool.Highlighter when _activeShape is Polyline stroke:
+                // Survey appends every coalesced sample clearing the 0.2 page-px dedupe and
+                // draws a plain constant-width polyline preview (SVGAnnotationLayer.jsx:5021-5040).
+                foreach (var sample in e.CanvasSamples)
+                    AppendInkSample(stroke, sample);
                 break;
             case EditorTool.Eraser:
-                if (_eraserPoints.Count == 0 || (pos - _eraserPoints[^1]).Length > 1)
+                // Same 0.2 gate the ink tools use (FabricEraserCanvas.jsx:2197-2205), over
+                // coalesced samples, so erase coverage tracks the pointer at the same density.
+                foreach (var sample in e.CanvasSamples)
                 {
-                    if (_eraserPoints.Count > 0) EraseLive(_eraserPoints[^1], pos);
-                    _eraserPoints.Add(pos);
+                    if (_eraserPoints.Count > 0 &&
+                        (sample - _eraserPoints[^1]).Length < PaperInk.LiveMinDistance) continue;
+                    if (_eraserPoints.Count > 0) EraseLive(_eraserPoints[^1], sample);
+                    _eraserPoints.Add(sample);
                 }
                 break;
             case EditorTool.Blur:
@@ -365,43 +389,36 @@ public partial class EditorWindow : Window
                     PushAddElement(shape);
                 }
                 return;
-            case EditorTool.Freehand when shape is Path pen && _penPoints is { Count: >= 1 }:
-                {
-                    var pts = PaperInk.Compact(_penPoints);
-                    AnnotationCanvas.Children.Remove(pen);
-                    Color penColor = pen.Fill is SolidColorBrush pb ? pb.Color : _color;
-                    var ink = AnnotationFactory.CreateInk(pts, penColor, _penWidth, highlighter: false);
-                    ink.Tag = AnnotationData.ForStroke(AnnotationData.TypeFreehand, pts, penColor, _penWidth);
-                    AnnotationCanvas.Children.Add(ink);
-                    PushAddElement(ink);
-                    _penPoints = null;
-                }
-                return;
             case EditorTool.Freehand or EditorTool.Highlighter:
                 if (shape is Polyline stroke && stroke.Points.Count >= 1)
                 {
-                    // Survey commits the raw pointer samples (0.2px dedupe, then compaction) and
-                    // lets the ink outline do the rest. Smoothing here rounded off corners and
-                    // lagged the hand, which is what made the pen feel worse than Survey's.
+                    // Survey appends the release sample on pointerup before committing
+                    // (SVGAnnotationLayer.jsx:1342-1348), then commits the raw samples
+                    // (0.2 live dedupe, then 0.35 compaction that always keeps the true
+                    // last point) and lets the swept-disk outline do the rest.
+                    AppendInkSample(stroke, pos);
                     var pts = PaperInk.Compact(stroke.Points);
                     AnnotationCanvas.Children.Remove(stroke);
                     bool highlighter = _tool == EditorTool.Highlighter;
                     double width = highlighter
-                        ? AnnotationStyle.HighlighterWidth(_highlighterSize)
-                        : stroke.StrokeThickness;
-                    var ink = AnnotationFactory.CreateInk(pts, StrokeColorOf(stroke), width, highlighter);
+                        ? AnnotationStyle.HighlighterWidth(_penSize)
+                        : AnnotationStyle.ClampSize(_penSize);
+                    Color inkColor = highlighter ? AnnotationStyle.HighlighterColor : AnnotationStyle.Opaque(_color);
+                    var ink = AnnotationFactory.CreateInk(pts, inkColor, width, highlighter);
                     ink.Tag = AnnotationData.ForStroke(
                         highlighter ? AnnotationData.TypeHighlighter : AnnotationData.TypeFreehand,
-                        pts, StrokeColorOf(stroke), width);
+                        pts, inkColor, width);
                     AnnotationCanvas.Children.Add(ink);
                     if (highlighter)
-                        HighlighterBlend.ApplyLiveFill(ink, _source, StrokeColorOf(stroke));
-                    PushAddElement(ink);
+                        RefreshHighlighterFill(ink);
+                    // Survey never auto-selects a freehand commit: "Do NOT auto-select pen
+                    // strokes or highlighter paths" (PageAnnotationLayer.jsx:5246-5247).
+                    PushAddElement(ink, select: false);
                 }
                 else if (shape is not null) AnnotationCanvas.Children.Remove(shape);
                 return;
             case EditorTool.Eraser:
-                ApplyEraserStroke();
+                ApplyEraserStroke(pos);
                 return;
             case EditorTool.Blur:
                 HideDragRect();
@@ -511,9 +528,16 @@ public partial class EditorWindow : Window
         {
             _eraserPoints.Clear();
             _eraserPoints.Add(pos);
+            // Survey snapshots mode + radius into pointer.gestureConfig at pointer-down:
+            // "Gesture behavior is immutable after pointer-down. Toolbar updates affect the
+            // next gesture only" (FabricEraserCanvas.jsx:2146-2152).
+            _gestureEraserSize = AnnotationStyle.ClampEraserSize(_eraserSize);
+            _gestureEraserPartial = _eraserPartial;
             _dragStart = pos;
             _dragging = true;
             Viewport.CaptureMouse();
+            // A stationary press already carves under the ring (FabricEraserCanvas.jsx:2174).
+            EraseLive(pos, pos);
             e.Handled = true;
             return;
         }
@@ -524,7 +548,7 @@ public partial class EditorWindow : Window
         Viewport.CaptureMouse();
         _thickness = ActiveSize();
         double strokeWidth = _tool == EditorTool.Highlighter
-            ? AnnotationStyle.HighlighterWidth(_highlighterSize)
+            ? AnnotationStyle.HighlighterWidth(_penSize)
             : _tool is EditorTool.Text or EditorTool.Callout
                 ? _shapeSize
                 : _thickness;
@@ -610,23 +634,22 @@ public partial class EditorWindow : Window
                 Canvas.SetTop(_activeShape, pos.Y);
                 break;
             case EditorTool.Freehand:
-                // perfect-freehand ink: a filled, pressure-shaped outline rebuilt as the
-                // pointer moves, so the live stroke looks exactly like the committed one.
-                _penPoints = new List<Point> { pos };
-                _penWidth = AnnotationStyle.ClampSize(_penSize);
-                _activeShape = new Path
-                {
-                    Fill = brush,
-                    Stroke = Brushes.Transparent,
-                    StrokeThickness = 0,
-                    Data = FreehandStroke.Outline(_penPoints, _penWidth, complete: false),
-                };
-                break;
             case EditorTool.Highlighter:
+                // Survey's in-flight ink is a plain constant-width <polyline> with round caps
+                // and joins (SVGAnnotationLayer.jsx:5021-5040); the swept-disk fill only shows
+                // up at commit, so nothing is rebuilt per move. The pen paints the picker's RAW
+                // colour - buildFreehandCommitJSON never composes pen with strokeOpacity
+                // (annotationCreationCommit.js:288-292) - and the highlighter paints the fixed
+                // rgba(255,193,7,.3) multiplied against the page, exactly as the commit will.
+                bool blend = _tool == EditorTool.Highlighter;
                 _activeShape = new Polyline
                 {
-                    Stroke = brush,
-                    StrokeThickness = AnnotationStyle.HighlighterWidth(_highlighterSize),
+                    Stroke = blend
+                        ? HighlighterBlend.PreviewBrush(_source, AnnotationStyle.HighlighterColor)
+                        : new SolidColorBrush(AnnotationStyle.Opaque(_color)),
+                    StrokeThickness = blend
+                        ? AnnotationStyle.HighlighterWidth(_penSize)
+                        : AnnotationStyle.ClampSize(_penSize),
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
@@ -656,25 +679,47 @@ public partial class EditorWindow : Window
     private bool inImageAt(Point pos) =>
         pos.X >= 0 && pos.Y >= 0 && pos.X <= _source.Width && pos.Y <= _source.Height;
 
-    /// <summary>Stroke color of a committed shape — the project metadata's source of truth.</summary>
-    private List<Point>? _penPoints;
-    private double _penWidth;
+    /// <summary>
+    /// Survey's live dedupe: keep a sample only once it is >= 0.2 page px from the last kept
+    /// one (SVGAnnotationLayer.jsx:737-740) - inclusive, matching Math.hypot(...) >= 0.2.
+    /// </summary>
+    private static void AppendInkSample(Polyline stroke, Point sample)
+    {
+        if (stroke.Points.Count == 0 || (sample - stroke.Points[^1]).Length >= PaperInk.LiveMinDistance)
+            stroke.Points.Add(sample);
+    }
 
-    /// <summary>Survey's eraser cursor: rgba(128,128,128,.2) disc, 2px*scale border, eraser diameter on screen.</summary>
+    /// <summary>
+    /// Survey's eraser ring (FabricEraserCanvas.jsx:2435-2450): a 1px rgba(17,24,39,.9)
+    /// border over an rgba(255,255,255,.18) fill with a 1px rgba(255,255,255,.72) halo, so
+    /// it reads on any background. Only the diameter scales with zoom - updateEraserCursor
+    /// (:487-500) scales width/height/transform and nothing else, so both rings stay
+    /// hairlines. WPF strokes straddle the geometry, so the dark ring is drawn at d-1 and
+    /// the halo at d+1 to land where the CSS border-box border and its box-shadow do.
+    /// </summary>
     private void UpdateEraserCursor(Point viewportPos)
     {
         if (EraserCursor is null) return;
         if (_tool != EditorTool.Eraser || _panning || _spaceDown)
         {
             EraserCursor.Visibility = Visibility.Collapsed;
+            if (EraserCursorHalo is not null) EraserCursorHalo.Visibility = Visibility.Collapsed;
             return;
         }
         double d = AnnotationStyle.ClampEraserSize(_eraserSize) * _zoom;
-        EraserCursor.Width = EraserCursor.Height = d;
-        EraserCursor.StrokeThickness = Math.Max(1, 2 * _zoom);
-        Canvas.SetLeft(EraserCursor, viewportPos.X - d / 2);
-        Canvas.SetTop(EraserCursor, viewportPos.Y - d / 2);
+        double ring = Math.Max(1, d - 1);
+        EraserCursor.Width = EraserCursor.Height = ring;
+        Canvas.SetLeft(EraserCursor, viewportPos.X - ring / 2);
+        Canvas.SetTop(EraserCursor, viewportPos.Y - ring / 2);
         EraserCursor.Visibility = Visibility.Visible;
+        if (EraserCursorHalo is not null)
+        {
+            double halo = Math.Max(1, d + 1);
+            EraserCursorHalo.Width = EraserCursorHalo.Height = halo;
+            Canvas.SetLeft(EraserCursorHalo, viewportPos.X - halo / 2);
+            Canvas.SetTop(EraserCursorHalo, viewportPos.Y - halo / 2);
+            EraserCursorHalo.Visibility = Visibility.Visible;
+        }
     }
 
     private static Color StrokeColorOf(Shape shape) =>
@@ -998,7 +1043,34 @@ public partial class EditorWindow : Window
         if (el is Path ink && ink.Tag is AnnotationData meta &&
             meta.Type == AnnotationData.TypeHighlighter &&
             meta.Color is string hex && TryParseColor(hex, out var color))
-            HighlighterBlend.ApplyLiveFill(ink, _source, color);
+            RefreshHighlighterFill(ink, color);
+    }
+
+    /// <summary>
+    /// Repaints one highlighter multiplied against everything painted below it. Survey's
+    /// mix-blend-mode:multiply blends against the page AND every earlier sibling in the same
+    /// SVG (svgAnnotationRenderers.jsx:272), not just the screenshot.
+    /// </summary>
+    private void RefreshHighlighterFill(Path ink, Color color)
+    {
+        using var backdrop = HighlighterBlend.BackdropUnder(
+            CanvasHost, BaseTiles, AnnotationCanvas, ink, _source.Width, _source.Height);
+        HighlighterBlend.ApplyLiveFill(ink, backdrop, color);
+    }
+
+    /// <summary>
+    /// Rebuilds every highlighter's multiply fill, bottom-up, so a change to anything under
+    /// one is reflected the way Survey's SVG blend is. Free when the canvas holds no
+    /// highlighter; otherwise one canvas render each, and only on an undoable mutation.
+    /// ponytail: refreshes all of them instead of intersect-testing - the count is tiny.
+    /// </summary>
+    private void RefreshHighlighters()
+    {
+        if (AnnotationCanvas is null) return;
+        var children = AnnotationCanvas.Children.Cast<UIElement>().ToList();
+        if (!children.Any(HighlighterBlend.IsHighlighter)) return;
+        foreach (UIElement el in children)
+            RefreshHighlighterFill(el);
     }
 
     private void AbortMove()

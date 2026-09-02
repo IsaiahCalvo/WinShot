@@ -20,10 +20,55 @@ public class PaperInkTests
     }
 
     [Fact]
-    public void Outline_UsesEvenOddLikeSurvey()
+    public void Compact_KeepsTheTrueFinalSample()
     {
-        var g = PaperInk.Outline(new[] { new Point(0, 0), new Point(20, 0) }, width: 6);
-        Assert.Equal(FillRule.EvenOdd, g.FillRule);
+        // Survey compactPoints force-appends the last raw sample so the stroke ends where
+        // the user released (paperAnnotationGeometry.js:82-93).
+        var pts = PaperInk.Compact(new[]
+        {
+            new Point(0, 0), new Point(1, 0), new Point(1.1, 0),
+        }, minDistance: 0.35);
+        Assert.Equal(3, pts.Count);
+        Assert.Equal(new Point(1.1, 0), pts[^1]);
+    }
+
+    [Fact]
+    public void Outline_SelfCrossingStrokeStaysSolid()
+    {
+        // Survey boolean-unions the swept disks before painting them evenodd, so a
+        // self-crossing stroke has no hole at the crossing (paperAnnotationGeometry.js:502-520).
+        // WPF's widen output is consistently wound, so Nonzero IS that union.
+        var x = PaperInk.Outline(new[]
+        {
+            new Point(40, 40), new Point(100, 100), new Point(100, 40), new Point(40, 100),
+        }, width: 20);
+        Assert.Equal(FillRule.Nonzero, x.FillRule);
+        Assert.True(x.FillContains(new Point(70, 70)));
+
+        var loop = PaperInk.Outline(new[]
+        {
+            new Point(100, 100), new Point(150, 100), new Point(150, 150),
+            new Point(100, 150), new Point(100, 100), new Point(150, 100),
+        }, width: 20);
+        Assert.True(loop.FillContains(new Point(125, 100)));
+    }
+
+    [Fact]
+    public void CullSlivers_DropsHairlineRemnantsButKeepsADot()
+    {
+        // Survey cullInkSliverPolygons: area floor min(0.4w, 0.35w^2) and a mean-thickness
+        // floor of 0.141w; "a full pen DOT always survives both floors"
+        // (paperAnnotationGeometry.js:1586-1615).
+        var dot = PaperInk.Outline(new[] { new Point(10, 10) }, width: 8);
+        Assert.False(PaperInk.IsEmpty(PaperInk.CullSlivers(dot, 8)));
+
+        // A 0.05px-thick ribbon of "8pt" ink is debris the eraser must not leave behind.
+        var sliver = new PathGeometry();
+        var fig = new PathFigure { StartPoint = new Point(0, 0), IsClosed = true, IsFilled = true };
+        fig.Segments.Add(new PolyLineSegment(
+            new[] { new Point(40, 0), new Point(40, 0.05), new Point(0, 0.05) }, true));
+        sliver.Figures.Add(fig);
+        Assert.True(PaperInk.IsEmpty(PaperInk.CullSlivers(sliver, 8)));
     }
 
     [Fact]
@@ -64,6 +109,15 @@ public class PaperInkTests
         Assert.False(left.FillContains(new Point(25, 0)));
         Assert.True(left.FillContains(new Point(5, 0)));
         Assert.True(left.FillContains(new Point(45, 0)));
+    }
+
+    [Fact]
+    public void IsEmpty_JudgesTheSurvivingFiguresNotTheBoundingBox()
+    {
+        // A long thin remnant has a near-zero bounding-box height but is still real ink.
+        var thin = PaperInk.Outline(new[] { new Point(0, 0), new Point(60, 0) }, width: 1);
+        Assert.InRange(thin.Bounds.Height, 0.9, 1.1);
+        Assert.False(PaperInk.IsEmpty(thin));
     }
 
     [Fact]

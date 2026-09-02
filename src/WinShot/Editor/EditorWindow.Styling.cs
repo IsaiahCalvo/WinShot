@@ -189,7 +189,7 @@ public partial class EditorWindow : Window
                     ink.Stroke = Brushes.Transparent;
                     ink.StrokeThickness = 0;
                     if (meta.Type == AnnotationData.TypeHighlighter)
-                        HighlighterBlend.ApplyLiveFill(ink, _source, snap.StrokeColor);
+                        RefreshHighlighterFill(ink, snap.StrokeColor);
                     else
                         ink.Fill = stroke;
                 }

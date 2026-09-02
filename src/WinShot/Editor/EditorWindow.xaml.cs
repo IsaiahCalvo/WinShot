@@ -63,7 +63,6 @@ public partial class EditorWindow : Window
     private Color _color = Color.FromRgb(0xFF, 0x3B, 0x30);
     private double _thickness = AnnotationStyle.DefaultPenSize;
     private double _penSize = AnnotationStyle.DefaultPenSize;
-    private double _highlighterSize = AnnotationStyle.DefaultHighlighterSize;
     private double _shapeSize = AnnotationStyle.DefaultShapeSize;
     private double _textFontSize = AnnotationStyle.DefaultTextSize;
     private bool _syncingSizeBox;
@@ -91,14 +90,13 @@ public partial class EditorWindow : Window
     private EditorTool _lastShapeTool = EditorTool.Rectangle;
     private EditorTool _lastTextTool = EditorTool.Text;
     private EditorTool _lastEffectsTool = EditorTool.Blur;
-    private Color _colorBeforeHighlighter;
-    private double _opacityBeforeHighlighter = 1;
-    private Color _highlighterColor = Color.FromRgb(0xFF, 0xFF, 0x00);
-    private double _highlighterOpacity = 0.5;
-    private bool _highlighterArmed;
     private EditorTool _toolBeforeCrop = EditorTool.Select;
     private bool _eraserPartial = true;
     private double _eraserSize = 20; // Survey default
+    // Survey snapshots the eraser's mode and radius at pointer-down and never re-reads the
+    // toolbar mid-gesture (FabricEraserCanvas.jsx:2146-2152).
+    private double _gestureEraserSize = 20;
+    private bool _gestureEraserPartial = true;
     private readonly List<Point> _eraserPoints = new();
     private double _pickerHue;
     private double _pickerSat = 1;
@@ -222,6 +220,7 @@ public partial class EditorWindow : Window
             }
         };
         Loaded += (_, _) => FitToView();
+        SetEraserPartial(_settings.Current.EraserPartial);
         // Loaded can fire before the window has its final size; this catches the first
         // laid-out frame for the initial fit.
         SizeChanged += (_, _) =>
@@ -648,6 +647,13 @@ public partial class EditorWindow : Window
             Viewport.Cursor = Cursors.Hand;
             EditorSurface.Cursor = Cursors.Hand;
         }
+        else if (_tool == EditorTool.Eraser)
+        {
+            // Survey's eraser surface is cursor:'none' so the ring is the ONLY cursor
+            // (FabricEraserCanvas.jsx:2419; PageAnnotationLayer.jsx:4592-4595).
+            Viewport.Cursor = Cursors.None;
+            EditorSurface.Cursor = Cursors.None;
+        }
         else
         {
             Viewport.Cursor = Cursors.Arrow;
@@ -678,7 +684,6 @@ public partial class EditorWindow : Window
                 EyedropSwatch.Visibility = Visibility.Collapsed;
         }
         RememberGroupTool(tool);
-        ArmHighlighterColor(tool);
         _tool = tool;
         if (ReferenceEquals(rb, RectangleToolBtn))
         {
@@ -746,26 +751,6 @@ public partial class EditorWindow : Window
             case "Shape": _lastShapeTool = tool; break;
             case "Text": _lastTextTool = tool; break;
             case "Effects": _lastEffectsTool = tool; break;
-        }
-    }
-
-    private void ArmHighlighterColor(EditorTool tool)
-    {
-        if (tool == EditorTool.Highlighter && !_highlighterArmed)
-        {
-            _colorBeforeHighlighter = _color;
-            _opacityBeforeHighlighter = _opacity;
-            _highlighterArmed = true;
-            SetCurrentColor(_highlighterColor);
-            SetOpacityPercent(_highlighterOpacity * 100, restyle: false);
-        }
-        else if (tool != EditorTool.Highlighter && _highlighterArmed)
-        {
-            _highlighterColor = _color;
-            _highlighterOpacity = _opacity;
-            _highlighterArmed = false;
-            SetCurrentColor(_colorBeforeHighlighter);
-            SetOpacityPercent(_opacityBeforeHighlighter * 100, restyle: false);
         }
     }
 
@@ -1072,7 +1057,10 @@ public partial class EditorWindow : Window
             {
                 switch (meta.Type)
                 {
-                    case AnnotationData.TypeHighlighter: _highlighterSize = th; break;
+                    // Survey has one shared strokeWidth for pen and highlighter; a committed
+                    // highlighter's width is max(strokeWidth, 8), so it cannot be read back
+                    // into the shared box without inflating the pen. Only the pen writes it.
+                    case AnnotationData.TypeHighlighter: break;
                     case AnnotationData.TypeFreehand: _penSize = th; break;
                     case AnnotationData.TypeText: break;
                     case AnnotationData.TypeCallout: _shapeSize = th; break;
@@ -1223,7 +1211,9 @@ public partial class EditorWindow : Window
 
     private double ActiveSize() => ChromeTool() switch
     {
-        EditorTool.Highlighter => _highlighterSize,
+        // Survey has no highlighter width of its own: the Width box shows the shared
+        // strokeWidth (default 3) and the highlighter draws at max(that, 8).
+        EditorTool.Highlighter => _penSize,
         EditorTool.Eraser => _eraserSize,
         EditorTool.Text => _textFontSize,
         EditorTool.Callout => _shapeSize,
@@ -1237,7 +1227,7 @@ public partial class EditorWindow : Window
     {
         switch (ChromeTool())
         {
-            case EditorTool.Highlighter: _highlighterSize = AnnotationStyle.HighlighterWidth(size); break;
+            case EditorTool.Highlighter: _penSize = AnnotationStyle.ClampSize(size); break;
             case EditorTool.Eraser: _eraserSize = AnnotationStyle.ClampEraserSize(size); break;
             case EditorTool.Text: _textFontSize = AnnotationStyle.ClampTextSize(size); break;
             case EditorTool.Callout: _shapeSize = AnnotationStyle.ClampSize(size); break;
@@ -1556,7 +1546,37 @@ public partial class EditorWindow : Window
     {
         if (_syncingContext) return;
         if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item && item.Tag is string tag)
-            _eraserPartial = tag != "Full";
+            SetEraserPartial(tag != "Full");
+    }
+
+    /// <summary>
+    /// Survey's eraser mode is persisted ('eraserMode' in localStorage, default 'partial')
+    /// and the eraser TOOL's tooltip / accessible name is the CURRENT MODE rather than a
+    /// static "Eraser" (PDFViewer.jsx:4274-4281, :32080-32097).
+    /// </summary>
+    private void SetEraserPartial(bool partial)
+    {
+        _eraserPartial = partial;
+        bool restore = _syncingContext;
+        _syncingContext = true;
+        try
+        {
+            if (EraserModeBox is not null) EraserModeBox.SelectedIndex = partial ? 0 : 1;
+        }
+        finally { _syncingContext = restore; }
+
+        string label = partial ? "Partial erase" : "Full stroke erase";
+        if (EraserToolBtn is not null)
+        {
+            EraserToolBtn.ToolTip = label + " (E)";
+            System.Windows.Automation.AutomationProperties.SetName(EraserToolBtn, label);
+        }
+        // The combo's XAML SelectedIndex fires this before the ctor has assigned _settings.
+        if (_settings is not null && _settings.Current.EraserPartial != partial)
+        {
+            _settings.Current.EraserPartial = partial;
+            _settings.Save();
+        }
     }
 
     private void OnFillChecked(object sender, RoutedEventArgs e)

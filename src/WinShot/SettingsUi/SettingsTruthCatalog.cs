@@ -106,5 +106,6 @@ internal static class SettingsTruthCatalog
             "LastCaptureRegion",
             "LastRecordingRegion",
             "ShortcutBindings",
+            "EraserPartial",
         };
 }

@@ -609,9 +609,9 @@ internal static class AnnotationFactory
     {
         var path = new Path
         {
-            // Pen = perfect-freehand's pressure-shaped outline; highlighter = Survey's
-            // constant-width swept disk (multiplied at flatten).
-            Data = highlighter ? PaperInk.Outline(points, width) : FreehandStroke.Outline(points, width, complete: true),
+            // Survey has ONE ink geometry for both tools: a constant-width swept disk
+            // (paperAnnotationGeometry.js:1542). No pressure, no taper, either tool.
+            Data = PaperInk.Outline(points, width),
             Fill = new SolidColorBrush(color),
             Stroke = Brushes.Transparent,
             StrokeThickness = 0,

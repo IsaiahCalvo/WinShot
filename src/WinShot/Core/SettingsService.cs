@@ -36,6 +36,9 @@ public class Settings
     public string LastCaptureRegion { get; set; } = "";        // "x,y,w,h" physical screen px
     public bool HideDesktopIconsDuringCapture { get; set; } = false;
     public string HotkeyCapturePrevious { get; set; } = "Ctrl+Shift+6";
+
+    /// <summary>Editor eraser mode. Survey persists this ('eraserMode') and defaults to partial.</summary>
+    public bool EraserPartial { get; set; } = true;
     public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
 
     // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet
