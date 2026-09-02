@@ -247,6 +247,34 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
+    public void HoverHighlightInsetsEquallyFromBothMenuEdges()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var menu = (WF.ContextMenuStrip)typeof(FastQuickActionsWindow)
+                .GetField("_overflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            menu.PerformLayout();
+
+            var bounds = menu.Items[0].GetType()
+                .GetMethod("HighlightBounds", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            foreach (var row in menu.Items.Cast<WF.ToolStripItem>().Where(i => i is not WF.ToolStripSeparator))
+            {
+                var highlight = (SD.Rectangle)bounds.Invoke(row, null)!;
+                // Converted out of the row's coordinates and into the menu's, where the
+                // gaps have to match: rows are not placed evenly inside the drop-down, so
+                // measuring the highlight against the row itself hides the asymmetry.
+                int left = row.Bounds.X + highlight.Left;
+                int right = menu.ClientSize.Width - (row.Bounds.X + highlight.Right);
+                Assert.Equal(left, right);
+                Assert.True(left > 0, $"'{row.Text}' highlight runs into the menu border");
+            }
+        });
+    }
+
+    [Fact]
     public void StatusFlashClearsItselfAndFreesItsTimer()
     {
         RunSta(() =>

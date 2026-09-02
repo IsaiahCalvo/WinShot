@@ -346,7 +346,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
             g.FillPath(fill, cardPath);
 
-        DrawThumbnail(g, _hovering);
+        bool flashing = _flashMessage is not null;
+        DrawThumbnail(g, _hovering || flashing);
         DrawStatusFlash(g);
 
         // The hover chrome stays out of the way while a message is up — the cursor is
@@ -515,58 +516,33 @@ public sealed class FastQuickActionsWindow : WF.Form
             ResumeAutoCloseTimer();
     }
 
+    /// <summary>
+    /// The hover treatment exactly — same blurred thumbnail, same tint — with the message
+    /// where the action buttons would be. Only the message fades; the blur clears with it,
+    /// the same way hover's does when the pointer leaves.
+    /// </summary>
     private void DrawStatusFlash(SD.Graphics g)
     {
-        if (_flashMessage is null || _flashAmount <= 0.01)
+        if (_flashMessage is null)
             return;
 
+        using (var scrim = new SD.SolidBrush(_visuals.HoverTint))
+        using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
+            g.FillPath(scrim, cardPath);
+
         int alpha = (int)Math.Round(255 * Math.Clamp(_flashAmount, 0, 1));
-        using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
-        GraphicsState state = g.Save();
-        try
+        if (alpha <= 2)
+            return;
+
+        using var font = ThemePalette.UiFont(Math.Max(8f, _cardRect.Height * 0.075f), SD.FontStyle.Bold);
+        using var text = new SD.SolidBrush(SD.Color.FromArgb(alpha, _visuals.Glyph));
+        using var format = new SD.StringFormat
         {
-            g.SetClip(clip, CombineMode.Intersect);
-            DrawBlurredOverlay(g, alpha);
-
-            // A veil under the text: a blurred screenshot is still busy enough to swallow it.
-            using (var veil = new SD.SolidBrush(SD.Color.FromArgb(alpha * 150 / 255, 0, 0, 0)))
-                g.FillRectangle(veil, _cardRect);
-
-            using var font = ThemePalette.UiFont(Math.Max(8f, _cardRect.Height * 0.075f), SD.FontStyle.Bold);
-            using var text = new SD.SolidBrush(SD.Color.FromArgb(alpha, _visuals.Glyph));
-            using var format = new SD.StringFormat
-            {
-                Alignment = SD.StringAlignment.Center,
-                LineAlignment = SD.StringAlignment.Center,
-                Trimming = SD.StringTrimming.EllipsisCharacter,
-            };
-            g.DrawString(_flashMessage, font, text, _cardRect, format);
-        }
-        finally
-        {
-            g.Restore(state);
-        }
-    }
-
-    private void DrawBlurredOverlay(SD.Graphics g, int alpha)
-    {
-        lock (_previewSync)
-        {
-            SD.Bitmap? blurred = _previewClosed ? null : _blurredPreview;
-            if (blurred is null)
-                return;
-
-            var matrix = new ColorMatrix { Matrix33 = alpha / 255f };
-            using var attributes = new ImageAttributes();
-            attributes.SetColorMatrix(matrix);
-            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-            g.DrawImage(
-                blurred,
-                _thumbRect,
-                0, 0, blurred.Width, blurred.Height,
-                SD.GraphicsUnit.Pixel,
-                attributes);
-        }
+            Alignment = SD.StringAlignment.Center,
+            LineAlignment = SD.StringAlignment.Center,
+            Trimming = SD.StringTrimming.EllipsisCharacter,
+        };
+        g.DrawString(_flashMessage, font, text, _cardRect, format);
     }
 
     private void DrawThumbnail(SD.Graphics g, bool blurred)

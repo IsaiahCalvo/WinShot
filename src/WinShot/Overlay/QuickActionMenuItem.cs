@@ -14,13 +14,13 @@ namespace WinShot.Overlay;
 /// </summary>
 internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 {
-    internal const int GlyphSize = 16;
-    private const int PadLeft = 5;
-    private const int PadRight = 9;
-    private const int GlyphGap = 8;
-    private const int ShortcutGap = 16;
-    private const int ArrowWidth = 14;
-    private const int MinHeight = 21;
+    internal const int GlyphSize = 14;
+    private const int PadLeft = 4;
+    private const int PadRight = 8;
+    private const int GlyphGap = 7;
+    private const int ShortcutGap = 12;
+    private const int ArrowWidth = 12;
+    private const int MinHeight = 18;
 
     private readonly Action _action;
     private readonly SD.Bitmap? _glyph;
@@ -77,7 +77,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
             width += ShortcutGap + Measure(Shortcut).Width;
         if (HasDropDownItems)
             width += ShortcutGap + ArrowWidth;
-        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 5));
+        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 3));
         return _ownSize.Value;
     }
 
@@ -125,16 +125,31 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
     {
         if (!Selected && !Pressed && !(HasDropDownItems && DropDown.Visible))
             return;
-        if (Width <= 2 || Height <= 2)
+
+        SD.Rectangle bounds = HighlightBounds();
+        if (bounds.Width <= 2 || bounds.Height <= 2)
             return;
 
         SmoothingMode previous = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        var bounds = new SD.Rectangle(0, 1, Width, Height - 2);
         using var path = GdiPaths.RoundedRect(bounds, Math.Min(6, bounds.Height / 2));
         using var fill = new SD.SolidBrush(SD.Color.FromArgb(66, 66, 70));
         g.FillPath(fill, path);
         g.SmoothingMode = previous;
+    }
+
+    /// <summary>
+    /// The highlight in the ROW's coordinates, derived from the MENU's. Deriving it from
+    /// the row instead assumes the row sits evenly inside the drop-down, and it does not:
+    /// ToolStripDropDownMenu places rows to suit its own metrics, which left the bar 1px
+    /// from the left border and 5px from the right.
+    /// </summary>
+    private SD.Rectangle HighlightBounds()
+    {
+        int gutter = QuickActionsContextMenu.HighlightGutter;
+        int menuWidth = Owner?.ClientSize.Width ?? Width;
+        int left = gutter - Bounds.X;
+        return new SD.Rectangle(left, 1, Math.Max(0, menuWidth - gutter * 2), Height - 2);
     }
 
     /// <summary>The chevron that says this row expands. Drawn here because the row opts out
@@ -176,6 +191,10 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     private const int CornerRadius = 8;
     private const int HorizontalGutter = 4;
 
+    /// <summary>Inset of the row highlight from both menu borders. Rows read it directly:
+    /// the drop-down's own Padding is not where its rows actually land.</summary>
+    internal const int HighlightGutter = 4;
+
     private int? _rowWidth;
     private bool _stretchingRows;
 
@@ -184,6 +203,7 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
         // The rows own their left inset; the drop-down must not add one of its own.
         ShowImageMargin = false;
         Renderer = new RoundedMenuRenderer();
+        Font = ThemePalette.UiFont(8.5f);
     }
 
     /// <summary>
