@@ -14,13 +14,13 @@ namespace WinShot.Overlay;
 /// </summary>
 internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 {
-    internal const int GlyphSize = 14;
-    private const int PadLeft = 4;
+    internal const int GlyphSize = 17;
+    private const int PadLeft = 8;
     private const int PadRight = 8;
     private const int GlyphGap = 7;
-    private const int ShortcutGap = 12;
+    private const int ShortcutGap = 10;
     private const int ArrowWidth = 12;
-    private const int MinHeight = 18;
+    private const int MinHeight = 19;
 
     private readonly Action _action;
     private readonly SD.Bitmap? _glyph;
@@ -77,7 +77,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
             width += ShortcutGap + Measure(Shortcut).Width;
         if (HasDropDownItems)
             width += ShortcutGap + ArrowWidth;
-        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 3));
+        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 2));
         return _ownSize.Value;
     }
 
@@ -139,17 +139,16 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
     }
 
     /// <summary>
-    /// The highlight in the ROW's coordinates, derived from the MENU's. Deriving it from
-    /// the row instead assumes the row sits evenly inside the drop-down, and it does not:
-    /// ToolStripDropDownMenu places rows to suit its own metrics, which left the bar 1px
-    /// from the left border and 5px from the right.
+    /// The highlight, inset from the row's own edges. That only reads as even because the
+    /// drop-down gives its rows the full client width (see
+    /// <see cref="QuickActionsContextMenu.DefaultPadding"/>) — with horizontal padding the
+    /// rows sit at X=0 inside a wider client, and the bar came out 1px off the left border
+    /// and clipped flat against the row's right edge.
     /// </summary>
     private SD.Rectangle HighlightBounds()
     {
         int gutter = QuickActionsContextMenu.HighlightGutter;
-        int menuWidth = Owner?.ClientSize.Width ?? Width;
-        int left = gutter - Bounds.X;
-        return new SD.Rectangle(left, 1, Math.Max(0, menuWidth - gutter * 2), Height - 2);
+        return new SD.Rectangle(gutter, 1, Math.Max(0, Width - gutter * 2), Height - 2);
     }
 
     /// <summary>The chevron that says this row expands. Drawn here because the row opts out
@@ -189,11 +188,8 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
 {
     private const int CornerRadius = 8;
-    private const int HorizontalGutter = 4;
-
-    /// <summary>Inset of the row highlight from both menu borders. Rows read it directly:
-    /// the drop-down's own Padding is not where its rows actually land.</summary>
-    internal const int HighlightGutter = 4;
+    /// <summary>Inset of the row highlight from both menu borders.</summary>
+    internal const int HighlightGutter = 3;
 
     private int? _rowWidth;
     private bool _stretchingRows;
@@ -211,7 +207,12 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     /// padding during layout — 8 on the left, 1 on the right — which left the highlight
     /// touching one border and short of the other.
     /// </summary>
-    protected override WF.Padding DefaultPadding => new(HorizontalGutter, 2, HorizontalGutter, 2);
+    /// <summary>
+    /// No horizontal padding, so a row spans the whole menu and its highlight can inset
+    /// evenly from both borders. ToolStripDropDownMenu lays rows out at X=0 regardless, so
+    /// any left padding becomes dead space on the right and clips the bar there.
+    /// </summary>
+    protected override WF.Padding DefaultPadding => new(0, 2, 0, 2);
 
     /// <summary>
     /// The width every row is given: the widest row's own width, or the drop-down's inner
@@ -220,6 +221,8 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     /// exactly how it looked before.
     /// </summary>
     internal int TargetRowWidth => Math.Max(RowWidth, ClientSize.Width - Padding.Horizontal);
+
+
 
     /// <summary>The width every row reports, measured once. Layout asks constantly.</summary>
     internal int RowWidth

@@ -534,7 +534,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (alpha <= 2)
             return;
 
-        using var font = ThemePalette.UiFont(Math.Max(8f, _cardRect.Height * 0.075f), SD.FontStyle.Bold);
+        // The same understated face the Copy pill uses — this is a status line, not a banner.
+        using var font = ThemePalette.UiFont(7f);
         using var text = new SD.SolidBrush(SD.Color.FromArgb(alpha, _visuals.Glyph));
         using var format = new SD.StringFormat
         {
