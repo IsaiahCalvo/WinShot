@@ -595,7 +595,7 @@ public partial class EditorWindow : Window
     {
         double pct = Math.Clamp(e.NewValue, 0, 100);
         if (_colorWell == ColorWell.Fill &&
-            EditorShellContract.ContextFor(_tool, _filledRectangleMode).HasFlag(EditorContextControls.FillStrokeTabs))
+            EditorShellContract.ContextFor(_tool, false).HasFlag(EditorContextControls.FillStrokeTabs))
         {
             SetOpacityPercent(pct, restyle: IsLoaded);
             return;

@@ -14,7 +14,7 @@ public class EditorShellContractTests
         }, EditorShellContract.PrimaryToolOrder);
         Assert.Equal(new[] { "Pixelate", "Spotlight", "Blur" }, EditorShellContract.EffectsGroupTools);
         Assert.Equal(new[] { "Freehand", "Highlighter", "Eraser" }, EditorShellContract.DrawGroupTools);
-        Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" },
+        Assert.Equal(new[] { "Rectangle", "Ellipse", "Line", "Arrow", "Step" },
             EditorShellContract.ShapeGroupTools);
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.TextGroupTools);
         Assert.Empty(EditorShellContract.MoreToolOrder);
@@ -26,7 +26,6 @@ public class EditorShellContractTests
             .Concat(EditorShellContract.ShapeGroupTools)
             .Concat(EditorShellContract.TextGroupTools)
             .Concat(EditorShellContract.MoreToolOrder)
-            .Where(name => name != "FilledRectangle")
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         Assert.Equal(18, uniqueTools.Length);

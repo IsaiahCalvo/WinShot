@@ -71,6 +71,7 @@
     <SolidColorBrush x:Key="FloatingBgBrush"   Color="{StaticResource FloatingBgColor}"/>
 
     <SolidColorBrush x:Key="AccentBrush"        Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentTintBrush"    Color="{StaticResource AccentColor}" Opacity="0.18"/>
     <SolidColorBrush x:Key="AccentHoverBrush"   Color="{StaticResource AccentHoverColor}"/>
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>
     <SolidColorBrush x:Key="InfoBrush"          Color="{StaticResource InfoColor}"/>
@@ -281,6 +282,111 @@
         </Setter>
     </Style>
 
+    <!-- Survey's `btn btn-default btn-sm`: transparent, 6px radius, accent tint + accent
+         border on hover, 40% opacity when disabled. Undo/redo use it with 14px icons. -->
+    <Style x:Key="SurveyDefaultButton" TargetType="Button">
+        <Setter Property="Height" Value="26"/>
+        <Setter Property="MinWidth" Value="30"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="Margin" Value="0,0,8,0"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background">
+                                <Setter.Value>
+                                    <SolidColorBrush Color="{StaticResource AccentColor}" Opacity="0.14"/>
+                                </Setter.Value>
+                            </Setter>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Right rail: 32x28 rounded buttons stacked vertically, 18px glyphs. -->
+    <Style x:Key="RailButton" TargetType="Button">
+        <Setter Property="Width" Value="32"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Margin" Value="0,2"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource PressedFillBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Survey's zoom input: a bare number field, underlined only while it has focus. -->
+    <Style x:Key="RailZoomBox" TargetType="TextBox">
+        <Setter Property="Width" Value="40"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Margin" Value="0,1"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        <Setter Property="Cursor" Value="IBeam"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Margin="0"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Compact 28px variant so undo/redo/rotate/flip fit Survey's top chrome
          without wrapping the 980-DIP primary row. -->
     <Style x:Key="CompactToolIconButton" TargetType="Button" BasedOn="{StaticResource ToolIconButton}">
@@ -335,19 +441,19 @@
     <Style x:Key="CompactFormatButton" TargetType="Button">
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="24"/>
-        <Setter Property="Margin" Value="1,0"/>
+        <Setter Property="Margin" Value="2,0"/>
         <Setter Property="FontFamily" Value="Segoe UI"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
                             BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>

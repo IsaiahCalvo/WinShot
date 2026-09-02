@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -68,11 +68,6 @@ public class AnnotationEditorRenderHarness
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-text-group.png"));
 
-                var filledRectangle = (RadioButton)editor.FindName("FilledRectangleToolBtn")!;
-                filledRectangle.IsChecked = true;
-                Pump(4);
-                RenderToPng(editor, Path.Combine(outDir, "editor-after-filled-rectangle-context.png"));
-
                 var colorPicker = (System.Windows.Controls.Primitives.Popup)editor.FindName("ColorPickerPopup")!;
                 typeof(EditorWindow).GetMethod("BuildColorPickerPalette",
                     BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null);
@@ -95,6 +90,24 @@ public class AnnotationEditorRenderHarness
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-rectangle-selection-context.png"));
 
+                // Survey's rotation pill beside the grip of a rotated shape.
+                AnnotationTransform.SetAngle((FrameworkElement)selectedRectangle, 30);
+                ((AnnotationData)((FrameworkElement)selectedRectangle).Tag!).Angle = 30;
+                typeof(EditorWindow).GetMethod("UpdateSelectionVisual", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null);
+                Pump(2);
+                typeof(EditorWindow).GetMethod("PlaceRotationPill", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(editor, null);
+                Pump(4);
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-rotation-pill.png"));
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-rotation-pill-200pct.png"), dpi: 192);
+
+                // Callout selection: knee/tip squares + corner circles, no rotation grip.
+                var callout = canvas.Children.OfType<FrameworkElement>()
+                    .First(f => f.Tag is AnnotationData { Type: AnnotationData.TypeCallout });
+                InvokePrivate(editor, "Select", callout);
+                Pump(4);
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-callout-selection.png"));
+
                 InvokePrivate(editor, "Select", null);
                 SelectTool(editor, EditorTool.Blur);
                 Pump(4);
@@ -103,6 +116,16 @@ public class AnnotationEditorRenderHarness
                 SelectTool(editor, EditorTool.Text);
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-text-style-context.png"));
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-text-style-context-200pct.png"), dpi: 192);
+
+                // A live click-placed editor: descenders must not clip at the bottom.
+                InvokePrivate(editor, "PlaceText", new Point(300, 330));
+                Pump(2);
+                var liveEditor = canvas.Children.OfType<TextBox>().Last();
+                liveEditor.Text = "Typing gjpqy";
+                Pump(4);
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-text-editing-200pct.png"), dpi: 192);
+                liveEditor.Text = "";
 
                 SelectTool(editor, EditorTool.Crop);
                 Pump(4);

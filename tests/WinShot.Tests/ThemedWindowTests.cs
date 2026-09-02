@@ -1,4 +1,4 @@
-﻿using System.Threading;
+using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -499,7 +499,7 @@ public class ThemedWindowTests
         {
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
             "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn", "EffectsGroupBtn",
-            "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
+            "RectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
@@ -518,7 +518,7 @@ public class ThemedWindowTests
         {
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
             "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn",
-            "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
+            "RectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "CalloutToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
@@ -562,11 +562,10 @@ public class ThemedWindowTests
         var viewport = (Grid)editor.FindName("Viewport")!;
         var undo = (Button)editor.FindName("BtnUndo")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
-        // Anchored LEFT on purpose. Centred, the row re-centres itself whenever the format
-        // cluster beside it changes width, so the tools slid up to 200 DIP between Select and
-        // the Text group — the buttons moved out from under the cursor on every tool switch.
-        // Survey's bar is left-aligned for the same reason. ToolRowStabilitySmoke pins this.
-        Assert.Equal(HorizontalAlignment.Left, primary.HorizontalAlignment);
+        // Survey centres the tool cluster and hangs undo/redo and the props off it as
+        // absolute side blocks. Equal star side columns give the same geometry, so the
+        // tools stay put on every tool switch. ToolRowStabilitySmoke pins this.
+        Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
         Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
         var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
         Assert.True(toolsHost.MinWidth < 40, "Group tools must size to the visible chips, not a reserved blank slot.");
@@ -683,10 +682,10 @@ public class ThemedWindowTests
         Assert.True(IsLogicalDescendant(formatBar, textButtons),
             "B/I/U/S must stay on the primary strip, not the overflow flyout.");
         Assert.True(IsLogicalDescendant(formatBar, bold));
-        Point textSave = ((FrameworkElement)editor.FindName("BtnZoomOut")!).TranslatePoint(new Point(0, 0), editor);
+        Point textSave = BarRightEdge(editor);
         Point textSec = secondary.TranslatePoint(new Point(0, 0), editor);
         Assert.True(textSec.X + secondary.ActualWidth <= textSave.X + 0.5,
-            $"Text secondary runs into the zoom cluster: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
+            $"Text secondary runs off the top bar: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
 
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
@@ -699,20 +698,19 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "72");
         Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
-        var save = (FrameworkElement)editor.FindName("BtnZoomOut")!;
         Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
-        Point saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
+        Point saveOrigin = BarRightEdge(editor);
         Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
-            $"Callout size runs into the zoom cluster: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
+            $"Callout size runs off the top bar: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
         editor.UpdateLayout();
         PackEditorFormat(editor);
         Point formatOrigin = formatBar.TranslatePoint(new Point(0, 0), editor);
-        saveOrigin = save.TranslatePoint(new Point(0, 0), editor);
+        saveOrigin = BarRightEdge(editor);
         Assert.True(formatOrigin.X + formatBar.ActualWidth <= saveOrigin.X + 0.5,
             $"Format extras sit on Save as…: format={formatOrigin.X}+{formatBar.ActualWidth} save={saveOrigin.X}");
         Point calloutSec = secondary.TranslatePoint(new Point(0, 0), editor);
         Assert.True(calloutSec.X + secondary.ActualWidth <= saveOrigin.X + 0.5,
-            $"Callout secondary runs into the zoom cluster: sec={calloutSec.X}+{secondary.ActualWidth} save={saveOrigin.X}");
+            $"Callout secondary runs off the top bar: sec={calloutSec.X}+{secondary.ActualWidth} save={saveOrigin.X}");
         var done = (Button)editor.FindName("BtnDone")!;
         Point doneOrigin = done.TranslatePoint(new Point(0, 0), editor);
         Assert.True(doneOrigin.X + done.ActualWidth <= editor.ActualWidth + 0.5,
@@ -747,11 +745,6 @@ public class ThemedWindowTests
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "1");
 
-        ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
-        Assert.Equal(Visibility.Visible, color.Visibility);
-        Assert.Equal(Visibility.Visible, thickness.Visibility);
-        Assert.Equal(Visibility.Collapsed, fill.Visibility);
-
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
         PackEditorFormat(editor);
@@ -759,9 +752,9 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, color.Visibility);
         var effectBox = (FrameworkElement)editor.FindName("EffectStrengthBox")!;
         Point effectOrigin = effectBox.TranslatePoint(new Point(0, 0), editor);
-        Point pixelateSave = ((FrameworkElement)editor.FindName("BtnZoomOut")!).TranslatePoint(new Point(0, 0), editor);
+        Point pixelateSave = BarRightEdge(editor);
         Assert.True(effectOrigin.X + effectBox.ActualWidth <= pixelateSave.X + 0.5,
-            $"Pixelate Medium runs into the zoom cluster: effect={effectOrigin.X}+{effectBox.ActualWidth} save={pixelateSave.X}");
+            $"Pixelate Medium runs off the top bar: effect={effectOrigin.X}+{effectBox.ActualWidth} save={pixelateSave.X}");
 
         typeof(EditorWindow).GetMethod("OnCropClick",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -778,9 +771,9 @@ public class ThemedWindowTests
         Assert.True(applyCrop.IsVisible && applyCrop.Parent == cropPanel,
             "Apply crop must stay on the strip; overflow Don't crop / ratio first.");
         Point applyOrigin = applyCrop.TranslatePoint(new Point(0, 0), editor);
-        Point cropSave = save.TranslatePoint(new Point(0, 0), editor);
+        Point cropSave = BarRightEdge(editor);
         Assert.True(applyOrigin.X + applyCrop.ActualWidth <= cropSave.X + 0.5,
-            $"Apply crop runs into the zoom cluster: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
+            $"Apply crop runs off the top bar: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
         Assert.Contains(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name == "CropCancelBtn");
         Point toolsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor);
@@ -947,8 +940,8 @@ public class ThemedWindowTests
         double zoom = (double)typeof(EditorWindow)
             .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(editor)!;
-        var fitModeLabel = (TextBlock)editor.FindName("FitModeLabel")!;
-        var zoomLabel = (TextBlock)editor.FindName("ZoomLabel")!;
+        var fitMenuBtn = (Button)editor.FindName("FitMenuBtn")!;
+        var zoomBox = (TextBox)editor.FindName("ZoomBox")!;
 
         editor.Close();
 
@@ -956,9 +949,19 @@ public class ThemedWindowTests
         Assert.True(zoom > 1.05, $"tiny capture stayed at native size: zoom={zoom}, viewport={vw}x{vh}");
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
-        Assert.Equal("Fit page", fitModeLabel.Text);
-        Assert.Equal(Visibility.Visible, zoomLabel.Visibility);
-        Assert.EndsWith("%", zoomLabel.Text);
+        Assert.Equal("Fit page", fitMenuBtn.ToolTip);
+        Assert.Equal(Visibility.Visible, zoomBox.Visibility);
+        Assert.EndsWith("%", zoomBox.Text);
+    }
+
+    /// <summary>
+    /// The props block must end inside the floating top bar. The zoom cluster moved to the
+    /// right rail below the bar, so the bar's own right edge is the boundary now.
+    /// </summary>
+    private static Point BarRightEdge(EditorWindow editor)
+    {
+        var bar = (FrameworkElement)editor.FindName("TopToolbar")!;
+        return bar.TranslatePoint(new Point(bar.ActualWidth - 6, 0), editor);
     }
 
     private static void PinSmoke(EditorWindow editor)

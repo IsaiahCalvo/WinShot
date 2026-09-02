@@ -39,7 +39,7 @@ internal static class EditorShellContract
 
     public static readonly string[] DrawGroupTools = { "Freehand", "Highlighter", "Eraser" };
     public static readonly string[] ShapeGroupTools =
-        { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" };
+        { "Rectangle", "Ellipse", "Line", "Arrow", "Step" };
     public static readonly string[] TextGroupTools = { "Text", "Callout" };
     public static readonly string[] EffectsGroupTools = { "Pixelate", "Spotlight", "Blur" };
 

@@ -442,7 +442,7 @@ internal static class AnnotationFactory
             return inner;
 
         double width = boxWidth is > 1 ? boxWidth.Value : DefaultTextBoxWidth;
-        double height = boxHeight is > 1 ? boxHeight.Value : fontSize * 1.31 + 2 * TextPadding;
+        double height = boxHeight is > 1 ? boxHeight.Value : SingleLineBoxHeight(fontSize, fontFamily);
         if (inner is TextBlock tb)
         {
             tb.Width = Math.Max(1, width - 2 * TextPadding);
@@ -547,6 +547,17 @@ internal static class AnnotationFactory
     }
 
     public const double TextPadding = 6;
+
+    /// <summary>
+    /// Height of a one-line text box: the font's real line height (Segoe UI is 1.33x,
+    /// not the 1.31 that used to clip descenders) plus padding and the editor's 1px border.
+    /// </summary>
+    public static double SingleLineBoxHeight(double fontSize, string? fontFamily = null)
+    {
+        var family = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? "Segoe UI" : fontFamily);
+        double line = family.LineSpacing > 0 ? family.LineSpacing : 1.33;
+        return Math.Ceiling(fontSize * line) + 2 * TextPadding + 2;
+    }
 
     public static VerticalAlignment ParseVerticalAlign(string? name) => name switch
     {

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -136,7 +136,7 @@ public partial class EditorWindow : Window
         else
         {
             tb.Width = AnnotationFactory.DefaultTextBoxWidth;
-            tb.Height = fontSize * 1.31 + 2 * AnnotationFactory.TextPadding;
+            tb.Height = AnnotationFactory.SingleLineBoxHeight(fontSize, _textFontFamily);
             tb.TextWrapping = TextWrapping.Wrap;
             tb.AcceptsReturn = true;
             _activeTextBox = new Rect(box.X, box.Y, tb.Width, tb.Height);
@@ -293,7 +293,7 @@ public partial class EditorWindow : Window
         Point topLeft = sized ? new Point(x, y) : new Point(x, y);
         var (strokeColor, fillColor) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
         double boxW = sized ? box!.Value.Width : AnnotationFactory.DefaultTextBoxWidth;
-        double boxH = sized ? box!.Value.Height : tb.FontSize * 1.31 + 2 * AnnotationFactory.TextPadding;
+        double boxH = sized ? box!.Value.Height : AnnotationFactory.SingleLineBoxHeight(tb.FontSize, tb.FontFamily.Source);
         var label = AnnotationFactory.CreateStyledTextLabel(
             text, tb.Foreground, tb.FontSize, style, _textFontFamily,
             _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike,

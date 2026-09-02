@@ -19,6 +19,7 @@ public partial class EditorWindow : Window
     private void OnViewportMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_sourceOperationActive) return;
+        if (IsRotationPillSource(e.OriginalSource)) return; // the pill is its own control
         _pendingInitialFit = false; // user is interacting — stop auto-refitting on resize
         bool panGesture = e.ChangedButton == MouseButton.Middle ||
             (e.ChangedButton == MouseButton.Left && (_spaceDown || _tool == EditorTool.Pan));
@@ -84,6 +85,8 @@ public partial class EditorWindow : Window
             SyncCaptureShadow();
             return;
         }
+        if (_activeHandle < 0 && !_dragging && !_movingSelection && !_marqueeSelecting && _handleKind != HandleKind.None)
+            UpdateRotationPillHover(e.GetPosition(AnnotationCanvas));
         if (_draggingCurveHandle && _pendingCurve is not null)
         {
             _curveControl = e.GetPosition(AnnotationCanvas);

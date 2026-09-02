@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -79,7 +79,6 @@ public partial class EditorWindow : Window
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
-    private bool _filledRectangleMode;
     private TextStyle _textStyle = TextStyle.Plain;
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
     private ArrowheadStyle _arrowhead = ArrowheadStyle.SolidTriangle;
@@ -482,6 +481,34 @@ public partial class EditorWindow : Window
 
     private void OnZoomIn(object sender, RoutedEventArgs e) => ZoomAt(ViewportCentre(), _zoom * ZoomStepFactor);
 
+    // Survey's zoom input: digits only, Enter commits and blurs, Esc reverts, blur commits.
+    private void OnZoomBoxTextInput(object sender, TextCompositionEventArgs e) =>
+        e.Handled = !e.Text.All(char.IsDigit);
+
+    private void OnZoomBoxFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        ZoomBox.Text = Math.Round(_zoom * 100).ToString();
+        ZoomBox.Dispatcher.BeginInvoke(ZoomBox.SelectAll, DispatcherPriority.Input);
+    }
+
+    private void OnZoomBoxKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { CommitZoomBox(); Viewport.Focus(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { ZoomBox.Text = Math.Round(_zoom * 100).ToString(); Viewport.Focus(); e.Handled = true; }
+    }
+
+    private void OnZoomBoxBlur(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        CommitZoomBox();
+        ZoomBox.Text = $"{Math.Round(_zoom * 100)}%";
+    }
+
+    private void CommitZoomBox()
+    {
+        if (int.TryParse(ZoomBox.Text.Trim().TrimEnd('%'), out int pct))
+            ZoomAt(ViewportCentre(), Math.Clamp(pct, 1, 4000) / 100.0);
+    }
+
     private void OnZoomOut(object sender, RoutedEventArgs e) => ZoomAt(ViewportCentre(), _zoom / ZoomStepFactor);
 
     private void OnFitMenuClick(object sender, RoutedEventArgs e) => FitMenuPopup.IsOpen = !FitMenuPopup.IsOpen;
@@ -511,7 +538,8 @@ public partial class EditorWindow : Window
 
     private void OnViewChanged()
     {
-        ZoomLabel.Text = $"{Math.Round(_zoom * 100)}%";
+        if (ZoomBox is not null && !ZoomBox.IsKeyboardFocused)
+            ZoomBox.Text = $"{Math.Round(_zoom * 100)}%";
         SyncZoomPresetChrome();
         SyncCaptureShadow();
         // Keep helper chrome hairline-thin on screen at any zoom; the dash
@@ -529,7 +557,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void SyncZoomPresetChrome()
     {
-        if (FitModeLabel is null || FitModeIcon is null) return;
+        if (FitMenuBtn is null || FitModeIcon is null) return;
         (string label, string icon) = _viewFitMode switch
         {
             ViewFitMode.Fit => ("Fit page", "SurveyIcon.FitPage"),
@@ -537,9 +565,9 @@ public partial class EditorWindow : Window
             ViewFitMode.FitHeight => ("Fit height", "SurveyIcon.FitHeight"),
             _ => ("Manual", "SurveyIcon.FitPage"),
         };
-        FitModeLabel.Text = label;
+        FitMenuBtn.ToolTip = label;
         FitModeIcon.Content = FindResource(icon);
-        FitModeLabel.Opacity = _viewFitMode == ViewFitMode.Free ? 0.6 : 1;
+        FitModeIcon.Opacity = _viewFitMode == ViewFitMode.Free ? 0.6 : 1;
         foreach (var (item, mode) in new[] { (FitPageItem, ViewFitMode.Fit), (FitWidthItem, ViewFitMode.FitWidth), (FitHeightItem, ViewFitMode.FitHeight) })
             if (item is not null)
                 item.Foreground = (Brush)FindResource(_viewFitMode == mode ? "TextPrimaryBrush" : "TextSecondaryBrush");
@@ -653,40 +681,12 @@ public partial class EditorWindow : Window
         _tool = tool;
         if (ReferenceEquals(rb, RectangleToolBtn))
         {
-            _filledRectangleMode = false;
             _fillMode = ShapeFillMode.None;
             if (FillNoneBtn is not null) FillNoneBtn.IsChecked = true;
         }
         if (IsLoaded)
         {
             UncheckOtherToolButtons(rb);
-            UpdateCursor();
-            UpdateContextPanels();
-            UpdateGroupButtonChrome();
-        }
-    }
-
-    private void OnFilledRectangleToolChecked(object sender, RoutedEventArgs e)
-    {
-        if (sender is not RadioButton rb) return;
-        if (IsLoaded)
-        {
-            CommitText();
-            CommitPendingCurve();
-            Select(null);
-            if (_tool == EditorTool.Crop) ClearCropPreview();
-            UncheckOtherToolButtons(rb);
-        }
-
-        _tool = EditorTool.Rectangle;
-        _filledRectangleMode = true;
-        _fillMode = ShapeFillMode.Solid;
-        _fillOpacity = _fillOpacity > 0 ? _fillOpacity : 1;
-        if (_fillColor.A == 0) _fillColor = _color;
-        _lastShapeTool = EditorTool.Rectangle;
-        if (FillSolidBtn is not null) FillSolidBtn.IsChecked = true;
-        if (IsLoaded)
-        {
             UpdateCursor();
             UpdateContextPanels();
             UpdateGroupButtonChrome();
@@ -707,7 +707,7 @@ public partial class EditorWindow : Window
 
     private void OnDrawGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Draw")
+        if (EditorShellContract.GroupFor(_tool, false) != "Draw")
             CheckToolButton(_lastDrawTool);
         UpdateContextPanels();
         UpdateGroupButtonChrome();
@@ -715,20 +715,15 @@ public partial class EditorWindow : Window
 
     private void OnShapeGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Shape")
-        {
-            if (_lastShapeTool == EditorTool.Rectangle && _filledRectangleMode)
-                FilledRectangleToolBtn.IsChecked = true;
-            else
-                CheckToolButton(_lastShapeTool);
-        }
+        if (EditorShellContract.GroupFor(_tool, false) != "Shape")
+            CheckToolButton(_lastShapeTool);
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnTextGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Text")
+        if (EditorShellContract.GroupFor(_tool, false) != "Text")
             CheckToolButton(_lastTextTool);
         UpdateContextPanels();
         UpdateGroupButtonChrome();
@@ -736,7 +731,7 @@ public partial class EditorWindow : Window
 
     private void OnEffectsGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, _filledRectangleMode) != "Effects")
+        if (EditorShellContract.GroupFor(_tool, false) != "Effects")
             CheckToolButton(_lastEffectsTool);
         UpdateContextPanels();
         UpdateGroupButtonChrome();
@@ -744,7 +739,7 @@ public partial class EditorWindow : Window
 
     private void RememberGroupTool(EditorTool tool)
     {
-        switch (EditorShellContract.GroupFor(tool, _filledRectangleMode))
+        switch (EditorShellContract.GroupFor(tool, false))
         {
             case "Draw": _lastDrawTool = tool; break;
             case "Shape": _lastShapeTool = tool; break;
@@ -795,7 +790,7 @@ public partial class EditorWindow : Window
     {
         string group = _tool is EditorTool.Select or EditorTool.Pan
             ? EditorShellContract.GroupFor(ChromeTool(), ChromeFilledRectangle())
-            : EditorShellContract.GroupFor(_tool, _filledRectangleMode);
+            : EditorShellContract.GroupFor(_tool, false);
         void Paint(Button btn, bool on)
         {
             if (btn is null) return;
@@ -876,7 +871,7 @@ public partial class EditorWindow : Window
 
         string group = _tool is EditorTool.Select or EditorTool.Pan
             ? EditorShellContract.GroupFor(chrome, filled)
-            : EditorShellContract.GroupFor(_tool, _filledRectangleMode);
+            : EditorShellContract.GroupFor(_tool, false);
         DrawGroupPanel.Visibility = Show(group == "Draw");
         ShapeGroupPanel.Visibility = Show(group == "Shape");
         TextGroupPanel.Visibility = Show(group == "Text");
@@ -961,16 +956,14 @@ public partial class EditorWindow : Window
         double inner = TopToolbar is { ActualWidth: > 0 } top
             ? top.ActualWidth
             : Math.Max(0, ActualWidth - 24);
-        double col0 = MeasureWidth(BtnUndo?.Parent as FrameworkElement);
         double tools = MeasureWidth(ToolPanel);
-        // Save/Done moved to the bottom bar; the right edge is now the zoom cluster.
-        double right = MeasureWidth(BtnZoomOut) + MeasureWidth(ZoomLabel) + MeasureWidth(BtnZoomIn)
-            + MeasureWidth(FitMenuBtn) + 24;
+        // Tools are centred; the props block gets the star column to their right.
+        double right = 64; // divider, panel margins, and the bar's own padding
         if (ColorPanel?.Visibility == Visibility.Visible)
             right += MeasureWidth(ColorPanel);
         if (SizeEffectHost?.Visibility == Visibility.Visible)
             right += MeasureWidth(SizeEffectHost);
-        double slack = inner - col0 - tools - right;
+        double slack = (inner - tools) / 2 - right;
         // Letters and Apply crop stay on the strip even if tools walk a few DIP.
         if (TextStylePanel?.Visibility == Visibility.Visible && TextFormatButtons is not null)
             slack = Math.Max(slack, MeasureWidth(TextFormatButtons) + 4);
@@ -1047,12 +1040,8 @@ public partial class EditorWindow : Window
         return _tool;
     }
 
-    private bool ChromeFilledRectangle()
-    {
-        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
-            return EditorShellContract.IsFilledRectangle(meta);
-        return _filledRectangleMode;
-    }
+    private bool ChromeFilledRectangle() =>
+        _selected is FrameworkElement fe && fe.Tag is AnnotationData meta && EditorShellContract.IsFilledRectangle(meta);
 
     private void SyncChromeFromSelection()
     {
@@ -1523,8 +1512,8 @@ public partial class EditorWindow : Window
         void Paint(Button? btn, bool on)
         {
             if (btn is null) return;
-            btn.Background = on ? (Brush)FindResource("PressedFillBrush") : Brushes.Transparent;
-            btn.BorderBrush = on ? (Brush)FindResource("BorderStrongBrush") : Brushes.Transparent;
+            btn.Background = (Brush)FindResource(on ? "AccentTintBrush" : "SurfaceAltBrush");
+            btn.Foreground = (Brush)FindResource(on ? "AccentBrush" : "TextPrimaryBrush");
         }
         Paint(BoldBtn, _textBold || _textStyle == TextStyle.Bold);
         Paint(ItalicBtn, _textItalic);

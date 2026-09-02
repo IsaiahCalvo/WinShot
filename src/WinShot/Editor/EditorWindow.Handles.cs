@@ -57,8 +57,7 @@ public partial class EditorWindow : Window
                 break;
             case AnnotationData.TypeCallout:
                 LayoutCalloutHandles(meta);
-                // The callout's own knee/arrow handles stay; the grip rides its box.
-                PlaceRotateGrip(fe);
+                HideRotateThumb(); // Survey callouts have no rotation handle
                 break;
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
@@ -191,10 +190,16 @@ public partial class EditorWindow : Window
         _rotateStem.Y2 = centre.Y;
         _rotateStem.StrokeThickness = 1 / _zoom;
         _rotateStem.Visibility = Visibility.Visible;
+
+        _gripContent = centre;
+        _gripAnchorContent = anchor;
+        if (_activeHandle == RotateHandleIndex || RotationPill?.Visibility == Visibility.Visible)
+            PlaceRotationPill();
     }
 
     private void HideRotateThumb()
     {
+        HideRotationPill();
         if (_rotateThumb is not null) _rotateThumb.Visibility = Visibility.Collapsed;
         if (_rotateStem is not null) _rotateStem.Visibility = Visibility.Collapsed;
     }
@@ -219,12 +224,13 @@ public partial class EditorWindow : Window
         Vector off = ElementOffset(_selected);
         _handleKind = HandleKind.Callout;
         EnsureThumbs(6);
+        // Survey: tip and knee are squares, the four text-box corners are circles.
         PlaceThumb(0, layout.Tip + off);
         PlaceThumb(1, layout.Knee + off);
-        PlaceThumb(2, layout.Box.TopLeft + off);
-        PlaceThumb(3, layout.Box.TopRight + off);
-        PlaceThumb(4, layout.Box.BottomRight + off);
-        PlaceThumb(5, layout.Box.BottomLeft + off);
+        PlaceThumb(2, layout.Box.TopLeft + off, round: true);
+        PlaceThumb(3, layout.Box.TopRight + off, round: true);
+        PlaceThumb(4, layout.Box.BottomRight + off, round: true);
+        PlaceThumb(5, layout.Box.BottomLeft + off, round: true);
         HandleLayer.Visibility = Visibility.Visible;
     }
 
@@ -277,13 +283,14 @@ public partial class EditorWindow : Window
             _handleThumbs[i].Visibility = i < count ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void PlaceThumb(int index, Point center)
+    private void PlaceThumb(int index, Point center, bool round = false)
     {
         if (index < 0 || index >= _handleThumbs.Count) return;
         var thumb = _handleThumbs[index];
         double s = HandleScreenPx / _zoom;
         thumb.Width = s;
         thumb.Height = s;
+        thumb.RadiusX = thumb.RadiusY = round ? s / 2 : 2 / _zoom;
         thumb.StrokeThickness = 1.5 / _zoom;
         Canvas.SetLeft(thumb, center.X - s / 2);
         Canvas.SetTop(thumb, center.Y - s / 2);
@@ -426,6 +433,7 @@ public partial class EditorWindow : Window
     {
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
+        ScheduleHideRotationPill();
 
         if (_adjustingCrop)
         {
@@ -1159,4 +1167,153 @@ public partial class EditorWindow : Window
         AnnotationTransform.SetOffset(fe, new Vector(offset.X + dx, offset.Y + dy));
     }
 
+
+    // ---- Survey's RotationInputField: a 60x28 pill 16px radially past the grip. ----
+    // Shows while the grip is hovered or dragged, hides 500ms after the cursor leaves
+    // unless it has keyboard focus. Enter commits, Esc reverts, Up/Down step 1 (Shift 15).
+    private Point _gripContent, _gripAnchorContent;
+    private DispatcherTimer? _pillHideTimer;
+    private double _pillStartAngle;
+
+    private double SelectedRotationAngle()
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return 0;
+        return meta.Type == AnnotationData.TypeStep
+            ? meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle
+            : AnnotationTransform.AngleOf(fe);
+    }
+
+    private void SetSelectedRotationAngle(double deg)
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
+        deg = AnnotationRotation.Normalize(deg);
+        if (fe is Grid badge && meta.Type == AnnotationData.TypeStep)
+        {
+            AnnotationFactory.SetStepPointerAngle(badge, deg);
+            meta.PointerAngle = deg;
+        }
+        else
+        {
+            AnnotationTransform.SetAngle(fe, deg);
+            meta.Angle = deg;
+        }
+    }
+
+    private void PlaceRotationPill()
+    {
+        if (RotationPill is null || _rotateThumb is not { Visibility: Visibility.Visible }) return;
+        Vector dir = _gripContent - _gripAnchorContent;
+        if (dir.Length < 0.001) dir = new Vector(0, -1);
+        dir.Normalize();
+        // Grip in viewport pixels, then 16px past its edge along the outward direction.
+        double gx = _gripContent.X * _zoom + ViewTranslate.X;
+        double gy = _gripContent.Y * _zoom + ViewTranslate.Y;
+        double reach = AnnotationRotation.HandleOffsetScreenPx / 2 + 16 + RotationPill.Width / 2;
+        Canvas.SetLeft(RotationPill, gx + dir.X * reach - RotationPill.Width / 2);
+        Canvas.SetTop(RotationPill, gy + dir.Y * reach - RotationPill.Height / 2);
+        if (!RotationInput.IsKeyboardFocused)
+            RotationInput.Text = Math.Round(AnnotationRotation.Normalize(SelectedRotationAngle())).ToString();
+        _pillHideTimer?.Stop();
+        RotationPill.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Hover over the grip shows the pill; leaving it starts the 500ms grace.</summary>
+    private void UpdateRotationPillHover(Point pos)
+    {
+        if (_rotateThumb is not { Visibility: Visibility.Visible }) { ScheduleHideRotationPill(); return; }
+        if (HitTestHandle(pos) == RotateHandleIndex) PlaceRotationPill();
+        else ScheduleHideRotationPill();
+    }
+
+    private void ScheduleHideRotationPill()
+    {
+        if (RotationPill is null || RotationPill.Visibility != Visibility.Visible) return;
+        _pillHideTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _pillHideTimer.Tick -= OnPillHideTick;
+        _pillHideTimer.Tick += OnPillHideTick;
+        _pillHideTimer.Stop();
+        _pillHideTimer.Start();
+    }
+
+    private void OnPillHideTick(object? sender, EventArgs e)
+    {
+        _pillHideTimer!.Stop();
+        if (RotationInput.IsKeyboardFocused || RotationPill.IsMouseOver || _activeHandle == RotateHandleIndex) return;
+        RotationPill.Visibility = Visibility.Collapsed;
+    }
+
+    private void HideRotationPill()
+    {
+        _pillHideTimer?.Stop();
+        if (RotationPill is null) return;
+        if (RotationInput.IsKeyboardFocused) Viewport.Focus();
+        RotationPill.Visibility = Visibility.Collapsed;
+    }
+
+    private bool IsRotationPillSource(object? source) =>
+        RotationPill is not null && source is DependencyObject d && RotationPill.IsAncestorOf(d);
+
+    private void OnRotationInputText(object sender, TextCompositionEventArgs e) =>
+        e.Handled = !e.Text.All(c => char.IsDigit(c) || c == '-');
+
+    private void OnRotationInputFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        _pillStartAngle = SelectedRotationAngle();
+        _pillHideTimer?.Stop();
+        RotationInput.Dispatcher.BeginInvoke(RotationInput.SelectAll, DispatcherPriority.Input);
+    }
+
+    private void OnRotationInputKey(object sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Enter:
+                CommitRotationInput();
+                Viewport.Focus();
+                break;
+            case Key.Escape:
+                SetSelectedRotationAngle(_pillStartAngle);
+                UpdateSelectionVisual();
+                HideRotationPill();
+                break;
+            case Key.Up or Key.Down:
+                double step = ShapeConstraint.ShiftHeld ? AnnotationRotation.SnapIncrementDegrees : 1;
+                if (e.Key == Key.Down) step = -step;
+                SetSelectedRotationAngle(SelectedRotationAngle() + step);
+                RotationInput.Text = Math.Round(AnnotationRotation.Normalize(SelectedRotationAngle())).ToString();
+                RotationInput.CaretIndex = RotationInput.Text.Length;
+                UpdateSelectionVisual();
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
+    }
+
+    private void OnRotationInputBlur(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        CommitRotationInput();
+        ScheduleHideRotationPill();
+    }
+
+    /// <summary>Applies the typed angle as one undoable step from the angle at focus time.</summary>
+    private void CommitRotationInput()
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
+        double target = double.TryParse(RotationInput.Text, out double typed) ? typed : SelectedRotationAngle();
+        SetSelectedRotationAngle(_pillStartAngle);
+        var before = CaptureResizeSnapshot(fe, meta);
+        SetSelectedRotationAngle(target);
+        var after = CaptureResizeSnapshot(fe, meta);
+        _pillStartAngle = SelectedRotationAngle();
+        if (!after.NearlyEquals(before))
+        {
+            UIElement el = fe;
+            Push(new EditorAction(
+                undo: () => { ApplyResizeSnapshot(el, before); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
+                redo: () => { ApplyResizeSnapshot(el, after); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); }),
+                apply: false);
+        }
+        UpdateSelectionVisual();
+    }
 }
