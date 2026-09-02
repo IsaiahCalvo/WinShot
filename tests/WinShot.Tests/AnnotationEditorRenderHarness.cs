@@ -1,7 +1,8 @@
-﻿using System.IO;
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -336,6 +337,45 @@ public class AnnotationEditorRenderHarness
                 File.WriteAllText(Path.Combine(outDir, "rotation-angle.txt"),
                     $"angle={AnnotationTransform.AngleOf(rotatedRect)} grip={grip} assumedCentre={rectCentre} last={last}");
                 Click(0.02, 0.02);
+
+                // --- Marquee: left→right = window (blue), right→left = crossing (green dashed). ---
+                Check("SelectToolBtn"); Click(0.02, 0.02);
+                void MarqueeDrag(double x0, double y0, double x1, double y1, string midShot, string endShot)
+                {
+                    editor.PointerDown(P(x0, y0)); Pump(1);
+                    for (int i = 1; i <= 8; i++) { double t = i / 8.0; editor.PointerMove(P(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)); Pump(1); }
+                    Shot(midShot);
+                    editor.PointerUp(P(x1, y1)); Pump(3); Shot(endShot);
+                }
+                MarqueeDrag(0.05, 0.20, 0.40, 0.56, "pointer-marquee-window-drag.png", "pointer-marquee-window.png");
+                Click(0.02, 0.02);
+                MarqueeDrag(0.75, 0.56, 0.50, 0.40, "pointer-marquee-crossing-drag.png", "pointer-marquee-crossing.png");
+                Click(0.02, 0.02);
+
+                // --- Undo / redo through the editor's own history. ---
+                void History(string method, int times)
+                {
+                    var m = typeof(EditorWindow).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    for (int k = 0; k < times; k++)
+                    {
+                        var task = (Task)m.Invoke(editor, null)!;
+                        for (int i = 0; i < 100 && !task.IsCompleted; i++) Pump(2);
+                        Pump(3);
+                    }
+                }
+                History("UndoAsync", 2); Shot("pointer-undo-2.png");
+                History("RedoAsync", 2); Shot("pointer-redo-2.png");
+
+                // --- Crop: enter, drag a region, adjust a corner, apply, undo. ---
+                ((Button)editor.FindName("CropUtilityBtn")!).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Pump(4);
+                Drag(new[] { (0.15, 0.20), (0.70, 0.70) }); Shot("pointer-crop-drag.png");
+                DragAbs(new Point(0.70 * W, 0.70 * H), new Point(0.76 * W, 0.76 * H)); Shot("pointer-crop-adjusted.png");
+                var cropPanel = (StackPanel)editor.FindName("CropPanel")!;
+                var applyCrop = cropPanel.Children.OfType<Button>().First(b => System.Windows.Automation.AutomationProperties.GetName(b) == "Apply crop");
+                applyCrop.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Pump(40); Shot("pointer-crop-applied.png");
+                History("UndoAsync", 1); Pump(20); Shot("pointer-crop-undone.png");
 
                 Check("SpotlightToolBtn"); Drag(new[] { (0.05, 0.05), (0.40, 0.30) }); Pump(30);
                 Shot("pointer-spotlight.png");
