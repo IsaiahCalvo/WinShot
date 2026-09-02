@@ -184,8 +184,17 @@ public partial class SettingsWindow : Window
     private void CenterOnWorkArea()
     {
         var area = SystemParameters.WorkArea;
-        double left = area.Left + (area.Width - Width) / 2;
-        double top = area.Top + (area.Height - Height) / 2;
+
+        // WorkArea is in DIPs, so a 720-DIP window is taller than a 1080p work area at 150%
+        // scaling and centring pushes the title bar off the top of the screen. Shrink to fit
+        // first — the sections scroll anyway — then clamp so the window always starts on-screen.
+        if (Height > area.Height)
+            Height = Math.Max(MinHeight, area.Height);
+        if (Width > area.Width)
+            Width = Math.Max(MinWidth, area.Width);
+
+        double left = Math.Max(area.Left, area.Left + (area.Width - Width) / 2);
+        double top = Math.Max(area.Top, area.Top + (area.Height - Height) / 2);
 
         IntPtr hwnd = new WindowInteropHelper(this).Handle;
         if (IsVisible && hwnd != IntPtr.Zero &&

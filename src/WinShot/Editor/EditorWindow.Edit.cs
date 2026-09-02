@@ -605,6 +605,9 @@ public partial class EditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Editor copy failed", ex);
+            // Without this the glyph simply never becomes a checkmark and the user pastes
+            // whatever was on the clipboard before.
+            ThemedMessageDialog.Show(this, "Copy failed", "WinShot could not put this image on the clipboard. Another app may be holding it — try again in a moment.");
         }
     }
 
@@ -644,6 +647,7 @@ public partial class EditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Editor pin failed", ex);
+            ThemedMessageDialog.Show(this, "Pin failed", "WinShot could not pin this image to the screen.");
         }
     }
 
@@ -703,6 +707,9 @@ public partial class EditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Editor save failed", ex);
+            ThemedMessageDialog.Show(this, "Save failed", ex is UnauthorizedAccessException or System.IO.IOException
+                ? "WinShot could not write to that folder. Check the folder still exists and you have permission to write to it."
+                : "WinShot could not save this image.");
         }
     }
 

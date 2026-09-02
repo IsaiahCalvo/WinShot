@@ -66,6 +66,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private string? _flashMessage;
     private double _flashAmount;
     private WF.Timer? _flashTimer;
+    private IDisposable? _flashTimerScope;
     private SD.Point _flashCursor;
     private bool _hovering;
     private int _hoverButton = -1;
@@ -417,6 +418,10 @@ public sealed class FastQuickActionsWindow : WF.Form
             StopExitMotionTimer();
             StopStackMotionTimer();
             StopAutoCloseTimer();
+            // A card disposed mid-flash used to leave its timer running; now that the flash
+            // also holds the high-resolution clock, leaking it would keep timeBeginPeriod(1)
+            // raised for the life of the process.
+            EndStatusFlash();
             HideActionTooltip();
             _tooltipTimer.Dispose();
             _overflowMenu.Dispose();
@@ -524,7 +529,11 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         _flashTimer?.Stop();
         _flashTimer?.Dispose();
-        _flashTimer = new WF.Timer { Interval = 30 };
+        // Frame interval and timer scope match the exit/restack loops below; at 30 ms with
+        // Windows' default ~15.6 ms tick this ran at ~32 fps and coalesced. Hold and fade
+        // timings are unchanged — only the smoothness.
+        _flashTimerScope ??= Motion.Acquire();
+        _flashTimer = new WF.Timer { Interval = Motion.FrameIntervalMs };
         long start = Environment.TickCount64;
         _flashTimer.Tick += (_, _) =>
         {
@@ -538,7 +547,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 EndStatusFlash();
                 return;
             }
-            _flashAmount = 1.0 - Motion.EaseInOutSine(fade);
+            _flashAmount = 1.0 - Motion.EaseOutCubic(fade);
             if (!_closed && !IsDisposed)
                 Invalidate(_cardRect);
         };
@@ -569,6 +578,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         _flashTimer?.Stop();
         _flashTimer?.Dispose();
         _flashTimer = null;
+        _flashTimerScope?.Dispose();
+        _flashTimerScope = null;
         _flashAmount = 0;
         _flashMessage = null;
         if (_closed || IsDisposed)

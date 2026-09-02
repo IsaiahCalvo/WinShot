@@ -31,11 +31,13 @@ public static class ThemePalette
 
     // Text.
     public static readonly SD.Color TextPrimary = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
-    public static readonly SD.Color TextSecondary = SD.Color.FromArgb(0xB8, 0xB8, 0xBC);
+    // Theme.xaml paints secondary text as #B3FFFFFF; this is that 70% white composited
+    // over ToolbarBg, so a WinForms label matches the WPF one beside it.
+    public static readonly SD.Color TextSecondary = SD.Color.FromArgb(0xBE, 0xBE, 0xBF);
 
     // White-alpha interaction fills / hairlines (GDI+ blends the alpha over dark).
     public static readonly SD.Color HoverFill = SD.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF);
-    public static readonly SD.Color Border = SD.Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF);
+    public static readonly SD.Color Border = SD.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF);
     public static readonly SD.Color BorderStrong = SD.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF);
 
     private static readonly bool HasFluentIcons = IsFontInstalled("Segoe Fluent Icons");

@@ -30,7 +30,7 @@ namespace WinShot.Editor.Background;
 public partial class BackgroundComposerWindow : Window
 {
     private static readonly string[] SolidSwatchHexes =
-        { "#FFFFFF", "#F2F2F7", "#1E1E1E", "#2D7DFF", "#34C759", "#AF52DE" };
+        { "#FFFFFF", "#F2F2F7", "#1E1E1E", "#0A84FF", "#34C759", "#AF52DE" };
 
     private readonly SD.Bitmap _source;
     private readonly SettingsService _settings;

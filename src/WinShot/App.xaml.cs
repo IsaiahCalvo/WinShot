@@ -1407,6 +1407,17 @@ public partial class App : Application
 
     private async void EditFromHistory(string path)
     {
+        // Videos route to the video editor. Branching here rather than at the call sites so
+        // History, the tray, and the winshot://edit: command all reach it the same way — the
+        // completion card used to be the only door to this window.
+        if (Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+        {
+            var editor = new VideoEditorWindow(path, _settings, _history);
+            TrackFirstRender(editor, "video editor window");
+            editor.Show();
+            return;
+        }
+
         if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
         {
             var win = EditorWindow.CreateForCapture(bmp, _settings, _history);

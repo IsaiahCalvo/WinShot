@@ -206,7 +206,7 @@
                                 <ContextMenu Style="{StaticResource DarkContextMenu}">
                                     <MenuItem Header="Restore to Quick Access" Click="OnRestore" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
                                     <MenuItem Header="Copy" Click="OnCopy" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
-                                    <MenuItem Header="Edit" Click="OnEdit" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
+                                    <MenuItem Header="Edit" Click="OnEdit" Visibility="{Binding EditableVisibility}" Style="{StaticResource DarkMenuItem}"/>
                                     <MenuItem Header="Pin" Click="OnPin" Visibility="{Binding PinVisibility}" Style="{StaticResource DarkMenuItem}"/>
                                     <MenuItem Header="Open" Click="OnOpen" Style="{StaticResource DarkMenuItem}"/>
                                     <MenuItem Header="Reveal in Explorer" Click="OnReveal" Style="{StaticResource DarkMenuItem}"/>
@@ -252,7 +252,7 @@
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnCopy" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Copy screenshot">
                                                     <StackPanel><TextBlock Text="&#xE8C8;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Copy" FontSize="10" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
-                                                <Button Style="{StaticResource OverlayActionButton}" Click="OnEdit" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Edit screenshot">
+                                                <Button Style="{StaticResource OverlayActionButton}" Click="OnEdit" Visibility="{Binding EditableVisibility}" AutomationProperties.Name="Edit capture">
                                                     <StackPanel><TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Edit" FontSize="10" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnPin" Visibility="{Binding PinVisibility}" AutomationProperties.Name="Pin screenshot">

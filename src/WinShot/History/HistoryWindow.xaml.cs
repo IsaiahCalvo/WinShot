@@ -973,7 +973,8 @@ public partial class HistoryWindow : Window
 
     private void OnEdit(object sender, RoutedEventArgs e)
     {
-        if (GetItem(sender) is { IsImage: true } item)
+        // Videos are editable too — App.EditFromHistory routes them to the video editor.
+        if (GetItem(sender) is { IsEditable: true } item)
             EditRequested?.Invoke(item.FilePath);
     }
 
@@ -1271,6 +1272,11 @@ public sealed class HistoryItem : INotifyPropertyChanged
     private static string FormatSize(long bytes) => FormatFileSize(bytes);
 
     public Visibility ImageOnlyVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Images open the annotation editor; MP4s open the video editor.</summary>
+    public bool IsEditable => IsImage || IsVideo;
+
+    public Visibility EditableVisibility => IsEditable ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MediaOnlyVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
     public Visibility PinVisibility => CanPin ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ThumbnailVisibility => IsImage || IsGif ? Visibility.Visible : Visibility.Collapsed;

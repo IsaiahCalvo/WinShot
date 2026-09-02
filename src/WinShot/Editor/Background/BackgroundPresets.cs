@@ -12,7 +12,7 @@ public static class BackgroundPresets
 {
     public static IReadOnlyList<(string Name, Brush Brush)> All { get; } = new List<(string, Brush)>
     {
-        ("Azure", Linear("#2D7DFF", "#6DD5ED")),
+        ("Azure", Linear("#0A84FF", "#6DD5ED")),
         ("Deep Ocean", Linear("#0F2027", "#203A43", "#2C5364")),
         ("Purple Haze", Linear("#CC2B5E", "#753A88")),
         ("Lavender", Linear("#9796F0", "#FBC7D4")),

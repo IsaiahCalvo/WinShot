@@ -353,7 +353,7 @@
                     <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
                         <Path x:Name="CropDim" Fill="#66000000" Visibility="Collapsed"/>
                         <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                                   StrokeDashArray="4 3" Fill="#114DA3FF" Visibility="Collapsed"/>
+                                   StrokeDashArray="4 3" Fill="#110A84FF" Visibility="Collapsed"/>
                         <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
                                    StrokeDashArray="4 3" Visibility="Collapsed"/>
                         <!-- Rubber band. Stroke/fill are set per drag: blue solid dragging
