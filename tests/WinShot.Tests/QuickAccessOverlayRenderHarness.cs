@@ -41,6 +41,13 @@ public class QuickAccessOverlayRenderHarness
                 menu.DrawToBitmap(bitmap, new SD.Rectangle(0, 0, menu.Width, menu.Height));
                 bitmap.Save(Path.Combine(outDir, "context-menu.png"), SD.Imaging.ImageFormat.Png);
 
+                // Hover state: the highlight has to inset evenly from both menu edges.
+                menu.Items.OfType<QuickActionMenuItem>().Skip(5).First().Select();
+                menu.Refresh();
+                using var hovered = new SD.Bitmap(menu.Width, menu.Height);
+                menu.DrawToBitmap(hovered, new SD.Rectangle(0, 0, menu.Width, menu.Height));
+                hovered.Save(Path.Combine(outDir, "context-menu-hover.png"), SD.Imaging.ImageFormat.Png);
+
                 // The Share submenu, when this machine has Blip and the row expands.
                 foreach (WF.ToolStripItem item in menu.Items)
                 {

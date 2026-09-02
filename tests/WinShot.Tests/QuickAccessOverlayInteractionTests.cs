@@ -217,6 +217,36 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
+    public void MenuRowsShareOneWidthAndGutterEvenly()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var menu = (WF.ContextMenuStrip)typeof(FastQuickActionsWindow)
+                .GetField("_overflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            menu.PerformLayout();
+
+            // Even gutters: the highlight spans a row, so an uneven pad shows as a
+            // highlight that touches one border and stops short of the other.
+            Assert.Equal(menu.Padding.Left, menu.Padding.Right);
+
+            // One width for every row. The width is cached, and it was once cached
+            // mid-build, leaving early rows wide and later ones short.
+            int[] widths = menu.Items.Cast<WF.ToolStripItem>()
+                .Where(i => i is not WF.ToolStripSeparator)
+                .Select(i => i.GetPreferredSize(SD.Size.Empty).Width)
+                .Distinct()
+                .ToArray();
+            Assert.Single(widths);
+            Assert.True(
+                widths[0] + menu.Padding.Horizontal <= menu.GetPreferredSize(SD.Size.Empty).Width,
+                "the drop-down must be wide enough for its rows");
+        });
+    }
+
+    [Fact]
     public void EveryIconedRowResolvesItsGlyph()
     {
         RunSta(() =>

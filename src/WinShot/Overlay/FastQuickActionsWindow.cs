@@ -168,7 +168,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         MouseEnter += (_, _) => SetHovering(true);
         MouseLeave += (_, _) => SetHovering(false);
         KeyDown += OnOverlayKeyDown;
-        Shown += (_, _) => QueuePreviewLoad();
+        Shown += (_, _) =>
+        {
+            QueuePreviewLoad();
+            BeginInvoke(new Action(WarmOverflowMenu));
+        };
         FormClosed += (_, _) =>
         {
             _closed = true;
@@ -771,17 +775,25 @@ public sealed class FastQuickActionsWindow : WF.Form
             menuSize,
             WF.Screen.FromRectangle(RectangleToScreen(_cardRect)).WorkingArea);
 
+    // Probed once per process. Neither answer changes while WinShot runs, and both were
+    // costing every capture: the WinRT share contract has to activate, and the Blip probe
+    // stats every directory on PATH.
+    private static bool? _shareSupported;
+    private static bool? _blipInstalled;
+
     private static bool TryIsShareSupported()
     {
+        if (_shareSupported is { } cached)
+            return cached;
         try
         {
-            return HistoryShareService.IsWindowsShareSupported();
+            return (_shareSupported = HistoryShareService.IsWindowsShareSupported()).Value;
         }
         catch (Exception ex)
         {
             // The share contract is unavailable on some Server SKUs; the row just drops out.
             Log.Error("Windows share support probe failed", ex);
-            return false;
+            return (_shareSupported = false).Value;
         }
     }
 
@@ -814,16 +826,35 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private static bool TryIsBlipInstalled()
+    /// <summary>
+    /// Builds the menu's window and row layout while the card is sitting idle. Doing it
+    /// on the right-click instead is what made the menu take a beat to appear.
+    /// </summary>
+    private void WarmOverflowMenu()
     {
+        if (_closed || IsDisposed) return;
         try
         {
-            return HistoryShareService.IsBlipInstalled();
+            _overflowMenu.Warm();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to warm the quick-actions menu", ex);
+        }
+    }
+
+    private static bool TryIsBlipInstalled()
+    {
+        if (_blipInstalled is { } cached)
+            return cached;
+        try
+        {
+            return (_blipInstalled = HistoryShareService.IsBlipInstalled()).Value;
         }
         catch (Exception ex)
         {
             Log.Error("Blip install probe failed", ex);
-            return false;
+            return (_blipInstalled = false).Value;
         }
     }
 

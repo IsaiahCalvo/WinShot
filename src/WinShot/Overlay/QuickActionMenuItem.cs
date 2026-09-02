@@ -26,6 +26,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 
     private readonly Action _action;
     private readonly SD.Bitmap? _glyph;
+    private SD.Size? _ownSize;
 
     internal QuickActionMenuItem(string id, string text, Action action)
         : base(text)
@@ -54,40 +55,39 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
         _action();
     }
 
+    /// <summary>
+    /// Every row reports the widest row's width: overriding this opts out of the
+    /// drop-down's own equalizing pass, and rows of different widths would put each
+    /// shortcut at its own right edge instead of in one column. Both this and
+    /// <see cref="OwnSize"/> are cached — layout asks repeatedly, and measuring every
+    /// sibling on every ask made opening the menu visibly slow.
+    /// </summary>
     public override SD.Size GetPreferredSize(SD.Size constrainingSize)
     {
         SD.Size own = OwnSize();
-        // Every row reports the widest row's width. Overriding GetPreferredSize opts out
-        // of the drop-down's own equalizing pass, and rows of different widths would put
-        // each shortcut at its own right edge instead of in one column.
-        int width = own.Width;
-        if (Owner is not null)
-        {
-            foreach (var sibling in Owner.Items)
-            {
-                if (sibling is QuickActionMenuItem row)
-                    width = Math.Max(width, row.OwnSize().Width);
-            }
-        }
-        return new SD.Size(width, own.Height);
+        int width = Owner is QuickActionsContextMenu menu ? menu.RowWidth : own.Width;
+        return new SD.Size(Math.Max(width, own.Width), own.Height);
     }
 
-    private SD.Size OwnSize()
+    internal SD.Size OwnSize()
     {
+        if (_ownSize is { } cached)
+            return cached;
         SD.Size text = Measure(Text ?? string.Empty);
         int width = TextLeft + text.Width + PadRight;
         if (Shortcut.Length > 0)
             width += ShortcutGap + Measure(Shortcut).Width;
         if (HasDropDownItems)
             width += ShortcutGap + ArrowWidth;
-        return new SD.Size(width, Math.Max(MinHeight, text.Height + 8));
+        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 8));
+        return _ownSize.Value;
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         // Deliberately not base.OnPaint: that is the layout this item exists to replace.
         var g = e.Graphics;
-        Owner?.Renderer.DrawMenuItemBackground(new WF.ToolStripItemRenderEventArgs(g, this));
+        DrawHighlight(g);
 
         if (_glyph is not null)
             g.DrawImage(_glyph, PadLeft, (Height - GlyphSize) / 2, GlyphSize, GlyphSize);
@@ -116,6 +116,27 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
                 ThemePalette.TextSecondary,
                 WF.TextFormatFlags.NoPrefix | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Right);
         }
+    }
+
+    /// <summary>
+    /// The hover/keyboard highlight: a rounded bar spanning the row, which is the full
+    /// width the drop-down gives its items, so it insets evenly from both edges instead
+    /// of the stock block that ran to one border and stopped short of the other.
+    /// </summary>
+    private void DrawHighlight(SD.Graphics g)
+    {
+        if (!Selected && !Pressed && !(HasDropDownItems && DropDown.Visible))
+            return;
+        if (Width <= 2 || Height <= 2)
+            return;
+
+        SmoothingMode previous = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        var bounds = new SD.Rectangle(0, 1, Width, Height - 2);
+        using var path = GdiPaths.RoundedRect(bounds, Math.Min(6, bounds.Height / 2));
+        using var fill = new SD.SolidBrush(SD.Color.FromArgb(66, 66, 70));
+        g.FillPath(fill, path);
+        g.SmoothingMode = previous;
     }
 
     /// <summary>The chevron that says this row expands. Drawn here because the row opts out
@@ -155,13 +176,68 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
 {
     private const int CornerRadius = 8;
+    private const int HorizontalGutter = 4;
+
+    private int? _rowWidth;
 
     internal QuickActionsContextMenu()
     {
         // The rows own their left inset; the drop-down must not add one of its own.
         ShowImageMargin = false;
-        Padding = new WF.Padding(0, 2, 0, 2);
         Renderer = new RoundedMenuRenderer();
+    }
+
+    /// <summary>
+    /// Even gutters on both sides. ToolStripDropDownMenu otherwise recomputes its own
+    /// padding during layout — 8 on the left, 1 on the right — which left the highlight
+    /// touching one border and short of the other.
+    /// </summary>
+    protected override WF.Padding DefaultPadding => new(HorizontalGutter, 3, HorizontalGutter, 3);
+
+    /// <summary>The width every row reports, measured once. Layout asks constantly.</summary>
+    internal int RowWidth
+    {
+        get
+        {
+            if (_rowWidth is { } cached)
+                return cached;
+            int width = 0;
+            foreach (WF.ToolStripItem item in Items)
+            {
+                if (item is QuickActionMenuItem row)
+                    width = Math.Max(width, row.OwnSize().Width);
+            }
+            _rowWidth = width;
+            return width;
+        }
+    }
+
+    // The cache must not outlive the row list: layout runs while rows are still being
+    // added, and a width measured then is short of the finished menu's.
+    protected override void OnItemAdded(WF.ToolStripItemEventArgs e)
+    {
+        _rowWidth = null;
+        base.OnItemAdded(e);
+    }
+
+    protected override void OnItemRemoved(WF.ToolStripItemEventArgs e)
+    {
+        _rowWidth = null;
+        base.OnItemRemoved(e);
+    }
+
+    /// <summary>Creates the window and lays the rows out now, so the first right-click
+    /// does not pay for it. Called while the card is idle.</summary>
+    internal void Warm()
+    {
+        _ = RowWidth;
+        _ = Handle;
+        PerformLayout();
+        foreach (WF.ToolStripItem item in Items)
+        {
+            if (item is WF.ToolStripMenuItem { HasDropDownItems: true, DropDown: QuickActionsContextMenu child })
+                child.Warm();
+        }
     }
 
     private int Radius => (int)Math.Round(CornerRadius * DeviceDpi / 96.0);
@@ -169,13 +245,7 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     public override SD.Size GetPreferredSize(SD.Size proposedSize)
     {
         SD.Size size = base.GetPreferredSize(proposedSize);
-        int rows = 0;
-        foreach (WF.ToolStripItem item in Items)
-        {
-            if (item is QuickActionMenuItem row)
-                rows = Math.Max(rows, row.GetPreferredSize(SD.Size.Empty).Width);
-        }
-        size.Width = Math.Max(size.Width, rows + Padding.Horizontal);
+        size.Width = Math.Max(size.Width, RowWidth + Padding.Horizontal);
         return size;
     }
 
@@ -205,6 +275,13 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     {
         protected override void OnRenderToolStripBorder(WF.ToolStripRenderEventArgs e)
         {
+        }
+
+        /// <summary>The rows draw their own rounded highlight.</summary>
+        protected override void OnRenderMenuItemBackground(WF.ToolStripItemRenderEventArgs e)
+        {
+            if (e.Item is not QuickActionMenuItem)
+                base.OnRenderMenuItemBackground(e);
         }
     }
 }
