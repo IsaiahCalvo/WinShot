@@ -115,27 +115,46 @@ internal static class AnnotationFactory
         _ => 0,
     };
 
+    /// <summary>
+    /// Survey strokes the five non-solid-triangle heads at <c>max(2, strokeWidth)</c> so they
+    /// stay visible on a 1px line, with round joins/caps and no dash
+    /// (lineRenderHelpers.js:110-176). WPF gives one Path a single StrokeThickness and a
+    /// single dash array, so the head cannot simply share the shaft's pen. Instead the head
+    /// outline is WIDENED by that pen and appended as a FILLED figure: it paints at the 2px
+    /// floor, keeps the round join/cap shape, and — being a fill — is immune to the shaft's
+    /// dash pattern, all without a second Path threaded through nine call sites.
+    /// </summary>
     private static void AppendHead(
         PathGeometry geometry, Point tip, double angle, double headSize, double thickness, ArrowheadStyle style)
     {
+        if (style == ArrowheadStyle.None) return;
+        if (style == ArrowheadStyle.SolidTriangle)
+        {
+            double back = headSize / 3;
+            double half = headSize / 2;
+            Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
+            Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
+            var solid = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = true };
+            solid.Segments.Add(new LineSegment(tip, isStroked: false));
+            solid.Segments.Add(new LineSegment(right, isStroked: false));
+            geometry.Figures.Add(solid);
+            return;
+        }
+
+        var outline = new PathGeometry();
         switch (style)
         {
-            case ArrowheadStyle.None:
-                return;
-            case ArrowheadStyle.SolidTriangle:
             case ArrowheadStyle.OpenTriangle:
             {
-                bool filled = style == ArrowheadStyle.SolidTriangle;
                 double back = headSize / 3;
                 double half = headSize / 2;
                 Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
                 Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
-                Point nose = tip;
-                var fig = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = filled };
-                fig.Segments.Add(new LineSegment(nose, isStroked: !filled));
-                fig.Segments.Add(new LineSegment(right, isStroked: !filled));
-                geometry.Figures.Add(fig);
-                return;
+                var fig = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = false };
+                fig.Segments.Add(new LineSegment(tip, isStroked: true));
+                fig.Segments.Add(new LineSegment(right, isStroked: true));
+                outline.Figures.Add(fig);
+                break;
             }
             case ArrowheadStyle.VShape:
             {
@@ -145,8 +164,8 @@ internal static class AnnotationFactory
                 var fig = new PathFigure { StartPoint = arm1, IsClosed = false, IsFilled = false };
                 fig.Segments.Add(new LineSegment(tip, isStroked: true));
                 fig.Segments.Add(new LineSegment(arm2, isStroked: true));
-                geometry.Figures.Add(fig);
-                return;
+                outline.Figures.Add(fig);
+                break;
             }
             case ArrowheadStyle.OpenCircle:
             {
@@ -157,8 +176,8 @@ internal static class AnnotationFactory
                     tip + new Vector(-r, 0), new Size(r, r), 0, false, SweepDirection.Clockwise, true));
                 fig.Segments.Add(new ArcSegment(
                     start, new Size(r, r), 0, false, SweepDirection.Clockwise, true));
-                geometry.Figures.Add(fig);
-                return;
+                outline.Figures.Add(fig);
+                break;
             }
             case ArrowheadStyle.HorizontalLine:
             {
@@ -166,9 +185,29 @@ internal static class AnnotationFactory
                 var perp = new Vector(-Math.Sin(angle), Math.Cos(angle)) * half;
                 var fig = new PathFigure { StartPoint = tip + perp, IsClosed = false, IsFilled = false };
                 fig.Segments.Add(new LineSegment(tip - perp, isStroked: true));
-                geometry.Figures.Add(fig);
-                return;
+                outline.Figures.Add(fig);
+                break;
             }
+            default:
+                return;
+        }
+
+        var pen = new Pen(Brushes.Black, Math.Max(2, thickness))
+        {
+            LineJoin = PenLineJoin.Round,
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+        };
+        var widened = outline.GetWidenedPathGeometry(pen);
+        foreach (var fig in widened.Figures)
+        {
+            var copy = fig.Clone();
+            copy.IsFilled = true;
+            // The head shares the arrow's Path, whose Stroke paints the SHAFT. Leaving the
+            // outline stroked as well would re-widen it by the shaft pen and fill the open
+            // circle's / open triangle's hole back in, so the outline is fill-only.
+            foreach (var seg in copy.Segments) seg.IsStroked = false;
+            geometry.Figures.Add(copy);
         }
     }
 
@@ -626,14 +665,17 @@ internal static class AnnotationFactory
     };
 
     public static Shape CreateBoxShape(
-        string type, Rect bounds, Color stroke, Color fill, double thickness, LineBorderStyle lineStyle)
+        string type, Rect bounds, Color stroke, Color fill, double thickness, LineBorderStyle lineStyle,
+        double cloudIntensity = CloudPath.DefaultIntensity)
     {
         Shape shape;
         if (type == AnnotationData.TypeRectangle && lineStyle == LineBorderStyle.Cloud)
         {
             shape = new Path
             {
-                Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height))),
+                Data = CloudPath.ForRectangle(
+                    new Rect(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height)),
+                    cloudIntensity, thickness),
             };
         }
         else

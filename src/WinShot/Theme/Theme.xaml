@@ -335,9 +335,12 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToolTip">
-                    <!-- Margin 12 leaves room for the 12px-deep shadow to render. -->
+                    <!-- Survey's chip sits exactly 10px below (or 8px left of) its target
+                         (Tooltip.jsx:86-98); any template margin would stack on top of the
+                         VerticalOffset/HorizontalOffset and push it further out, so it is 0.
+                         The drop shadow needs no margin room - it paints outside the border. -->
                     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="12">
+                            BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="0">
                         <Border.Effect>
                             <!-- TOOLTIP_SURFACE box-shadow: 0 12px 30px rgba(0,0,0,0.5) -->
                             <DropShadowEffect BlurRadius="30" ShadowDepth="12" Direction="270" Opacity="0.5"/>

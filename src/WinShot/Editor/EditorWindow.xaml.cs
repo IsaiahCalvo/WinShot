@@ -73,6 +73,14 @@ public partial class EditorWindow : Window
     private bool _syncingSizeBox;
     private bool _syncingContext;
     private string _textFontFamily = "Helvetica";
+
+    /// <summary>
+    /// Survey's callout <c>style.fontColor</c> (Callout/types.js:184) - the text colour is its
+    /// own field, independent of the border colour, and the renderer feeds it straight to the
+    /// label (svgAnnotationRenderers.jsx:1643). Null = "not chosen", which falls back to the
+    /// stroke colour so legacy projects and freshly drawn callouts keep the old look.
+    /// </summary>
+    private Color? _textFontColor;
     private bool _textBold;
     private bool _textItalic;
     private bool _textUnderline;
@@ -219,6 +227,8 @@ public partial class EditorWindow : Window
 
         Viewport.LostMouseCapture += (_, _) =>
         {
+            // A counter drag owns PointerMove outright, so it must never survive a lost capture.
+            CancelCounterDrag();
             AbortDrag();
             AbortPan();
             AbortMove();
@@ -987,6 +997,12 @@ public partial class EditorWindow : Window
         // mounted (AppShell.jsx:1756, bridge cleared on commit/cancel/unmount,
         // TextEditOverlay.jsx:324-330, :400-402, :432).
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle) && _activeText is not null);
+        // Survey's Aa button is NOT part of the portalled strip: it renders in the top row
+        // whenever contextTool is text or callout, or a rich-text session is live
+        // (AppShell.jsx:2646-2649), and is disabled - never hidden - with nothing editable.
+        if (TextEditPanel is not null)
+            TextEditPanel.Visibility = Show(
+                chrome is EditorTool.Text or EditorTool.Callout || _activeText is not null);
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
@@ -1003,6 +1019,7 @@ public partial class EditorWindow : Window
             StepStartInput.Text = _nextStep.ToString(CultureInfo.InvariantCulture);
         SyncTextEditButton();
         SyncColorWellIndicator();
+        SyncFontColorSwatch();
         ThicknessLabel.Visibility = Visibility.Collapsed;
         if (Has(EditorContextControls.Thickness))
             SyncSizeBox();
@@ -1279,6 +1296,11 @@ public partial class EditorWindow : Window
             }
             if (!string.IsNullOrWhiteSpace(meta.FontFamily))
                 _textFontFamily = meta.FontFamily;
+            // fontColor follows the selection like every other rich-text field; absent means
+            // "never recoloured", which is the stroke-colour fallback, so clear it.
+            _textFontColor = meta.FontColor is string fcHex && TryParseColor(fcHex, out var fcSel)
+                ? fcSel
+                : null;
             _textBold = meta.Bold ?? false;
             _textItalic = meta.Italic ?? false;
             _textUnderline = meta.Underline ?? false;
@@ -1288,6 +1310,9 @@ public partial class EditorWindow : Window
             if (meta.Style is string styleName && Enum.TryParse(styleName, out TextStyle textStyle))
                 _textStyle = textStyle;
             _lineStyle = AnnotationStyle.LineStyleFrom(meta);
+            // Survey's Bump field follows the selection like every other style input.
+            if (meta.CloudIntensity is double bump)
+                _cloudIntensity = CloudPath.ClampIntensity(bump);
             (_arrowhead, _startArrowhead) = AnnotationStyle.HeadsFrom(meta);
             SelectComboByTag(LineStyleBox, _lineStyle == LineBorderStyle.Cloud ? "cloud" :
                 _lineStyle == LineBorderStyle.Dashed ? "dashed" :
@@ -1736,6 +1761,7 @@ public partial class EditorWindow : Window
         if (FontFamilyBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string family) return;
         _textFontFamily = family;
         if (IsLoaded) RestyleSelectedTextFormat();
+        ReturnFocusToEditor();
     }
 
     private void OnFontSizeBoxChanged(object sender, SelectionChangedEventArgs e)
@@ -1744,6 +1770,76 @@ public partial class EditorWindow : Window
         if (FontSizeBox?.SelectedItem is not ComboBoxItem item || item.Tag is not double size) return;
         _textFontSize = AnnotationStyle.ClampTextSize(size);
         if (IsLoaded) RestyleSelectedTextFormat();
+        ReturnFocusToEditor();
+    }
+
+    /// <summary>
+    /// Survey's rich-text dropdowns are `preserveFocus` (AnnotationDropdown.jsx:139, 164, 175):
+    /// picking a value hands the caret straight back to the still-open editor. WPF's ComboBox
+    /// has to take keyboard focus to run its popup, so the hand-back happens once the pick is in.
+    /// </summary>
+    private void ReturnFocusToEditor()
+    {
+        if (_activeText is not { } editor) return;
+        Dispatcher.BeginInvoke(() => editor.Focus(), DispatcherPriority.Input);
+    }
+
+    // ---- font colour: Survey's dedicated rich-text swatch (AppShell.jsx:1780-1826) ----
+
+    private void OnFontColorClick(object sender, RoutedEventArgs e)
+    {
+        if (FontColorPopup is null) return;
+        BuildFontColorPalette();
+        FontColorPopup.IsOpen = !FontColorPopup.IsOpen;
+    }
+
+    private void BuildFontColorPalette()
+    {
+        if (FontColorGrid is null || FontColorGrid.Children.Count > 0) return;
+        foreach (string hex in FontColorPresets)
+        {
+            if (!TryParseColor(hex, out var c)) continue;
+            var btn = new Button
+            {
+                Width = 22,
+                Height = 22,
+                Margin = new Thickness(2),
+                Cursor = Cursors.Hand,
+                Focusable = false,
+                ToolTip = hex,
+                Tag = c,
+                Background = new SolidColorBrush(c),
+                BorderBrush = (Brush)FindResource("BorderStrongBrush"),
+                BorderThickness = new Thickness(1),
+            };
+            AutomationProperties.SetName(btn, $"Font color {hex}");
+            btn.Click += (_, _) => SetFontColor(c);
+            FontColorGrid.Children.Add(btn);
+        }
+    }
+
+    /// <summary>Survey's CompactColorPicker presets, trimmed to the two rows the swatch shows.</summary>
+    private static readonly string[] FontColorPresets =
+    {
+        "#1E293B", "#000000", "#FFFFFF", "#8D96A6", "#FF3B30", "#FF9500", "#FFCC00", "#34C759",
+        "#00C7BE", "#0A84FF", "#5856D6", "#AF52DE", "#FF2D55", "#A2845E", "#D8A84E", "#248A3D",
+    };
+
+    private void SetFontColor(Color color)
+    {
+        _textFontColor = color;
+        if (FontColorPopup is not null) FontColorPopup.IsOpen = false;
+        SyncFontColorSwatch();
+        if (IsLoaded) RestyleSelectedTextFormat();
+        ReturnFocusToEditor();
+    }
+
+    /// <summary>The swatch shows the chosen font colour, or the stroke colour it falls back to.</summary>
+    private void SyncFontColorSwatch()
+    {
+        if (FontColorIndicator is null) return;
+        FontColorIndicator.Fill = new SolidColorBrush(
+            _textFontColor ?? AnnotationStyle.Opaque(_color));
     }
 
     private void OnTextBoldClick(object sender, RoutedEventArgs e)
@@ -1936,7 +2032,13 @@ public partial class EditorWindow : Window
             : _cloudIntensity;
         _cloudIntensity = CloudPath.ClampIntensity(parsed);
         CloudBumpInput.Text = ((int)_cloudIntensity).ToString(CultureInfo.InvariantCulture);
-        if (IsLoaded) RestyleSelectedLineStyle(_lineStyle);
+        if (!IsLoaded) return;
+        // The bump is per-annotation, so stamp it on the selection before the restyle
+        // rebuilds their geometry from it.
+        foreach (UIElement el in SelectionList())
+            if (el is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeRectangle } m })
+                m.CloudIntensity = _cloudIntensity;
+        RestyleSelectedLineStyle(_lineStyle);
     }
 
     private void OnStepStartKey(object sender, KeyEventArgs e)

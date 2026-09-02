@@ -27,13 +27,16 @@ public partial class EditorWindow : Window
         var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
         double thickness = AnnotationStyle.ClampSize(_shapeSize);
         var lineStyle = _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle;
+        // Survey seeds a new callout's fontColor from the picker (Callout creation commit),
+        // and the field stays independent of the border colour from then on.
+        Color? fontColor = _textFontColor;
         var visual = AnnotationFactory.CreateCallout(
-            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily);
+            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor);
         visual.Tag = AnnotationData.ForCallout(
-            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily);
+            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor);
         AnnotationCanvas.Children.Add(visual);
 
-        var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(stroke), fontSize);
+        var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(fontColor ?? stroke), fontSize);
         StyleCalloutEditor(tb, fontFamily);
         tb.Width = layout.RenderBox.Width;
         tb.Height = layout.RenderBox.Height;
@@ -45,7 +48,13 @@ public partial class EditorWindow : Window
         tb.AcceptsReturn = true;
         tb.TextWrapping = TextWrapping.Wrap;
         HookCalloutGrow(tb, visual);
-        tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
+        tb.LostKeyboardFocus += (_, ev) =>
+        {
+            // Same opt-out the plain-text editor uses: the rich-text strip restyles the OPEN
+            // callout editor instead of committing it (TextEditOverlay.jsx:445-447).
+            if (KeepEditorOpenFor(ev.NewFocus as DependencyObject, tb)) return;
+            CommitCalloutText();
+        };
         tb.PreviewKeyDown += (_, ev) =>
         {
             if (ev.Key == Key.Escape)
@@ -279,7 +288,7 @@ public partial class EditorWindow : Window
         // editor leaves the callout tool, so the next page click commits instead of drawing.
         if (_tool == EditorTool.Callout) CheckToolButton(EditorTool.Select);
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(
-            meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White),
+            CalloutFontColor(meta) ?? (meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White)),
             meta.FontSize ?? CalloutLayout.DefaultFontSize);
         StyleCalloutEditor(tb, meta.FontFamily);
         tb.Width = layout.RenderBox.Width;
@@ -297,7 +306,11 @@ public partial class EditorWindow : Window
         HookCalloutGrow(tb, visual);
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
-        tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
+        tb.LostKeyboardFocus += (_, ev) =>
+        {
+            if (KeepEditorOpenFor(ev.NewFocus as DependencyObject, tb)) return;
+            CommitCalloutText();
+        };
         tb.PreviewKeyDown += (_, ev) =>
         {
             if (ev.Key == Key.Escape)
@@ -411,11 +424,7 @@ public partial class EditorWindow : Window
             // Survey's click-outside commit explicitly opts out of the rich-text toolbar, the
             // mini toolbar and the font-colour picker (TextEditOverlay.jsx:445-447), so
             // B/I/U/S, family, size, colour and align all apply LIVE to the still-open editor.
-            if (IsFormatChrome(ev.NewFocus as DependencyObject))
-            {
-                Dispatcher.BeginInvoke(() => tb.Focus(), DispatcherPriority.Input);
-                return;
-            }
+            if (KeepEditorOpenFor(ev.NewFocus as DependencyObject, tb)) return;
             CommitText();
         };
         tb.PreviewKeyDown += (_, ev) =>
@@ -438,11 +447,32 @@ public partial class EditorWindow : Window
     {
         for (int guard = 0; node is not null && guard < 64; guard++)
         {
-            if (ReferenceEquals(node, SecondaryToolPanel)) return true;
+            // TextStylePanel is REPARENTED into EditorRichTextHost (the 34px sub-row) while an
+            // editor is open, which takes it out of SecondaryToolPanel's tree - so both hosts
+            // and the strip itself have to count, or the guard silently stops firing exactly
+            // when it matters (Survey's [data-rich-text-toolbar] opt-out, TextEditOverlay.jsx:445).
+            if (ReferenceEquals(node, SecondaryToolPanel) || ReferenceEquals(node, TextStylePanel)
+                || ReferenceEquals(node, EditorRichTextHost) || ReferenceEquals(node, TextEditPanel))
+                return true;
             node = LogicalTreeHelper.GetParent(node)
                 ?? (node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : null);
         }
         return false;
+    }
+
+    /// <summary>
+    /// True when focus moved into the format chrome, so the editor must stay open. A ComboBox
+    /// needs the keyboard focus it just took to run its drop-down, so focus is handed back
+    /// from the SelectionChanged handler instead of here; every other control (all
+    /// non-focusable) never gets here at all.
+    /// </summary>
+    private bool KeepEditorOpenFor(DependencyObject? newFocus, TextBox tb)
+    {
+        if (!IsFormatChrome(newFocus)) return false;
+        if (newFocus is not System.Windows.Controls.Primitives.Selector
+            && newFocus is not ComboBoxItem)
+            Dispatcher.BeginInvoke(() => tb.Focus(), DispatcherPriority.Input);
+        return true;
     }
 
     private void GrowTextEditor(TextBox tb, double floorH)
@@ -730,25 +760,249 @@ public partial class EditorWindow : Window
         return overlap is not null && !overlap.IsEmpty() && overlap.Bounds.Width > 0 && overlap.Bounds.Height > 0;
     }
 
-    private void PlaceStep(Point pos)
+    // ------------------------------------------- counter press-drag-release placement
+
+    /// <summary>
+    /// Survey's counter drag (PDFViewer.jsx:31727-31790, 26079-26257): a counter is not
+    /// dropped on click, it is placed by press → slide → release, and holding Shift mid-drag
+    /// freezes the nub TIP and swings the badge body around it ("slide → Shift-twist → slide").
+    /// Escape cancels outright. The same state machine drives a committed counter's
+    /// Shift-orbit (useSVGInteraction.js:488-533, 1199-1263), because the geometry is identical:
+    /// the only difference is whether release commits an add or a move.
+    /// </summary>
+    private sealed class CounterDrag
     {
-        int number = _nextStep;
-        bool letters = _stepLetters;
-        var badge = AnnotationFactory.CreateStepBadge(number, _color, _thickness, letters);
-        double left = pos.X - badge.Width / 2, top = pos.Y - badge.Height / 2;
-        Canvas.SetLeft(badge, left);
-        Canvas.SetTop(badge, top);
-        var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness, ++_stepClock);
-        // Record the caption mode so project reload rebuilds the same number/letter badge.
-        if (letters) data.Style = "Letter";
-        badge.Tag = data;
-        Push(new EditorAction(
-            undo: () => AnnotationCanvas.Children.Remove(badge),
-            redo: () =>
+        public required Grid Badge { get; init; }
+        public required bool IsNew { get; init; }
+        public required double Radius { get; init; }
+        public required double TipDistance { get; init; }
+        public double BodyX, BodyY, Angle;
+        public bool ShiftActive;
+        public double TipX, TipY;
+        public double CursorOffsetX, CursorOffsetY;
+        public double LastCursorX, LastCursorY;
+        public Point StartBody;
+        public Point StartCursor;
+        public double StartAngle;
+        public bool Moved;
+    }
+
+    private CounterDrag? _counterDrag;
+
+    /// <summary>Survey's ~3px gate: below it a Shift-press on a committed counter is still a
+    /// multi-select toggle, not an orbit (useSVGInteraction.js:490-494).</summary>
+    private const double CounterOrbitThreshold = 3;
+
+    private void BeginStepPlacement(Point pos)
+    {
+        double radius = CounterGeometry.RadiusFor(_thickness);
+        var badge = AnnotationFactory.CreateStepBadge(_nextStep, _color, _thickness, _stepLetters);
+        AnnotationCanvas.Children.Add(badge);
+        _counterDrag = new CounterDrag
+        {
+            Badge = badge,
+            IsNew = true,
+            Radius = radius,
+            TipDistance = CounterGeometry.TipDistance(radius),
+            Angle = CounterGeometry.DefaultPointerAngle,
+            StartAngle = CounterGeometry.DefaultPointerAngle,
+            StartBody = pos,
+            StartCursor = pos,
+        };
+        Viewport.CaptureMouse();
+        ApplyCounterDragMove(pos);
+    }
+
+    /// <summary>Starts an orbit/slide drag on an ALREADY committed counter.</summary>
+    private void BeginCounterOrbit(Grid badge, AnnotationData meta, Point cursor, bool shift)
+    {
+        double radius = CounterGeometry.RadiusFor(meta.Thickness ?? _thickness);
+        double tipDist = CounterGeometry.TipDistance(radius);
+        Vector off = ElementOffset(badge);
+        double bodyX = (double.IsNaN(Canvas.GetLeft(badge)) ? 0 : Canvas.GetLeft(badge)) + off.X + tipDist;
+        double bodyY = (double.IsNaN(Canvas.GetTop(badge)) ? 0 : Canvas.GetTop(badge)) + off.Y + tipDist;
+        double angle = meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle;
+        _counterDrag = new CounterDrag
+        {
+            Badge = badge,
+            IsNew = false,
+            Radius = radius,
+            TipDistance = tipDist,
+            BodyX = bodyX,
+            BodyY = bodyY,
+            Angle = angle,
+            StartBody = new Point(bodyX, bodyY),
+            StartCursor = cursor,
+            StartAngle = angle,
+            LastCursorX = cursor.X,
+            LastCursorY = cursor.Y,
+            // Slide keeps the grab offset so the badge does not snap its centre to the cursor.
+            CursorOffsetX = bodyX - cursor.X,
+            CursorOffsetY = bodyY - cursor.Y,
+        };
+        // Arm orbit WITHOUT re-posing: Survey only anchors the tip at pointer-down and waits
+        // for the first move, so a Shift-click that never moves stays a selection toggle.
+        if (shift) AnchorCounterTip(_counterDrag);
+        Viewport.CaptureMouse();
+    }
+
+    /// <summary>Survey's applyCounterDragMove (PDFViewer.jsx:26079-26154).</summary>
+    private void ApplyCounterDragMove(Point cursor)
+    {
+        if (_counterDrag is not { } drag) return;
+        drag.LastCursorX = cursor.X;
+        drag.LastCursorY = cursor.Y;
+
+        double bodyX, bodyY, angle;
+        if (drag.ShiftActive)
+        {
+            double dx = cursor.X - drag.TipX, dy = cursor.Y - drag.TipY;
+            double dist = Math.Sqrt(dx * dx + dy * dy);
+            if (dist < 0.001)
             {
-                if (!AnnotationCanvas.Children.Contains(badge))
-                    AnnotationCanvas.Children.Add(badge);
-            }));
+                // Cursor sitting exactly on the frozen tip: keep the pose rather than
+                // dividing by zero and snapping to a garbage angle.
+                bodyX = drag.BodyX;
+                bodyY = drag.BodyY;
+                angle = drag.Angle;
+            }
+            else
+            {
+                double dirX = dx / dist, dirY = dy / dist;
+                bodyX = drag.TipX + drag.TipDistance * dirX;
+                bodyY = drag.TipY + drag.TipDistance * dirY;
+                // pointerAngle is body → tip, i.e. the opposite of tip → cursor.
+                angle = (Math.Atan2(-dirY, -dirX) * 180 / Math.PI + 360) % 360;
+            }
+        }
+        else
+        {
+            bodyX = cursor.X + drag.CursorOffsetX;
+            bodyY = cursor.Y + drag.CursorOffsetY;
+            angle = drag.Angle;
+        }
+
+        // Survey clamps the BODY (not the tip) into the page in both modes: "stays on page"
+        // wins over "perfect orbit at the edge".
+        bodyX = Math.Clamp(bodyX, drag.Radius, Math.Max(drag.Radius, _source.Width - drag.Radius));
+        bodyY = Math.Clamp(bodyY, drag.Radius, Math.Max(drag.Radius, _source.Height - drag.Radius));
+
+        // Survey's gate is CURSOR travel, not the resulting pose: an off-centre Shift-click
+        // can nudge the orbit pose without the user having dragged anything.
+        if (Math.Abs(cursor.X - drag.StartCursor.X) > CounterOrbitThreshold ||
+            Math.Abs(cursor.Y - drag.StartCursor.Y) > CounterOrbitThreshold)
+            drag.Moved = true;
+
+        drag.BodyX = bodyX;
+        drag.BodyY = bodyY;
+        drag.Angle = angle;
+        drag.Badge.RenderTransform = null;
+        Canvas.SetLeft(drag.Badge, bodyX - drag.TipDistance);
+        Canvas.SetTop(drag.Badge, bodyY - drag.TipDistance);
+        AnnotationFactory.SetStepPointerAngle(drag.Badge, angle);
+        if (!drag.IsNew) UpdateSelectionVisual();
+    }
+
+    /// <summary>Shift down mid-drag: pin the tip where it is so the body can orbit it.</summary>
+    private void FreezeCounterTip()
+    {
+        if (_counterDrag is not { } drag || drag.ShiftActive) return;
+        AnchorCounterTip(drag);
+        // Survey re-applies with the last known cursor so Shift-down poses the badge even if
+        // the pointer never moves afterwards (PDFViewer.jsx:26240-26244).
+        ApplyCounterDragMove(new Point(drag.LastCursorX, drag.LastCursorY));
+    }
+
+    private static void AnchorCounterTip(CounterDrag drag)
+    {
+        double rad = drag.Angle * Math.PI / 180;
+        drag.TipX = drag.BodyX + drag.TipDistance * Math.Cos(rad);
+        drag.TipY = drag.BodyY + drag.TipDistance * Math.Sin(rad);
+        drag.ShiftActive = true;
+    }
+
+    /// <summary>Shift up: hand the body back to the cursor with no jump.</summary>
+    private void ReleaseCounterTip()
+    {
+        if (_counterDrag is not { } drag || !drag.ShiftActive) return;
+        drag.CursorOffsetX = drag.BodyX - drag.LastCursorX;
+        drag.CursorOffsetY = drag.BodyY - drag.LastCursorY;
+        drag.ShiftActive = false;
+    }
+
+    private void CancelCounterDrag()
+    {
+        if (_counterDrag is not { } drag) return;
+        _counterDrag = null;
+        if (Viewport.IsMouseCaptured) Viewport.ReleaseMouseCapture();
+        if (drag.IsNew)
+        {
+            AnnotationCanvas.Children.Remove(drag.Badge);
+            return;
+        }
+        Canvas.SetLeft(drag.Badge, drag.StartBody.X - drag.TipDistance);
+        Canvas.SetTop(drag.Badge, drag.StartBody.Y - drag.TipDistance);
+        AnnotationFactory.SetStepPointerAngle(drag.Badge, drag.StartAngle);
+        UpdateSelectionVisual();
+    }
+
+    private void CommitCounterDrag()
+    {
+        if (_counterDrag is not { } drag) return;
+        _counterDrag = null;
+        if (Viewport.IsMouseCaptured) Viewport.ReleaseMouseCapture();
+        var badge = drag.Badge;
+        double left = drag.BodyX - drag.TipDistance, top = drag.BodyY - drag.TipDistance;
+
+        if (drag.IsNew)
+        {
+            var data = AnnotationData.ForStep(
+                new Point(left, top), _nextStep, _color, _thickness, ++_stepClock);
+            data.PointerAngle = drag.Angle;
+            if (_stepLetters) data.Style = "Letter";
+            badge.Tag = data;
+            Push(new EditorAction(
+                undo: () => AnnotationCanvas.Children.Remove(badge),
+                redo: () =>
+                {
+                    if (!AnnotationCanvas.Children.Contains(badge))
+                        AnnotationCanvas.Children.Add(badge);
+                }));
+            return;
+        }
+
+        if (badge.Tag is not AnnotationData meta) return;
+        if (!drag.Moved)
+        {
+            // A pure Shift-click never became an orbit, so it stays a multi-select toggle.
+            Canvas.SetLeft(badge, drag.StartBody.X - drag.TipDistance);
+            Canvas.SetTop(badge, drag.StartBody.Y - drag.TipDistance);
+            AnnotationFactory.SetStepPointerAngle(badge, drag.StartAngle);
+            ToggleSelection(badge);
+            return;
+        }
+        Point beforeBody = drag.StartBody;
+        double beforeAngle = drag.StartAngle;
+        Point afterBody = new(drag.BodyX, drag.BodyY);
+        double afterAngle = drag.Angle;
+        double tipDist = drag.TipDistance;
+        void Apply(Point body, double angle)
+        {
+            badge.RenderTransform = null;
+            Canvas.SetLeft(badge, body.X - tipDist);
+            Canvas.SetTop(badge, body.Y - tipDist);
+            AnnotationFactory.SetStepPointerAngle(badge, angle);
+            meta.Points = new[] { new[] { body.X - tipDist, body.Y - tipDist } };
+            meta.PointerAngle = angle;
+            meta.Tx = 0;
+            meta.Ty = 0;
+            badge.Tag = meta;
+            UpdateSelectionVisual();
+        }
+        Apply(afterBody, afterAngle);
+        Push(new EditorAction(
+            undo: () => Apply(beforeBody, beforeAngle),
+            redo: () => Apply(afterBody, afterAngle)), apply: false);
     }
 
     /// <summary>Monotonic creation stamp handed to each new counter (Survey's data.createdAt).</summary>

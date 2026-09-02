@@ -264,6 +264,15 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
+        // Survey listens for the counter drag's Shift / Escape on the WINDOW in the capture
+        // phase, ahead of every in-page handler, and only while a drag is live
+        // (PDFViewer.jsx:26202-26257). Escape cancels the placement outright; Shift freezes
+        // the nub tip so the badge orbits it.
+        if (_counterDrag is not null)
+        {
+            if (e.Key == Key.Escape) { CancelCounterDrag(); e.Handled = true; return; }
+            if (e.Key is Key.LeftShift or Key.RightShift) { FreezeCounterTip(); e.Handled = true; return; }
+        }
         // Let an open text annotation keep its own keyboard behavior.
         if (Keyboard.FocusedElement is TextBox) return;
 
@@ -390,6 +399,14 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyUp(KeyEventArgs e)
     {
         base.OnPreviewKeyUp(e);
+        if (_counterDrag is not null && e.Key is Key.LeftShift or Key.RightShift)
+        {
+            // Releasing Shift hands the body back to the cursor with the offset it had at
+            // release, so slide resumes with no jump.
+            ReleaseCounterTip();
+            e.Handled = true;
+            return;
+        }
         if (e.Key != Key.Space || Keyboard.FocusedElement is TextBox) return;
         if (_spaceDown)
         {

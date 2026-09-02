@@ -203,14 +203,17 @@ internal sealed class CalloutAnnotation : Canvas
         {
             _head.Data = Geometry.Empty;
         }
-        _head.Stroke = strokeBrush;
-        _head.Fill = head is ArrowheadStyle.SolidTriangle ? strokeBrush : Brushes.Transparent;
-        _head.StrokeThickness = Math.Max(1, thickness);
+        // ArrowGeometry now emits EVERY head as a filled outline (the non-solid ones widened
+        // to Survey's max(2, strokeWidth) floor), so the head paints from Fill alone; a stroke
+        // on top would inflate it past that floor.
+        _head.Stroke = null;
+        _head.Fill = strokeBrush;
+        _head.StrokeThickness = 0;
         _head.StrokeDashArray = null;   // Survey keeps the arrowhead solid at any line style
         _head.Visibility = head == ArrowheadStyle.None ? Visibility.Collapsed : Visibility.Visible;
         _headGlow.Data = _head.Data;
         _headGlow.Stroke = glowBrush;
-        _headGlow.Fill = head is ArrowheadStyle.SolidTriangle ? glowBrush : Brushes.Transparent;
+        _headGlow.Fill = glowBrush;
         _headGlow.StrokeThickness = Math.Max(3, thickness + 2);
         if (_head.Visibility != Visibility.Visible) _headGlow.Visibility = Visibility.Collapsed;
 

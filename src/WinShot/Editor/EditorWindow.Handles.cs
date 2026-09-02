@@ -463,6 +463,7 @@ public partial class EditorWindow : Window
     {
         if (_adjustingCrop) return; // an in-progress crop adjust keeps its handles
         _handleKind = HandleKind.None;
+        if (_bendTip is not null) _bendTip.IsOpen = false;
         HandleLayer.Visibility = Visibility.Collapsed;
         foreach (var t in _handleThumbs) t.Visibility = Visibility.Collapsed;
         HideRotateThumb();
@@ -524,11 +525,43 @@ public partial class EditorWindow : Window
     /// the ordinary tool cursor stands. Survey drives this from the handle groups' inline
     /// cursor styles; WinShot's handle layer is not hit-testable, so it runs off the move path.
     /// </summary>
+    /// <summary>
+    /// Survey's curve-bend midpoint carries a native <c>&lt;title&gt;Drag to bend&lt;/title&gt;</c>
+    /// (SVGAnnotationLayer.jsx:5374-5463). WinShot's handles live inside
+    /// <c>InteractionCanvas</c>, which is <c>IsHitTestVisible="False"</c>, so a ToolTip set on
+    /// the thumb could never fire - the chip has to be driven from the same hover hit-test
+    /// that already paints the handle cursor.
+    /// </summary>
+    private ToolTip? _bendTip;
+
+    private void ShowBendTip(bool show, Point canvasPos)
+    {
+        if (!show)
+        {
+            if (_bendTip is not null) _bendTip.IsOpen = false;
+            return;
+        }
+        _bendTip ??= new ToolTip
+        {
+            Content = "Drag to bend",
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Relative,
+            PlacementTarget = Viewport,
+            StaysOpen = true,
+        };
+        var vp = AnnotationCanvas.TranslatePoint(canvasPos, Viewport);
+        _bendTip.HorizontalOffset = vp.X;
+        // Survey anchors the chip below its target with a 10px gap (Tooltip.jsx:86-98).
+        _bendTip.VerticalOffset = vp.Y + HandleScreenPx / 2 + 10;
+        _bendTip.IsOpen = true;
+    }
+
     private bool UpdateHandleCursor(Point pos)
     {
-        if (_handleKind is HandleKind.None or HandleKind.Crop) return false;
+        if (_handleKind is HandleKind.None or HandleKind.Crop) { ShowBendTip(false, pos); return false; }
         int handle = HitTestHandle(pos);
-        if (handle < 0) return false;
+        if (handle < 0) { ShowBendTip(false, pos); return false; }
+        // Endpoint thumb 2 IS the curve-bend midpoint (see LayoutEndpointHandles).
+        ShowBendTip(_handleKind == HandleKind.Endpoints && handle == 2 && _activeHandle < 0, pos);
         double angle = _selected is FrameworkElement fe ? AnnotationTransform.AngleOf(fe) : 0;
         // Survey line endpoints, the curve-bend midpoint, the counter tip and the callout
         // tip/knee are all cursor:'grab' (SVGAnnotationLayer.jsx:5379, 5396, 5149).
@@ -830,7 +863,8 @@ public partial class EditorWindow : Window
         fe.Height = Math.Max(1, b.Height);
         if (fe is Path path && fe.Tag is AnnotationData meta &&
             AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
-            path.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height), cloudIntensity);
+            path.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height),
+                meta.CloudIntensity ?? cloudIntensity, path.StrokeThickness);
         if (fe.Tag is AnnotationData data &&
             data.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
         {
@@ -1076,7 +1110,8 @@ public partial class EditorWindow : Window
                 fe.Width = Math.Max(1, snap.Bounds.Width);
                 fe.Height = Math.Max(1, snap.Bounds.Height);
                 if (fe is Path cloud && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
-                    cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height), _cloudIntensity);
+                    cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height),
+                        meta.CloudIntensity ?? _cloudIntensity, cloud.StrokeThickness);
                 meta.Rect = new[] { snap.Bounds.X, snap.Bounds.Y, snap.Bounds.Width, snap.Bounds.Height };
                 meta.Tx = 0;
                 meta.Ty = 0;

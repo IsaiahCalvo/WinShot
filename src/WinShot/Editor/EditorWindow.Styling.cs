@@ -206,7 +206,9 @@ public partial class EditorWindow : Window
                     var lineStyle = AnnotationStyle.LineStyleFrom(snap.Meta);
                     if (boxLike is Path cloud && lineStyle == LineBorderStyle.Cloud)
                     {
-                        cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, boxLike.Width), Math.Max(1, boxLike.Height)), _cloudIntensity);
+                        cloud.Data = CloudPath.ForRectangle(
+                            new Rect(0, 0, Math.Max(1, boxLike.Width), Math.Max(1, boxLike.Height)),
+                            snap.Meta.CloudIntensity ?? _cloudIntensity, snap.Thickness);
                         cloud.StrokeDashArray = null;
                     }
                     else
@@ -325,6 +327,17 @@ public partial class EditorWindow : Window
             tb.WithLineHeight(tb.FontSize * AnnotationFactory.TextLineHeightFactor);
             tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(_textVerticalAlign);
         }
+        if (_textFontColor is Color fc)
+        {
+            tb.Foreground = new SolidColorBrush(fc);
+            // The committed callout label lives on the visual, not the editor, so the live
+            // preview underneath has to be recoloured with it.
+            if (tb.Tag is CalloutAnnotation live)
+            {
+                live.Label.Foreground = tb.Foreground;
+                if (live.Tag is AnnotationData lm) { lm.FontColor = ToHex(fc); live.Tag = lm; }
+            }
+        }
         tb.FontWeight = _textBold || _textStyle == TextStyle.Bold ? FontWeights.Bold : FontWeights.Normal;
         tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
         tb.TextAlignment = AnnotationFactory.ParseAlign(_textAlign);
@@ -353,6 +366,13 @@ public partial class EditorWindow : Window
         after.VerticalAlign = _textVerticalAlign;
         after.FontSize = _textFontSize;
         after.Style = _textStyle.ToString();
+        // Survey's fontColor is a style field of its own; leaving it null keeps the old
+        // "text follows the border colour" fallback for anything never recoloured.
+        if (_textFontColor is Color fc)
+        {
+            after.FontColor = ToHex(fc);
+            if (meta.Type == AnnotationData.TypeText) after.Color = ToHex(fc);
+        }
         if (meta.Type == AnnotationData.TypeText)
         {
             if (_textStyle == TextStyle.Huge && before.Style != nameof(TextStyle.Huge))
@@ -972,6 +992,11 @@ public partial class EditorWindow : Window
         var before = meta.Clone();
         var after = meta.Clone();
         after.LineStyle = AnnotationStyle.ToStorageName(style);
+        // The Bump lives with the annotation, not the tool, so switching a rect INTO cloud
+        // stamps the current toolbar value and switching out of it drops the field.
+        after.CloudIntensity = style == LineBorderStyle.Cloud
+            ? meta.CloudIntensity ?? _cloudIntensity
+            : null;
 
         if (meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
         {
@@ -980,7 +1005,8 @@ public partial class EditorWindow : Window
             var fill = AnnotationStyle.FillColorFrom(after, stroke);
             double thickness = after.Thickness ?? (fe is Shape live ? live.StrokeThickness : 2);
             var rebuilt = AnnotationFactory.CreateBoxShape(
-                after.Type, bounds, stroke, fill, thickness, style);
+                after.Type, bounds, stroke, fill, thickness, style,
+                after.CloudIntensity ?? _cloudIntensity);
             if (fill.A == 0)
                 rebuilt.Fill = ShapeFillBrush.CreateFromName(after.Fill, stroke);
             rebuilt.Tag = after;

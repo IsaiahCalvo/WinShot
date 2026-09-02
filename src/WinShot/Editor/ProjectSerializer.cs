@@ -73,6 +73,13 @@ internal sealed class AnnotationData
     /// <summary>Survey line/arrow midpoint (point on the curve). Absent = straight.</summary>
     public double[]? Mid { get; set; }
 
+    /// <summary>
+    /// Survey's cloud `Bump` value (AppShell.jsx:2593-2624), 1..20. Only meaningful on a
+    /// rectangle with lineStyle 'cloud'; absent means the 2 default, so a legacy project
+    /// reloads exactly as it was saved.
+    /// </summary>
+    public double? CloudIntensity { get; set; }
+
     public string? Text { get; set; }
 
     public string? FontFamily { get; set; }
@@ -153,7 +160,7 @@ internal sealed class AnnotationData
 
     public static AnnotationData ForShape(
         string type, Rect bounds, Color color, double thickness, ShapeFillMode fill,
-        Color? fillColor, LineBorderStyle lineStyle) => new()
+        Color? fillColor, LineBorderStyle lineStyle, double? cloudIntensity = null) => new()
     {
         Type = type,
         Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
@@ -162,6 +169,7 @@ internal sealed class AnnotationData
         Fill = fill.ToString(),
         FillColor = fillColor is Color fc ? ToHex(fc) : null,
         LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+        CloudIntensity = lineStyle == LineBorderStyle.Cloud ? cloudIntensity : null,
     };
 
     public static AnnotationData ForCallout(
@@ -439,7 +447,8 @@ internal static class ProjectSerializer
                 var shape = AnnotationFactory.CreateBoxShape(
                     a.Type, bounds, color,
                     fillColor.A == 0 ? Colors.Transparent : fillColor,
-                    RequireThickness(a), lineStyle);
+                    RequireThickness(a), lineStyle,
+                    a.CloudIntensity ?? CloudPath.DefaultIntensity);
                 if (fillColor.A == 0)
                     shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
                 return shape;

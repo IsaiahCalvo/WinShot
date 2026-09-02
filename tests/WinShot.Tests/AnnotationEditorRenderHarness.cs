@@ -265,6 +265,20 @@ public class AnnotationEditorRenderHarness
                 Check("SelectToolBtn");
                 Click(0.10, 0.40); Shot("pointer-rect-selected.png");
                 Click(0.55, 0.735); Shot("pointer-arrow-selected.png");
+                // Survey's curve-bend midpoint carries a <title>Drag to bend</title>
+                // (SVGAnnotationLayer.jsx:5374-5463). WinShot's handle layer is
+                // IsHitTestVisible=False, so the chip is driven from the hover hit-test.
+                editor.PointerMove(P(0.55, 0.735)); Pump(3);
+                var bendTipField = typeof(EditorWindow).GetField("_bendTip",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var bendTip = (System.Windows.Controls.ToolTip?)bendTipField.GetValue(editor);
+                string bendOnMidpoint = $"open={bendTip?.IsOpen} content={bendTip?.Content}";
+                editor.PointerMove(P(0.42, 0.62)); Pump(3);   // an ENDPOINT: no bend chip
+                bendTip = (System.Windows.Controls.ToolTip?)bendTipField.GetValue(editor);
+                File.WriteAllText(Path.Combine(outDir, "bend-tooltip.txt"),
+                    $"midpoint: {bendOnMidpoint}" + Environment.NewLine +
+                    $"endpoint: open={bendTip?.IsOpen}");
+                if (bendTip is not null) bendTip.IsOpen = false;
                 Click(0.80, 0.35); Shot("pointer-counter-selected.png");
                 Click(0.02, 0.02);
 
@@ -539,6 +553,17 @@ public class AnnotationEditorRenderHarness
                 Drag(new[] { (0.55, 0.22), (0.92, 0.34), (0.92, 0.22), (0.55, 0.34) }, steps: 10);
                 Shot("pointer-ink-highlighter.png");
 
+                // Survey's in-progress highlighter already carries mixBlendMode:'multiply'
+                // against the page AND every earlier sibling (SVGAnnotationLayer.jsx:5028-5039),
+                // so the stroke must not change appearance when the pointer is released. Drawn
+                // straight over the committed pen strokes above: preview and commit are shot
+                // one frame apart, and any release "pop" shows up as a difference between them.
+                editor.PointerDown(P(0.06, 0.16)); Pump(1);
+                for (int i = 1; i <= 16; i++) { editor.PointerMove(P(0.06 + 0.24 * i / 16.0, 0.16)); Pump(1); }
+                Shot("pointer-highlighter-preview-over-ink.png");
+                editor.PointerUp(P(0.30, 0.16)); Pump(4);
+                Shot("pointer-highlighter-committed-over-ink.png");
+
                 var inkPaths = canvas.Children.OfType<System.Windows.Shapes.Path>()
                     .Where(q => q.Tag is AnnotationData { Type: AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter })
                     .ToList();
@@ -674,6 +699,114 @@ public class AnnotationEditorRenderHarness
                 Click(0.10, 0.30); Shot("pointer-counter-chrome.png");
                 File.WriteAllText(Path.Combine(outDir, "counter-chrome.txt"),
                     $"selectionRect={((FrameworkElement)editor.FindName("SelectionRect")!).Visibility}");
+
+                // Counter placement is press-drag-release, not a click: the badge follows the
+                // cursor, Shift freezes the nub TIP and swings the body around it, releasing
+                // Shift resumes the slide with no jump, and Escape cancels outright
+                // (Survey PDFViewer.jsx:31727-31790, 26079-26257). Shift/Escape arrive through
+                // Survey's window-level capture listener, which is what these private calls are.
+                string CounterAngles() => string.Join(",", canvas.Children.OfType<Grid>()
+                    .Where(g2 => g2.Tag is AnnotationData { Type: AnnotationData.TypeStep })
+                    .Select(g2 => Math.Round(((AnnotationData)g2.Tag!).PointerAngle ?? -1, 1)));
+                int CounterCount() => canvas.Children.OfType<Grid>()
+                    .Count(g2 => g2.Tag is AnnotationData { Type: AnnotationData.TypeStep });
+
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+                counterBtn2.IsChecked = true; Pump(3);
+                editor.PointerDown(P(0.30, 0.40)); Pump(2);
+                editor.PointerMove(P(0.45, 0.40)); Pump(2);
+                Shot("pointer-counter-drag-slide.png");
+                InvokePrivate(editor, "FreezeCounterTip");              // Shift down
+                editor.PointerMove(P(0.45, 0.58)); Pump(2);
+                Shot("pointer-counter-drag-orbit.png");
+                InvokePrivate(editor, "ReleaseCounterTip");             // Shift up
+                editor.PointerMove(P(0.52, 0.58)); Pump(2);
+                editor.PointerUp(P(0.52, 0.58)); Pump(4);
+                Shot("pointer-counter-drag-committed.png");
+                int afterCommit = CounterCount();
+                string committedAngle = CounterAngles();
+                // Escape mid-drag leaves nothing behind.
+                editor.PointerDown(P(0.72, 0.40)); Pump(2);
+                editor.PointerMove(P(0.78, 0.46)); Pump(2);
+                InvokePrivate(editor, "CancelCounterDrag");
+                Pump(4);
+                File.WriteAllText(Path.Combine(outDir, "counter-drag.txt"),
+                    $"committed={afterCommit} committedAngle={committedAngle} afterEscape={CounterCount()}");
+
+                // Multi-selection: Survey drops the per-item boxes and gives every member the
+                // SAME blue glow the hover paints (SVGAnnotationLayer.jsx:3826-3840).
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+                Check("RectangleToolBtn");
+                Drag(new[] { (0.10, 0.20), (0.35, 0.45) });
+                Drag(new[] { (0.45, 0.20), (0.70, 0.45) });
+                Check("SelectToolBtn");
+                InvokePrivate(editor, "Select", null);
+                Drag(new[] { (0.05, 0.12), (0.80, 0.55) });   // window marquee takes both
+                Pump(4);
+                Shot("pointer-multi-select-halos.png");
+                File.WriteAllText(Path.Combine(outDir, "multi-select-halos.txt"),
+                    string.Join(Environment.NewLine,
+                        ((Canvas)editor.FindName("InteractionCanvas")!).Children
+                            .OfType<System.Windows.Shapes.Path>()
+                            .Where(pth => pth.Visibility == Visibility.Visible && pth.Data is not null)
+                            .Select(pth => $"halo stroke={pth.Stroke} opacity={pth.Opacity} " +
+                                           $"width={pth.StrokeThickness} bounds={pth.Data!.Bounds}")));
+
+                // Non-solid arrowheads keep Survey's max(2, strokeWidth) floor on a 1px line
+                // (lineRenderHelpers.js:110-176) and never pick up the shaft's dash.
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+                Check("ArrowToolBtn");
+                var arrowHeadBox = (ComboBox)editor.FindName("ArrowStyleBox")!;
+                var shapeSize2 = typeof(EditorWindow).GetField("_shapeSize", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                double headRow = 0.18;
+                foreach (string headTag in new[] { "openTriangle", "vShape", "openCircle", "horizontalLine" })
+                {
+                    InvokePrivate(editor, "Select", null);
+                    arrowHeadBox.SelectedItem = arrowHeadBox.Items.OfType<ComboBoxItem>()
+                        .First(it => (string?)it.Tag == headTag);
+                    Pump(2);
+                    shapeSize2.SetValue(editor, 1.0);
+                    InvokePrivate(editor, "RememberSize", 1.0);
+                    Drag(new[] { (0.10, headRow), (0.45, headRow) });
+                    shapeSize2.SetValue(editor, 6.0);
+                    InvokePrivate(editor, "RememberSize", 6.0);
+                    Drag(new[] { (0.55, headRow), (0.90, headRow) });
+                    headRow += 0.20;
+                }
+                Shot("pointer-arrowhead-two-px-floor.png");
+
+                // Rich-text chrome: the Aa button lives in the TOP row and is visible-but-
+                // disabled with nothing editable selected (AppShell.jsx:2646-2674); the strip
+                // that portals into the 34px sub-row leads with the font-colour swatch
+                // (AppShell.jsx:1780-1826).
+                InvokePrivate(editor, "Select", null);
+                canvas.Children.Clear();
+                Pump(4);
+                Check("TextToolBtn"); Pump(4);
+                var textEditBtn = (Button)editor.FindName("TextEditBtn")!;
+                var textEditPanel = (FrameworkElement)editor.FindName("TextEditPanel")!;
+                RenderElementToPng(textEditPanel, Path.Combine(outDir, "chrome-text-edit-aa-idle.png"));
+                string aaIdle = $"visible={textEditPanel.Visibility} enabled={textEditBtn.IsEnabled} tip={textEditBtn.ToolTip}";
+                Click(0.30, 0.30);                    // places a text box and opens its editor
+                Pump(6);
+                Shot("pointer-rich-text-subrow.png");
+                RenderElementToPng((FrameworkElement)editor.FindName("EditorRichTextHost")!,
+                    Path.Combine(outDir, "chrome-rich-text-strip.png"));
+                var stylePanel = (StackPanel)editor.FindName("TextStylePanel")!;
+                var fontColorBtn = (Button)editor.FindName("FontColorBtn")!;
+                File.WriteAllText(Path.Combine(outDir, "rich-text-strip.txt"),
+                    $"aaIdle: {aaIdle}" + Environment.NewLine +
+                    $"aaEditing: enabled={textEditBtn.IsEnabled} tip={textEditBtn.ToolTip}" + Environment.NewLine +
+                    $"stripFirstChildHoldsFontColor={((FrameworkElement)stylePanel.Children[0]).IsAncestorOf(fontColorBtn)}" + Environment.NewLine +
+                    $"fontColorFocusable={fontColorBtn.Focusable} boldFocusable={((Button)editor.FindName("BoldBtn")!).Focusable}");
+                InvokePrivate(editor, "CommitText");
+                Pump(4);
 
                 // ---- CHROME: Survey's flat strip, gold accent, and the new popovers ----
                 InvokePrivate(editor, "Select", null);

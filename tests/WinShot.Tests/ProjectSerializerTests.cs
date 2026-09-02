@@ -177,7 +177,10 @@ public class ProjectSerializerTests
                     }, Array.Empty<BitmapSource>()));
                 var geometry = Assert.IsType<PathGeometry>(arrow.Data);
                 Assert.Equal(2, geometry.Figures.Count);
-                Assert.False(geometry.Figures[1].IsFilled);
+                // Survey strokes the non-solid heads at max(2, strokeWidth) and never dashes
+                // them (lineRenderHelpers.js:110-176). WinShot emits the head as a widened
+                // FILLED outline so it keeps that weight and ignores the shaft's dash.
+                Assert.True(geometry.Figures[1].IsFilled);
                 Assert.NotNull(arrow.StrokeDashArray);
                 // Survey's [6,4] is in ABSOLUTE user units; WPF multiplies the array by
                 // StrokeThickness, so at thickness 4 the stored array is [1.5, 1] and the
@@ -227,6 +230,16 @@ public class ProjectSerializerTests
                     },
                     AnnotationData.ForText(new Point(1, 1), "Hi", TextStyle.Plain, 16,
                         Color.FromRgb(0, 0, 0), "Arial", true, true, true, false, "center"),
+                    // Survey's cloud `Bump` and callout `fontColor` are per-annotation style
+                    // fields, so a reload must not fall back to the 2 / border-colour defaults.
+                    AnnotationData.ForShape(AnnotationData.TypeRectangle, new Rect(0, 0, 5, 4),
+                        Color.FromRgb(255, 0, 0), 2, ShapeFillMode.None, null,
+                        LineBorderStyle.Cloud, cloudIntensity: 7),
+                    AnnotationData.ForCallout(
+                        CalloutLayout.FromDrag(new Point(1, 1), new Point(3, 2)),
+                        "note", Color.FromRgb(255, 0, 0), Color.FromArgb(0, 0, 0, 0), 2,
+                        ArrowheadStyle.SolidTriangle, LineBorderStyle.Solid, 14, "Arial",
+                        Color.FromRgb(0x1E, 0x29, 0x3B)),
                 },
             };
             ProjectSerializer.Save(path, source, doc, Array.Empty<BitmapSource>());
@@ -238,6 +251,8 @@ public class ProjectSerializerTests
             Assert.True(loaded.Doc.Annotations[1].Italic);
             Assert.True(loaded.Doc.Annotations[1].Underline);
             Assert.Equal("center", loaded.Doc.Annotations[1].Align);
+            Assert.Equal(7d, loaded.Doc.Annotations[2].CloudIntensity);
+            Assert.Equal("#FF1E293B", loaded.Doc.Annotations[3].FontColor);
         }
         finally
         {

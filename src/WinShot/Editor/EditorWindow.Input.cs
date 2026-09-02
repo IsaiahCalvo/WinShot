@@ -143,6 +143,11 @@ public partial class EditorWindow : Window
     internal void PointerMove(PointerArgs e)
     {
         if (_sourceOperationActive) return;
+        if (_counterDrag is not null)
+        {
+            ApplyCounterDragMove(e.GetPosition(AnnotationCanvas));
+            return;
+        }
         if (_panning)
         {
             var p = e.GetPosition(Viewport);
@@ -200,6 +205,16 @@ public partial class EditorWindow : Window
         }
         if (_movingSelection && _selected is not null)
         {
+            // Survey 2026-04-20: mid-drag Shift on a counter swaps the move for an orbit around
+            // the frozen nub tip, matching the creation-time gesture (useSVGInteraction.js:1199-1240).
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0 && _selection.Count == 1
+                && _selected is Grid stepBadge
+                && stepBadge.Tag is AnnotationData { Type: AnnotationData.TypeStep } stepMeta)
+            {
+                _movingSelection = false;
+                BeginCounterOrbit(stepBadge, stepMeta, e.GetPosition(AnnotationCanvas), shift: true);
+                return;
+            }
             var posMove = e.GetPosition(AnnotationCanvas);
             // Survey drags freely and applies constrainToPage on release, so an off-page
             // drag snaps back inside on drop rather than sticking at the edge mid-gesture.
@@ -259,7 +274,8 @@ public partial class EditorWindow : Window
                 _activeShape.Width = Math.Max(1, r.Width);
                 _activeShape.Height = Math.Max(1, r.Height);
                 if (_activeShape is Path cloudPath && _lineStyle == LineBorderStyle.Cloud)
-                    cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height), _cloudIntensity);
+                    cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height),
+                        _cloudIntensity, cloudPath.StrokeThickness);
                 break;
             case EditorTool.Freehand or EditorTool.Highlighter when _activeShape is Polyline stroke:
                 // Survey appends every coalesced sample clearing the 0.2 page-px dedupe and
@@ -294,6 +310,13 @@ public partial class EditorWindow : Window
     internal void PointerUp(PointerArgs e)
     {
         if (_sourceOperationActive) return;
+        if (_counterDrag is not null && e.ChangedButton == MouseButton.Left)
+        {
+            ApplyCounterDragMove(e.GetPosition(AnnotationCanvas));
+            CommitCounterDrag();
+            e.Handled = true;
+            return;
+        }
         if (_panning && e.ChangedButton is MouseButton.Middle or MouseButton.Left)
         {
             EndPan();
@@ -428,7 +451,8 @@ public partial class EditorWindow : Window
                         : _lineStyle;
                     shape.Tag = AnnotationData.ForShape(
                         _tool == EditorTool.Rectangle ? AnnotationData.TypeRectangle : AnnotationData.TypeEllipse,
-                        bounds, strokeColor, shape.StrokeThickness, _fillMode, fillColor, lineStyle);
+                        bounds, strokeColor, shape.StrokeThickness, _fillMode, fillColor, lineStyle,
+                        _cloudIntensity);
                     PushAddElement(shape);
                 }
                 return;
@@ -560,7 +584,9 @@ public partial class EditorWindow : Window
         }
         if (_tool == EditorTool.Step)
         {
-            if (inImage) PlaceStep(pos);
+            // Survey places a counter by press-drag-release, not by click
+            // (PDFViewer.jsx:31727-31790); PointerUp commits it.
+            if (inImage) BeginStepPlacement(pos);
             e.Handled = true;
             return;
         }
@@ -651,7 +677,7 @@ public partial class EditorWindow : Window
                         Stroke = brush,
                         StrokeThickness = strokeWidth,
                         Fill = fillBrush,
-                        Data = CloudPath.ForRectangle(new Rect(0, 0, 1, 1), _cloudIntensity),
+                        Data = CloudPath.ForRectangle(new Rect(0, 0, 1, 1), _cloudIntensity, strokeWidth),
                     };
                 }
                 else
@@ -692,7 +718,7 @@ public partial class EditorWindow : Window
                 _activeShape = new Polyline
                 {
                     Stroke = blend
-                        ? HighlighterBlend.PreviewBrush(_source, AnnotationStyle.HighlighterColor)
+                        ? HighlighterPreviewBrush()
                         : new SolidColorBrush(AnnotationStyle.Opaque(_color)),
                     StrokeThickness = blend
                         ? AnnotationStyle.HighlighterWidth(_penSize)
@@ -1000,6 +1026,18 @@ public partial class EditorWindow : Window
         // Survey gates the multi-select toggle on Shift alone (useSVGInteraction.js:536);
         // Ctrl/Cmd is reserved (it means "move the whole callout" there).
         bool additive = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        // Survey UX 2026-04-20: Shift-pointerdown on a single-selected counter enters orbit
+        // BEFORE the multi-select toggle, or the toggle would always win and the orbit drag
+        // could never fire (useSVGInteraction.js:488-533). A movement under ~3px still commits
+        // as a plain toggle, so a pure Shift-click is unchanged.
+        if (additive && hit is Grid orbitBadge
+            && orbitBadge.Tag is AnnotationData { Type: AnnotationData.TypeStep } orbitMeta
+            && !(_selection.Count > 1 && _selection.Contains(hit)))
+        {
+            BeginCounterOrbit(orbitBadge, orbitMeta, pos, shift: true);
+            e.Handled = true;
+            return;
+        }
         if (additive)
             ToggleSelection(hit);
         else if (!(_selection.Count > 1 && _selection.Contains(hit)))
@@ -1183,45 +1221,90 @@ public partial class EditorWindow : Window
     /// </summary>
     private void UpdateHoverHalo(Point pos)
     {
-        UIElement? hovered = _tool == EditorTool.Select && _activeHandle < 0 && !_dragging
-            && !_marqueeSelecting && !_movingSelection
+        // Survey paints the same glow from the pan-mode `pendingHover` path
+        // (SVGAnnotationLayer.jsx:598-633): "one glow implementation serves both modes."
+        bool hoverMode = _tool is EditorTool.Select or EditorTool.Pan || _spaceDown;
+        UIElement? hovered = hoverMode && _activeHandle < 0 && !_dragging
+            && !_marqueeSelecting && !_movingSelection && !_panning
             ? HitTestAnnotation(pos)
             : null;
-        if (hovered is null || _selection.Contains(hovered) || hovered is CalloutAnnotation
-            || hovered is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
-        {
+        // A member of a multi-selection already carries its halo from UpdateSelectionHalos;
+        // a single-selected mark shows its own overlay instead (SVGAnnotationLayer.jsx:3839-3840).
+        if (hovered is not null && _selection.Contains(hovered))
+            hovered = null;
+        if (hovered is not FrameworkElement fe || !PaintHalo(HoverHalo, fe))
             HoverHalo.Visibility = Visibility.Collapsed;
-            return;
-        }
+    }
 
+    /// <summary>
+    /// Traces <paramref name="fe"/>'s own geometry (and rotation) into <paramref name="halo"/>
+    /// with Survey's per-type halo weights. False when the mark has no vector outline to trace.
+    /// </summary>
+    private bool PaintHalo(Path halo, FrameworkElement fe)
+    {
+        if (fe.Tag is not AnnotationData meta || fe is CalloutAnnotation) return false;
         Geometry? geo = fe is Shape s && s.RenderedGeometry is { } rg && !rg.IsEmpty()
             ? ToCanvasSpace(fe, rg)
             : meta.Type == AnnotationData.TypeStep
                 ? StepPinGeometry(fe)
                 : null;
-        if (geo is null)
-        {
-            HoverHalo.Visibility = Visibility.Collapsed;
-            return;
-        }
+        if (geo is null) return false;
 
         double sw = meta.Thickness ?? (fe is Shape sh ? sh.StrokeThickness : 1);
         double inv = 1 / _zoom;
         bool ink = meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
-        HoverHalo.Data = geo;
+        halo.Data = geo;
         if (ink)
         {
             // Survey's filled-outline ink halo: a thin trace plus a 12% wash inside it.
-            HoverHalo.StrokeThickness = Math.Max(1.25 * inv, Math.Min(2 * inv, sw + 0.5));
-            HoverHalo.Fill = new SolidColorBrush(Color.FromArgb(0x1F, 0x4A, 0x90, 0xE2));
+            halo.StrokeThickness = Math.Max(1.25 * inv, Math.Min(2 * inv, sw + 0.5));
+            halo.Fill = new SolidColorBrush(Color.FromArgb(0x1F, 0x4A, 0x90, 0xE2));
         }
         else
         {
             // Counters hard-code 6; every other shape uses max(6, strokeWidth + 4).
-            HoverHalo.StrokeThickness = meta.Type == AnnotationData.TypeStep ? 6 : Math.Max(6, sw + 4);
-            HoverHalo.Fill = null;
+            halo.StrokeThickness = meta.Type == AnnotationData.TypeStep ? 6 : Math.Max(6, sw + 4);
+            halo.Fill = null;
         }
-        HoverHalo.Visibility = Visibility.Visible;
+        halo.Visibility = Visibility.Visible;
+        return true;
+    }
+
+    /// <summary>
+    /// Survey drops the per-item dashed boxes in a multi-selection and gives every member the
+    /// SAME blue glow the cursor hover paints — the union frame is the "this is a group"
+    /// affordance (SVGAnnotationLayer.jsx:3826-3840). A single selection keeps its own overlay.
+    /// </summary>
+    private readonly List<Path> _selectionHalos = new();
+
+    private void UpdateSelectionHalos()
+    {
+        if (HoverHalo is null) return;
+        int wanted = _selection.Count > 1 ? _selection.Count : 0;
+        while (_selectionHalos.Count < wanted)
+        {
+            var halo = new Path
+            {
+                Stroke = HoverHalo.Stroke,
+                Opacity = HoverHalo.Opacity,
+                Fill = null,
+                StrokeLineJoin = PenLineJoin.Round,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed,
+            };
+            // Directly beneath HoverHalo, i.e. still under the selection chrome and handles.
+            InteractionCanvas.Children.Insert(
+                InteractionCanvas.Children.IndexOf(HoverHalo), halo);
+            _selectionHalos.Add(halo);
+        }
+        for (int i = 0; i < _selectionHalos.Count; i++)
+        {
+            bool painted = i < wanted
+                && _selection[i] is FrameworkElement fe
+                && AnnotationCanvas.Children.Contains(_selection[i])
+                && PaintHalo(_selectionHalos[i], fe);
+            if (!painted) _selectionHalos[i].Visibility = Visibility.Collapsed;
+        }
     }
 
     /// <summary>The counter's pin outline in canvas space (its badge Grid holds the Path).</summary>
@@ -1311,6 +1394,24 @@ public partial class EditorWindow : Window
         using var backdrop = HighlighterBlend.BackdropUnder(
             CanvasHost, BaseTiles, AnnotationCanvas, ink, _source.Width, _source.Height);
         HighlighterBlend.ApplyLiveFill(ink, backdrop, color);
+    }
+
+    /// <summary>
+    /// The in-flight highlighter's stroke paint. Survey's drag preview already carries
+    /// mixBlendMode:'multiply' at the colour the commit will use
+    /// (SVGAnnotationLayer.jsx:5028-5039), and that blend sees the page AND every earlier
+    /// sibling - so the preview has to multiply against the SAME backdrop the commit does
+    /// (BackdropUnder), not the bare screenshot. Otherwise a stroke drawn over an existing
+    /// annotation visibly changes on release. Composited once here, at pointer-down; growing
+    /// the stroke only re-clips the finished brush.
+    /// </summary>
+    private Brush HighlighterPreviewBrush()
+    {
+        // The stroke is not on the canvas yet, so nothing is hidden: this renders the page
+        // plus every committed annotation, which is exactly what the new ink will sit on.
+        using var backdrop = HighlighterBlend.BackdropUnder(
+            CanvasHost, BaseTiles, AnnotationCanvas, target: null!, _source.Width, _source.Height);
+        return HighlighterBlend.PreviewBrush(backdrop, AnnotationStyle.HighlighterColor);
     }
 
     /// <summary>
@@ -1502,6 +1603,7 @@ public partial class EditorWindow : Window
         // Survey's halo is hovered-AND-unselected, so any selection change clears it; the next
         // pointer move re-derives it.
         if (HoverHalo is not null) HoverHalo.Visibility = Visibility.Collapsed;
+        UpdateSelectionHalos();
         // The crop-adjust overlay owns the handles while a pending crop is being fine-tuned;
         // don't let the selection refresh stomp it.
         if (_adjustingCrop || (_handleKind == HandleKind.Crop && _pendingCrop is not null))
