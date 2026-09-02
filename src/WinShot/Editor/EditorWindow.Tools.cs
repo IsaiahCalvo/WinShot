@@ -76,6 +76,9 @@ public partial class EditorWindow : Window
         tb.Padding = new Thickness(CalloutLayout.TextPadding, 0, CalloutLayout.TextPadding, 0);
         tb.VerticalContentAlignment = VerticalAlignment.Center;
         tb.CaretBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xFF));
+        // Survey's callout line height is (lineHeight || 1) * 1.13, not plain text's 1.16 * 1.13
+        // (svgAnnotationRenderers.jsx:1133).
+        tb.WithLineHeight(tb.FontSize * 1.13);
     }
 
     /// <summary>
@@ -158,7 +161,6 @@ public partial class EditorWindow : Window
                         apply: false);
                 }
             }
-            Select(visual);
             UpdateSelectionVisual();
             return;
         }
@@ -174,54 +176,95 @@ public partial class EditorWindow : Window
             meta.Text = text;
             visual.Tag = meta;
         }
-        PushAddElement(visual);
-        Select(visual);
+        // Survey's commit clears the edit state without selecting the result
+        // (PDFViewer.jsx:31936-31942), so no handles appear on the new callout.
+        PushAddElement(visual, select: false);
         UpdateSelectionVisual();
     }
 
     private void PlaceText(Point pos) => PlaceTextInBox(new Rect(pos.X, pos.Y, 0, 0));
 
+    /// <summary>Survey's desktop new-text defaults (TextEditOverlay.jsx:126-137, :47).</summary>
+    private const double NewTextFontSize = 16;
+    private const string NewTextFontFamily = "Helvetica";
+
+    /// <summary>New text always commits a 1px solid black border and no fill (textEditCommit.js:127-129, :44).</summary>
+    private const double NewTextStrokeWidth = 1;
+
     /// <summary>
-    /// Survey text: a click (empty/tiny box) opens a free editor; a drag opens a
-    /// wrapped editor inset by TEXT_PADDING = 6 inside the dragged rect.
+    /// Survey text: the drag sets the WRAP WIDTH ONLY (PDFViewer.jsx:31532-31533 passes
+    /// <c>textBoxWidth</c> and no height). The box's height is font-derived at mount
+    /// (<c>fontSize * 1.16 * 1.13 + 2 * pad</c>) and grows from measured content while typing.
+    /// Every new editor starts from fixed defaults — on desktop <c>newTextStyle</c> is null,
+    /// so nothing carries over from the previous annotation (PDFViewer.jsx:31826).
     /// </summary>
     private void PlaceTextInBox(Rect box)
     {
-        var style = _textStyle;
-        double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
-        if (style == TextStyle.Huge) fontSize *= 2.2;
+        _textStyle = TextStyle.Plain;
+        _textFontSize = NewTextFontSize;
+        _textFontFamily = NewTextFontFamily;
+        _textBold = _textItalic = _textUnderline = _textStrike = false;
+        _textAlign = "left";
+        _textVerticalAlign = "top";
+
+        double fontSize = NewTextFontSize;
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(_color), fontSize);
-        tb.FontFamily = new FontFamily(_textFontFamily);
-        tb.FontWeight = _textBold || style == TextStyle.Bold ? FontWeights.Bold : FontWeights.Normal;
-        tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
-        tb.TextAlignment = AnnotationFactory.ParseAlign(_textAlign);
-        tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(_textVerticalAlign);
-        tb.Tag = style;
-        bool sized = box.Width >= 8 && box.Height >= 8;
-        _activeTextBox = sized ? box : null;
-        if (sized)
-        {
-            tb.Width = box.Width;
-            tb.Height = box.Height;
-            tb.TextWrapping = TextWrapping.Wrap;
-            tb.AcceptsReturn = true;
-            Canvas.SetLeft(tb, box.X);
-            Canvas.SetTop(tb, box.Y);
-        }
-        else
-        {
-            tb.Width = AnnotationFactory.DefaultTextBoxWidth;
-            tb.Height = AnnotationFactory.SingleLineBoxHeight(fontSize, _textFontFamily);
-            tb.TextWrapping = TextWrapping.Wrap;
-            tb.AcceptsReturn = true;
-            _activeTextBox = new Rect(box.X, box.Y, tb.Width, tb.Height);
-            Canvas.SetLeft(tb, box.X);
-            Canvas.SetTop(tb, box.Y);
-        }
+        tb.FontFamily = new FontFamily(NewTextFontFamily);
+        tb.TextAlignment = TextAlignment.Left;
+        tb.VerticalContentAlignment = VerticalAlignment.Top;
+        tb.Tag = TextStyle.Plain;
+        tb.TextWrapping = TextWrapping.Wrap;
+        tb.AcceptsReturn = true;
+
+        // Survey: outerW = max(8 + 2*pad, textBoxWidth || 160); the dragged height is discarded.
+        double wrapW = box.Width >= 1
+            ? Math.Max(8 + 2 * AnnotationFactory.TextPadding, box.Width)
+            : AnnotationFactory.DefaultTextBoxWidth;
+        tb.Width = wrapW;
+        tb.Height = AnnotationFactory.SingleLineBoxHeight(fontSize);
+        _activeTextBox = new Rect(box.X, box.Y, tb.Width, tb.Height);
+        Canvas.SetLeft(tb, box.X);
+        Canvas.SetTop(tb, box.Y);
+
+        ShowTextPreview(box.X, box.Y, tb.Width, tb.Height,
+            Colors.Transparent, NewTextStrokeWidth, LineBorderStyle.Solid);
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         HookTextEditor(tb);
+        UpdateContextPanels(); // brings up the rich-text row for the now-open editor
         Dispatcher.InvokeAsync(() => tb.Focus());
+    }
+
+    /// <summary>
+    /// Survey paints the box chrome during creation from the live bounds with the COMMITTED
+    /// look, so nothing changes appearance when the editor closes
+    /// (SVGAnnotationLayer.jsx:4831-4853, hideText=true). The editor itself is chromeless.
+    /// </summary>
+    private void ShowTextPreview(
+        double x, double y, double w, double h, Color fill, double strokeThickness, LineBorderStyle lineStyle)
+    {
+        HideTextPreview();
+        var rect = new Rectangle
+        {
+            Width = Math.Max(1, w),
+            Height = Math.Max(1, h),
+            Fill = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill),
+            Stroke = strokeThickness > 0 ? Brushes.Black : Brushes.Transparent,
+            StrokeThickness = Math.Max(0, strokeThickness),
+            IsHitTestVisible = false,
+        };
+        AnnotationFactory.ApplyDash(rect, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
+        Canvas.SetLeft(rect, x);
+        Canvas.SetTop(rect, y);
+        AnnotationCanvas.Children.Add(rect);
+        _textPreview = rect;
+    }
+
+    private void HideTextPreview()
+    {
+        if (_textPreview is null) return;
+        AnnotationCanvas.Children.Remove(_textPreview);
+        _textPreview = null;
     }
 
     private void BeginCalloutReEdit(CalloutAnnotation visual)
@@ -305,6 +348,9 @@ public partial class EditorWindow : Window
                     AnnotationCanvas.Children.Add(label);
             },
             redo: () => AnnotationCanvas.Children.Remove(label)));
+        // Survey's existing-text commit clones the original and only replaces text/height
+        // (textEditCommit.js:190-210) — a blank re-edit keeps the box, it never deletes it.
+        _reeditSource = label;
 
         var style = Enum.TryParse(meta.Style, out TextStyle s) ? s : TextStyle.Plain;
         double fontSize = meta.FontSize is double fs && fs > 0 ? fs : AnnotationFactory.FontSizeFor(_thickness);
@@ -314,25 +360,36 @@ public partial class EditorWindow : Window
         var tb = AnnotationFactory.CreateTextEditor(foreground, fontSize);
         tb.Tag = style;
         tb.Text = meta.Text ?? string.Empty;
+        tb.FontFamily = new FontFamily(string.IsNullOrWhiteSpace(meta.FontFamily) ? NewTextFontFamily : meta.FontFamily);
+        tb.FontWeight = meta.Bold == true ? FontWeights.Bold : FontWeights.Normal;
+        tb.FontStyle = meta.Italic == true ? FontStyles.Italic : FontStyles.Normal;
+        tb.TextAlignment = AnnotationFactory.ParseAlign(meta.Align);
+        tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(meta.VerticalAlign);
+        tb.TextWrapping = TextWrapping.Wrap;
+        tb.AcceptsReturn = true;
         if (meta.Rect is { Length: >= 4 } box && box[2] >= 8 && box[3] >= 8)
         {
             tb.Width = box[2];
             tb.Height = box[3];
-            tb.TextWrapping = TextWrapping.Wrap;
-            tb.AcceptsReturn = true;
             _activeTextBox = new Rect(x, y, box[2], box[3]);
             Canvas.SetLeft(tb, x);
             Canvas.SetTop(tb, y);
         }
         else
         {
-            _activeTextBox = null;
-            Canvas.SetLeft(tb, x - AnnotationFactory.TextPadding);
-            Canvas.SetTop(tb, y - AnnotationFactory.TextPadding);
+            tb.Width = AnnotationFactory.DefaultTextBoxWidth;
+            tb.Height = AnnotationFactory.SingleLineBoxHeight(fontSize);
+            _activeTextBox = new Rect(x, y, tb.Width, tb.Height);
+            Canvas.SetLeft(tb, x);
+            Canvas.SetTop(tb, y);
         }
+        ShowTextPreview(Canvas.GetLeft(tb), Canvas.GetTop(tb), tb.Width, tb.Height,
+            AnnotationStyle.FillColorFrom(meta, Colors.Transparent),
+            meta.Thickness ?? NewTextStrokeWidth, AnnotationStyle.LineStyleFrom(meta));
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         HookTextEditor(tb);
+        UpdateContextPanels(); // brings up the rich-text row for the now-open editor
         Dispatcher.InvokeAsync(() =>
         {
             tb.Focus();
@@ -340,9 +397,27 @@ public partial class EditorWindow : Window
         });
     }
 
+    /// <summary>
+    /// Survey re-measures on every keystroke and grows the box (never below the mount-time
+    /// floor) so the chrome and the reflowed text track live
+    /// (TextEditOverlay.jsx:239-270, :584-587).
+    /// </summary>
     private void HookTextEditor(TextBox tb)
     {
-        tb.LostKeyboardFocus += (_, _) => CommitText();
+        double floorH = tb.Height;
+        tb.TextChanged += (_, _) => GrowTextEditor(tb, floorH);
+        tb.LostKeyboardFocus += (_, ev) =>
+        {
+            // Survey's click-outside commit explicitly opts out of the rich-text toolbar, the
+            // mini toolbar and the font-colour picker (TextEditOverlay.jsx:445-447), so
+            // B/I/U/S, family, size, colour and align all apply LIVE to the still-open editor.
+            if (IsFormatChrome(ev.NewFocus as DependencyObject))
+            {
+                Dispatcher.BeginInvoke(() => tb.Focus(), DispatcherPriority.Input);
+                return;
+            }
+            CommitText();
+        };
         tb.PreviewKeyDown += (_, ev) =>
         {
             if (ev.Key == Key.Escape) { CancelText(); ev.Handled = true; }
@@ -352,6 +427,61 @@ public partial class EditorWindow : Window
                 ev.Handled = true;
             }
         };
+    }
+
+    /// <summary>
+    /// True when <paramref name="node"/> lives inside the format strip (WinShot's counterpart
+    /// of Survey's [data-rich-text-toolbar] / [data-mini-toolbar] / [data-font-color-picker]).
+    /// Popup contents are their own visual tree, so the walk follows logical parents first.
+    /// </summary>
+    private bool IsFormatChrome(DependencyObject? node)
+    {
+        for (int guard = 0; node is not null && guard < 64; guard++)
+        {
+            if (ReferenceEquals(node, SecondaryToolPanel)) return true;
+            node = LogicalTreeHelper.GetParent(node)
+                ?? (node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : null);
+        }
+        return false;
+    }
+
+    private void GrowTextEditor(TextBox tb, double floorH)
+    {
+        double inner = Math.Max(1, tb.Width - 2 * AnnotationFactory.TextPadding);
+        double grown = Math.Max(floorH, MeasureText(tb, inner).ContentHeight + 2 * AnnotationFactory.TextPadding);
+        if (Math.Abs(grown - tb.Height) >= 0.5)
+        {
+            tb.Height = grown;
+            // The commit reads _activeTextBox, so the grown height has to land there too.
+            if (_activeTextBox is Rect r) _activeTextBox = new Rect(r.X, r.Y, r.Width, grown);
+        }
+        if (_textPreview is not null) _textPreview.Height = Math.Max(1, tb.Height);
+    }
+
+    /// <summary>
+    /// WPF equivalent of Survey's two live measurements: canvas <c>measureText</c> per line
+    /// (max width, TextEditOverlay.jsx:55-68) and <c>el.scrollHeight</c> for the wrapped
+    /// content height (TextEditOverlay.jsx:224-232).
+    /// </summary>
+    private (double MaxLineWidth, double ContentHeight) MeasureText(TextBox tb, double innerWidth)
+    {
+        var typeface = new Typeface(tb.FontFamily, tb.FontStyle, tb.FontWeight, FontStretches.Normal);
+        double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        string text = tb.Text ?? string.Empty;
+        double maxLine = 0;
+        foreach (string line in text.Split('\n'))
+        {
+            var one = new FormattedText(line, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                typeface, tb.FontSize, Brushes.Black, dpi);
+            if (one.WidthIncludingTrailingWhitespace > maxLine) maxLine = one.WidthIncludingTrailingWhitespace;
+        }
+        var wrapped = new FormattedText(text.Length == 0 ? " " : text, CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight, typeface, tb.FontSize, Brushes.Black, dpi)
+        {
+            MaxTextWidth = Math.Max(1, innerWidth),
+            LineHeight = tb.FontSize * AnnotationFactory.TextLineHeightFactor,
+        };
+        return (maxLine, wrapped.Height);
     }
 
     private void CommitText()
@@ -366,30 +496,69 @@ public partial class EditorWindow : Window
         _activeText = null; // guards against re-entry from LostKeyboardFocus on removal
         var box = _activeTextBox;
         _activeTextBox = null;
+        var reeditSource = _reeditSource;
+        _reeditSource = null;
+        HideTextPreview();
 
         double x = Canvas.GetLeft(tb), y = Canvas.GetTop(tb);
         string text = tb.Text;
         AnnotationCanvas.Children.Remove(tb);
-        if (string.IsNullOrWhiteSpace(text)) return;
+        UpdateContextPanels(); // Survey clears the rich-text row at the commit boundary
+        // Survey discards only BLANK NEW text (textEditCommit.js:136); a re-edit blanked to
+        // nothing still commits, so the box survives as an empty bordered rectangle.
+        if (reeditSource is null && string.IsNullOrWhiteSpace(text)) return;
 
         var style = tb.Tag is TextStyle s ? s : TextStyle.Plain;
-        bool sized = box is Rect sizedBox && sizedBox.Width >= 8 && sizedBox.Height >= 8;
-        Point topLeft = sized ? new Point(x, y) : new Point(x, y);
-        var (strokeColor, fillColor) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
-        double boxW = sized ? box!.Value.Width : AnnotationFactory.DefaultTextBoxWidth;
-        double boxH = sized ? box!.Value.Height : AnnotationFactory.SingleLineBoxHeight(tb.FontSize, tb.FontFamily.Source);
+        Point topLeft = new(x, y);
+        var (strokeColor, _) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
+
+        // Survey's committed geometry. New text: tight-width fit for a single rendered line,
+        // otherwise the wrap target; height is always content + 2*pad (textEditCommit.js:137-148).
+        // Existing text: width unchanged, height grow-only (textEditCommit.js:200-202).
+        const double pad = AnnotationFactory.TextPadding;
+        double outerW = box?.Width is > 1 ? box!.Value.Width : AnnotationFactory.DefaultTextBoxWidth;
+        var (maxLineWidth, contentHeight) = MeasureText(tb, Math.Max(1, outerW - 2 * pad));
+        double perLine = tb.FontSize * AnnotationFactory.TextLineHeightFactor;
+        int renderedLines = Math.Max(
+            text.Split('\n').Length,
+            perLine > 0 ? (int)Math.Round(contentHeight / perLine) : 1);
+
+        double boxW, boxH;
+        Color fillColor;
+        double strokeWidth;
+        LineBorderStyle lineStyle;
+        if (reeditSource is not null)
+        {
+            var prior = reeditSource.Tag as AnnotationData;
+            boxW = outerW;
+            boxH = Math.Max(contentHeight + 2 * pad, box?.Height ?? 0);
+            fillColor = prior is null ? Colors.Transparent : AnnotationStyle.FillColorFrom(prior, Colors.Transparent);
+            strokeWidth = prior?.Thickness ?? NewTextStrokeWidth;
+            lineStyle = prior is null ? LineBorderStyle.Solid : AnnotationStyle.LineStyleFrom(prior);
+        }
+        else
+        {
+            boxW = renderedLines <= 1 && maxLineWidth > 0
+                ? Math.Ceiling(maxLineWidth + 2) + 2 * pad
+                : outerW;
+            boxH = contentHeight + 2 * pad;
+            fillColor = Colors.Transparent; // Survey pins backgroundColor '' for new text
+            strokeWidth = NewTextStrokeWidth;
+            lineStyle = LineBorderStyle.Solid;
+        }
+
         var label = AnnotationFactory.CreateStyledTextLabel(
             text, tb.Foreground, tb.FontSize, style, _textFontFamily,
             _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike,
             AnnotationFactory.ParseAlign(_textAlign), _textVerticalAlign,
-            boxW, boxH, fillColor, _shapeSize, _lineStyle);
+            boxW, boxH, fillColor, strokeWidth, lineStyle);
         Canvas.SetLeft(label, topLeft.X);
         Canvas.SetTop(label, topLeft.Y);
         label.Tag = AnnotationData.ForText(topLeft, text, style, tb.FontSize,
             tb.Foreground is SolidColorBrush fg ? fg.Color : strokeColor,
             _textFontFamily, _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike, _textAlign,
             _textVerticalAlign, new Rect(topLeft.X, topLeft.Y, boxW, boxH),
-            fillColor, _shapeSize, _lineStyle);
+            fillColor, strokeWidth, lineStyle);
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(label),
             redo: () =>
@@ -397,7 +566,8 @@ public partial class EditorWindow : Window
                 if (!AnnotationCanvas.Children.Contains(label))
                     AnnotationCanvas.Children.Add(label);
             }));
-        Select(label);
+        // Survey's commit only clears the edit state (setEditingAnnotation(null),
+        // PDFViewer.jsx:31936-31942) — no selection chrome appears on the new label.
     }
 
     private void CancelText()
@@ -406,7 +576,19 @@ public partial class EditorWindow : Window
         if (tb is null) return;
         _activeText = null;
         _activeTextBox = null;
+        var reeditSource = _reeditSource;
+        _reeditSource = null;
+        HideTextPreview();
         AnnotationCanvas.Children.Remove(tb);
+        // Escape during a re-edit is a true no-op: put the original label back and drop the
+        // removal step BeginTextReEdit pushed (Survey's onEditCancel, TextEditOverlay.jsx:398-403).
+        if (reeditSource is not null)
+        {
+            if (!AnnotationCanvas.Children.Contains(reeditSource))
+                AnnotationCanvas.Children.Add(reeditSource);
+            DiscardLastAction();
+        }
+        UpdateContextPanels();
     }
 
     // ------------------------------------------------------------- step tool

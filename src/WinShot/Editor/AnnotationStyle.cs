@@ -52,10 +52,14 @@ internal static class AnnotationStyle
     public const int DefaultCounterSize = 14;
 
     public static int ClampCounterSize(double size) => (int)Math.Clamp(Math.Round(size), 4, 76);
-    public static readonly int[] TextSizePresets = { 8, 10, 12, 14, 16, 18, 20, 24, 27, 32, 36, 48, 72 };
+    /// <summary>Survey's FONT_SIZE_PRESETS (AppShell.jsx:1859), verbatim.</summary>
+    public static readonly int[] TextSizePresets =
+        { 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72 };
+
+    /// <summary>Survey's family list (AppShell.jsx:1833) — single-name fonts only, no system UI font.</summary>
     public static readonly string[] FontFamilies =
     {
-        "Segoe UI", "Arial", "Helvetica", "Times New Roman", "Courier New", "Georgia", "Verdana",
+        "Arial", "Helvetica", "Times New Roman", "Courier New", "Georgia", "Verdana",
     };
 
     public const int DefaultPenSize = 3;
@@ -195,8 +199,9 @@ internal static class AnnotationStyle
     public static int ClampSize(double size) =>
         (int)Math.Clamp(Math.Round(size), 1, 50);
 
+    /// <summary>Survey clamps font size to 6..200 (TextEditOverlay.jsx:297, textEditCommit.js:93).</summary>
     public static int ClampTextSize(double size) =>
-        (int)Math.Clamp(Math.Round(size), 8, 72);
+        (int)Math.Clamp(Math.Round(size), 6, 200);
 
     public static int ClampEraserSize(double size) =>
         (int)Math.Clamp(Math.Round(size), 1, 100);

@@ -339,18 +339,25 @@ internal static class AnnotationFactory
 
     /// <summary>Takes the foreground brush and font size directly so re-editing a committed label can reproduce its look.</summary>
     public static TextBox CreateTextEditor(Brush foreground, double fontSize) =>
-        new()
+        new TextBox
         {
-            MinWidth = 48,
+            // Survey's floor for the editable box is 8 + 2 * TEXT_PADDING
+            // (TextEditOverlay.jsx:164); anything wider would render past the box it commits.
+            MinWidth = 8 + 2 * TextPadding,
             FontSize = fontSize,
             FontWeight = FontWeights.Normal,
             Foreground = foreground,
-            CaretBrush = foreground,
+            // Survey's caret is a fixed iOS blue, independent of the text colour
+            // (TextEditOverlay.jsx:591 caretColor '#007AFF').
+            CaretBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xFF)),
             Background = Brushes.Transparent, // Survey edits in place over the page
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0xAA, 0x0A, 0x84, 0xFF)),
-            BorderThickness = new Thickness(1),
+            // Chromeless: the box chrome comes from the live preview painted with the
+            // COMMITTED look, so nothing changes appearance on commit
+            // (TextEditOverlay.jsx:563-564).
+            BorderBrush = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
             Padding = new Thickness(TextPadding),
-        };
+        }.WithLineHeight(fontSize * TextLineHeightFactor);
 
     /// <summary>Transparent background keeps the whole text box clickable for the Select tool without rendering anything.</summary>
     public static TextBlock CreateTextLabel(string text, Brush foreground, double fontSize) =>
@@ -372,6 +379,9 @@ internal static class AnnotationFactory
             Background = Brushes.Transparent,
             TextAlignment = align,
             TextWrapping = TextWrapping.Wrap,
+            // Same line-height contract the editor uses, so nothing reflows on commit.
+            LineHeight = fontSize * TextLineHeightFactor,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
         };
         if (underline || strike)
         {
@@ -457,14 +467,18 @@ internal static class AnnotationFactory
         var chrome = new Rectangle
         {
             Fill = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill),
-            Stroke = strokeThickness > 0 ? foreground : Brushes.Transparent,
+            // Survey's textbox border is a plain <rect> with no rx/ry, stroked in the
+            // stored `stroke` — hardcoded '#000000' for user-created text, never the
+            // picker colour (svgAnnotationRenderers.jsx:1231-1246, TextEditOverlay.jsx:140-142).
+            Stroke = strokeThickness > 0 ? Brushes.Black : Brushes.Transparent,
             StrokeThickness = Math.Max(0, strokeThickness),
-            RadiusX = 2,
-            RadiusY = 2,
         };
         ApplyDash(chrome, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
         box.Children.Add(chrome);
-        inner.Margin = new Thickness(TextPadding);
+        // Survey gives the content area fontSize * 0.35 of extra bottom room for descenders
+        // (svgAnnotationRenderers.jsx:1191) rather than growing the box itself.
+        inner.Margin = new Thickness(
+            TextPadding, TextPadding, TextPadding, TextPadding - fontSize * TextDescenderRatio);
         box.Children.Add(inner);
         return box;
     }
@@ -560,18 +574,42 @@ internal static class AnnotationFactory
         label.FontSize = CounterGeometry.FontSize(radius, caption);
     }
 
+    /// <summary>
+    /// Applies Survey's line-height contract to an in-place editor. TextBox has no LineHeight
+    /// of its own; Block.LineHeight is an inherited attached property its inner paragraph
+    /// picks up, which is how a TextBox is given a fixed line box in WPF.
+    /// </summary>
+    public static TextBox WithLineHeight(this TextBox tb, double lineHeight)
+    {
+        tb.SetValue(System.Windows.Documents.Block.LineHeightProperty, lineHeight);
+        tb.SetValue(System.Windows.Documents.Block.LineStackingStrategyProperty,
+            LineStackingStrategy.BlockLineHeight);
+        return tb;
+    }
+
     public const double TextPadding = 6;
 
     /// <summary>
-    /// Height of a one-line text box: the font's real line height (Segoe UI is 1.33x,
-    /// not the 1.31 that used to clip descenders) plus padding and the editor's 1px border.
+    /// Survey's line-height contract: <c>(lineHeight || 1.16) * 1.13</c>
+    /// (svgAnnotationRenderers.jsx:1086) — the same 1.3108 factor the editor and the
+    /// committed SVG both use.
     /// </summary>
-    public static double SingleLineBoxHeight(double fontSize, string? fontFamily = null)
-    {
-        var family = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? "Segoe UI" : fontFamily);
-        double line = family.LineSpacing > 0 ? family.LineSpacing : 1.33;
-        return Math.Ceiling(fontSize * line) + 2 * TextPadding + 2;
-    }
+    public const double TextLineHeightFactor = 1.16 * 1.13;
+
+    /// <summary>
+    /// Survey's descender buffer: the text CONTENT area is <c>fontSize * 0.35</c> taller
+    /// than the box's inner height so j/p/g/q/y are not cut off
+    /// (svgAnnotationRenderers.jsx:1181, TextEditOverlay.jsx:470).
+    /// </summary>
+    public const double TextDescenderRatio = 0.35;
+
+    /// <summary>
+    /// Height of a one-line text box, matching Survey's new-text mount geometry
+    /// (TextEditOverlay.jsx:165): <c>fontSize * 1.16 * 1.13 + 2 * TEXT_PADDING</c>.
+    /// The font family no longer participates — Survey's factor is font-independent.
+    /// </summary>
+    public static double SingleLineBoxHeight(double fontSize, string? fontFamily = null) =>
+        fontSize * TextLineHeightFactor + 2 * TextPadding;
 
     public static VerticalAlignment ParseVerticalAlign(string? name) => name switch
     {

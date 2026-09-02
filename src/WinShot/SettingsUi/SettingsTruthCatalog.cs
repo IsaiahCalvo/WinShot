@@ -107,5 +107,8 @@ internal static class SettingsTruthCatalog
             "LastRecordingRegion",
             "ShortcutBindings",
             "EraserPartial",
+            // Editor view state, remembered the way Survey remembers its zoom preference.
+            "EditorZoomMode",
+            "EditorManualZoom",
         };
 }

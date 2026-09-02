@@ -8,6 +8,10 @@ internal enum EditorShortcutCommand
     Undo,
     Redo,
     FitAndCenter,
+    FitWidth,
+    FitHeight,
+    ZoomIn,
+    ZoomOut,
     Copy,
     SaveAs,
 }
@@ -20,7 +24,14 @@ internal static class EditorShortcut
         {
             (Key.Z, ModifierKeys.Control) => EditorShortcutCommand.Undo,
             (Key.Y, ModifierKeys.Control) => EditorShortcutCommand.Redo,
+            // Survey's zoom shortcuts (PDFViewer.jsx:23456-23484): Ctrl+0/1/2 pick the fit
+            // modes, Ctrl+= / Ctrl++ / Ctrl+- step by TOOLBAR_ZOOM_STEP_FACTOR.
             (Key.D0 or Key.NumPad0, ModifierKeys.Control) => EditorShortcutCommand.FitAndCenter,
+            (Key.D1 or Key.NumPad1, ModifierKeys.Control) => EditorShortcutCommand.FitWidth,
+            (Key.D2 or Key.NumPad2, ModifierKeys.Control) => EditorShortcutCommand.FitHeight,
+            (Key.OemPlus or Key.Add, ModifierKeys.Control) => EditorShortcutCommand.ZoomIn,
+            (Key.OemPlus or Key.Add, ModifierKeys.Control | ModifierKeys.Shift) => EditorShortcutCommand.ZoomIn,
+            (Key.OemMinus or Key.Subtract, ModifierKeys.Control) => EditorShortcutCommand.ZoomOut,
             (Key.C, ModifierKeys.Control) => EditorShortcutCommand.Copy,
             (Key.S, ModifierKeys.Control | ModifierKeys.Shift) => EditorShortcutCommand.SaveAs,
             _ => EditorShortcutCommand.None,

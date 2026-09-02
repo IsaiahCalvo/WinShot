@@ -184,6 +184,18 @@ public partial class EditorWindow : Window
         UpdateUndoRedoButtons();
     }
 
+    /// <summary>
+    /// Drops the most recent undo entry WITHOUT running it. Used when a gesture that already
+    /// pushed a step turns out to be a no-op — a cancelled text re-edit, whose removal step
+    /// must not survive as an undoable "delete" (Survey's onEditCancel restores in place).
+    /// </summary>
+    private void DiscardLastAction()
+    {
+        if (_undoStack.Count == 0) return;
+        _undoStack.Pop().Discard();
+        UpdateUndoRedoButtons();
+    }
+
     /// <summary>Clears the redo stack, letting each dropped action release any
     /// resources it can no longer replay (e.g. blur/pixelate backup bitmaps).</summary>
     private void DiscardRedoStack()
@@ -285,7 +297,11 @@ public partial class EditorWindow : Window
             {
                 case EditorShortcutCommand.Undo: _ = UndoAsync(); break;
                 case EditorShortcutCommand.Redo: _ = RedoAsync(); break;
-                case EditorShortcutCommand.FitAndCenter: FitToView(); break;
+                case EditorShortcutCommand.FitAndCenter: FitToView(); PersistZoomPreference(); break;
+                case EditorShortcutCommand.FitWidth: FitToWidth(); PersistZoomPreference(); break;
+                case EditorShortcutCommand.FitHeight: FitToHeight(); PersistZoomPreference(); break;
+                case EditorShortcutCommand.ZoomIn: ZoomAt(ViewportCentre(), _zoom * ZoomStepFactor); break;
+                case EditorShortcutCommand.ZoomOut: ZoomAt(ViewportCentre(), _zoom / ZoomStepFactor); break;
                 case EditorShortcutCommand.Copy: OnCopy(this, new RoutedEventArgs()); break;
                 case EditorShortcutCommand.SaveAs: OnSave(this, new RoutedEventArgs()); break;
             }

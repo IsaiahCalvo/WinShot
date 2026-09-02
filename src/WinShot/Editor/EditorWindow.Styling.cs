@@ -301,9 +301,41 @@ public partial class EditorWindow : Window
 
     private void RestyleSelectedTextFormat()
     {
+        // Survey's toolbar mutates the OPEN editor through richTextEditor.api.* — it never
+        // commits first (AppShell.jsx:1756-1975). With an editor up, that is the only target.
+        if (_activeText is { } editor)
+        {
+            RestyleOpenEditor(editor);
+            return;
+        }
         foreach (UIElement el in SelectionList().ToArray())
             RestyleOneTextFormat(el);
         UpdateSelectionVisual();
+    }
+
+    /// <summary>Applies the current text-format state live to the in-place editor.</summary>
+    private void RestyleOpenEditor(TextBox tb)
+    {
+        bool callout = tb.Tag is CalloutAnnotation;
+        if (!callout)
+        {
+            tb.FontFamily = new FontFamily(string.IsNullOrWhiteSpace(_textFontFamily)
+                ? "Helvetica" : _textFontFamily);
+            tb.FontSize = AnnotationStyle.ClampTextSize(_textFontSize);
+            tb.WithLineHeight(tb.FontSize * AnnotationFactory.TextLineHeightFactor);
+            tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(_textVerticalAlign);
+        }
+        tb.FontWeight = _textBold || _textStyle == TextStyle.Bold ? FontWeights.Bold : FontWeights.Normal;
+        tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
+        tb.TextAlignment = AnnotationFactory.ParseAlign(_textAlign);
+        tb.TextDecorations = null;
+        if (_textUnderline || _textStrike)
+        {
+            var decorations = new TextDecorationCollection();
+            if (_textUnderline) decorations.Add(TextDecorations.Underline);
+            if (_textStrike) decorations.Add(TextDecorations.Strikethrough);
+            tb.TextDecorations = decorations;
+        }
     }
 
     private void RestyleOneTextFormat(UIElement element)

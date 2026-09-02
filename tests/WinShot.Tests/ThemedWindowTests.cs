@@ -652,12 +652,16 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
         Assert.Equal(Visibility.Collapsed, ((TextBlock)editor.FindName("ThicknessLabel")!).Visibility);
+        // Survey's Width control for text is a STROKE width (AppShell.jsx:2464-2482), so the
+        // shared size box keeps the stroke presets; the font size lives in FontSizeBox, which
+        // — like Survey's rich-text row — is only up while an editor is mounted.
         Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "16");
-        Assert.Contains(sizeBox.Items.OfType<ComboBoxItem>(),
+        Assert.DoesNotContain(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "72");
         var fontSizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
         Point toolsOrigin = groupTools.TranslatePoint(new Point(0, 0), groupBar);
@@ -678,7 +682,9 @@ public class ThemedWindowTests
         var overflowPanel = (StackPanel)editor.FindName("FormatOverflowPanel")!;
         var bold = (Button)editor.FindName("BoldBtn")!;
         var textButtons = (FrameworkElement)editor.FindName("TextFormatButtons")!;
-        Assert.Equal(Visibility.Visible, overflowBtn.Visibility);
+        // Survey's rich-text row is only portalled in while an editor is mounted, so with the
+        // Text tool merely armed there is nothing on the strip left to overflow.
+        Assert.Equal(Visibility.Collapsed, overflowBtn.Visibility);
         Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name is "TextFormatButtons" or "BoldBtn" or "ItalicBtn");
         Assert.True(IsLogicalDescendant(formatBar, textButtons),
@@ -698,7 +704,9 @@ public class ThemedWindowTests
             item => item.Content is string s && s == "50");
         Assert.DoesNotContain(sizeBox.Items.OfType<ComboBoxItem>(),
             item => item.Content is string s && s == "72");
-        Assert.Equal(Visibility.Visible, fontSizeBox.Visibility);
+        // Same rule for callouts: Survey's font-size dropdown belongs to the rich-text row,
+        // which only exists while an editor is mounted (TextEditOverlay.jsx:278-318).
+        Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
         Point saveOrigin = BarRightEdge(editor);
@@ -739,7 +747,9 @@ public class ThemedWindowTests
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object[] { label });
         editor.UpdateLayout();
-        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
+        // Survey shows the rich-text row solely while an editor is mounted, NOT when a text
+        // annotation is merely selected (AppShell.jsx:1756 gates on bottomToolbarApi.richTextEditor).
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
 
@@ -958,7 +968,8 @@ public class ThemedWindowTests
         Assert.True(zoom > 1.05, $"tiny capture stayed at native size: zoom={zoom}, viewport={vw}x{vh}");
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
-        Assert.Equal("Fit page", fitMenuBtn.ToolTip);
+        // Survey's fit trigger tooltip is `Page fit: ${label}` in every state (AppShell.jsx:3072).
+        Assert.Equal("Page fit: Fit page", fitMenuBtn.ToolTip);
         Assert.Equal(Visibility.Visible, zoomBox.Visibility);
         Assert.EndsWith("%", zoomBox.Text);
     }

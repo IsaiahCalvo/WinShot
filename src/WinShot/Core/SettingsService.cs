@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace WinShot.Core;
@@ -39,6 +39,11 @@ public class Settings
 
     /// <summary>Editor eraser mode. Survey persists this ('eraserMode') and defaults to partial.</summary>
     public bool EraserPartial { get; set; } = true;
+
+    // Editor view: Survey persists the zoom MODE and the manual scale and restores them on
+    // load (zoomController.js:9, :18-21, :36-71; PDFViewer.jsx:916-937, :7856-7863).
+    public string EditorZoomMode { get; set; } = "Fit";   // Fit | FitWidth | FitHeight | Free
+    public double EditorManualZoom { get; set; } = 1.0;
     public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
 
     // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet

@@ -293,10 +293,68 @@ public class AnnotationEditorRenderHarness
                 Check("TextToolBtn");
                 Click(0.10, 0.92); Pump(4);
                 var textBox = canvas.Children.OfType<TextBox>().Last();
+                double mountW = textBox.Width, mountH = textBox.Height;
                 textBox.Text = "Hello gjpq text"; Pump(3);
                 Shot("pointer-text-editing.png");
+                // Survey grows the box from measured content while typing and never shrinks it
+                // below the font-derived mount height (TextEditOverlay.jsx:239-270).
+                textBox.Text = "Hello gjpq text that wraps onto several rendered lines"; Pump(4);
+                double grownH = textBox.Height;
+                Shot("pointer-text-growing.png");
+                textBox.Text = "Hi"; Pump(4);
                 Click(0.02, 0.02); Pump(4);
                 Shot("pointer-text-committed.png");
+                // Committed NEW text hugs a single rendered line: outer width is
+                // ceil(maxLineWidth + 2) + 2*pad, height is content + 2*pad (textEditCommit.js:137-148).
+                var committed = canvas.Children.OfType<FrameworkElement>()
+                    .Last(el => el.Tag is AnnotationData { Type: AnnotationData.TypeText });
+                File.WriteAllText(Path.Combine(outDir, "text-geometry.txt"),
+                    $"mount={mountW}x{mountH} grown={grownH} " +
+                    $"committed={committed.Width}x{committed.Height} " +
+                    $"selected={typeof(EditorWindow).GetField("_selected", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)}");
+
+                // Survey re-opens an existing textbox on a plain (non-drag) text-tool click
+                // (PDFViewer.jsx:31502-31519) instead of needing a double-click.
+                Check("TextToolBtn");
+                Click(0.10, 0.92); Pump(4);
+                File.WriteAllText(Path.Combine(outDir, "text-reedit.txt"),
+                    $"editors={canvas.Children.OfType<TextBox>().Count()} " +
+                    $"text={canvas.Children.OfType<TextBox>().LastOrDefault()?.Text}");
+                Shot("pointer-text-reedit.png");
+                // Blanking a RE-EDIT keeps the box (Survey commits text:'' — textEditCommit.js:200).
+                var reedit = canvas.Children.OfType<TextBox>().Last();
+                reedit.Text = ""; Pump(3);
+                Click(0.02, 0.02); Pump(4);
+                File.WriteAllText(Path.Combine(outDir, "text-blank-reedit.txt"),
+                    $"texts={canvas.Children.OfType<FrameworkElement>().Count(el => el.Tag is AnnotationData { Type: AnnotationData.TypeText })}");
+                Shot("pointer-text-blanked.png");
+                // A text drag sets the WRAP WIDTH ONLY; the dragged height is discarded.
+                Check("TextToolBtn");
+                editor.PointerDown(P(0.40, 0.90)); Pump(1);
+                for (int i = 1; i <= 10; i++) { editor.PointerMove(P(0.40 + 0.20 * i / 10.0, 0.90 + 0.06 * i / 10.0)); Pump(1); }
+                Shot("pointer-text-drag-preview.png");
+                editor.PointerUp(P(0.60, 0.96)); Pump(4);
+                var dragged = canvas.Children.OfType<TextBox>().Last();
+                File.WriteAllText(Path.Combine(outDir, "text-drag.txt"),
+                    $"box={dragged.Width}x{dragged.Height} singleLine={AnnotationFactory.SingleLineBoxHeight(dragged.FontSize)}");
+                dragged.Text = "Dragged wrap width"; Pump(3);
+                Click(0.02, 0.02); Pump(4);
+                Shot("pointer-text-dragged.png");
+
+                // Align grid: Survey's 26x26 cells with a centred 6px accent dot on real chrome.
+                Check("TextToolBtn");
+                Click(0.72, 0.90); Pump(4); // open an editor so the rich-text row is up
+                ((Button)editor.FindName("AlignMenuBtn")!).RaiseEvent(
+                    new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Pump(6);
+                var alignGrid = (System.Windows.Controls.Primitives.UniformGrid)editor.FindName("AlignGrid")!;
+                File.WriteAllText(Path.Combine(outDir, "align-grid.txt"),
+                    $"grid={alignGrid.Width}x{alignGrid.Height} desired={alignGrid.DesiredSize} " +
+                    $"cell={alignGrid.Children.OfType<Button>().First().ActualWidth}");
+                ((System.Windows.Controls.Primitives.Popup)editor.FindName("AlignPopup")!).IsOpen = false; Pump(2);
+                typeof(EditorWindow).GetMethod("CancelText", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(editor, null);
+                Pump(3);
 
                 // Callout: a sub-MinDrag click is a cancel (Survey commits nothing).
                 Check("CalloutToolBtn");

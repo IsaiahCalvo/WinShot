@@ -27,8 +27,9 @@ namespace WinShot.Editor;
 /// </summary>
 public partial class EditorWindow : Window
 {
-    private const double MinZoom = 0.05;
-    private const double MaxZoom = 16.0;
+    // Survey's zoomController MIN_SCALE / MAX_SCALE (utils/zoomController.js:23-24).
+    private const double MinZoom = 0.01;
+    private const double MaxZoom = 40.0;
 
     private const string SaveDialogFilter =
         "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp|WinShot project|*.winshot";
@@ -70,7 +71,7 @@ public partial class EditorWindow : Window
     private double _textFontSize = AnnotationStyle.DefaultTextSize;
     private bool _syncingSizeBox;
     private bool _syncingContext;
-    private string _textFontFamily = "Segoe UI";
+    private string _textFontFamily = "Helvetica";
     private bool _textBold;
     private bool _textItalic;
     private bool _textUnderline;
@@ -78,6 +79,12 @@ public partial class EditorWindow : Window
     private string _textAlign = "left";
     private string _textVerticalAlign = "top";
     private Rect? _activeTextBox;
+
+    /// <summary>The committed label a text re-edit replaced, so blanking or cancelling restores it.</summary>
+    private FrameworkElement? _reeditSource;
+
+    /// <summary>Live box chrome painted behind the chromeless editor with the committed look.</summary>
+    private System.Windows.Shapes.Rectangle? _textPreview;
     private int _nextStep = 1;
     private bool _stepLetters; // Step tool: false = number badges, true = letter badges (A, B, …)
     private ShapeFillMode _fillMode = ShapeFillMode.None;
@@ -147,7 +154,6 @@ public partial class EditorWindow : Window
     // Set when a new source is loaded; the first layout pass with a real viewport runs the
     // initial fit-to-view and clears it. Guarantees large/tall captures fit on open
     // regardless of layout timing.
-    private bool _pendingInitialFit;
     private Point _dragStart;
     private Shape? _activeShape;
     private CalloutAnnotation? _previewCallout;
@@ -191,7 +197,6 @@ public partial class EditorWindow : Window
         InitializeComponent();
         _source = source;
         _owned.Add(source);
-        _pendingInitialFit = true;
         _settings = settings;
         _history = history;
         _afterInitialPreview = afterInitialPreview;
@@ -223,20 +228,18 @@ public partial class EditorWindow : Window
                 HideDragRect();
             }
         };
-        Loaded += (_, _) => FitToView();
+        Loaded += (_, _) => RestorePersistedZoom();
         SetEraserPartial(_settings.Current.EraserPartial);
-        // Loaded can fire before the window has its final size; this catches the first
-        // laid-out frame for the initial fit.
+        // Survey re-runs the CURRENT non-manual zoom mode on every layout change
+        // (applyLayoutDrivenZoom, PDFViewer.jsx:7999-8009); only MANUAL opts out.
         SizeChanged += (_, _) =>
         {
-            if (_pendingInitialFit) FitToView();
+            ReapplyFit();
             Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Background);
         };
         // The WINDOW can stop resizing while the VIEWPORT keeps shrinking as the toolbars / zoom
-        // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
-        // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
-        // until the user takes control.
-        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        // bar finish laying out, so the viewport's own size changes re-fit too.
+        Viewport.SizeChanged += (_, _) => ReapplyFit();
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -244,6 +247,7 @@ public partial class EditorWindow : Window
         };
         Closed += (_, _) =>
         {
+            PersistZoomPreference();
             _closed = true;
             _dragPreview?.Dispose();
             _dragPreview = null;
@@ -424,8 +428,7 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return; // viewport not ready; retry on next trigger
 
-        const double margin = 12; // Survey fit-page breathing room
-        double fit = Math.Min((vw - margin * 2) / _sourceWidth, (vh - margin * 2) / _sourceHeight);
+        double fit = Math.Min((vw - ViewMargin * 2) / _sourceWidth, (vh - ViewMargin * 2) / _sourceHeight);
         // Fit may go below MinZoom (a 32000px scroll capture in a 650px viewport fits at
         // ~0.02) — clamping it to MinZoom left only the middle band visible. MinZoom still
         // floors user zooming. Small captures scale UP so Fit is not a postage stamp at 100%.
@@ -434,30 +437,25 @@ public partial class EditorWindow : Window
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
         ViewTranslate.Y = Math.Round((vh - _sourceHeight * _zoom) / 2);
-        // Do NOT clear _pendingInitialFit here: the viewport keeps resizing as toolbars/the zoom
-        // bar lay out after open, and an early fit computed against a too-large viewport leaves the
-        // image too zoomed-in (bottom clipped). Keep re-fitting on every SizeChanged until the user
-        // actually takes control of the view (clicks/scrolls/zooms/pans — those clear the flag).
         Log.Info($"Editor fit: src={_sourceWidth}x{_sourceHeight} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
         OnViewChanged();
     }
 
-    /// <summary>Fits to WIDTH and pins the top, so a long capture is readable and you scroll down
-    /// it (mouse wheel). Small captures scale up to fill the width.</summary>
+    /// <summary>
+    /// Fits to WIDTH. Survey anchors the scale change on the viewport centre
+    /// (zoomToScale('fitw') → applyAnchoredScale(clientWidth/2, clientHeight/2),
+    /// PdfjsViewerContainer.jsx:1883-1899, :1082-1113), so the content the user was reading
+    /// stays put instead of the view snapping back to the top of the capture.
+    /// </summary>
     private void FitToWidth()
     {
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
 
-        const double margin = 12; // Survey fit-page breathing room
-        double fitW = (vw - margin * 2) / _sourceWidth;
+        double fitW = (vw - ViewMargin * 2) / _sourceWidth;
         // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
-        _zoom = Math.Clamp(fitW, Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
+        ApplyAnchoredScale(Math.Clamp(fitW, Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom));
         _viewFitMode = ViewFitMode.FitWidth;
-        ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
-        ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
-        _pendingInitialFit = false; // explicit manual choice; SizeChanged would otherwise snap to fit-whole
         OnViewChanged();
     }
 
@@ -467,19 +465,79 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
 
-        const double margin = 12; // Survey fit-page breathing room
-        double fitH = (vh - margin * 2) / _sourceHeight;
+        double fitH = (vh - ViewMargin * 2) / _sourceHeight;
         _zoom = Math.Clamp(fitH, Math.Min(MinZoom, Math.Max(fitH, 0.001)), MaxZoom);
         _viewFitMode = ViewFitMode.FitHeight;
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
         ViewTranslate.Y = Math.Round((vh - _sourceHeight * _zoom) / 2);
-        _pendingInitialFit = false;
         OnViewChanged();
     }
 
+    /// <summary>Survey's fit-page breathing room, also the bound used by <see cref="ClampView"/>.</summary>
+    private const double ViewMargin = 12;
+
+    /// <summary>
+    /// Re-runs the CURRENT fit mode after a layout change, exactly like Survey's
+    /// applyLayoutDrivenZoom (PDFViewer.jsx:7999-8009): every mode but MANUAL tracks the
+    /// viewport, so Fit width stays fit-to-width as the window resizes.
+    /// </summary>
+    private void ReapplyFit()
+    {
+        switch (_viewFitMode)
+        {
+            case ViewFitMode.Fit: FitToView(); break;
+            case ViewFitMode.FitWidth: FitToWidth(); break;
+            case ViewFitMode.FitHeight: FitToHeight(); break;
+        }
+    }
+
+    /// <summary>
+    /// Survey's applyAnchoredScale (PdfjsViewerContainer.jsx:1082-1113): re-projects the
+    /// content point under the viewport centre so it lands back under the viewport centre.
+    /// </summary>
+    private void ApplyAnchoredScale(double newZoom)
+    {
+        Point anchor = ViewportCentre();
+        double cx = (anchor.X - ViewTranslate.X) / _zoom;
+        double cy = (anchor.Y - ViewTranslate.Y) / _zoom;
+        _zoom = newZoom;
+        ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
+        ViewTranslate.X = anchor.X - cx * _zoom;
+        ViewTranslate.Y = anchor.Y - cy * _zoom;
+        ClampView();
+    }
+
+    /// <summary>
+    /// Survey's viewer is a native bounded scroller (position:absolute; inset:0;
+    /// overflow:auto; contain:strict — PdfjsViewerContainer.jsx:2096-2108), so the browser
+    /// hard-clamps scroll to [0, scrollMax] and content can never be scrolled or panned out
+    /// of view; content smaller than the container is RECENTRED by margin, not by scroll
+    /// (:834-846, applied at :2194-2197). WPF's free transform needs that made explicit.
+    /// The 12px fit margin is folded into the bounds so the fit modes' breathing room and
+    /// FitToWidth's top pin survive the clamp unchanged.
+    /// </summary>
+    private void ClampView()
+    {
+        if (_sourceWidth < 1 || _sourceHeight < 1) return;
+        double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
+        if (vw < 1 || vh < 1) return;
+        ViewTranslate.X = ClampViewAxis(ViewTranslate.X, vw, _sourceWidth * _zoom);
+        ViewTranslate.Y = ClampViewAxis(ViewTranslate.Y, vh, _sourceHeight * _zoom);
+        SyncCaptureShadow();
+    }
+
+    private static double ClampViewAxis(double offset, double viewSize, double content) =>
+        content + 2 * ViewMargin <= viewSize
+            ? (viewSize - content) / 2
+            : Math.Clamp(offset, viewSize - ViewMargin - content, ViewMargin);
+
     /// <summary>Survey's TOOLBAR_ZOOM_STEP_FACTOR: each click is a quarter step about the viewport centre.</summary>
     private const double ZoomStepFactor = 1.25;
+
+    /// <summary>Survey's WHEEL_NOTCH_PX / WHEEL_NOTCH_FACTOR (pdfZoomMath.js:4-5).</summary>
+    private const double WheelNotchPx = 100;
+    private const double WheelNotchFactor = 1.1;
 
     private Point ViewportCentre() => new(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2);
 
@@ -489,10 +547,37 @@ public partial class EditorWindow : Window
     private void OnZoomBoxTextInput(object sender, TextCompositionEventArgs e) =>
         e.Handled = !e.Text.All(char.IsDigit);
 
-    private void OnZoomBoxFocus(object sender, KeyboardFocusChangedEventArgs e)
-    {
+    private void OnZoomBoxFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        // Survey's input mounts with the current value and never selects it
+        // (AppShell.jsx:2914-2932 — autoFocus, no select()).
         ZoomBox.Text = Math.Round(_zoom * 100).ToString();
-        ZoomBox.Dispatcher.BeginInvoke(ZoomBox.SelectAll, DispatcherPriority.Input);
+
+    /// <summary>
+    /// Survey strips every non-digit from the incoming value and caps it at 4000
+    /// mid-keystroke (handleZoomInputChange, PDFViewer.jsx:22775-22787). React's onChange
+    /// covers pastes too, which WPF's PreviewTextInput does not.
+    /// </summary>
+    private void OnZoomBoxPasting(object sender, DataObjectPastingEventArgs e)
+    {
+        string incoming = e.DataObject.GetDataPresent(DataFormats.UnicodeText)
+            ? (string)e.DataObject.GetData(DataFormats.UnicodeText)!
+            : string.Empty;
+        string digits = new(incoming.Where(char.IsDigit).ToArray());
+        if (digits == incoming) return;
+        e.CancelCommand();
+        if (digits.Length == 0) return;
+        int start = ZoomBox.SelectionStart;
+        ZoomBox.Text = ZoomBox.Text.Remove(start, ZoomBox.SelectionLength).Insert(start, digits);
+        ZoomBox.SelectionStart = start + digits.Length;
+    }
+
+    private void OnZoomBoxTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (int.TryParse(ZoomBox.Text.Trim().TrimEnd('%'), out int pct) && pct > 4000)
+        {
+            ZoomBox.Text = "4000";
+            ZoomBox.SelectionStart = ZoomBox.Text.Length;
+        }
     }
 
     private void OnZoomBoxKeyDown(object sender, KeyEventArgs e)
@@ -517,18 +602,66 @@ public partial class EditorWindow : Window
 
     private void OnFitMenuClick(object sender, RoutedEventArgs e) => FitMenuPopup.IsOpen = !FitMenuPopup.IsOpen;
 
-    private void OnFitPage(object sender, RoutedEventArgs e) { FitMenuPopup.IsOpen = false; FitToView(); }
+    private void OnFitPage(object sender, RoutedEventArgs e)
+    {
+        FitMenuPopup.IsOpen = false;
+        FitToView();
+        PersistZoomPreference();
+    }
 
-    private void OnFitWidth(object sender, RoutedEventArgs e) { FitMenuPopup.IsOpen = false; FitToWidth(); }
+    private void OnFitWidth(object sender, RoutedEventArgs e)
+    {
+        FitMenuPopup.IsOpen = false;
+        FitToWidth();
+        PersistZoomPreference();
+    }
 
-    private void OnFitHeight(object sender, RoutedEventArgs e) { FitMenuPopup.IsOpen = false; FitToHeight(); }
+    private void OnFitHeight(object sender, RoutedEventArgs e)
+    {
+        FitMenuPopup.IsOpen = false;
+        FitToHeight();
+        PersistZoomPreference();
+    }
+
+    /// <summary>
+    /// Survey saves the zoom mode and the manual scale on every change and restores them on
+    /// load (zoomController.js:36-71, :149-157; PDFViewer.jsx:916-937, :7856-7863).
+    /// </summary>
+    /// <remarks>
+    /// Called on the explicit mode choices and once on close rather than on every wheel notch:
+    /// Survey writes localStorage, WinShot writes a settings file.
+    /// </remarks>
+    private void PersistZoomPreference()
+    {
+        if (!IsLoaded) return;
+        var settings = _settings.Current;
+        string mode = _viewFitMode.ToString();
+        double manual = _viewFitMode == ViewFitMode.Free ? _zoom : settings.EditorManualZoom;
+        if (settings.EditorZoomMode == mode && Math.Abs(settings.EditorManualZoom - manual) < 0.0001) return;
+        settings.EditorZoomMode = mode;
+        settings.EditorManualZoom = manual;
+        _settings.Save();
+    }
+
+    private void RestorePersistedZoom()
+    {
+        switch (_settings.Current.EditorZoomMode)
+        {
+            case "FitWidth": FitToWidth(); break;
+            case "FitHeight": FitToHeight(); break;
+            case "Free":
+                FitToView(); // establishes a sane translation before the stored scale is applied
+                ZoomAt(ViewportCentre(), _settings.Current.EditorManualZoom);
+                break;
+            default: FitToView(); break;
+        }
+    }
 
     /// <summary>Zooms so the content point under <paramref name="anchor"/> (viewport coords) stays put.</summary>
     private void ZoomAt(Point anchor, double newZoom)
     {
         newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
         if (Math.Abs(newZoom - _zoom) < 0.00001) return;
-        _pendingInitialFit = false; // explicit zoom — stop auto-refitting on resize
         _viewFitMode = ViewFitMode.Free;
 
         double cx = (anchor.X - ViewTranslate.X) / _zoom;
@@ -537,6 +670,7 @@ public partial class EditorWindow : Window
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
         ViewTranslate.X = anchor.X - cx * _zoom;
         ViewTranslate.Y = anchor.Y - cy * _zoom;
+        ClampView();
         OnViewChanged();
     }
 
@@ -566,9 +700,11 @@ public partial class EditorWindow : Window
             ViewFitMode.Fit => ("Fit page", "SurveyIcon.FitPage"),
             ViewFitMode.FitWidth => ("Fit width", "SurveyIcon.FitWidth"),
             ViewFitMode.FitHeight => ("Fit height", "SurveyIcon.FitHeight"),
-            _ => ("Manual", "SurveyIcon.FitPage"),
+            _ => ($"Manual {Math.Round(_zoom * 100)}%", "SurveyIcon.FitPage"),
         };
-        FitMenuBtn.ToolTip = label;
+        // Survey prefixes every state with "Page fit: " and carries the live percentage in
+        // manual (AppShell.jsx:3072; PDFViewer.jsx:7865-7870).
+        FitMenuBtn.ToolTip = $"Page fit: {label}";
         FitModeIcon.Content = FindResource(icon);
         FitModeIcon.Opacity = _viewFitMode == ViewFitMode.Free ? 0.6 : 1;
         foreach (var (item, mode) in new[] { (FitPageItem, ViewFitMode.Fit), (FitWidthItem, ViewFitMode.FitWidth), (FitHeightItem, ViewFitMode.FitHeight) })
@@ -592,24 +728,25 @@ public partial class EditorWindow : Window
     {
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
-            // Ctrl+wheel zooms around the cursor (ZoomAt clears _pendingInitialFit). A plain
-            // scroll must NOT clear it: one stray wheel tick during the just-opened window's
-            // toolbar layout would otherwise permanently cancel the pending refit and freeze
-            // a bottom-clipped view of a tall capture.
-            ZoomAt(e.GetPosition(Viewport), _zoom * Math.Pow(1.2, e.Delta / 120.0));
+            // Ctrl+wheel zooms around the cursor; ZoomAt sets ViewFitMode.Free, which is
+            // Survey's MANUAL and the only thing that stops the view tracking the viewport.
+            // Survey: exp(-cappedDelta * ln(1.1)/100) — 1.1x per notch, one notch per
+            // event (pdfZoomMath.js:3-6, :74-88). WPF's 120-unit notch maps onto WHEEL_NOTCH_PX.
+            double notch = Math.Clamp(e.Delta / 1.2, -WheelNotchPx, WheelNotchPx);
+            ZoomAt(e.GetPosition(Viewport), _zoom * Math.Exp(notch * Math.Log(WheelNotchFactor) / WheelNotchPx));
         }
         else if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
         {
             // Shift+wheel scrolls horizontally.
             ViewTranslate.X += e.Delta;
-            SyncCaptureShadow();
+            ClampView();
         }
         else
         {
             // Plain wheel scrolls vertically — the natural way to move through a tall scrolling
             // capture. (Ctrl+wheel still zooms.)
             ViewTranslate.Y += e.Delta;
-            SyncCaptureShadow();
+            ClampView();
         }
         e.Handled = true;
     }
@@ -660,7 +797,14 @@ public partial class EditorWindow : Window
         else
         {
             Viewport.Cursor = Cursors.Arrow;
-            EditorSurface.Cursor = _tool == EditorTool.Select ? Cursors.Arrow : Cursors.Cross;
+            // Survey gives the text tool an I-beam, never the shape crosshair
+            // (PDFViewer.jsx:31456 cursor:'text'; PageAnnotationLayer.jsx:4593).
+            EditorSurface.Cursor = _tool switch
+            {
+                EditorTool.Select => Cursors.Arrow,
+                EditorTool.Text => Cursors.IBeam,
+                _ => Cursors.Cross,
+            };
         }
     }
 
@@ -832,7 +976,10 @@ public partial class EditorWindow : Window
         OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
         EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
-        TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
+        // Survey portals the rich-text row into the sub-toolbar ONLY while an editor is
+        // mounted (AppShell.jsx:1756, bridge cleared on commit/cancel/unmount,
+        // TextEditOverlay.jsx:324-330, :400-402, :432).
+        TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle) && _activeText is not null);
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
@@ -847,8 +994,10 @@ public partial class EditorWindow : Window
             SyncSizeBox();
         if (Has(EditorContextControls.TextStyle))
             SyncTextFormatChrome();
+        // Survey's rich-text row carries a dedicated 'Font size' dropdown for BOTH plain
+        // text and callout text (AppShell.jsx:1855-1876), and it is only up while editing.
         if (FontSizeBox is not null)
-            FontSizeBox.Visibility = Show(chrome == EditorTool.Callout);
+            FontSizeBox.Visibility = Show(chrome is EditorTool.Text or EditorTool.Callout && _activeText is not null);
 
         if (Has(EditorContextControls.EffectStrength))
         {
@@ -1023,6 +1172,11 @@ public partial class EditorWindow : Window
 
     private EditorTool ChromeTool()
     {
+        // An OPEN editor owns the chrome, whatever tool is armed: Survey's rich-text row is
+        // published by the mounted overlay, so a Select-tool double-click re-edit shows the
+        // same formatting controls a fresh text placement does (TextEditOverlay.jsx:278-318).
+        if (_activeText is { } editor)
+            return editor.Tag is CalloutAnnotation ? EditorTool.Callout : EditorTool.Text;
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
             EditorShellContract.ToolForAnnotation(meta.Type) is EditorTool mapped)
             return mapped;
@@ -1127,11 +1281,11 @@ public partial class EditorWindow : Window
     private void SyncSizeBox()
     {
         if (SizeBox is null) return;
-        bool text = ChromeTool() is EditorTool.Text;
         bool counter = ChromeTool() is EditorTool.Step;
+        // Survey's Width control for text is a STROKE width (AppShell.jsx:2464-2482), not the
+        // font size; the font size lives in its own dropdown next to B/I/U/S.
         int[] presets = _tool == EditorTool.Eraser
             ? AnnotationStyle.EraserSizePresets
-            : text ? AnnotationStyle.TextSizePresets
             : counter ? AnnotationStyle.CounterSizePresets
             : AnnotationStyle.SizePresets;
         _thickness = ActiveSize();
@@ -1142,7 +1296,6 @@ public partial class EditorWindow : Window
             SizeBox.Items.Clear();
             int current = _tool == EditorTool.Eraser
                 ? AnnotationStyle.ClampEraserSize(_eraserSize)
-                : text ? AnnotationStyle.ClampTextSize(_textFontSize)
                 : counter ? AnnotationStyle.ClampCounterSize(_counterSize)
                 : AnnotationStyle.ClampSize(_thickness);
             ComboBoxItem? selected = null;
@@ -1226,7 +1379,7 @@ public partial class EditorWindow : Window
         // strokeWidth (default 3) and the highlighter draws at max(that, 8).
         EditorTool.Highlighter => _penSize,
         EditorTool.Eraser => _eraserSize,
-        EditorTool.Text => _textFontSize,
+        EditorTool.Text => _shapeSize,
         EditorTool.Callout => _shapeSize,
         EditorTool.Freehand => _penSize,
         EditorTool.Step => _counterSize,
@@ -1241,7 +1394,7 @@ public partial class EditorWindow : Window
         {
             case EditorTool.Highlighter: _penSize = AnnotationStyle.ClampSize(size); break;
             case EditorTool.Eraser: _eraserSize = AnnotationStyle.ClampEraserSize(size); break;
-            case EditorTool.Text: _textFontSize = AnnotationStyle.ClampTextSize(size); break;
+            case EditorTool.Text: _shapeSize = AnnotationStyle.ClampSize(size); break;
             case EditorTool.Callout: _shapeSize = AnnotationStyle.ClampSize(size); break;
             case EditorTool.Freehand: _penSize = AnnotationStyle.ClampSize(size); break;
             case EditorTool.Step: _counterSize = AnnotationStyle.ClampCounterSize(size); break;
@@ -1495,21 +1648,31 @@ public partial class EditorWindow : Window
             FontFamilyBox.SelectedIndex = 0;
             FitComboToLongestItem(FontFamilyBox);
         }
-        if (FontSizeBox is not null && FontSizeBox.Items.Count == 0)
-        {
-            foreach (int n in AnnotationStyle.TextSizePresets)
-                FontSizeBox.Items.Add(new ComboBoxItem { Content = n.ToString(), Tag = (double)n });
-            FitComboToLongestItem(FontSizeBox);
-        }
         if (FontSizeBox is not null)
         {
+            // Survey rebuilds the preset list per render and PREPENDS the live size when it is
+            // not one of the presets, so the trigger label always matches (AppShell.jsx:1861-1863).
             bool restore = _syncingContext;
             _syncingContext = true;
             try
             {
-                foreach (ComboBoxItem item in FontSizeBox.Items.OfType<ComboBoxItem>())
-                    if (item.Tag is double n && (int)n == AnnotationStyle.ClampTextSize(_textFontSize))
-                        FontSizeBox.SelectedItem = item;
+                int current = AnnotationStyle.ClampTextSize(_textFontSize);
+                FontSizeBox.Items.Clear();
+                ComboBoxItem? selected = null;
+                foreach (int n in AnnotationStyle.TextSizePresets)
+                {
+                    var item = new ComboBoxItem { Content = n.ToString(), Tag = (double)n };
+                    FontSizeBox.Items.Add(item);
+                    if (n == current) selected = item;
+                }
+                if (selected is null)
+                {
+                    selected = new ComboBoxItem { Content = current.ToString(), Tag = (double)current };
+                    FontSizeBox.Items.Insert(0, selected);
+                }
+                FontSizeBox.SelectedItem = selected;
+                FitComboToLongestItem(FontSizeBox,
+                    AnnotationStyle.TextSizePresets.Select(n => n.ToString()).ToArray());
             }
             finally { _syncingContext = restore; }
         }
@@ -1535,17 +1698,24 @@ public partial class EditorWindow : Window
     private void PaintAlignCells()
     {
         string current = $"{_textAlign}|{_textVerticalAlign}";
-        var onBorder = (Brush)FindResource("BorderStrongBrush");
-        var onFill = (Brush)FindResource("PressedFillBrush");
-        var onDot = (Brush)FindResource("TextPrimaryBrush");
+        // Survey's active cell is accent-on-accent-tint with an accent border, and INACTIVE
+        // cells still carry chrome (#14171c on 1px #2a3140) rather than being invisible
+        // (AppShell.jsx:1960-2001).
+        var onBorder = (Brush)FindResource("AccentBrush");
+        var onFill = (Brush)FindResource("AccentTintBrush");
+        var offBorder = (Brush)FindResource("BorderBrush");
+        var offFill = (Brush)FindResource("SurfaceAltBrush");
+        var onDot = (Brush)FindResource("AccentBrush");
         var offDot = (Brush)FindResource("TextSecondaryBrush");
         if (AlignGrid is not null)
         {
             foreach (Button cell in AlignGrid.Children.OfType<Button>())
             {
                 bool on = cell.Tag as string == current;
-                cell.Background = on ? onFill : Brushes.Transparent;
-                cell.BorderBrush = on ? onBorder : Brushes.Transparent;
+                cell.Background = on ? onFill : offFill;
+                cell.BorderBrush = on ? onBorder : offBorder;
+                foreach (Shape glyph in ((cell.Content as Panel)?.Children).OfType<Shape>())
+                    glyph.Fill = on ? onDot : offDot;
             }
         }
         if (AlignTriggerGrid is not null)

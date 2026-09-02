@@ -394,33 +394,33 @@
                                                             <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
                                                                     BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="8" Margin="0,4,12,12"
                                                                     Effect="{StaticResource FloatingShadow}">
-                                                                <UniformGrid x:Name="AlignGrid" Columns="3" Width="84" Height="84">
+                                                                <UniformGrid x:Name="AlignGrid" Columns="3" Width="90" Height="90">
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="left|top" Click="OnAlignCellClick" ToolTip="Top left">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Top"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="center|top" Click="OnAlignCellClick" ToolTip="Top center">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Top"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="right|top" Click="OnAlignCellClick" ToolTip="Top right">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Top"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="left|middle" Click="OnAlignCellClick" ToolTip="Middle left">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Center"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="center|middle" Click="OnAlignCellClick" ToolTip="Middle center">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="right|middle" Click="OnAlignCellClick" ToolTip="Middle right">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="left|bottom" Click="OnAlignCellClick" ToolTip="Bottom left">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Bottom"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="center|bottom" Click="OnAlignCellClick" ToolTip="Bottom center">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Bottom"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="right|bottom" Click="OnAlignCellClick" ToolTip="Bottom right">
-                                                                        <Grid Width="16" Height="16"><Rectangle Width="10" Height="8" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom"/></Grid>
+                                                                        <Grid Width="16" Height="16"><Ellipse Width="6" Height="6" Fill="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
                                                                     </Button>
                                                                 </UniformGrid>
                                                             </Border>
@@ -723,6 +723,7 @@
                         <TextBox x:Name="ZoomBox" Style="{StaticResource RailZoomBox}" Text="100%"
                                  ToolTip="Zoom level. Click to type a percentage." AutomationProperties.Name="Zoom level"
                                  PreviewTextInput="OnZoomBoxTextInput" PreviewKeyDown="OnZoomBoxKeyDown"
+                                 TextChanged="OnZoomBoxTextChanged" DataObject.Pasting="OnZoomBoxPasting"
                                  GotKeyboardFocus="OnZoomBoxFocus" LostKeyboardFocus="OnZoomBoxBlur"/>
                         <Button x:Name="BtnZoomOut" Style="{StaticResource RailButton}" Click="OnZoomOut"
                                 ToolTip="Zoom out" AutomationProperties.Name="Zoom out"

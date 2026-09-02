@@ -12,6 +12,14 @@ public class EditorShortcutTests
     [InlineData(Key.Z, ModifierKeys.Control, "Undo")]
     [InlineData(Key.Y, ModifierKeys.Control, "Redo")]
     [InlineData(Key.D0, ModifierKeys.Control, "FitAndCenter")]
+    // Survey's zoom shortcuts (PDFViewer.jsx:23456-23484).
+    [InlineData(Key.D1, ModifierKeys.Control, "FitWidth")]
+    [InlineData(Key.NumPad2, ModifierKeys.Control, "FitHeight")]
+    [InlineData(Key.OemPlus, ModifierKeys.Control, "ZoomIn")]
+    [InlineData(Key.OemPlus, ModifierKeys.Control | ModifierKeys.Shift, "ZoomIn")]
+    [InlineData(Key.Add, ModifierKeys.Control, "ZoomIn")]
+    [InlineData(Key.OemMinus, ModifierKeys.Control, "ZoomOut")]
+    [InlineData(Key.Subtract, ModifierKeys.Control, "ZoomOut")]
     public void Resolve_MapsWindowsNativeEditorCommands(
         Key key, ModifierKeys modifiers, string expected) =>
         Assert.Equal(expected, EditorShortcut.Resolve(key, modifiers).ToString());

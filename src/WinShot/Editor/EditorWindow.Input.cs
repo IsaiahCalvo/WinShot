@@ -86,7 +86,8 @@ public partial class EditorWindow : Window
     {
         if (_sourceOperationActive) return;
         if (IsRotationPillSource(e.OriginalSource)) return; // the pill is its own control
-        _pendingInitialFit = false; // user is interacting — stop auto-refitting on resize
+        // Survey keeps the fit mode across annotation clicks; only an explicit zoom
+        // (ZoomAt -> ViewFitMode.Free, Survey's MANUAL) stops the view tracking the viewport.
         bool panGesture = e.ChangedButton == MouseButton.Middle ||
             (e.ChangedButton == MouseButton.Left && (_spaceDown || _tool == EditorTool.Pan));
         if (panGesture)
@@ -148,7 +149,7 @@ public partial class EditorWindow : Window
             ViewTranslate.X += p.X - _panLast.X;
             ViewTranslate.Y += p.Y - _panLast.Y;
             _panLast = p;
-            SyncCaptureShadow();
+            ClampView();
             return;
         }
         if (_activeHandle < 0 && !_dragging && !_movingSelection && !_marqueeSelecting && _handleKind != HandleKind.None)
@@ -232,7 +233,17 @@ public partial class EditorWindow : Window
                 UpdateCalloutPreview(_dragStart, CalloutLayout.PushBoxOffTip(_dragStart, pos));
                 break;
             case EditorTool.Text:
-                ShowDragRect(ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false), dim: false);
+                // Survey's preview only appears once the pointer has moved past 10 SCREEN px
+                // on either axis (PDFViewer.jsx:31477-31487); below that nothing is drawn.
+                if (TextDragExceedsThreshold(pos))
+                {
+                    SetTextPreviewStyle();
+                    ShowDragRect(ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false), dim: false);
+                }
+                else
+                {
+                    HideDragRect();
+                }
                 break;
             case EditorTool.CurvedArrow when _activeShape is Path curve:
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
@@ -371,12 +382,26 @@ public partial class EditorWindow : Window
                 return;
             case EditorTool.Text:
                 HideDragRect();
+                ResetDragRectStyle();
                 if (!inImageAt(_dragStart)) return;
-                var textBox = ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false);
-                if (textBox.Width < 8 && textBox.Height < 8)
+                // Survey decides click-vs-drag on pointer UP with the same 10 screen px test
+                // (PDFViewer.jsx:31502 `isDrag = dx > 10 || dy > 10`).
+                if (!TextDragExceedsThreshold(pos))
+                {
+                    // With the text tool armed, a plain click INSIDE an existing textbox
+                    // re-opens it instead of creating a new one (PDFViewer.jsx:31502-31519).
+                    if (HitTestAnnotation(_dragStart) is FrameworkElement hit &&
+                        hit.Tag is AnnotationData { Type: AnnotationData.TypeText })
+                    {
+                        BeginTextReEdit(hit);
+                        return;
+                    }
                     PlaceText(_dragStart);
+                }
                 else
-                    PlaceTextInBox(textBox);
+                {
+                    PlaceTextInBox(ShapeConstraint.BoxFromDrag(_dragStart, pos, square: false));
+                }
                 return;
             case EditorTool.Rectangle or EditorTool.Ellipse:
                 if (shape is null) return;
@@ -482,8 +507,11 @@ public partial class EditorWindow : Window
 
         // Clicking an existing mark selects it instead of stacking a new one on top.
         // Region effects act on the image under the drag; they never pick up a mark.
+        // The Text tool is excluded: Survey's text overlay owns the whole page, so a press
+        // over an existing mark starts the drag-to-size gesture and only the RELEASE decides
+        // between re-editing that textbox and creating a new one (PDFViewer.jsx:31491-31521).
         if (_tool is not (EditorTool.Eraser or EditorTool.Eyedropper or EditorTool.Crop or EditorTool.Pan
-                or EditorTool.Blur or EditorTool.Pixelate or EditorTool.Spotlight)
+                or EditorTool.Blur or EditorTool.Pixelate or EditorTool.Spotlight or EditorTool.Text)
             && HitTestAnnotation(pos) is { } existing)
         {
             Select(existing);
@@ -525,7 +553,7 @@ public partial class EditorWindow : Window
                 _dragStart = pos;
                 _dragging = true;
                 Viewport.CaptureMouse();
-                ShowDragRect(new Rect(pos, pos), dim: false);
+                // Nothing is shown until the 10 screen px deadband is crossed.
             }
             e.Handled = true;
             return;
@@ -1036,14 +1064,34 @@ public partial class EditorWindow : Window
         AnnotationFactory.ApplyDash(shape, _lineStyle);
     }
 
-    /// <summary>Puts the drag rectangle back to its ordinary look after a marquee.</summary>
+    /// <summary>Puts the drag rectangle back to its ordinary look after a marquee or text drag.</summary>
     private void ResetDragRectStyle()
     {
         DragRect.Stroke = (Brush)FindResource("InfoBrush");
         DragRect.Fill = new SolidColorBrush(Color.FromArgb(0x11, 0x4D, 0xA3, 0xFF));
         DragRect.StrokeDashArray = new DoubleCollection { 4, 3 };
         DragRect.StrokeThickness = 1.5 / _zoom;
+        DragRect.RadiusX = DragRect.RadiusY = 0;
     }
+
+    /// <summary>
+    /// Survey's text-tool creation preview: <c>2px dashed rgba(59,130,246,0.5)</c> over
+    /// <c>rgba(59,130,246,0.05)</c> with a 2px corner radius (PDFViewer.jsx:31537-31543).
+    /// DragRect is shared with crop / marquee, so <see cref="ResetDragRectStyle"/> undoes this.
+    /// </summary>
+    private void SetTextPreviewStyle()
+    {
+        DragRect.Stroke = new SolidColorBrush(Color.FromArgb(0x80, 0x3B, 0x82, 0xF6));
+        DragRect.Fill = new SolidColorBrush(Color.FromArgb(0x0D, 0x3B, 0x82, 0xF6));
+        DragRect.StrokeThickness = 2 / _zoom;
+        // WPF dash units are multiples of StrokeThickness; CSS `2px dashed` draws ~2:2 px.
+        DragRect.StrokeDashArray = new DoubleCollection { 1, 1 };
+        DragRect.RadiusX = DragRect.RadiusY = 2 / _zoom;
+    }
+
+    /// <summary>Survey's text drag gate: 10 SCREEN px on either axis (PDFViewer.jsx:31502).</summary>
+    private bool TextDragExceedsThreshold(Point pos) =>
+        Math.Abs(pos.X - _dragStart.X) * _zoom > 10 || Math.Abs(pos.Y - _dragStart.Y) * _zoom > 10;
 
     private void EndMarquee(Point pos)
     {
