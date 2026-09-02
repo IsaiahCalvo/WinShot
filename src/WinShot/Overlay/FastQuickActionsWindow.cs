@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using WinShot.Core;
+using WinShot.History;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 using W = System.Windows;
@@ -21,7 +22,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private static readonly List<FastQuickActionsWindow> OpenWindows = new();
     private static readonly Stack<string> RecentlyClosed = new();
 
-    private readonly SD.Bitmap _image;
+    // Not readonly: the menu's rotate/flip/resize rows replace the card's pixels in place.
+    private SD.Bitmap _image;
     private readonly SettingsService _settings;
     // Media-file mode: the card fronts a finished recording (mp4/gif) instead of a
     // fresh bitmap. _image is just the poster frame; copy/save/drag act on the file.
@@ -55,6 +57,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private Task<string>? _dragFileTask;
     private string? _tempDragPath;
     private string? _historyPath;
+    private int _imageVersion;
     private bool _hovering;
     private int _hoverButton = -1;
     private int _pressedButton = -1;
@@ -717,15 +720,24 @@ public sealed class FastQuickActionsWindow : WF.Form
         _overflowMenu.AccessibleName = "More capture actions";
         _overflowMenu.Renderer = new DarkDropDown.DarkMenuRenderer();
         _overflowMenu.ShowImageMargin = false;
-        if (_mediaFilePath is not null)
+        foreach (var row in QuickActionsMenu.Rows(
+                     mediaFile: _mediaFilePath is not null,
+                     canEdit: _mediaCanEdit,
+                     canShare: TryIsShareSupported()))
         {
-            _overflowMenu.Items.Add("Open", null, (_, _) => OpenMediaFile());
-            _overflowMenu.Items.Add("Show in folder", null, (_, _) => RevealMediaFile());
-        }
-        else
-        {
-            _overflowMenu.Items.Add("Recognize text (OCR)", null, (_, _) => OcrRequested?.Invoke(this));
-            _overflowMenu.Items.Add("Add background", null, (_, _) => BackgroundRequested?.Invoke(this));
+            if (row.Id == QuickActionsMenu.Separator)
+            {
+                _overflowMenu.Items.Add(new WF.ToolStripSeparator());
+                continue;
+            }
+            string id = row.Id;
+            var item = new WF.ToolStripMenuItem(row.Text, null, (_, _) => RunMenuAction(id));
+            if (row.Shortcut.Length > 0)
+            {
+                item.ShortcutKeyDisplayString = row.Shortcut;
+                item.ShowShortcutKeys = true;
+            }
+            _overflowMenu.Items.Add(item);
         }
         _overflowMenu.Opening += (_, _) =>
         {
@@ -753,6 +765,200 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         SetHovering(true);
         _overflowMenu.Show(this, new SD.Point(Width / 2, Height / 2));
+    }
+
+    private static bool TryIsShareSupported()
+    {
+        try
+        {
+            return HistoryShareService.IsWindowsShareSupported();
+        }
+        catch (Exception ex)
+        {
+            // The share contract is unavailable on some Server SKUs; the row just drops out.
+            Log.Error("Windows share support probe failed", ex);
+            return false;
+        }
+    }
+
+    private void RunMenuAction(string id)
+    {
+        try
+        {
+            switch (id)
+            {
+                case QuickActionsMenu.Annotate:
+                    EditRequested?.Invoke(this);
+                    return;
+                case QuickActionsMenu.Pin:
+                    PinRequested?.Invoke(this);
+                    return;
+                case QuickActionsMenu.ExtractText:
+                    OcrRequested?.Invoke(this);
+                    return;
+                case QuickActionsMenu.Background:
+                    BackgroundRequested?.Invoke(this);
+                    return;
+                case QuickActionsMenu.Resize:
+                    ResizeImage();
+                    return;
+                case QuickActionsMenu.Print:
+                    QuickActionsMenu.PrintImage(this, _image);
+                    return;
+                case QuickActionsMenu.Save:
+                    _ = SaveCoreAsync(askForDestination: false, closeAfterSave: true);
+                    return;
+                case QuickActionsMenu.SaveAs:
+                    _ = SaveCoreAsync(askForDestination: true, closeAfterSave: true);
+                    return;
+                case QuickActionsMenu.Open:
+                    OpenMediaFile();
+                    return;
+                case QuickActionsMenu.OpenWith:
+                    _ = WithFileAsync(QuickActionsMenu.ShowOpenWith, closeAfter: true);
+                    return;
+                case QuickActionsMenu.ShowInFolder:
+                    _ = WithFileAsync(QuickActionsMenu.ShowInExplorer, closeAfter: true);
+                    return;
+                case QuickActionsMenu.MoveToRecycleBin:
+                    MoveToRecycleBin();
+                    return;
+                case QuickActionsMenu.Share:
+                    _ = ShareAsync();
+                    return;
+                case QuickActionsMenu.Close:
+                    Close();
+                    return;
+                default:
+                    if (QuickActionsMenu.TransformFor(id) is { } transform)
+                        TransformImage(transform);
+                    return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Quick-actions menu action '{id}' failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Rotate/flip the card's bitmap in place. <see cref="SD.Image.RotateFlip"/> swaps
+    /// the dimensions on a quarter turn, so only the preview has to be re-rendered.
+    /// </summary>
+    private void TransformImage(SD.RotateFlipType transform)
+    {
+        _image.RotateFlip(transform);
+        OnImageChanged();
+    }
+
+    private void ReplaceImage(SD.Bitmap replacement)
+    {
+        SD.Bitmap old = _image;
+        _image = replacement;
+        old.Dispose();
+        OnImageChanged();
+    }
+
+    /// <summary>
+    /// Re-renders the thumbnail and drops every copy of the old pixels: the temp
+    /// drag file, and the history file the card was written to on capture. Without
+    /// this a drag-out or a Show in folder after a rotate hands back the old image.
+    /// </summary>
+    private void OnImageChanged()
+    {
+        _imageVersion++;
+        _previewTask = LoadPreviewAsync();
+        Invalidate();
+
+        _dragFileTask = null;
+        string? stale = _tempDragPath;
+        _tempDragPath = null;
+        string? history = _historyPath;
+        var copy = CaptureService.CloneBitmap(_image);
+        _ = Task.Run(() =>
+        {
+            using (copy)
+            {
+                try
+                {
+                    if (stale is not null && File.Exists(stale))
+                        File.Delete(stale);
+                    if (history is not null && File.Exists(history))
+                        ImageSaver.Save(copy, history);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Failed to rewrite the capture file after an image edit", ex);
+                }
+            }
+        });
+    }
+
+    private void ResizeImage()
+    {
+        using var dialog = new ResizeImageDialog(_image.Size);
+        if (dialog.ShowDialog(this) != WF.DialogResult.OK || dialog.Result is not { } size)
+            return;
+        if (size == _image.Size)
+            return;
+        ReplaceImage(QuickActionsMenu.Resized(_image, size.Width, size.Height));
+    }
+
+    /// <summary>Runs a shell action that needs a real file, saving one first if the capture has none.</summary>
+    private async Task WithFileAsync(Action<string> action, bool closeAfter)
+    {
+        try
+        {
+            string path = _mediaFilePath ?? await EnsureDragFileAsync();
+            action(path);
+            if (closeAfter && !_closed && !IsDisposed)
+                Close();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Quick-actions file action failed", ex);
+        }
+    }
+
+    private async Task ShareAsync()
+    {
+        try
+        {
+            string path = _mediaFilePath ?? await EnsureDragFileAsync();
+            if (_closed || IsDisposed) return;
+            HistoryShareService.ShowWindowsShare(
+                Handle,
+                new[] { path },
+                ex => Log.Error("Windows share failed", ex));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Share failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Trashes the capture's file and closes the card. A capture that was never
+    /// written to disk has nothing to trash, so this is just a discard.
+    /// </summary>
+    private void MoveToRecycleBin()
+    {
+        string? path = _mediaFilePath ?? _historyPath;
+        if (QuickActionsMenu.FileReady(path))
+        {
+            try
+            {
+                QuickActionsMenu.SendToRecycleBin(path!);
+                _historyPath = _mediaFilePath is null ? null : _historyPath;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Failed to recycle {path}", ex);
+                return;
+            }
+        }
+        _allowImmediateClose = true;
+        Close();
     }
 
     private void StartAutoCloseTimer()
@@ -988,14 +1194,18 @@ public sealed class FastQuickActionsWindow : WF.Form
         try
         {
             int w = _thumbRect.Width, h = _thumbRect.Height;
+            // A rotate/flip/resize starts a fresh render; drop whatever the previous
+            // one produces so it cannot repaint the card with the old pixels.
+            int version = _imageVersion;
+            SD.Bitmap source = _image;
             (preview, blurred) = await Task.Run(() =>
             {
-                var p = CreatePreviewBitmap(_image, w, h);
+                var p = CreatePreviewBitmap(source, w, h);
                 var b = CreateBlurred(p);
                 return (p, b);
             }).ConfigureAwait(false);
 
-            if (_closed || IsDisposed || PreviewPipelineClosed())
+            if (_closed || IsDisposed || PreviewPipelineClosed() || version != _imageVersion)
             {
                 return;
             }
@@ -1418,19 +1628,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error($"Failed to open {_mediaFilePath}", ex);
-        }
-    }
-
-    private void RevealMediaFile()
-    {
-        try
-        {
-            Process.Start("explorer.exe", $"/select,\"{_mediaFilePath}\"");
-            Close();
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"Failed to reveal {_mediaFilePath}", ex);
         }
     }
 

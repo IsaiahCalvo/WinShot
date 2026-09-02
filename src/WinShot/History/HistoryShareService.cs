@@ -45,8 +45,11 @@ internal static class HistoryShareService
     public static bool IsWindowsShareSupported() => WinDataTransferManager.IsSupported();
 
     public static void ShowWindowsShare(Window owner, IReadOnlyList<string> paths, Action<Exception> onFailed)
+        => ShowWindowsShare(new WindowInteropHelper(owner).EnsureHandle(), paths, onFailed);
+
+    /// <summary>The share sheet for a plain HWND — the quick-actions card is a WinForms form.</summary>
+    public static void ShowWindowsShare(IntPtr hwnd, IReadOnlyList<string> paths, Action<Exception> onFailed)
     {
-        IntPtr hwnd = new WindowInteropHelper(owner).EnsureHandle();
         var interop = WinDataTransferManager.As<IDataTransferManagerInterop>();
         IntPtr result = interop.GetForWindow(hwnd, DataTransferManagerId);
         var manager = WinRT.MarshalInterface<WinDataTransferManager>.FromAbi(result);

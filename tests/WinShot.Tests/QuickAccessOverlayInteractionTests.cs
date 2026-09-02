@@ -174,9 +174,43 @@ public class QuickAccessOverlayInteractionTests
             using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
             var field = typeof(FastQuickActionsWindow).GetField("_overflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var menu = (WF.ContextMenuStrip)field.GetValue(overlay)!;
+            string[] labels = menu.Items.Cast<WF.ToolStripItem>()
+                .Where(i => i is not WF.ToolStripSeparator)
+                .Select(i => i.Text ?? string.Empty)
+                .ToArray();
 
-            Assert.Equal(new[] { "Recognize text (OCR)", "Add background" }, menu.Items.Cast<WF.ToolStripItem>().Select(i => i.Text));
-            Assert.DoesNotContain(menu.Items.Cast<WF.ToolStripItem>(), i => i.Text?.Contains("Cloud", StringComparison.OrdinalIgnoreCase) == true);
+            Assert.Contains("Extract text", labels);
+            Assert.Contains("Add background", labels);
+            Assert.Contains("Rotate left", labels);
+            Assert.Contains("Flip horizontal", labels);
+            Assert.Contains("Resize…", labels);
+            Assert.Contains("Print…", labels);
+            Assert.Contains("Open with…", labels);
+            Assert.Contains("Move to Recycle Bin", labels);
+            // Cloud upload, Quick Look and Temporarily Hide are the CleanShot rows we skipped.
+            Assert.DoesNotContain(labels, l => l.Contains("Cloud", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(labels, l => l.Contains("Quick Look", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(labels, l => l.Contains("Temporarily", StringComparison.OrdinalIgnoreCase));
+        });
+    }
+
+    [Fact]
+    public void RotateSwapsTheCardImageAndBumpsTheRenderVersion()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var type = typeof(FastQuickActionsWindow);
+            var run = type.GetMethod("RunMenuAction", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var versionField = type.GetField("_imageVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            run.Invoke(overlay, new object[] { "rotate-right" });
+
+            using var rotated = overlay.CloneImage();
+            Assert.Equal(760, rotated.Width);
+            Assert.Equal(1200, rotated.Height);
+            Assert.Equal(1, (int)versionField.GetValue(overlay)!);
         });
     }
 
