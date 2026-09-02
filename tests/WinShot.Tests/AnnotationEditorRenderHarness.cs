@@ -192,6 +192,8 @@ public class AnnotationEditorRenderHarness
         {
             try
             {
+                // Effects await background work; route continuations back to this STA thread so Pump runs them.
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
                 var app = Application.Current ?? new Application();
                 app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 ThemeResources.EnsureLoaded();
@@ -285,6 +287,59 @@ public class AnnotationEditorRenderHarness
                 Check("SelectToolBtn");
                 Click(0.85, 0.88); Shot("pointer-callout-selected.png");
                 Click(0.10, 0.92); Shot("pointer-text-selected.png");
+                // --- Effects (WinShot-only; Survey has no equivalent): pixelate and blur. ---
+                EditorWindow.PointerArgs PA(Point c, int clicks = 1) =>
+                    new EditorWindow.PointerArgs(c, canvas.TranslatePoint(c, viewport), MouseButton.Left, clicks);
+                void DragAbs(Point a, Point b, int steps = 12)
+                {
+                    editor.PointerDown(PA(a)); Pump(1);
+                    for (int i = 1; i <= steps; i++) { editor.PointerMove(PA(a + (b - a) * (i / (double)steps))); Pump(1); }
+                    editor.PointerUp(PA(b)); Pump(3);
+                }
+                Check("PixelateToolBtn"); Drag(new[] { (0.62, 0.30), (0.80, 0.45) });
+                Check("BlurToolBtn"); Drag(new[] { (0.62, 0.50), (0.80, 0.62) }); Pump(30);
+                Shot("pointer-effects.png");
+
+                // --- Callout mechanics: knee and tip move independently, corners resize, box moves. ---
+                Check("SelectToolBtn");
+                Click(0.85, 0.88);
+                var calloutEl = canvas.Children.OfType<CalloutAnnotation>().Last();
+                Point CalloutPt(Func<CalloutLayout, Point> pick) => pick(calloutEl.Layout) + AnnotationTransform.OffsetOf(calloutEl);
+                Point knee = CalloutPt(l => l.Knee);
+                DragAbs(knee, knee + new Vector(0.05 * W, 0.06 * H)); Shot("pointer-callout-knee.png");
+                Point tip = CalloutPt(l => l.Tip);
+                DragAbs(tip, tip + new Vector(-0.08 * W, 0.03 * H)); Shot("pointer-callout-tip.png");
+                Point br = CalloutPt(l => l.Box.BottomRight);
+                DragAbs(br, br + new Vector(0.05 * W, 0.03 * H)); Shot("pointer-callout-resize.png");
+                Point boxCentre = CalloutPt(l => new Point(l.Box.X + l.Box.Width / 2, l.Box.Y + l.Box.Height / 2));
+                DragAbs(boxCentre, boxCentre + new Vector(-0.06 * W, -0.10 * H)); Shot("pointer-callout-moved.png");
+                Click(0.02, 0.02);
+
+                // --- Rotation: hover the grip (pill), drag it (live angle), release. ---
+                Click(0.10, 0.40);
+                Point grip = (Point)typeof(EditorWindow).GetField("_gripContent", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
+                editor.PointerMove(PA(grip)); Pump(3); Shot("pointer-rotation-hover.png");
+                editor.PointerDown(PA(grip)); Pump(1);
+                var rectCentre = new Point(0.23 * W, 0.385 * H);
+                double radius = (grip - rectCentre).Length;
+                Point last = grip;
+                for (int i = 1; i <= 12; i++)
+                {
+                    double ang = -Math.PI / 2 + i / 12.0 * (Math.PI / 5);
+                    last = new Point(rectCentre.X + radius * Math.Cos(ang), rectCentre.Y + radius * Math.Sin(ang));
+                    editor.PointerMove(PA(last)); Pump(1);
+                }
+                Shot("pointer-rotation-dragging.png");
+                editor.PointerUp(PA(last)); Pump(3); Shot("pointer-rotated.png");
+                var rotatedRect = canvas.Children.OfType<FrameworkElement>()
+                    .First(f => f.Tag is AnnotationData { Type: AnnotationData.TypeRectangle });
+                File.WriteAllText(Path.Combine(outDir, "rotation-angle.txt"),
+                    $"angle={AnnotationTransform.AngleOf(rotatedRect)} grip={grip} assumedCentre={rectCentre} last={last}");
+                Click(0.02, 0.02);
+
+                Check("SpotlightToolBtn"); Drag(new[] { (0.05, 0.05), (0.40, 0.30) }); Pump(30);
+                Shot("pointer-spotlight.png");
+
 
                 editor.Close();
                 Pump(2);

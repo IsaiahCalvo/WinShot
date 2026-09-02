@@ -244,9 +244,8 @@ public partial class EditorWindow : Window
         Vector off = ElementOffset(_selected);
         _handleKind = HandleKind.Callout;
         EnsureThumbs(6);
-        // Survey: tip and knee are squares, the four text-box corners are circles.
-        PlaceThumb(0, layout.Tip + off, ThumbKind.Square);
-        PlaceThumb(1, layout.Knee + off, ThumbKind.Square);
+        PlaceThumb(0, layout.Tip + off);   // Survey: every callout handle is a circle
+        PlaceThumb(1, layout.Knee + off);
         PlaceThumb(2, layout.Box.TopLeft + off);
         PlaceThumb(3, layout.Box.TopRight + off);
         PlaceThumb(4, layout.Box.BottomRight + off);
@@ -368,7 +367,7 @@ public partial class EditorWindow : Window
 
     // ---- resize drag lifecycle ----
 
-    private void BeginResize(int handle)
+    private void BeginResize(int handle, Point pos)
     {
         _activeHandle = handle;
         Viewport.CaptureMouse();
@@ -384,8 +383,8 @@ public partial class EditorWindow : Window
             if (handle == RotateHandleIndex)
             {
                 _rotateStartAngle = AnnotationTransform.AngleOf(fe);
-                _rotateGrabBearing = AnnotationRotation.AngleFromPointer(
-                    RotationCentre(fe), Mouse.GetPosition(AnnotationCanvas));
+                // The press position from the pointer seam, never the live mouse device.
+                _rotateGrabBearing = AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos);
             }
         }
     }
@@ -1207,6 +1206,9 @@ public partial class EditorWindow : Window
     private DispatcherTimer? _pillHideTimer;
     private double _pillStartAngle;
 
+    /// <summary>Survey/Fabric show angles as 0–359, never negative.</summary>
+    private static double DisplayAngle(double deg) => Math.Round(((deg % 360) + 360) % 360) % 360;
+
     private double SelectedRotationAngle()
     {
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return 0;
@@ -1240,11 +1242,11 @@ public partial class EditorWindow : Window
         // Grip in viewport pixels, then 16px past its edge along the outward direction.
         double gx = _gripContent.X * _zoom + ViewTranslate.X;
         double gy = _gripContent.Y * _zoom + ViewTranslate.Y;
-        double reach = AnnotationRotation.HandleOffsetScreenPx / 2 + 16 + RotationPill.Width / 2;
+        double reach = 16; // Survey: the pill sits just past the grip, overlapping it
         Canvas.SetLeft(RotationPill, gx + dir.X * reach - RotationPill.Width / 2);
         Canvas.SetTop(RotationPill, gy + dir.Y * reach - RotationPill.Height / 2);
         if (!RotationInput.IsKeyboardFocused)
-            RotationInput.Text = Math.Round(AnnotationRotation.Normalize(SelectedRotationAngle())).ToString();
+            RotationInput.Text = DisplayAngle(SelectedRotationAngle()).ToString();
         _pillHideTimer?.Stop();
         RotationPill.Visibility = Visibility.Visible;
     }
@@ -1312,7 +1314,7 @@ public partial class EditorWindow : Window
                 double step = ShapeConstraint.ShiftHeld ? AnnotationRotation.SnapIncrementDegrees : 1;
                 if (e.Key == Key.Down) step = -step;
                 SetSelectedRotationAngle(SelectedRotationAngle() + step);
-                RotationInput.Text = Math.Round(AnnotationRotation.Normalize(SelectedRotationAngle())).ToString();
+                RotationInput.Text = DisplayAngle(SelectedRotationAngle()).ToString();
                 RotationInput.CaretIndex = RotationInput.Text.Length;
                 UpdateSelectionVisual();
                 break;

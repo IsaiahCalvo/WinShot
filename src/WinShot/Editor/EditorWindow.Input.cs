@@ -100,7 +100,7 @@ public partial class EditorWindow : Window
             int handle = HitTestHandle(pos);
             if (handle >= 0)
             {
-                BeginResize(handle);
+                BeginResize(handle, pos);
                 e.Handled = true;
                 return;
             }
@@ -437,7 +437,9 @@ public partial class EditorWindow : Window
         bool inImage = pos.X >= 0 && pos.Y >= 0 && pos.X <= _source.Width && pos.Y <= _source.Height;
 
         // Clicking an existing mark selects it instead of stacking a new one on top.
-        if (_tool is not (EditorTool.Eraser or EditorTool.Eyedropper or EditorTool.Crop or EditorTool.Pan)
+        // Region effects act on the image under the drag; they never pick up a mark.
+        if (_tool is not (EditorTool.Eraser or EditorTool.Eyedropper or EditorTool.Crop or EditorTool.Pan
+                or EditorTool.Blur or EditorTool.Pixelate or EditorTool.Spotlight)
             && HitTestAnnotation(pos) is { } existing)
         {
             Select(existing);
