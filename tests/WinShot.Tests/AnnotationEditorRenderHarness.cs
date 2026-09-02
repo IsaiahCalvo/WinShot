@@ -298,12 +298,37 @@ public class AnnotationEditorRenderHarness
                 Click(0.02, 0.02); Pump(4);
                 Shot("pointer-text-committed.png");
 
-                // Callout: drag tip→box, type, commit, select.
+                // Callout: a sub-MinDrag click is a cancel (Survey commits nothing).
                 Check("CalloutToolBtn");
-                Drag(new[] { (0.60, 0.95), (0.85, 0.88) }); Pump(4);
+                int calloutsBeforeClick = canvas.Children.OfType<CalloutAnnotation>().Count();
+                Click(0.30, 0.95); Pump(4);
+                File.WriteAllText(Path.Combine(outDir, "callout-short-click.txt"),
+                    $"before={calloutsBeforeClick} after={canvas.Children.OfType<CalloutAnnotation>().Count()} " +
+                    $"editors={canvas.Children.OfType<TextBox>().Count()}");
+
+                // Callout: drag tip→box (ghost mid-drag), type, commit, select.
+                Check("CalloutToolBtn");
+                editor.PointerDown(P(0.60, 0.95)); Pump(1);
+                for (int i = 1; i <= 8; i++)
+                {
+                    double t = i / 8.0;
+                    editor.PointerMove(P(0.60 + 0.25 * t, 0.95 - 0.07 * t));
+                    Pump(1);
+                }
+                Shot("pointer-callout-ghost.png");
+                editor.PointerUp(P(0.85, 0.88)); Pump(4);
                 var calloutBox = canvas.Children.OfType<TextBox>().Last();
                 calloutBox.Text = "Callout gjpq"; Pump(3);
                 Shot("pointer-callout-editing.png");
+                // Auto-grow: enough text to wrap past the drag-created height.
+                var grownCallout = canvas.Children.OfType<CalloutAnnotation>().Last();
+                double heightBeforeGrow = grownCallout.Layout.Box.Height;
+                calloutBox.Text = "Callout gjpq wrapping onto several lines to grow the box"; Pump(4);
+                Shot("pointer-callout-growing.png");
+                File.WriteAllText(Path.Combine(outDir, "callout-grow.txt"),
+                    $"before={heightBeforeGrow} after={grownCallout.Layout.Box.Height} " +
+                    $"tool={typeof(EditorWindow).GetField("_tool", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)}");
+                calloutBox.Text = "Callout gjpq"; Pump(3);
                 Click(0.02, 0.02); Pump(4);
                 Check("SelectToolBtn");
                 Click(0.85, 0.88); Shot("pointer-callout-selected.png");
@@ -339,7 +364,27 @@ public class AnnotationEditorRenderHarness
                     $"hit={hitIndex} br={br} before={boxBefore} after={calloutEl.Layout.Box} offset={AnnotationTransform.OffsetOf(calloutEl)} W={W} H={H}");
                 Point boxCentre = CalloutPt(l => new Point(l.Box.X + l.Box.Width / 2, l.Box.Y + l.Box.Height / 2));
                 DragAbs(boxCentre, boxCentre + new Vector(-0.06 * W, -0.10 * H)); Shot("pointer-callout-moved.png");
+
+                // Invalid drop: the knee dragged into the text box is rejected on release and
+                // the WHOLE callout snaps back to its pre-drag state (Survey dropSafe rollback).
+                var beforeDrop = calloutEl.Layout;
+                Point kneeNow = CalloutPt(l => l.Knee);
+                Point insideBox = CalloutPt(l => new Point(l.Box.X + l.Box.Width / 2, l.Box.Y + l.Box.Height / 2));
+                editor.PointerDown(PA(kneeNow)); Pump(1);
+                for (int i = 1; i <= 10; i++) { editor.PointerMove(PA(kneeNow + (insideBox - kneeNow) * (i / 10.0))); Pump(1); }
+                Shot("pointer-callout-invalid-drag.png");
+                editor.PointerUp(PA(insideBox)); Pump(3);
+                Shot("pointer-callout-invalid-drop.png");
+                File.WriteAllText(Path.Combine(outDir, "callout-invalid-drop.txt"),
+                    $"knee before={beforeDrop.Knee} after={calloutEl.Layout.Knee} " +
+                    $"tip before={beforeDrop.Tip} after={calloutEl.Layout.Tip} " +
+                    $"box before={beforeDrop.Box} after={calloutEl.Layout.Box}");
                 Click(0.02, 0.02);
+
+                // Hover: Survey paints the blue glow (not handles) on an unselected callout.
+                editor.PointerMove(PA(CalloutPt(l => new Point(l.Box.X + l.Box.Width / 2, l.Box.Y + l.Box.Height / 2))));
+                Pump(3); Shot("pointer-callout-hover.png");
+                editor.PointerMove(PA(new Point(0.02 * W, 0.02 * H))); Pump(3);
 
                 // --- Rotation: hover the grip (pill), drag it (live angle), release. ---
                 Click(0.10, 0.40);

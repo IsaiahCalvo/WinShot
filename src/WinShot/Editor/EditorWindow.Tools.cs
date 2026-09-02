@@ -18,21 +18,25 @@ public partial class EditorWindow : Window
 
     private void CommitCallout(Point tip, Point boxOrigin)
     {
-        var layout = CalloutLayout.FromDrag(tip, boxOrigin);
+        // Survey's callout font is fixed at creation (defaultCalloutStyle: Arial 14) and never
+        // reads the text tool's toolbar state.
+        double fontSize = CalloutLayout.DefaultFontSize;
+        string fontFamily = CalloutLayout.DefaultFontFamily;
+        var layout = CalloutLayout.FromDrag(tip, boxOrigin,
+            descender: fontSize * CalloutLayout.DescenderRatio);
         var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
-        double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
         double thickness = AnnotationStyle.ClampSize(_shapeSize);
+        var lineStyle = _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle;
         var visual = AnnotationFactory.CreateCallout(
-            layout, "", stroke, fill, thickness, _arrowhead,
-            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize, _textFontFamily);
+            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily);
         visual.Tag = AnnotationData.ForCallout(
-            layout, "", stroke, fill, thickness, _arrowhead,
-            _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle, fontSize, _textFontFamily);
+            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily);
         AnnotationCanvas.Children.Add(visual);
 
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(stroke), fontSize);
-        tb.Width = layout.Box.Width;
-        tb.Height = layout.Box.Height;
+        StyleCalloutEditor(tb, fontFamily);
+        tb.Width = layout.RenderBox.Width;
+        tb.Height = layout.RenderBox.Height;
         tb.Tag = visual;
         Canvas.SetLeft(tb, layout.Box.X);
         Canvas.SetTop(tb, layout.Box.Y);
@@ -40,6 +44,7 @@ public partial class EditorWindow : Window
         _activeText = tb;
         tb.AcceptsReturn = true;
         tb.TextWrapping = TextWrapping.Wrap;
+        HookCalloutGrow(tb, visual);
         tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
         tb.PreviewKeyDown += (_, ev) =>
         {
@@ -52,6 +57,62 @@ public partial class EditorWindow : Window
             }
         };
         Dispatcher.InvokeAsync(() => tb.Focus());
+    }
+
+    /// <summary>
+    /// Survey's hard rule: no visual difference between edit mode and not edit mode
+    /// (calloutEditAdapter.js:214-220 - transparent chrome, the callout's own box border is
+    /// the only outline; cursorColor #007AFF).
+    /// </summary>
+    private static void StyleCalloutEditor(TextBox tb, string? fontFamily)
+    {
+        tb.BorderThickness = new Thickness(0);
+        tb.BorderBrush = Brushes.Transparent;
+        tb.Background = Brushes.Transparent;
+        tb.FontWeight = FontWeights.Normal;
+        tb.FontFamily = new FontFamily(
+            string.IsNullOrWhiteSpace(fontFamily) ? CalloutLayout.DefaultFontFamily : fontFamily);
+        // Survey insets the text horizontally only and centres it vertically.
+        tb.Padding = new Thickness(CalloutLayout.TextPadding, 0, CalloutLayout.TextPadding, 0);
+        tb.VerticalContentAlignment = VerticalAlignment.Center;
+        tb.CaretBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x7A, 0xFF));
+    }
+
+    /// <summary>
+    /// Survey's Fabric textbox auto-grows vertically as the user types and the live bounds
+    /// retract line1 to the growing edge (TextEditOverlay.jsx:239-270,
+    /// svgAnnotationRenderers.jsx:1341-1352). Grow-only: never below the drag-created height.
+    /// </summary>
+    private void HookCalloutGrow(TextBox tb, CalloutAnnotation visual)
+    {
+        double floor = visual.Layout.Box.Height;
+        tb.TextChanged += (_, _) =>
+        {
+            var layout = visual.Layout;
+            double grown = Math.Max(floor, MeasureCalloutText(visual, tb.Text ?? "", layout.Box.Width));
+            if (Math.Abs(grown - layout.Box.Height) < 0.5) return;
+            ApplyCalloutLayout(visual, layout.WithBox(
+                new Rect(layout.Box.X, layout.Box.Y, layout.Box.Width, grown)));
+            tb.Height = visual.Layout.RenderBox.Height;
+            UpdateSelectionVisual();
+        };
+    }
+
+    /// <summary>Wrapped height of <paramref name="text"/> inside a callout box of that width.</summary>
+    private static double MeasureCalloutText(CalloutAnnotation visual, string text, double width)
+    {
+        var probe = new TextBlock
+        {
+            Text = text,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = visual.Label.FontFamily,
+            FontSize = visual.Label.FontSize,
+            FontWeight = visual.Label.FontWeight,
+            FontStyle = visual.Label.FontStyle,
+        };
+        probe.Measure(new Size(
+            Math.Max(1, width - 2 * CalloutLayout.TextPadding), double.PositiveInfinity));
+        return probe.DesiredSize.Height;
     }
 
     private void CommitCalloutText()
@@ -67,6 +128,8 @@ public partial class EditorWindow : Window
         {
             _calloutReediting = false;
             string previous = _calloutReeditBefore;
+            var layoutBefore = _calloutReeditLayoutBefore;
+            _calloutReeditLayoutBefore = null;
             if (string.IsNullOrWhiteSpace(text))
                 text = previous;
             visual.Text = text;
@@ -75,11 +138,23 @@ public partial class EditorWindow : Window
                 var before = re.Clone();
                 re.Text = text;
                 visual.Tag = re;
-                if (before.Text != text)
+                // The box may have auto-grown while typing, so undo restores the layout too.
+                var layoutAfter = visual.Layout;
+                if (before.Text != text || (layoutBefore is CalloutLayout lb && lb.Box != layoutAfter.Box))
                 {
                     Push(new EditorAction(
-                        undo: () => { visual.Text = previous; if (visual.Tag is AnnotationData u) { u.Text = previous; visual.Tag = u; } },
-                        redo: () => { visual.Text = text; if (visual.Tag is AnnotationData r) { r.Text = text; visual.Tag = r; } }),
+                        undo: () =>
+                        {
+                            visual.Text = previous;
+                            if (visual.Tag is AnnotationData u) { u.Text = previous; visual.Tag = u; }
+                            if (layoutBefore is CalloutLayout l) ApplyCalloutLayout(visual, l);
+                        },
+                        redo: () =>
+                        {
+                            visual.Text = text;
+                            if (visual.Tag is AnnotationData r) { r.Text = text; visual.Tag = r; }
+                            ApplyCalloutLayout(visual, layoutAfter);
+                        }),
                         apply: false);
                 }
             }
@@ -117,7 +192,7 @@ public partial class EditorWindow : Window
         if (style == TextStyle.Huge) fontSize *= 2.2;
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(_color), fontSize);
         tb.FontFamily = new FontFamily(_textFontFamily);
-        tb.FontWeight = _textBold || style == TextStyle.Bold ? FontWeights.Bold : FontWeights.SemiBold;
+        tb.FontWeight = _textBold || style == TextStyle.Bold ? FontWeights.Bold : FontWeights.Normal;
         tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
         tb.TextAlignment = AnnotationFactory.ParseAlign(_textAlign);
         tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(_textVerticalAlign);
@@ -157,11 +232,15 @@ public partial class EditorWindow : Window
         Vector off = visual.RenderTransform is TranslateTransform t
             ? new Vector(t.X, t.Y)
             : new Vector();
+        // Survey routes creation and double-click re-edit through the same guard: opening the
+        // editor leaves the callout tool, so the next page click commits instead of drawing.
+        if (_tool == EditorTool.Callout) CheckToolButton(EditorTool.Select);
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(
             meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White),
-            meta.FontSize ?? 16);
-        tb.Width = layout.Box.Width;
-        tb.Height = layout.Box.Height;
+            meta.FontSize ?? CalloutLayout.DefaultFontSize);
+        StyleCalloutEditor(tb, meta.FontFamily);
+        tb.Width = layout.RenderBox.Width;
+        tb.Height = layout.RenderBox.Height;
         tb.Text = meta.Text ?? visual.Text;
         tb.Tag = visual;
         tb.AcceptsReturn = true;
@@ -171,6 +250,8 @@ public partial class EditorWindow : Window
         visual.Label.Visibility = Visibility.Collapsed;
         _calloutReediting = true;
         _calloutReeditBefore = meta.Text ?? visual.Text ?? "";
+        _calloutReeditLayoutBefore = layout;
+        HookCalloutGrow(tb, visual);
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         tb.LostKeyboardFocus += (_, _) => CommitCalloutText();
@@ -181,6 +262,9 @@ public partial class EditorWindow : Window
                 AnnotationCanvas.Children.Remove(tb);
                 _activeText = null;
                 visual.Label.Visibility = Visibility.Visible;
+                if (_calloutReeditLayoutBefore is CalloutLayout cancelled)
+                    ApplyCalloutLayout(visual, cancelled);
+                _calloutReeditLayoutBefore = null;
                 _calloutReediting = false;
                 ev.Handled = true;
             }

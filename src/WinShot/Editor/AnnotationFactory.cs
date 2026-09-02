@@ -340,7 +340,7 @@ internal static class AnnotationFactory
         {
             MinWidth = 48,
             FontSize = fontSize,
-            FontWeight = FontWeights.SemiBold,
+            FontWeight = FontWeights.Normal,
             Foreground = foreground,
             CaretBrush = foreground,
             Background = Brushes.Transparent, // Survey edits in place over the page
@@ -363,7 +363,7 @@ internal static class AnnotationFactory
             Text = text,
             FontSize = fontSize,
             FontFamily = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? "Segoe UI" : fontFamily),
-            FontWeight = bold ? FontWeights.Bold : FontWeights.SemiBold,
+            FontWeight = bold ? FontWeights.Bold : FontWeights.Normal,
             FontStyle = italic ? FontStyles.Italic : FontStyles.Normal,
             Foreground = foreground,
             Background = Brushes.Transparent,
@@ -471,7 +471,7 @@ internal static class AnnotationFactory
     {
         var typeface = new Typeface(new FontFamily(fontFamily),
             italic ? FontStyles.Italic : FontStyles.Normal,
-            bold ? FontWeights.Bold : FontWeights.SemiBold, FontStretches.Normal);
+            bold ? FontWeights.Bold : FontWeights.Normal, FontStretches.Normal);
         var formatted = new FormattedText(text, CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
         return new Path
@@ -630,10 +630,11 @@ internal static class AnnotationFactory
 
     public static CalloutAnnotation CreateCallout(
         CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
-        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null)
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null,
+        Color? fontColor = null)
     {
         var visual = new CalloutAnnotation();
-        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize, fontFamily);
+        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize, fontFamily, fontColor);
         return visual;
     }
 }

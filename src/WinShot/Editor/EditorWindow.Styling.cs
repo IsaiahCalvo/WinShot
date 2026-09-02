@@ -219,11 +219,15 @@ public partial class EditorWindow : Window
                     var box = snap.Meta.Rect is { Length: >= 4 } r
                         ? new Rect(r[0], r[1], r[2], r[3])
                         : new Rect(cp[2][0], cp[2][1], CalloutLayout.DefaultBoxWidth, CalloutLayout.DefaultBoxHeight);
-                    var layout = CalloutLayout.FromParts(new Point(cp[0][0], cp[0][1]), new Point(cp[1][0], cp[1][1]), box);
+                    var layout = CalloutLayout.FromParts(
+                        new Point(cp[0][0], cp[0][1]), new Point(cp[1][0], cp[1][1]), box,
+                        CalloutDescender(snap.Meta));
                     var (head, _) = AnnotationStyle.HeadsFrom(snap.Meta);
                     callout.Apply(layout, snap.Meta.Text ?? callout.Text, snap.StrokeColor, snap.FillColor,
                         snap.Thickness, head, AnnotationStyle.LineStyleFrom(snap.Meta),
-                        snap.Meta.FontSize ?? 16, snap.Meta.FontFamily);
+                        snap.Meta.FontSize ?? CalloutLayout.DefaultFontSize, snap.Meta.FontFamily,
+                        CalloutFontColor(snap.Meta));
+                    ApplyTextFormat(callout, snap.Meta);
                 }
                 break;
             case AnnotationData.TypeText:
@@ -334,25 +338,14 @@ public partial class EditorWindow : Window
         }
         else if (fe is CalloutAnnotation callout)
         {
-            var stroke = after.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White;
-            var fill = AnnotationStyle.FillColorFrom(after, stroke);
-            var (head, _) = AnnotationStyle.HeadsFrom(after);
-            var layout = callout.Layout;
-            callout.Apply(layout, after.Text ?? callout.Text, stroke, fill,
-                after.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(after),
-                after.FontSize ?? 16, after.FontFamily);
-            ApplyTextFormat(fe, after);
+            ApplyCalloutMeta(callout, callout.Layout, after);
             fe.Tag = after;
             Push(new EditorAction(
                 undo: () =>
                 {
                     if (fe is CalloutAnnotation c0)
                     {
-                        var s = before.Color is string h && TryParseColor(h, out var col) ? col : Colors.White;
-                        var f = AnnotationStyle.FillColorFrom(before, s);
-                        var (hd, _) = AnnotationStyle.HeadsFrom(before);
-                        c0.Apply(c0.Layout, before.Text ?? c0.Text, s, f, before.Thickness ?? 2, hd,
-                            AnnotationStyle.LineStyleFrom(before), before.FontSize ?? 16, before.FontFamily);
+                        ApplyCalloutMeta(c0, c0.Layout, before);
                         fe.Tag = before;
                     }
                 },
@@ -360,11 +353,7 @@ public partial class EditorWindow : Window
                 {
                     if (fe is CalloutAnnotation c1)
                     {
-                        var s = after.Color is string h && TryParseColor(h, out var col) ? col : Colors.White;
-                        var f = AnnotationStyle.FillColorFrom(after, s);
-                        var (hd, _) = AnnotationStyle.HeadsFrom(after);
-                        c1.Apply(c1.Layout, after.Text ?? c1.Text, s, f, after.Thickness ?? 2, hd,
-                            AnnotationStyle.LineStyleFrom(after), after.FontSize ?? 16, after.FontFamily);
+                        ApplyCalloutMeta(c1, c1.Layout, after);
                         fe.Tag = after;
                     }
                 }), apply: false);
@@ -416,11 +405,40 @@ public partial class EditorWindow : Window
         if (si >= 0) _selection[si] = newEl;
     }
 
+    /// <summary>Survey descenderBuffer for a callout's stored font size.</summary>
+    private static double CalloutDescender(AnnotationData meta) =>
+        (meta.FontSize ?? CalloutLayout.DefaultFontSize) * CalloutLayout.DescenderRatio;
+
+    private static Color? CalloutFontColor(AnnotationData meta) =>
+        meta.FontColor is string hex && TryParseColor(hex, out var c) ? c : null;
+
+    /// <summary>
+    /// Survey spreads the whole callout on every geometry mutation ({...c, ...patch}), so
+    /// style survives every drag. This is the one funnel that redraws a callout from its
+    /// stored AnnotationData - colours, dash, font AND the text format flags.
+    /// </summary>
+    private static void ApplyCalloutMeta(CalloutAnnotation callout, CalloutLayout layout, AnnotationData meta)
+    {
+        var (head, _) = AnnotationStyle.HeadsFrom(meta);
+        var stroke = meta.Color is string hex && TryParseColor(hex, out var sc) ? sc : Colors.White;
+        // A font-size change moves the buffered bottom edge, so the join has to be re-derived;
+        // an unchanged buffer leaves a free-drag (raw) layout untouched.
+        double buffer = CalloutDescender(meta);
+        if (Math.Abs(layout.Descender - buffer) > 0.001) layout = layout.WithDescender(buffer);
+        callout.Apply(layout, meta.Text ?? callout.Text, stroke,
+            AnnotationStyle.FillColorFrom(meta, stroke), meta.Thickness ?? 2, head,
+            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? CalloutLayout.DefaultFontSize,
+            meta.FontFamily, CalloutFontColor(meta));
+        ApplyTextFormat(callout, meta);
+    }
+
     private static void ApplyTextFormat(FrameworkElement fe, AnnotationData meta)
     {
         fe.Tag = meta;
         var align = AnnotationFactory.ParseAlign(meta.Align);
-        var family = new FontFamily(string.IsNullOrWhiteSpace(meta.FontFamily) ? "Segoe UI" : meta.FontFamily);
+        var family = new FontFamily(string.IsNullOrWhiteSpace(meta.FontFamily)
+            ? (fe is CalloutAnnotation ? CalloutLayout.DefaultFontFamily : "Segoe UI")
+            : meta.FontFamily);
         bool bold = meta.Bold == true;
         bool italic = meta.Italic == true;
         TextBlock? tb = fe as TextBlock
@@ -428,9 +446,13 @@ public partial class EditorWindow : Window
             ?? (fe as Grid)?.Children.OfType<TextBlock>().FirstOrDefault()
             ?? (fe as CalloutAnnotation)?.Label;
         if (tb is null) return;
-        tb.VerticalAlignment = AnnotationFactory.ParseVerticalAlign(meta.VerticalAlign);
+        // Survey's callout text is ALWAYS vertically centred (buildCalloutTextContentStyle
+        // hardcodes justifyContent 'center'); only plain text honours a stored vertical align.
+        tb.VerticalAlignment = fe is CalloutAnnotation
+            ? VerticalAlignment.Center
+            : AnnotationFactory.ParseVerticalAlign(meta.VerticalAlign);
         tb.FontFamily = family;
-        tb.FontWeight = bold ? FontWeights.Bold : FontWeights.SemiBold;
+        tb.FontWeight = bold ? FontWeights.Bold : FontWeights.Normal;
         tb.FontStyle = italic ? FontStyles.Italic : FontStyles.Normal;
         tb.TextAlignment = align;
         if (meta.FontSize is double fs && fs > 0) tb.FontSize = fs;

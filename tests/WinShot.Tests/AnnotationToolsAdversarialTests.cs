@@ -44,8 +44,12 @@ public class AnnotationToolsAdversarialTests
     [Fact]
     public void Callout_ZeroLengthDragStillProducesSeparatedTipAndKnee()
     {
+        // Survey never commits a zero-length drag (it is a cancel, SVGAnnotationLayer.jsx:1113),
+        // but the geometry must still be finite: with the tip sitting on the box corner the
+        // knee parks MIN_SEGMENT_LENGTH off that border (calloutGeometry.js:595-615) instead
+        // of stacking on the tip.
         var layout = CalloutLayout.FromDrag(new Point(50, 50), new Point(50, 50));
-        Assert.True((layout.Knee - layout.Tip).Length >= CalloutLayout.MinKneeToTip - 0.01);
+        Assert.Equal(CalloutLayout.MinSegmentLength, (layout.Knee - layout.Tip).Length, 3);
         Assert.True(layout.Box.Width >= CalloutLayout.MinBoxWidth);
     }
 

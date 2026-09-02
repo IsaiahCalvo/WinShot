@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -19,8 +20,7 @@ public partial class EditorWindow : Window
     /// <summary>Which family of handles is currently shown.</summary>
     private enum HandleKind { None, Box, Endpoints, Crop, Callout }
 
-    private const double HandleScreenPx = 12;  // Survey cornerSize
-    private const double HandleGrabPx = 14;    // screen-px grab radius for hit testing
+    private const double HandleScreenPx = 11;  // Survey HANDLE_RADIUS 5.5 -> an 11 px circle
     private const double RotateHandleScreenPx = 24;  // Survey renderRotationControl size
     private enum ThumbKind { Corner, PillH, PillV, Square }
     private ContentControl? _rotateIcon;
@@ -35,6 +35,13 @@ public partial class EditorWindow : Window
     // time, so picking the grip up off-centre does not snap the mark round.
     private double _rotateStartAngle;
     private double _rotateGrabBearing;
+
+    // Callout free-drag (Survey useSVGInteraction.js:2536-2545): the pre-drag layout and the
+    // grab point, so every frame is snapshot + delta and the grabbed handle keeps the offset
+    // it was picked up with instead of snapping to the cursor.
+    private CalloutLayout? _calloutDragStart;
+    private Point _calloutGrabLocal;
+    private bool _calloutDragInvalid;
 
     /// <summary>
     /// Builds the handle layout for the current selection: an 8-thumb box frame for
@@ -244,12 +251,30 @@ public partial class EditorWindow : Window
         Vector off = ElementOffset(_selected);
         _handleKind = HandleKind.Callout;
         EnsureThumbs(6);
+        // Survey places the two bottom corners on the descender-buffered bottom edge.
+        var rbox = layout.RenderBox;
         PlaceThumb(0, layout.Tip + off);   // Survey: every callout handle is a circle
         PlaceThumb(1, layout.Knee + off);
-        PlaceThumb(2, layout.Box.TopLeft + off);
-        PlaceThumb(3, layout.Box.TopRight + off);
-        PlaceThumb(4, layout.Box.BottomRight + off);
-        PlaceThumb(5, layout.Box.BottomLeft + off);
+        PlaceThumb(2, rbox.TopLeft + off);
+        PlaceThumb(3, rbox.TopRight + off);
+        PlaceThumb(4, rbox.BottomRight + off);
+        PlaceThumb(5, rbox.BottomLeft + off);
+        // Survey per-part cursors: grab on knee/tip, diagonal resize on the corners.
+        var cursors = new[]
+        {
+            Cursors.Hand, Cursors.Hand,
+            Cursors.SizeNWSE, Cursors.SizeNESW, Cursors.SizeNWSE, Cursors.SizeNESW,
+        };
+        // Survey turns EVERY handle on the callout red together while the drag is heading
+        // for a spot that would be rejected on release (HANDLE_RING_INVALID ef4444).
+        var ring = _calloutDragInvalid
+            ? new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44))
+            : new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE2));
+        for (int i = 0; i < 6; i++)
+        {
+            _handleThumbs[i].Cursor = cursors[i];
+            _handleThumbs[i].Stroke = ring;
+        }
         HandleLayer.Visibility = Visibility.Visible;
     }
 
@@ -294,12 +319,25 @@ public partial class EditorWindow : Window
                 Stroke = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE2)),
                 RadiusX = 2,
                 RadiusY = 2,
+                // Survey handleStyle.js: drop-shadow(0 1px 3px rgba(0,0,0,0.15)).
+                Effect = new DropShadowEffect
+                {
+                    BlurRadius = 3,
+                    ShadowDepth = 1,
+                    Direction = 270,
+                    Opacity = 0.15,
+                    Color = Colors.Black,
+                },
             };
             _handleThumbs.Add(thumb);
             HandleLayer.Children.Add(thumb);
         }
         for (int i = 0; i < _handleThumbs.Count; i++)
+        {
             _handleThumbs[i].Visibility = i < count ? Visibility.Visible : Visibility.Collapsed;
+            _handleThumbs[i].Stroke = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE2));
+            _handleThumbs[i].Cursor = null;
+        }
     }
 
     private void PlaceThumb(int index, Point center, ThumbKind kind = ThumbKind.Corner, double angleDeg = 0)
@@ -341,7 +379,6 @@ public partial class EditorWindow : Window
     private int HitTestHandle(Point pos)
     {
         if (_handleKind == HandleKind.None || HandleLayer.Visibility != Visibility.Visible) return -1;
-        double grab = HandleGrabPx / _zoom;
         int best = -1;
         double bestDist = double.MaxValue;
         for (int i = 0; i < _handleThumbs.Count; i++)
@@ -350,6 +387,8 @@ public partial class EditorWindow : Window
             if (thumb.Visibility != Visibility.Visible) continue;
             double cx = Canvas.GetLeft(thumb) + thumb.Width / 2;
             double cy = Canvas.GetTop(thumb) + thumb.Height / 2;
+            // Survey 2026-05-18: the grab zone is the visible handle, not a wider disc.
+            double grab = Math.Max(thumb.Width, thumb.Height) / 2;
             double d = (pos - new Point(cx, cy)).Length;
             if (d <= grab && d < bestDist) { bestDist = d; best = i; }
         }
@@ -360,7 +399,8 @@ public partial class EditorWindow : Window
         {
             double cx = Canvas.GetLeft(_rotateThumb) + _rotateThumb.Width / 2;
             double cy = Canvas.GetTop(_rotateThumb) + _rotateThumb.Height / 2;
-            if ((pos - new Point(cx, cy)).Length <= grab) return RotateHandleIndex;
+            if ((pos - new Point(cx, cy)).Length <= RotateHandleScreenPx / 2 / _zoom)
+                return RotateHandleIndex;
         }
         return best;
     }
@@ -380,6 +420,13 @@ public partial class EditorWindow : Window
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
         {
             _resizeBefore = CaptureResizeSnapshot(_selected, meta);
+            _calloutDragStart = null;
+            _calloutDragInvalid = false;
+            if (_handleKind == HandleKind.Callout && _selected is CalloutAnnotation dragged)
+            {
+                _calloutDragStart = dragged.Layout;
+                _calloutGrabLocal = pos - ElementOffset(dragged);
+            }
             if (handle == RotateHandleIndex)
             {
                 _rotateStartAngle = AnnotationTransform.AngleOf(fe);
@@ -478,6 +525,19 @@ public partial class EditorWindow : Window
             return;
         }
 
+        if (_handleKind == HandleKind.Callout && fe is CalloutAnnotation dropped
+            && _calloutDragStart is CalloutLayout preDrag)
+        {
+            _calloutDragStart = null;
+            _calloutDragInvalid = false;
+            // Survey: an invalid drop rolls the WHOLE callout - tip, knee, box position AND
+            // box size - back to the pre-drag snapshot rather than clamping it into shape.
+            ApplyCalloutLayout(dropped, CalloutLayout.IsDropSafe(dropped.Layout, HandleScreenPx / 2)
+                ? CalloutLayout.FromParts(dropped.Layout.Tip, dropped.Layout.Knee,
+                    dropped.Layout.Box, dropped.Layout.Descender)
+                : preDrag);
+        }
+
         var before = _resizeBefore;
         var after = CaptureResizeSnapshot(_selected, meta);
         _resizeBefore = null;
@@ -503,6 +563,8 @@ public partial class EditorWindow : Window
         _activeHandle = -1;
         if (!_adjustingCrop && _selected is not null && _resizeBefore is { } snap)
             ApplyResizeSnapshot(_selected, snap);
+        _calloutDragStart = null;
+        _calloutDragInvalid = false;
         _adjustingCrop = false;
         _resizeBefore = null;
         UpdateSelectionVisual();
@@ -692,32 +754,39 @@ public partial class EditorWindow : Window
         path.Tag = meta;
     }
 
+    /// <summary>
+    /// Survey free-drag model (useSVGInteraction.js:2536-2545): while the pointer is down the
+    /// grabbed handle follows the cursor 1:1 from the PRE-DRAG snapshot - no mid-drag clamping,
+    /// no re-routing, no cumulative drift - and each frame is validated only so the rings can
+    /// go red. <see cref="EndResize"/> disciplines the drop.
+    /// </summary>
     private void ApplyCalloutResize(FrameworkElement fe, AnnotationData meta, Point pos)
     {
-        if (fe is not CalloutAnnotation callout) return;
-        var layout = callout.Layout;
-        Vector off = ElementOffset(callout);
-        Point local = pos - off;
-        CalloutLayout next = _activeHandle switch
+        if (fe is not CalloutAnnotation callout || _calloutDragStart is not CalloutLayout snap) return;
+        Vector d = (pos - ElementOffset(callout)) - _calloutGrabLocal;
+        var rbox = snap.RenderBox;
+        double buffer = snap.Descender;
+
+        CalloutLayout Corner(int corner, Point grabbed)
         {
-            0 => layout.WithTip(local),
-            1 => layout.WithKnee(local),
-            2 => layout.WithBox(NewBoundsForHandle(layout.Box, 0, local)),
-            3 => layout.WithBox(NewBoundsForHandle(layout.Box, 1, local)),
-            4 => layout.WithBox(NewBoundsForHandle(layout.Box, 2, local)),
-            5 => layout.WithBox(NewBoundsForHandle(layout.Box, 3, local)),
-            _ => layout,
+            var next = NewBoundsForHandle(rbox, corner, grabbed + d);
+            return CalloutLayout.Raw(snap.Tip, snap.Knee,
+                new Rect(next.X, next.Y, next.Width, Math.Max(0, next.Height - buffer)), buffer);
+        }
+
+        CalloutLayout proposed = _activeHandle switch
+        {
+            0 => CalloutLayout.Raw(snap.Tip + d, snap.Knee, snap.Box, buffer),
+            1 => CalloutLayout.Raw(snap.Tip, snap.Knee + d, snap.Box, buffer),
+            2 => Corner(0, rbox.TopLeft),
+            3 => Corner(1, rbox.TopRight),
+            4 => Corner(2, rbox.BottomRight),
+            5 => Corner(3, rbox.BottomLeft),
+            _ => snap,
         };
-        var (head, _) = AnnotationStyle.HeadsFrom(meta);
-        var stroke = meta.Color is string hex && TryParseColor(hex, out var sc) ? sc : Colors.White;
-        var fill = AnnotationStyle.FillColorFrom(meta, stroke);
-        callout.Apply(next, meta.Text ?? "", stroke, fill, meta.Thickness ?? 2, head,
-            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
-        var data = AnnotationData.ForCallout(next, meta.Text ?? "", stroke, fill,
-            meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
-        data.Tx = meta.Tx;
-        data.Ty = meta.Ty;
-        callout.Tag = data;
+        _calloutDragInvalid = !CalloutLayout.IsDropSafe(proposed, HandleScreenPx / 2);
+        ApplyCalloutMeta(callout, proposed, meta);
+        callout.Tag = CalloutDataFrom(callout.Layout, meta);
     }
 
     // ---- snapshots (undo/redo) ----
@@ -848,12 +917,9 @@ public partial class EditorWindow : Window
                         ? new Rect(r[0], r[1], r[2], r[3])
                         : new Rect(cp[2][0], cp[2][1], CalloutLayout.DefaultBoxWidth, CalloutLayout.DefaultBoxHeight);
                     var layout = CalloutLayout.FromParts(
-                        new Point(cp[0][0], cp[0][1]), new Point(cp[1][0], cp[1][1]), box);
-                    var (head, _) = AnnotationStyle.HeadsFrom(snap.Meta);
-                    var stroke = snap.Meta.Color is string hx && TryParseColor(hx, out var sc) ? sc : Colors.White;
-                    callout.Apply(layout, snap.Meta.Text ?? "", stroke, AnnotationStyle.FillColorFrom(snap.Meta, stroke),
-                        snap.Meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(snap.Meta),
-                        snap.Meta.FontSize ?? 16, snap.Meta.FontFamily);
+                        new Point(cp[0][0], cp[0][1]), new Point(cp[1][0], cp[1][1]), box,
+                        CalloutDescender(snap.Meta));
+                    ApplyCalloutMeta(callout, layout, snap.Meta);
                     meta = snap.Meta.Clone();
                 }
                 break;
@@ -942,7 +1008,7 @@ public partial class EditorWindow : Window
                 var foreground = glyph.Fill ?? Brushes.White;
                 string text = meta.Text ?? string.Empty;
                 var typeface = new Typeface(new FontFamily("Segoe UI"),
-                    FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+                    FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
                 var formatted = new FormattedText(text, CultureInfo.CurrentUICulture,
                     FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
                 glyph.Data = formatted.BuildGeometry(new Point(0, 0));

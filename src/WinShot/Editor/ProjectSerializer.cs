@@ -76,6 +76,9 @@ internal sealed class AnnotationData
     public string? Text { get; set; }
 
     public string? FontFamily { get; set; }
+
+    /// <summary>Survey callout style.fontColor "#AARRGGBB" - independent of the border colour.</summary>
+    public string? FontColor { get; set; }
     public bool? Bold { get; set; }
     public bool? Italic { get; set; }
     public bool? Underline { get; set; }
@@ -156,7 +159,8 @@ internal sealed class AnnotationData
 
     public static AnnotationData ForCallout(
         CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
-        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null) => new()
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null,
+        Color? fontColor = null) => new()
     {
         Type = TypeCallout,
         Points = new[]
@@ -174,6 +178,7 @@ internal sealed class AnnotationData
         Text = text,
         FontSize = fontSize,
         FontFamily = fontFamily,
+        FontColor = fontColor is Color fcol ? ToHex(fcol) : null,
     };
 
     public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) =>
@@ -440,10 +445,14 @@ internal static class ProjectSerializer
                     ? fc
                     : Color.FromArgb(0, 255, 255, 255);
                 var (head, _) = AnnotationStyle.HeadsFrom(a);
-                double fontSize = a.FontSize is double fs && fs > 0 ? fs : 16;
+                double fontSize = a.FontSize is double fs && fs > 0 ? fs : CalloutLayout.DefaultFontSize;
+                layout = layout.WithDescender(fontSize * CalloutLayout.DescenderRatio);
+                Color? fontColor = a.FontColor is string fch && AnnotationStyle.TryParseHex(fch, out var fcc)
+                    ? fcc
+                    : null;
                 return AnnotationFactory.CreateCallout(
                     layout, a.Text ?? "", stroke, fill, RequireThickness(a),
-                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily);
+                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily, fontColor);
             }
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:

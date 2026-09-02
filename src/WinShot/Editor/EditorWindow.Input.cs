@@ -128,6 +128,7 @@ public partial class EditorWindow : Window
         }
         if (_activeHandle < 0 && !_dragging && !_movingSelection && !_marqueeSelecting && _handleKind != HandleKind.None)
             UpdateRotationPillHover(e.GetPosition(AnnotationCanvas));
+        UpdateCalloutHover(e.GetPosition(AnnotationCanvas));
         UpdateEraserCursor(e.GetPosition(Viewport));
         if (_draggingCurveHandle && _pendingCurve is not null)
         {
@@ -189,7 +190,7 @@ public partial class EditorWindow : Window
                 arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness, _arrowhead, _startArrowhead);
                 break;
             case EditorTool.Callout:
-                UpdateCalloutPreview(_dragStart, pos);
+                UpdateCalloutPreview(_dragStart, CalloutLayout.PushBoxOffTip(_dragStart, pos));
                 break;
             case EditorTool.Text:
                 ShowDragRect(ShapeConstraint.BoxFromDrag(_dragStart, pos, ShapeConstraint.ShiftHeld), dim: false);
@@ -312,9 +313,14 @@ public partial class EditorWindow : Window
             case EditorTool.Callout:
                 HideDragRect();
                 ClearCalloutPreview();
-                Point boxOrigin = pos;
-                if ((pos - _dragStart).Length < CalloutLayout.MinDrag)
-                    boxOrigin = new Point(_dragStart.X + 80, _dragStart.Y - CalloutLayout.DefaultBoxHeight / 2);
+                // Survey: a drag shorter than 4 page-px is a cancel, not a default callout
+                // (SVGAnnotationLayer.jsx:1113-1117) - no stray 0x0 callout is committed.
+                if ((pos - _dragStart).Length < CalloutLayout.MinDrag) return;
+                Point boxOrigin = CalloutLayout.PushBoxOffTip(_dragStart, pos);
+                // Survey switches out of the creation tool as edit mode opens, so the next
+                // page click commits the editor instead of starting another callout. Done
+                // BEFORE the editor exists, or OnToolChecked's CommitText would delete it.
+                CheckToolButton(EditorTool.Select);
                 CommitCallout(_dragStart, boxOrigin);
                 return;
             case EditorTool.CurvedArrow:
@@ -688,27 +694,31 @@ public partial class EditorWindow : Window
         if (_pendingCrop is null) HideDragRect();
     }
 
+    /// <summary>
+    /// Survey's creation ghost (SVGAnnotationLayer.jsx:4855-4949): fixed slate chrome at 0.6
+    /// opacity with 5,5 dashes and a solid triangle head - deliberately NOT the toolbar style,
+    /// so the committed callout (solid, full opacity, user style) is visually distinct.
+    /// </summary>
     private void UpdateCalloutPreview(Point tip, Point boxOrigin)
     {
-        var layout = CalloutLayout.FromDrag(tip, boxOrigin);
-        var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
-        double thickness = AnnotationStyle.ClampSize(_shapeSize);
-        double fontSize = AnnotationStyle.ClampTextSize(_textFontSize);
+        var layout = CalloutLayout.FromDrag(tip, boxOrigin,
+            descender: CalloutLayout.DefaultFontSize * CalloutLayout.DescenderRatio);
+        var ghost = Color.FromRgb(0x1E, 0x29, 0x3B);
+        var clear = Color.FromArgb(0, 0, 0, 0);
         if (_previewCallout is null)
         {
             _previewCallout = AnnotationFactory.CreateCallout(
-                layout, "", stroke, fill, thickness, _arrowhead,
-                _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle,
-                fontSize, _textFontFamily);
+                layout, "", ghost, clear, 2, ArrowheadStyle.SolidTriangle,
+                LineBorderStyle.Dashed, CalloutLayout.DefaultFontSize, CalloutLayout.DefaultFontFamily);
             _previewCallout.IsHitTestVisible = false;
             AnnotationCanvas.Children.Add(_previewCallout);
         }
         else
         {
-            _previewCallout.Apply(layout, "", stroke, fill, thickness, _arrowhead,
-                _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle,
-                fontSize, _textFontFamily);
+            _previewCallout.Apply(layout, "", ghost, clear, 2, ArrowheadStyle.SolidTriangle,
+                LineBorderStyle.Dashed, CalloutLayout.DefaultFontSize, CalloutLayout.DefaultFontFamily);
         }
+        _previewCallout.ApplyGhost();
     }
 
     private void ClearCalloutPreview()
@@ -946,13 +956,20 @@ public partial class EditorWindow : Window
         {
             _movingCalloutBox = false;
             Viewport.ReleaseMouseCapture();
-            if (_selected is CalloutAnnotation c && _calloutBoxBefore is CalloutLayout before
-                && _moveTotal.Length >= 0.5)
+            if (_selected is CalloutAnnotation c && _calloutBoxBefore is CalloutLayout before)
             {
-                var after = c.Layout;
-                Push(new EditorAction(
-                    undo: () => ApplyCalloutLayout(c, before),
-                    redo: () => ApplyCalloutLayout(c, after)), apply: false);
+                // Survey: a drop that breaks the callout rules restores the pre-drag snapshot
+                // whole rather than clamping the box into a legal spot. A safe drop is put
+                // back through the connection rules the free drag skipped.
+                bool safe = CalloutLayout.IsDropSafe(c.Layout, CalloutLayout.HandleRadius);
+                var after = safe
+                    ? CalloutLayout.FromParts(c.Layout.Tip, c.Layout.Knee, c.Layout.Box, c.Layout.Descender)
+                    : before;
+                ApplyCalloutLayout(c, after);
+                if (safe && _moveTotal.Length >= 0.5)
+                    Push(new EditorAction(
+                        undo: () => ApplyCalloutLayout(c, before),
+                        redo: () => ApplyCalloutLayout(c, after)), apply: false);
             }
             _calloutBoxBefore = null;
             _moveTotal = new Vector();
@@ -1007,32 +1024,64 @@ public partial class EditorWindow : Window
         UpdateSelectionVisual();
     }
 
+    /// <summary>
+    /// Survey shows the glow when a callout is hovered while unselected, or selected as part
+    /// of a multi-selection (SVGAnnotationLayer.jsx:3416).
+    /// </summary>
+    private void UpdateCalloutHover(Point pos)
+    {
+        if (!AnnotationCanvas.Children.OfType<CalloutAnnotation>().Any()) return;
+        var hovered = _tool == EditorTool.Select && _activeHandle < 0 && !_dragging && !_marqueeSelecting
+            ? HitTestAnnotation(pos) as CalloutAnnotation
+            : null;
+        foreach (UIElement child in AnnotationCanvas.Children)
+        {
+            if (child is not CalloutAnnotation c) continue;
+            bool selected = ReferenceEquals(c, _selected) || _selection.Contains(c);
+            c.ShowGlow = selected
+                ? _selection.Count > 1
+                : ReferenceEquals(c, hovered);
+        }
+    }
+
     private static bool CalloutBoxContains(CalloutAnnotation callout, Point pos)
     {
         Vector off = ElementOffset(callout);
-        var b = callout.Layout.Box;
+        var b = callout.Layout.RenderBox;
         b.Offset(off.X, off.Y);
         return b.Contains(pos);
     }
 
+    /// <summary>
+    /// Live text-box drag. Survey moves the box freely while the pointer is down (no
+    /// re-routing), then accepts or rolls the whole callout back on release.
+    /// </summary>
     private void NudgeCalloutBox(CalloutAnnotation callout, double dx, double dy)
     {
-        var box = callout.Layout.Box;
-        ApplyCalloutLayout(callout, callout.Layout.WithBox(
-            new Rect(box.X + dx, box.Y + dy, box.Width, box.Height)));
+        var l = callout.Layout;
+        ApplyCalloutLayout(callout, CalloutLayout.Raw(l.Tip, l.Knee,
+            new Rect(l.Box.X + dx, l.Box.Y + dy, l.Box.Width, l.Box.Height), l.Descender));
     }
 
     private void ApplyCalloutLayout(CalloutAnnotation callout, CalloutLayout layout)
     {
         if (callout.Tag is not AnnotationData meta) return;
+        ApplyCalloutMeta(callout, layout, meta);
+        callout.Tag = CalloutDataFrom(callout.Layout, meta);
+    }
+
+    /// <summary>
+    /// Rebuilds a callout's AnnotationData for a new layout while carrying over every style
+    /// field the geometry patch does not own - Survey's `{ ...c, ...patch }` spread.
+    /// </summary>
+    private static AnnotationData CalloutDataFrom(CalloutLayout layout, AnnotationData meta)
+    {
         var (head, _) = AnnotationStyle.HeadsFrom(meta);
         var stroke = meta.Color is string hex && TryParseColor(hex, out var sc) ? sc : Colors.White;
-        var fill = AnnotationStyle.FillColorFrom(meta, stroke);
-        callout.Apply(layout, meta.Text ?? callout.Text, stroke, fill, meta.Thickness ?? 2, head,
-            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
-        ApplyTextFormat(callout, meta);
-        var data = AnnotationData.ForCallout(layout, meta.Text ?? "", stroke, fill,
-            meta.Thickness ?? 2, head, AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? 16, meta.FontFamily);
+        var data = AnnotationData.ForCallout(layout, meta.Text ?? "", stroke,
+            AnnotationStyle.FillColorFrom(meta, stroke), meta.Thickness ?? 2, head,
+            AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? CalloutLayout.DefaultFontSize,
+            meta.FontFamily, CalloutFontColor(meta));
         data.Tx = meta.Tx;
         data.Ty = meta.Ty;
         data.Bold = meta.Bold;
@@ -1040,7 +1089,8 @@ public partial class EditorWindow : Window
         data.Underline = meta.Underline;
         data.Strike = meta.Strike;
         data.Align = meta.Align;
-        callout.Tag = data;
+        data.VerticalAlign = meta.VerticalAlign;
+        return data;
     }
 
     private IReadOnlyList<UIElement> SelectionList()

@@ -783,6 +783,9 @@ public partial class EditorWindow : Window
             foreach (var (data, element) in built)
             {
                 if (element is FrameworkElement fe) fe.Tag = data;
+                // Persisted bold/italic/underline/strike/align have to reach the callout's
+                // TextBlock; nothing else on the load path applies them.
+                if (element is CalloutAnnotation loadedCallout) ApplyTextFormat(loadedCallout, data);
                 if (element is FrameworkElement target && (data.Tx != 0 || data.Ty != 0 || data.Angle != 0))
                     AnnotationTransform.Apply(target, new Vector(data.Tx, data.Ty), data.Angle);
                 win.AnnotationCanvas.Children.Add(element);

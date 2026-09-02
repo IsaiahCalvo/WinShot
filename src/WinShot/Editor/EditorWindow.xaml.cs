@@ -152,6 +152,7 @@ public partial class EditorWindow : Window
     private CalloutAnnotation? _previewCallout;
     private bool _calloutReediting;
     private string _calloutReeditBefore = "";
+    private CalloutLayout? _calloutReeditLayoutBefore;
     private bool _movingCalloutBox;
     private CalloutLayout? _calloutBoxBefore;
     private TextBox? _activeText;
