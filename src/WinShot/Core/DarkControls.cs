@@ -61,6 +61,7 @@ internal sealed class StateAmount : IDisposable
     private IDisposable? _run;
     private double _from;
     private double _target;
+    private bool _disposed;
 
     public StateAmount(WF.Control owner) => _owner = owner;
 
@@ -68,7 +69,11 @@ internal sealed class StateAmount : IDisposable
 
     public void To(double target)
     {
-        if (Math.Abs(target - _target) < 0.0001d)
+        // A control disposed while the pointer is still over it gets one last OnMouseLeave.
+        // Starting a tween from there raised the process-wide timer resolution for 140 ms on
+        // behalf of a control nobody can see, and if the pump had already stopped the
+        // Motion holder would never have been released at all.
+        if (_disposed || Math.Abs(target - _target) < 0.0001d)
             return;
 
         _run?.Dispose();
@@ -96,6 +101,7 @@ internal sealed class StateAmount : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _run?.Dispose();
         _run = null;
     }
@@ -183,6 +189,11 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
     {
         if (keyData is WF.Keys.Enter or WF.Keys.Space && Focused)
         {
+            // The mouse gets a press wash on the way in and out; the keyboard fired the
+            // action with the button looking untouched, so nothing acknowledged the commit.
+            // A key has no down/up to straddle, so the tap is full press easing straight off.
+            _press.Reset(1);
+            _press.To(0);
             PerformClick();
             return true;
         }
@@ -625,17 +636,19 @@ public sealed class DarkSegmented : WF.Control
         _pillRun = Motion.Run(
             Motion.GlideDurationMs,
             Motion.EaseOutCubic,
-            _ =>
+            eased =>
             {
-                _pill.Update();
+                // The eased amount, not the tween's own clock: Motion.Run owns both here, so
+                // the pill decelerates into its cell like every other state change in the app.
+                _pill.Update((float)eased);
                 _pillRect = _pill.Current;
                 if (!IsDisposed)
                     Invalidate();
             },
             () =>
             {
-                // The tween reads a wall clock, so the final frame is not necessarily
-                // at the target — and with animation off it never ticked at all.
+                // Belt and braces: Motion.Run always delivers amount 1.0, which lands the
+                // tween on its target and stops it, but a cancelled run never gets there.
                 _pill.Stop();
                 _gliding = false;
                 Invalidate();

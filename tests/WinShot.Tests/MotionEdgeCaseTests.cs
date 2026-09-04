@@ -375,6 +375,52 @@ public class MotionEdgeCaseTests
         Assert.True(Dwell(ToastSeverity.Error) > Dwell(ToastSeverity.Success));
     }
 
+    /// <summary>
+    /// DarkSegmented hands Motion.Run an ease and lets it drive the pill. That argument was
+    /// dead: the frame callback discarded the eased value and asked RectangleTween to read its
+    /// own stopwatch through a plain lerp, so the pill was the one thing in the vocabulary that
+    /// moved at constant velocity. Pinned on the tween, where the arithmetic lives.
+    /// </summary>
+    [Fact]
+    public void ARectangleTweenFollowsTheAmountItIsGivenRatherThanItsOwnClock()
+    {
+        var tween = new WinShot.Capture.RectangleTween();
+        tween.Retarget(new SD.Rectangle(0, 0, 10, 10), new SD.Rectangle(200, 0, 10, 10));
+
+        tween.Update(0.5f);
+        Assert.Equal(100, tween.Current.X);
+
+        // What DarkSegmented actually passes at the halfway point of the glide.
+        tween.Update((float)Motion.EaseOutCubic(0.5d));
+        Assert.Equal(175, tween.Current.X);
+
+        // The last frame Motion.Run always delivers lands on the target and stops.
+        Assert.False(tween.Update(1f));
+        Assert.Equal(200, tween.Current.X);
+        Assert.False(tween.IsActive);
+    }
+
+    /// <summary>
+    /// A control disposed with the pointer still over it gets one last OnMouseLeave. That
+    /// started a 140 ms tween — raising the process-wide timer resolution on behalf of a
+    /// control that no longer exists, and leaking the holder outright if the pump stopped first.
+    /// </summary>
+    [Fact]
+    public void AStateChangeAfterDisposalStartsNoTween()
+    {
+        Assert.Equal(0, Motion.Holders);
+
+        var button = new DarkButton { Size = new SD.Size(80, 26), Text = "OK" };
+        Raise(button, "OnMouseEnter", EventArgs.Empty);
+        button.Dispose();
+        Raise(button, "OnMouseLeave", EventArgs.Empty);
+
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    private static void Raise(WF.Control control, string method, EventArgs e) =>
+        typeof(DarkButton).GetMethod(method, BindingFlagsNonPublic)!.Invoke(control, new object[] { e });
+
     private const System.Reflection.BindingFlags BindingFlagsNonPublic =
         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
 }

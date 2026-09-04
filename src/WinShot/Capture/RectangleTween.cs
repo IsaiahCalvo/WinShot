@@ -47,12 +47,20 @@ internal sealed class RectangleTween
     }
 
     /// <summary>Advances to the current wall-clock position. Returns whether it is still running.</summary>
-    public bool Update()
+    public bool Update() =>
+        Update(Duration.Ticks <= 0 ? 1f : (float)_clock.Elapsed.Ticks / Duration.Ticks);
+
+    /// <summary>
+    /// Advances to an explicit amount, for callers that already own the clock and the curve
+    /// (<see cref="WinShot.Core.Motion.Run"/>). Without this the caller's ease was dead code:
+    /// it handed in EaseOutCubic and the rect kept reading its own stopwatch through a plain
+    /// lerp, so the pill glided at constant velocity while everything else eased.
+    /// </summary>
+    public bool Update(float amount)
     {
         if (!IsActive)
             return false;
 
-        float amount = Duration.Ticks <= 0 ? 1f : (float)_clock.Elapsed.Ticks / Duration.Ticks;
         if (amount >= 1f)
         {
             Current = SD.Rectangle.Round(_to);
@@ -60,6 +68,7 @@ internal sealed class RectangleTween
             return false;
         }
 
+        amount = Math.Max(0f, amount);
         Current = SD.Rectangle.Round(new SD.RectangleF(
             Lerp(_from.X, _to.X, amount),
             Lerp(_from.Y, _to.Y, amount),
