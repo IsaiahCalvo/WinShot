@@ -338,6 +338,50 @@ public class ScrollingCaptureServiceTests
         Assert.NotNull(ScrollHintText.For(ScrollHint.MoveCursorHere));
     }
 
+    /// <summary>
+    /// There is one Auto-Scroll button, so a horizontally-scrolling pane has to be found by
+    /// the loop: vertical input moves nothing, the input ladder is exhausted, and the loop
+    /// flips the axis rather than reporting "reached the bottom" on a pane it never
+    /// scrolled. The wheel goes to a sink here, never to real input.
+    /// </summary>
+    [Fact]
+    public void AutoScrollOnAHorizontalPane_DiscoversTheAxisAndStitchesWide()
+    {
+        using var cts = new CancellationTokenSource();
+        var region = new SD.Rectangle(0, 0, HorizontalFrameWidth, HorizontalHeight);
+        int left = 0, steps = 0;
+        bool sawHorizontalInput = false;
+
+        void ScrollInput(int delta, bool horizontal)
+        {
+            // Only the horizontal axis moves this pane; vertical notches do nothing, which
+            // is exactly what forces the discovery.
+            if (!horizontal) return;
+            sawHorizontalInput = true;
+            left += 40;
+            if (++steps >= 12) cts.Cancel();
+        }
+
+        using var stitched = ScrollingCaptureService.RunAsync(
+            region,
+            presetDirection: null,
+            autoScroll: () => true,
+            status: _ => { },
+            hint: _ => { },
+            cts.Token,
+            preview: null,
+            frameSource: _ => MakeHorizontalFrame(left),
+            paneScoped: false,
+            cursorSource: () => new SD.Point(10, 10),
+            scrollInput: ScrollInput).GetAwaiter().GetResult();
+
+        Assert.True(sawHorizontalInput, "the loop never tried the horizontal axis");
+        Assert.NotNull(stitched);
+        Assert.True(stitched!.Width > HorizontalFrameWidth,
+            $"expected a wide stitch, got {stitched.Width}x{stitched.Height}");
+        Assert.Equal(HorizontalHeight, stitched.Height);
+    }
+
     [Fact]
     public void HorizontalSlowScroll_ReconstructsContiguousDocument()
     {
