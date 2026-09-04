@@ -398,6 +398,7 @@ public partial class SettingsWindow : Window
 
     private void PopulateAbout()
     {
+        AboutIconImage.Source = AppIcon.Large();
         AboutVersionText.Text = $"Version {AppInfo.Version}";
         AboutVersionValue.Text = AppInfo.Version;
         AboutRuntimeValue.Text = $".NET {Environment.Version}";

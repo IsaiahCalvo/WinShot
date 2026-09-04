@@ -1155,9 +1155,12 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel Margin="4,8" HorizontalAlignment="Center">
-                                <TextBlock Text="&#xE722;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="{StaticResource GlyphHero}" HorizontalAlignment="Center"
-                                           Foreground="{StaticResource AccentBrush}"/>
+                                <!-- The shipped mark itself, not a stand-in glyph: About, the tray
+                                     and the exe all show one WinShot icon. -->
+                                <Image x:Name="AboutIconImage" Width="{StaticResource GlyphHero}"
+                                       Height="{StaticResource GlyphHero}" HorizontalAlignment="Center"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       AutomationProperties.Name="WinShot icon"/>
                                 <TextBlock Text="WinShot" FontSize="{StaticResource TextDisplay}" FontWeight="SemiBold"
                                            HorizontalAlignment="Center" Margin="0,8,0,0"
                                            Foreground="{StaticResource TextPrimaryBrush}"/>

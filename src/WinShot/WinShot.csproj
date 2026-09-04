@@ -42,8 +42,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Assets\download-window-svgrepo-com.svg"
-                      LogicalName="WinShot.Assets.download-window-svgrepo-com.svg" />
+    <!-- The one WinShot mark: exe icon (ApplicationIcon above), tray icon and About pane
+         all read this file. Re-cut it with tools\make-icon.ps1. -->
+    <EmbeddedResource Include="Assets\winshot.ico"
+                      LogicalName="WinShot.Assets.winshot.ico" />
     <EmbeddedResource Include="Assets\quick-access-close.svg"
                       LogicalName="WinShot.Assets.quick-access-close.svg" />
     <EmbeddedResource Include="Assets\quick-access-copy.svg"
