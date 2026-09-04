@@ -1,11 +1,14 @@
 # Third-party notices
 
-Everything WinShot ships, and where it came from. Verified 2026-09-04 against the
+Every package WinShot ships, and where it came from. Verified 2026-09-04 against the
 resolved package graph in `src/WinShot/obj/project.assets.json` and each package's
-own `.nuspec` in the local NuGet cache — not from memory or from a badge.
+own `.nuspec` in the local NuGet cache — not from memory or from a badge. Bundled
+image assets are covered separately under "Icon assets".
 
-Fourteen packages reach the shipping binary: thirteen MIT, one Apache-2.0. Nothing
-in the graph is copyleft. Test-only packages (xunit, Newtonsoft.Json,
+Fourteen packages reach the resolved package graph: thirteen MIT, one Apache-2.0.
+One of the fourteen (`SkiaSharp.NativeAssets.macOS`) is in the graph but is not
+carried into the win-x64 output; it is listed anyway, because listing a package that
+turns out not to ship is the harmless mistake. Nothing in the graph is copyleft. Test-only packages (xunit, Newtonsoft.Json,
 `Microsoft.TestPlatform.*`) are not distributed and carry no notice obligation, so
 they are deliberately absent from the count and from the list below.
 
@@ -122,6 +125,23 @@ authoritative list is shipped inside the package as
 `skiasharp.nativeassets.win32/3.119.4/THIRD-PARTY-NOTICES.txt`, and that file
 should be reproduced verbatim with the distribution.
 
+## Icon assets
+
+Sixteen files sit under `src/WinShot/Assets/` and all sixteen ship inside the binary:
+fifteen SVGs as `EmbeddedResource`, plus `winshot.ico` as the `ApplicationIcon`.
+
+Fifteen of them — `winshot.ico` and the fourteen `quick-access-*.svg` — are WinShot's
+own: one icon family, viewBox 0 0 24 24, `currentColor`, stroke 1.85, drawn for this
+app and carrying no upstream marker.
+
+One is not. `download-window-svgrepo-com.svg` came from **SVG Repo**
+(https://www.svgrepo.com) — its own header comment says so, and unlike the others it
+is 800×800 with a hard-coded `#000000` fill. SVG Repo licences per icon, anywhere
+from CC0 to CC-BY with attribution required, so this file's terms are **unverified**.
+Nothing in the code references it; only `WinShot.csproj` still embeds it. T7 deletes
+it, which resolves this entry — if it is ever kept instead, its individual SVG Repo
+licence has to be looked up and recorded here.
+
 ## Related
 
 The browser extension has its own notices, covering different code:
@@ -136,4 +156,5 @@ The browser extension has its own notices, covering different code:
 - **These notices must ship, not just live here.** MIT and Apache-2.0 obligations
   attach to the distributed binary, so this file (plus the Apache-2.0 text and
   Skia's `THIRD-PARTY-NOTICES.txt`) needs to be carried by the installer and
-  reachable from the About pane. Not wired yet.
+  reachable from the About pane. Not wired yet. Tracked in the master plan under
+  T7's About-pane row so it does not go with this branch.

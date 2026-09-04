@@ -92,6 +92,9 @@ public sealed class FrameSignature
             var row = new byte[width * 4];
             var luma = new int[span];
             var prevLuma = new int[span];
+            // Allocated once, refilled per row: a stackalloc inside the loop grows the frame by
+            // one buffer per scanline and can overflow the stack on a tall capture (CA2014).
+            Span<ulong> hs = stackalloc ulong[Strips];
             for (int y = 0; y < height; y++)
             {
                 Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
@@ -103,7 +106,6 @@ public sealed class FrameSignature
 
                 long[] sum = new long[Strips];
                 long[] grad = new long[Strips];
-                Span<ulong> hs = stackalloc ulong[Strips];
                 hs.Fill(ImageStitcher.FnvOffsetBasis);
                 for (int x = 0; x < span; x++)
                 {
