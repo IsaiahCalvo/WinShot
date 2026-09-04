@@ -34,7 +34,7 @@ public class SettingsTruthCatalogTests
         [
             "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
             "capture-window", "record-screen", "scrolling-capture", "capture-text",
-            "self-timer",
+            "self-timer", "load-clipboard",
         ],
         SettingsTruthCatalog.ExecutableShortcutIds);
     }

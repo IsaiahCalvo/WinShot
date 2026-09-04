@@ -22,6 +22,7 @@ internal static class SettingsTruthCatalog
             "HotkeyCapturePrevious",
             "HotkeyAllInOne",
             "HotkeySelfTimer",
+            "HotkeyLoadClipboard",
             "RecordingFps",
             "GifFps",
             "RecordAudio",
@@ -86,6 +87,7 @@ internal static class SettingsTruthCatalog
         "scrolling-capture",
         "capture-text",
         "self-timer",
+        "load-clipboard",
     ];
 
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =

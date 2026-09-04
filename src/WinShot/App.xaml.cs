@@ -292,6 +292,7 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer")));
         menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region")));
         menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
+        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow));
         menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
         menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
         menu.Items.Add(new WF.ToolStripSeparator());
@@ -353,6 +354,7 @@ public partial class App : Application
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
         Reg(s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"));
+        Reg(s.HotkeyLoadClipboard, LoadClipboardImageFlow);
 
         if (failed.Count == 0)
         {
@@ -426,6 +428,7 @@ public partial class App : Application
         switch (cmd)
         {
             case "record": RecordFlow(); break;
+            case "load-clipboard": LoadClipboardImageFlow(); break;
             case "record-display": RecordDisplayFlow(); break;
             case "history": OpenHistory(); break;
             case "settings": OpenSettings(); break;
@@ -657,6 +660,24 @@ public partial class App : Application
             return window;
         }
     }
+
+    /// <summary>
+    /// Opens whatever image is on the clipboard in the editor. Editing a picture someone
+    /// pasted to you used to mean saving it to a file first — nothing in the app read an
+    /// image out of the clipboard at all.
+    /// </summary>
+    private void LoadClipboardImageFlow() => RunCaptureFlow(
+        "Open clipboard image failed", "Could not open the clipboard image", async () =>
+        {
+            SD.Bitmap? image = await RunCaptureWorkAsync(ClipboardImage.TryRead);
+            if (image is null)
+            {
+                ShowBalloon("Open clipboard image", "There is no image on the clipboard.",
+                    ToastSeverity.Info, holdLong: true);
+                return;
+            }
+            HandleCapture(image, PostCaptureAction.Edit);
+        });
 
     private void CaptureFullscreenFlow() => RunCaptureFlow(
         "Fullscreen capture failed", "Capture failed", async () =>

@@ -40,6 +40,9 @@ public class Settings
     // Unbound by default: Ctrl+Shift+1..8 are taken and there is no obvious ninth. The
     // self-timer was reachable only from a tray row with an empty shortcut column.
     public string HotkeySelfTimer { get; set; } = "";
+    // Also unbound by default. Editing an image someone sent you meant saving it to disk
+    // first, because nothing in the app ever read an image out of the clipboard.
+    public string HotkeyLoadClipboard { get; set; } = "";
 
     // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet
     // wired to behavior. Keyed by the catalog's stable action id -> gesture (e.g. "Ctrl+Alt+P").

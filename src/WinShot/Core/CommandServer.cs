@@ -32,6 +32,7 @@ public sealed class CommandServer : IDisposable
         "settings",
         "self-timer",
         "self-timer-region",
+        "load-clipboard",
         "restore-last",
         "exit",
     };
