@@ -236,6 +236,123 @@ public class PinInteractionTests
     public void TheZoomChipReadsTheScale(double scale, string expected)
         => Assert.Equal(expected, FastPinWindow.ZoomChipText(scale));
 
+    /// <summary>
+    /// A locked pin keeps its own way out. Locking used to put WS_EX_TRANSPARENT on the whole
+    /// window, so the pin received no mouse messages at all and the tray's "Unlock pinned
+    /// windows" was the only escape. The two chips it still offers have to be real rects that
+    /// hit-test, and the other two actions have to be gone -- they would need exactly the
+    /// click that lock exists to pass through.
+    /// </summary>
+    [Fact]
+    public void ALockedPinKeepsItsLockAndCloseChipsHitTestable()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(600, 400);
+            using var pin = new FastPinWindow(bitmap, new SettingsService());
+            pin.CreateControl();
+            SetField(pin, "_mouseInside", true);
+
+            Assert.Equal(new[] { 0, 1, 2, 3 }, VisibleButtons(pin));
+            SetLocked(pin, true);
+            Assert.Equal(new[] { 2, 3 }, VisibleButtons(pin));
+
+            // Lock and Close are hit-testable; Copy and Save are not offered at all.
+            SD.Rectangle lockChip = ButtonBounds(pin, 2);
+            SD.Rectangle closeChip = ButtonBounds(pin, 3);
+            Assert.False(lockChip.IsEmpty);
+            Assert.False(closeChip.IsEmpty);
+            Assert.True(ButtonBounds(pin, 0).IsEmpty);
+            Assert.True(ButtonBounds(pin, 1).IsEmpty);
+            Assert.False(lockChip.IntersectsWith(closeChip));
+
+            Assert.Equal(2, HitTest(pin, Centre(lockChip)));
+            Assert.Equal(3, HitTest(pin, Centre(closeChip)));
+            Assert.Equal(-1, HitTest(pin, new SD.Point(pin.ClientSize.Width / 2, pin.ClientSize.Height - 4)));
+
+            // Unlocking puts everything back.
+            SetLocked(pin, false);
+            Assert.Equal(new[] { 0, 1, 2, 3 }, VisibleButtons(pin));
+        });
+    }
+
+    /// <summary>
+    /// The dim a locked pin takes is hover-scoped and applies to the image, not the window:
+    /// window opacity would take the chips painted over it down too, and a permanent dim was
+    /// the old behaviour's other half. Window opacity itself must not move.
+    /// </summary>
+    [Fact]
+    public void ALockedPinDimsOnlyWhileHovered_AndOnlyItsImage()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => false;   // jump straight to the end state
+            try
+            {
+                using var bitmap = new SD.Bitmap(600, 400);
+                using var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+
+                SetLocked(pin, true);
+                Assert.Equal(1d, ImageAlpha(pin), 3);
+                Assert.Equal(1d, pin.Opacity, 3);
+
+                SetField(pin, "_mouseInside", true);
+                UpdateImage(pin);
+                Assert.Equal(PinInteraction.LockedOpacity(1d), ImageAlpha(pin), 3);
+                Assert.Equal(1d, pin.Opacity, 3);
+
+                SetField(pin, "_mouseInside", false);
+                UpdateImage(pin);
+                Assert.Equal(1d, ImageAlpha(pin), 3);
+
+                // And an unlocked pin never dims, hovered or not.
+                SetLocked(pin, false);
+                SetField(pin, "_mouseInside", true);
+                UpdateImage(pin);
+                Assert.Equal(1d, ImageAlpha(pin), 3);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+            }
+        });
+    }
+
+    private static void SetLocked(FastPinWindow pin, bool locked)
+        => typeof(FastPinWindow)
+            .GetMethod("SetLocked", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, new object[] { locked });
+
+    private static SD.Point Centre(SD.Rectangle rect)
+        => new(rect.Left + (rect.Width / 2), rect.Top + (rect.Height / 2));
+
+    private static int[] VisibleButtons(FastPinWindow pin)
+        => (int[])typeof(FastPinWindow)
+            .GetProperty("VisibleButtons", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(pin)!;
+
+    private static SD.Rectangle ButtonBounds(FastPinWindow pin, int index)
+        => (SD.Rectangle)typeof(FastPinWindow)
+            .GetMethod("ButtonBounds", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, new object[] { index })!;
+
+    private static int HitTest(FastPinWindow pin, SD.Point point)
+        => (int)typeof(FastPinWindow)
+            .GetMethod("HitTestButton", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, new object[] { point })!;
+
+    private static double ImageAlpha(FastPinWindow pin)
+        => (double)typeof(FastPinWindow)
+            .GetField("_imageAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(pin)!;
+
+    private static void UpdateImage(FastPinWindow pin)
+        => typeof(FastPinWindow)
+            .GetMethod("UpdateImageAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, null);
+
     private static double ChromeAlpha(FastPinWindow pin)
         => (double)typeof(FastPinWindow)
             .GetField("_chromeAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!

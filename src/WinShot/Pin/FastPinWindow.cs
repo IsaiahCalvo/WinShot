@@ -9,8 +9,6 @@ namespace WinShot.Pin;
 
 public sealed class FastPinWindow : WF.Form
 {
-    private const int GwlExStyle = -20;
-    private const long WsExTransparent = 0x00000020;
     private const int WmNclbuttondown = 0x00A1;
     private const int WmNchittest = 0x0084;
     private const int WmSizing = 0x0214;
@@ -18,6 +16,9 @@ public sealed class FastPinWindow : WF.Form
     private const int CsDropShadow = 0x00020000;
 
     // WM_NCHITTEST results for the resize border / interior.
+    /// <summary>"Not mine" -- the message is re-sent to whatever is underneath. A locked pin
+    /// answers this for every point except its own lock and close chips.</summary>
+    private const int HtTransparent = -1;
     private const int HtClient = 1;
     private const int HtLeft = 10;
     private const int HtRight = 11;
@@ -84,6 +85,14 @@ public sealed class FastPinWindow : WF.Form
     /// state change on this window and the only thing that tells you it is interactive.</summary>
     private double _chromeAlpha;
     private IDisposable? _chromeFade;
+    /// <summary>Alpha the pinned image is painted at. 1 at rest; a locked pin dims toward
+    /// PinInteraction.LockedOpacity while the pointer is over it, so you can see what is
+    /// underneath without unlocking, and it comes straight back when you move away.</summary>
+    private double _imageAlpha = 1d;
+    private IDisposable? _imageFade;
+    /// <summary>A locked pin answers HTTRANSPARENT, so it gets no WM_MOUSELEAVE. This runs
+    /// only while the pointer is over a locked pin and stops as soon as it is not.</summary>
+    private readonly WF.Timer _lockedHoverTimer = new() { Interval = 120 };
 
     public FastPinWindow(SD.Bitmap image, SettingsService? settings = null)
     {
@@ -181,12 +190,30 @@ public sealed class FastPinWindow : WF.Form
             Invalidate();
         };
         _tooltipTimer.Tick += (_, _) => ShowActionTooltip();
+        _lockedHoverTimer.Tick += (_, _) =>
+        {
+            if (!_locked || !Bounds.Contains(WF.Cursor.Position))
+            {
+                _lockedHoverTimer.Stop();
+                if (!_locked) return;
+                _mouseInside = false;
+                SetHoverButton(-1);
+                SetPressed(-1);
+                UpdateChromeAlpha();
+                UpdateImageAlpha();
+                Invalidate();
+            }
+        };
         Closed += (_, _) =>
         {
             // An in-flight tween holds the process-wide high-resolution clock; a pin closed
             // mid-fade must not leave it raised.
             _chromeFade?.Dispose();
             _chromeFade = null;
+            _imageFade?.Dispose();
+            _imageFade = null;
+            _lockedHoverTimer.Stop();
+            _lockedHoverTimer.Dispose();
             _readoutTimer.Dispose();
             HideActionTooltip();
             _tooltipTimer.Dispose();
@@ -207,6 +234,24 @@ public sealed class FastPinWindow : WF.Form
                 parameters.ClassStyle |= CsDropShadow;
             return parameters;
         }
+    }
+
+    /// <summary>
+    /// A pin disposed without being closed never raises Closed, so the tweens have to be
+    /// released here too: an in-flight one holds the process-wide high-resolution clock for
+    /// the rest of the process.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _chromeFade?.Dispose();
+            _chromeFade = null;
+            _imageFade?.Dispose();
+            _imageFade = null;
+            _lockedHoverTimer.Stop();
+        }
+        base.Dispose(disposing);
     }
 
     protected override WF.AccessibleObject CreateAccessibilityInstance() =>
@@ -233,7 +278,17 @@ public sealed class FastPinWindow : WF.Form
         // screenshot even with PinnedBorder off. The optional border is
         // PinWindowGeometry.DrawBorder's job, and the shadow is what separates a pin from
         // the desktop.
-        e.Graphics.DrawImage(_image, new SD.Rectangle(0, 0, Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height)));
+        var imageRect = new SD.Rectangle(0, 0, Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height));
+        if (_imageAlpha >= 0.999d)
+        {
+            e.Graphics.DrawImage(_image, imageRect);
+        }
+        else
+        {
+            // Alpha matrix, not Form.Opacity: the whole point is that the chips painted over
+            // this stay fully opaque, and window opacity would take them down with it.
+            DrawWithAlpha(e.Graphics, _image, imageRect, _imageAlpha);
+        }
 
         if (_border)
         {
@@ -259,7 +314,7 @@ public sealed class FastPinWindow : WF.Form
 
     /// <summary>Whether the chrome should be up. The drawn amount follows it through
     /// <see cref="_chromeAlpha"/>, so leaving fades instead of cutting.</summary>
-    private bool ToolbarVisible => !_locked && (_mouseInside || (_focusButton >= 0 && ContainsFocus));
+    private bool ToolbarVisible => _mouseInside || (_focusButton >= 0 && ContainsFocus);
 
     /// <summary>
     /// Runs the hover chrome toward whatever <see cref="ToolbarVisible"/> now says, over
@@ -298,9 +353,18 @@ public sealed class FastPinWindow : WF.Form
 
     private int Ui(int logicalPixels) => PinInteraction.ScaleLogical(logicalPixels, DeviceDpi);
 
+    /// <summary>
+    /// Which toolbar buttons are on offer. A locked pin shows only Lock and Close: everything
+    /// else it could do would need the click that lock exists to pass through.
+    /// </summary>
+    private int[] VisibleButtons => _locked ? LockedButtons : AllButtons;
+
+    private static readonly int[] AllButtons = { 0, 1, 2, 3 };
+    private static readonly int[] LockedButtons = { 2, 3 };
+
     private SD.Rectangle ToolbarBounds()
     {
-        int count = _toolbarButtons.Count;
+        int count = VisibleButtons.Length;
         int buttonSize = Ui(ToolbarButtonSizeLogical);
         int gap = Ui(ToolbarButtonGapLogical);
         int pad = Ui(ToolbarPadLogical);
@@ -312,13 +376,19 @@ public sealed class FastPinWindow : WF.Form
         return new SD.Rectangle(x, y, width, height);
     }
 
+    /// <summary>The rect of a toolbar button by its index in _toolbarButtons, or Empty when
+    /// the current state does not offer it.</summary>
     private SD.Rectangle ButtonBounds(int index)
     {
+        int slot = Array.IndexOf(VisibleButtons, index);
+        if (slot < 0)
+            return SD.Rectangle.Empty;
+
         SD.Rectangle bar = ToolbarBounds();
         int buttonSize = Ui(ToolbarButtonSizeLogical);
         int gap = Ui(ToolbarButtonGapLogical);
         int pad = Ui(ToolbarPadLogical);
-        int x = bar.Left + pad + index * (buttonSize + gap);
+        int x = bar.Left + pad + slot * (buttonSize + gap);
         int y = bar.Top + pad;
         return new SD.Rectangle(x, y, buttonSize, buttonSize);
     }
@@ -335,7 +405,7 @@ public sealed class FastPinWindow : WF.Form
             DrawRoundedRect(g, border, bar, Ui(8));
         }
 
-        for (int i = 0; i < _toolbarButtons.Count; i++)
+        foreach (int i in VisibleButtons)
             DrawButton(
                 g,
                 ButtonBounds(i),
@@ -466,10 +536,55 @@ public sealed class FastPinWindow : WF.Form
             return;
         }
 
-        var matrix = new SD.Imaging.ColorMatrix { Matrix33 = (float)Math.Clamp(_chromeAlpha, 0d, 1d) };
+        DrawWithAlpha(g, icon, at, _chromeAlpha);
+    }
+
+    private static void DrawWithAlpha(SD.Graphics g, SD.Bitmap image, SD.Rectangle at, double alpha)
+    {
+        var matrix = new SD.Imaging.ColorMatrix { Matrix33 = (float)Math.Clamp(alpha, 0d, 1d) };
         using var attributes = new SD.Imaging.ImageAttributes();
         attributes.SetColorMatrix(matrix);
-        g.DrawImage(icon, at, 0, 0, icon.Width, icon.Height, SD.GraphicsUnit.Pixel, attributes);
+        g.DrawImage(image, at, 0, 0, image.Width, image.Height, SD.GraphicsUnit.Pixel, attributes);
+    }
+
+    /// <summary>
+    /// Runs the pinned image toward its target alpha: full at rest, and
+    /// PinInteraction.LockedOpacity while a locked pin is hovered, so the dim is something
+    /// you cause by pointing at it rather than a permanent penalty for locking.
+    /// </summary>
+    private void UpdateImageAlpha()
+    {
+        double target = _locked && _mouseInside ? PinInteraction.LockedOpacity(1d) : 1d;
+        if (Math.Abs(_imageAlpha - target) < 0.001d)
+            return;
+
+        double from = _imageAlpha;
+        _imageFade?.Dispose();
+        _imageFade = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic,
+            p =>
+            {
+                if (IsDisposed) return;
+                _imageAlpha = from + ((target - from) * p);
+                Invalidate();
+            },
+            () => { _imageFade?.Dispose(); _imageFade = null; });
+    }
+
+    /// <summary>
+    /// The pointer is over a locked pin. HTTRANSPARENT means no WM_MOUSEMOVE and so no
+    /// WM_MOUSELEAVE either, so hover is noticed here (WM_NCHITTEST still arrives) and the
+    /// leaving is watched for by a timer that runs only while it matters.
+    /// </summary>
+    private void NoteLockedHover()
+    {
+        if (!_mouseInside)
+        {
+            _mouseInside = true;
+            UpdateChromeAlpha();
+            UpdateImageAlpha();
+            Invalidate();
+        }
+        _lockedHoverTimer.Start();
     }
 
     private void DrawReadout(SD.Graphics g, string text, SD.Point near)
@@ -506,9 +621,9 @@ public sealed class FastPinWindow : WF.Form
 
     private int HitTestButton(SD.Point point)
     {
-        if (!_mouseInside || _locked)
+        if (!_mouseInside)
             return -1;
-        for (int i = 0; i < _toolbarButtons.Count; i++)
+        foreach (int i in VisibleButtons)
         {
             if (ButtonBounds(i).Contains(point))
                 return i;
@@ -717,11 +832,15 @@ public sealed class FastPinWindow : WF.Form
 
         if (keyCode == WF.Keys.Tab && modifiers is WF.Keys.None or WF.Keys.Shift)
         {
+            // Cycles the buttons this state actually offers, so Tab on a locked pin walks
+            // Lock and Close rather than stopping on two chips that are not drawn.
+            int[] offered = VisibleButtons;
             int direction = modifiers == WF.Keys.Shift ? -1 : 1;
-            int next = _focusButton < 0
-                ? (direction > 0 ? 0 : _toolbarButtons.Count - 1)
-                : (_focusButton + direction + _toolbarButtons.Count) % _toolbarButtons.Count;
-            FocusToolbarButton(next);
+            int slot = Array.IndexOf(offered, _focusButton);
+            int nextSlot = slot < 0
+                ? (direction > 0 ? 0 : offered.Length - 1)
+                : (slot + direction + offered.Length) % offered.Length;
+            FocusToolbarButton(offered[nextSlot]);
             return true;
         }
 
@@ -737,7 +856,7 @@ public sealed class FastPinWindow : WF.Form
 
     private void FocusToolbarButton(int index)
     {
-        if (_locked || index < 0 || index >= _toolbarButtons.Count)
+        if (index < 0 || index >= _toolbarButtons.Count || !VisibleButtons.Contains(index))
             return;
 
         _focusButton = index;
@@ -756,30 +875,35 @@ public sealed class FastPinWindow : WF.Form
         Invalidate();
     }
 
+    /// <summary>
+    /// Locking used to be a one-way trip: WS_EX_TRANSPARENT on the whole window meant the pin
+    /// received no mouse messages at all, so its own controls were gone and the tray's
+    /// "Unlock pinned windows" was the only way back. Click-through is now answered per point
+    /// in WM_NCHITTEST instead, which lets the lock and close chips stay hit-testable while
+    /// every other pixel passes clicks through exactly as before.
+    /// </summary>
     private void SetLocked(bool locked)
     {
         if (_locked == locked)
             return;
 
-        long style = GetWindowLongPtr(Handle, GwlExStyle).ToInt64();
+        _locked = locked;
         if (locked)
         {
             _opacityBeforeLock = Opacity;
-            SetWindowLongPtr(Handle, GwlExStyle, new IntPtr(style | WsExTransparent));
-            Opacity = PinInteraction.LockedOpacity(_opacityBeforeLock);
-            _mouseInside = false;
             _focusButton = -1;
             SetHoverButton(-1);
+            SetPressed(-1);
         }
         else
         {
-            SetWindowLongPtr(Handle, GwlExStyle, new IntPtr(style & ~WsExTransparent));
+            _lockedHoverTimer.Stop();
             Opacity = _opacityBeforeLock;
         }
 
-        _locked = locked;
         _lockItem.Text = locked ? "Unlock (Ctrl+L)" : "Lock (Ctrl+L)";
         UpdateChromeAlpha();
+        UpdateImageAlpha();
         Invalidate();
     }
 
@@ -787,8 +911,17 @@ public sealed class FastPinWindow : WF.Form
 
     protected override void WndProc(ref WF.Message m)
     {
-        // A locked pin is WS_EX_TRANSPARENT, so it never receives these messages anyway;
-        // the tray "Unlock pinned windows" command (UnlockAllPins) is the escape hatch.
+        if (m.Msg == WmNchittest && _locked)
+        {
+            // Click-through everywhere except the pin's own escape hatches. The pointer being
+            // here is also the only hover signal a locked pin gets.
+            NoteLockedHover();
+            m.Result = HitTestButton(PointToClient(WF.Cursor.Position)) >= 0
+                ? (IntPtr)HtClient
+                : (IntPtr)HtTransparent;
+            return;
+        }
+
         if (m.Msg == WmNchittest && !_locked)
         {
             base.WndProc(ref m);
@@ -1036,12 +1169,6 @@ public sealed class FastPinWindow : WF.Form
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
-    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
-    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
     private sealed class FastPinAccessibleObject(FastPinWindow owner)
         : WF.Control.ControlAccessibleObject(owner)
