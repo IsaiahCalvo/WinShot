@@ -75,9 +75,16 @@ internal static class SelectorChrome
         return new SD.Size(size.Width + 16, size.Height + 8);
     }
 
-    /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
-    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
+    /// <summary>Draws the size/coordinate label pill, clamped inside the client area.
+    /// <paramref name="alpha"/> scales the whole pill, so a caller can fade one out
+    /// (TextRenderer cannot draw translucent text, so the text is drawn through
+    /// Graphics.DrawString once the pill is no longer fully opaque).</summary>
+    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y,
+        double alpha = 1d)
     {
+        double amount = Math.Clamp(alpha, 0d, 1d);
+        if (amount <= 0d) return;
+
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
         int w = size.Width + 16;
@@ -89,11 +96,26 @@ internal static class SelectorChrome
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(Scale(235, amount), 0x1C, 0x1C, 0x1E)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
-        WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
+        if (amount >= 1d)
+        {
+            WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
+            return;
+        }
+
+        using var textBrush = new SD.SolidBrush(SD.Color.FromArgb(Scale(255, amount), ThemePalette.TextPrimary));
+        using var format = new SD.StringFormat
+        {
+            Alignment = SD.StringAlignment.Center,
+            LineAlignment = SD.StringAlignment.Center,
+        };
+        g.DrawString(text, font, textBrush, bg, format);
     }
+
+    private static int Scale(int value, double amount)
+        => (int)Math.Clamp(Math.Round(value * amount), 0d, 255d);
 }

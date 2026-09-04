@@ -1322,7 +1322,8 @@ public partial class App : Application
             PerfLog.TrackFirstShown(selector, "scrolling selector");
             try
             {
-                if (await selector.ShowAsync(paneHover: true) == WF.DialogResult.OK &&
+                if (await selector.ShowAsync(paneHover: true,
+                        instruction: "Drag over the part of the screen that scrolls") == WF.DialogResult.OK &&
                     selector.SelectedRegionPx is SD.Rectangle r)
                 {
                     picked = r;

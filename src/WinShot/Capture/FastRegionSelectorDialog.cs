@@ -33,6 +33,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SelectorOptions _options;
     private SelectorMode _mode = SelectorMode.Area;
     private bool _paneHover;
+    /// <summary>Mode-specific instruction pill (scrolling capture). Fades out once the
+    /// user starts dragging: by then it has been read or it never will be.</summary>
+    private double _instructionAlpha;
+    private IDisposable? _instructionFade;
     /// <summary>Alt-hover resolves the deepest UIA ELEMENT (normal captures) instead of the
     /// scrollable pane (scrolling captures).</summary>
     private bool _elementGranularity;
@@ -174,6 +178,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </summary>
     internal void Park()
     {
+        // The selector is pooled, so an in-flight tween would otherwise outlive the session
+        // that started it and keep the process-wide timer resolution raised.
+        _instructionFade?.Dispose();
+        _instructionFade = null;
+        _instructionAlpha = 0d;
         SelectorSurfaces.Park(this);
         foreach (var pane in _panes)
             SelectorSurfaces.Park(pane);
@@ -197,7 +206,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     }
 
     public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area,
-        bool paneHover = false, bool elementHover = false)
+        bool paneHover = false, bool elementHover = false, string? instruction = null)
     {
         _mode = mode;
         _paneHover = paneHover || elementHover;
@@ -209,7 +218,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
-        _options = SelectorOptions.ForRegion(_settings?.Current);
+        _options = SelectorOptions.ForRegion(_settings?.Current) with { Instruction = instruction };
+        _instructionFade?.Dispose();
+        _instructionFade = null;
+        _instructionAlpha = instruction is null ? 0d : 1d;
         // Always open translucent over the live desktop so the overlay appears the instant
         // the hotkey fires. The freeze snapshot (WGC setup alone can cost 300-1700 ms under
         // load) is taken in the background — these surfaces are excluded from capture — and
@@ -483,6 +495,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         InvalidateScreenRect(new SD.Rectangle(pt.X - CrosshairBandHalf, mon.Top, CrosshairBandHalf * 2, mon.Height));
         InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - CrosshairBandHalf, mon.Width, CrosshairBandHalf * 2));
         InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
+        if (InstructionRectAt(pt) is SD.Rectangle instruction)
+            InvalidateScreenRect(instruction);
     }
 
     /// <summary>The physical bounds of the surface (coordinator or pane) containing a screen point.</summary>
@@ -716,8 +730,53 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _dragStartScreen = screen;
         _dragging = true;
         _dragMoved = false;
+        FadeInstructionOut();
         InvalidateAllSurfaces();
     }
+
+    /// <summary>
+    /// Retires the instruction pill when the drag it was asking for begins. The follow tick
+    /// is already repainting around the cursor at ~66 fps while a selection is open, so the
+    /// ramp only has to move the value and ask for the pill's own rect back.
+    /// </summary>
+    private void FadeInstructionOut()
+    {
+        if (_options.Instruction is null || _instructionAlpha <= 0d || _instructionFade is not null)
+            return;
+
+        _instructionFade = Core.Motion.Run(Core.Motion.QuickMs, Core.Motion.EaseInCubic,
+            p =>
+            {
+                _instructionAlpha = 1d - p;
+                InvalidateInstructionRegion();
+            },
+            () => { _instructionFade?.Dispose(); _instructionFade = null; });
+    }
+
+    /// <summary>Screen rect the instruction pill occupies, so the fade repaints only it.</summary>
+    private void InvalidateInstructionRegion()
+    {
+        if (InstructionRectAt(_currentScreen) is SD.Rectangle rect)
+            InvalidateScreenRect(rect);
+    }
+
+    /// <summary>The pill's screen rect for a cursor at <paramref name="pt"/>, padded, or null
+    /// when there is no instruction to draw. The follow repaint needs it too: the pill rides
+    /// well outside the crosshair band, so without it a moving cursor would smear the pill.</summary>
+    private SD.Rectangle? InstructionRectAt(SD.Point pt)
+    {
+        if (_options.Instruction is not string instruction || _instructionAlpha <= 0d)
+            return null;
+        SD.Size pill = SelectorChrome.MeasureLabel(instruction);
+        return new SD.Rectangle(
+            pt.X - (pill.Width / 2) - 4,
+            pt.Y - InstructionRise - pill.Height - 4,
+            pill.Width + 8,
+            pill.Height + 8);
+    }
+
+    /// <summary>How far above the cursor the instruction pill rides, clear of the loupe.</summary>
+    private const int InstructionRise = 26;
 
     internal void HandleMouseMove()
     {
@@ -1028,6 +1087,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (_magnifierOn)
                 FastSelectorLoupeRenderer.Draw(
                     g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
+        }
+
+        // Mode-specific instruction, riding above the cursor so it never lands on the loupe.
+        // Drawn last so nothing paints over it, and only while there is no selection yet --
+        // once a region exists the size readout and the action bar own the copy.
+        if (_options.Instruction is string instruction && _instructionAlpha > 0.004d &&
+            cursorOnThisSurface && _pendingScreen is null)
+        {
+            SD.Point cursorLocal = ToLocal(_currentScreen, monitorBounds);
+            SD.Size pill = SelectorChrome.MeasureLabel(instruction);
+            SelectorChrome.DrawLabel(g, clientSize, instruction,
+                cursorLocal.X - (pill.Width / 2),
+                cursorLocal.Y - InstructionRise - pill.Height,
+                _instructionAlpha);
         }
     }
 
