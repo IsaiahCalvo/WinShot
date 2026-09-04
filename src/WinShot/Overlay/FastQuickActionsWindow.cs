@@ -212,6 +212,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             ReflowOpenWindowsAnimated();
         };
         OpenWindows.Add(this);
+        TrimStackToCapacity();
 
         if (historyPathTask is not null)
             _ = WatchHistoryPathAsync(historyPathTask);
@@ -985,10 +986,14 @@ public sealed class FastQuickActionsWindow : WF.Form
             : WF.Screen.PrimaryScreen ?? WF.Screen.FromPoint(WF.Cursor.Position);
         var area = screen.WorkingArea;
         _placedWorkingArea = area;
+        int gutter = QuickAccessOverlayLayout.StackGutter(_dpi);
         // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
+        // Cards that are already flying out are skipped: they are still visible and still
+        // intersecting, and counting them left an empty slot in the stack for a capture
+        // taken while an old card was on its way off screen.
         int offset = OpenWindows.ToArray()
-            .Where(w => !ReferenceEquals(w, this) && w.Visible && area.IntersectsWith(w.Bounds))
-            .Sum(w => w.Height + 12);
+            .Where(w => !ReferenceEquals(w, this) && w.Visible && !w._exitMotionStarted && area.IntersectsWith(w.Bounds))
+            .Sum(w => w.Height + gutter);
         Location = QuickAccessOverlayLayout.Place(
             area,
             Size,
@@ -1042,6 +1047,25 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         _enterMotion?.Dispose();
         _enterMotion = null;
+    }
+
+    /// <summary>
+    /// Dismisses the oldest cards once the column is full. Through <see cref="Close"/>, so
+    /// they fly out and the rest restack exactly as a manual close does — and so the
+    /// auto-close action, the history entry and the recently-closed stack all still run.
+    /// </summary>
+    private void TrimStackToCapacity()
+    {
+        SD.Rectangle area = _placedWorkingArea;
+        if (area.Height <= 0)
+            return;
+
+        int capacity = QuickAccessOverlayLayout.StackCapacity(area, Size, _dpi);
+        var stacked = OpenWindows
+            .Where(w => !w.IsDisposed && !w._closed && !w._exitMotionStarted && w._placedWorkingArea == area)
+            .ToList();
+        for (int i = 0; i < stacked.Count - capacity; i++)
+            stacked[i].Close();
     }
 
     private void BeginExitMotion()
@@ -1112,7 +1136,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 offset,
                 window._dpi);
             window.BeginStackMotion(target, started);
-            offsets[workingArea] = offset + window.Height + 12;
+            offsets[workingArea] = offset + window.Height + QuickAccessOverlayLayout.StackGutter(window._dpi);
         }
     }
 

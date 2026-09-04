@@ -1,4 +1,4 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 
 namespace WinShot.Overlay;
 
@@ -111,6 +111,33 @@ internal readonly record struct QuickAccessOverlayLayout(
             Math.Clamp(x, workingArea.Left, maxX),
             Math.Clamp(y, workingArea.Top, maxY));
     }
+
+    /// <summary>
+    /// The gap between two stacked cards. It was a bare 12 in two places while the card
+    /// itself scales with DPI, so on a 150 % display it read as 8 logical pixels against a
+    /// card and a half.
+    /// </summary>
+    public static int StackGutter(int dpi) => Scale(StackGutterLogical, Math.Clamp(dpi, 96, 480) / 96d);
+
+    /// <summary>
+    /// How many cards the stack holds before the oldest is dismissed. Every anchor stacks
+    /// along Y, so this is how many cards and gutters fit between the working area's insets.
+    /// Without a cap the column marched inboard until <see cref="Place"/> started clamping,
+    /// and from then on every new capture landed exactly on top of the last one.
+    /// </summary>
+    public static int StackCapacity(SD.Rectangle workingArea, SD.Size cardSize, int dpi)
+    {
+        double dpiScale = Math.Clamp(dpi, 96, 480) / 96d;
+        int gutter = StackGutter(dpi);
+        int step = Math.Max(1, cardSize.Height + gutter);
+        int span = workingArea.Height - Scale(16, dpiScale) * 2;
+        return Math.Clamp((span + gutter) / step, 1, MaxStackedCards);
+    }
+
+    private const int StackGutterLogical = 12;
+
+    /// <summary>Roughly a 1080p screenful; a taller monitor gains nothing from a deeper pile.</summary>
+    private const int MaxStackedCards = 5;
 
     private static int Scale(int value, double dpiScale) => Math.Max(1, (int)Math.Round(value * dpiScale));
 }

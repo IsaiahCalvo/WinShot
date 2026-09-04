@@ -779,6 +779,58 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    [Fact]
+    public void ABurstOfCapturesDismissesTheOldestCardsInsteadOfPilingUp()
+    {
+        RunSta(() =>
+        {
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            var cards = new List<FastQuickActionsWindow>();
+            try
+            {
+                for (int i = 0; i < 9; i++)
+                {
+                    using var bitmap = new SD.Bitmap(1200, 760);
+                    var card = new FastQuickActionsWindow(bitmap, settings);
+                    cards.Add(card);
+                    card.Show();
+                }
+
+                int capacity = QuickAccessOverlayLayout.StackCapacity(
+                    WF.Screen.PrimaryScreen!.WorkingArea,
+                    cards[^1].Size,
+                    cards[^1].DeviceDpi);
+                int living = cards.Count(c => !c.IsDisposed && !IsLeaving(c));
+
+                Assert.InRange(capacity, 1, 5);
+                Assert.Equal(capacity, living);
+                // Oldest first: the survivors are the tail of the burst.
+                Assert.All(cards.TakeLast(capacity), c => Assert.False(IsLeaving(c)));
+                Assert.All(cards.Take(cards.Count - capacity), c => Assert.True(IsLeaving(c)));
+            }
+            finally
+            {
+                foreach (var card in cards)
+                {
+                    AllowImmediateClose(card);
+                    card.Dispose();
+                }
+                PumpUntil(() => Motion.Holders == 0, 4000);
+            }
+        });
+    }
+
+    private static bool IsLeaving(FastQuickActionsWindow card)
+        => (bool)typeof(FastQuickActionsWindow)
+            .GetField("_exitMotionStarted", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(card)!;
+
+    private static void AllowImmediateClose(FastQuickActionsWindow card)
+        => typeof(FastQuickActionsWindow)
+            .GetField("_allowImmediateClose", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(card, true);
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);

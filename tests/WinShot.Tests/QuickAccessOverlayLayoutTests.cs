@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
@@ -106,4 +106,32 @@ public class QuickAccessOverlayLayoutTests
     [Fact]
     public void NewSettings_DefaultToBottomRight()
         => Assert.Equal("bottom-right", new Settings().OverlayPosition);
+
+    [Theory]
+    [InlineData(96, 12)]
+    [InlineData(120, 15)]
+    [InlineData(144, 18)]
+    [InlineData(192, 24)]
+    public void TheStackGutterScalesWithTheCard(int dpi, int expected)
+        => Assert.Equal(expected, QuickAccessOverlayLayout.StackGutter(dpi));
+
+    [Fact]
+    public void ARegularScreenHoldsFiveCardsAndAShortOneHoldsFewer()
+    {
+        var card = new SD.Size(192, 120);
+        var full = new SD.Rectangle(0, 0, 1920, 1040);
+        var short_ = new SD.Rectangle(0, 0, 1920, 320);
+        var sliver = new SD.Rectangle(0, 0, 1920, 60);
+
+        Assert.Equal(5, QuickAccessOverlayLayout.StackCapacity(full, card, 96));
+        Assert.Equal(2, QuickAccessOverlayLayout.StackCapacity(short_, card, 96));
+        // Never zero: the card that was just captured always gets a slot.
+        Assert.Equal(1, QuickAccessOverlayLayout.StackCapacity(sliver, card, 96));
+    }
+
+    [Fact]
+    public void ADeeperMonitorDoesNotBuyADeeperPile()
+        => Assert.Equal(
+            5,
+            QuickAccessOverlayLayout.StackCapacity(new SD.Rectangle(0, 0, 3840, 2160), new SD.Size(192, 120), 96));
 }
