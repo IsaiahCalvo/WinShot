@@ -1524,7 +1524,9 @@ public partial class App : Application
         string? path;
         try
         {
-            path = _history.GetItems().FirstOrDefault();
+            // Off the UI thread: GetItems enumerates the history folder, and a five-thousand
+            // file history would otherwise stall the hotkey press that asked for it.
+            path = await Task.Run(() => _history.GetItems().FirstOrDefault());
         }
         catch (Exception ex)
         {

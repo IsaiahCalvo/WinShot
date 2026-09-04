@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -146,7 +146,10 @@ internal sealed class TallCapturePreviewWindow : WF.Form
         try
         {
             using var g = SD.Graphics.FromImage(scaled);
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            // Bilinear, not bicubic: this runs on the UI thread the moment the pointer lands
+            // on the card, and at these reduction ratios (a 6,000 px strip into ~900 px)
+            // bicubic costs several times as much for no visible difference.
+            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.DrawImage(image, new SD.Rectangle(0, 0, bounds.Width, bounds.Height),
                 0, 0, image.Width, image.Height, SD.GraphicsUnit.Pixel);

@@ -115,7 +115,11 @@ public static class ScrollingStatusWindow
             // runs whatever happens.
             try
             {
-                await Task.WhenAll(controls.FadeOutAsync(), preview.FadeOutAsync(), overlay.FadeOutAsync());
+                // Raced against a deadline: the ramps run on WinForms timers, and a flow that
+                // ends while the pump is going away would otherwise never return the capture.
+                Task fades = Task.WhenAll(
+                    controls.FadeOutAsync(), preview.FadeOutAsync(), overlay.FadeOutAsync());
+                await Task.WhenAny(fades, Task.Delay(ScrollChromeFade.DurationMs * 4));
             }
             catch (Exception ex)
             {
