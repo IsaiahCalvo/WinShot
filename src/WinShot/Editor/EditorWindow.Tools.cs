@@ -65,7 +65,35 @@ public partial class EditorWindow : Window
                 ev.Handled = true;
             }
         };
+        SeedTextFormatFromMeta((AnnotationData)visual.Tag);
+        UpdateContextPanels(); // brings up the rich-text row for the now-open editor
         Dispatcher.InvokeAsync(() => tb.Focus());
+    }
+
+    /// <summary>
+    /// Survey seeds each TextEditOverlay's styleRef from the annotation being edited, so an
+    /// editor never inherits the previously formatted object's style
+    /// (TextEditOverlay.jsx:143-156). WinShot's _text* state is window-level, so every
+    /// editor-open path has to reload it explicitly or the globals leak across annotations.
+    /// </summary>
+    private void SeedTextFormatFromMeta(AnnotationData meta)
+    {
+        bool callout = meta.Type == AnnotationData.TypeCallout;
+        _textFontFamily = string.IsNullOrWhiteSpace(meta.FontFamily)
+            ? (callout ? CalloutLayout.DefaultFontFamily : NewTextFontFamily)
+            : meta.FontFamily;
+        _textFontSize = AnnotationStyle.ClampTextSize(meta.FontSize is double fs && fs > 0
+            ? fs
+            : (callout ? CalloutLayout.DefaultFontSize : NewTextFontSize));
+        _textBold = meta.Bold ?? false;
+        _textItalic = meta.Italic ?? false;
+        _textUnderline = meta.Underline ?? false;
+        _textStrike = meta.Strike ?? false;
+        _textAlign = string.IsNullOrWhiteSpace(meta.Align) ? "left" : meta.Align;
+        _textVerticalAlign = string.IsNullOrWhiteSpace(meta.VerticalAlign) ? "top" : meta.VerticalAlign;
+        _textStyle = Enum.TryParse(meta.Style, out TextStyle st) ? st : TextStyle.Plain;
+        // Absent fontColor means "never recoloured", i.e. the stroke-colour fallback.
+        _textFontColor = meta.FontColor is string fcHex && TryParseColor(fcHex, out var fc) ? fc : null;
     }
 
     /// <summary>
@@ -325,6 +353,8 @@ public partial class EditorWindow : Window
                 ev.Handled = true;
             }
         };
+        SeedTextFormatFromMeta(meta);
+        UpdateContextPanels(); // brings up the rich-text row for the now-open editor
         Dispatcher.InvokeAsync(() =>
         {
             tb.Focus();
@@ -344,6 +374,10 @@ public partial class EditorWindow : Window
     {
         if (label.Tag is not AnnotationData meta || meta.Type != AnnotationData.TypeText)
             return;
+        // CommitText rebuilds the label from the window-level _text* fields, so they have to
+        // carry THIS object's formatting or the re-edit both loses its own style and stamps
+        // the previously formatted annotation's style onto it.
+        SeedTextFormatFromMeta(meta);
         Select(null);
         double x = Canvas.GetLeft(label), y = Canvas.GetTop(label);
         if (label.RenderTransform is TranslateTransform t)
@@ -378,6 +412,14 @@ public partial class EditorWindow : Window
         tb.FontStyle = meta.Italic == true ? FontStyles.Italic : FontStyles.Normal;
         tb.TextAlignment = AnnotationFactory.ParseAlign(meta.Align);
         tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(meta.VerticalAlign);
+        tb.TextDecorations = null;
+        if (meta.Underline == true || meta.Strike == true)
+        {
+            var decorations = new TextDecorationCollection();
+            if (meta.Underline == true) decorations.Add(TextDecorations.Underline);
+            if (meta.Strike == true) decorations.Add(TextDecorations.Strikethrough);
+            tb.TextDecorations = decorations;
+        }
         tb.TextWrapping = TextWrapping.Wrap;
         tb.AcceptsReturn = true;
         if (meta.Rect is { Length: >= 4 } box && box[2] >= 8 && box[3] >= 8)
@@ -417,8 +459,10 @@ public partial class EditorWindow : Window
     /// </summary>
     private void HookTextEditor(TextBox tb)
     {
-        double floorH = tb.Height;
-        tb.TextChanged += (_, _) => GrowTextEditor(tb, floorH);
+        // A field, not a closure local: the rich-text strip re-grows the editor on a style
+        // click too, and it has no access to this scope.
+        _textEditorFloorH = tb.Height;
+        tb.TextChanged += (_, _) => GrowTextEditor(tb, _textEditorFloorH);
         tb.LostKeyboardFocus += (_, ev) =>
         {
             // Survey's click-outside commit explicitly opts out of the rich-text toolbar, the

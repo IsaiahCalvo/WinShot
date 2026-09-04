@@ -89,6 +89,9 @@ public partial class EditorWindow : Window
     private string _textVerticalAlign = "top";
     private Rect? _activeTextBox;
 
+    /// <summary>Mount-time height of the open plain-text editor — the grow-only floor.</summary>
+    private double _textEditorFloorH;
+
     /// <summary>The committed label a text re-edit replaced, so blanking or cancelling restores it.</summary>
     private FrameworkElement? _reeditSource;
 
@@ -1341,7 +1344,9 @@ public partial class EditorWindow : Window
                     // into the shared box without inflating the pen. Only the pen writes it.
                     case AnnotationData.TypeHighlighter: break;
                     case AnnotationData.TypeFreehand: _penSize = th; break;
-                    case AnnotationData.TypeText: break;
+                    // Survey reads a selected text box's strokeWidth back into the Width box
+                    // like any other shape (PDFViewer.jsx:3836-3863).
+                    case AnnotationData.TypeText: _shapeSize = th; break;
                     case AnnotationData.TypeCallout: _shapeSize = th; break;
                     // Survey puts the counter's RADIUS in the Size box on selection
                     // (PDFViewer.jsx:3861), not a stroke width.
@@ -1557,15 +1562,14 @@ public partial class EditorWindow : Window
         RememberSize(clamped);
         SyncSizeBox();
         if (!IsLoaded) return;
-        if (ChromeTool() is EditorTool.Text)
-            RestyleSelectedTextFormat();
-        else
-        {
-            double applied = _tool == EditorTool.Highlighter
-                ? AnnotationStyle.HighlighterWidth(_thickness)
-                : _thickness;
-            RestyleSelected(color: null, thickness: applied, fill: null);
-        }
+        // Survey's Width input is the STROKE control for every kind, text boxes included
+        // (isEditableShapeSelected covers 'textbox', PDFViewer.jsx:7428-7433) — the font size
+        // is a separate dropdown inside the rich-text portal (AppShell.jsx:1855-1876). It also
+        // keeps patching strokeWidth while the rich-text editor is mounted.
+        double applied = _tool == EditorTool.Highlighter
+            ? AnnotationStyle.HighlighterWidth(_thickness)
+            : _thickness;
+        RestyleSelected(color: null, thickness: applied, fill: null);
     }
 
     /// <summary>
@@ -2120,8 +2124,13 @@ public partial class EditorWindow : Window
     private void OnEnterTextEdit(object sender, RoutedEventArgs e)
     {
         if (_activeText is not null) return;
-        if (_selected is CalloutAnnotation callout) BeginCalloutReEdit(callout);
-        else if (_selected is TextBlock label) BeginTextReEdit(label);
+        // Survey gates on the annotation's TYPE, never on the rendered element
+        // (PDFViewer.jsx:23087-23089, :11310-11328). A committed plain text is a Grid
+        // (Path for Outline, Border for Pill) wrapping the TextBlock, so a visual-class
+        // test is false for every normal text box and the button does nothing.
+        if (_selected is not FrameworkElement { Tag: AnnotationData m } fe) return;
+        if (m.Type == AnnotationData.TypeCallout && fe is CalloutAnnotation callout) BeginCalloutReEdit(callout);
+        else if (m.Type == AnnotationData.TypeText) BeginTextReEdit(fe);
     }
 
     /// <summary>
@@ -2132,7 +2141,10 @@ public partial class EditorWindow : Window
     {
         if (TextEditBtn is null) return;
         bool editing = _activeText is not null;
-        bool canEdit = editing || _selected is CalloutAnnotation or TextBlock;
+        // Same annotation-type gate Survey's canEnterTextEdit uses (PDFViewer.jsx:23087).
+        bool canEdit = editing
+            || (_selected is FrameworkElement { Tag: AnnotationData sm }
+                && sm.Type is AnnotationData.TypeText or AnnotationData.TypeCallout);
         TextEditBtn.IsEnabled = canEdit;
         TextEditBtn.Opacity = canEdit ? 1 : 0.5;
         TextEditBtn.Background = editing

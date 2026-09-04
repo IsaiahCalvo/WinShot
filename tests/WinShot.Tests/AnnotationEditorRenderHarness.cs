@@ -818,74 +818,136 @@ public class AnnotationEditorRenderHarness
                 Click(0.85, 0.88); Shot("pointer-callout-selected.png");
                 Click(0.10, 0.92); Shot("pointer-text-selected.png");
 
-                // ---- AUDIT PROBE: post-commit text/callout formatting -------------
+                // ---- TEXT FORMAT PARITY PROBE -------------------------------------
                 {
                     var log = new System.Text.StringBuilder();
                     var selField = typeof(EditorWindow).GetField("_selected", BindingFlags.Instance | BindingFlags.NonPublic)!;
                     var activeField = typeof(EditorWindow).GetField("_activeText", BindingFlags.Instance | BindingFlags.NonPublic)!;
                     var boldBtn = (Button)editor.FindName("BoldBtn")!;
+                    var underlineBtn = (Button)editor.FindName("UnderlineBtn")!;
                     var aaBtn = (Button)editor.FindName("TextEditBtn")!;
                     var strip = (FrameworkElement)editor.FindName("TextStylePanel")!;
                     var sizeInput = (TextBox)editor.FindName("SizeInput")!;
+                    var famBox = (ComboBox)editor.FindName("FontFamilyBox")!;
+                    var sizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
                     void Fire(Button b) { b.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Pump(4); }
+                    void Invoke(string name) => typeof(EditorWindow)
+                        .GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null);
+                    void Hist(string name)
+                    {
+                        typeof(EditorWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+                            .Invoke(editor, null);
+                        Pump(6);
+                    }
+                    void PickFamily(string family)
+                    {
+                        foreach (ComboBoxItem it in famBox.Items.OfType<ComboBoxItem>())
+                            if (it.Tag as string == family) { famBox.SelectedItem = it; break; }
+                        Pump(4);
+                    }
+                    void PickSize(double size)
+                    {
+                        foreach (ComboBoxItem it in sizeBox.Items.OfType<ComboBoxItem>())
+                            if (it.Tag is double d && Math.Abs(d - size) < 0.01) { sizeBox.SelectedItem = it; break; }
+                        Pump(4);
+                    }
                     string Desc(object? o) => o is null ? "null" : o.GetType().Name;
-
-                    // A committed TEXT box is selected right now.
-                    var selText = selField.GetValue(editor) as FrameworkElement;
-                    var textMeta = selText?.Tag as AnnotationData;
-                    log.AppendLine($"[TEXT] selectedVisual={Desc(selText)} metaType={textMeta?.Type}");
-                    log.AppendLine($"[TEXT] stripVisible={strip.Visibility} AaEnabled={aaBtn.IsEnabled} AaVisible={((FrameworkElement)editor.FindName("TextEditPanel")!).Visibility}");
                     TextBlock? TextOf(FrameworkElement? fe) => fe as TextBlock
                         ?? (fe as Border)?.Child as TextBlock
                         ?? (fe as Grid)?.Children.OfType<TextBlock>().FirstOrDefault();
-                    log.AppendLine($"[TEXT] before  bold={textMeta?.Bold} weight={TextOf(selText)?.FontWeight}");
+                    FrameworkElement? Sel() => selField.GetValue(editor) as FrameworkElement;
+                    TextBox? Live() => activeField.GetValue(editor) as TextBox;
+                    FrameworkElement? LastText() => canvas.Children.OfType<FrameworkElement>()
+                        .LastOrDefault(f => (f.Tag as AnnotationData)?.Type == AnnotationData.TypeText);
+
+                    // TXT-1: the Aa button reads the annotation TYPE, so a committed plain
+                    // text (a Grid, never a bare TextBlock) lights it up and re-opens.
+                    var selText = Sel();
+                    var textMeta = selText?.Tag as AnnotationData;
+                    log.AppendLine($"[TEXT] selectedVisual={Desc(selText)} metaType={textMeta?.Type}");
+                    log.AppendLine($"[TEXT] stripVisible={strip.Visibility} AaEnabled={aaBtn.IsEnabled}");
                     Fire(boldBtn);
-                    var selText2 = selField.GetValue(editor) as FrameworkElement;
-                    log.AppendLine($"[TEXT] afterBold meta.Bold={(selText2?.Tag as AnnotationData)?.Bold} weight={TextOf(selText2)?.FontWeight}");
-                    // Aa should re-open the editor on the selected textbox (Survey: handleEnterTextEditFromStrip).
+                    log.AppendLine($"[TEXT] afterBold(selected) meta.Bold={(Sel()?.Tag as AnnotationData)?.Bold} weight={TextOf(Sel())?.FontWeight}");
                     Fire(aaBtn);
-                    log.AppendLine($"[TEXT] afterAa activeEditor={(activeField.GetValue(editor) is null ? "null" : "open")} editorsOnCanvas={canvas.Children.OfType<TextBox>().Count()}");
-                    // Size box on a selected textbox = border thickness in Survey.
-                    selField.SetValue(editor, selText2);
+                    log.AppendLine($"[TEXT] afterAa activeEditor={(Live() is null ? "null" : "open")} stripVisible={strip.Visibility} editors={canvas.Children.OfType<TextBox>().Count()}");
+
+                    // TXT-7: a size change on the OPEN editor re-measures immediately, with
+                    // no keystroke in between.
+                    double hBeforeSize = Live()?.Height ?? 0;
+                    PickSize(36);
+                    log.AppendLine($"[TEXT] afterSize36(open) editorSize={Live()?.FontSize} heightBefore={hBeforeSize:F1} heightAfter={Live()?.Height:F1}");
+                    Fire(underlineBtn);
+                    log.AppendLine($"[TEXT] afterUnderline(open) decorations={(Live()?.TextDecorations?.Count ?? 0)}");
+                    Invoke("CommitText"); Pump(4);
+                    var commitTarget = LastText();
+                    var cm = commitTarget?.Tag as AnnotationData;
+                    log.AppendLine($"[TEXT] afterCommit bold={cm?.Bold} underline={cm?.Underline} fontSize={cm?.FontSize} labelDecorations={(TextOf(commitTarget)?.TextDecorations?.Count ?? 0)}");
+
+                    // TXT-5: re-opening that text must reload ITS style (underline included)
+                    // rather than the last-formatted object's, and commit it back unchanged.
+                    Check("SelectToolBtn");
+                    selField.SetValue(editor, commitTarget);
+                    Fire(aaBtn);
+                    log.AppendLine($"[TEXT] reEdit editorDecorations={(Live()?.TextDecorations?.Count ?? 0)} editorWeight={Live()?.FontWeight} editorSize={Live()?.FontSize} editorFamily={Live()?.FontFamily}");
+                    Invoke("CommitText"); Pump(4);
+                    var roundTrip = LastText()?.Tag as AnnotationData;
+                    log.AppendLine($"[TEXT] reEditCommit bold={roundTrip?.Bold} underline={roundTrip?.Underline} fontSize={roundTrip?.FontSize} family={roundTrip?.FontFamily}");
+
+                    // TXT-6: the Size box is the STROKE control for a selected text box.
+                    var sizeTarget = LastText();
+                    selField.SetValue(editor, sizeTarget);
+                    Invoke("UpdateContextPanels"); Pump(2);
+                    log.AppendLine($"[TEXT] sizeBoxReadBack={sizeInput.Text} (meta.Thickness={(sizeTarget?.Tag as AnnotationData)?.Thickness})");
                     sizeInput.Text = "6";
-                    typeof(EditorWindow).GetMethod("CommitSizeInput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null);
-                    Pump(4);
-                    var selText3 = selField.GetValue(editor) as FrameworkElement;
-                    log.AppendLine($"[TEXT] afterSize6 meta.Thickness={(selText3?.Tag as AnnotationData)?.Thickness}");
+                    Invoke("CommitSizeInput"); Pump(4);
+                    log.AppendLine($"[TEXT] afterSize6 meta.Thickness={(Sel()?.Tag as AnnotationData)?.Thickness}");
 
                     // ---- CALLOUT ----
                     Check("SelectToolBtn");
                     Click(0.85, 0.88); Pump(3);
-                    var selCallout = selField.GetValue(editor) as CalloutAnnotation;
-                    log.AppendLine($"[CALLOUT] selected={Desc(selCallout)} AaEnabled={aaBtn.IsEnabled} stripVisible={strip.Visibility}");
-                    Fire(aaBtn); // Aa opens the callout editor
-                    log.AppendLine($"[CALLOUT] afterAa activeEditor={(activeField.GetValue(editor) is null ? "null" : "open")} stripVisible={strip.Visibility}");
+                    var selCallout = Sel() as CalloutAnnotation;
                     var beforeMeta = selCallout?.Tag as AnnotationData;
-                    log.AppendLine($"[CALLOUT] before bold={beforeMeta?.Bold} italic={beforeMeta?.Italic} labelWeight={selCallout?.Label.FontWeight} fontFamily={beforeMeta?.FontFamily} fontSize={beforeMeta?.FontSize}");
+                    log.AppendLine($"[CALLOUT] selected={Desc(selCallout)} AaEnabled={aaBtn.IsEnabled} stripVisible={strip.Visibility}");
+                    log.AppendLine($"[CALLOUT] before bold={beforeMeta?.Bold} family={beforeMeta?.FontFamily} size={beforeMeta?.FontSize}");
+                    // TXT-2: the rich-text strip has to come up for the callout editor too.
+                    Fire(aaBtn);
+                    log.AppendLine($"[CALLOUT] afterAa activeEditor={(Live() is null ? "null" : "open")} stripVisible={strip.Visibility}");
+                    // TXT-5: the strip reloads the callout's own style, not the text box's.
+                    log.AppendLine($"[CALLOUT] seeded editorWeight={Live()?.FontWeight} editorSize={Live()?.FontSize} editorFamily={Live()?.FontFamily}");
+                    // TXT-3 + TXT-8: bold writes through to meta and label AT CLICK TIME.
                     Fire(boldBtn);
-                    var liveEditor = activeField.GetValue(editor) as TextBox;
-                    log.AppendLine($"[CALLOUT] afterBold(open) editorWeight={liveEditor?.FontWeight} meta.Bold={(selCallout?.Tag as AnnotationData)?.Bold} labelWeight={selCallout?.Label.FontWeight}");
-                    // Font family + size on an OPEN callout editor.
-                    var famBox = (ComboBox)editor.FindName("FontFamilyBox")!;
-                    foreach (ComboBoxItem it in famBox.Items.OfType<ComboBoxItem>())
-                        if (it.Tag as string == "Courier New") { famBox.SelectedItem = it; break; }
-                    Pump(4);
-                    var sizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
-                    foreach (ComboBoxItem it in sizeBox.Items.OfType<ComboBoxItem>())
-                        if (it.Tag is double d && Math.Abs(d - 36) < 0.01) { sizeBox.SelectedItem = it; break; }
-                    Pump(4);
-                    liveEditor = activeField.GetValue(editor) as TextBox;
-                    log.AppendLine($"[CALLOUT] afterFamily/Size(open) editorFamily={liveEditor?.FontFamily} editorSize={liveEditor?.FontSize} labelFamily={selCallout?.Label.FontFamily} labelSize={selCallout?.Label.FontSize}");
-                    // Commit the callout editor and see what survived.
-                    typeof(EditorWindow).GetMethod("CommitCalloutText", BindingFlags.Instance | BindingFlags.NonPublic)!
-                        .Invoke(editor, null);
-                    Pump(4);
+                    log.AppendLine($"[CALLOUT] afterBold(open) editorWeight={Live()?.FontWeight} meta.Bold={(selCallout?.Tag as AnnotationData)?.Bold} labelWeight={selCallout?.Label.FontWeight} labelVisible={selCallout?.Label.Visibility}");
+                    // TXT-4: family + size are not excluded for callouts any more.
+                    PickFamily("Courier New");
+                    PickSize(36);
+                    var cMeta = selCallout?.Tag as AnnotationData;
+                    log.AppendLine($"[CALLOUT] afterFamily/Size(open) editorFamily={Live()?.FontFamily} editorSize={Live()?.FontSize} labelFamily={selCallout?.Label.FontFamily} labelSize={selCallout?.Label.FontSize} meta.Family={cMeta?.FontFamily} meta.Size={cMeta?.FontSize}");
+                    Shot("pointer-callout-format-open.png");
+                    Invoke("CommitCalloutText"); Pump(4);
                     var afterMeta = selCallout?.Tag as AnnotationData;
-                    log.AppendLine($"[CALLOUT] afterCommit meta.Bold={afterMeta?.Bold} meta.FontFamily={afterMeta?.FontFamily} meta.FontSize={afterMeta?.FontSize} labelWeight={selCallout?.Label.FontWeight} labelFamily={selCallout?.Label.FontFamily} labelSize={selCallout?.Label.FontSize}");
+                    log.AppendLine($"[CALLOUT] afterCommit bold={afterMeta?.Bold} family={afterMeta?.FontFamily} size={afterMeta?.FontSize} text={afterMeta?.Text} labelWeight={selCallout?.Label.FontWeight} labelFamily={selCallout?.Label.FontFamily} labelSize={selCallout?.Label.FontSize} labelVisible={selCallout?.Label.Visibility}");
+                    // TXT-8: each strip click left its own undo checkpoint.
+                    Hist("UndoAsync");
+                    var undone1 = selCallout?.Tag as AnnotationData;
+                    log.AppendLine($"[CALLOUT] undo1 size={undone1?.FontSize} family={undone1?.FontFamily} bold={undone1?.Bold}");
+                    Hist("UndoAsync");
+                    var undone2 = selCallout?.Tag as AnnotationData;
+                    log.AppendLine($"[CALLOUT] undo2 size={undone2?.FontSize} family={undone2?.FontFamily} bold={undone2?.Bold}");
+                    Hist("RedoAsync"); Hist("RedoAsync");
+                    var redone = selCallout?.Tag as AnnotationData;
+                    log.AppendLine($"[CALLOUT] redo size={redone?.FontSize} family={redone?.FontFamily} bold={redone?.Bold}");
                     File.WriteAllText(Path.Combine(outDir, "text-format-audit.txt"), log.ToString());
                     Shot("pointer-text-format-audit.png");
+                    // The two restyled objects up close: the bold + underlined 36pt text box
+                    // that survived a re-edit round trip, and the bold Courier New 36 callout.
+                    void CloseUp(FrameworkElement? fe, string name)
+                    {
+                        if (fe is null || fe.ActualWidth < 1 || fe.ActualHeight < 1) return;
+                        RenderElementToPng(fe, Path.Combine(outDir, name));
+                    }
+                    CloseUp(selCallout?.Label, "textfmt-committed-callout.png");
                 }
-                // ---- END AUDIT PROBE ----------------------------------------------
+                // ---- END TEXT FORMAT PARITY PROBE ---------------------------------
                 // --- Effects (WinShot-only; Survey has no equivalent): pixelate and blur. ---
                 EditorWindow.PointerArgs PA(Point c, int clicks = 1) =>
                     new EditorWindow.PointerArgs(c, canvas.TranslatePoint(c, viewport), MouseButton.Left, clicks);

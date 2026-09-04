@@ -308,6 +308,21 @@ public partial class EditorWindow : Window
         if (_activeText is { } editor)
         {
             RestyleOpenEditor(editor);
+            // A callout's style is written through to the stored object AT CLICK TIME, with
+            // its own undo checkpoint (TextEditOverlay.jsx:280-303 applyStyle ->
+            // onCalloutTextStyleChange, PDFViewer.jsx:3504-3519). Plain text has no such
+            // write-back in Survey — it rides the single commit CommitText already pushes.
+            if (editor.Tag is CalloutAnnotation live)
+            {
+                RestyleOneTextFormat(live);
+                // CalloutAnnotation.Apply re-shows the label; the editor sits on top of it
+                // for as long as the edit is open.
+                live.Label.Visibility = Visibility.Collapsed;
+                // A font-size change moves the box's buffered bottom edge, so the editor has
+                // to follow it (Survey re-broadcasts live bounds on the same click).
+                editor.Height = live.Layout.RenderBox.Height;
+                UpdateSelectionVisual();
+            }
             return;
         }
         foreach (UIElement el in SelectionList().ToArray())
@@ -319,24 +334,23 @@ public partial class EditorWindow : Window
     private void RestyleOpenEditor(TextBox tb)
     {
         bool callout = tb.Tag is CalloutAnnotation;
+        // setFontFamily / setFontSize are plain members of the same rich-text api and apply to
+        // callouts exactly as to plain text (TextEditOverlay.jsx:297, :301, :76-77).
+        tb.FontFamily = new FontFamily(string.IsNullOrWhiteSpace(_textFontFamily)
+            ? (callout ? CalloutLayout.DefaultFontFamily : "Helvetica") : _textFontFamily);
+        tb.FontSize = AnnotationStyle.ClampTextSize(_textFontSize);
+        // Survey's callout line height is (lineHeight || 1) * 1.13, plain text's 1.16 * 1.13.
+        tb.WithLineHeight(tb.FontSize * (callout ? 1.13 : AnnotationFactory.TextLineHeightFactor));
+        // Callout text is always vertically centred (buildCalloutTextContentStyle).
         if (!callout)
-        {
-            tb.FontFamily = new FontFamily(string.IsNullOrWhiteSpace(_textFontFamily)
-                ? "Helvetica" : _textFontFamily);
-            tb.FontSize = AnnotationStyle.ClampTextSize(_textFontSize);
-            tb.WithLineHeight(tb.FontSize * AnnotationFactory.TextLineHeightFactor);
             tb.VerticalContentAlignment = AnnotationFactory.ParseVerticalAlign(_textVerticalAlign);
-        }
         if (_textFontColor is Color fc)
         {
             tb.Foreground = new SolidColorBrush(fc);
             // The committed callout label lives on the visual, not the editor, so the live
-            // preview underneath has to be recoloured with it.
-            if (tb.Tag is CalloutAnnotation live)
-            {
-                live.Label.Foreground = tb.Foreground;
-                if (live.Tag is AnnotationData lm) { lm.FontColor = ToHex(fc); live.Tag = lm; }
-            }
+            // preview underneath has to be recoloured with it. The meta write-back (and its
+            // undo entry) belongs to RestyleSelectedTextFormat's callout branch.
+            if (tb.Tag is CalloutAnnotation live) live.Label.Foreground = tb.Foreground;
         }
         tb.FontWeight = _textBold || _textStyle == TextStyle.Bold ? FontWeights.Bold : FontWeights.Normal;
         tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
@@ -349,6 +363,10 @@ public partial class EditorWindow : Window
             if (_textStrike) decorations.Add(TextDecorations.Strikethrough);
             tb.TextDecorations = decorations;
         }
+        // Survey re-measures and re-broadcasts the live bounds on the style click itself
+        // (applyStyle -> rAF(broadcastLiveBounds), TextEditOverlay.jsx:286-288), so the box
+        // and its chrome grow immediately instead of waiting for the next keystroke.
+        if (!callout) GrowTextEditor(tb, _textEditorFloorH);
     }
 
     private void RestyleOneTextFormat(UIElement element)
