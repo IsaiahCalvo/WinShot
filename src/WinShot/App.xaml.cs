@@ -273,7 +273,9 @@ public partial class App : Application
         _tray = new WF.NotifyIcon
         {
             Icon = TrayIconFactory.Create(),
-            Visible = true,
+            // "Hide the tray icon" is a real preference; the registered hotkeys and
+            // winshot://settings stay as the way back in.
+            Visible = _settings.Current.ShowTrayIcon,
             Text = "WinShot",
         };
 
@@ -281,26 +283,37 @@ public partial class App : Application
         var menu = new WF.ContextMenuStrip
         {
             Renderer = new DarkDropDown.DarkMenuRenderer(),
-            ShowImageMargin = false,
+            // A fixed left gutter for the capture verbs. The housekeeping group at the
+            // bottom deliberately gets no glyphs, which demotes it without another separator.
+            ShowImageMargin = true,
         };
         // Non-clickable header showing the running version — always visible at a glance.
         var versionHeader = new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false };
         menu.Items.Add(versionHeader);
         menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
-        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window")));
-        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
-        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen")));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, () => QueueCaptureCommand("self-timer")));
-        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
-        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
-        menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
+        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"), "\uE7C5"));
+        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"), "\uE737"));
+        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background"), "\uE790"));
+        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"), "\uE740"));
+        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, () => QueueCaptureCommand("self-timer"), "\uE916"));
+        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display"), "\uE7F4"));
+        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"), "\uE72C"));
+        menu.Items.Add(MenuItem("All-in-one…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"), "\uE71D"));
         menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow));
-        menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow));
-        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr")));
-        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling")));
-        menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal")));
+        menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow, "\uE714"));
+        menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow, "\uE7F4"));
+        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr"), "\uE8D2"));
+        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"), "\uE8CB"));
+        menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal"), "\uE8AB"));
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(MenuItem("Open image…", null, OpenImageFileFlow, "\uE8E5"));
+        menu.Items.Add(MenuItem("Pin to the screen…", null, PinFromFileFlow, "\uE718"));
+        menu.Items.Add(MenuItem("Restore recently closed", null, RestoreLastFlow, "\uE7A7"));
+        _desktopIconsMenuItem = MenuItem("Hide desktop icons", null, ToggleDesktopIcons, "\uE8B7");
+        menu.Items.Add(_desktopIconsMenuItem);
+        _recentsMenuItem = new WF.ToolStripMenuItem("Recent captures");
+        _recentsMenuItem.DropDownOpening += (_, _) => PopulateRecentCaptures();
+        menu.Items.Add(_recentsMenuItem);
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("History…", null, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
@@ -313,16 +326,253 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Check for updates…", null, () => _ = CheckForUpdatesFlowAsync()));
         menu.Items.Add(MenuItem("About WinShot…", null, OpenAbout));
         menu.Items.Add(MenuItem("Exit", null, Shutdown));
+        // The desktop-icon row's checked state is only true while WinShot is holding them
+        // hidden, and a capture guard can change that behind the menu's back.
+        menu.Opening += (_, _) => RefreshDesktopIconsMenuItem();
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
         _tray.BalloonTipClicked += (_, _) => { if (_pendingUpdate is not null) _ = InstallPendingUpdateAsync(); };
+        _settings.Changed += ApplyTrayVisibility;
     }
 
-    private static WF.ToolStripMenuItem MenuItem(string text, string? shortcut, Action onClick)
+    private IDisposable? _trayConfirmation;
+
+    /// <summary>
+    /// A short confirmation beat on the tray mark for the two silent successes — a copy and
+    /// a save. Both currently finish with a toast that can be missed and nothing else; the
+    /// icon is the one thing already on screen and already looked at.
+    /// </summary>
+    private void PlayTrayConfirmation()
     {
-        var item = new WF.ToolStripMenuItem(text) { ShortcutKeyDisplayString = shortcut };
+        if (_tray is null || !_tray.Visible)
+            return;
+
+        _trayConfirmation?.Dispose();
+        _trayConfirmation = Motion.Run(
+            TrayConfirmationMs,
+            Motion.EaseOutBack,
+            eased =>
+            {
+                // Pop in over the first third, hold, then fall away — the badge is a beat,
+                // not a state, so it must clearly end.
+                double p = Math.Clamp(eased, 0, 1);
+                double scale = p < 0.30 ? p / 0.30 : p > 0.78 ? Math.Max(0, 1 - (p - 0.78) / 0.22) : 1;
+                if (_tray is not null)
+                    _tray.Icon = TrayIconFactory.Create(TrayIconVariant.Confirm, scale);
+            },
+            () =>
+            {
+                _trayConfirmation = null;
+                RefreshDesktopIconsMenuItem(); // restores Normal, or Slashed if that is the state
+            });
+    }
+
+    private const int TrayConfirmationMs = 620;
+
+    private WF.ToolStripMenuItem? _desktopIconsMenuItem;
+    private WF.ToolStripMenuItem? _recentsMenuItem;
+    private bool _desktopIconsHiddenByTray;
+
+    private void ApplyTrayVisibility()
+    {
+        if (_tray is null) return;
+        bool wanted = _settings.Current.ShowTrayIcon;
+        if (_tray.Visible != wanted)
+            _tray.Visible = wanted;
+    }
+
+    /// <summary>The manual toggle over the same DesktopIcons the capture guard uses. The
+    /// tray mark picks up a slash while WinShot is the one holding them hidden, because a
+    /// hidden desktop with no visible cause is a support call.</summary>
+    private void ToggleDesktopIcons()
+    {
+        try
+        {
+            if (DesktopIcons.Visible)
+            {
+                DesktopIcons.Hide();
+                _desktopIconsHiddenByTray = true;
+            }
+            else
+            {
+                DesktopIcons.Show();
+                _desktopIconsHiddenByTray = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Toggling desktop icons failed", ex);
+            ShowBalloon("Desktop icons", "Windows would not let WinShot change the desktop right now.", ToastSeverity.Error);
+        }
+        RefreshDesktopIconsMenuItem();
+    }
+
+    private void RefreshDesktopIconsMenuItem()
+    {
+        if (_desktopIconsMenuItem is null) return;
+        bool hidden = !DesktopIcons.Visible;
+        _desktopIconsMenuItem.Checked = hidden;
+        _desktopIconsMenuItem.Text = hidden ? "Show desktop icons" : "Hide desktop icons";
+        if (!hidden)
+            _desktopIconsHiddenByTray = false;
+        if (_tray is not null)
+        {
+            _tray.Icon = _desktopIconsHiddenByTray
+                ? TrayIconFactory.Create(TrayIconVariant.Slashed)
+                : TrayIconFactory.Create();
+        }
+    }
+
+    /// <summary>The last few captures, with their own thumbnails in the icon gutter that is
+    /// now there anyway.</summary>
+    private void PopulateRecentCaptures()
+    {
+        if (_recentsMenuItem is null) return;
+        foreach (WF.ToolStripItem item in _recentsMenuItem.DropDownItems)
+            item.Image?.Dispose();
+        _recentsMenuItem.DropDownItems.Clear();
+
+        List<string> recent;
+        try
+        {
+            recent = _history.GetItems().Take(RecentCaptureCount).ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Reading recent captures for the tray menu failed", ex);
+            recent = [];
+        }
+
+        if (recent.Count == 0)
+        {
+            _recentsMenuItem.DropDownItems.Add(new WF.ToolStripMenuItem("No captures yet") { Enabled = false });
+            return;
+        }
+
+        foreach (string path in recent)
+        {
+            string file = path;
+            var item = new WF.ToolStripMenuItem(Path.GetFileName(file))
+            {
+                Image = TryLoadThumbnail(file),
+            };
+            item.Click += (_, _) => EditFromHistory(file);
+            _recentsMenuItem.DropDownItems.Add(item);
+        }
+    }
+
+    private const int RecentCaptureCount = 6;
+
+    private static SD.Image? TryLoadThumbnail(string path)
+    {
+        try
+        {
+            if (!File.Exists(path) || Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+                return null;
+            using var source = new SD.Bitmap(path);
+            return source.GetThumbnailImage(16, 16, null, IntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Thumbnail for the tray menu failed ({Path.GetFileName(path)})", ex);
+            return null;
+        }
+    }
+
+    /// <summary>Open an image from disk straight into the editor.</summary>
+    private void OpenImageFileFlow()
+    {
+        string? path = AskForImageFile("Open an image");
+        if (path is not null)
+            EditFromHistory(path);
+    }
+
+    /// <summary>Pin an image from disk to the screen — FastPinWindow already takes a bitmap.</summary>
+    private async void PinFromFileFlow()
+    {
+        string? path = AskForImageFile("Pin an image to the screen");
+        if (path is null)
+            return;
+        if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
+            return;
+        try
+        {
+            var win = new FastPinWindow(bmp, _settings);
+            PerfLog.TrackFirstShown(win, "pin window");
+            win.Show();
+        }
+        catch (Exception ex)
+        {
+            bmp.Dispose();
+            Log.Error("Pinning an opened image failed", ex);
+            ShowBalloon("Pin to the screen", FriendlyError.For(ex), ToastSeverity.Error);
+        }
+    }
+
+    private static string? AskForImageFile(string title)
+    {
+        try
+        {
+            using var dialog = new WF.OpenFileDialog
+            {
+                Title = title,
+                Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp|All files|*.*",
+                CheckFileExists = true,
+            };
+            return dialog.ShowDialog() == WF.DialogResult.OK ? dialog.FileName : null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Opening the file picker failed", ex);
+            return null;
+        }
+    }
+
+    /// <param name="glyph">A Segoe Fluent codepoint for the capture verbs. Housekeeping rows
+    /// pass none on purpose: an empty gutter is what visually demotes them.</param>
+    private static WF.ToolStripMenuItem MenuItem(
+        string text, string? shortcut, Action onClick, string? glyph = null)
+    {
+        var item = new WF.ToolStripMenuItem(text)
+        {
+            ShortcutKeyDisplayString = shortcut,
+            Image = glyph is null ? null : RenderMenuGlyph(glyph),
+        };
         item.Click += (_, _) => onClick();
         return item;
+    }
+
+    private static readonly Dictionary<string, SD.Image> MenuGlyphCache = new(StringComparer.Ordinal);
+
+    /// <summary>16 px monoline glyph for the menu's left gutter, cached for the process.</summary>
+    private static SD.Image? RenderMenuGlyph(string glyph)
+    {
+        if (MenuGlyphCache.TryGetValue(glyph, out SD.Image? cached))
+            return cached;
+        try
+        {
+            var bmp = new SD.Bitmap(16, 16, SD.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = SD.Graphics.FromImage(bmp))
+            {
+                g.Clear(SD.Color.Transparent);
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                using var font = ThemePalette.IconFont(9f);
+                using var brush = new SD.SolidBrush(ThemePalette.TextPrimary);
+                using var format = new SD.StringFormat
+                {
+                    Alignment = SD.StringAlignment.Center,
+                    LineAlignment = SD.StringAlignment.Center,
+                };
+                g.DrawString(glyph, font, brush, new SD.RectangleF(0, 0, 16, 16), format);
+            }
+            MenuGlyphCache[glyph] = bmp;
+            return bmp;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Tray menu glyph could not be rendered", ex);
+            return null;
+        }
     }
 
     private System.Windows.Threading.DispatcherTimer? _hotkeyRetryTimer;
@@ -1099,7 +1349,11 @@ public partial class App : Application
         {
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
             if (showSuccess)
-                await Dispatcher.InvokeAsync(() => ShowBalloon("Copied", "The capture is on the clipboard.", ToastSeverity.Success));
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    ShowBalloon("Copied", "The capture is on the clipboard.", ToastSeverity.Success);
+                    PlayTrayConfirmation();
+                });
         }
         catch (Exception ex)
         {
@@ -1240,7 +1494,11 @@ public partial class App : Application
                 try
                 {
                     ImageSaver.Save(bmp, path);
-                    Dispatcher.InvokeAsync(() => ShowBalloon("Saved", Path.GetFileName(path), ToastSeverity.Success));
+                    Dispatcher.InvokeAsync(() =>
+                    {
+                        ShowBalloon("Saved", Path.GetFileName(path), ToastSeverity.Success);
+                        PlayTrayConfirmation();
+                    });
                 }
                 catch (Exception ex)
                 {

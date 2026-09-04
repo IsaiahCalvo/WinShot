@@ -424,18 +424,42 @@ public sealed class DarkDropDown : WF.Control
         {
         }
 
+        /// <summary>
+        /// A decisive accent row rather than a timid grey wash: a rounded rectangle inset a
+        /// few pixels, the way Win11's own menus draw their selection, filled in the app's
+        /// one accent so the row under the pointer is unmistakable.
+        /// </summary>
         protected override void OnRenderMenuItemBackground(WF.ToolStripItemRenderEventArgs e)
         {
-            if (e.Item.Selected || e.Item.Pressed)
-            {
-                using var brush = new SD.SolidBrush(SD.Color.FromArgb(66, 66, 70));
-                e.Graphics.FillRectangle(brush, new SD.Rectangle(SD.Point.Empty, e.Item.Size));
-            }
+            if (!e.Item.Selected && !e.Item.Pressed)
+                return;
+            if (!e.Item.Enabled)
+                return; // the version header is a disabled row; it must not light up
+
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = new SD.Rectangle(SD.Point.Empty, e.Item.Size);
+            bounds.Inflate(-HighlightInset, -HighlightInset);
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return;
+
+            using var path = GdiPaths.RoundedRect(bounds, HighlightRadius);
+            using var brush = new SD.SolidBrush(
+                e.Item.Pressed ? ThemePalette.Accent : ThemePalette.AccentHover);
+            g.FillPath(brush, path);
         }
+
+        private const int HighlightInset = 4;
+        private const int HighlightRadius = 5;
 
         protected override void OnRenderItemText(WF.ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Enabled ? DarkControlPalette.Text : DarkControlPalette.TextMuted;
+            // White on the accent fill; the muted grey would disappear into it.
+            e.TextColor = !e.Item.Enabled
+                ? DarkControlPalette.TextMuted
+                : e.Item.Selected || e.Item.Pressed
+                    ? SD.Color.White
+                    : DarkControlPalette.Text;
             base.OnRenderItemText(e);
         }
 

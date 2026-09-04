@@ -208,6 +208,7 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("AfterCaptureMatrix").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("SoundsRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrayIconRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
@@ -223,7 +224,7 @@ public class ThemedWindowTests
         string[] accessibleControls =
         [
             "StartupCheck", "UpdatesCheck", "SaveFolderBox", "BrowseSaveFolderButton",
-            "HideIconsCheck", "ScreenshotShowOverlayCheck", "RecordingShowOverlayCheck",
+            "HideIconsCheck", "ShowTrayIconCheck", "ScreenshotShowOverlayCheck", "RecordingShowOverlayCheck",
             "ScreenshotCopyCheck", "RecordingCopyCheck", "ScreenshotSaveCheck",
             "ScreenshotOpenAnnotateCheck", "ScreenshotPinCheck", "RecordingOpenEditorCheck",
             "OverlayPositionCombo",

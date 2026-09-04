@@ -451,10 +451,12 @@
                                         <ComboBoxItem Content="Silent" Tag="silent"/>
                                     </ComboBox>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableTrayIconRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="TrayIconRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="System tray"/>
                                     <CheckBox x:Name="ShowTrayIconCheck" Content="Show icon"/>
                                 </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}" TextWrapping="Wrap"
+                                           Text="With the icon hidden, your shortcuts still work and winshot://settings reopens this window."/>
 
                                 <Rectangle Style="{StaticResource GroupSep}"/>
 

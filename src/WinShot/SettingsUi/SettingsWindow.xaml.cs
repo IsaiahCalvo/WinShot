@@ -1063,6 +1063,7 @@ public partial class SettingsWindow : Window
         Accessible(UpdatesCheck, "Check for updates at startup", "Checks GitHub Releases when WinShot starts.");
         Accessible(PlaySoundsCheck, "Play a sound on capture", "Play a shutter sound each time WinShot captures.");
         Accessible(ShutterSoundCombo, "Shutter sound", "Choose which shutter sound plays on capture.");
+        Accessible(ShowTrayIconCheck, "Show the tray icon", "Hide the WinShot icon from the system tray; shortcuts keep working.");
         Accessible(SaveFolderBox, "Export location", "Folder where captures are saved.");
         Accessible(BrowseSaveFolderButton, "Browse for export location", "Choose the folder where captures are saved.");
         Accessible(HideIconsCheck, "Hide desktop icons while capturing", "Temporarily hides desktop icons during capture.");
@@ -1122,7 +1123,7 @@ public partial class SettingsWindow : Window
 
         foreach (Control control in new Control[]
         {
-            StartupCheck, UpdatesCheck, PlaySoundsCheck, ShutterSoundCombo, SaveFolderBox,
+            StartupCheck, UpdatesCheck, PlaySoundsCheck, ShutterSoundCombo, ShowTrayIconCheck, SaveFolderBox,
             BrowseSaveFolderButton, HideIconsCheck,
             ScreenshotShowOverlayCheck, RecordingShowOverlayCheck, ScreenshotCopyCheck, RecordingCopyCheck,
             ScreenshotSaveCheck, ScreenshotOpenAnnotateCheck, ScreenshotPinCheck, RecordingOpenEditorCheck,
