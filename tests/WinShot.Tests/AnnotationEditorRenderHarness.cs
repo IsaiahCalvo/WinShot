@@ -1637,6 +1637,98 @@ public class AnnotationEditorRenderHarness
                 RenderElementToPng(editor.FindName("ColorWellBtn") as UIElement,
                     Path.Combine(outDir, "chrome-color-swatch-counter.png"));
 
+                // ---- SWEEP PROBE: one shared preset palette, tooltip delay, small counters ----
+                {
+                    var sweep = new System.Text.StringBuilder();
+
+                    // AREA-04/05: the stroke popover must be Survey's 16-cell PRESET_COLORS grid
+                    // (CompactColorPicker.jsx:13-18) with a 2px white ring on the applied colour.
+                    typeof(EditorWindow).GetField("_customColor", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .SetValue(editor, Color.FromRgb(0x00, 0xFF, 0x80));
+                    ((RadioButton)editor.FindName("CustomSwatch")!).RaiseEvent(
+                        new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    Pump(8);
+                    var strokeGrid = (System.Windows.Controls.Primitives.UniformGrid)editor.FindName("ColorPickerGrid")!;
+                    RenderElementToPng(((System.Windows.Controls.Primitives.Popup)editor.FindName("ColorPickerPopup")!).Child,
+                        Path.Combine(outDir, "sweep-color-presets.png"), dpi: 192);
+                    string Cells(System.Windows.Controls.Primitives.UniformGrid g) =>
+                        string.Join(", ", g.Children.OfType<Button>().Select(b =>
+                            $"{(b.Tag is Color c ? AnnotationStyle.ToRgbHex(c) : "?")}" +
+                            $"{(b.BorderThickness.Left > 1 ? "*" : "")}"));
+                    sweep.AppendLine($"[COLOR] strokeCells={strokeGrid.Children.Count} columns={strokeGrid.Columns}");
+                    sweep.AppendLine($"[COLOR] stroke: {Cells(strokeGrid)}");
+                    ((System.Windows.Controls.Primitives.Popup)editor.FindName("ColorPickerPopup")!).IsOpen = false;
+                    Pump(3);
+
+                    // AREA-06: the font-colour popover is the SAME palette, not a private one.
+                    InvokePrivate(editor, "BuildFontColorPalette");
+                    Pump(3);
+                    var fontGrid = (System.Windows.Controls.Primitives.UniformGrid)editor.FindName("FontColorGrid")!;
+                    ((System.Windows.Controls.Primitives.Popup)editor.FindName("FontColorPopup")!).IsOpen = true;
+                    Pump(6);
+                    RenderElementToPng(((System.Windows.Controls.Primitives.Popup)editor.FindName("FontColorPopup")!).Child,
+                        Path.Combine(outDir, "sweep-font-color-presets.png"), dpi: 192);
+                    sweep.AppendLine($"[COLOR] fontCells={fontGrid.Children.Count}");
+                    sweep.AppendLine($"[COLOR] font:   {Cells(fontGrid)}");
+                    sweep.AppendLine($"[COLOR] sameList={Cells(strokeGrid).Replace("*", "") == Cells(fontGrid).Replace("*", "")}");
+                    ((System.Windows.Controls.Primitives.Popup)editor.FindName("FontColorPopup")!).IsOpen = false;
+                    Pump(3);
+
+                    // AREA-01: with the app-wide 0ms metadata installed (App.InstallInstantTooltips),
+                    // no Style may reintroduce a delay on top of it — Survey shows every chrome
+                    // tooltip on mouseenter with no timer (Tooltip.jsx:22-31, 144-161).
+                    typeof(App).GetMethod("InstallInstantTooltips", BindingFlags.Static | BindingFlags.NonPublic)!
+                        .Invoke(null, null);
+                    var toolBtn = (System.Windows.Controls.Primitives.ToggleButton)editor.FindName("FreehandToolBtn")!;
+                    var styled = new System.Windows.Controls.Primitives.ToggleButton
+                    {
+                        Style = (Style)editor.FindResource("ToolButton"),
+                        ToolTip = "Top left",
+                    };
+                    styled.Measure(new Size(100, 100));
+                    sweep.AppendLine($"[TIP] toolRail={ToolTipService.GetInitialShowDelay(toolBtn)}ms " +
+                        $"ToolButtonStyle={ToolTipService.GetInitialShowDelay(styled)}ms");
+
+                    // AREA-07: the counter digit must stay proportional at the minimum radius.
+                    canvas.Children.Clear();
+                    InvokePrivate(editor, "Select", null);
+                    counterBtn2.IsChecked = true; Pump(3);
+                    var stepStart = (TextBox)editor.FindName("StepStartInput")!;
+                    stepStart.Text = "100";
+                    InvokePrivate(editor, "CommitStepStart");
+                    Pump(3);
+                    foreach (double size in new[] { 4.0, 8.0, 20.0 })
+                    {
+                        InvokePrivate(editor, "RememberSize", size);
+                        Pump(2);
+                        Click(0.15 + 0.25 * (size / 20.0), 0.40);
+                        sweep.AppendLine($"[COUNTER] size={size} radius={CounterGeometry.RadiusFor(size)} " +
+                            $"font(1)={CounterGeometry.FontSize(CounterGeometry.RadiusFor(size), "1"):F2} " +
+                            $"font(100)={CounterGeometry.FontSize(CounterGeometry.RadiusFor(size), "100"):F2}");
+                    }
+                    Pump(4);
+                    Shot("sweep-counter-sizes.png");
+                    RenderToPng(editor, Path.Combine(outDir, "sweep-counter-sizes-400pct.png"), dpi: 384);
+
+                    // AREA-10: Survey caps history at 100 entries (PDFViewer.jsx:23652). Trimmed
+                    // entries must be Discard()ed so blur/pixelate backup bitmaps are released
+                    // instead of being held for the life of the window.
+                    var undoStack = (System.Collections.ICollection)typeof(EditorWindow)
+                        .GetField("_undoStack", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
+                    var push = typeof(EditorWindow).GetMethod("Push", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    int depthBefore = undoStack.Count;
+                    int discarded = 0;
+                    for (int i = 0; i < 130; i++)
+                        push.Invoke(editor, new object[]
+                        {
+                            new EditorAction(() => { }, () => { }, () => discarded++),
+                            false,
+                        });
+                    sweep.AppendLine($"[HISTORY] before={depthBefore} pushed=130 depth={undoStack.Count} " +
+                        $"discarded={discarded}");
+                    File.WriteAllText(Path.Combine(outDir, "sweep.txt"), sweep.ToString());
+                }
+
                 editor.Close();
                 Pump(2);
             }
@@ -1810,12 +1902,13 @@ public class AnnotationEditorRenderHarness
         SaveBitmap(bitmap, path);
     }
 
-    private static void RenderElementToPng(UIElement element, string path)
+    private static void RenderElementToPng(UIElement element, string path, double dpi = 96)
     {
         element.UpdateLayout();
         var size = element.RenderSize;
         var bitmap = new RenderTargetBitmap(
-            (int)Math.Ceiling(size.Width), (int)Math.Ceiling(size.Height), 96, 96, PixelFormats.Pbgra32);
+            (int)Math.Ceiling(size.Width * dpi / 96), (int)Math.Ceiling(size.Height * dpi / 96),
+            dpi, dpi, PixelFormats.Pbgra32);
         bitmap.Render(element);
         SaveBitmap(bitmap, path);
     }

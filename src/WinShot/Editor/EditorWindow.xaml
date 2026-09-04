@@ -479,7 +479,8 @@
                                                             <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
                                                                     BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,36,36"
                                                                     Effect="{StaticResource ChromePopoverShadow}">
-                                                                <UniformGrid x:Name="FontColorGrid" Columns="8" Width="216"/>
+                                                                <!-- 8 columns x (22px cell + 3px margin per side) = 224 (CompactColorPicker.jsx:368). -->
+                                                                <UniformGrid x:Name="FontColorGrid" Columns="8" Width="224"/>
                                                             </Border>
                                                         </Popup>
                                                         </Grid>

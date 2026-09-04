@@ -783,67 +783,85 @@ public partial class EditorWindow : Window
         ColorPickerPopup.IsOpen = true;
     }
 
-    /// <summary>Builds the extended color grid once. A 5x8 palette of useful hues/shades.</summary>
+    /// <summary>
+    /// Builds Survey's shared preset grid once: PRESET_COLORS is 16 cells over 8 columns — a
+    /// transparent cell, a full hue wheel and three greys (CompactColorPicker.jsx:13-18, rendered
+    /// at :367-369). There is exactly one preset palette in the app, so the font-colour grid
+    /// (BuildFontColorPalette) fills itself from the same list through the same swatch factory.
+    /// </summary>
     private void BuildColorPickerPalette()
     {
         if (_colorPickerBuilt) return;
         _colorPickerBuilt = true;
 
-        AddPickerSwatch(Colors.Transparent, "Transparent");
-        string[] swatches =
+        foreach (Color c in AnnotationStyle.PickerPresets)
         {
-            // row 1 — greys (transparent already occupies the first cell)
-            "#3A3A3C", "#636366", "#8E8E93", "#AEAEB2", "#C7C7CC", "#E5E5EA", "#FFFFFF",
-            "#FF3B30",
-            // row 2 — reds / oranges
-            "#FF6B5E", "#FF9500", "#FFB340", "#FFCC00", "#FFE066", "#D70015", "#A2231D",
-            // row 3 — greens / teals
-            "#34C759", "#30D158", "#00C7BE", "#63E6BE", "#5AC8FA", "#64D2FF", "#248A3D", "#0E6E4E",
-            // row 4 — blues / purples
-            "#007AFF", "#0A84FF", "#5856D6", "#5E5CE6", "#AF52DE", "#BF5AF2", "#0040DD", "#3634A3",
-            // row 5 — pinks / browns
-            "#FF2D55", "#FF375F", "#FF6482", "#A2845E", "#AC8E68", "#8B5A2B", "#D2691E", "#7D2E2E",
-        };
-
-        foreach (string hex in swatches)
-        {
-            if (!TryParseColor(hex, out var c)) continue;
-            AddPickerSwatch(c, hex);
+            var btn = MakePickerSwatch(c, "Color");
+            btn.Click += OnColorPickerGridPick;
+            ColorPickerGrid.Children.Add(btn);
         }
+        // The ring is set by SyncColorPickerInputs, which the caller runs straight after this.
     }
 
-    private void AddPickerSwatch(Color c, string name)
+    /// <summary>
+    /// One preset cell. The transparent cell is Survey's white ground under a #cfcfcf checker of
+    /// 4px squares (CompactColorPicker.jsx:386-396) — not a dark checker on nothing.
+    /// </summary>
+    private Button MakePickerSwatch(Color c, string role)
     {
-        Brush fill = c.A == 0
-            ? new DrawingBrush
+        string hex = AnnotationStyle.ToRgbHex(c);
+        Brush fill;
+        if (c.A == 0)
+        {
+            var checker = new DrawingGroup();
+            checker.Children.Add(new GeometryDrawing(
+                Brushes.White, null, new RectangleGeometry(new Rect(0, 0, 8, 8))));
+            var grey = new SolidColorBrush(Color.FromRgb(0xCF, 0xCF, 0xCF));
+            checker.Children.Add(new GeometryDrawing(
+                grey, null, new RectangleGeometry(new Rect(0, 0, 4, 4))));
+            checker.Children.Add(new GeometryDrawing(
+                grey, null, new RectangleGeometry(new Rect(4, 4, 4, 4))));
+            fill = new DrawingBrush
             {
                 TileMode = TileMode.Tile,
                 Viewport = new Rect(0, 0, 8, 8),
                 ViewportUnits = BrushMappingMode.Absolute,
-                Drawing = new GeometryDrawing(
-                    new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
-                    null,
-                    new RectangleGeometry(new Rect(0, 0, 4, 4))),
-            }
-            : new SolidColorBrush(c);
+                Drawing = checker,
+            };
+        }
+        else
+        {
+            fill = new SolidColorBrush(c);
+        }
+
         var btn = new Button
         {
-            Width = 22,
-            Height = 22,
-            Margin = new Thickness(2),
-            Cursor = Cursors.Hand,
-            ToolTip = name,
+            Style = (Style)FindResource("PickerSwatchButton"),
+            ToolTip = c.A == 0 ? "Transparent" : hex,
             Tag = c,
             Background = fill,
-            BorderBrush = (Brush)FindResource("BorderStrongBrush"),
-            BorderThickness = new Thickness(1),
         };
-        AutomationProperties.SetName(btn, c.A == 0 ? "Transparent" : $"Color {name}");
+        AutomationProperties.SetName(btn, c.A == 0 ? "Transparent" : $"{role} {hex}");
         AutomationProperties.SetHelpText(btn, c.A == 0
             ? "Set the current color well to fully transparent."
-            : $"Use local annotation color {name}.");
-        btn.Click += OnColorPickerGridPick;
-        ColorPickerGrid.Children.Add(btn);
+            : $"Use {role.ToLowerInvariant()} {hex}.");
+        return btn;
+    }
+
+    /// <summary>
+    /// Rings the applied colour: `border: isSelected ? '2px solid white' : '1px solid #3a4252'`
+    /// (CompactColorPicker.jsx:411). Without it the popover never shows which swatch is live.
+    /// </summary>
+    private static void SyncPickerSelection(Panel? grid, Color? current)
+    {
+        if (grid is null) return;
+        foreach (Button b in grid.Children.OfType<Button>())
+        {
+            bool selected = b.Tag is Color c && current is Color cur &&
+                            (c.A == 0 ? cur.A == 0 : cur.A != 0 && AnnotationStyle.ToRgbHex(c) == AnnotationStyle.ToRgbHex(cur));
+            b.BorderThickness = new Thickness(selected ? 2 : 1);
+            b.BorderBrush = selected ? Brushes.White : new SolidColorBrush(Color.FromRgb(0x3A, 0x42, 0x52));
+        }
     }
 
     private void OnColorPickerGridPick(object sender, RoutedEventArgs e)
@@ -895,6 +913,9 @@ public partial class EditorWindow : Window
     /// <summary>Refreshes the popup's preview + hex box to a color without re-triggering the live preview handler.</summary>
     private void SyncColorPickerInputs(Color c)
     {
+        // Every path that moves the picker's colour (grid, hex, spectrum, hue, opacity) lands
+        // here, so this is the one place the selected-swatch ring has to be re-derived.
+        SyncPickerSelection(ColorPickerGrid, c);
         _suppressHexEvents = true;
         ColorPickerPreview.Fill = c.A == 0 ? Brushes.Transparent : new SolidColorBrush(c);
         ColorPickerHex.Text = $"#{c.R:X2}{c.G:X2}{c.B:X2}";

@@ -194,7 +194,10 @@
         <Setter Property="FontSize" Value="{StaticResource ToolGlyphSize}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
-        <Setter Property="ToolTipService.InitialShowDelay" Value="400"/>
+        <!-- No ToolTipService.InitialShowDelay setter here: tooltip delay is owned app-wide by
+             App.InstallInstantTooltips() (App.xaml.cs:57-70), which zeroes it to match Survey's
+             makeTooltipBinding — it shows on mouseenter with no timer at all (Tooltip.jsx:22-31,
+             144-161). A Style setter would outrank that metadata default and reintroduce a lag. -->
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
@@ -670,6 +673,34 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <ContentPresenter/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- One preset cell of Survey's shared CompactColorPicker grid (CompactColorPicker.jsx:405-417):
+         a square, 4px-rounded swatch with a 1px #3a4252 hairline, in a grid whose gap is 6px
+         (:368) — a 3px margin per side. The applied colour gets a 2px white ring, which
+         SyncPickerSelection sets as a local value. Non-focusable: clicking a font-colour swatch
+         must not blur (and therefore commit) the open text editor. -->
+    <Style x:Key="PickerSwatchButton" TargetType="Button">
+        <Setter Property="Width" Value="22"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Margin" Value="3"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="BorderBrush" Value="#FF3A4252"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            SnapsToDevicePixels="True"/>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

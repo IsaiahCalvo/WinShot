@@ -10,6 +10,8 @@ public class EditorShortcutTests
     [InlineData(Key.C, ModifierKeys.Control, "Copy")]
     [InlineData(Key.S, ModifierKeys.Control | ModifierKeys.Shift, "SaveAs")]
     [InlineData(Key.Z, ModifierKeys.Control, "Undo")]
+    // Survey mandates all four undo/redo bindings (undoRedoHotkeys.js:4-6, 33-39).
+    [InlineData(Key.Z, ModifierKeys.Control | ModifierKeys.Shift, "Redo")]
     [InlineData(Key.Y, ModifierKeys.Control, "Redo")]
     [InlineData(Key.D0, ModifierKeys.Control, "FitAndCenter")]
     // Survey's zoom shortcuts (PDFViewer.jsx:23456-23484).

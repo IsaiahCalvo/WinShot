@@ -53,8 +53,15 @@ public partial class EditorWindow : Window
     private SD.Bitmap _source;
     private readonly List<SD.Bitmap> _owned = new();
 
-    private readonly Stack<EditorAction> _undoStack = new();
+    /// <summary>
+    /// Undo history, oldest first — a list rather than a Stack because Survey caps its history at
+    /// 100 entries (<c>[...prev, action].slice(-100)</c>, PDFViewer.jsx:23652) and the oldest entry
+    /// has to be droppable from the front. The redo stack needs no cap: it only ever receives what
+    /// undo pops, and DiscardRedoStack drains it on every new edit.
+    /// </summary>
+    private readonly List<EditorAction> _undoStack = new();
     private readonly Stack<EditorAction> _redoStack = new();
+    private const int UndoDepthLimit = 100;
 
     /// <summary>Per-application random source used to seed irreversible pixelation jitter.</summary>
     private static readonly Random ToolRandom = new();
@@ -1852,42 +1859,28 @@ public partial class EditorWindow : Window
         FontColorPopup.IsOpen = !FontColorPopup.IsOpen;
     }
 
+    /// <summary>
+    /// Survey has ONE preset palette: the font-colour swatch renders the same shared
+    /// CompactColorPicker as the border swatch (AppShell.jsx:1798-1825), so picking a text colour
+    /// must offer exactly the colours picking a stroke colour does.
+    /// </summary>
     private void BuildFontColorPalette()
     {
         if (FontColorGrid is null || FontColorGrid.Children.Count > 0) return;
-        foreach (string hex in FontColorPresets)
+        foreach (Color c in AnnotationStyle.PickerPresets)
         {
-            if (!TryParseColor(hex, out var c)) continue;
-            var btn = new Button
-            {
-                Width = 22,
-                Height = 22,
-                Margin = new Thickness(2),
-                Cursor = Cursors.Hand,
-                Focusable = false,
-                ToolTip = hex,
-                Tag = c,
-                Background = new SolidColorBrush(c),
-                BorderBrush = (Brush)FindResource("BorderStrongBrush"),
-                BorderThickness = new Thickness(1),
-            };
-            AutomationProperties.SetName(btn, $"Font color {hex}");
+            var btn = MakePickerSwatch(c, "Font color");
             btn.Click += (_, _) => SetFontColor(c);
             FontColorGrid.Children.Add(btn);
         }
+        SyncPickerSelection(FontColorGrid, _textFontColor);
     }
-
-    /// <summary>Survey's CompactColorPicker presets, trimmed to the two rows the swatch shows.</summary>
-    private static readonly string[] FontColorPresets =
-    {
-        "#1E293B", "#000000", "#FFFFFF", "#8D96A6", "#FF3B30", "#FF9500", "#FFCC00", "#34C759",
-        "#00C7BE", "#0A84FF", "#5856D6", "#AF52DE", "#FF2D55", "#A2845E", "#D8A84E", "#248A3D",
-    };
 
     private void SetFontColor(Color color)
     {
         _textFontColor = color;
         if (FontColorPopup is not null) FontColorPopup.IsOpen = false;
+        SyncPickerSelection(FontColorGrid, color);
         SyncFontColorSwatch();
         if (IsLoaded) RestyleSelectedTextFormat();
         ReturnFocusToEditor();

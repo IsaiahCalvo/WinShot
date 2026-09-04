@@ -176,12 +176,34 @@ public partial class EditorWindow : Window
     private void Push(EditorAction action, bool apply = true)
     {
         if (apply) action.Redo();
-        _undoStack.Push(action);
+        PushUndo(action);
         DiscardRedoStack();
         // Survey re-derives counter numbers after EVERY mutation, not just creation
         // (PDFViewer.jsx:24220/24240, annotationEraseCommitPlan.js:173).
         RenumberCounters();
         UpdateUndoRedoButtons();
+    }
+
+    /// <summary>
+    /// Appends to the undo history, dropping the oldest entries past Survey's 100-deep cap
+    /// (PDFViewer.jsx:23652). Discard() lets a trimmed blur/pixelate step release its backup
+    /// bitmap, which would otherwise be held for the life of the window.
+    /// </summary>
+    private void PushUndo(EditorAction action)
+    {
+        _undoStack.Add(action);
+        while (_undoStack.Count > UndoDepthLimit)
+        {
+            _undoStack[0].Discard();
+            _undoStack.RemoveAt(0);
+        }
+    }
+
+    private EditorAction PopUndo()
+    {
+        var action = _undoStack[^1];
+        _undoStack.RemoveAt(_undoStack.Count - 1);
+        return action;
     }
 
     /// <summary>
@@ -192,7 +214,7 @@ public partial class EditorWindow : Window
     private void DiscardLastAction()
     {
         if (_undoStack.Count == 0) return;
-        _undoStack.Pop().Discard();
+        PopUndo().Discard();
         UpdateUndoRedoButtons();
     }
 
@@ -232,7 +254,7 @@ public partial class EditorWindow : Window
         ClearCropPreview();
         Select(null); // the undone action may remove or reshape the selected element
         if (_undoStack.Count == 0) return;
-        var action = _undoStack.Pop();
+        var action = PopUndo();
         await action.UndoAsync();
         RenumberCounters();
         _redoStack.Push(action);
@@ -248,7 +270,7 @@ public partial class EditorWindow : Window
         var action = _redoStack.Pop();
         await action.RedoAsync();
         RenumberCounters();
-        _undoStack.Push(action);
+        PushUndo(action);
         UpdateUndoRedoButtons();
     }
 

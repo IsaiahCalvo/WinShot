@@ -33,4 +33,16 @@ public class CounterGeometryTests
     {
         Assert.True(CounterGeometry.FontSize(14, "1") > CounterGeometry.FontSize(14, "999"));
     }
+
+    /// <summary>
+    /// Survey removed the absolute font floor (counterGeometry.js:13-14) because it outgrew
+    /// counters below radius 6 — the digit must stay proportional at the minimum radius 4, and
+    /// the width limit must keep winning for multi-digit captions.
+    /// </summary>
+    [Fact]
+    public void FontSize_HasNoAbsoluteFloor()
+    {
+        Assert.Equal(4.2, CounterGeometry.FontSize(4, "1"), 3);
+        Assert.Equal(3.690, CounterGeometry.FontSize(5, "100"), 3);
+    }
 }

@@ -22,7 +22,11 @@ internal static class EditorShortcut
     public static EditorShortcutCommand Resolve(Key key, ModifierKeys modifiers) =>
         (key, modifiers) switch
         {
+            // Survey's owner decision (undoRedoHotkeys.js:4-6): UNDO = Ctrl+Z; REDO = Ctrl+Shift+Z
+            // AND Ctrl+Y — "ALL FOUR must work". isUndoKeyEvent excludes shiftKey, so Ctrl+Shift+Z
+            // is unambiguously redo.
             (Key.Z, ModifierKeys.Control) => EditorShortcutCommand.Undo,
+            (Key.Z, ModifierKeys.Control | ModifierKeys.Shift) => EditorShortcutCommand.Redo,
             (Key.Y, ModifierKeys.Control) => EditorShortcutCommand.Redo,
             // Survey's zoom shortcuts (PDFViewer.jsx:23456-23484): Ctrl+0/1/2 pick the fit
             // modes, Ctrl+= / Ctrl++ / Ctrl+- step by TOOLBAR_ZOOM_STEP_FACTOR.

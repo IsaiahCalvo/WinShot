@@ -39,11 +39,16 @@ internal static class CounterGeometry
         return new PathGeometry { Figures = { fig }, FillRule = FillRule.Nonzero };
     }
 
+    /// <summary>
+    /// Survey's getCounterLabelLayout (counterGeometry.js:10-33): <c>Math.min(baseFontSize,
+    /// widthLimitedFontSize)</c> with NO lower bound — the comment at :13-14 records deleting the
+    /// old absolute floor, which "outgrew counters below radius 6". Do not reintroduce one.
+    /// </summary>
     public static double FontSize(double radius, string caption)
     {
         int glyphs = Math.Max(1, caption.Length);
         double baseSize = radius * 1.05;
         double widthLimited = (radius * 1.55) / (glyphs * 0.7);
-        return Math.Max(6, Math.Min(baseSize, widthLimited));
+        return Math.Min(baseSize, widthLimited);
     }
 }
