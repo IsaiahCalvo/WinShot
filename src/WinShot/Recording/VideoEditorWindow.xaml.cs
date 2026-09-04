@@ -43,6 +43,12 @@ public partial class VideoEditorWindow : Window
     private double _trimEndSec;
     private bool _filmstripBuilt; // thumbnails are generated at most once
 
+    // Export resolution choices resolved against this project's real dimensions, so the
+    // picker can label the pixels each one produces instead of a bare percentage.
+    private IReadOnlyList<VideoResolutionPreset> _resolutions =
+        VideoResolutionPresets.For(1920, 1080);
+    private long _sourceBytes;
+
     // Drag handles are 12px wide; the accent bar sits on their inner edge so the
     // selection spans from the start-thumb's right edge to the end-thumb's left.
     private const double ThumbWidth = 12;
@@ -110,6 +116,7 @@ public partial class VideoEditorWindow : Window
         if (Media.NaturalDuration.HasTimeSpan)
             _durationSec = Media.NaturalDuration.TimeSpan.TotalSeconds;
         StatusText.Text = "";
+        PopulateResolutions();
         if (!_trimInitialized)
         {
             _trimInitialized = true;
@@ -121,6 +128,35 @@ public partial class VideoEditorWindow : Window
         UpdateOutputSummary();
         UpdateTimeLabel();
     }
+
+    /// <summary>
+    /// Rebuilds the resolution picker against the source's real dimensions. Runs once the
+    /// media reports them, and keeps the user's choice when the list has not changed.
+    /// </summary>
+    private void PopulateResolutions()
+    {
+        if (ResolutionCombo is null || Media is null)
+            return;
+
+        var resolved = VideoResolutionPresets.For(
+            (uint)Math.Max(0, Media.NaturalVideoWidth),
+            (uint)Math.Max(0, Media.NaturalVideoHeight));
+        if (resolved.Count == _resolutions.Count &&
+            resolved.Select(p => p.Label).SequenceEqual(_resolutions.Select(p => p.Label)))
+        {
+            return;
+        }
+
+        int selected = Math.Max(0, ResolutionCombo.SelectedIndex);
+        _resolutions = resolved;
+        ResolutionCombo.Items.Clear();
+        foreach (VideoResolutionPreset preset in resolved)
+            ResolutionCombo.Items.Add(new ComboBoxItem { Content = preset.Label });
+        ResolutionCombo.SelectedIndex = Math.Min(selected, resolved.Count - 1);
+    }
+
+    private VideoResolutionPreset SelectedResolution =>
+        _resolutions[Math.Clamp(ResolutionCombo?.SelectedIndex ?? 0, 0, _resolutions.Count - 1)];
 
     private void OnMediaEnded(object sender, RoutedEventArgs e)
     {
@@ -400,6 +436,7 @@ public partial class VideoEditorWindow : Window
         if (TrimEndLabel is not null) TrimEndLabel.Text = $"Out {FormatTime(_trimEndSec)}";
         if (TrimRangeLabel is not null) TrimRangeLabel.Text = FormatTime(Math.Max(0, _trimEndSec - _trimStartSec));
 
+        UpdateOutputSummary(); // the estimate is a function of the trimmed duration
         UpdatePlayhead();
     }
 
@@ -533,25 +570,65 @@ public partial class VideoEditorWindow : Window
             FrameRateCombo is null || MuteCheck is null || MonoCheck is null)
             return;
 
-        string dimensions = "Source dimensions";
-        if (Media is not null && Media.NaturalVideoWidth > 0 && Media.NaturalVideoHeight > 0)
-        {
-            var video = VideoExportVideoSettings.FromControls(
-                (uint)Media.NaturalVideoWidth,
-                (uint)Media.NaturalVideoHeight,
-                sourceFrameRate: 30,
-                ResolutionCombo.SelectedIndex,
-                QualityCombo.SelectedIndex,
-                FrameRateCombo.SelectedIndex);
-            dimensions = $"{video.Width} × {video.Height}";
-        }
+        VideoResolutionPreset preset = SelectedResolution;
+        var video = VideoExportVideoSettings.FromSize(
+            preset.Width,
+            preset.Height,
+            sourceFrameRate: 30,
+            QualityCombo.SelectedIndex,
+            FrameRateCombo.SelectedIndex);
 
         string quality = SelectedComboText(QualityCombo, "High");
         string frameRate = SelectedComboText(FrameRateCombo, "Source") + " FPS";
-        string audio = MuteCheck.IsChecked == true
+        bool muted = MuteCheck.IsChecked == true;
+        string audio = muted
             ? "Mute audio"
             : MonoCheck.IsChecked == true ? "Mono audio" : "Original audio";
-        OutputSummaryText.Text = $"{dimensions}  •  {quality}  •  {frameRate}  •  {audio}";
+
+        // Recomputed on every quality, size, frame-rate and trim change, because the whole
+        // point of an estimate is that it moves when the thing it estimates moves.
+        double seconds = _durationSec > 0 ? Math.Max(0, _trimEndSec - _trimStartSec) : 0;
+        long estimate = VideoExportEstimate.Bytes(
+            video.Bitrate,
+            muted ? 0 : VideoExportEstimate.AudioBitrate,
+            seconds);
+        string size = estimate > 0 ? $"  •  ~{VideoExportEstimate.FormatBytes(estimate)}" : "";
+        OutputSummaryText.Text =
+            $"{video.Width} × {video.Height}  •  {quality}  •  {frameRate}  •  {audio}{size}";
+    }
+
+    /// <summary>The size it really came out at, and how that compares to the source — the
+    /// estimate above is a promise, and this is the receipt.</summary>
+    private string DescribeSavedSize(string savedPath)
+    {
+        try
+        {
+            long saved = new FileInfo(savedPath).Length;
+            if (saved <= 0)
+                return "";
+            string? ratio = VideoExportEstimate.ComparedToSource(saved, SourceBytes());
+            return ratio is null
+                ? $" — {VideoExportEstimate.FormatBytes(saved)}"
+                : $" — {VideoExportEstimate.FormatBytes(saved)}, {ratio}";
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not read the exported video size", ex);
+            return "";
+        }
+    }
+
+    private long SourceBytes()
+    {
+        if (_sourceBytes != 0)
+            return _sourceBytes;
+        try { _sourceBytes = new FileInfo(_mp4Path).Length; }
+        catch (Exception ex)
+        {
+            Log.Error("Could not read the source video size", ex);
+            _sourceBytes = -1;
+        }
+        return _sourceBytes;
     }
 
     private static string SelectedComboText(ComboBox combo, string fallback) =>
@@ -622,11 +699,11 @@ public partial class VideoEditorWindow : Window
             double sourceFps = props.FrameRate is { Denominator: > 0 } rate
                 ? (double)rate.Numerator / rate.Denominator
                 : 30;
-            var videoSettings = VideoExportVideoSettings.FromControls(
-                srcW,
-                srcH,
+            VideoResolutionPreset preset = SelectedResolution;
+            var videoSettings = VideoExportVideoSettings.FromSize(
+                preset.Width,
+                preset.Height,
                 sourceFps,
-                ResolutionCombo.SelectedIndex,
                 QualityCombo.SelectedIndex,
                 FrameRateCombo.SelectedIndex);
 
@@ -678,7 +755,7 @@ public partial class VideoEditorWindow : Window
             if (_closed)
                 return;
 
-            StatusText.Text = $"Saved {outFile.Name}";
+            StatusText.Text = $"Saved {outFile.Name}{DescribeSavedSize(savedPath)}";
             Log.Info($"Edited video exported to {savedPath}");
             RecordingCompletionOverlay.Show(
                 savedPath,
