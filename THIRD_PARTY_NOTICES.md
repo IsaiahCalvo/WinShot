@@ -99,8 +99,13 @@ source header should never be a dead end for whoever audits this next.
 SSE2/NEON intrinsics — four bytes at a time, where the memory access dominates
 anyway. The structure, the clamp to `[1, dim-2]`, the compare-against-the-start-pixel
 rule, the last-similar return value and the byte-masked summed-L1 score are all
-theirs. `EdgeSnap.cs` carries the attribution header MIT requires in the source
-file itself; the permission notice it points at is this one:
+theirs. One line deviates on purpose and says so in place: PowerToys masks the
+summed distance to a byte, so a distance past 255 wraps and two very different
+colours read as identical; `EdgeSnap` clamps instead. Below 256 the two are
+identical, so the tuned default of 30 is unaffected.
+
+`EdgeSnap.cs` carries the attribution header MIT requires in the source file
+itself; the permission notice it points at is this one:
 
 > Copyright (c) Microsoft Corporation.
 >

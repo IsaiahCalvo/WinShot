@@ -34,18 +34,57 @@ public sealed partial class FastRegionSelectorDialog
     private IDisposable? _hintTween;
     private double _hintAmount;
 
+    /// <summary>The one live right-click menu. Kept in a field rather than disposed from its
+    /// own Closed handler: WinForms' Modal menu filter still touches a closing drop-down on
+    /// the next few messages, and disposing inside that window takes the process down.</summary>
+    private WF.ContextMenuStrip? _measureMenu;
+
     /// <summary>How close the cursor must come to a guide to grab it.</summary>
     private const int GuideGrabPx = 4;
 
     private const int HintStripBottomGap = 28;
+
+    /// <summary>Perpendicular gap between the measured line and its pill; mirrors the same
+    /// constant in <see cref="SelectorChrome.DrawDimension"/>.</summary>
+    private const int DimensionPillGap = 6;
 
     internal MeasureSession MeasureState => _measure;
 
     /// <summary>The live measured run, in screen px — for tests, which cannot see a screen.</summary>
     internal SD.Rectangle? MeasuredScreenRect => _measured;
 
+    internal double HintAmount => _hintAmount;
+
+    /// <summary>
+    /// Render seam. Puts the selector into Measure mode over a supplied snapshot without
+    /// opening a window, so the measure chrome can be painted into a bitmap and pixel-scanned
+    /// on the hidden test desktop — the plan's rule is that render assertions are scanned, not
+    /// eyeballed. Nothing in the app calls this; the real path is <see cref="ShowAsync"/>.
+    /// </summary>
+    internal void EnterMeasureForRender(SD.Bitmap frozen, SD.Rectangle virtualScreen, SD.Point cursor)
+    {
+        _mode = SelectorMode.Measure;
+        _vs = virtualScreen;
+        _monitorBounds = virtualScreen;
+        Bounds = virtualScreen;
+        _frozen = frozen;
+        _magnifierOn = false;
+        ResetMeasure();
+        _hintAmount = 1;
+        MoveMeasureCursorForRender(cursor);
+    }
+
+    /// <summary>Render seam: moves the measuring cursor and re-reads the pixels under it.</summary>
+    internal void MoveMeasureCursorForRender(SD.Point cursor)
+    {
+        _currentScreen = cursor;
+        _lastFollowScreen = cursor;
+        HandleMeasureMouseMove();
+    }
+
     private void ResetMeasure()
     {
+        CloseMeasureMenu();
         _measure.Reset();
         _measured = null;
         _contrast = null;
@@ -393,8 +432,26 @@ public sealed partial class FastRegionSelectorDialog
         }
     }
 
+    /// <summary>Closes the menu without disposing it — see the field's note.</summary>
+    private void CloseMeasureMenu()
+    {
+        if (_measureMenu is null || _measureMenu.IsDisposed)
+            return;
+        try { _measureMenu.Close(); }
+        catch (Exception ex) { Log.Error("Closing the measure menu failed (non-fatal)", ex); }
+    }
+
+    /// <summary>Frees the previous menu, which by now is several message loops closed.</summary>
+    internal void DisposeMeasureMenu()
+    {
+        CloseMeasureMenu();
+        _measureMenu?.Dispose();
+        _measureMenu = null;
+    }
+
     private void ShowMeasureMenu(SD.Point screen)
     {
+        DisposeMeasureMenu();
         var menu = new WF.ContextMenuStrip
         {
             Renderer = new DarkDropDown.DarkMenuRenderer(),
@@ -426,13 +483,13 @@ public sealed partial class FastRegionSelectorDialog
         Row("Capture this object", "Enter", () => { if (_measured is SD.Rectangle r) CaptureMeasured(r); }, measuring);
         Row("Exit measure mode", "Esc", () => Complete(WF.DialogResult.Cancel));
 
-        menu.Closed += (_, _) => menu.Dispose();
+        _measureMenu = menu;
         menu.Show(screen);
     }
 
     // ----------------------------------------------------------- motion (chrome only)
 
-    private void StartHintEntrance()
+    internal void StartHintEntrance()
     {
         StopHintEntrance();
         _hintAmount = 0;
@@ -447,7 +504,7 @@ public sealed partial class FastRegionSelectorDialog
             () => _hintTween = null);
     }
 
-    private void StopHintEntrance()
+    internal void StopHintEntrance()
     {
         _hintTween?.Dispose();
         _hintTween = null;
@@ -494,7 +551,11 @@ public sealed partial class FastRegionSelectorDialog
         int row = Math.Clamp(_currentScreen.Y, run.Top, run.Bottom - 1);
         int centre = (run.Left + run.Right - 1) / 2;
         int left = Math.Clamp(centre - (pill.Width / 2), monitor.Left, Math.Max(monitor.Left, monitor.Right - pill.Width));
-        int top = Math.Clamp(row - pill.Height - 6, monitor.Top, Math.Max(monitor.Top, monitor.Bottom - pill.Height));
+        // Above the line, flipped below when there is no room — clamping instead would park
+        // the pill on top of the very thing being measured.
+        int above = row - pill.Height - DimensionPillGap;
+        int top = above >= monitor.Top ? above : row + DimensionPillGap;
+        top = Math.Clamp(top, monitor.Top, Math.Max(monitor.Top, monitor.Bottom - pill.Height));
         return new SD.Rectangle(left, top, pill.Width, pill.Height);
     }
 
@@ -506,8 +567,12 @@ public sealed partial class FastRegionSelectorDialog
         SD.Color crimson = ThemePalette.Measure;
         SD.Color guideBlue = ThemePalette.Accent;
 
-        // Guides first: they are the ground the distances are read against, and a crimson
-        // dimension must never end up under a blue rule.
+        // Z-order is ground, then data, then chrome. Brightening repaints the frozen slice
+        // inside the run, so anything drawn before it comes back cut in half wherever it
+        // crossed the measured object — guides and reticle both.
+        if (cursorOnThisSurface && _measured is SD.Rectangle bright)
+            BrightenRegion(g, monitorBounds, ToLocal(bright, monitorBounds));
+
         foreach (int x in _measure.GuidesX)
             SelectorChrome.DrawGuide(g, clientSize, vertical: true, x - monitorBounds.X, guideBlue);
         foreach (int y in _measure.GuidesY)
@@ -520,11 +585,8 @@ public sealed partial class FastRegionSelectorDialog
         {
             SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds), crimson);
 
-            if (_measured is SD.Rectangle run)
-            {
-                BrightenRegion(g, monitorBounds, ToLocal(run, monitorBounds));
-                PaintLiveMeasurement(g, monitorBounds, run, crimson);
-            }
+            if (_measured is SD.Rectangle measured)
+                PaintLiveMeasurement(g, monitorBounds, measured, crimson);
 
             if (_magnifierOn)
             {
@@ -601,7 +663,11 @@ public sealed partial class FastRegionSelectorDialog
 
         string label = ColorMath.ContrastLabel(foreground, background, _measure.UseApca);
         SD.Size pill = SelectorChrome.MeasureLabel(label);
-        SD.Point at = ToLocal(new SD.Point(run.Left, run.Top - pill.Height - 8), monitorBounds);
+        // Above the region, tucked just inside its top when there is no room above — the
+        // clamp alone would pin it to the screen corner, a long way from what it describes.
+        int above = run.Top - pill.Height - 8;
+        int top = above >= monitorBounds.Top ? above : run.Top + 8;
+        SD.Point at = ToLocal(new SD.Point(run.Left, top), monitorBounds);
         SelectorChrome.DrawLabel(g, monitorBounds.Size, label, at.X, at.Y, fullyRounded: true);
     }
 

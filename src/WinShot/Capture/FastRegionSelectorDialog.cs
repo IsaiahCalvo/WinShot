@@ -457,6 +457,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     {
         if (disposing)
         {
+            DisposeMeasureMenu();
             DisposePanes();
             DisposeFrozen();
             _followTimer.Dispose();
@@ -1409,7 +1410,9 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     {
         DialogResult = result;
         StopFollowMotion();
-        StopHintEntrance();
+        // The session is over: drop the live run and the held canvas with it, so a pooled
+        // re-show can never paint a stale measurement over a fresh screen.
+        ResetMeasure();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();

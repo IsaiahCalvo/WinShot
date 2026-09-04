@@ -142,9 +142,15 @@ public sealed class EdgeSnap : IDisposable
 
     /// <summary>
     /// PowerToys' two metrics over the four bytes of a pixel. Per-channel is strict: every
-    /// channel must be within tolerance. The default is summed L1, masked to a byte exactly as
-    /// the SIMD original masks <c>_mm_sad_epu8</c>'s result with <c>uint8_t</c>'s max — a sum
-    /// past 255 wraps there, and the tuned default of 30 was tuned against that behaviour.
+    /// channel must be within tolerance. The default is summed L1.
+    ///
+    /// ONE DELIBERATE DEVIATION FROM THE PORT. The original masks <c>_mm_sad_epu8</c>'s
+    /// result with <c>uint8_t</c>'s max, so a summed distance past 255 wraps: a blue button
+    /// on a white card scores 224 + 192 + 112 = 528, wraps to 16, and reads as the SAME
+    /// COLOUR at any sane tolerance — the ruler walks straight through the edge it exists to
+    /// find. This clamps instead of wrapping. Below 256 the two are identical, which is the
+    /// entire range the tuned default of 30 lives in, so the tuning is untouched; above it,
+    /// pairs that were accidentally "close" are now correctly far apart.
     /// </summary>
     internal static bool PixelsClose(uint pixel1, uint pixel2, byte tolerance, bool perChannel)
     {
@@ -156,7 +162,7 @@ public sealed class EdgeSnap : IDisposable
         if (perChannel)
             return d0 <= tolerance && d1 <= tolerance && d2 <= tolerance && d3 <= tolerance;
 
-        return ((d0 + d1 + d2 + d3) & 0xFF) <= tolerance;
+        return Math.Min(d0 + d1 + d2 + d3, 255) <= tolerance;
     }
 
     public void Dispose()

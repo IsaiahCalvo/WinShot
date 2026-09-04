@@ -140,6 +140,35 @@ public class EdgeSnapTests
     }
 
     [Fact]
+    public void AHighContrastPairIsFarApartRatherThanWrappingIntoLookingIdentical()
+    {
+        // Blue on white: 224 + 192 + 112 = 528. PowerToys masks that sum to a byte, which
+        // wraps it to 16 and calls the two colours the same thing. Clamping is the one
+        // deliberate deviation from the port, and this is the case it exists for.
+        uint blue = 0xFF_10_30_80;
+        uint white = 0xFF_F0_F0_F0;
+
+        Assert.False(EdgeSnap.PixelsClose(blue, white, 30, perChannel: false));
+        Assert.False(EdgeSnap.PixelsClose(blue, white, 254, perChannel: false));
+        Assert.True(EdgeSnap.PixelsClose(blue, white, 255, perChannel: false));
+    }
+
+    [Fact]
+    public void ASolidCardOnAContrastingDesktopMeasuresAsTheCard()
+    {
+        using var bmp = new Bitmap(400, 300, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.FromArgb(0x10, 0x30, 0x80));
+            using var card = new SolidBrush(Color.FromArgb(0xF0, 0xF0, 0xF0));
+            g.FillRectangle(card, 50, 40, 100, 60);
+        }
+        using var snap = EdgeSnap.Lock(bmp);
+
+        Assert.Equal(new Rectangle(50, 40, 100, 60), snap.DetectEdges(new Point(80, 60), EdgeSnap.DefaultTolerance));
+    }
+
+    [Fact]
     public void ReadingAPixelOutsideTheBitmapIsNotACrash()
     {
         using var bmp = Scene();
