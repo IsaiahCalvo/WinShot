@@ -98,7 +98,8 @@ public static class ScrollingCaptureService
         ScrollDirection? presetDirection, Func<bool> autoScroll, Action<string> status,
         Action<ScrollHint> hint, CancellationToken ct, Action<SD.Bitmap>? preview = null,
         Func<SD.Rectangle, SD.Bitmap>? frameSource = null, bool paneScoped = false,
-        Func<SD.Point>? cursorSource = null, Action<int, bool>? scrollInput = null)
+        Func<SD.Point>? cursorSource = null, Action<int, bool>? scrollInput = null,
+        bool reverse = false)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -112,7 +113,7 @@ public static class ScrollingCaptureService
         {
             try
             {
-                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource, paneScoped, cursorSource, scrollInput);
+                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource, paneScoped, cursorSource, scrollInput, reverse);
                 return loop.Run();
             }
             catch (Exception ex)
@@ -236,11 +237,24 @@ public static class ScrollingCaptureService
         private readonly Func<SD.Point> _cursor;
         /// <summary>Test seam: receives (delta, horizontal) instead of real wheel input.</summary>
         private readonly Action<int, bool>? _scrollInput;
+        /// <summary>
+        /// Upward capture: the user scrolls up from where they are and the newest content
+        /// arrives above what is already captured. Rather than teaching the stitch buffer,
+        /// the canvas profile, the dead reckoning, the retract and the sticky-band re-attach
+        /// to run backwards, every frame is flipped on the way in and the finished canvas is
+        /// flipped once on the way out. In flipped space an upward scroll IS a downward one,
+        /// so the whole engine -- matcher, seam healer, footer detector -- runs unmodified
+        /// and stays covered by the suites that already exist. A sticky header lands at the
+        /// bottom of a flipped frame, gets excluded from every seam as a "footer", and the
+        /// final flip puts it back at the top where it belongs.
+        /// </summary>
+        private readonly bool _reverse;
 
         public Loop(SD.Rectangle region, ScrollDirection? presetDirection, Func<bool> autoScroll,
             Action<string> status, Action<ScrollHint> hint, Action<SD.Bitmap>? preview,
             CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource, bool paneScoped = false,
-            Func<SD.Point>? cursorSource = null, Action<int, bool>? scrollInput = null)
+            Func<SD.Point>? cursorSource = null, Action<int, bool>? scrollInput = null,
+            bool reverse = false)
         {
             _region = region;
             _paneScoped = paneScoped;
@@ -253,6 +267,7 @@ public static class ScrollingCaptureService
             _grab = frameSource ?? CaptureService.CaptureScreenRegionWithoutLayeredWindows;
             _cursor = cursorSource ?? CursorPoint;
             _scrollInput = scrollInput;
+            _reverse = reverse;
             _verticalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Width);
             _horizontalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Height);
             _stitch = new StitchBuffer(region.Width, _verticalLimit);
@@ -342,7 +357,7 @@ public static class ScrollingCaptureService
                 _lastFrame?.Dispose();
                 _firstFrameKeep?.Dispose();
                 _stitch.Dispose();
-                return _horizontal.Take();
+                return Unflip(_horizontal.Take());
             }
             _horizontal.Dispose();
             var vertical = _stitch.Take();
@@ -350,12 +365,28 @@ public static class ScrollingCaptureService
                 vertical = DeduplicateStaticRails(vertical);
             _lastFrame?.Dispose();
             _firstFrameKeep?.Dispose();
-            return vertical;
+            return Unflip(vertical);
+        }
+
+        /// <summary>Puts a reverse capture back the right way up, once, at the end.</summary>
+        private SD.Bitmap? Unflip(SD.Bitmap? image)
+        {
+            if (_reverse)
+                image?.RotateFlip(SD.RotateFlipType.RotateNoneFlipY);
+            return image;
         }
 
         // ------------------------------------------------------------ frames
 
         private SD.Bitmap CaptureFrame()
+        {
+            SD.Bitmap frame = GrabSettledFrame();
+            if (_reverse)
+                frame.RotateFlip(SD.RotateFlipType.RotateNoneFlipY);
+            return frame;
+        }
+
+        private SD.Bitmap GrabSettledFrame()
         {
             if (!_scrolledBeforeFrame)
                 return _grab(_region);
@@ -1463,6 +1494,7 @@ public static class ScrollingCaptureService
             _lastSentNotches = up ? 0 : notches; // dead-reckoning only advances downward
             int sign = horizontal ? 1 : -1;
             if (up) sign = -sign;
+            if (_reverse) sign = -sign; // the page has to move the other way to reveal more
             int delta = WheelDelta * notches * sign;
             if (_scrollInput is not null)
             {
@@ -1559,6 +1591,7 @@ public static class ScrollingCaptureService
                 SD.Bitmap? snap = _direction == ScrollDirection.Horizontal
                     ? _horizontalStrip?.SnapshotWhole()
                     : _strip?.SnapshotWhole();
+                snap = Unflip(snap); // the strip is stitched in flipped space on a reverse run
                 if (snap is not null)
                     _preview(snap); // callback takes ownership
             }

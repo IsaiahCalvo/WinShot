@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipes;
 
 namespace WinShot.Core;
@@ -28,6 +28,7 @@ public sealed class CommandServer : IDisposable
         "ocr",
         "scrolling",
         "scroll-horizontal",
+        "scroll-up",
         "history",
         "settings",
         "self-timer",

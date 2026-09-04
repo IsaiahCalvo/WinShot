@@ -339,6 +339,51 @@ public class ScrollingCaptureServiceTests
     }
 
     /// <summary>
+    /// Upward capture, for a chat thread or a log you are already at the bottom of. The user
+    /// scrolls up, so the newest content arrives ABOVE what is captured, and the finished
+    /// image must still read top-to-bottom in document order. Frames are flipped on the way
+    /// in and the canvas once on the way out, so the matcher and the seam healer run exactly
+    /// as they do downward -- this asserts the result of that, row by row.
+    /// </summary>
+    [Fact]
+    public void ReverseCapture_ReadsTopToBottomInDocumentOrder()
+    {
+        using var cts = new CancellationTokenSource();
+        // Starting low in the document and scrolling up to the top.
+        var positions = Enumerable.Range(0, 31).Select(i => 1200 - (i * 40)).ToList();
+        int index = 0;
+
+        SD.Bitmap FrameSource(SD.Rectangle _)
+        {
+            if (index >= positions.Count)
+            {
+                cts.Cancel();
+                return MakeFrame(positions[^1]);
+            }
+            return MakeFrame(positions[index++]);
+        }
+
+        using SD.Bitmap? stitched = ScrollingCaptureService.RunAsync(
+            new SD.Rectangle(0, 0, Width, FrameHeight),
+            ScrollDirection.Vertical,
+            autoScroll: () => false,
+            status: _ => { },
+            hint: _ => { },
+            cts.Token,
+            preview: null,
+            frameSource: FrameSource,
+            paneScoped: false,
+            cursorSource: null,
+            scrollInput: null,
+            reverse: true).GetAwaiter().GetResult();
+
+        Assert.NotNull(stitched);
+        Assert.Equal(1200 + FrameHeight, stitched!.Height);
+        for (int y = 0; y < stitched.Height; y += 71)
+            AssertRowIsDocRow(stitched, y, y);
+    }
+
+    /// <summary>
     /// There is one Auto-Scroll button, so a horizontally-scrolling pane has to be found by
     /// the loop: vertical input moves nothing, the input ladder is exhausted, and the loop
     /// flips the axis rather than reporting "reached the bottom" on a pane it never

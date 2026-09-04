@@ -21,9 +21,11 @@ public static class ScrollingStatusWindow
     /// image and mean opposite things to the person watching: an abort must not be reported
     /// back as a failure. <paramref name="presetDirection"/> forces an axis (the
     /// scroll-horizontal command); null auto-detects from the first movement.
+    /// <paramref name="reverse"/> captures upward, for content you are already at the
+    /// bottom of (the scroll-up command).
     /// </summary>
     public static async Task<(SD.Bitmap? Image, bool Cancelled)> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null,
-        bool autoStart = false, TimeSpan? autoStop = null, bool paneScoped = false)
+        bool autoStart = false, TimeSpan? autoStop = null, bool paneScoped = false, bool reverse = false)
     {
         using var cts = new CancellationTokenSource();
         bool cancelled = false;
@@ -91,7 +93,8 @@ public static class ScrollingStatusWindow
                 hint => MarshalHint(controls, preview, hint),
                 cts.Token,
                 thumb => PushPreview(preview, thumb),
-                paneScoped: paneScoped);
+                paneScoped: paneScoped,
+                reverse: reverse);
 
             if (cancelled)
             {

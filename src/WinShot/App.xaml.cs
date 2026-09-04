@@ -299,6 +299,7 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr")));
         menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling")));
         menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal")));
+        menu.Items.Add(MenuItem("Scrolling capture (upward)", null, () => QueueCaptureCommand("scroll-up")));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("History…", null, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
@@ -435,7 +436,7 @@ public partial class App : Application
     private static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
-        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
+        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "scroll-up" or "self-timer"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
     private void QueueCaptureCommand(string cmd)
@@ -462,7 +463,11 @@ public partial class App : Application
             case "all-in-one": AllInOneFlow(); break;
             case "ocr": OcrFlow(); break;
             case "scrolling": ScrollingFlow(); break;
-            case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
+            case "scroll-horizontal":
+            case "scroll-up":
+                ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd),
+                    ScrollCaptureCommand.ReverseForCommand(cmd));
+                break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
             // Automation hook (CleanShot's cleanshot://scrolling-capture analog):
             // scroll-region:x,y,w,h[,auto][,save] — physical screen coords, no selector.
@@ -1313,7 +1318,7 @@ public partial class App : Application
         ToastSeverity severity = ToastSeverity.Success, bool holdLong = false) =>
         ShowToast(title, preview, anchor, onOpen, severity, holdLong);
 
-    private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
+    private void ScrollingFlow(ScrollDirection? direction = null, bool reverse = false) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
         {
             SD.Rectangle? picked = null;
@@ -1323,7 +1328,9 @@ public partial class App : Application
             try
             {
                 if (await selector.ShowAsync(paneHover: true,
-                        instruction: "Drag over the part of the screen that scrolls") == WF.DialogResult.OK &&
+                        instruction: reverse
+                            ? "Drag over the part that scrolls, then scroll up"
+                            : "Drag over the part of the screen that scrolls") == WF.DialogResult.OK &&
                     selector.SelectedRegionPx is SD.Rectangle r)
                 {
                     picked = r;
@@ -1355,7 +1362,7 @@ public partial class App : Application
 
             // Escape and Cancel are the user finishing the flow the way they chose to; only a
             // run that came back with nothing to show for it is a failure worth a red card.
-            var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick);
+            var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick, reverse: reverse);
             if (stitched is not null)
                 HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
             else if (!cancelled)
