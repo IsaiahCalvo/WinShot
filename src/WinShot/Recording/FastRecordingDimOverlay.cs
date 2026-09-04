@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using WinShot.Core;
@@ -105,6 +105,8 @@ public sealed class FastRecordingDimOverlay : IDisposable
     private readonly List<DimSurface> _surfaces = new();
     private readonly List<MarkerSurface> _markers = new();
     private IDisposable? _entrance;
+    private IDisposable? _exit;
+    private bool _fadingOut;
 
     public FastRecordingDimOverlay(SD.Rectangle recordingArea)
         : this(recordingArea, dimScreen: true)
@@ -166,10 +168,45 @@ public sealed class FastRecordingDimOverlay : IDisposable
             () => _entrance = null);
     }
 
+    /// <summary>
+    /// Leaves the way it arrived, then disposes itself. Used when a take stops: the marker
+    /// vanishing in the same frame as the last recorded one is the "everything tears down at
+    /// once" flash this whole change exists to remove.
+    /// </summary>
+    public void FadeOutAndDispose()
+    {
+        if (_fadingOut)
+            return;
+        _fadingOut = true;
+        _entrance?.Dispose();
+        _entrance = null;
+
+        _exit = Motion.Run(
+            Motion.QuickMs,
+            Motion.EaseInCubic,
+            amount =>
+            {
+                double remaining = 1 - amount;
+                foreach (DimSurface surface in _surfaces)
+                {
+                    if (!surface.IsDisposed)
+                        surface.Opacity = DimOpacity * remaining;
+                }
+                foreach (MarkerSurface marker in _markers)
+                {
+                    if (!marker.IsDisposed)
+                        marker.SetFade(remaining);
+                }
+            },
+            Dispose);
+    }
+
     public void Dispose()
     {
         _entrance?.Dispose();
         _entrance = null;
+        _exit?.Dispose();
+        _exit = null;
         foreach (DimSurface surface in _surfaces)
         {
             try { surface.Close(); surface.Dispose(); }
@@ -204,6 +241,7 @@ public sealed class FastRecordingDimOverlay : IDisposable
         private readonly RecordingRegionMarkerEdge _edge;
         private readonly int _thickness;
         private int _alpha = -1;
+        private double _fade = 1;
 
         public MarkerSurface(SD.Rectangle bounds, RecordingRegionMarkerEdge edge, int thickness)
         {
@@ -230,10 +268,21 @@ public sealed class FastRecordingDimOverlay : IDisposable
             base.OnClosed(e);
         }
 
+        /// <summary>Global multiplier on the strip's alpha, so the owner can fade every strip
+        /// out with one tween. A layered window cannot use Form.Opacity — that is
+        /// SetLayeredWindowAttributes, which fights UpdateLayeredWindow — so the fade lives in
+        /// the bitmap.</summary>
+        public void SetFade(double fade)
+        {
+            _fade = Math.Clamp(fade, 0, 1);
+            _alpha = -1; // force the next frame through even if the pulse landed on the same step
+            Render();
+        }
+
         private void Render()
         {
             double wave = (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 2000.0)) / 2;
-            int alpha = 150 + (int)Math.Round(105 * wave);
+            int alpha = (int)Math.Round((150 + (105 * wave)) * _fade);
             if (alpha == _alpha || IsDisposed)
                 return;
             _alpha = alpha;

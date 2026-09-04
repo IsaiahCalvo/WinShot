@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using WinShot.Core;
@@ -162,6 +162,68 @@ public class RecordingControlBarTests
 
         PumpUntil(() => Motion.Holders == 0);
         Assert.Equal(0, Motion.Holders);
+    }
+
+    // ---- stop: saving state, then a fade -----------------------------------------
+
+    [Fact]
+    public void Bar_SavingStateSurvivesUntilTheFadeAndReleasesTheClock()
+    {
+        using var animation = new Anim(true);
+        Assert.Equal(0, Motion.Holders);
+
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: false);
+        bar.Show();
+        PumpUntil(() => bar.Opacity > 0.9);
+
+        bar.BeginSaving();
+        Assert.True(bar.IsSaving);
+        // Still on screen: the whole point is that nothing tears down before the card lands.
+        WF.Application.DoEvents();
+        Assert.False(bar.IsDisposed);
+
+        bar.FadeOutAndClose();
+        PumpUntil(() => bar.IsDisposed);
+        Assert.True(bar.IsDisposed);
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+        bar.Dispose();
+    }
+
+    [Fact]
+    public void Bar_FadeOutIsIdempotentAndSafeBeforeItIsEverShown()
+    {
+        using var animation = new Anim(true);
+        Assert.Equal(0, Motion.Holders);
+
+        // Never shown: there is no handle and no tween to run, so this must simply not throw.
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.FadeOutAndClose();
+        bar.FadeOutAndClose();
+        bar.Dispose();
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>With animation off system-wide the exit must still end with the window gone,
+    /// not left on screen waiting for a tween that never runs.</summary>
+    [Fact]
+    public void Bar_FadeOutStillClosesWithAnimationOff()
+    {
+        using var animation = new Anim(false);
+
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+        bar.BeginSaving();
+        bar.FadeOutAndClose();
+        WF.Application.DoEvents();
+
+        Assert.True(bar.IsDisposed);
+        Assert.Equal(0, Motion.Holders);
+        bar.Dispose();
     }
 
     [Fact]

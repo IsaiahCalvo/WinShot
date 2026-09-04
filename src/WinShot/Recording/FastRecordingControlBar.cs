@@ -43,9 +43,12 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly string _stopHotkey;
     private readonly double _scale;
     private IDisposable? _entrance;
+    private IDisposable? _exit;
     private string _elapsedText = "00:00";
     private int _hoverIndex = -1;
     private bool _actionTaken;
+    private bool _saving;
+    private bool _closing;
     private bool _paused;
     private int _dotAlpha = 255;
 
@@ -117,6 +120,12 @@ public sealed class FastRecordingControlBar : WF.Form
         KeyDown += OnBarKeyDown;
         _timer.Tick += (_, _) =>
         {
+            if (_saving)
+            {
+                Invalidate(); // the spinner arc sweeps across the whole pill
+                return;
+            }
+
             // Eased breathing instead of a binary blink: alpha rides a 1.6s sine.
             double wave = (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 1600.0)) / 2;
             int alpha = _paused ? 255 : 120 + (int)Math.Round(135 * wave);
@@ -164,8 +173,13 @@ public sealed class FastRecordingControlBar : WF.Form
         using (var fill = new SD.SolidBrush(Back))
             g.FillRectangle(fill, ClientRectangle);
 
-        for (int i = 0; i < _cells.Count; i++)
-            PaintCell(g, i);
+        if (_saving)
+            PaintSaving(g);
+        else
+        {
+            for (int i = 0; i < _cells.Count; i++)
+                PaintCell(g, i);
+        }
 
         PopupChrome.DrawBorder(g, ClientSize, Height / 2);
         base.OnPaint(e);
@@ -175,6 +189,8 @@ public sealed class FastRecordingControlBar : WF.Form
     {
         _entrance?.Dispose();
         _entrance = null;
+        _exit?.Dispose();
+        _exit = null;
         _timer.Stop();
         _timer.Dispose();
         _toolTip.Dispose();
@@ -211,6 +227,81 @@ public sealed class FastRecordingControlBar : WF.Form
                 Top = restY + (int)Math.Round(rise * (1 - amount));
             },
             () => _entrance = null);
+    }
+
+    /// <summary>
+    /// Stop was pressed and the file is being written. The pill stays put, drops its controls
+    /// for a "Saving…" row, and keeps sweeping a small arc so the wait is visibly the app
+    /// working rather than the screen going blank between the last frame and the card.
+    /// </summary>
+    public void BeginSaving()
+    {
+        if (_saving || _closing)
+            return;
+
+        _saving = true;
+        _actionTaken = true;
+        _elapsed.Stop();
+        _toolTip.SetToolTip(this, null);
+        Cursor = WF.Cursors.Default;
+        _timer.Start(); // runs even when the elapsed clock was never shown
+        Invalidate();
+    }
+
+    /// <summary>True once <see cref="BeginSaving"/> has run; for tests.</summary>
+    internal bool IsSaving => _saving;
+
+    /// <summary>
+    /// Leaves the way it arrived: the entrance played backwards, then the window closes
+    /// itself. Safe to call twice, and safe to call on a bar that never got shown.
+    /// </summary>
+    public void FadeOutAndClose()
+    {
+        if (_closing)
+            return;
+
+        _closing = true;
+        _entrance?.Dispose();
+        _entrance = null;
+        _timer.Stop();
+        if (IsDisposed || !IsHandleCreated)
+        {
+            CloseSafely();
+            return;
+        }
+
+        int restY = Top;
+        int sink = S(8);
+        double from = Opacity;
+        _exit?.Dispose();
+        _exit = Motion.Run(
+            Motion.EnterDurationMs,
+            Motion.EaseInCubic,
+            amount =>
+            {
+                if (IsDisposed)
+                    return;
+                Opacity = from * (1 - amount);
+                Top = restY + (int)Math.Round(sink * amount);
+            },
+            () =>
+            {
+                _exit = null;
+                CloseSafely();
+            });
+    }
+
+    private void CloseSafely()
+    {
+        try
+        {
+            if (!IsDisposed)
+                Close();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to close the recording control bar", ex);
+        }
     }
 
     private void PositionUnderRegion()
@@ -262,6 +353,34 @@ public sealed class FastRecordingControlBar : WF.Form
             color = SD.Color.FromArgb(0x60, color);
         WF.TextRenderer.DrawText(g, GlyphFor(cell), _glyphFont, bounds, color,
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+    }
+
+    /// <summary>The whole pill becomes one row: a sweeping arc and the word for what is
+    /// happening. No controls, because none of them mean anything now.</summary>
+    private void PaintSaving(SD.Graphics g)
+    {
+        int ring = S(14);
+        var arc = new SD.Rectangle(
+            S(RecordingControlBarLayout.SidePadDip) + S(4),
+            (ClientSize.Height - ring) / 2,
+            ring,
+            ring);
+        // 1.1 s per revolution — fast enough to read as busy, slow enough not to strobe.
+        float start = (float)(Environment.TickCount64 % 1100 * 360.0 / 1100.0);
+        using (var track = new SD.Pen(Hairline, S(2)))
+            g.DrawEllipse(track, arc);
+        using (var sweep = new SD.Pen(GlyphColor, S(2)))
+            g.DrawArc(sweep, arc, start, 100f);
+
+        var textRect = new SD.Rectangle(
+            arc.Right + S(8),
+            0,
+            ClientSize.Width - arc.Right - S(8) - S(RecordingControlBarLayout.SidePadDip),
+            ClientSize.Height);
+        using SD.Font font = ThemePalette.UiFontPx(S(13));
+        WF.TextRenderer.DrawText(g, "Saving…", font, textRect, GlyphColor,
+            WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
     }
 
@@ -332,7 +451,8 @@ public sealed class FastRecordingControlBar : WF.Form
             return;
 
         _hoverIndex = index;
-        bool actionable = index >= 0 && !_actionTaken && _cells[index].Cell != RecordingControlBarCell.Timer;
+        bool actionable = index >= 0 && !_actionTaken && !_saving &&
+            _cells[index].Cell != RecordingControlBarCell.Timer;
         Cursor = actionable ? WF.Cursors.Hand : WF.Cursors.Default;
         _toolTip.SetToolTip(this, actionable ? TipFor(_cells[index].Cell) : null);
         Invalidate();

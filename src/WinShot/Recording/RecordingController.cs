@@ -661,9 +661,16 @@ public sealed class RecordingController
         if (!IsRecording || _stopping) return;
         _stopping = true;
         _discard = discard;
-        CloseBar();
+        // The click/keystroke overlays are deliberately visible to the capture, so they have
+        // to go the instant the recorder stops. Everything else leaves on a fade: the bar
+        // stays put in a "Saving…" state until the completion card replaces it (or, when the
+        // take is being thrown away, fades out at once because there is nothing to wait for).
         CloseOverlays(); // also releases the mouse/keyboard hooks
-        CloseDimOverlay();
+        FadeOutDimOverlay();
+        if (discard || _restarting)
+            FadeOutBar();
+        else if (_bar is { IsDisposed: false })
+            _bar.BeginSaving();
         try
         {
             if (_isGif)
@@ -748,9 +755,9 @@ public sealed class RecordingController
             Log.Error($"MP4 recording failed: {e.Error}");
             DisposeRecorder();
             string? tempPath = _tempPath;
-            CloseBar(); // failure can happen without the user pressing Stop
+            FadeOutBar(); // failure can happen without the user pressing Stop
             CloseOverlays();
-            CloseDimOverlay();
+            FadeOutDimOverlay();
             EndSession();
             ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(tempPath, e.Error));
         });
@@ -839,6 +846,9 @@ public sealed class RecordingController
         StopElapsedTimer();
         RestoreDesktopIcons();
         RestoreNotifications();
+        // Finalization is done and the completion card (if any) is already on screen, so the
+        // "Saving…" pill has said everything it had to say.
+        FadeOutBar();
         if (wasRecording)
             RecordingActiveChanged?.Invoke(false);
 
@@ -909,9 +919,9 @@ public sealed class RecordingController
         {
             TryDelete(temp);
         }
-        CloseBar();
+        FadeOutBar();
         CloseOverlays();
-        CloseDimOverlay();
+        FadeOutDimOverlay();
         EndSession();
     }
 
@@ -951,6 +961,17 @@ public sealed class RecordingController
         _bar = null;
     }
 
+    /// <summary>Lets the bar play its exit and close itself. The reference is dropped now, so
+    /// nothing can close it out from under the tween.</summary>
+    private void FadeOutBar()
+    {
+        FastRecordingControlBar? bar = _bar;
+        _bar = null;
+        if (bar is null || bar.IsDisposed) return;
+        try { bar.FadeOutAndClose(); }
+        catch (Exception ex) { Log.Error("Failed to fade out the recording bar", ex); }
+    }
+
     private void CloseOverlays()
     {
         if (_clickOverlay is not null)
@@ -973,6 +994,17 @@ public sealed class RecordingController
         try { _dimOverlay.Dispose(); }
         catch (Exception ex) { Log.Error("Failed to close recording dim overlay", ex); }
         _dimOverlay = null;
+    }
+
+    /// <summary>Same, but on a fade. The reference is dropped now so a later teardown cannot
+    /// dispose the overlay mid-tween.</summary>
+    private void FadeOutDimOverlay()
+    {
+        FastRecordingDimOverlay? overlay = _dimOverlay;
+        _dimOverlay = null;
+        if (overlay is null) return;
+        try { overlay.FadeOutAndDispose(); }
+        catch (Exception ex) { Log.Error("Failed to fade out the recording dim overlay", ex); }
     }
 
     private void StartElapsedTimer(bool enabled)
