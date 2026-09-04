@@ -472,9 +472,23 @@ public class ThemedWindowTests
         var window = HistoryWindow.Show(history, settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
-        window.Close();
+
+        // The window fades in rather than appearing between two frames, and Escape plays that
+        // backwards instead of blinking out.
+        bool animated = Motion.AnimationsEnabled();
+        WaitUntil(() => window.Opacity >= 1);
+        Assert.Equal(1d, window.Opacity, 3);
+
+        int holdersBefore = Motion.Holders;
+        Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
+        if (animated)
+            Assert.True(window.IsVisible, "Escape should fade the window out, not blink it away");
+
         WaitUntilHidden(window);
         Assert.False(window.IsVisible);
+        Assert.True(
+            Motion.Holders <= holdersBefore,
+            $"the dismissal tween leaked a Motion holder: {holdersBefore} -> {Motion.Holders}");
     }
 
     private static T CreatePrivate<T>(params object[] args) where T : Window =>

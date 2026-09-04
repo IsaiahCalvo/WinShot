@@ -49,6 +49,9 @@ public partial class HistoryWindow : Window
     private bool _loadedOnce;
     private DragPreview? _dragPreview;
     private string? _loadError;
+    private IDisposable? _windowFade;
+    private bool _dismissing;
+    private bool _closed;
     private IDisposable? _emptyStateFade;
     private FileSystemWatcher? _watcher;
     private DispatcherTimer? _watcherDebounce;
@@ -91,9 +94,14 @@ public partial class HistoryWindow : Window
         };
         Closed += (_, _) =>
         {
+            // Before anything else: emptying the grid on the way out must not start the
+            // empty-state fade, which would outlive the window and hold the animation clock.
+            _closed = true;
             _loadCts?.Cancel();
             StopWatcher();
             _preview?.Close();
+            _windowFade?.Dispose();
+            _windowFade = null;
             _emptyStateFade?.Dispose();
             _emptyStateFade = null;
             _dragPreview?.Dispose();
@@ -133,6 +141,7 @@ public partial class HistoryWindow : Window
             centerMs = center.ElapsedMilliseconds;
             var show = Stopwatch.StartNew();
             instance.Show();
+            instance.FadeIn();
             showMs = show.ElapsedMilliseconds;
             if (instance._loadedOnce)
                 instance.Dispatcher.BeginInvoke(
@@ -168,6 +177,53 @@ public partial class HistoryWindow : Window
                 $"activate={activateMs} visible={wasVisible} total={total.ElapsedMilliseconds} ms");
         }
         return instance;
+    }
+
+    /// <summary>
+    /// The window arriving on screen. A grid of a hundred thumbnails appearing between two
+    /// frames reads as a flash; over a fifth of a second it reads as opening.
+    /// </summary>
+    private void FadeIn()
+    {
+        _windowFade?.Dispose();
+        Opacity = 0;
+        bool finished = false;
+        IDisposable handle = Motion.Run(
+            Motion.EnterDurationMs,
+            Motion.EaseOutCubic,
+            progress => Opacity = progress,
+            () =>
+            {
+                finished = true;
+                _windowFade = null;
+            });
+        _windowFade = finished ? null : handle;
+    }
+
+    /// <summary>
+    /// Escape: fade out, then close, so dismissing is the entrance played backwards.
+    ///
+    /// ponytail: only this path fades. Doing it from OnClosing means cancelling the close and
+    /// finishing it from a timer, and a Close() whose message loop never runs again would leave
+    /// the window alive — which is exactly the shape that takes a WPF process down on the way
+    /// out. The title-bar X stays instant, the way every other window on Windows closes.
+    /// </summary>
+    private void Dismiss()
+    {
+        if (_dismissing)
+            return;
+
+        _dismissing = true;
+        _windowFade?.Dispose();
+        _windowFade = Motion.Run(
+            Motion.SwapMs,
+            Motion.EaseInCubic,
+            progress => Opacity = 1d - progress,
+            () =>
+            {
+                _windowFade = null;
+                Close();
+            });
     }
 
     private static void CreateInstance(HistoryService history, SettingsService settings)
@@ -234,7 +290,7 @@ public partial class HistoryWindow : Window
         switch (key)
         {
             case Key.Escape:
-                Close();
+                Dismiss();
                 return true;
             case Key.Enter:
                 if (SelectedItem() is { } toActivate)
@@ -661,6 +717,8 @@ public partial class HistoryWindow : Window
 
     private void UpdateEmptyState()
     {
+        if (_closed) return;
+
         if (_items.Count > 0 && _loadError is null)
         {
             _emptyStateFade?.Dispose();
