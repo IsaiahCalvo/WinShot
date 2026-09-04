@@ -42,6 +42,7 @@ public partial class SettingsWindow : Window
         ApplyHighContrastPalette();
         PopulateAbout();
         WireInlineHotkeyConflictChecks();
+        WireLiveApply();
         UpdateTitleForSection(SectionList?.SelectedIndex ?? 0);
         // Mica: the cards already supply their own opaque surface colour, so contrast is
         // unchanged and only the gutter between them picks up what is behind the window.
@@ -325,6 +326,17 @@ public partial class SettingsWindow : Window
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
+            // Toggles applied as they were changed; only typed fields can be lost, and
+            // Escape used to lose them silently.
+            if (HasUncommittedFieldEdits() &&
+                !ThemedMessageDialog.Confirm(
+                    this,
+                    "Discard changes?",
+                    "The fields you typed have not been applied yet. Close Settings and lose them?",
+                    confirmLabel: "Discard"))
+            {
+                return;
+            }
             Close();
             return;
         }
@@ -349,11 +361,42 @@ public partial class SettingsWindow : Window
             SetWindowLong(hwnd, GwlExStyle, updated);
     }
 
-    private void LoadFromSettings()
-    {
-        var s = _settings.Current;
+    private void LoadFromSettings() => LoadFromSettings(_settings.Current);
 
-        // General
+    /// <summary>Fills every control from a settings snapshot. Split per tab so
+    /// "Restore defaults" can reload one tab from a pristine <see cref="Settings"/>
+    /// without touching the others or the user's saved file.</summary>
+    private void LoadFromSettings(Settings s)
+    {
+        using (SuspendLiveApply())
+        {
+            for (int i = 0; i < Sections().Length; i++)
+                LoadSection(i, s);
+        }
+        UpdateTemplatePreview();
+    }
+
+    /// <summary>Loads one tab's controls from <paramref name="s"/>. Index matches
+    /// <see cref="Sections"/> and the tab bar.</summary>
+    private void LoadSection(int index, Settings s)
+    {
+        using var _ = SuspendLiveApply();
+        switch (index)
+        {
+            case 0: LoadGeneral(s); break;
+            case 1: LoadShortcutBoxes(s); break;
+            case 2: LoadQuickAccess(s); break;
+            case 3: LoadRecording(s); break;
+            case 4: LoadScreenshots(s); break;
+            case 5: LoadAnnotate(s); break;
+            case 6: LoadAdvanced(s); break;
+            // 7 = About: nothing to restore.
+        }
+        UpdateTemplatePreview();
+    }
+
+    private void LoadGeneral(Settings s)
+    {
         SaveFolderBox.Text = s.SaveFolder;
         StartupCheck.IsChecked = s.LaunchAtStartup;
         UpdatesCheck.IsChecked = s.CheckForUpdatesOnStartup;
@@ -362,7 +405,7 @@ public partial class SettingsWindow : Window
         SelectByTag(ShutterSoundCombo, CaptureSound.Normalize(s.ShutterSound), fallbackIndex: 0);
         ShowTrayIconCheck.IsChecked = s.ShowTrayIcon;
 
-        // General > "After capture" matrix — a set of independent actions, not a choice.
+        // "After capture" matrix — a set of independent actions, not a choice.
         ScreenshotShowOverlayCheck.IsChecked = s.ScreenshotShowOverlay;
         RecordingShowOverlayCheck.IsChecked = s.RecordingShowOverlay;
         ScreenshotCopyCheck.IsChecked = s.ScreenshotCopy;
@@ -371,8 +414,10 @@ public partial class SettingsWindow : Window
         ScreenshotOpenAnnotateCheck.IsChecked = s.ScreenshotOpenAnnotate;
         ScreenshotPinCheck.IsChecked = s.ScreenshotPin;
         RecordingOpenEditorCheck.IsChecked = s.RecordingOpenEditor;
+    }
 
-        // Quick Access overlay
+    private void LoadQuickAccess(Settings s)
+    {
         SelectByTag(OverlayPositionCombo, s.OverlayPosition, fallbackIndex: 5);
         OverlayMoveToActiveScreenCheck.IsChecked = s.OverlayMoveToActiveScreen;
         OverlaySizeSlider.Value = Math.Clamp(s.OverlaySizePercent, 0, 100);
@@ -384,11 +429,11 @@ public partial class SettingsWindow : Window
         OverlayActionCombo.IsEnabled = s.OverlayAutoClose;
         OverlayCloseAfterDragCheck.IsChecked = s.OverlayCloseAfterDragging;
         SelectByTag(OverlaySaveBehaviorCombo, s.OverlaySaveButtonBehavior, fallbackIndex: 0);
+    }
 
-        // Hotkeys (Shortcuts tab is generated from the catalog; see SettingsWindow.Shortcuts.cs)
-        LoadShortcutBoxes();
-
-        // Recording > General
+    private void LoadRecording(Settings s)
+    {
+        // General
         ShowRecordingControlsCheck.IsChecked = s.ShowRecordingControls;
         ShowRecordingTimerCheck.IsChecked = s.ShowRecordingTimer;
         ScaleHiDpiVideoCheck.IsChecked = s.ScaleHiDpiVideo;
@@ -403,20 +448,22 @@ public partial class SettingsWindow : Window
         SelectByTag(WebcamCombo, s.WebcamOverlayPosition, fallbackIndex: 0);
         WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(s.WebcamOverlaySizePercent).ToString();
 
-        // Recording > Video
+        // Video
         SelectByTag(MaxResolutionCombo, s.RecordingMaxResolution, fallbackIndex: 0);
         RecordingFpsBox.Text = s.RecordingFps.ToString();
         RecordAudioCheck.IsChecked = s.RecordAudio;
         SystemAudioCheck.IsChecked = s.RecordSystemAudio;
         RecordAudioMonoCheck.IsChecked = s.RecordAudioMono;
 
-        // Recording > GIF
+        // GIF
         GifFpsBox.Text = s.GifFps.ToString();
         GifQualitySlider.Value = Math.Clamp(s.GifQuality, 0, 100);
         OptimizeGifsCheck.IsChecked = s.OptimizeGifs;
         SelectByTag(GifSizeCombo, s.GifSize, fallbackIndex: 0);
+    }
 
-        // Screenshots
+    private void LoadScreenshots(Settings s)
+    {
         SelectByTag(FormatCombo, s.ImageFormat, fallbackIndex: 0);
         HiDpiCheck.IsChecked = s.DownscaleHiDpi;
         ConvertToSrgbCheck.IsChecked = s.ConvertToSrgb;
@@ -429,8 +476,10 @@ public partial class SettingsWindow : Window
         SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 1);
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
+    }
 
-        // Annotate
+    private void LoadAnnotate(Settings s)
+    {
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
         SmoothPencilCheck.IsChecked = s.SmoothPencil;
         RememberLastToolCheck.IsChecked = s.RememberLastTool;
@@ -439,8 +488,10 @@ public partial class SettingsWindow : Window
         ShowColorNamesCheck.IsChecked = s.ShowColorNames;
         AlwaysOnTopCheck.IsChecked = s.AlwaysOnTop;
         ShowDockIconCheck.IsChecked = s.ShowDockIcon;
+    }
 
-        // Advanced
+    private void LoadAdvanced(Settings s)
+    {
         TemplateBox.Text = s.FileNameTemplate;
         AskForNameCheck.IsChecked = s.AskForNameAfterCapture;
         AddRetinaSuffixCheck.IsChecked = s.AddRetinaSuffix;
@@ -455,8 +506,6 @@ public partial class SettingsWindow : Window
         OcrDetectLinksCheck.IsChecked = s.OcrDetectLinks;
         HistoryLimitBox.Text = s.HistoryLimit.ToString();
         RetentionDaysBox.Text = s.HistoryRetentionDays.ToString();
-
-        UpdateTemplatePreview();
     }
 
     // ----- Keep-history slider <-> retention-days mapping --------------------
@@ -640,83 +689,24 @@ public partial class SettingsWindow : Window
 
             var s = _settings.Current;
 
-            // General
+            // Everything a checkbox, combo or slider owns. Those already applied
+            // themselves as they were changed; re-running the writer is idempotent and
+            // keeps one description of "what the toggles mean".
+            WriteToggleSettings(s);
+
+            // Validated text fields — the reason this window still has a commit point.
             s.SaveFolder = SaveFolderBox.Text.Trim();
-            s.ImageFormat = SelectedTag(FormatCombo, "png");
-            s.LaunchAtStartup = StartupCheck.IsChecked == true;
-            s.CheckForUpdatesOnStartup = UpdatesCheck.IsChecked == true;
-            s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
-            s.PlaySounds = PlaySoundsCheck.IsChecked == true;
-            s.ShutterSound = CaptureSound.Normalize(SelectedTag(ShutterSoundCombo, CaptureSound.Default));
-            s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
-
-            // After-capture matrix. Every ticked cell runs; none excludes another.
-            s.ScreenshotShowOverlay = ScreenshotShowOverlayCheck.IsChecked == true;
-            s.ScreenshotCopy = ScreenshotCopyCheck.IsChecked == true;
-            s.ScreenshotSave = ScreenshotSaveCheck.IsChecked == true;
-            s.ScreenshotOpenAnnotate = ScreenshotOpenAnnotateCheck.IsChecked == true;
-            s.ScreenshotPin = ScreenshotPinCheck.IsChecked == true;
-            s.RecordingShowOverlay = RecordingShowOverlayCheck.IsChecked == true;
-            s.RecordingCopy = RecordingCopyCheck.IsChecked == true;
-            s.RecordingOpenEditor = RecordingOpenEditorCheck.IsChecked == true;
-
-            // Quick Access overlay
-            s.OverlayPosition = SelectedTag(OverlayPositionCombo, "bottom-right");
-            s.OverlayMoveToActiveScreen = OverlayMoveToActiveScreenCheck.IsChecked == true;
-            s.OverlaySizePercent = (int)Math.Round(OverlaySizeSlider.Value);
-            s.OverlayAutoClose = OverlayAutoCloseCheck.IsChecked == true;
-            // Persist seconds when auto-close is on; otherwise 0 = stay until dismissed
-            // (preserves the legacy meaning of OverlayAutoCloseSeconds for downstream code).
+            s.FileNameTemplate = TemplateBox.Text.Trim();
+            s.RecordingFps = recordingFps;
+            s.GifFps = gifFps;
+            s.RecordingCountdownSeconds = countdown;
+            s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
+            // Seconds only mean anything while auto-close is on; 0 keeps the legacy
+            // "stay until dismissed" meaning for everything downstream.
             s.OverlayAutoCloseSeconds = OverlayAutoCloseCheck.IsChecked == true ? overlaySeconds : 0;
-            s.OverlayAutoCloseAction = SelectedTag(OverlayActionCombo, "save-close");
-            s.OverlayCloseAfterDragging = OverlayCloseAfterDragCheck.IsChecked == true;
-            s.OverlaySaveButtonBehavior = SelectedTag(OverlaySaveBehaviorCombo, "export");
 
             // Only executable global hotkeys are editable; unknown stored bindings survive.
             SaveShortcutBoxes(s);
-
-            // Recording > General
-            s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
-            s.ShowRecordingTimer = ShowRecordingTimerCheck.IsChecked == true;
-            s.ScaleHiDpiVideo = ScaleHiDpiVideoCheck.IsChecked == true;
-            s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
-            s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
-            s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
-            s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
-            s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
-            s.RecordingCountdownSeconds = countdown;
-            s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
-            s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
-
-            // Recording > Video
-            s.RecordingMaxResolution = SelectedTag(MaxResolutionCombo, "original");
-            s.RecordingFps = recordingFps;
-            s.RecordAudio = RecordAudioCheck.IsChecked == true;
-            s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
-            s.RecordAudioMono = RecordAudioMonoCheck.IsChecked == true;
-
-            // Recording > GIF
-            s.GifFps = gifFps;
-            s.GifQuality = (int)Math.Round(GifQualitySlider.Value);
-            s.OptimizeGifs = OptimizeGifsCheck.IsChecked == true;
-            s.GifSize = SelectedTag(GifSizeCombo, "800");
-
-            s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
-
-            // Screenshots
-            s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
-            s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
-            s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
-            s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
-            s.SelfTimerSeconds = selfTimer;
-
-            // Naming & history (Advanced tab)
-            s.FileNameTemplate = TemplateBox.Text.Trim();
-            s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
-            s.HistoryRetentionDays = retentionDays;
-            s.PinnedRoundedCorners = PinnedRoundedCornersCheck.IsChecked == true;
-            s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
-            s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
 
             await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
             await _settings.SaveAsync();
@@ -729,6 +719,244 @@ public partial class SettingsWindow : Window
                 SaveButton.IsEnabled = true;
         }
     }
+
+    /// <summary>
+    /// Every setting a checkbox, combo or slider owns. These apply the moment they are
+    /// changed (see <see cref="WireLiveApply"/>) — no OK button, which is where the modal
+    /// feel actually bit. Text fields that need validating still wait for Done.
+    /// </summary>
+    private void WriteToggleSettings(Settings s)
+    {
+        // General
+        s.LaunchAtStartup = StartupCheck.IsChecked == true;
+        s.CheckForUpdatesOnStartup = UpdatesCheck.IsChecked == true;
+        s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
+        s.PlaySounds = PlaySoundsCheck.IsChecked == true;
+        s.ShutterSound = CaptureSound.Normalize(SelectedTag(ShutterSoundCombo, CaptureSound.Default));
+        s.ShowTrayIcon = ShowTrayIconCheck.IsChecked == true;
+
+        // After-capture matrix. Every ticked cell runs; none excludes another.
+        s.ScreenshotShowOverlay = ScreenshotShowOverlayCheck.IsChecked == true;
+        s.ScreenshotCopy = ScreenshotCopyCheck.IsChecked == true;
+        s.ScreenshotSave = ScreenshotSaveCheck.IsChecked == true;
+        s.ScreenshotOpenAnnotate = ScreenshotOpenAnnotateCheck.IsChecked == true;
+        s.ScreenshotPin = ScreenshotPinCheck.IsChecked == true;
+        s.RecordingShowOverlay = RecordingShowOverlayCheck.IsChecked == true;
+        s.RecordingCopy = RecordingCopyCheck.IsChecked == true;
+        s.RecordingOpenEditor = RecordingOpenEditorCheck.IsChecked == true;
+
+        // Quick Access overlay
+        s.OverlayPosition = SelectedTag(OverlayPositionCombo, "bottom-right");
+        s.OverlayMoveToActiveScreen = OverlayMoveToActiveScreenCheck.IsChecked == true;
+        s.OverlaySizePercent = (int)Math.Round(OverlaySizeSlider.Value);
+        s.OverlayAutoClose = OverlayAutoCloseCheck.IsChecked == true;
+        s.OverlayAutoCloseAction = SelectedTag(OverlayActionCombo, "save-close");
+        s.OverlayCloseAfterDragging = OverlayCloseAfterDragCheck.IsChecked == true;
+        s.OverlaySaveButtonBehavior = SelectedTag(OverlaySaveBehaviorCombo, "export");
+        // Turning auto-close ON live would otherwise leave seconds at 0, which downstream
+        // reads as "stay until dismissed" — the toggle would look broken until Done.
+        if (s.OverlayAutoClose && s.OverlayAutoCloseSeconds <= 0 &&
+            int.TryParse(OverlayCloseBox.Text.Trim(), out int liveSeconds))
+        {
+            s.OverlayAutoCloseSeconds = Math.Clamp(liveSeconds, 1, 3600);
+        }
+
+        // Recording
+        s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
+        s.ShowRecordingTimer = ShowRecordingTimerCheck.IsChecked == true;
+        s.ScaleHiDpiVideo = ScaleHiDpiVideoCheck.IsChecked == true;
+        s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
+        s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
+        s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
+        s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
+        s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
+        s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
+        s.RecordingMaxResolution = SelectedTag(MaxResolutionCombo, "original");
+        s.RecordAudio = RecordAudioCheck.IsChecked == true;
+        s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
+        s.RecordAudioMono = RecordAudioMonoCheck.IsChecked == true;
+        s.GifQuality = (int)Math.Round(GifQualitySlider.Value);
+        s.OptimizeGifs = OptimizeGifsCheck.IsChecked == true;
+        s.GifSize = SelectedTag(GifSizeCombo, "800");
+
+        // Screenshots
+        s.ImageFormat = SelectedTag(FormatCombo, "png");
+        s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
+        s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
+        s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
+        s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
+        s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
+        s.SelfTimerSeconds = int.TryParse(SelectedTag(SelfTimerCombo, "3"), out int timer) ? timer : 3;
+
+        // Advanced
+        s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
+        s.HistoryRetentionDays = SliderIndexToRetentionDays(HistorySlider.Value);
+        s.PinnedRoundedCorners = PinnedRoundedCornersCheck.IsChecked == true;
+        s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
+        s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
+        s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
+    }
+
+    // ------------------------------------------------------- live apply
+
+    private int _liveApplySuspended;
+    private DispatcherTimer? _liveApplyTimer;
+    private bool _startupRegistrationDirty;
+
+    /// <summary>Blocks live-apply while code (not the user) is moving controls.</summary>
+    private IDisposable SuspendLiveApply()
+    {
+        _liveApplySuspended++;
+        return new Suspender(this);
+    }
+
+    private sealed class Suspender(SettingsWindow owner) : IDisposable
+    {
+        public void Dispose() => owner._liveApplySuspended--;
+    }
+
+    /// <summary>
+    /// Checkboxes, combos and sliders apply as you change them. The alternative — the whole
+    /// window waiting on Done — is the modal feel the audit named, and Done still exists for
+    /// the text fields that genuinely need validating (folder, template, hotkeys, the
+    /// numeric bounds), where live-applying half-typed input would be worse than modal.
+    /// </summary>
+    private void WireLiveApply()
+    {
+        foreach (DependencyObject node in LogicalDescendants(this))
+        {
+            switch (node)
+            {
+                case CheckBox check:
+                    check.Checked += OnLiveApplyChanged;
+                    check.Unchecked += OnLiveApplyChanged;
+                    break;
+                case ComboBox combo:
+                    combo.SelectionChanged += OnLiveApplyChanged;
+                    break;
+                case Slider slider:
+                    slider.ValueChanged += OnLiveApplyChanged;
+                    break;
+            }
+        }
+    }
+
+    private void OnLiveApplyChanged(object sender, RoutedEventArgs e)
+    {
+        if (_liveApplySuspended > 0 || _saving)
+            return;
+        if (sender is CheckBox startup && ReferenceEquals(startup, StartupCheck))
+            _startupRegistrationDirty = true;
+
+        // Coalesce: dragging a slider raises ValueChanged per pixel, and each save is a
+        // serialize plus two backup copies.
+        _liveApplyTimer ??= new DispatcherTimer(
+            TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, OnLiveApplyDue, Dispatcher);
+        _liveApplyTimer.Stop();
+        _liveApplyTimer.Start();
+    }
+
+    private void OnLiveApplyDue(object? sender, EventArgs e)
+    {
+        _liveApplyTimer?.Stop();
+        if (_saving)
+            return;
+        try
+        {
+            WriteToggleSettings(_settings.Current);
+            _settings.Save();
+            if (_startupRegistrationDirty)
+            {
+                _startupRegistrationDirty = false;
+                bool enabled = _settings.Current.LaunchAtStartup;
+                _ = Task.Run(() => ApplyStartupRegistration(enabled));
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Live-applying a settings toggle failed", ex);
+        }
+    }
+
+    // ------------------------------------------------------- restore defaults
+
+    /// <summary>Resets the tab you are looking at — not the whole app — because that is the
+    /// scope the button sits in and the only one whose damage a user can see and undo.</summary>
+    private void OnRestoreDefaults(object sender, RoutedEventArgs e)
+    {
+        int index = SectionList?.SelectedIndex ?? 0;
+        string tab = TabLabel(index);
+        if (index == Sections().Length - 1)
+        {
+            ThemedMessageDialog.Show(this, "Restore defaults", "The About tab has no settings to restore.");
+            return;
+        }
+
+        if (!ThemedMessageDialog.Confirm(
+                this,
+                "Restore defaults",
+                $"Reset every setting on the {tab} tab to its default? Other tabs keep what you have.",
+                confirmLabel: "Restore"))
+        {
+            return;
+        }
+
+        RestoreSectionDefaults(index);
+    }
+
+    /// <summary>The reset itself, without the confirm prompt.</summary>
+    internal void RestoreSectionDefaults(int index)
+    {
+        var defaults = new Settings();
+        PostCaptureMigration.Apply(defaults); // so the matrix reads as a fresh install would
+        LoadSection(index, defaults);
+
+        // The tab's toggles apply at once; its text fields still commit on Done.
+        WriteToggleSettings(_settings.Current);
+        _settings.Save();
+        ResetValidation();
+    }
+
+    /// <summary>Runs the pending live-apply immediately instead of waiting out the
+    /// coalescing delay. Test seam.</summary>
+    internal void FlushLiveApplyForTest() => OnLiveApplyDue(null, EventArgs.Empty);
+
+    internal bool HasUncommittedFieldEditsForTest() => HasUncommittedFieldEdits();
+
+    private string TabLabel(int index) =>
+        SectionList?.Items.Count > index && SectionList.Items[index] is ListBoxItem item
+            ? LogicalDescendants(item).OfType<TextBlock>().LastOrDefault()?.Text ?? "this"
+            : "this";
+
+    // ------------------------------------------------------- discard guard
+
+    /// <summary>True when a field that only commits on Done differs from what is stored.
+    /// The toggles are already applied, so they are never "unsaved".</summary>
+    private bool HasUncommittedFieldEdits()
+    {
+        var s = _settings.Current;
+        if (!string.Equals(SaveFolderBox.Text.Trim(), s.SaveFolder, StringComparison.Ordinal)) return true;
+        if (!string.Equals(TemplateBox.Text.Trim(), s.FileNameTemplate, StringComparison.Ordinal)) return true;
+        if (FieldDiffers(RecordingFpsBox, s.RecordingFps)) return true;
+        if (FieldDiffers(GifFpsBox, s.GifFps)) return true;
+        if (FieldDiffers(CountdownBox, s.RecordingCountdownSeconds)) return true;
+        if (FieldDiffers(WebcamSizeBox, s.WebcamOverlaySizePercent)) return true;
+        if (OverlayAutoCloseCheck.IsChecked == true && FieldDiffers(OverlayCloseBox, s.OverlayAutoCloseSeconds))
+            return true;
+
+        foreach (var def in AllShortcutDefs())
+        {
+            if (_shortcutBoxes.TryGetValue(def.Key, out var box) &&
+                !string.Equals(NormalizeForCompare(box.Text), def.Get(s), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool FieldDiffers(TextBox box, int stored) =>
+        !int.TryParse(box.Text.Trim(), out int value) || value != stored;
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
 
@@ -819,6 +1047,7 @@ public partial class SettingsWindow : Window
             control.TabIndex = tabIndex++;
         }
 
+        RestoreDefaultsButton.TabIndex = 999;
         CancelButton.TabIndex = 1000;
         SaveButton.TabIndex = 1001;
     }

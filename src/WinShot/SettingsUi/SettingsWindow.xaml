@@ -399,6 +399,13 @@
             <!-- Footer action bar (inset to line up with the section cards) -->
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="20,6,20,0">
+                <Grid>
+                    <Button x:Name="RestoreDefaultsButton" Content="Restore defaults"
+                            HorizontalAlignment="Left"
+                            FocusVisualStyle="{StaticResource SettingsFocusVisual}"
+                            AutomationProperties.Name="Restore defaults for this tab"
+                            AutomationProperties.HelpText="Reset every setting on the tab you are looking at to its default."
+                            Style="{StaticResource PillButtonSecondary}" Click="OnRestoreDefaults"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="CancelButton" Content="Cancel" IsCancel="True"
                             FocusVisualStyle="{StaticResource SettingsFocusVisual}"
@@ -411,6 +418,7 @@
                             AutomationProperties.HelpText="Validate and apply the visible settings, then close this window."
                             Style="{StaticResource PillButtonPrimary}" Click="OnSave"/>
                 </StackPanel>
+                </Grid>
             </Border>
 
             <!-- Sections (only one visible at a time; toggled from OnSectionChanged) -->

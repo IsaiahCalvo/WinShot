@@ -184,6 +184,7 @@ public class ThemedWindowTests
         Assert.True(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotSaveCheck")).IsChecked);
         Assert.False(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotShowOverlayCheck")).IsChecked);
         SettingsSectionMotionSmoke(window);
+        SettingsLiveApplyAndDefaultsSmoke(window, settings);
         typeof(SettingsWindow).GetMethod(
             "SaveShortcutBoxes",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -237,7 +238,8 @@ public class ThemedWindowTests
             "HiDpiCheck", "SelfTimerCombo", "FreezeScreenCheck", "CrosshairModeCombo",
             "ShowMagnifierCheck", "TemplateBox", "HistorySlider", "PinnedRoundedCornersCheck",
             "PinnedShadowCheck", "PinnedBorderCheck", "AllInOneRememberCheck",
-            "OcrJoinLinesCheck", "CancelButton", "SaveButton", "AboutCheckUpdatesButton",
+            "OcrJoinLinesCheck", "RestoreDefaultsButton", "CancelButton", "SaveButton",
+            "AboutCheckUpdatesButton",
             "AboutRepositoryButton", "AboutLogsButton",
         ];
 
@@ -744,6 +746,51 @@ public class ThemedWindowTests
         list.SelectedIndex = 0;
         PumpDispatcherOnce();
         Assert.Contains("General", window.Title);
+    }
+
+    /// <summary>
+    /// Checkboxes and combos apply as they change — no Done — while typed fields still
+    /// wait for a commit, and "Restore defaults" resets the visible tab only.
+    /// </summary>
+    private static void SettingsLiveApplyAndDefaultsSmoke(SettingsWindow window, SettingsService settings)
+    {
+        var list = (ListBox)window.FindName("SectionList")!;
+        var overlayCheck = (CheckBox)window.FindName("ScreenshotShowOverlayCheck")!;
+        var pinCheck = (CheckBox)window.FindName("ScreenshotPinCheck")!;
+        var freeze = (CheckBox)window.FindName("FreezeScreenCheck")!;
+        var template = (TextBox)window.FindName("TemplateBox")!;
+
+        // A toggle applies without touching Done.
+        bool before = settings.Current.ScreenshotPin;
+        pinCheck.IsChecked = !before;
+        window.FlushLiveApplyForTest();
+        Assert.Equal(!before, settings.Current.ScreenshotPin);
+
+        // A typed field does NOT — that is what Done is still for, and what Escape warns about.
+        string storedTemplate = settings.Current.FileNameTemplate;
+        Assert.False(window.HasUncommittedFieldEditsForTest());
+        template.Text = storedTemplate + " draft";
+        Assert.True(window.HasUncommittedFieldEditsForTest());
+        window.FlushLiveApplyForTest();
+        Assert.Equal(storedTemplate, settings.Current.FileNameTemplate);
+        template.Text = storedTemplate;
+        Assert.False(window.HasUncommittedFieldEditsForTest());
+
+        // Restore defaults resets the tab it is on, and nothing else.
+        settings.Current.FreezeScreen = false;
+        freeze.IsChecked = false;
+        overlayCheck.IsChecked = false;
+        window.FlushLiveApplyForTest();
+        Assert.False(settings.Current.ScreenshotShowOverlay);
+
+        list.SelectedIndex = 0;                       // General owns the after-capture matrix
+        PumpDispatcherOnce();
+        window.RestoreSectionDefaults(0);
+        Assert.True(settings.Current.ScreenshotShowOverlay);   // reset
+        Assert.False(settings.Current.FreezeScreen);           // Screenshots tab untouched
+
+        window.RestoreSectionDefaults(4);                      // now reset Screenshots
+        Assert.True(settings.Current.FreezeScreen);
     }
 
     private static void PumpDispatcherOnce()

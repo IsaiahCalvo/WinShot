@@ -117,9 +117,12 @@ public partial class SettingsWindow
         }
     }
 
-    private void LoadShortcutBoxes()
+    private void LoadShortcutBoxes() => LoadShortcutBoxes(_settings.Current);
+
+    /// <param name="s">The snapshot to read from — a pristine Settings when "Restore
+    /// defaults" is resetting the Shortcuts tab, the live one otherwise.</param>
+    private void LoadShortcutBoxes(Settings s)
     {
-        var s = _settings.Current;
         foreach (var def in AllShortcutDefs())
             if (_shortcutBoxes.TryGetValue(def.Key, out var box))
                 box.Text = def.Get(s);
