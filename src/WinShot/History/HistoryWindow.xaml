@@ -7,40 +7,6 @@
         AutomationProperties.Name="WinShot history"
         AutomationProperties.HelpText="Browse, sort, select, restore, copy, edit, pin, share, reveal, or delete local captures.">
     <Window.Resources>
-        <Style x:Key="ToolbarButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="12,8"/>
-            <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="{StaticResource RadiusButton}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceBrush}"/></Trigger>
-                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource ElevatedBrush}"/></Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Bd" Property="BorderThickness" Value="1"/></Trigger>
-                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.42"/></Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="AccentToolbarButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="16,9"/>
-        </Style>
-
         <Style x:Key="FilterChip" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
@@ -63,6 +29,9 @@
             </Setter>
         </Style>
 
+        <!-- Not a fork of PillButtonPrimary/Secondary: these sit ON the thumbnail, so they are
+             white-on-image with a translucent hover wash. A grey pill here would cover the
+             picture the user is trying to identify. -->
         <Style x:Key="OverlayActionButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="White"/>
@@ -99,40 +68,40 @@
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,10">
             <Grid>
                 <StackPanel x:Name="NormalToolbar" Orientation="Horizontal" HorizontalAlignment="Left">
-                    <Button x:Name="SelectButton" Content="Select" Style="{StaticResource AccentToolbarButton}"
+                    <Button x:Name="SelectButton" Content="Select" Style="{StaticResource PillButtonPrimary}"
                             Click="OnToggleSelectionMode" AutomationProperties.Name="Select history items"/>
                 </StackPanel>
 
                 <StackPanel x:Name="SelectionToolbar" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                    <Button x:Name="DoneButton" Style="{StaticResource AccentToolbarButton}" Click="OnToggleSelectionMode">
+                    <Button x:Name="DoneButton" Style="{StaticResource PillButtonPrimary}" Click="OnToggleSelectionMode">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Done"/></StackPanel>
                     </Button>
                     <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
                                FontSize="{StaticResource TextBodyLg}" VerticalAlignment="Center" Margin="20,0,16,0"/>
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
-                    <Button x:Name="AllSelectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSelectAll" AutomationProperties.Name="Select or clear all visible history items">
+                    <Button x:Name="AllSelectionButton" Style="{StaticResource PillButtonSecondary}" Click="OnToggleSelectAll" AutomationProperties.Name="Select or clear all visible history items">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock x:Name="SelectAllText" Text="Select all"/></StackPanel>
                     </Button>
-                    <Button x:Name="CopyToButton" Style="{StaticResource ToolbarButton}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
+                    <Button x:Name="CopyToButton" Style="{StaticResource PillButtonSecondary}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Copy to"/></StackPanel>
                     </Button>
-                    <Button x:Name="PinSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnPinSelected" IsEnabled="False" AutomationProperties.Name="Pin selected screenshots">
+                    <Button x:Name="PinSelectedButton" Style="{StaticResource PillButtonSecondary}" Click="OnPinSelected" IsEnabled="False" AutomationProperties.Name="Pin selected screenshots">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Pin"/></StackPanel>
                     </Button>
-                    <Button x:Name="ShareButton" Style="{StaticResource ToolbarButton}" Click="OnShareSelected" IsEnabled="False" AutomationProperties.Name="Share selected files">
+                    <Button x:Name="ShareButton" Style="{StaticResource PillButtonSecondary}" Click="OnShareSelected" IsEnabled="False" AutomationProperties.Name="Share selected files">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Share"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphMicro}" Margin="8,1,0,0"/></StackPanel>
                     </Button>
-                    <Button x:Name="DeleteSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnDeleteSelected" IsEnabled="False" AutomationProperties.Name="Delete selected history items">
+                    <Button x:Name="DeleteSelectedButton" Style="{StaticResource PillButtonSecondary}" Click="OnDeleteSelected" IsEnabled="False" AutomationProperties.Name="Delete selected history items">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Delete"/></StackPanel>
                     </Button>
                 </StackPanel>
 
                 <StackPanel x:Name="SortControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="{StaticResource ChipGutterMargin}"/>
-                    <Button x:Name="SortFieldButton" Style="{StaticResource ToolbarButton}" Click="OnSortFieldMenu" Background="{StaticResource SurfaceBrush}" Padding="12,7">
+                    <Button x:Name="SortFieldButton" Style="{StaticResource PillButtonSecondary}" Click="OnSortFieldMenu">
                         <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphMicro}" Margin="12,2,0,0"/></StackPanel>
                     </Button>
-                    <Button x:Name="SortDirectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSortDirection" Margin="4,0,0,0"
+                    <Button x:Name="SortDirectionButton" Style="{StaticResource PillButtonSecondary}" MinWidth="40" Click="OnToggleSortDirection"
                             AutomationProperties.Name="Sort descending"><TextBlock x:Name="SortDirectionGlyph" Text="&#xE74B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextTitle}"/></Button>
                 </StackPanel>
             </Grid>
@@ -153,10 +122,10 @@
         <Border Grid.Row="3" Background="{StaticResource ToolbarBgBrush}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,10">
             <DockPanel>
-                <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more" Style="{StaticResource ToolbarButton}"
+                <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more" Style="{StaticResource PillButtonSecondary}"
                         Click="OnLoadMore" Visibility="Collapsed" AutomationProperties.Name="Load more history items"
                         AutomationProperties.HelpText="Shows the next 200 local history items without loading the entire library at once."/>
-                <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Click="OnRefresh" Margin="{StaticResource ChipGutterMargin}" AutomationProperties.Name="Refresh history">
+                <Button DockPanel.Dock="Right" Style="{StaticResource PillButtonSecondary}" Click="OnRefresh" AutomationProperties.Name="Refresh history">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" Margin="0,0,7,0"/><TextBlock Text="Refresh"/></StackPanel>
                 </Button>
                 <StackPanel Orientation="Horizontal">

@@ -141,6 +141,16 @@ public class HistoryAcceptanceTests
         Assert.Contains("x:Name=\"LoadMoreButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnLoadMore\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Shows the next 200 local history items", xaml, StringComparison.Ordinal);
+
+        // History used to fork the theme with its own accent and neutral button styles at four
+        // different paddings. Every command button here is one of the two shared pills now; the
+        // only local Button style left is the one drawn on top of a thumbnail.
+        Assert.DoesNotContain("x:Key=\"ToolbarButton\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Key=\"AccentToolbarButton\"", xaml, StringComparison.Ordinal);
+        Assert.Single(
+            System.Text.RegularExpressions.Regex.Matches(xaml, "<Style x:Key=\"[A-Za-z]+\" TargetType=\"Button\""));
+        Assert.Contains("Style=\"{StaticResource PillButtonPrimary}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource PillButtonSecondary}\"", xaml, StringComparison.Ordinal);
     }
 
     [Theory]
