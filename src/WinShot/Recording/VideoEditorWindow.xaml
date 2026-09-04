@@ -31,8 +31,9 @@
             <TextBlock x:Name="TimeLabel" DockPanel.Dock="Right" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextBody}"
                        FontFamily="Consolas" VerticalAlignment="Center" Margin="10,0,0,0" Text="0:00 / 0:00"
                        AutomationProperties.Name="Current position and video duration"/>
-            <TextBlock x:Name="ScrubHint" Style="{StaticResource Hint}" VerticalAlignment="Center"
-                       Margin="{StaticResource LabelGutterMargin}"
+            <TextBlock x:Name="ScrubHint" VerticalAlignment="Center"
+                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
+                       TextTrimming="CharacterEllipsis" Margin="{StaticResource LabelGutterMargin}"
                        Text="Drag the filmstrip to scrub. Space plays and pauses."/>
         </DockPanel>
 
