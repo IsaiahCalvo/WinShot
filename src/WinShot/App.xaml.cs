@@ -73,16 +73,6 @@ public partial class App : Application
             Log.Info("Single-instance mutex present but no live instance responded; starting as primary.");
         }
 
-        // Before any window exists, and after the hand-off has had its chance to exit.
-        // ThemeResources.ApplyAnimationPreference can only zero a control template's
-        // transitions while its BeginStoryboards are still unsealed, and WPF seals them the
-        // first time a style is applied - so whichever window opened first used to decide
-        // whether "Animation effects: off" reached the WPF stack at all. The recovery dialog
-        // below was one such first window. A `winshot <command>` launch that only forwards to
-        // the running instance opens no window, so it should not parse the dictionary at all;
-        // the "already running" dialog on that path loads it itself.
-        Core.ThemeResources.EnsureLoaded();
-
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Error("Unhandled UI exception", args.Exception);
@@ -91,6 +81,19 @@ public partial class App : Application
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             Log.Error("Unhandled exception", args.ExceptionObject as Exception);
+
+        // Before any window exists, and after the hand-off has had its chance to exit.
+        // ThemeResources.ApplyAnimationPreference can only zero a control template's
+        // transitions while its BeginStoryboards are still unsealed, and WPF seals them the
+        // first time a style is applied - so whichever window opened first used to decide
+        // whether "Animation effects: off" reached the WPF stack at all. The recovery dialog
+        // below was one such first window. A `winshot <command>` launch that only forwards to
+        // the running instance opens no window, so it should not parse the dictionary at all;
+        // the "already running" dialog on that path loads it itself.
+        // Deliberately below the two handlers above: with animation off this inflates ~146
+        // deferred values and walks every template, and a bad pack URI in a repackaged build
+        // would otherwise kill startup with nothing installed to log it.
+        Core.ThemeResources.EnsureLoaded();
 
         // WinForms controls (the Fast* selectors, scrolling chrome) route UI-thread exceptions
         // through their own NativeWindow callback, which would otherwise pop the default .NET
@@ -663,7 +666,10 @@ public partial class App : Application
                 HandleCapture(capture);
             }
             else
-                ShowBalloon("Capture previous region", "No previous region yet — capture a region first.", ToastSeverity.Error);
+                // Info, not Error: nothing went wrong, a prerequisite is simply not met yet —
+                // the same shape as OCR's "Nothing found", which for the same reason does not
+                // wear a red glyph. The long dwell is what gives the sentence time to read.
+                ShowBalloon("Capture previous region", "No previous region yet — capture a region first.", ToastSeverity.Info, holdLong: true);
         });
 
     private void AllInOneFlow() => RunCaptureFlow(
@@ -1360,7 +1366,8 @@ public partial class App : Application
         string? path = FastQuickActionsWindow.PopRecentlyClosed();
         if (path is null)
         {
-            ShowBalloon("Restore", "No recently closed capture to restore.", ToastSeverity.Error);
+            // Prerequisite not met, not a failure — see CapturePreviousFlow.
+            ShowBalloon("Restore", "No recently closed capture to restore.", ToastSeverity.Info, holdLong: true);
             return;
         }
         if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
@@ -1515,6 +1522,20 @@ public partial class App : Application
     internal void ShowBalloon(
         string title, string message, ToastSeverity severity = ToastSeverity.Info, bool holdLong = false) =>
         ShowToast(title, message, anchor: null, onOpen: null, severity, holdLong);
+
+    /// <summary>
+    /// The one way to put a toast on screen, for callers outside App as well: it is what
+    /// carries the dispose-on-throw guard and the tray-balloon fallback, so a window that
+    /// fails to create still tells the user something instead of leaking a form and going
+    /// quiet. Silently does nothing when there is no running App (tests).
+    /// </summary>
+    internal static void Toast(
+        string title, string message, SD.Point? anchor = null, Action? onOpen = null,
+        ToastSeverity severity = ToastSeverity.Info, bool holdLong = false)
+    {
+        if (Current is App app)
+            app.ShowToast(title, message, anchor, onOpen, severity, holdLong);
+    }
 
     private void ShowToast(
         string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity,

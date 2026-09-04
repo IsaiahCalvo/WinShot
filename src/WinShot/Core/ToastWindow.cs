@@ -89,6 +89,9 @@ public sealed class ToastWindow : WF.Form
     // the anchor monitor or labels truncate on 125%/150% displays.
     private readonly double _scale;
 
+    /// <summary>The monitor this toast was laid out for; see the constructor.</summary>
+    private readonly WF.Screen _screen;
+
     private int S(int logical) => WinShot.Recording.RecordingMonitorDpi.Px(logical, _scale);
 
     public ToastWindow(
@@ -100,13 +103,18 @@ public sealed class ToastWindow : WF.Form
         bool holdLong = false)
     {
         _anchor = anchorScreen;
-        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
-            WF.Screen.FromPoint(anchorScreen ?? WF.Cursor.Position).Bounds);
+
+        // One screen read for the life of the toast. With no anchor the fallback is the
+        // pointer's monitor, and the pointer can cross to a different-DPI display between
+        // construction and Show() — re-reading it in Position() would lay the card out at
+        // 150 % metrics and then place it on a 100 % display.
+        _screen = WF.Screen.FromPoint(anchorScreen ?? WF.Cursor.Position);
+        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(_screen.Bounds);
 
         // Born on the anchor's monitor. Left at the default the form is created on the
         // primary, so a mixed-DPI move fires WM_DPICHANGED and re-renders the point-sized
         // fonts at a DPI the manual _scale layout was never computed for.
-        Location = WF.Screen.FromPoint(anchorScreen ?? WF.Cursor.Position).Bounds.Location;
+        Location = _screen.Bounds.Location;
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
@@ -406,7 +414,10 @@ public sealed class ToastWindow : WF.Form
             // From wherever the entrance had reached, not from full opacity: a toast replaced
             // 60 ms in used to snap to rest before fading.
             double from = _entranceAmount;
-            _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(from * (1d - p)), CloseIfStillExiting);
+            // EaseInCubic, not EaseOutCubic: the amount runs backwards here, so easing out
+            // over reversed time would drop the card below 12 % opacity in the first 120 ms
+            // and then leave an invisible window sitting there for the rest of the tween.
+            _motion = Motion.Run(RiseMs, Motion.EaseInCubic, p => ApplyEntrance(from * (1d - p)), CloseIfStillExiting);
             return;
         }
 
@@ -462,7 +473,7 @@ public sealed class ToastWindow : WF.Form
 
     private void Position()
     {
-        SD.Rectangle area = WF.Screen.FromPoint(_anchor ?? WF.Cursor.Position).WorkingArea;
+        SD.Rectangle area = _screen.WorkingArea;
         // The insets are logical DIP like every other measurement in this file: unscaled, the
         // toast sat 16 physical px off the edge at 150 % where the quick-actions card sits 24,
         // which reads as a near-miss rather than as alignment.

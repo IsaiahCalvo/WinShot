@@ -46,7 +46,6 @@
 
     <!-- Accent (single blue identity: active tool, primary action, selection) -->
     <Color x:Key="AccentColor">#FF0A84FF</Color>         <!-- macOS dark-mode system blue -->
-    <Color x:Key="AccentHoverColor">#FF409CFF</Color>    <!-- brighter blue, hover/press of accent -->
     <Color x:Key="AccentPressedColor">#FF0060DF</Color>  <!-- darker blue, pressed of accent -->
 
     <!-- Semantic info/heading (split out from accent-hover; was overloaded #4DA3FF) -->
@@ -68,9 +67,22 @@
          press necessarily lands on top of a hover; a second lightening wash made every
          pressed surface the brightest thing on screen and drove the glyph on a checked
          tool button down to 2.56:1. Dipping on press reads as pressed and keeps the
-         worst stack (chip + hover + press) at 8.8:1 for text. -->
+         worst stack (chip + hover + press) at 8.8:1 for text.
+
+         The one exception is a SATURATED fill — the blue pill button — where the wash is
+         not a hint on a neutral ground but a change to the colour the label has to be read
+         against. Lightening #0A84FF to #409CFF took white type to 2.83:1, below even the 3:1
+         floor for graphics, on the primary action of every dialog. So a saturated fill
+         hovers by dipping the same 12 %, which puts it at 4.44:1 — brighter contrast than
+         the button at rest, in the direction the press already goes. -->
     <Color x:Key="HoverFillColor">#1FFFFFFF</Color>      <!-- ~12% white circular/row hover -->
+    <Color x:Key="HoverShadeColor">#1F000000</Color>     <!-- ~12% black: hover on a SATURATED fill -->
     <Color x:Key="PressedShadeColor">#2E000000</Color>   <!-- ~18% black pressed -->
+
+    <!-- ~85% of the darkest ground: a badge or caption sitting ON a thumbnail, where the
+         picture underneath is whatever the user captured and only an opaque-ish scrim keeps
+         white type legible over it. -->
+    <Color x:Key="BadgeScrimColor">#D91D1D1D</Color>
 
     <!-- Hairlines / borders (one token for structure, one for emphasis) -->
     <Color x:Key="BorderColor">#1FFFFFFF</Color>         <!-- ~12% white: dividers, toolbar/panel edge, separators -->
@@ -88,7 +100,6 @@
     <SolidColorBrush x:Key="FloatingBgBrush"   Color="{StaticResource FloatingBgColor}"/>
 
     <SolidColorBrush x:Key="AccentBrush"        Color="{StaticResource AccentColor}"/>
-    <SolidColorBrush x:Key="AccentHoverBrush"   Color="{StaticResource AccentHoverColor}"/>
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>
     <SolidColorBrush x:Key="InfoBrush"          Color="{StaticResource InfoColor}"/>
     <SolidColorBrush x:Key="AnnotationRedBrush" Color="{StaticResource AnnotationRedColor}"/>
@@ -106,7 +117,9 @@
     <SolidColorBrush x:Key="TextDisabledBrush"  Color="{StaticResource TextDisabledColor}"/>
 
     <SolidColorBrush x:Key="HoverFillBrush"     Color="{StaticResource HoverFillColor}"/>
+    <SolidColorBrush x:Key="HoverShadeBrush"    Color="{StaticResource HoverShadeColor}"/>
     <SolidColorBrush x:Key="PressedShadeBrush"   Color="{StaticResource PressedShadeColor}"/>
+    <SolidColorBrush x:Key="BadgeScrimBrush"    Color="{StaticResource BadgeScrimColor}"/>
 
     <SolidColorBrush x:Key="BorderBrush"        Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
@@ -287,9 +300,10 @@
                 <ControlTemplate TargetType="ToggleButton">
                     <Grid>
                         <!-- Chip underneath, hover/press wash over it: the washes
-                             are translucent white, so a checked button lights up
-                             the same way an unchecked one does and no combination
-                             of states needs spelling out in a MultiTrigger. -->
+                             are translucent (white to lighten on hover, black to
+                             darken on press), so a checked button reacts the same
+                             way an unchecked one does and no combination of states
+                             needs spelling out in a MultiTrigger. -->
                         <Border x:Name="Chip"  Opacity="0" CornerRadius="{StaticResource RadiusChip}"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"/>
@@ -424,7 +438,7 @@
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
                             <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
-                                    Background="{StaticResource AccentHoverBrush}"/>
+                                    Background="{StaticResource HoverShadeBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
                                     Background="{StaticResource AccentPressedBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -961,10 +975,10 @@
                 <ControlTemplate TargetType="CheckBox">
                     <StackPanel Orientation="Horizontal">
                         <Grid Width="18" Height="18" VerticalAlignment="Center">
-                            <Border x:Name="Box" CornerRadius="5"
+                            <Border x:Name="Box" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource SurfaceAltBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
-                            <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                            <Border x:Name="Chip" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource AccentBrush}"
                                     BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
                             <Path x:Name="Check" Opacity="0"

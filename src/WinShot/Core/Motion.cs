@@ -72,6 +72,14 @@ internal static class Motion
     }
 
     /// <summary>
+    /// The mirror of <see cref="EaseOutCubic"/>: starts slow and accelerates away. An exit
+    /// wants this, so that leaving reads as the entrance played backwards — running the
+    /// entrance ease over reversed time instead dumps most of the opacity in the first third
+    /// and then lingers invisible for the rest of the tween.
+    /// </summary>
+    public static double EaseInCubic(double progress) => 1d - EaseOutCubic(1d - progress);
+
+    /// <summary>
     /// Overshoots past the target and settles back — the ease for a surface arriving on
     /// screen, so an entrance reads as landing rather than sliding to a halt. Starts at 0 and
     /// ends at exactly 1; in between it goes above 1, which is the whole point, so callers
@@ -228,10 +236,14 @@ internal static class Motion
 
         public void Dispose()
         {
-            if (_released) return;
-            _released = true;
+            // The released flag is read and set inside the same lock the count uses: two
+            // threads disposing one handle would otherwise both get past an unguarded check
+            // and unbalance timeEndPeriod. Every holder today is created and disposed by a
+            // Tween on the UI thread, so this is a guard against the next caller, not a bug.
             lock (Gate)
             {
+                if (_released) return;
+                _released = true;
                 _holders--;
                 if (_holders == 0)
                     TimeEndPeriod(1);

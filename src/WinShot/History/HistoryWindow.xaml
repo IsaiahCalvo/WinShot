@@ -225,13 +225,13 @@
                                             <Border Background="{StaticResource SurfaceBrush}" Opacity="0.72" Visibility="{Binding MissingThumbnailVisibility}">
                                                 <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphIllustration}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding ScrollingVisibility}">
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding ScrollingVisibility}">
                                                 <TextBlock Text="SCROLLING" Foreground="White" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Width="32" Height="25" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding VideoBadgeVisibility}">
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Width="32" Height="25" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding VideoBadgeVisibility}">
                                                 <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="{StaticResource GlyphBadge}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Padding="7,4" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding GifBadgeVisibility}">
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Padding="7,4" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding GifBadgeVisibility}">
                                                 <TextBlock Text="GIF" Foreground="White" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"/>
                                             </Border>
                                         </Grid>

@@ -269,6 +269,36 @@ public class DarkControlPaletteTests
     });
 
     /// <summary>
+    /// The primary pill's label is white on the accent, and hovering used to make that pair
+    /// WORSE — the wash was a brighter blue, which took white to 2.83:1, below even the 3:1
+    /// floor for graphics, on the affirmative button of every dialog. Nothing computed the
+    /// hovered pair, so nothing caught it. Hover on a saturated fill dips instead, so every
+    /// interactive state has to beat the button sitting there doing nothing.
+    /// </summary>
+    [Fact]
+    public void PillButtonPrimary_EveryStateReadsBetterThanAtRest() => OnTheme(theme =>
+    {
+        Color white = Colors.White;
+        Color accent = ((SolidColorBrush)theme["AccentBrush"]).Color;
+        Color hover = ((SolidColorBrush)theme["HoverShadeBrush"]).Color;
+        Color press = ((SolidColorBrush)theme["PressedShadeBrush"]).Color;
+        double rest = Contrast(white, accent);
+
+        foreach ((string state, Color fill) in new[]
+        {
+            ("hovered", Over(hover, accent)),
+            ("pressed", Over(press, accent)),
+            ("hovered + pressed", Over(press, Over(hover, accent))),
+        })
+        {
+            double now = Contrast(white, fill);
+            Assert.True(
+                now >= rest && now >= 3d,
+                $"a {state} PillButtonPrimary renders White at {now:0.00}:1, against {rest:0.00}:1 at rest");
+        }
+    });
+
+    /// <summary>
     /// Text brushes have to clear 4.5:1 on every ground the app puts them on. The failure
     /// line on a dialog is the case that broke: AnnotationRedBrush is a stroke/fill colour
     /// that clears the bar on WindowBg (4.99:1) and misses it on the ToolbarBg a dialog card

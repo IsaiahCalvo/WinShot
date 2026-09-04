@@ -90,6 +90,30 @@ public class MotionTests
     [InlineData(1d, 1d)]
     [InlineData(-5d, 0d)]
     [InlineData(5d, 1d)]
+    public void EaseInCubic_IsClamped(double progress, double expected)
+        => Assert.Equal(expected, Motion.EaseInCubic(progress), 6);
+
+    /// <summary>
+    /// The point of having both: an exit eased with EaseInCubic is the entrance played
+    /// backwards. Running the entrance's own ease over reversed time instead front-loads the
+    /// whole move — the toast lost most of its opacity in the first third and then sat there
+    /// invisible — so the two must be reflections of each other, not the same curve twice.
+    /// </summary>
+    [Theory]
+    [InlineData(0.25d)]
+    [InlineData(0.5d)]
+    [InlineData(0.75d)]
+    public void EaseInCubic_MirrorsEaseOutCubicAndAccelerates(double t)
+    {
+        Assert.Equal(1d - Motion.EaseOutCubic(1d - t), Motion.EaseInCubic(t), 6);
+        Assert.True(Motion.EaseInCubic(t) < t);
+    }
+
+    [Theory]
+    [InlineData(0d, 0d)]
+    [InlineData(1d, 1d)]
+    [InlineData(-5d, 0d)]
+    [InlineData(5d, 1d)]
     public void EaseOutBack_StartsAndEndsExactlyOnTheTarget(double progress, double expected)
         => Assert.Equal(expected, Motion.EaseOutBack(progress), 6);
 

@@ -573,6 +573,7 @@ public sealed class DarkSegmented : WF.Control
     private int _selectedIndex;
     private int _hotIndex = -1;
     private int _coolingIndex = -1;
+    private string[] _options = [];
 
     public DarkSegmented()
     {
@@ -592,7 +593,27 @@ public sealed class DarkSegmented : WF.Control
 
     public double Scale { get; init; } = 1.0;
 
-    public string[] Options { get; set; } = [];
+    /// <summary>
+    /// The cells. Assigning a shorter array used to leave the selection, the hot cell and a
+    /// running pill glide pointing past the end of it and repaint nothing, so the setter
+    /// clamps all three and abandons the glide — the pill has nowhere to glide to once the
+    /// track it was crossing no longer exists.
+    /// </summary>
+    public string[] Options
+    {
+        get => _options;
+        set
+        {
+            _options = value ?? [];
+            _pillRun?.Dispose();
+            _pillRun = null;
+            _gliding = false;
+            _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, _options.Length - 1));
+            _hotIndex = -1;
+            _coolingIndex = -1;
+            Invalidate();
+        }
+    }
 
     public event EventHandler? SelectedIndexChanged;
 

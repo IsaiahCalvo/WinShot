@@ -47,7 +47,10 @@ public sealed class FastPinWindow : WF.Form
     private const int ReadoutDurationMs = 800;
 
     private const int ToolbarIconSizeLogical = 16;
-    private static readonly SD.Color PressedFill = SD.Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF);
+    // Black, not a brighter white than the hover wash: every other control in the app now
+    // darkens on press (Theme.xaml's PressedShadeColor, DarkControlPalette's -12 press step),
+    // and the lock/close chips were the one surface still pressing the other way.
+    private static readonly SD.Color PressedFill = SD.Color.FromArgb(0x2E, 0x00, 0x00, 0x00);
 
     private static readonly List<FastPinWindow> OpenPins = new();
     private static int _openCount;
@@ -298,12 +301,18 @@ public sealed class FastPinWindow : WF.Form
 
     private void DrawButton(SD.Graphics g, SD.Rectangle bounds, string iconAsset, bool hot, bool pressed, bool focused)
     {
-        // Mirrors FastQuickActionsWindow.DrawButton: rest = dim glyph, hover = HoverFill circle,
-        // pressed = one step brighter than hover.
+        // Rest = dim glyph, hover = HoverFill circle, pressed = that same wash with the press
+        // shade stacked over it — the order Theme.xaml's Hover/Press layers composite in, so
+        // the chips press the same direction as every other control.
         if (hot || pressed)
         {
-            using var fill = new SD.SolidBrush(pressed ? PressedFill : ThemePalette.HoverFill);
-            g.FillEllipse(fill, bounds);
+            using var hover = new SD.SolidBrush(ThemePalette.HoverFill);
+            g.FillEllipse(hover, bounds);
+        }
+        if (pressed)
+        {
+            using var press = new SD.SolidBrush(PressedFill);
+            g.FillEllipse(press, bounds);
         }
 
         SD.Color glyphColor = hot || pressed ? ThemePalette.TextPrimary : ThemePalette.TextSecondary;

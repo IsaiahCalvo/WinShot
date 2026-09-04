@@ -1249,7 +1249,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         try
         {
             SD.Rectangle card = RectangleToScreen(_cardRect);
-            new Core.ToastWindow(title, message, new SD.Point(card.Left, card.Top), null, severity).Show();
+            // Through App, not a bare `new ToastWindow(...).Show()`: that is where the
+            // dispose-on-throw guard and the tray-balloon fallback live, and a share failure
+            // is exactly the message that must not go quiet when a window won't create.
+            App.Toast(title, message, new SD.Point(card.Left, card.Top), severity: severity);
         }
         catch (Exception ex)
         {
