@@ -232,6 +232,11 @@ public class MeasureModeTests
         selector.HandleMouseDown(new WF.MouseEventArgs(WF.MouseButtons.Right, 1, 80, 60, 0));
 
         Assert.Equal(WF.DialogResult.None, selector.DialogResult);
+
+        // Leaving a real drop-down open would hand the next test class a live modal-menu
+        // hook; Escape ends the session, which closes it.
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+        WF.Application.DoEvents();
     }
 
     [Fact]

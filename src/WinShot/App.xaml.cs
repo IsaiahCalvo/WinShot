@@ -741,9 +741,10 @@ public partial class App : Application
                 FastAllInOneSelectorDialog.Return(selector);
                 if (measureRequested)
                 {
-                    // Queue rather than call: this flow still has to unwind and clear
-                    // _captureInProgress before another selector may open.
-                    Dispatcher.BeginInvoke(() => QueueCaptureCommand("measure"));
+                    // Park it in the pending slot rather than queueing it: QueueCaptureCommand
+                    // would be dropped by the still-set _captureInProgress guard, and this is
+                    // the slot FinishCaptureFlow drains the moment it clears that guard.
+                    _pendingCaptureCommand = "measure";
                 }
             }
 

@@ -38,9 +38,17 @@ public sealed partial class FastRegionSelectorDialog
     /// the latch keeps the axis-lock repaint to one on the way down and one on the way up.</summary>
     private bool _shiftLatched;
 
-    /// <summary>The one live right-click menu. Kept in a field rather than disposed from its
-    /// own Closed handler: WinForms' Modal menu filter still touches a closing drop-down on
-    /// the next few messages, and disposing inside that window takes the process down.</summary>
+    /// <summary>
+    /// The one live right-click menu. Its lifetime is owned here rather than by its own
+    /// Closed handler because WinForms' modal-menu filter is a process-global message hook
+    /// that keeps touching a drop-down for several messages after it closes — disposing
+    /// inside that window takes the process down with an ObjectDisposedException from the
+    /// hook, which is not a failure any caller can catch.
+    ///
+    /// So: closing is immediate and always safe, and disposing waits until the NEXT menu
+    /// opens, by which point the hook is long done with this one. At most one menu object
+    /// outlives the selector, and the selector itself is pooled for the life of the process.
+    /// </summary>
     private WF.ContextMenuStrip? _measureMenu;
 
     /// <summary>How close the cursor must come to a guide to grab it.</summary>
@@ -313,6 +321,9 @@ public sealed partial class FastRegionSelectorDialog
                 return false; // let the ordinary Escape close the selector
 
             case WF.Keys.Enter when _measured is SD.Rectangle target:
+                // No repaint to ask for: this ends the session.
+                e.Handled = true;
+                e.SuppressKeyPress = true;
                 CaptureMeasured(target);
                 return true;
 
@@ -494,17 +505,16 @@ public sealed partial class FastRegionSelectorDialog
         catch (Exception ex) { Log.Error("Closing the measure menu failed (non-fatal)", ex); }
     }
 
-    /// <summary>Frees the previous menu, which by now is several message loops closed.</summary>
-    internal void DisposeMeasureMenu()
+    /// <summary>Frees the previous menu, which by now is many messages closed.</summary>
+    private void DisposePreviousMeasureMenu()
     {
-        CloseMeasureMenu();
         _measureMenu?.Dispose();
         _measureMenu = null;
     }
 
     private void ShowMeasureMenu(SD.Point screen)
     {
-        DisposeMeasureMenu();
+        DisposePreviousMeasureMenu();
         var menu = new WF.ContextMenuStrip
         {
             Renderer = new DarkDropDown.DarkMenuRenderer(),

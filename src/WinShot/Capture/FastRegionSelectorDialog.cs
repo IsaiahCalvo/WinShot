@@ -457,7 +457,8 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     {
         if (disposing)
         {
-            DisposeMeasureMenu();
+            // Close, do not dispose: see the _measureMenu note.
+            CloseMeasureMenu();
             DisposePanes();
             DisposeFrozen();
             _followTimer.Dispose();
