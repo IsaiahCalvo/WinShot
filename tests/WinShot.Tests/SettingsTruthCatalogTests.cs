@@ -34,8 +34,25 @@ public class SettingsTruthCatalogTests
         [
             "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
             "capture-window", "record-screen", "scrolling-capture", "capture-text",
+            "history",
         ],
         SettingsTruthCatalog.ExecutableShortcutIds);
+    }
+
+    [Fact]
+    public void DefaultGlobalHotkeys_AreAllDistinct()
+    {
+        var s = new Settings();
+        string[] defaults =
+        [
+            s.HotkeyCaptureRegion, s.HotkeyCaptureWindow, s.HotkeyCaptureFullscreen,
+            s.HotkeyRecord, s.HotkeyOcr, s.HotkeyScrolling, s.HotkeyCapturePrevious,
+            s.HotkeyAllInOne, s.HotkeyHistory,
+        ];
+
+        Assert.Equal("Ctrl+Shift+0", s.HotkeyHistory);
+        Assert.Equal(defaults.Length, defaults.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(defaults, gesture => Assert.True(HotkeyManager.TryParseGesture(gesture, out _, out _)));
     }
 
     [Fact]

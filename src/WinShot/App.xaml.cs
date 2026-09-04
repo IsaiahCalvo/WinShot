@@ -300,7 +300,7 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling")));
         menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal")));
         menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("History…", null, OpenHistory));
+        menu.Items.Add(MenuItem("History…", s.HotkeyHistory, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
         menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
         menu.Items.Add(new WF.ToolStripSeparator());
@@ -351,6 +351,7 @@ public partial class App : Application
         Reg(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"));
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
+        Reg(s.HotkeyHistory, OpenHistory);
 
         if (failed.Count == 0)
         {

@@ -59,6 +59,8 @@ public class Settings
 
     // History
     public int HistoryRetentionDays { get; set; } = 0; // 0 = count-based pruning only
+    // 1-8 are taken by the capture hotkeys and 9 is reserved for measure mode.
+    public string HotkeyHistory { get; set; } = "Ctrl+Shift+0";
 
     // Quick Access overlay (post-capture)
     public bool OverlayAutoClose { get; set; } = false; // CleanShot "Auto-close: Enable"; gates OverlayAutoCloseSeconds
