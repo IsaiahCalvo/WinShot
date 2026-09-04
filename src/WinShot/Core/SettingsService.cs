@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace WinShot.Core;
@@ -90,7 +90,7 @@ public class Settings
     public bool CursorOnScreenshots { get; set; } = false; // TODO: wire behavior — include cursor in fullscreen/self-timer shots
     public bool FreezeScreen { get; set; } = true;      // freeze the screen while selecting
     public bool ShowCrosshair { get; set; } = true;     // crosshair guides during selection
-    public string CrosshairMode { get; set; } = "command"; // always | command | never — when crosshair is shown
+    public string CrosshairMode { get; set; } = "always";  // always | command | never — when crosshair is shown
     public bool ShowMagnifier { get; set; } = true;     // pixel magnifier during selection
 
     // Quick Access overlay (extends the post-capture overlay block)

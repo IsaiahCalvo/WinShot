@@ -130,4 +130,16 @@ public class SelectorOptionsTests
         Assert.True(SelectorForeground.IsCovered(new IntPtr(99), surfaces));
         Assert.True(SelectorForeground.IsCovered(new IntPtr(99), new List<IntPtr>()));
     }
+
+    [Fact]
+    public void CrosshairGuidesAreOnOutOfTheBox()
+    {
+        // The shipped default, not the settings-is-null fallback: a fresh install shows
+        // the guides without the user holding Ctrl.
+        SelectorOptions options = SelectorOptions.ForRegion(new Settings());
+
+        Assert.Equal("always", new Settings().CrosshairMode);
+        Assert.True(options.IsCrosshairVisible(controlPressed: false));
+        Assert.True(options.NeedsCursorFollow);
+    }
 }

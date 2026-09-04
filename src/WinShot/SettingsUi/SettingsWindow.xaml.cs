@@ -325,7 +325,7 @@ public partial class SettingsWindow : Window
         SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
         CursorOnScreenshotsCheck.IsChecked = s.CursorOnScreenshots;
         FreezeScreenCheck.IsChecked = s.FreezeScreen;
-        SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 1);
+        SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 0);
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
 
@@ -599,7 +599,7 @@ public partial class SettingsWindow : Window
 
             // Screenshots
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
-            s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
+            s.CrosshairMode = SelectedTag(CrosshairModeCombo, "always");
             s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
             s.SelfTimerSeconds = selfTimer;
