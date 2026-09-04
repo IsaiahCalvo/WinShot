@@ -1114,13 +1114,15 @@
             </Grid>
         </Border>
         <ControlTemplate.Triggers>
+            <!-- Only the BACKGROUND moves here. `.annotation-dropdown__chevron` pins its own
+                 `color: #9da6b4` on the icon element (AnnotationDropdown.css:46-49), so the
+                 chevron's `currentColor` never picks up the trigger's hover white — the LABEL is
+                 what brightens (:25-29), and that is done on the ComboBox in SurveyDropdown. -->
             <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="Bg" Property="Background" Value="{StaticResource ChromeControlHoverBrush}"/>
-                <Setter TargetName="Caret" Property="Stroke" Value="#FFFFFFFF"/>
             </Trigger>
             <Trigger Property="IsChecked" Value="True">
                 <Setter TargetName="Bg" Property="Background" Value="{StaticResource ChromeControlHoverBrush}"/>
-                <Setter TargetName="Caret" Property="Stroke" Value="#FFFFFFFF"/>
             </Trigger>
         </ControlTemplate.Triggers>
     </ControlTemplate>
@@ -1232,6 +1234,17 @@
                         <Trigger Property="Tag" Value="{x:Null}">
                             <Setter TargetName="Heading" Property="Visibility" Value="Collapsed"/>
                             <Setter TargetName="HeadingRule" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                        <!-- `.annotation-dropdown__trigger:hover, [data-state='open'] { color: #fff }`
+                             (AnnotationDropdown.css:25-29). Set on the ComboBox, not on ContentSite:
+                             ContentSite's TextElement.Foreground is a TemplateBinding, and a value set
+                             in template markup outranks a template trigger, so a TargetName setter
+                             there would be ignored. Driving Foreground re-evaluates that binding. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="#FFFFFFFF"/>
+                        </Trigger>
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter Property="Foreground" Value="#FFFFFFFF"/>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
                             <Setter TargetName="Toggle" Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
