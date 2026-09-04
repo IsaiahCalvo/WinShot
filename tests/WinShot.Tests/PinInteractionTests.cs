@@ -220,6 +220,22 @@ public class PinInteractionTests
         });
     }
 
+    /// <summary>
+    /// The zoom chip's label. It replaced an 800 ms cursor pill, so it has to be readable at
+    /// every scale a pin can reach -- including the fit scale of a 32,000 px scrolling
+    /// capture, which rounds to 0 % if you just print the integer.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0, "100%")]
+    [InlineData(0.5, "50%")]
+    [InlineData(3.0, "300%")]
+    [InlineData(1.324, "132%")]
+    [InlineData(0.078, "7.8%")]
+    [InlineData(0.004, "0.4%")]
+    [InlineData(0.0001, "0.1%")]
+    public void TheZoomChipReadsTheScale(double scale, string expected)
+        => Assert.Equal(expected, FastPinWindow.ZoomChipText(scale));
+
     private static double ChromeAlpha(FastPinWindow pin)
         => (double)typeof(FastPinWindow)
             .GetField("_chromeAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!

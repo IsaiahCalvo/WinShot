@@ -343,6 +343,51 @@ public sealed class FastPinWindow : WF.Form
                 i == _hoverButton,
                 i == _pressedButton,
                 i == _focusButton && ContainsFocus);
+
+        DrawZoomChip(g, bar);
+    }
+
+    /// <summary>
+    /// The pin's scale, as a chip under the toolbar, for as long as the chrome is up. It used
+    /// to be knowable only in the 800 ms after a wheel tick, so "is this pin at 100 %?" -- the
+    /// question you ask before reading pixels off it -- had no answer at rest.
+    /// </summary>
+    private void DrawZoomChip(SD.Graphics g, SD.Rectangle bar)
+    {
+        string text = ZoomChipText(_scale);
+        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt, SD.FontStyle.Bold);
+        SD.Size size = WF.TextRenderer.MeasureText(text, font);
+        int w = size.Width + Ui(14);
+        int h = size.Height + Ui(6);
+        var chip = new SD.Rectangle(
+            bar.Left + ((bar.Width - w) / 2),
+            bar.Bottom + Ui(4),
+            w,
+            h);
+
+        // A tiny pin has no room under the bar; the chip is not worth clipping the image for.
+        if (chip.Bottom > ClientSize.Height - Ui(2))
+            return;
+
+        using var bg = new SD.SolidBrush(Fade(SD.Color.FromArgb(235, ThemePalette.ToolbarBg)));
+        using var border = new SD.Pen(Fade(ThemePalette.Border));
+        FillRoundedRect(g, bg, chip, h / 2);
+        DrawRoundedRect(g, border, chip, h / 2);
+        WF.TextRenderer.DrawText(g, text, font, chip, Fade(ThemePalette.TextPrimary),
+            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+    }
+
+    /// <summary>
+    /// The chip's label. Rounds to whole percent, and never says "0%" for a scale that is
+    /// merely small -- a 32,000 px scrolling capture fits the screen at about 0.4 %.
+    /// </summary>
+    internal static string ZoomChipText(double scale)
+    {
+        double percent = scale * 100d;
+        if (percent >= 10d) return $"{Math.Round(percent):0}%";
+        if (percent >= 1d) return $"{percent:0.#}%";
+        return $"{Math.Max(percent, 0.1d):0.0}%";
     }
 
     private string IconAssetFor(int index)
@@ -612,8 +657,9 @@ public sealed class FastPinWindow : WF.Form
         Left -= (int)Math.Round(e.X * (factor - 1));
         Top -= (int)Math.Round(e.Y * (factor - 1));
         _scale = newScale;
+        // No transient readout for zoom any more: the chip under the toolbar is showing the
+        // scale the whole time the chrome is up, which is whenever a wheel tick can happen.
         ApplyScale();
-        ShowReadout($"{(int)Math.Round(_scale * 100)}%", PointToClient(WF.Cursor.Position));
         Invalidate();
     }
 
@@ -707,7 +753,6 @@ public sealed class FastPinWindow : WF.Form
         _opacityBeforeLock = 1.0;
         _scale = 1.0;
         ApplyScale();
-        ShowReadout("100%", PointToClient(WF.Cursor.Position));
         Invalidate();
     }
 
