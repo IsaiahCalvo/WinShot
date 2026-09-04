@@ -974,8 +974,20 @@ public partial class App : Application
                 return _recording;
             _recording = new RecordingController(_settings, _history);
             _recording.RecordingElapsedChanged += OnRecordingElapsedChanged;
+            _recording.RecordingActiveChanged += OnRecordingActiveChanged;
             return _recording;
         }
+    }
+
+    /// <summary>Swaps the tray icon to a stop glyph for the length of the take, so the tray
+    /// says a recording is live and one click on it ends the recording.</summary>
+    private void OnRecordingActiveChanged(bool recording)
+    {
+        if (_tray is null)
+            return;
+        _tray.Icon = recording ? TrayIconFactory.CreateRecording() : TrayIconFactory.Create();
+        if (!recording)
+            _tray.Text = "WinShot";
     }
 
     private void OnRecordingElapsedChanged(TimeSpan? elapsed)

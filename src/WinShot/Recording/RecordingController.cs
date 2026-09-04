@@ -100,6 +100,11 @@ public sealed class RecordingController
 
     public event Action<TimeSpan?>? RecordingElapsedChanged;
 
+    /// <summary>Raised whenever a take starts or ends. Separate from the elapsed event, which
+    /// only fires while "Display recording time" is on — the tray icon has to say a recording
+    /// is live regardless of whether the user asked for a clock.</summary>
+    public event Action<bool>? RecordingActiveChanged;
+
     public void Shutdown()
     {
         _restarting = false; // never spin up a fresh recording while tearing down
@@ -420,6 +425,7 @@ public sealed class RecordingController
         StartElapsedTimer(p.ShowTimer);
 
         IsRecording = true;
+        RecordingActiveChanged?.Invoke(true);
         Log.Info($"Recording started ({(_isGif ? "GIF" : "MP4")}) {screenRect}");
     }
 
@@ -820,6 +826,7 @@ public sealed class RecordingController
 
     private void EndSession()
     {
+        bool wasRecording = IsRecording;
         IsRecording = false;
         _stopping = false;
         _discard = false;
@@ -829,6 +836,8 @@ public sealed class RecordingController
         StopElapsedTimer();
         RestoreDesktopIcons();
         RestoreNotifications();
+        if (wasRecording)
+            RecordingActiveChanged?.Invoke(false);
 
         if (_restarting && _lastCapture is { } capture)
         {
