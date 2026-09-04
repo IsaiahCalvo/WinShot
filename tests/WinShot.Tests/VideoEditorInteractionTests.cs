@@ -96,7 +96,11 @@ public class VideoEditorInteractionTests
         Assert.False(string.IsNullOrWhiteSpace((string?)Named("BtnCancelExport").Attribute("AutomationProperties.HelpText")));
         Assert.Equal("Collapsed", (string?)Named("BtnCancelExport").Attribute("Visibility"));
         Assert.Equal("Cancel", (string?)Named("BtnClose").Attribute("Content"));
-        Assert.Equal("Trim & export", (string?)Named("BtnExport").Attribute("Content"));
+        // The primary starts as "Convert" and is relabelled once a trim exists.
+        Assert.Equal("Convert", (string?)Named("BtnExport").Attribute("Content"));
+        Assert.Equal("Collapsed", (string?)Named("BtnTrimOnly").Attribute("Visibility"));
+        Assert.False(string.IsNullOrWhiteSpace((string?)Named("BtnTrimOnly").Attribute("AutomationProperties.HelpText")));
+        Assert.Equal("OnDestinationChanged", (string?)Named("DestinationCombo").Attribute("SelectionChanged"));
         Assert.Equal("Output summary", (string?)Named("OutputSummaryText").Attribute("AutomationProperties.Name"));
         Assert.Contains(document.Descendants(presentation + "WrapPanel"), panel =>
             (string?)panel.Attribute("Grid.Row") == "3");

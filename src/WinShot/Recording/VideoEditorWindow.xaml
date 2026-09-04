@@ -185,7 +185,7 @@
                       AutomationProperties.Name="Export mono audio"
                       AutomationProperties.HelpText="Mixes exported audio down to one channel."
                       Checked="OnOutputSettingsChanged" Unchecked="OnOutputSettingsChanged"/>
-            <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+            <StackPanel Orientation="Horizontal" Margin="0,4,12,4">
                 <TextBlock Style="{StaticResource FieldLabel}" Text="Volume" Margin="{StaticResource ChipGutterMargin}"/>
                 <Slider x:Name="VolumeSlider" Width="90" MinWidth="90" Style="{StaticResource DarkSlider}" VerticalAlignment="Center"
                         Minimum="0" Maximum="1" Value="1" SmallChange="0.05" LargeChange="0.1"
@@ -193,6 +193,18 @@
                         AutomationProperties.Name="Export volume"
                         AutomationProperties.HelpText="Use Left and Right Arrow to adjust export volume."
                         ValueChanged="OnVolumeChanged"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                <TextBlock Style="{StaticResource FieldLabel}" Text="Save to"/>
+                <ComboBox x:Name="DestinationCombo" Width="150" Margin="8,0,0,0"
+                          Style="{StaticResource DarkComboBox}" SelectedIndex="0"
+                          AutomationProperties.Name="Export destination"
+                          AutomationProperties.HelpText="Choose the folder the exported video is written to."
+                          SelectionChanged="OnDestinationChanged">
+                    <ComboBoxItem Content="Beside the original"/>
+                    <ComboBoxItem Content="Save folder"/>
+                    <ComboBoxItem Content="Choose folder..."/>
+                </ComboBox>
             </StackPanel>
         </WrapPanel>
 
@@ -225,10 +237,15 @@
                         AutomationProperties.HelpText="Stops the current export and removes any partial output. Keyboard shortcut: Escape."
                         AutomationProperties.AcceleratorKey="Escape"
                         Click="OnCancelExport"/>
+                <Button x:Name="BtnTrimOnly" Style="{StaticResource PillButtonSecondary}"
+                        Content="Trim only" Margin="{StaticResource ChipGutterMargin}" Visibility="Collapsed"
+                        Click="OnTrimOnly"
+                        AutomationProperties.Name="Trim without re-encoding"
+                        AutomationProperties.HelpText="Cuts to the trimmed range keeping the original encoding, so nothing is re-compressed."/>
                 <Button x:Name="BtnExport" Style="{StaticResource PillButtonPrimary}"
-                        Content="Trim &amp; export" Margin="0" Click="OnExport"
-                        AutomationProperties.Name="Trim and export video"
-                        AutomationProperties.HelpText="Trims and converts the edited video beside the source file. Keyboard shortcut: Control E."
+                        Content="Convert" Margin="0" Click="OnExport"
+                        AutomationProperties.Name="Convert video"
+                        AutomationProperties.HelpText="Re-encodes the video at the chosen size and quality. Keyboard shortcut: Control E."
                         AutomationProperties.AcceleratorKey="Control+E"/>
             </StackPanel>
         </Grid>

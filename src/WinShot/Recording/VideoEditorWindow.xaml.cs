@@ -48,6 +48,8 @@ public partial class VideoEditorWindow : Window
     private IReadOnlyList<VideoResolutionPreset> _resolutions =
         VideoResolutionPresets.For(1920, 1080);
     private long _sourceBytes;
+    private string? _chosenFolder;      // remembered for the session when "Choose folder..." is used
+    private int _lastDestinationIndex;  // to restore the picker when a folder choice is cancelled
 
     // Drag handles are 12px wide; the accent bar sits on their inner edge so the
     // selection spans from the start-thumb's right edge to the end-thumb's left.
@@ -205,7 +207,7 @@ public partial class VideoEditorWindow : Window
         if (e.Key == Key.E && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
             if (!_exporting)
-                OnExport(BtnExport, new RoutedEventArgs());
+                _ = RunExportAsync(trimOnly: false);
             e.Handled = true;
             return;
         }
@@ -432,6 +434,7 @@ public partial class VideoEditorWindow : Window
         SelectionBorder.Width = Math.Max(0, endX - startX);
         SelectionBorder.Height = height;
 
+        UpdateExportButtons();
         if (TrimStartLabel is not null) TrimStartLabel.Text = $"In {FormatTime(_trimStartSec)}";
         if (TrimEndLabel is not null) TrimEndLabel.Text = $"Out {FormatTime(_trimEndSec)}";
         if (TrimRangeLabel is not null) TrimRangeLabel.Text = FormatTime(Math.Max(0, _trimEndSec - _trimStartSec));
@@ -564,6 +567,56 @@ public partial class VideoEditorWindow : Window
 
     private void OnOutputSettingsChanged(object sender, RoutedEventArgs e) => UpdateOutputSummary();
 
+    /// <summary>
+    /// Trim-only is offered only once the handles have actually moved, and the primary stops
+    /// promising a trim it is not making.
+    /// </summary>
+    private void UpdateExportButtons()
+    {
+        if (BtnExport is null || BtnTrimOnly is null)
+            return;
+
+        bool hasTrim = VideoExportLabels.HasTrim(_trimStartSec, _trimEndSec, _durationSec);
+        BtnExport.Content = VideoExportLabels.PrimaryLabel(hasTrim);
+        System.Windows.Automation.AutomationProperties.SetHelpText(
+            BtnExport, VideoExportLabels.PrimaryHelp(hasTrim) + " Keyboard shortcut: Control E.");
+        BtnTrimOnly.Visibility = hasTrim && !_exporting ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnDestinationChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DestinationCombo is null)
+            return;
+
+        if (DestinationCombo.SelectedIndex != VideoExportDestination.ChooseFolder)
+        {
+            _lastDestinationIndex = DestinationCombo.SelectedIndex;
+            return;
+        }
+
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "Choose where the exported video is saved",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(_chosenFolder)
+                ? _chosenFolder!
+                : Path.GetDirectoryName(_mp4Path) ?? "",
+        };
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            _chosenFolder = dialog.SelectedPath;
+            // Say where it is going rather than leaving the picker on the verb.
+            ((ComboBoxItem)DestinationCombo.Items[VideoExportDestination.ChooseFolder]!).Content =
+                Path.GetFileName(_chosenFolder.TrimEnd(Path.DirectorySeparatorChar));
+            _lastDestinationIndex = VideoExportDestination.ChooseFolder;
+        }
+        else
+        {
+            // Cancelling the browser must not silently change where the file goes.
+            DestinationCombo.SelectedIndex = _lastDestinationIndex;
+        }
+    }
+
     private void UpdateOutputSummary()
     {
         if (OutputSummaryText is null || ResolutionCombo is null || QualityCombo is null ||
@@ -636,7 +689,13 @@ public partial class VideoEditorWindow : Window
 
     // ---- export ----
 
-    private async void OnExport(object sender, RoutedEventArgs e)
+    private void OnExport(object sender, RoutedEventArgs e) => _ = RunExportAsync(trimOnly: false);
+
+    private void OnTrimOnly(object sender, RoutedEventArgs e) => _ = RunExportAsync(trimOnly: true);
+
+    /// <param name="trimOnly">Cut to the trimmed range keeping the source encoding — no
+    /// re-compression, and a fraction of the time.</param>
+    private async Task RunExportAsync(bool trimOnly)
     {
         if (_exporting) return;
         if (_durationSec <= 0)
@@ -652,6 +711,12 @@ public partial class VideoEditorWindow : Window
         }
 
         double startSec = trimRange.StartSeconds;
+
+        if (trimOnly && !VideoExportLabels.HasTrim(_trimStartSec, _trimEndSec, _durationSec))
+        {
+            StatusText.Text = "Move a trim handle first, or use Convert.";
+            return;
+        }
 
         _exporting = true;
         _exportCancellationRequested = false;
@@ -707,24 +772,43 @@ public partial class VideoEditorWindow : Window
                 QualityCombo.SelectedIndex,
                 FrameRateCombo.SelectedIndex);
 
-            var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
-            profile.Video.Width = videoSettings.Width;
-            profile.Video.Height = videoSettings.Height;
-            profile.Video.Bitrate = videoSettings.Bitrate;
-            profile.Video.FrameRate.Numerator = (uint)Math.Round(videoSettings.FrameRate);
-            profile.Video.FrameRate.Denominator = 1;
-            if (audioSettings.OutputChannelCount is uint channelCount && profile.Audio is not null)
-                profile.Audio.ChannelCount = channelCount;
+            // Trim-only keeps the source encoding: the whole point is that nothing is
+            // re-compressed, so the size and quality controls do not apply to it.
+            MediaEncodingProfile profile;
+            if (trimOnly)
+            {
+                profile = await MediaEncodingProfile.CreateFromFileAsync(srcFile);
+            }
+            else
+            {
+                profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
+                profile.Video.Width = videoSettings.Width;
+                profile.Video.Height = videoSettings.Height;
+                profile.Video.Bitrate = videoSettings.Bitrate;
+                profile.Video.FrameRate.Numerator = (uint)Math.Round(videoSettings.FrameRate);
+                profile.Video.FrameRate.Denominator = 1;
+                if (audioSettings.OutputChannelCount is uint channelCount && profile.Audio is not null)
+                    profile.Audio.ChannelCount = channelCount;
+            }
 
-            string dir = Path.GetDirectoryName(_mp4Path)!;
-            string baseName = Path.GetFileNameWithoutExtension(_mp4Path);
+            string dir = VideoExportDestination.Resolve(
+                DestinationCombo?.SelectedIndex ?? VideoExportDestination.BesideOriginal,
+                _mp4Path,
+                _settings.Current.SaveFolder,
+                _chosenFolder,
+                Directory.Exists);
             var folder = await StorageFolder.GetFolderFromPathAsync(dir);
             ThrowIfExportCanceled();
-            var outFile = await folder.CreateFileAsync($"{baseName} (edited).mp4", CreationCollisionOption.GenerateUniqueName);
+            var outFile = await folder.CreateFileAsync(
+                VideoExportDestination.EditedFileName(_mp4Path),
+                CreationCollisionOption.GenerateUniqueName);
             _pendingOutputPath = outFile.Path;
             ThrowIfExportCanceled();
 
-            var render = composition.RenderToFileAsync(outFile, MediaTrimmingPreference.Precise, profile);
+            var render = composition.RenderToFileAsync(
+                outFile,
+                trimOnly ? MediaTrimmingPreference.Fast : MediaTrimmingPreference.Precise,
+                profile);
             _activeRender = render;
             if (_exportCancellationRequested)
                 render.Cancel();
@@ -746,21 +830,26 @@ public partial class VideoEditorWindow : Window
 
             string savedPath = outFile.Path;
             _exportCompleted = true;
-            _ = Task.Run(() =>
-            {
-                try { _history.AddFile(savedPath); }
-                catch (Exception ex) { Log.Error("Failed to add edited video to history", ex); }
-            });
 
             if (_closed)
                 return;
 
-            StatusText.Text = $"Saved {outFile.Name}{DescribeSavedSize(savedPath)}";
+            // History is written AFTER the replace choice, so replacing never leaves an entry
+            // pointing at a file that was moved out from under it.
+            savedPath = OfferReplaceOriginal(savedPath);
+            string finalPath = savedPath;
+            _ = Task.Run(() =>
+            {
+                try { _history.AddFile(finalPath); }
+                catch (Exception ex) { Log.Error("Failed to add edited video to history", ex); }
+            });
+
+            StatusText.Text = $"Saved {Path.GetFileName(savedPath)}{DescribeSavedSize(savedPath)}";
             Log.Info($"Edited video exported to {savedPath}");
             RecordingCompletionOverlay.Show(
                 savedPath,
                 _settings,
-                onEdit: () => new VideoEditorWindow(savedPath, _settings, _history).Show());
+                onEdit: () => new VideoEditorWindow(finalPath, _settings, _history).Show());
         }
         catch (Exception ex) when (VideoEditorInteraction.IsCancellation(ex) || _exportCancellationRequested)
         {
@@ -797,6 +886,46 @@ public partial class VideoEditorWindow : Window
                 SetExportUiState(exporting: false);
                 OpenPreviewSafely();
             }
+        }
+    }
+
+    /// <summary>
+    /// Asks what to do with the file that was just written. Save as new is the primary, so the
+    /// default answer never destroys the source. Returns the path the result now lives at.
+    /// </summary>
+    private string OfferReplaceOriginal(string exportedPath)
+    {
+        if (string.Equals(exportedPath, _mp4Path, StringComparison.OrdinalIgnoreCase))
+            return exportedPath;
+
+        int choice = ThemedMessageDialog.Choose(
+            this,
+            "Export finished",
+            $"Saved {Path.GetFileName(exportedPath)}. Replace the original with it, or keep both?",
+            new[] { "Replace video", "Save as new video" },
+            cancelLabel: "Keep both");
+        if (choice != 0)
+            return exportedPath;
+
+        try
+        {
+            // The preview still holds the source open; it is reopened by the finally block.
+            try { Media.Close(); }
+            catch (Exception ex) { Log.Error("Failed to close the preview before replacing", ex); }
+            File.Move(exportedPath, _mp4Path, overwrite: true);
+            Log.Info($"Replaced {_mp4Path} with the edited video");
+            _sourceBytes = 0; // the source is a different file now
+            return _mp4Path;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to replace {_mp4Path} with the edited video", ex);
+            ThemedMessageDialog.Show(
+                this,
+                "Could not replace the original",
+                $"The edited video was kept as {Path.GetFileName(exportedPath)}. " +
+                "The original is still in place — close anything playing it and try again.");
+            return exportedPath;
         }
     }
 
@@ -838,6 +967,7 @@ public partial class VideoEditorWindow : Window
     private void SetExportUiState(bool exporting)
     {
         BtnExport.IsEnabled = !exporting;
+        BtnTrimOnly.IsEnabled = !exporting;
         BtnClose.Visibility = exporting ? Visibility.Collapsed : Visibility.Visible;
         BtnCancelExport.Visibility = exporting ? Visibility.Visible : Visibility.Collapsed;
         BtnCancelExport.IsEnabled = exporting;
@@ -851,6 +981,8 @@ public partial class VideoEditorWindow : Window
         MuteCheck.IsEnabled = !exporting;
         MonoCheck.IsEnabled = !exporting;
         VolumeSlider.IsEnabled = !exporting;
+        DestinationCombo.IsEnabled = !exporting;
+        UpdateExportButtons();
     }
 
     private static async Task<bool> DeletePartialOutputAndLogAsync(string? partialPath)
