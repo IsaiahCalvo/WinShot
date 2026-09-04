@@ -16,7 +16,7 @@
 
          Glyph icons use "Segoe Fluent Icons" (Win11) with fallback to
          "Segoe MDL2 Assets" (Win10). Glyph codepoints live in the XAML that
-         consumes ToolButton/CircleActionButton — see UI-SPEC.md for the map.
+         consumes ToolButton/SurveyPrimaryButton — see UI-SPEC.md for the map.
          Draw/Shapes/Text annotation tools use Survey SVGs from SurveyToolIcons.xaml.
          ==================================================================== -->
 
@@ -118,6 +118,8 @@
     <Color x:Key="ChromeTextDisabledColor">#FF5A6473</Color>
 
     <SolidColorBrush x:Key="SurveyGoldBrush"        Color="{StaticResource SurveyGoldColor}"/>
+    <!-- .btn-primary:hover background/border: #b6904a (styles.css:156-159) -->
+    <SolidColorBrush x:Key="SurveyGoldPressedBrush" Color="{StaticResource SurveyGoldPressedColor}"/>
     <!-- .btn-active / B-I-U-S on state: rgba(216,168,78,0.18) -->
     <SolidColorBrush x:Key="SurveyGoldTintBrush"    Color="{StaticResource SurveyGoldColor}" Opacity="0.18"/>
     <!-- .btn-default:hover / .btn-icon:hover fill: rgba(216,168,78,0.14) -->
@@ -167,8 +169,6 @@
 
     <sys:Double x:Key="ToolButtonSize">36</sys:Double>
     <sys:Double x:Key="ToolGlyphSize">17</sys:Double>
-    <sys:Double x:Key="CircleActionSize">34</sys:Double>
-    <sys:Double x:Key="CircleGlyphSize">17</sys:Double>
     <sys:Double x:Key="PillHeight">30</sys:Double>
 
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
@@ -418,6 +418,56 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="Template" Value="{StaticResource SurveyButtonTemplate}"/>
+    </Style>
+
+    <!-- ====================================================================
+         `.btn.btn-primary.btn-md` (styles.css:82, 126-130, 151-159): the
+         affirmative action INSIDE Survey chrome — gold #d8a84e on #15110a,
+         6px radius, 28px tall, 6px/12px padding, hover #b6904a. Scoped to the
+         editor so PillButtonPrimary (settings, video, dialogs) stays untouched.
+         ==================================================================== -->
+    <Style x:Key="SurveyPrimaryButton" TargetType="Button">
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="MinWidth" Value="64"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="Margin" Value="4,0"/>
+        <Setter Property="Foreground" Value="#FF15110A"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border x:Name="FocusRing" Margin="-1" CornerRadius="7" BorderThickness="1"
+                                BorderBrush="Transparent" Background="Transparent"/>
+                        <Border x:Name="Bd" CornerRadius="6" BorderThickness="1"
+                                Background="{StaticResource SurveyGoldBrush}"
+                                BorderBrush="{StaticResource SurveyGoldBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              Margin="{TemplateBinding Padding}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurveyGoldPressedBrush}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SurveyGoldPressedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource SurveyGoldBrush}"/>
+                            <Setter TargetName="FocusRing" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                            <Setter Property="Cursor" Value="No"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- `.btn.btn-icon` (styles.css:207-221): a 28x28 square with no padding.
@@ -865,50 +915,6 @@
     </Style>
 
     <!-- ====================================================================
-         CIRCLE ACTION BUTTON — round bottom-utility-bar action
-         (share / pin / copy / cloud). 34px, monochrome glyph, hover fill.
-         ==================================================================== -->
-    <Style x:Key="CircleActionButton" TargetType="Button">
-        <Setter Property="Width"  Value="{StaticResource CircleActionSize}"/>
-        <Setter Property="Height" Value="{StaticResource CircleActionSize}"/>
-        <Setter Property="Margin" Value="4,0"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
-        <Setter Property="FontSize" Value="{StaticResource CircleGlyphSize}"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="SnapsToDevicePixels" Value="True"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Ellipse x:Name="Bg" Fill="{StaticResource SurfaceBrush}"/>
-                        <Ellipse x:Name="FocusRing" Stroke="{StaticResource BorderBrush}" StrokeThickness="1"/>
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
-                                          TextElement.FontSize="{TemplateBinding FontSize}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource SurfaceAltBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource ElevatedBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
-                            <Setter TargetName="FocusRing" Property="StrokeThickness" Value="2"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- ====================================================================
          FLOATING TOOLBAR CONTAINER — apply to a Border.
          Dark charcoal, 14px corners, padding, soft drop shadow, top highlight.
          Use for the editor's floating top pill and any HUD/overlay card.
@@ -921,12 +927,6 @@
         <Setter Property="Padding" Value="8,6"/>
         <Setter Property="Effect" Value="{StaticResource FloatingShadow}"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
-    </Style>
-
-    <!-- BOTTOM UTILITY-BAR CONTAINER — same material, used for the editor's
-         bottom bar (zoom dropdown · circular actions). -->
-    <Style x:Key="BottomUtilityBar" TargetType="Border" BasedOn="{StaticResource FloatingToolbar}">
-        <Setter Property="Padding" Value="8,5"/>
     </Style>
 
     <!-- A generic raised panel/sidebar surface (background composer left rail). -->

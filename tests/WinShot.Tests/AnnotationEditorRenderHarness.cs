@@ -174,6 +174,361 @@ public class AnnotationEditorRenderHarness
     }
 
     /// <summary>
+    /// AUDIT-ONLY probe (gated on WINSHOT_RENDER_INKAUDIT=1): measures pen live-preview vs
+    /// committed geometry and eraser determinism across widths and pointer speeds.
+    /// </summary>
+    [Fact]
+    public void RenderInkAndEraserAudit()
+    {
+        if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_INKAUDIT") != "1")
+            return;
+
+        string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUTPUT")
+            ?? Path.Combine(Path.GetTempPath(), "winshot-annotation-render");
+        Directory.CreateDirectory(outDir);
+        var log = new System.Text.StringBuilder();
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(
+                    new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+                var app = Application.Current ?? new Application();
+                app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                ThemeResources.EnsureLoaded();
+
+                var settings = new SettingsService();
+                var history = new HistoryService(settings);
+                var source = CreateSanitizedSource();
+                var editor = new EditorWindow(source, settings, history)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -6000,
+                    Top = -6000,
+                    ShowInTaskbar = false,
+                };
+                editor.Show();
+                Pump(45);
+
+                var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+                var viewport = (FrameworkElement)editor.FindName("Viewport")!;
+                double W = source.Width, H = source.Height;
+                var penSizeField = typeof(EditorWindow).GetField("_penSize",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var eraserSizeField = typeof(EditorWindow).GetField("_eraserSize",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+                EditorWindow.PointerArgs Pt(Point c) =>
+                    new(c, canvas.TranslatePoint(c, viewport), MouseButton.Left, 1);
+                void Check(string name)
+                { ((RadioButton)editor.FindName(name)!).IsChecked = true; Pump(3); }
+
+                double GeomArea(Geometry g) =>
+                    g is null ? 0 : g.GetFlattenedPathGeometry().GetArea();
+                int Figures(Geometry g) =>
+                    g is null ? 0 : g.GetFlattenedPathGeometry().Figures.Count;
+
+                // ---------- 1. pen live preview vs commit, several widths ----------
+                // "slow" = hand samples ~0.25 canvas px apart (what a 120Hz pointer produces
+                // at high zoom); "fast" = ~3.3 px apart. Only the slow case can expose the
+                // 0.2 live dedupe vs 0.35 commit compaction as a shape change.
+                foreach (var (pw, slow) in new[]
+                {
+                    (1.0, false), (2.0, false), (3.0, false), (12.0, false), (30.0, false),
+                    (2.0, true), (3.0, true), (12.0, true),
+                })
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    penSizeField.SetValue(editor, pw);
+                    Check("FreehandToolBtn");
+
+                    var path = new List<Point>();
+                    int n = slow ? 900 : 240;
+                    double span = slow ? 0.20 : 0.70;
+                    for (int i = 0; i <= n; i++)
+                    {
+                        double t = i / (double)n;
+                        path.Add(new Point(0.08 * W + span * W * t,
+                                           0.40 * H + (slow ? 0.03 : 0.12) * H * Math.Sin(t * Math.PI * 3)));
+                    }
+                    editor.PointerDown(Pt(path[0])); Pump(1);
+                    for (int i = 1; i < path.Count; i++) { editor.PointerMove(Pt(path[i])); Pump(1); }
+                    Pump(3);
+                    var live = canvas.Children.OfType<System.Windows.Shapes.Polyline>().Last();
+                    int livePts = live.Points.Count;
+                    string tag = $"w{pw}{(slow ? "-slow" : "")}";
+                    RenderToPng(editor, Path.Combine(outDir, $"audit-pen-preview-{tag}.png"), dpi: 192);
+                    editor.PointerUp(Pt(path[^1])); Pump(5);
+                    RenderToPng(editor, Path.Combine(outDir, $"audit-pen-commit-{tag}.png"), dpi: 192);
+                    var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    var compacted = PaperInk.Compact(live.Points);
+                    log.AppendLine($"PEN {tag} rawSamples={path.Count} livePts(0.2)={livePts} " +
+                        $"committedPts(0.35)={compacted.Count} " +
+                        $"outlineFigures={Figures(ink.Data!)} " +
+                        $"outlineVerts={FlatVertexCount(ink.Data!)} " +
+                        $"area={GeomArea(ink.Data!):F2} " +
+                        $"fillRule={((PathGeometry)ink.Data!).FillRule}");
+                }
+
+                // ---------- 2. eraser determinism: widths x pointer speeds ----------
+                foreach (double pw in new[] { 2.0, 12.0 })
+                {
+                    foreach (double stepPx in new[] { 0.5, 60.0 })
+                    {
+                        canvas.Children.Clear(); Pump(3);
+                        penSizeField.SetValue(editor, pw);
+                        Check("FreehandToolBtn");
+                        // One long horizontal stroke.
+                        var a = new Point(0.08 * W, 0.5 * H);
+                        var b = new Point(0.92 * W, 0.5 * H);
+                        editor.PointerDown(Pt(a)); Pump(1);
+                        for (int i = 1; i <= 120; i++)
+                            { editor.PointerMove(Pt(new Point(a.X + (b.X - a.X) * i / 120.0, a.Y))); Pump(1); }
+                        editor.PointerUp(Pt(b)); Pump(4);
+                        var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                        double areaBefore = GeomArea(ink.Data!);
+                        int figBefore = Figures(ink.Data!);
+
+                        // Vertical eraser sweep straight across the middle of the stroke.
+                        eraserSizeField.SetValue(editor, 20.0);
+                        Check("EraserToolBtn"); Pump(2);
+                        double cx = (a.X + b.X) / 2;
+                        double y0 = 0.5 * H - 60, y1 = 0.5 * H + 60;
+                        editor.PointerDown(Pt(new Point(cx, y0))); Pump(1);
+                        for (double y = y0 + stepPx; y <= y1; y += stepPx)
+                            { editor.PointerMove(Pt(new Point(cx, y))); Pump(1); }
+                        editor.PointerUp(Pt(new Point(cx, y1))); Pump(4);
+
+                        bool survived = canvas.Children.Contains(ink);
+                        double areaAfter = survived ? GeomArea(ink.Data!) : 0;
+                        int figAfter = survived ? Figures(ink.Data!) : 0;
+                        log.AppendLine($"ERASE penW={pw} step={stepPx} " +
+                            $"figures {figBefore}->{figAfter} " +
+                            $"area {areaBefore:F1}->{areaAfter:F1} " +
+                            $"removed={areaBefore - areaAfter:F1} " +
+                            $"expectedCut~{(20 + pw) * pw:F1} " +
+                            $"cutClean={(figAfter == 2 ? "YES" : "NO")}");
+                        if (stepPx == 60.0)
+                            RenderToPng(editor, Path.Combine(outDir, $"audit-erase-w{pw}-fast.png"), dpi: 192);
+                        if (stepPx == 0.5)
+                            RenderToPng(editor, Path.Combine(outDir, $"audit-erase-w{pw}-slow.png"), dpi: 192);
+                    }
+                }
+
+                // ---------- 3. eraser sweep ALONG a thin stroke (grazing) ----------
+                foreach (double pw in new[] { 1.0, 2.0, 12.0 })
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    penSizeField.SetValue(editor, pw);
+                    Check("FreehandToolBtn");
+                    var a = new Point(0.08 * W, 0.5 * H);
+                    var b = new Point(0.92 * W, 0.5 * H);
+                    editor.PointerDown(Pt(a)); Pump(1);
+                    for (int i = 1; i <= 120; i++)
+                        { editor.PointerMove(Pt(new Point(a.X + (b.X - a.X) * i / 120.0, a.Y))); Pump(1); }
+                    editor.PointerUp(Pt(b)); Pump(4);
+                    var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    double areaBefore = GeomArea(ink.Data!);
+                    eraserSizeField.SetValue(editor, 20.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    // zig-zag along the stroke: many short segments, each barely overlapping
+                    editor.PointerDown(Pt(new Point(0.20 * W, 0.5 * H))); Pump(1);
+                    for (int i = 1; i <= 80; i++)
+                    {
+                        double x = 0.20 * W + (0.60 * W) * i / 80.0;
+                        double y = 0.5 * H + ((i % 2 == 0) ? 9 : -9);
+                        editor.PointerMove(Pt(new Point(x, y))); Pump(1);
+                    }
+                    editor.PointerUp(Pt(new Point(0.80 * W, 0.5 * H))); Pump(4);
+                    bool survived = canvas.Children.Contains(ink);
+                    log.AppendLine($"GRAZE penW={pw} survived={survived} " +
+                        $"figures={(survived ? Figures(ink.Data!) : 0)} " +
+                        $"area {areaBefore:F1}->{(survived ? GeomArea(ink.Data!) : 0):F1}");
+                    RenderToPng(editor, Path.Combine(outDir, $"audit-erase-graze-w{pw}.png"), dpi: 192);
+                }
+
+                // ---------- 4. raw PaperInk.Subtract behaviour, no UI ----------
+                foreach (double pw in new[] { 1.0, 2.0, 3.0, 12.0 })
+                {
+                    var pts = new List<Point>();
+                    for (int i = 0; i <= 200; i++) pts.Add(new Point(50 + i * 4, 300));
+                    var inkGeo = PaperInk.Outline(pts, pw);
+                    double before = inkGeo.GetFlattenedPathGeometry().GetArea();
+                    Geometry acc = inkGeo;
+                    int noChange = 0;
+                    for (int i = 0; i < 40; i++)
+                    {
+                        var from = new Point(400, 240 + i * 3);
+                        var to = new Point(400, 240 + (i + 1) * 3);
+                        var cut = PaperInk.EraserStroke(new[] { from, to }, 20);
+                        double a0 = acc.GetFlattenedPathGeometry().GetArea();
+                        var next = PaperInk.Subtract(acc, cut);
+                        next = PaperInk.CullSlivers(next, pw);
+                        double a1 = next.GetFlattenedPathGeometry().GetArea();
+                        if (Math.Abs(a0 - a1) < 1e-9) noChange++;
+                        acc = next;
+                    }
+                    log.AppendLine($"RAW w={pw} area {before:F2} -> " +
+                        $"{acc.GetFlattenedPathGeometry().GetArea():F2} " +
+                        $"figures={acc.GetFlattenedPathGeometry().Figures.Count} " +
+                        $"segmentsWithNoChange={noChange}/40 " +
+                        $"widenFillRule={(PaperInk.Outline(pts, pw) as PathGeometry)!.FillRule}");
+                }
+
+                // ---------- 5. widened-outline fidelity: cap/join faceting ----------
+                foreach (double pw in new[] { 1.0, 3.0, 12.0, 30.0 })
+                {
+                    var dot = PaperInk.Outline(new[] { new Point(100, 100), new Point(101, 100) }, pw);
+                    log.AppendLine($"CAP w={pw} verts={FlatVertexCount(dot)} " +
+                        $"bounds={dot.Bounds} area={dot.GetFlattenedPathGeometry().GetArea():F3} " +
+                        $"idealArea={(Math.PI * pw * pw / 4 + pw):F3}");
+                }
+
+                // ---------- 6. highlighter fidelity vs the exact CSS multiply ----------
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    penSizeField.SetValue(editor, 12.0);
+                    Check("HighlighterToolBtn");
+                    // Straight across the card text row "Arrow Shape Pen Text" (y=182 in source px).
+                    var ha = new Point(85, 186); var hb = new Point(340, 186);
+                    editor.PointerDown(Pt(ha)); Pump(1);
+                    for (int i = 1; i <= 60; i++)
+                        { editor.PointerMove(Pt(new Point(ha.X + (hb.X - ha.X) * i / 60.0, ha.Y))); Pump(1); }
+                    editor.PointerUp(Pt(hb)); Pump(6);
+                    var hl = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    var hostField = typeof(EditorWindow).GetProperty("CanvasHost",
+                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    var host = (FrameworkElement)editor.FindName("CanvasHost")!;
+                    using var live = BitmapEffects.RenderVisual(host, source.Width, source.Height);
+                    var c = AnnotationStyle.HighlighterColor;
+                    // Compare the live canvas inside the ink to page*color, and probe a few
+                    // integer offsets to reveal any misregistration of the ImageBrush.
+                    for (int dy = -2; dy <= 2; dy++)
+                    {
+                        long err = 0; int n2 = 0; int worst = 0;
+                        for (int y = 181; y <= 192; y++)
+                            for (int x = 100; x <= 320; x++)
+                            {
+                                var got = live.GetPixel(x, y);
+                                var src = source.GetPixel(x, Math.Clamp(y + dy, 0, source.Height - 1));
+                                int e = Math.Abs(got.R - HighlighterBlend.MultiplyChannel(src.R, c.R, c.A))
+                                      + Math.Abs(got.G - HighlighterBlend.MultiplyChannel(src.G, c.G, c.A))
+                                      + Math.Abs(got.B - HighlighterBlend.MultiplyChannel(src.B, c.B, c.A));
+                                err += e; n2++; if (e > worst) worst = e;
+                            }
+                        log.AppendLine($"HL-FIDELITY dy={dy} meanAbsErr={(double)err / n2 / 3:F2} worstPixelErr={worst}");
+                    }
+                    log.AppendLine($"HL bounds={hl.Data!.Bounds} fill={hl.Fill.GetType().Name} " +
+                        $"width={((AnnotationData)hl.Tag!).Thickness} color={((AnnotationData)hl.Tag!).Color} " +
+                        $"host={hostField?.Name}");
+                    RenderToPng(editor, Path.Combine(outDir, "audit-highlighter-over-text-200pct.png"), dpi: 192);
+                }
+
+                // ---------- 7. eraser on a MOVED stroke (nonzero element offset) ----------
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    penSizeField.SetValue(editor, 6.0);
+                    Check("FreehandToolBtn");
+                    var a = new Point(0.10 * W, 0.30 * H);
+                    var b = new Point(0.85 * W, 0.30 * H);
+                    editor.PointerDown(Pt(a)); Pump(1);
+                    for (int i = 1; i <= 60; i++)
+                        { editor.PointerMove(Pt(new Point(a.X + (b.X - a.X) * i / 60.0, a.Y))); Pump(1); }
+                    editor.PointerUp(Pt(b)); Pump(4);
+                    var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    // Select and drag it down 120 px so ElementOffset != 0.
+                    Check("SelectToolBtn"); Pump(2);
+                    editor.PointerDown(Pt(new Point(0.5 * W, 0.30 * H))); Pump(1);
+                    for (int i = 1; i <= 20; i++)
+                        { editor.PointerMove(Pt(new Point(0.5 * W, 0.30 * H + 120.0 * i / 20.0))); Pump(1); }
+                    editor.PointerUp(Pt(new Point(0.5 * W, 0.30 * H + 120))); Pump(4);
+                    InvokePrivate(editor, "Select", null); Pump(2);
+                    double areaBefore = GeomArea(ink.Data!);
+                    var bnds = ink.Data!.Bounds;
+                    eraserSizeField.SetValue(editor, 20.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    double ey = 0.30 * H + 120;
+                    editor.PointerDown(Pt(new Point(0.5 * W, ey - 60))); Pump(1);
+                    for (int i = 1; i <= 40; i++)
+                        { editor.PointerMove(Pt(new Point(0.5 * W, ey - 60 + 120.0 * i / 40.0))); Pump(1); }
+                    editor.PointerUp(Pt(new Point(0.5 * W, ey + 60))); Pump(5);
+                    bool survived = canvas.Children.Contains(ink);
+                    log.AppendLine($"MOVED-ERASE survived={survived} dataBounds={bnds}->" +
+                        $"{(survived ? ink.Data!.Bounds.ToString() : "gone")} " +
+                        $"figures={(survived ? Figures(ink.Data!) : 0)} " +
+                        $"area {areaBefore:F1}->{(survived ? GeomArea(ink.Data!) : 0):F1}");
+                    RenderToPng(editor, Path.Combine(outDir, "audit-erase-moved.png"), dpi: 192);
+                }
+
+                // ---------- 8. many short passes over one self-crossing stroke ----------
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    penSizeField.SetValue(editor, 8.0);
+                    Check("FreehandToolBtn");
+                    var loop = new List<Point>();
+                    for (int i = 0; i <= 160; i++)
+                    {
+                        double t = i / 160.0 * Math.PI * 2;
+                        loop.Add(new Point(0.5 * W + 0.22 * W * Math.Cos(t) + 0.06 * W * Math.Cos(3 * t),
+                                           0.5 * H + 0.28 * H * Math.Sin(t)));
+                    }
+                    editor.PointerDown(Pt(loop[0])); Pump(1);
+                    for (int i = 1; i < loop.Count; i++) { editor.PointerMove(Pt(loop[i])); Pump(1); }
+                    editor.PointerUp(Pt(loop[^1])); Pump(4);
+                    var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    double a0 = GeomArea(ink.Data!);
+                    eraserSizeField.SetValue(editor, 16.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    int passes = 0, misses = 0;
+                    for (int k = 0; k < 12 && canvas.Children.Contains(ink); k++)
+                    {
+                        double y = 0.20 * H + k * 0.05 * H;
+                        double before = GeomArea(ink.Data!);
+                        editor.PointerDown(Pt(new Point(0.10 * W, y))); Pump(1);
+                        for (int i = 1; i <= 30; i++)
+                            { editor.PointerMove(Pt(new Point(0.10 * W + 0.80 * W * i / 30.0, y))); Pump(1); }
+                        editor.PointerUp(Pt(new Point(0.90 * W, y))); Pump(4);
+                        passes++;
+                        if (canvas.Children.Contains(ink) && Math.Abs(GeomArea(ink.Data!) - before) < 1e-6)
+                            misses++;
+                    }
+                    bool survived = canvas.Children.Contains(ink);
+                    log.AppendLine($"MULTIPASS passes={passes} passesThatCutNothing={misses} " +
+                        $"survived={survived} figures={(survived ? Figures(ink.Data!) : 0)} " +
+                        $"area {a0:F1}->{(survived ? GeomArea(ink.Data!) : 0):F1}");
+                    RenderToPng(editor, Path.Combine(outDir, "audit-erase-multipass.png"), dpi: 192);
+                }
+
+                File.WriteAllText(Path.Combine(outDir, "ink-eraser-audit.txt"), log.ToString());
+                editor.Close();
+                Pump(3);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw failure;
+    }
+
+    private static int FlatVertexCount(Geometry g)
+    {
+        int n = 0;
+        foreach (var f in g.GetFlattenedPathGeometry().Figures)
+        {
+            n += 1;
+            foreach (var s in f.Segments)
+            {
+                if (s is LineSegment) n += 1;
+                else if (s is PolyLineSegment pls) n += pls.Points.Count;
+            }
+        }
+        return n;
+    }
+
+    /// <summary>
     /// Drives every drawing tool through the editor's pointer seam (no real mouse, no
     /// visible window) and renders each state, so tool behaviour can be compared against
     /// Survey without touching the user's desktop. Gated like the render above.
@@ -250,6 +605,63 @@ public class AnnotationEditorRenderHarness
                         $"image={tl}..{brPt} viewport={viewport.ActualWidth}x{viewport.ActualHeight}");
                 }
                 Shot("pointer-open.png");
+
+                // LAYOUT: Survey's sub-row is a PORTAL that only mounts while a category is
+                // open (PDFViewer.jsx:32015), it OVERLAYS the canvas (AppShell.jsx:2727-2740),
+                // and the chip is a TOGGLE (AppShell.jsx:1637-1641). Scan the window's left
+                // edge column for the chrome bands so the three claims are measurable.
+                var groupBar = (FrameworkElement)editor.FindName("EditorGroupBar")!;
+                string ScanColumn()
+                {
+                    editor.UpdateLayout();
+                    var bmp = new RenderTargetBitmap(
+                        (int)Math.Ceiling(editor.ActualWidth), (int)Math.Ceiling(editor.ActualHeight),
+                        96, 96, PixelFormats.Pbgra32);
+                    bmp.Render(editor);
+                    int h = bmp.PixelHeight;
+                    var px = new byte[h * 4];
+                    bmp.CopyPixels(new Int32Rect(4, 0, 1, h), px, 4, 0);
+                    var runs = new List<string>();
+                    string prev = ""; int start = 0;
+                    for (int y = 0; y <= h; y++)
+                    {
+                        string c = y == h ? "" : $"#{px[y * 4 + 2]:X2}{px[y * 4 + 1]:X2}{px[y * 4 + 0]:X2}";
+                        if (c != prev)
+                        {
+                            if (prev.Length > 0) runs.Add($"{prev} y={start}..{y - 1}");
+                            prev = c; start = y;
+                        }
+                    }
+                    return string.Join(" | ", runs);
+                }
+                double viewportHOnOpen = viewport.ActualHeight;
+                var layoutLog = new System.Text.StringBuilder();
+                layoutLog.AppendLine($"select/no-group: band={groupBar.Visibility} viewportH={viewport.ActualHeight:0.##}");
+                layoutLog.AppendLine($"  column: {ScanColumn()}");
+
+                // Chip opens the Draw category.
+                ((Button)editor.FindName("DrawGroupBtn")!).RaiseEvent(
+                    new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Pump(4);
+                Shot("layout-subrow-open.png");
+                layoutLog.AppendLine($"draw open: band={groupBar.Visibility} barH={groupBar.ActualHeight} " +
+                    $"viewportH={viewport.ActualHeight:0.##} (delta={viewport.ActualHeight - viewportHOnOpen:0.##})");
+                layoutLog.AppendLine($"  column: {ScanColumn()}");
+
+                // Clicking the ACTIVE chip closes the row and leaves the tool alone.
+                object toolWhileOpen = typeof(EditorWindow).GetField("_tool",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
+                ((Button)editor.FindName("DrawGroupBtn")!).RaiseEvent(
+                    new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Pump(4);
+                Shot("layout-subrow-closed.png");
+                object toolAfterClose = typeof(EditorWindow).GetField("_tool",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
+                layoutLog.AppendLine($"chip toggled shut: band={groupBar.Visibility} tool {toolWhileOpen}->{toolAfterClose} " +
+                    $"viewportH={viewport.ActualHeight:0.##}");
+                layoutLog.AppendLine($"  column: {ScanColumn()}");
+                File.WriteAllText(Path.Combine(outDir, "layout-chrome.txt"), layoutLog.ToString());
+                Check("SelectToolBtn");
 
                 // Shapes: rect, ellipse, line, arrow, two counters.
                 Check("RectangleToolBtn"); Drag(new[] { (0.10, 0.25), (0.36, 0.52) });
@@ -405,6 +817,75 @@ public class AnnotationEditorRenderHarness
                 Check("SelectToolBtn");
                 Click(0.85, 0.88); Shot("pointer-callout-selected.png");
                 Click(0.10, 0.92); Shot("pointer-text-selected.png");
+
+                // ---- AUDIT PROBE: post-commit text/callout formatting -------------
+                {
+                    var log = new System.Text.StringBuilder();
+                    var selField = typeof(EditorWindow).GetField("_selected", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var activeField = typeof(EditorWindow).GetField("_activeText", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var boldBtn = (Button)editor.FindName("BoldBtn")!;
+                    var aaBtn = (Button)editor.FindName("TextEditBtn")!;
+                    var strip = (FrameworkElement)editor.FindName("TextStylePanel")!;
+                    var sizeInput = (TextBox)editor.FindName("SizeInput")!;
+                    void Fire(Button b) { b.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Pump(4); }
+                    string Desc(object? o) => o is null ? "null" : o.GetType().Name;
+
+                    // A committed TEXT box is selected right now.
+                    var selText = selField.GetValue(editor) as FrameworkElement;
+                    var textMeta = selText?.Tag as AnnotationData;
+                    log.AppendLine($"[TEXT] selectedVisual={Desc(selText)} metaType={textMeta?.Type}");
+                    log.AppendLine($"[TEXT] stripVisible={strip.Visibility} AaEnabled={aaBtn.IsEnabled} AaVisible={((FrameworkElement)editor.FindName("TextEditPanel")!).Visibility}");
+                    TextBlock? TextOf(FrameworkElement? fe) => fe as TextBlock
+                        ?? (fe as Border)?.Child as TextBlock
+                        ?? (fe as Grid)?.Children.OfType<TextBlock>().FirstOrDefault();
+                    log.AppendLine($"[TEXT] before  bold={textMeta?.Bold} weight={TextOf(selText)?.FontWeight}");
+                    Fire(boldBtn);
+                    var selText2 = selField.GetValue(editor) as FrameworkElement;
+                    log.AppendLine($"[TEXT] afterBold meta.Bold={(selText2?.Tag as AnnotationData)?.Bold} weight={TextOf(selText2)?.FontWeight}");
+                    // Aa should re-open the editor on the selected textbox (Survey: handleEnterTextEditFromStrip).
+                    Fire(aaBtn);
+                    log.AppendLine($"[TEXT] afterAa activeEditor={(activeField.GetValue(editor) is null ? "null" : "open")} editorsOnCanvas={canvas.Children.OfType<TextBox>().Count()}");
+                    // Size box on a selected textbox = border thickness in Survey.
+                    selField.SetValue(editor, selText2);
+                    sizeInput.Text = "6";
+                    typeof(EditorWindow).GetMethod("CommitSizeInput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null);
+                    Pump(4);
+                    var selText3 = selField.GetValue(editor) as FrameworkElement;
+                    log.AppendLine($"[TEXT] afterSize6 meta.Thickness={(selText3?.Tag as AnnotationData)?.Thickness}");
+
+                    // ---- CALLOUT ----
+                    Check("SelectToolBtn");
+                    Click(0.85, 0.88); Pump(3);
+                    var selCallout = selField.GetValue(editor) as CalloutAnnotation;
+                    log.AppendLine($"[CALLOUT] selected={Desc(selCallout)} AaEnabled={aaBtn.IsEnabled} stripVisible={strip.Visibility}");
+                    Fire(aaBtn); // Aa opens the callout editor
+                    log.AppendLine($"[CALLOUT] afterAa activeEditor={(activeField.GetValue(editor) is null ? "null" : "open")} stripVisible={strip.Visibility}");
+                    var beforeMeta = selCallout?.Tag as AnnotationData;
+                    log.AppendLine($"[CALLOUT] before bold={beforeMeta?.Bold} italic={beforeMeta?.Italic} labelWeight={selCallout?.Label.FontWeight} fontFamily={beforeMeta?.FontFamily} fontSize={beforeMeta?.FontSize}");
+                    Fire(boldBtn);
+                    var liveEditor = activeField.GetValue(editor) as TextBox;
+                    log.AppendLine($"[CALLOUT] afterBold(open) editorWeight={liveEditor?.FontWeight} meta.Bold={(selCallout?.Tag as AnnotationData)?.Bold} labelWeight={selCallout?.Label.FontWeight}");
+                    // Font family + size on an OPEN callout editor.
+                    var famBox = (ComboBox)editor.FindName("FontFamilyBox")!;
+                    foreach (ComboBoxItem it in famBox.Items.OfType<ComboBoxItem>())
+                        if (it.Tag as string == "Courier New") { famBox.SelectedItem = it; break; }
+                    Pump(4);
+                    var sizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
+                    foreach (ComboBoxItem it in sizeBox.Items.OfType<ComboBoxItem>())
+                        if (it.Tag is double d && Math.Abs(d - 36) < 0.01) { sizeBox.SelectedItem = it; break; }
+                    Pump(4);
+                    liveEditor = activeField.GetValue(editor) as TextBox;
+                    log.AppendLine($"[CALLOUT] afterFamily/Size(open) editorFamily={liveEditor?.FontFamily} editorSize={liveEditor?.FontSize} labelFamily={selCallout?.Label.FontFamily} labelSize={selCallout?.Label.FontSize}");
+                    // Commit the callout editor and see what survived.
+                    typeof(EditorWindow).GetMethod("CommitCalloutText", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, null);
+                    Pump(4);
+                    var afterMeta = selCallout?.Tag as AnnotationData;
+                    log.AppendLine($"[CALLOUT] afterCommit meta.Bold={afterMeta?.Bold} meta.FontFamily={afterMeta?.FontFamily} meta.FontSize={afterMeta?.FontSize} labelWeight={selCallout?.Label.FontWeight} labelFamily={selCallout?.Label.FontFamily} labelSize={selCallout?.Label.FontSize}");
+                    File.WriteAllText(Path.Combine(outDir, "text-format-audit.txt"), log.ToString());
+                    Shot("pointer-text-format-audit.png");
+                }
+                // ---- END AUDIT PROBE ----------------------------------------------
                 // --- Effects (WinShot-only; Survey has no equivalent): pixelate and blur. ---
                 EditorWindow.PointerArgs PA(Point c, int clicks = 1) =>
                     new EditorWindow.PointerArgs(c, canvas.TranslatePoint(c, viewport), MouseButton.Left, clicks);

@@ -112,6 +112,15 @@ public partial class EditorWindow : Window
     private EditorTool _lastTextTool = EditorTool.Text;
     private EditorTool _lastEffectsTool = EditorTool.Blur;
     private EditorTool _toolBeforeCrop = EditorTool.Select;
+    /// <summary>
+    /// Survey's <c>activeCategoryDropdown</c> reduced to a bool: the category sub-row is a
+    /// PORTAL that only mounts while a category is open (PDFViewer.jsx:32015). Clicking the
+    /// active chip closes it without changing the tool (AppShell.jsx:1637-1641), and the
+    /// derive-from-tool effect re-opens it on any tool change that lands in a group
+    /// (PDFViewer.jsx:4538-4555) — "closing doesn't change the tool, so this effect doesn't
+    /// re-open" (:4535-4537).
+    /// </summary>
+    private bool _groupRowOpen = true;
     private bool _eraserPartial = true;
     private double _eraserSize = 20; // Survey default
     // Survey snapshots the eraser's mode and radius at pointer-down and never re-reads the
@@ -441,7 +450,7 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return; // viewport not ready; retry on next trigger
 
-        double fit = Math.Min((vw - ViewMargin * 2) / _sourceWidth, (vh - ViewMargin * 2) / _sourceHeight);
+        double fit = Math.Min(FitWidthScale(vw), FitHeightScale(vh));
         // Fit may go below MinZoom (a 32000px scroll capture in a 650px viewport fits at
         // ~0.02) — clamping it to MinZoom left only the middle band visible. MinZoom still
         // floors user zooming. Small captures scale UP so Fit is not a postage stamp at 100%.
@@ -465,7 +474,7 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
 
-        double fitW = (vw - ViewMargin * 2) / _sourceWidth;
+        double fitW = FitWidthScale(vw);
         // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
         ApplyAnchoredScale(Math.Clamp(fitW, Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom));
         _viewFitMode = ViewFitMode.FitWidth;
@@ -478,7 +487,7 @@ public partial class EditorWindow : Window
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
         if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return;
 
-        double fitH = (vh - ViewMargin * 2) / _sourceHeight;
+        double fitH = FitHeightScale(vh);
         _zoom = Math.Clamp(fitH, Math.Min(MinZoom, Math.Max(fitH, 0.001)), MaxZoom);
         _viewFitMode = ViewFitMode.FitHeight;
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
@@ -487,7 +496,22 @@ public partial class EditorWindow : Window
         OnViewChanged();
     }
 
-    /// <summary>Survey's fit-page breathing room, also the bound used by <see cref="ClampView"/>.</summary>
+    /// <summary>
+    /// Survey's fit insets (PdfjsViewerContainer.jsx:51-52): PAD is subtracted per side
+    /// horizontally, GAP is added to the page height as a DIVISOR — vertical breathing room
+    /// scales with the content instead of being subtracted flat, and desktop has no
+    /// padTop/padBottom at all (:129-135, :137-140, :1891-1895).
+    /// </summary>
+    private const double FitPadX = 20;
+    private const double FitGap = 16;
+
+    /// <summary>Survey's getFitWidthForContainer / pw (PdfjsViewerContainer.jsx:137-140, :1891).</summary>
+    private double FitWidthScale(double vw) => Math.Max(1, vw - FitPadX * 2) / _sourceWidth;
+
+    /// <summary>Survey's fh: clientHeight / (ph + 2*gap) (PdfjsViewerContainer.jsx:1892-1893).</summary>
+    private double FitHeightScale(double vh) => vh / (_sourceHeight + 2 * FitGap);
+
+    /// <summary>The pan bound used by <see cref="ClampView"/>; unrelated to the fit insets.</summary>
     private const double ViewMargin = 12;
 
     /// <summary>
@@ -876,44 +900,69 @@ public partial class EditorWindow : Window
 
     private void OnDrawGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, false) != "Draw")
-            CheckToolButton(_lastDrawTool);
+        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
+        // closes the sub-row and leaves the tool alone; otherwise it opens and
+        // restores that category's last tool.
+        if (EditorShellContract.GroupFor(_tool, false) == "Draw")
+            _groupRowOpen = !_groupRowOpen;
+        else
+            CheckToolButton(_lastDrawTool); // RememberGroupTool re-opens the row
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnShapeGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, false) != "Shape")
-            CheckToolButton(_lastShapeTool);
+        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
+        // closes the sub-row and leaves the tool alone; otherwise it opens and
+        // restores that category's last tool.
+        if (EditorShellContract.GroupFor(_tool, false) == "Shape")
+            _groupRowOpen = !_groupRowOpen;
+        else
+            CheckToolButton(_lastShapeTool); // RememberGroupTool re-opens the row
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnTextGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, false) != "Text")
-            CheckToolButton(_lastTextTool);
+        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
+        // closes the sub-row and leaves the tool alone; otherwise it opens and
+        // restores that category's last tool.
+        if (EditorShellContract.GroupFor(_tool, false) == "Text")
+            _groupRowOpen = !_groupRowOpen;
+        else
+            CheckToolButton(_lastTextTool); // RememberGroupTool re-opens the row
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnEffectsGroupClick(object sender, RoutedEventArgs e)
     {
-        if (EditorShellContract.GroupFor(_tool, false) != "Effects")
-            CheckToolButton(_lastEffectsTool);
+        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
+        // closes the sub-row and leaves the tool alone; otherwise it opens and
+        // restores that category's last tool.
+        if (EditorShellContract.GroupFor(_tool, false) == "Effects")
+            _groupRowOpen = !_groupRowOpen;
+        else
+            CheckToolButton(_lastEffectsTool); // RememberGroupTool re-opens the row
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
+    /// <summary>
+    /// Survey's derive-from-tool effect (PDFViewer.jsx:4538-4555): every tool change that
+    /// lands in a group both remembers it as that group's last tool AND opens that group's
+    /// sub-row, so keyboard shortcuts are indistinguishable from clicking the chip.
+    /// </summary>
     private void RememberGroupTool(EditorTool tool)
     {
         switch (EditorShellContract.GroupFor(tool, false))
         {
-            case "Draw": _lastDrawTool = tool; break;
-            case "Shape": _lastShapeTool = tool; break;
-            case "Text": _lastTextTool = tool; break;
-            case "Effects": _lastEffectsTool = tool; break;
+            case "Draw": _lastDrawTool = tool; _groupRowOpen = true; break;
+            case "Shape": _lastShapeTool = tool; _groupRowOpen = true; break;
+            case "Text": _lastTextTool = tool; _groupRowOpen = true; break;
+            case "Effects": _lastEffectsTool = tool; _groupRowOpen = true; break;
         }
     }
 
@@ -1041,10 +1090,10 @@ public partial class EditorWindow : Window
         string group = _tool is EditorTool.Select or EditorTool.Pan
             ? EditorShellContract.GroupFor(chrome, filled)
             : EditorShellContract.GroupFor(_tool, false);
-        DrawGroupPanel.Visibility = Show(group == "Draw");
-        ShapeGroupPanel.Visibility = Show(group == "Shape");
-        TextGroupPanel.Visibility = Show(group == "Text");
-        EffectsGroupPanel.Visibility = Show(group == "Effects");
+        DrawGroupPanel.Visibility = Show(_groupRowOpen && group == "Draw");
+        ShapeGroupPanel.Visibility = Show(_groupRowOpen && group == "Shape");
+        TextGroupPanel.Visibility = Show(_groupRowOpen && group == "Text");
+        EffectsGroupPanel.Visibility = Show(_groupRowOpen && group == "Effects");
 
         EditorColorBar.Visibility = Visibility.Visible;
         if (SizeEffectHost is not null)
@@ -1061,7 +1110,13 @@ public partial class EditorWindow : Window
         // category portal for as long as it is up (AppShell.jsx:1756-1772, 2009).
         bool richText = TextStylePanel.Visibility == Visibility.Visible;
         HostRichTextRow(richText);
-        EditorGroupToolsHost.Visibility = Show(!richText && group is "Draw" or "Shape" or "Text" or "Effects");
+        EditorGroupToolsHost.Visibility = Show(_groupRowOpen && !richText && group is "Draw" or "Shape" or "Text" or "Effects");
+        // Survey PORTALS the 34px strip in only while something occupies it
+        // (PDFViewer.jsx:32015, AppShell.jsx:1756-1772); with Pan/Select active or the chip
+        // toggled shut there is no band and no hairline at all — the top bar butts straight
+        // onto the canvas. Collapsing the Border (not just its children) reproduces that,
+        // and because the band overlays the canvas the viewport never resizes or re-fits.
+        EditorGroupBar.Visibility = Show(EditorGroupToolsHost.Visibility == Visibility.Visible || richText);
         Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
     }
 

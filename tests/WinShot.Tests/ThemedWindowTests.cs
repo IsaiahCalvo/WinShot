@@ -549,7 +549,8 @@ public class ThemedWindowTests
 
         Assert.Null(editor.FindName("EditorStyleBar"));
         var groupBar = (FrameworkElement)editor.FindName("EditorGroupBar")!;
-        // The strip row is fixed chrome (Survey's 34px sub-row); only its chips host toggles.
+        // Survey PORTALS the 34px sub-row in only while a category is open
+        // (PDFViewer.jsx:32015) and OVERLAYS it on the canvas (AppShell.jsx:2727-2740).
         var groupHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
         var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
@@ -586,6 +587,11 @@ public class ThemedWindowTests
             el => el.Name is "EditorStyleBar");
 
         Assert.Equal(Visibility.Collapsed, groupHost.Visibility);
+        // No category open -> no band and no hairline at all: the top bar butts straight
+        // onto the canvas, which is why both are #181c24 in Survey.
+        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        Assert.Equal(34d, groupBar.Height);
+        Assert.Equal(VerticalAlignment.Top, groupBar.VerticalAlignment);
         Assert.DoesNotContain(primary.Children.OfType<FrameworkElement>(),
             el => el.Tag as string == "Step");
         Assert.Contains(((StackPanel)editor.FindName("ShapeGroupPanel")!).Children.OfType<RadioButton>(),
@@ -605,6 +611,21 @@ public class ThemedWindowTests
         editor.UpdateLayout();
         PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupHost.Visibility);
+        Assert.Equal(Visibility.Visible, groupBar.Visibility);
+        // AppShell.jsx:1637-1641: the chip is a TOGGLE — clicking the ACTIVE category
+        // closes the sub-row and leaves the tool alone; the derive-from-tool effect
+        // (PDFViewer.jsx:4535-4555) does not re-open it because the tool never changed.
+        var shapeChip = (Button)editor.FindName("ShapeGroupBtn")!;
+        shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        editor.UpdateLayout();
+        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        Assert.True(((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked);
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            "Opening or closing the sub-row must not resize the canvas — it overlays it.");
+        shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        Assert.Equal(Visibility.Visible, groupBar.Visibility);
         double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
         double arrowBarW = groupBar.ActualWidth;
         double arrowToolsW = groupTools.ActualWidth;
@@ -968,6 +989,11 @@ public class ThemedWindowTests
         Assert.True(zoom > 1.05, $"tiny capture stayed at native size: zoom={zoom}, viewport={vw}x{vh}");
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
+        // Survey's fit insets: PAD=20 subtracted per side horizontally, GAP=16 folded into
+        // the height DIVISOR (PdfjsViewerContainer.jsx:51-52, :137-140, :1891-1895).
+        double surveyFit = Math.Min((vw - 40) / imgW, vh / (imgH + 32));
+        Assert.True(Math.Abs(zoom - surveyFit) < 0.001,
+            $"fit does not match Survey: zoom={zoom} expected={surveyFit} viewport={vw}x{vh}");
         // Survey's fit trigger tooltip is `Page fit: ${label}` in every state (AppShell.jsx:3072).
         Assert.Equal("Page fit: Fit page", fitMenuBtn.ToolTip);
         Assert.Equal(Visibility.Visible, zoomBox.Visibility);

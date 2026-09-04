@@ -6,7 +6,11 @@
         AllowDrop="True" Drop="OnEditorDrop" DragOver="OnEditorDragOver"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
         AutomationProperties.Name="WinShot annotation editor">
-    <Grid Background="{StaticResource ChromePopoverBrush}">
+    <!-- Survey's canvas ground is #181c24 — the SAME token as the top bar and sub-row
+         (PDFViewer.jsx:23583/23607), which is why its chrome reads as one surface.
+         #0d0f14 is popovers/backdrop only, so it stays on the Window (Survey's `body`,
+         styles.css:23) and never on a chrome band. -->
+    <Grid Background="{StaticResource ChromeBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -317,7 +321,7 @@
                                                                         <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
                                                                                  Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
                                                                                  ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
-                                                                        <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource PillButtonPrimary}"
+                                                                        <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource SurveyPrimaryButton}"
                                                                                 Content="Apply" Click="OnColorPickerApply" AutomationProperties.Name="Apply color"/>
                                                                     </Grid>
                                                                     <DockPanel Margin="0,8,0,0">
@@ -396,7 +400,7 @@
                             </Grid>
                     <StackPanel x:Name="EditorFormatBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
+                                                        <Button Style="{StaticResource SurveyPrimaryButton}" Content="Apply crop" Click="OnApplyCrop"
                                                                 Margin="0,0,6,0"
                                                                 AutomationProperties.Name="Apply crop"/>
                                                         <Button x:Name="CropCancelBtn" Style="{StaticResource PillButtonSecondary}" Content="Don't crop" Click="OnCancelCrop"
@@ -680,11 +684,11 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="48"/>
             </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="34"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-                <Grid x:Name="Viewport" Grid.Row="1" Background="{StaticResource ChromePopoverBrush}" ClipToBounds="True"
+            <!-- Survey's #chrome-sub-toolbar-host is `position:absolute; top:0` inside the
+                 centre column so the sub-row OVERLAYS the canvas without pushing it down —
+                 "the viewer underneath keeps its full height" (AppShell.jsx:2727-2740).
+                 One row, EditorGroupBar declared after Viewport so it paints on top. -->
+                <Grid x:Name="Viewport" Background="{StaticResource ChromeBgBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
               AutomationProperties.Name="Annotation canvas"
@@ -778,8 +782,12 @@
             </Canvas>
         </Grid>
                 <!-- PDFViewer.jsx:32014-32032: 34px, #181c24, 1px #2a3140 bottom
-                     hairline, border-box (so the hairline eats into the 34). -->
-                <Border x:Name="EditorGroupBar" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                     hairline, border-box (so the hairline eats into the 34). Survey
+                     PORTALS this strip in only while a category is open
+                     (PDFViewer.jsx:32015 `activeCategoryDropdown &&`), so it starts
+                     collapsed and UpdateContextPanels mounts/unmounts it. -->
+                <Border x:Name="EditorGroupBar" HorizontalAlignment="Stretch" VerticalAlignment="Top"
+                        Height="34" Visibility="Collapsed"
                         Margin="0" Padding="0" CornerRadius="0"
                         Background="{StaticResource ChromeBgBrush}"
                         BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,0,0,1"
@@ -911,7 +919,7 @@
                 </Border>
             <!-- Survey's collapsed right rail (48px): zoom in, click-to-type percentage, zoom
                  out, divider, then the fit trigger whose menu flies out to the left. -->
-            <Border x:Name="ZoomRail" Grid.Column="1" Grid.RowSpan="2" Background="{StaticResource ChromeRailBrush}"
+            <Border x:Name="ZoomRail" Grid.Column="1" Background="{StaticResource ChromeRailBrush}"
                     BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="1,0,0,0"
                     AutomationProperties.Name="Zoom rail">
                 <!-- Survey's rail footer: zoom / fit live at the BOTTOM of the rail,
@@ -995,22 +1003,30 @@
             </Border>
         </Grid>
 
-        <Border x:Name="EditorBottomBar" Grid.Row="2" Style="{StaticResource BottomUtilityBar}"
-                Margin="12,6,12,12">
+        <!-- Survey chrome is FLAT and full-bleed: no radius, no border ring, no shadow,
+             no margin. The only Survey surface hosting these controls is the rail footer
+             (#12151c + a 1px #2a3140 top rule, AppShell.jsx:3011/3093), so the bottom band
+             uses the same fill and rule — and the rail can now land on it (LAYOUT-08). -->
+        <Border x:Name="EditorBottomBar" Grid.Row="2"
+                Margin="0" Padding="12,6" CornerRadius="0"
+                Background="{StaticResource ChromeRailBrush}"
+                BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,1,0,0"
+                SnapsToDevicePixels="True">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
-                    <Button x:Name="BtnSave" Style="{StaticResource CircleActionButton}" Click="OnSave"
+                    <Button x:Name="BtnSave" Style="{StaticResource CompactToolIconButton}" Click="OnSave"
                             ToolTip="Save as... (Ctrl+Shift+S)" AutomationProperties.Name="Save as"
                             AutomationProperties.HelpText="Choose a local export file. Shortcut Ctrl+Shift+S."
                             Content="{StaticResource SurveyIcon.Download}"/>
-                    <Button x:Name="BtnDone" Style="{StaticResource PillButtonPrimary}" Margin="6,0,0,0"
+                    <Button x:Name="BtnDone" Style="{StaticResource SurveyPrimaryButton}" Margin="6,0,0,0"
                             Content="Done" Click="OnDone" ToolTip="Copy and close"
                             AutomationProperties.Name="Done"
                             AutomationProperties.HelpText="Copy the edited image to the clipboard and close the editor."/>
                 </StackPanel>
 
-                <Button x:Name="BtnDragOut" Grid.Column="1" Style="{StaticResource PillButtonSecondary}"
+                <Button x:Name="BtnDragOut" Grid.Column="1" Style="{StaticResource SurveyDefaultButton}"
+                        Margin="0" Padding="10,4"
                         HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="SizeAll"
                         PreviewMouseLeftButtonDown="OnDragOutMouseDown" PreviewMouseMove="OnDragOutMouseMove"
                         ToolTip="Drag this image into another app" AutomationProperties.Name="Drag and drop"
@@ -1018,18 +1034,18 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="12"
                                    VerticalAlignment="Center" Opacity="0.7" Margin="0,0,8,0"/>
-                        <TextBlock Text="Drag &amp; Drop" VerticalAlignment="Center"/>
+                        <TextBlock Text="Drag &amp; Drop" VerticalAlignment="Center" FontFamily="Segoe UI" FontSize="13"/>
                     </StackPanel>
                 </Button>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
-                    <Button x:Name="BtnPin" Style="{StaticResource CircleActionButton}" Content="&#xE718;" ToolTip="Pin to screen"
+                    <Button x:Name="BtnPin" Style="{StaticResource CompactToolIconButton}" Content="&#xE718;" ToolTip="Pin to screen"
                             Click="OnPin" AutomationProperties.Name="Pin to screen"
                             AutomationProperties.HelpText="Open the edited image in a local always-on-top pin window."/>
-                    <Button x:Name="BtnCopy" Style="{StaticResource CircleActionButton}" Content="&#xE8C8;"
+                    <Button x:Name="BtnCopy" Style="{StaticResource CompactToolIconButton}" Content="&#xE8C8;"
                             ToolTip="Copy to clipboard (Ctrl+C)" Click="OnCopy" AutomationProperties.Name="Copy"
                             AutomationProperties.HelpText="Copy the source-resolution edited image. Shortcut Ctrl+C."/>
-                    <Button x:Name="BtnCenter" Style="{StaticResource CircleActionButton}" Content="&#xE9A6;"
+                    <Button x:Name="BtnCenter" Style="{StaticResource CompactToolIconButton}" Content="&#xE9A6;"
                             ToolTip="Fit &amp; center (Ctrl+0)" Click="OnCenterView" AutomationProperties.Name="Fit and center"
                             AutomationProperties.HelpText="Fit and center the whole image. Shortcut Ctrl+0."/>
                 </StackPanel>
