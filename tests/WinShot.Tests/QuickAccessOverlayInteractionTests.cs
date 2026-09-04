@@ -533,6 +533,63 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    [Fact]
+    public void TheCardSlidesInFromOffScreenAndLandsExactlyOnItsSlot()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            // Pin the monitor: "move to the active screen" reads the live cursor, which on a
+            // multi-monitor machine can answer differently between two placements and make
+            // the settled slot itself move.
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+
+            overlay.Show();
+            // The move happens before the first paint, so by the time Show returns the card
+            // is already off its slot rather than sitting on it.
+            SD.Point duringEntrance = overlay.Location;
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            SD.Point settled = overlay.Location;
+
+            Assert.NotEqual(settled, duringEntrance);
+            Assert.Equal(settled.X, duringEntrance.X);
+            Assert.True(duringEntrance.Y > settled.Y, "a bottom-anchored card comes up from below its slot");
+            Assert.True(
+                settled.Y + overlay.Height <= WF.Screen.FromRectangle(overlay.Bounds).WorkingArea.Bottom,
+                "the card settles fully inside the working area");
+            Assert.Equal(0, Motion.Holders);
+            overlay.Hide();
+        });
+    }
+
+    [Fact]
+    public void ClosingMidEntranceReleasesTheHighResolutionClock()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            overlay.Show();
+            overlay.Dispose();
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    private static void PumpUntil(Func<bool> condition, int timeoutMs)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(5);
+        }
+    }
+
     private static void InvokeKey(FastQuickActionsWindow overlay, WF.Keys keys)
         => Invoke(overlay, "OnOverlayKeyDown", overlay, new WF.KeyEventArgs(keys));
 

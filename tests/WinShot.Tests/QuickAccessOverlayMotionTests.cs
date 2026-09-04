@@ -1,4 +1,4 @@
-using WinShot.Overlay;
+﻿using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
 
@@ -6,6 +6,65 @@ namespace WinShot.Tests;
 
 public class QuickAccessOverlayMotionTests
 {
+    [Theory]
+    [InlineData("bottom-right")]
+    [InlineData("bottom-left")]
+    [InlineData("bottom")]
+    public void ACardAnchoredToTheBottomStartsCompletelyBelowTheWorkingArea(string position)
+    {
+        var workingArea = new SD.Rectangle(-1920, -120, 1920, 1040);
+        var bounds = new SD.Rectangle(-220, 780, 192, 120);
+
+        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position);
+
+        Assert.Equal(bounds.Left, origin.X);
+        Assert.True(origin.Y >= workingArea.Bottom);
+    }
+
+    [Theory]
+    [InlineData("left", true)]
+    [InlineData("right", false)]
+    [InlineData("top", null)]
+    public void ASideOrTopAnchoredCardStartsOffThatSameEdge(string position, bool? offLeft)
+    {
+        var workingArea = new SD.Rectangle(-1920, -120, 1920, 1040);
+        var bounds = new SD.Rectangle(-1904, 340, 192, 120);
+
+        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position);
+
+        if (offLeft is null)
+        {
+            Assert.Equal(bounds.Left, origin.X);
+            Assert.True(origin.Y + bounds.Height <= workingArea.Top);
+            return;
+        }
+
+        Assert.Equal(bounds.Top, origin.Y);
+        if (offLeft.Value)
+            Assert.True(origin.X + bounds.Width <= workingArea.Left);
+        else
+            Assert.True(origin.X >= workingArea.Right);
+    }
+
+    [Fact]
+    public void TheEntranceOvershootsItsSlotAndThenSettlesExactlyOnIt()
+    {
+        var start = new SD.Point(1700, 1040);
+        var end = new SD.Point(1700, 900);
+
+        double peak = Enumerable.Range(1, 99)
+            .Select(i => QuickAccessOverlayMotion.EaseOutBack(i / 100d))
+            .Max();
+
+        Assert.True(peak > 1d, "EaseOutBack must go past its target — that is the settle.");
+        Assert.Equal(0d, QuickAccessOverlayMotion.EaseOutBack(0d), 6);
+        Assert.Equal(1d, QuickAccessOverlayMotion.EaseOutBack(1d), 6);
+        // Clamped interpolation would flatten the overshoot into a stop at the slot.
+        Assert.True(QuickAccessOverlayMotion.InterpolateUnclamped(start, end, peak).Y < end.Y);
+        Assert.Equal(end, QuickAccessOverlayMotion.InterpolateUnclamped(start, end, 1d));
+        Assert.Equal(start, QuickAccessOverlayMotion.InterpolateUnclamped(start, end, 0d));
+    }
+
     [Theory]
     [InlineData("bottom-right", true)]
     [InlineData("right", true)]

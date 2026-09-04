@@ -42,6 +42,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly QuickActionsContextMenu _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
     private QuickAccessTooltipWindow? _tooltipWindow;
+    private SD.Rectangle _placedWorkingArea;
+    private IDisposable? _enterMotion;
     private WF.Timer? _exitMotionTimer;
     private WF.Timer? _stackMotionTimer;
     private IDisposable? _exitMotionClock;
@@ -192,6 +194,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             _closed = true;
             ClosePreviewPipeline();
+            StopEnterMotion();
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
             HideActionTooltip();
@@ -299,6 +302,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         base.OnVisibleChanged(e);
         if (Visible)
         {
+            // Before the first paint, not from Shown: Shown fires after the window has
+            // already painted once at its settled slot, which is a visible flash of the
+            // card at its destination before the slide-in starts.
+            BeginEnterMotion();
             QueueRegionUpdate();
             QueuePreviewLoad();
         }
@@ -417,6 +424,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             bool removed = OpenWindows.Remove(this);
             _closed = true;
             ClosePreviewPipeline();
+            StopEnterMotion();
             StopExitMotionTimer();
             StopStackMotionTimer();
             StopAutoCloseTimer();
@@ -765,6 +773,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             ? WF.Screen.FromPoint(WF.Cursor.Position)
             : WF.Screen.PrimaryScreen ?? WF.Screen.FromPoint(WF.Cursor.Position);
         var area = screen.WorkingArea;
+        _placedWorkingArea = area;
         // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
         int offset = OpenWindows.ToArray()
             .Where(w => !ReferenceEquals(w, this) && w.Visible && area.IntersectsWith(w.Bounds))
@@ -775,6 +784,53 @@ public sealed class FastQuickActionsWindow : WF.Form
             _settings.Current.OverlayPosition,
             offset,
             _dpi);
+        // The card is re-laid-out and re-placed once it learns its monitor's DPI, and that
+        // can land after the window is already visible — which would drop the card straight
+        // onto its slot and eat the entrance. Re-aim the slide at the new slot instead.
+        if (_enterMotion is not null)
+            BeginEnterMotion();
+    }
+
+    /// <summary>
+    /// The card slides in from outside the edge it is anchored to and settles with a small
+    /// overshoot — the eye follows it to the corner, so you always know where the capture
+    /// went. Dismissal was already choreographed; arrival was a hard cut.
+    /// </summary>
+    private void BeginEnterMotion()
+    {
+        if (_exitMotionStarted || _closed || IsDisposed || !IsHandleCreated)
+            return;
+
+        SD.Point target = Location;
+        // The working area the card was actually placed against, not one re-derived from
+        // Bounds: with monitors stacked above the laptop, Screen.FromRectangle can answer
+        // with a different monitor than the one PositionFromSettings chose, and the card
+        // then slides in from an edge it was never anchored to.
+        SD.Point start = QuickAccessOverlayMotion.EnterOrigin(
+            _placedWorkingArea,
+            Bounds,
+            _settings.Current.OverlayPosition);
+        if (start == target)
+            return;
+
+        StopEnterMotion();
+        MoveWithoutActivation(start);
+        _enterMotion = Motion.Run(
+            QuickAccessOverlayMotion.EnterDurationMs,
+            QuickAccessOverlayMotion.EaseOutBack,
+            eased =>
+            {
+                if (_exitMotionStarted || _closed || IsDisposed)
+                    return;
+                MoveWithoutActivation(QuickAccessOverlayMotion.InterpolateUnclamped(start, target, eased));
+            },
+            () => _enterMotion = null);
+    }
+
+    private void StopEnterMotion()
+    {
+        _enterMotion?.Dispose();
+        _enterMotion = null;
     }
 
     private void BeginExitMotion()
@@ -783,6 +839,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             return;
 
         _exitMotionStarted = true;
+        StopEnterMotion();
         StopStackMotionTimer();
         StopAutoCloseTimer();
         HideActionTooltip();
@@ -850,6 +907,7 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private void BeginStackMotion(SD.Point target, long started)
     {
+        StopEnterMotion();
         StopStackMotionTimer();
         if (_exitMotionStarted || _closed || IsDisposed || Location == target)
             return;
