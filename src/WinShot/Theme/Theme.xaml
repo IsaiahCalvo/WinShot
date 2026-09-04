@@ -46,6 +46,10 @@
 
     <!-- Accent (single blue identity: active tool, primary action, selection) -->
     <Color x:Key="AccentColor">#FF0A84FF</Color>         <!-- macOS dark-mode system blue -->
+    <!-- The same accent, deepened just enough that WHITE text on it clears 4.5:1 (it is
+         3.65:1 on AccentColor). Fill of anything that carries a white label; never a
+         border, a glyph or an indicator — those stay AccentColor. -->
+    <Color x:Key="AccentDeepColor">#FF0A73E0</Color>
     <Color x:Key="AccentPressedColor">#FF0060DF</Color>  <!-- darker blue, pressed of accent -->
 
     <!-- Semantic info/heading (split out from accent-hover; was overloaded #4DA3FF) -->
@@ -53,13 +57,19 @@
 
     <!-- Annotation / destructive red -->
     <Color x:Key="AnnotationRedColor">#FFFF453A</Color>  <!-- default stroke, step counter, record dot, destructive -->
+    <!-- Same story as AccentDeep: white on AnnotationRed is 3.4:1, so a destructive button's
+         FILL deepens while the stroke/dot colour is untouched. -->
+    <Color x:Key="RedDeepColor">#FFD42B21</Color>
     <Color x:Key="RedHoverColor">#FFFF6B60</Color>       <!-- brighter red, hover of destructive action -->
     <Color x:Key="RedPressedColor">#FFE0352B</Color>     <!-- darker red, pressed of destructive action -->
 
     <!-- Text -->
     <Color x:Key="TextPrimaryColor">#FFF2F2F4</Color>    <!-- ~95% white -->
     <Color x:Key="TextSecondaryColor">#B3FFFFFF</Color>  <!-- ~70% white, labels/values -->
-    <Color x:Key="TextDisabledColor">#66FFFFFF</Color>   <!-- ~40% white -->
+    <Color x:Key="TextDisabledColor">#66FFFFFF</Color>   <!-- ~40% white: DISABLED controls only (WCAG exempts them) -->
+    <!-- Helper text is not disabled text. At 40% white it measured 3.67:1 on the card
+         surface; 55% clears 4.5:1 and still reads clearly quieter than TextSecondary. -->
+    <Color x:Key="TextHintColor">#8CFFFFFF</Color>
 
     <!-- Interaction fills. Hover lightens, press DARKENS — the same ladder
          DarkControlPalette.HoverPressLighten uses on the WinForms side (+18 hovering,
@@ -100,6 +110,8 @@
     <SolidColorBrush x:Key="FloatingBgBrush"   Color="{StaticResource FloatingBgColor}"/>
 
     <SolidColorBrush x:Key="AccentBrush"        Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentDeepBrush"    Color="{StaticResource AccentDeepColor}"/>
+    <SolidColorBrush x:Key="RedDeepBrush"       Color="{StaticResource RedDeepColor}"/>
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>
     <SolidColorBrush x:Key="InfoBrush"          Color="{StaticResource InfoColor}"/>
     <SolidColorBrush x:Key="AnnotationRedBrush" Color="{StaticResource AnnotationRedColor}"/>
@@ -115,6 +127,7 @@
     <SolidColorBrush x:Key="TextPrimaryBrush"   Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
     <SolidColorBrush x:Key="TextDisabledBrush"  Color="{StaticResource TextDisabledColor}"/>
+    <SolidColorBrush x:Key="TextHintBrush"      Color="{StaticResource TextHintColor}"/>
 
     <SolidColorBrush x:Key="HoverFillBrush"     Color="{StaticResource HoverFillColor}"/>
     <SolidColorBrush x:Key="HoverShadeBrush"    Color="{StaticResource HoverShadeColor}"/>
@@ -427,13 +440,13 @@
         <Setter Property="Margin" Value="4,0"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
-        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bg" Background="{StaticResource AccentBrush}"
+                    <Border x:Name="Bg" Background="{StaticResource AccentDeepBrush}"
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
@@ -477,7 +490,7 @@
         <Setter Property="Margin" Value="4,0"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
-        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
@@ -526,7 +539,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bg" Background="{StaticResource AnnotationRedBrush}"
+                    <Border x:Name="Bg" Background="{StaticResource RedDeepBrush}"
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>

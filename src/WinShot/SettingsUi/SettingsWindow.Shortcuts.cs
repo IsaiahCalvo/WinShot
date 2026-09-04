@@ -40,33 +40,33 @@ public partial class SettingsWindow
     [
         new ShortcutSection { Title = "General", Items =
         [
-            Real("all-in-one", "All-In-One", "All-in-one capture",
+            Real("all-in-one", "All-in-one", "All-in-one capture",
                  s => s.HotkeyAllInOne, (s, v) => s.HotkeyAllInOne = v),
         ]},
         new ShortcutSection { Title = "Screenshots", Items =
         [
-            Real("capture-area", "Capture Region", "Capture region",
+            Real("capture-area", "Capture region", "Capture region",
                  s => s.HotkeyCaptureRegion, (s, v) => s.HotkeyCaptureRegion = v),
-            Real("capture-previous", "Capture Previous Region", "Repeat previous region",
+            Real("capture-previous", "Capture previous region", "Repeat previous region",
                  s => s.HotkeyCapturePrevious, (s, v) => s.HotkeyCapturePrevious = v),
-            Real("capture-fullscreen", "Capture Fullscreen", "Capture fullscreen",
+            Real("capture-fullscreen", "Capture fullscreen", "Capture fullscreen",
                  s => s.HotkeyCaptureFullscreen, (s, v) => s.HotkeyCaptureFullscreen = v),
-            Real("capture-window", "Capture Window", "Capture window",
+            Real("capture-window", "Capture window", "Capture window",
                  s => s.HotkeyCaptureWindow, (s, v) => s.HotkeyCaptureWindow = v),
         ]},
-        new ShortcutSection { Title = "Screen Recording", Items =
+        new ShortcutSection { Title = "Screen recording", Items =
         [
-            Real("record-screen", "Record Screen", "Record screen",
+            Real("record-screen", "Record screen", "Record screen",
                  s => s.HotkeyRecord, (s, v) => s.HotkeyRecord = v),
         ]},
-        new ShortcutSection { Title = "Scrolling Capture", Items =
+        new ShortcutSection { Title = "Scrolling capture", Items =
         [
-            Real("scrolling-capture", "Scrolling Capture", "Scrolling capture",
+            Real("scrolling-capture", "Scrolling capture", "Scrolling capture",
                  s => s.HotkeyScrolling, (s, v) => s.HotkeyScrolling = v),
         ]},
-        new ShortcutSection { Title = "OCR", Items =
+        new ShortcutSection { Title = "Text recognition", Items =
         [
-            Real("capture-text", "Capture Text", "Capture text (OCR)",
+            Real("capture-text", "Capture text", "Capture text (OCR)",
                  s => s.HotkeyOcr, (s, v) => s.HotkeyOcr = v),
         ]},
     ];

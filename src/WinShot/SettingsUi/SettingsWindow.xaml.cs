@@ -1139,14 +1139,14 @@ public partial class SettingsWindow : Window
 
             if (conflict)
             {
-                box.BorderBrush = ErrorBrush;
-                box.ToolTip = $"{box.Text} is already assigned to another action.";
+                MarkInvalid(box, $"{box.Text} is already assigned to another action.");
             }
             else if (ReferenceEquals(box.BorderBrush, ErrorBrush))
             {
-                // Only clear marks we own (an error border with our conflict tooltip).
+                // Only clear marks we own (an error border with our conflict message).
                 box.ClearValue(BorderBrushProperty);
                 box.ToolTip = null;
+                InlineValidation.Clear(box);
             }
         }
     }
@@ -1168,6 +1168,7 @@ public partial class SettingsWindow : Window
         {
             box.ClearValue(BorderBrushProperty);
             box.ToolTip = null;
+            InlineValidation.Clear(box);
         }
     }
 
@@ -1200,7 +1201,10 @@ public partial class SettingsWindow : Window
     private static void MarkInvalid(TextBox box, string message)
     {
         box.BorderBrush = ErrorBrush;
+        // The tooltip stays as the accessible/overflow copy; the adorner is what the user
+        // actually reads, under the field, without hovering anything.
         box.ToolTip = message;
+        InlineValidation.Show(box, message);
     }
 
     /// <summary>Parses an int; unparseable input blocks the save, out-of-range input is clamped.</summary>
