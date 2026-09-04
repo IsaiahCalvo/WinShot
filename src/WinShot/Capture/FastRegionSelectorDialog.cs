@@ -805,18 +805,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_mode == SelectorMode.Window)
             return; // window mode confirms on mouse-up
 
-        // Area mode.
+        // Area mode. A fresh press is a fresh provenance: the flag below says the rect came
+        // from the detector, and downstream probe refinement is only correct for those.
+        SelectedByPaneClick = false;
+
         // Ctrl+click retargets to the detected element even when a selection is already
-        // framed. Without it the only way back to element pick was to cancel and re-open:
-        // a bare click takes the element, but only while nothing is pending.
+        // framed. Without it the only way back to element pick was to cancel and re-open —
+        // a bare click takes the element, but only while nothing is pending. It stages the
+        // element as an adjustable selection rather than capturing it, matching what Ctrl
+        // means at release: give me the adjustable path this time.
         if (_paneHover &&
             (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control &&
             SnapRectAt(screen) is SD.Rectangle element)
         {
+            SelectedByPaneClick = true;
             if (_pendingScreen is null)
             {
                 SetPendingRegion(element);
-                SelectedByPaneClick = true;
                 InvalidateAllSurfaces();
             }
             else
@@ -849,6 +854,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             int handle = SelectionHandles.HitTest(screen, pending);
             if (handle >= 0)
             {
+                // Hand-adjusting a detector rect makes it a hand-drawn one; downstream probe
+                // refinement is only correct for a rect the detector still owns.
                 _resizeHandle = handle;
                 _adjustStartRect = pending;
                 return;
