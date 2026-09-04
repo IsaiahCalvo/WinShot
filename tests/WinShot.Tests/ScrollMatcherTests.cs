@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using WinShot.Scrolling;
 using Xunit;
@@ -297,5 +297,35 @@ public class ScrollMatcherTests
         }
         finally { bmp.UnlockBits(data); }
         return bmp;
+    }
+
+    /// <summary>
+    /// A capture region only a few pixels wide leaves the last column strip with no pixels in
+    /// it. The strip length used to be computed arithmetically and went to zero (span 2) or
+    /// negative (span 1), turning the strip mean into NaN or a negative number that then
+    /// poisoned every comparison downstream. Guards the clamp in FrameSignature.Build.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(6)]
+    [InlineData(8)]
+    public void FrameSignature_StaysFiniteOnAnAbsurdlyNarrowRegion(int width)
+    {
+        using var bmp = new SD.Bitmap(width, 4, PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(bmp))
+            g.Clear(SD.Color.FromArgb(255, 120, 120, 120));
+
+        var sig = FrameSignature.Build(bmp);
+
+        for (int s = 0; s < FrameSignature.Strips; s++)
+            for (int y = 0; y < sig.Height; y++)
+            {
+                Assert.True(float.IsFinite(sig.StripMean[s][y]), $"strip {s} row {y} mean is not finite");
+                Assert.True(sig.StripMean[s][y] >= 0f, $"strip {s} row {y} mean is negative");
+                Assert.True(float.IsFinite(sig.StripEnergy[s][y]), $"strip {s} row {y} energy is not finite");
+            }
     }
 }

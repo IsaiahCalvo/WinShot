@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using SD = System.Drawing;
 
@@ -129,7 +129,11 @@ public sealed class FrameSignature
                 long totalSum = 0, totalGrad = 0;
                 for (int s = 0; s < Strips; s++)
                 {
-                    int len = s == Strips - 1 ? span - stripLen * (Strips - 1) : stripLen;
+                    // Clamped: below three columns the last strip's arithmetic length goes to
+                    // zero or negative, which used to divide the strip mean into NaN (span 2)
+                    // or a negative mean (span 1). Such a strip holds no pixels, so its sum is
+                    // zero and a length of 1 is simply a mean of 0.
+                    int len = Math.Max(1, s == Strips - 1 ? span - stripLen * (Strips - 1) : stripLen);
                     stripMean[s][y] = sum[s] / (float)len;
                     stripEnergy[s][y] = y == 0 ? 0f : grad[s] / (float)len;
                     totalSum += sum[s];

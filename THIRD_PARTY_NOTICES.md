@@ -43,12 +43,48 @@ to say what ShareX is observed to do (always-on element detection, longest-run r
 matching when stitching, re-foregrounding the window before a scroll key). Those are
 observations about behaviour, not ported code. `Core/HotkeyConflictInspector.cs`
 also names ShareX, as one of the apps whose hotkeys can clash with WinShot's; that
-is a data row, not a citation.
+is a data row, not a citation — and its test fixture,
+`tests/WinShot.Tests/HotkeyConflictTests.cs`, names it for the same reason. Those
+five files plus the two headers above are every mention of ShareX in the tree.
+
+**How that was checked, and what it found.** ShareX's own sources for the two
+files in question — the region selector's rectangle list and its rectangle
+animation — were fetched and read alongside WinShot's on 2026-09-04 (commit
+`c24ccbf`). No ShareX checkout is kept in this tree or on this machine, so the
+findings are recorded here rather than left as an assertion:
+
+- `Capture/RectangleTween.cs` was **not** a port and never had been. It shares a
+  four-value lerp, the parameter name `amount` and a 200 ms duration with ShareX's
+  animation, and nothing else — different base type, different members, its own
+  stopwatch, its own retarget/stop API, and an exact-landing branch ShareX has no
+  equivalent of. Its header was simply wrong about WinShot's own code, and now
+  says "modelled on the behaviour of".
+- `Core/WindowEnumerator.cs` **was** close. No copied line, but the same
+  decomposition into one recursive function, the same trick of using a nullable
+  clip rectangle as the top-level/child discriminator, the same nine guards in the
+  same order, and two comments that read as paraphrases. That is what the
+  restructure removed: the walk is now a `SnapScan` with separate
+  `CollectTopLevel` / `CollectChild` entry points, because a top-level window and
+  a child control answer to different rules, and named `IsCapturableWindow`,
+  `FrameBoundsOf` and `DropCoveredControls` helpers. The emitted ordering is
+  unchanged, because the region selector's hover resolution depends on it.
+
+Anyone re-auditing this should redo the diff against a pinned ShareX tag and add
+the tag here; the fetch above was not tag-pinned.
 
 The NVIDIA GeForce overlay's window class name (`CEF-OSC-WIDGET`), noted in
 `WindowEnumerator.cs`, is a fact about NVIDIA's software: the overlay enumerates as
 an ordinary top-level window. Every screenshot tool that walks the window list hits
 it.
+
+### Survey — https://github.com/Kal-Voe/Survey — no third-party terms
+
+Three editor files say in their own headers that they are ports:
+`Editor/AnnotationRotation.cs` (svg transform maths), `Editor/MarqueeSelection.cs`
+(window/crossing marquee) and `Editor/ToolPreferences.cs` (the per-tool defaults).
+Survey is Isaiah's own repository — the same author as WinShot — so the ported maths
+carry no third-party obligation. Listed here because "ported from" in a shipping
+source header should never be a dead end for whoever audits this next.
 
 ### Microsoft PowerToys — https://github.com/microsoft/PowerToys — MIT — **PENDING, not yet used**
 
@@ -131,8 +167,11 @@ Sixteen files sit under `src/WinShot/Assets/` and all sixteen ship inside the bi
 fifteen SVGs as `EmbeddedResource`, plus `winshot.ico` as the `ApplicationIcon`.
 
 Fifteen of them — `winshot.ico` and the fourteen `quick-access-*.svg` — are WinShot's
-own: one icon family, viewBox 0 0 24 24, `currentColor`, stroke 1.85, drawn for this
-app and carrying no upstream marker.
+own, drawn for this app and carrying no upstream marker. The fourteen SVGs share a
+viewBox of `0 0 24 24` and paint with `currentColor`. Their stroke weights do not yet
+agree: six are 1.85, seven are 2, and `quick-access-pin.svg` is a solid filled path
+with no stroke at all. Normalising them to 1.85 belongs to T7, which also replaces the
+pin glyph.
 
 One is not. `download-window-svgrepo-com.svg` came from **SVG Repo**
 (https://www.svgrepo.com) — its own header comment says so, and unlike the others it
@@ -158,3 +197,8 @@ The browser extension has its own notices, covering different code:
   Skia's `THIRD-PARTY-NOTICES.txt`) needs to be carried by the installer and
   reachable from the About pane. Not wired yet. Tracked in the master plan under
   T7's About-pane row so it does not go with this branch.
+- **This file is written for whoever maintains WinShot, not for its users.** It
+  names a first name, internal track IDs, and unfinished work. Whoever wires the
+  About pane should render the user-facing part — "Studied, not copied", "Shipped
+  packages", "Icon assets" and the licence texts — and leave this section out,
+  rather than surfacing the whole file verbatim.

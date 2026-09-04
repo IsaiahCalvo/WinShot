@@ -112,7 +112,7 @@ public static class WindowEnumerator
 
         try
         {
-            EnumWindows((hwnd, _) => scan.AddWindow(hwnd), IntPtr.Zero);
+            EnumWindows((hwnd, _) => scan.CollectTopLevel(hwnd), IntPtr.Zero);
         }
         catch (Exception)
         {
@@ -164,7 +164,7 @@ public static class WindowEnumerator
         }
 
         /// <summary>Top-level window. False stops the enumeration; true means "carry on".</summary>
-        public bool AddWindow(IntPtr hwnd)
+        public bool CollectTopLevel(IntPtr hwnd)
         {
             if (_clock.ElapsedMilliseconds > _budgetMs)
                 return false;
@@ -187,7 +187,7 @@ public static class WindowEnumerator
         }
 
         /// <summary>Child control, clipped to the parent rect it was found under.</summary>
-        private bool AddControl(IntPtr hwnd, Rectangle parent)
+        private bool CollectChild(IntPtr hwnd, Rectangle parent)
         {
             if (_clock.ElapsedMilliseconds > _budgetMs)
                 return false;
@@ -217,7 +217,7 @@ public static class WindowEnumerator
                 return;
             try
             {
-                EnumChildWindows(hwnd, (child, _) => AddControl(child, bounds), IntPtr.Zero);
+                EnumChildWindows(hwnd, (child, _) => CollectChild(child, bounds), IntPtr.Zero);
             }
             catch (Exception)
             {

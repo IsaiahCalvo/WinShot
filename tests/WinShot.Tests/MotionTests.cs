@@ -1,4 +1,4 @@
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using WinShot.Core;
 using Xunit;
 
@@ -9,34 +9,42 @@ public class MotionTests
     /// <summary>
     /// The high-resolution clock is process-wide and costs power, so the refcount has to be
     /// exact: raised on the first holder, dropped only by the last, and immune to double-dispose.
+    ///
+    /// Asserted as a delta against a baseline, never as an absolute. Motion.Holders is a
+    /// process-global counter and five shipping surfaces acquire it (the quick-actions card,
+    /// both selectors, and the click/keystroke overlays), so the tests that drive those
+    /// surfaces are live holders while this test runs in a parallel collection. Absolute
+    /// assertions here made the whole suite red roughly one run in six.
     /// </summary>
     [Fact]
     public void Acquire_ReferenceCountsAndSurvivesDoubleDispose()
     {
-        Assert.Equal(0, Motion.Holders);
+        int baseline = Motion.Holders;
 
         var outer = Motion.Acquire();
-        Assert.Equal(1, Motion.Holders);
+        Assert.Equal(baseline + 1, Motion.Holders);
 
         var inner = Motion.Acquire();
-        Assert.Equal(2, Motion.Holders);
+        Assert.Equal(baseline + 2, Motion.Holders);
 
         inner.Dispose();
         inner.Dispose(); // idempotent: must not decrement twice
-        Assert.Equal(1, Motion.Holders);
+        Assert.Equal(baseline + 1, Motion.Holders);
 
         outer.Dispose();
-        Assert.Equal(0, Motion.Holders);
+        Assert.Equal(baseline, Motion.Holders);
     }
 
     [Fact]
     public async Task Acquire_IsSafeFromManyThreadsAtOnce()
     {
+        int baseline = Motion.Holders;
+
         var holds = await Task.WhenAll(Enumerable.Range(0, 64).Select(_ => Task.Run(Motion.Acquire)));
-        Assert.Equal(64, Motion.Holders);
+        Assert.Equal(baseline + 64, Motion.Holders);
 
         await Task.WhenAll(holds.Select(h => Task.Run(h.Dispose)));
-        Assert.Equal(0, Motion.Holders);
+        Assert.Equal(baseline, Motion.Holders);
     }
 
     [Theory]

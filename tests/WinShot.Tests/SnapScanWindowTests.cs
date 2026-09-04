@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using WF = System.Windows.Forms;
 using WinShot.Core;
 using Xunit;
@@ -29,7 +29,7 @@ public sealed class SnapProbeWindowCollection
 /// GetClientRect (virtualized to logical pixels) come back in different coordinate spaces. That
 /// is a harness artifact — the real app is PerMonitorV2 via app.manifest and both are physical.
 ///
-/// That split is not only a distortion, it can *remove* handles: AddControl clips each child to
+/// That split is not only a distortion, it can *remove* handles: CollectChild clips each child to
 /// its parent frame, and a logical child rect far enough outside a physical frame rect clips to
 /// empty and is never emitted. The probe therefore sits at the primary origin, where the two
 /// spaces cannot diverge: at scale s the frame spans physical 0..500s while the outermost child
@@ -51,6 +51,12 @@ public class SnapScanWindowTests
             ShowInTaskbar = false,
             Text = "SnapScanProbeWindow",
             Bounds = ProbeBounds,
+            // TopMost so nothing can settle in front of the probe. DropCoveredControls drops a
+            // control rect covered by ANY earlier-accepted rect, including an unrelated window's
+            // frame — correct behaviour (you cannot point at a covered control) but it would
+            // silently delete the outer/inner rects these tests assert on. The frame rect
+            // survives coverage either way, so the wait loop below would not notice.
+            TopMost = true,
         };
         outer = new WF.Panel { Bounds = new Rectangle(10, 10, 300, 200) };
         inner = new WF.Button { Bounds = new Rectangle(20, 20, 120, 40), Text = "inner" };
@@ -139,14 +145,24 @@ public class SnapScanWindowTests
         Assert.DoesNotContain(rects, r => r.Handle == handle);
     }
 
+    /// <summary>
+    /// Guards the clock check the restructure relocated into the two collect entry points.
+    ///
+    /// The budget is compared against elapsed milliseconds, so a budget of 0 does NOT prove
+    /// anything: the first callback reads 0 ms, `0 > 0` is false, and that window and its whole
+    /// child walk run regardless — on a near-empty desktop an uncapped walk finishes inside a
+    /// millisecond anyway, so a zero-budget test passes whether the check exists or not. A
+    /// budget that is already exhausted at t = 0 is the only value that makes the check fire
+    /// deterministically, and then the walk must emit nothing at all.
+    /// </summary>
     [Fact]
-    public void AnExhaustedBudgetStopsTheWalkInsteadOfRunningItAnyway()
+    public void AnAlreadyExhaustedBudgetStopsTheWalkBeforeItEmitsAnything()
     {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        var rects = WindowEnumerator.GetSnapRectangles(timeoutMs: 0);
-        clock.Stop();
+        using var form = ShowProbeWindow(out _, out _);
 
-        Assert.NotNull(rects);
-        Assert.True(clock.ElapsedMilliseconds < 2000, $"budget ignored: {clock.ElapsedMilliseconds} ms");
+        // Without this the assertion below is vacuous: an empty desktop yields an empty list.
+        Assert.NotEmpty(WindowEnumerator.GetSnapRectangles());
+
+        Assert.Empty(WindowEnumerator.GetSnapRectangles(timeoutMs: -1));
     }
 }
