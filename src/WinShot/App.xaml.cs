@@ -604,6 +604,15 @@ public partial class App : Application
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
 
+        // The rest of the tray's commands, bound through the ShortcutBindings dictionary
+        // rather than a Settings field each. Unbound actions are absent from it, so this
+        // registers only what the user actually asked for.
+        foreach ((string id, Action handler) in BindableCommands())
+        {
+            if (s.ShortcutBindings.TryGetValue(id, out string? gesture))
+                Reg(gesture, handler);
+        }
+
         if (failed.Count == 0)
         {
             _hotkeyRetryTimer?.Stop();
@@ -637,6 +646,31 @@ public partial class App : Application
                 : $"{failed.Count} shortcuts are in use by other apps — see Settings > Shortcuts.",
             ToastSeverity.Error);
     }
+
+    /// <summary>
+    /// Every command that can be bound but has no dedicated Hotkey* field. The ids match
+    /// SettingsTruthCatalog.ExecutableShortcutIds, which the truth-catalog test pins, so a
+    /// row can never appear in Settings without something here to run it.
+    /// </summary>
+    private IEnumerable<(string Id, Action Handler)> BindableCommands()
+    {
+        yield return ("capture-window-background", () => QueueCaptureCommand("capture-window-background"));
+        yield return ("capture-display", () => QueueCaptureCommand("capture-display"));
+        yield return ("self-timer", () => QueueCaptureCommand("self-timer"));
+        yield return ("record-display", RecordDisplayFlow);
+        yield return ("scroll-horizontal", () => QueueCaptureCommand("scroll-horizontal"));
+        yield return ("open-image", OpenImageFileFlow);
+        yield return ("pin-to-screen", PinFromFileFlow);
+        yield return ("restore-last", RestoreLastFlow);
+        yield return ("unlock-pins", FastPinWindow.UnlockAllPins);
+        yield return ("toggle-desktop-icons", ToggleDesktopIcons);
+        yield return ("history", OpenHistory);
+        yield return ("settings", OpenSettings);
+        yield return ("about", OpenAbout);
+    }
+
+    /// <summary>Test seam: the ids this app can actually dispatch.</summary>
+    internal IEnumerable<string> BindableCommandIdsForTest() => BindableCommands().Select(c => c.Id);
 
     private System.Windows.Threading.DispatcherTimer CreateHotkeyRetryTimer()
     {

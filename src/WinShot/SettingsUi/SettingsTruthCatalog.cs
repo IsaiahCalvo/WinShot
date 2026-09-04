@@ -77,6 +77,12 @@ internal static class SettingsTruthCatalog
             "PinnedBorder",
         };
 
+    /// <summary>
+    /// Every action Settings is allowed to offer a shortcut for, in catalog order. The eight
+    /// with dedicated Hotkey* fields come first in their sections; the rest ride in
+    /// <see cref="Settings.ShortcutBindings"/>. App.RegisterHotkeysCore registers exactly
+    /// this list — a row here with no registration is a fake control.
+    /// </summary>
     internal static readonly IReadOnlyList<string> ExecutableShortcutIds =
     [
         "all-in-one",
@@ -84,9 +90,22 @@ internal static class SettingsTruthCatalog
         "capture-previous",
         "capture-fullscreen",
         "capture-window",
+        "capture-window-background",
+        "capture-display",
+        "self-timer",
         "record-screen",
+        "record-display",
         "scrolling-capture",
+        "scroll-horizontal",
         "capture-text",
+        "open-image",
+        "pin-to-screen",
+        "restore-last",
+        "unlock-pins",
+        "toggle-desktop-icons",
+        "history",
+        "settings",
+        "about",
     ];
 
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =

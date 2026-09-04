@@ -7,8 +7,10 @@ using WinShot.Core;
 
 namespace WinShot.SettingsUi;
 
-// Only executable global hotkeys are shown. Older placeholder bindings remain in
-// Settings.ShortcutBindings and survive saves, but are never presented as working shortcuts.
+// Only executable global hotkeys are shown. Eight have dedicated Settings fields; the rest
+// ride in Settings.ShortcutBindings, keyed by the same ids App.BindableCommands dispatches.
+// Bindings for actions this build does not know about survive saves untouched, and are never
+// presented as working shortcuts.
 public partial class SettingsWindow
 {
     private sealed class ShortcutDef
@@ -35,6 +37,28 @@ public partial class SettingsWindow
         Func<Settings, string> get, Action<Settings, string> set) =>
         new() { Key = key, Label = label, ValidatorLabel = validatorLabel, Get = get, Set = set };
 
+    /// <summary>
+    /// A command with no dedicated Settings field, bound through the existing
+    /// <see cref="Settings.ShortcutBindings"/> dictionary. Unbound actions are simply
+    /// absent from it, which is how the eight original hotkeys keep their own fields
+    /// without a schema change per command added here.
+    /// </summary>
+    private static ShortcutDef Bound(string key, string label, string validatorLabel) =>
+        new()
+        {
+            Key = key,
+            Label = label,
+            ValidatorLabel = validatorLabel,
+            Get = s => s.ShortcutBindings.TryGetValue(key, out string? gesture) ? gesture : "",
+            Set = (s, v) =>
+            {
+                if (string.IsNullOrWhiteSpace(v))
+                    s.ShortcutBindings.Remove(key);
+                else
+                    s.ShortcutBindings[key] = v;
+            },
+        };
+
     /// <summary>The complete list of shortcuts registered and dispatched by App.xaml.cs.</summary>
     private static ShortcutSection[] BuildShortcutCatalog() =>
     [
@@ -53,21 +77,40 @@ public partial class SettingsWindow
                  s => s.HotkeyCaptureFullscreen, (s, v) => s.HotkeyCaptureFullscreen = v),
             Real("capture-window", "Capture window", "Capture window",
                  s => s.HotkeyCaptureWindow, (s, v) => s.HotkeyCaptureWindow = v),
+            Bound("capture-window-background", "Capture window with background", "Capture window with background"),
+            Bound("capture-display", "Capture display", "Capture display"),
+            Bound("self-timer", "Capture fullscreen (self-timer)", "Self-timer capture"),
         ]},
         new ShortcutSection { Title = "Screen recording", Items =
         [
             Real("record-screen", "Record screen", "Record screen",
                  s => s.HotkeyRecord, (s, v) => s.HotkeyRecord = v),
+            Bound("record-display", "Record display", "Record display"),
         ]},
         new ShortcutSection { Title = "Scrolling capture", Items =
         [
             Real("scrolling-capture", "Scrolling capture", "Scrolling capture",
                  s => s.HotkeyScrolling, (s, v) => s.HotkeyScrolling = v),
+            Bound("scroll-horizontal", "Horizontal scrolling capture", "Horizontal scrolling capture"),
         ]},
         new ShortcutSection { Title = "Text recognition", Items =
         [
             Real("capture-text", "Capture text", "Capture text (OCR)",
                  s => s.HotkeyOcr, (s, v) => s.HotkeyOcr = v),
+        ]},
+        new ShortcutSection { Title = "Windows and files", Items =
+        [
+            Bound("open-image", "Open image", "Open image"),
+            Bound("pin-to-screen", "Pin an image to the screen", "Pin an image to the screen"),
+            Bound("restore-last", "Restore recently closed", "Restore recently closed"),
+            Bound("unlock-pins", "Unlock pinned windows", "Unlock pinned windows"),
+            Bound("toggle-desktop-icons", "Hide or show desktop icons", "Hide or show desktop icons"),
+        ]},
+        new ShortcutSection { Title = "App", Items =
+        [
+            Bound("history", "History", "History"),
+            Bound("settings", "Settings", "Settings"),
+            Bound("about", "About WinShot", "About WinShot"),
         ]},
     ];
 
@@ -142,8 +185,9 @@ public partial class SettingsWindow
             if (!_shortcutBoxes.TryGetValue(def.Key, out var box)) continue;
             def.Set(s, NormalizeForCompare(box.Text));
         }
-        // Intentionally do not mutate ShortcutBindings: old, unknown action bindings remain
-        // available to a future version without being advertised as executable today.
+        // Each Bound() def writes only its own key, so bindings for actions this build does
+        // not know about survive untouched and stay available to a future version without
+        // being advertised as executable today.
     }
 
     private HotkeyBox[] RealHotkeyBoxes() =>
