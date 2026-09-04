@@ -99,6 +99,46 @@ public class SelectorInteractionTests
         }
     }
 
+    /// <summary>Drives the selector's pointer without touching the real mouse.</summary>
+    private sealed class Pointer : IDisposable
+    {
+        public SD.Point At;
+
+        public Pointer(int x = 0, int y = 0)
+        {
+            At = new SD.Point(x, y);
+            FastRegionSelectorDialog.CursorProvider = () => At;
+        }
+
+        public Pointer MoveTo(FastRegionSelectorDialog selector, int x, int y)
+        {
+            At = new SD.Point(x, y);
+            selector.HandleMouseMove();
+            return this;
+        }
+
+        public void Dispose() => FastRegionSelectorDialog.CursorProvider = null;
+    }
+
+    private static WF.MouseEventArgs Left(int clicks = 1) =>
+        new(WF.MouseButtons.Left, clicks, 0, 0, 0);
+
+    [Fact]
+    public void SpaceFlipsBetweenDrawingARectangleAndPickingAWindow()
+    {
+        using var pointer = new Pointer(120, 90);
+        using var selector = CreateSelector();
+        Assert.Equal(FastRegionSelectorDialog.SelectorMode.Area, selector.Mode);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Space));
+        Assert.Equal(FastRegionSelectorDialog.SelectorMode.Window, selector.Mode);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Space));
+        Assert.Equal(FastRegionSelectorDialog.SelectorMode.Area, selector.Mode);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs = 8000)
     {
         var clock = Stopwatch.StartNew();

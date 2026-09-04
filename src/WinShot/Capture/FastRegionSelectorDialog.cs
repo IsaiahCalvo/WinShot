@@ -639,6 +639,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             e.Handled = true;
             Confirm(VirtualFromScreen(pending));
         }
+        else if (e.KeyCode == WF.Keys.Space)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            ToggleWindowMode();
+        }
         else if (e.KeyCode == WF.Keys.Menu)
         {
             if (!_altLatched)
@@ -649,6 +655,43 @@ public sealed class FastRegionSelectorDialog : WF.Form
             e.Handled = true;
             e.SuppressKeyPress = true; // no menu-loop ding on a borderless overlay
         }
+    }
+
+    internal SelectorMode Mode => _mode;
+
+    /// <summary>
+    /// Space flips between drawing a rectangle and picking a whole window, mid-selection.
+    /// Window capture used to be a different hotkey chosen before the overlay opened, so
+    /// realising "actually I want that whole window" cost an Escape and a second gesture.
+    /// The window list is already loaded for both modes, so there is nothing to wait for;
+    /// the arriving target's wash ramp is what makes the flip read as a change.
+    /// </summary>
+    private void ToggleWindowMode()
+    {
+        if (_mode == SelectorMode.Window)
+        {
+            _mode = SelectorMode.Area;
+            SetHoverWindow(null);
+        }
+        else
+        {
+            // An in-progress drag or an adjustable pending rect belongs to the mode being
+            // left; carrying either into window mode would leave a marquee nothing can
+            // confirm on screen.
+            _mode = SelectorMode.Window;
+            _dragging = false;
+            _dragMoved = false;
+            _pendingScreen = null;
+            _hoverBarButton = -1;
+            _pressedBarButton = -1;
+            _resizeHandle = -1;
+            _movingPending = false;
+            SetHoverPane(null);
+            SetHoverWindow(ResolveWindow(_currentScreen));
+            StartFollowMotion(); // window mode tracks the cursor even with both chrome toggles off
+        }
+        Cursor = CursorForCurrent();
+        InvalidateAllSurfaces();
     }
 
     internal void HandleKeyUp(WF.KeyEventArgs e)
@@ -1659,9 +1702,19 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return new SD.Rectangle(x, y, Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
     }
 
+    /// <summary>
+    /// Test seam: where the pointer is. Tests drive selection gestures through the same
+    /// handlers the surfaces call, and those read the REAL cursor — which would make every
+    /// drag assertion depend on where the mouse happens to be sitting. Nothing but tests
+    /// assigns this, and the hidden-desktop runner is the only place it is safe to.
+    /// </summary>
+    internal static Func<SD.Point>? CursorProvider;
+
     /// <summary>True physical cursor position — DPI-independent across monitors.</summary>
     private static SD.Point CursorScreen()
     {
+        if (CursorProvider is Func<SD.Point> provider)
+            return provider();
         return GetCursorPos(out POINT p) ? new SD.Point(p.X, p.Y) : WF.Cursor.Position;
     }
 
