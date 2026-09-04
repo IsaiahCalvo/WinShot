@@ -742,9 +742,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return; // window mode confirms on mouse-up
 
         // Area mode.
-        if (_recordingHud && _pendingScreen is SD.Rectangle hudPending)
+        if (_recordingHud)
         {
-            if (HandleHudMouseDown(hudPending, screen))
+            // Any press ends an aspect glide: the tween writes the pending rect every frame,
+            // and it must not keep doing that under a drag the user has started.
+            StopAspectSnap();
+            if (_pendingScreen is SD.Rectangle hudPending && HandleHudMouseDown(hudPending, screen))
                 return;
         }
 
