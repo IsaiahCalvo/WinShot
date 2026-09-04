@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using WinShot.Scrolling;
 using Xunit;
@@ -295,6 +295,47 @@ public class ScrollingCaptureServiceTests
         // …and nowhere inside the body.
         for (int y = 0; y < bodyRows; y++)
             Assert.NotEqual(footerTop, stitched.GetPixel(Width / 2, y).ToArgb());
+    }
+
+    /// <summary>
+    /// Auto-Scroll with the pointer parked off the region injects nothing and says why.
+    /// The loop keeps running (the user can move back and resume) — this is a pause, not a
+    /// stop. Deliberately only the "outside" case runs through the loop: with the pointer
+    /// inside, the loop would inject real wheel input, which tests never do.
+    /// </summary>
+    [Fact]
+    public void AutoScrollWithThePointerOutsideTheRegion_PausesAndSaysSo()
+    {
+        using var cts = new CancellationTokenSource();
+        var positions = Enumerable.Range(0, 6).Select(i => i * 40).ToList();
+        int index = 0;
+        var hints = new List<ScrollHint>();
+
+        SD.Bitmap FrameSource(SD.Rectangle _)
+        {
+            if (index >= positions.Count)
+            {
+                cts.Cancel();
+                return MakeFrame(positions[^1]);
+            }
+            return MakeFrame(positions[index++]);
+        }
+
+        using var stitched = ScrollingCaptureService.RunAsync(
+            new SD.Rectangle(0, 0, Width, FrameHeight),
+            ScrollDirection.Vertical,
+            autoScroll: () => true,
+            status: _ => { },
+            hint: hints.Add,
+            cts.Token,
+            preview: null,
+            frameSource: FrameSource,
+            paneScoped: false,
+            cursorSource: () => new SD.Point(-4000, -4000)).GetAwaiter().GetResult();
+
+        Assert.NotNull(stitched);
+        Assert.Contains(ScrollHint.MoveCursorHere, hints);
+        Assert.NotNull(ScrollHintText.For(ScrollHint.MoveCursorHere));
     }
 
     [Fact]

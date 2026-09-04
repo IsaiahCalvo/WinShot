@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 
@@ -14,6 +14,19 @@ public enum ScrollHint
     /// <summary>The live frame sits entirely over already-captured content (user scrolled
     /// back up). Nothing is appended until they scroll past the capture's end again.</summary>
     AlreadyCaptured,
+
+    /// <summary>Auto-Scroll is on but the pointer has left the region, so nothing is being
+    /// injected. Moving the pointer back over the region resumes immediately.</summary>
+    MoveCursorHere,
+}
+
+/// <summary>Whether Auto-Scroll may inject a wheel step right now. Auto-Scroll drives the
+/// page under the pointer, so it only runs while the pointer is over the captured region:
+/// parking the pointer elsewhere is how the user pauses, and it is what makes the wheel
+/// reach the right window without the loop moving anyone's cursor.</summary>
+internal static class ScrollAutoScrollGate
+{
+    public static bool MayInject(SD.Rectangle region, SD.Point cursor) => region.Contains(cursor);
 }
 
 /// <summary>Hard limits that keep an in-memory scroll capture within a predictable budget.</summary>
@@ -84,7 +97,8 @@ public static class ScrollingCaptureService
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion,
         ScrollDirection? presetDirection, Func<bool> autoScroll, Action<string> status,
         Action<ScrollHint> hint, CancellationToken ct, Action<SD.Bitmap>? preview = null,
-        Func<SD.Rectangle, SD.Bitmap>? frameSource = null, bool paneScoped = false)
+        Func<SD.Rectangle, SD.Bitmap>? frameSource = null, bool paneScoped = false,
+        Func<SD.Point>? cursorSource = null)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -98,7 +112,7 @@ public static class ScrollingCaptureService
         {
             try
             {
-                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource, paneScoped);
+                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource, paneScoped, cursorSource);
                 return loop.Run();
             }
             catch (Exception ex)
@@ -212,10 +226,12 @@ public static class ScrollingCaptureService
         private ulong _lastProbe;     // sparse hash of the last manual-mode frame (pause fast path)
 
         private readonly Func<SD.Rectangle, SD.Bitmap> _grab;
+        private readonly Func<SD.Point> _cursor;
 
         public Loop(SD.Rectangle region, ScrollDirection? presetDirection, Func<bool> autoScroll,
             Action<string> status, Action<ScrollHint> hint, Action<SD.Bitmap>? preview,
-            CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource, bool paneScoped = false)
+            CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource, bool paneScoped = false,
+            Func<SD.Point>? cursorSource = null)
         {
             _region = region;
             _paneScoped = paneScoped;
@@ -226,6 +242,7 @@ public static class ScrollingCaptureService
             _preview = preview;
             _ct = ct;
             _grab = frameSource ?? CaptureService.CaptureScreenRegionWithoutLayeredWindows;
+            _cursor = cursorSource ?? CursorPoint;
             _verticalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Width);
             _horizontalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Height);
             _stitch = new StitchBuffer(region.Width, _verticalLimit);
@@ -1362,6 +1379,18 @@ public static class ScrollingCaptureService
             if (wantAuto && _direction != ScrollDirection.Horizontal)
                 _direction ??= ScrollDirection.Vertical; // Auto-Scroll defaults to vertical
 
+            if (wantAuto && !ScrollAutoScrollGate.MayInject(_region, _cursor()))
+            {
+                // Pointer parked outside the region: hold the wheel and say so. Auto-Scroll
+                // is not cancelled — moving back over the region resumes on the next tick.
+                SetHint(ScrollHint.MoveCursorHere);
+                _scrolledBeforeFrame = false;
+                return Sleep(ManualPollMs);
+            }
+
+            if (_lastHint == ScrollHint.MoveCursorHere)
+                SetHint(ScrollHint.None);
+
             if (wantAuto)
             {
                 if (_state == Track.Tracking)
@@ -1411,17 +1440,12 @@ public static class ScrollingCaptureService
             switch (_method)
             {
                 case ScrollMethod.WheelInput:
-                    // Cursor DIP: wheel routing follows the cursor, but a cursor parked in the
-                    // region triggers hover effects that end up in the capture. So teleport to
-                    // the region center just for the wheel tick and return immediately — the
-                    // page gets a mouseleave, hover styles clear, and the frame is only grabbed
-                    // after the ~350ms settle. If the user moved the mouse in the same instant,
-                    // leave their cursor alone rather than fight them.
-                    GetCursorPos(out var orig);
-                    SetCursorPos(centerX, centerY);
+                    // Wheel routing follows the cursor, and Pace() only gets here while the
+                    // cursor is already inside the region — so the tick lands on the right
+                    // window without moving anyone's pointer. (This used to teleport the
+                    // cursor to the region centre and back for every step, which made the
+                    // pointer twitch for the whole run and left no way to pause.)
                     SendWheelInput(delta, horizontal);
-                    if (GetCursorPos(out var now) && now.X == centerX && now.Y == centerY)
-                        SetCursorPos(orig.X, orig.Y);
                     break;
 
                 case ScrollMethod.WheelMessage:
@@ -1460,6 +1484,9 @@ public static class ScrollingCaptureService
                     break;
             }
         }
+
+        private static SD.Point CursorPoint()
+            => GetCursorPos(out var p) ? new SD.Point(p.X, p.Y) : SD.Point.Empty;
 
         private bool Sleep(int ms)
         {
@@ -1989,9 +2016,6 @@ public static class ScrollingCaptureService
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessage(IntPtr hWnd, uint msg, nuint wParam, nint lParam);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
 
     private const uint GA_ROOT = 2;
 
