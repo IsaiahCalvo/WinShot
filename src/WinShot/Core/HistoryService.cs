@@ -24,8 +24,10 @@ public class HistoryService
     public static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinShot", "History");
 
-    public string Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular)
+    /// <summary>Writes a capture into history, or returns null when history is switched off.</summary>
+    public string? Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular)
     {
+        if (!_settings.Current.HistoryEnabled) return null;
         lock (_gate)
         {
             string dir = _directoryProvider();
@@ -39,9 +41,11 @@ public class HistoryService
         }
     }
 
-    /// <summary>Copies an existing file (e.g. a finished recording) into history.</summary>
-    public string AddFile(string sourcePath)
+    /// <summary>Copies an existing file (e.g. a finished recording) into history,
+    /// or returns null when history is switched off.</summary>
+    public string? AddFile(string sourcePath)
     {
+        if (!_settings.Current.HistoryEnabled) return null;
         lock (_gate)
         {
             string dir = _directoryProvider();

@@ -1076,7 +1076,7 @@
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Keep history"/>
                                     <Slider x:Name="HistorySlider" HorizontalAlignment="Stretch"
-                                            Minimum="0" Maximum="4" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Minimum="0" Maximum="5" TickFrequency="1" IsSnapToTickEnabled="True"
                                             ValueChanged="OnHistorySliderChanged"/>
                                 </DockPanel>
                                 <Grid Margin="{StaticResource SettingsRowIndentMargin}" HorizontalAlignment="Stretch">
@@ -1086,14 +1086,16 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="No age limit" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Left"/>
-                                    <TextBlock Grid.Column="1" Text="1 day" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
-                                    <TextBlock Grid.Column="2" Text="3 days" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
-                                    <TextBlock Grid.Column="3" Text="1 week" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
-                                    <TextBlock Grid.Column="4" Text="1 month" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Right"/>
+                                    <TextBlock Grid.Column="0" Text="Never" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Left"/>
+                                    <TextBlock Grid.Column="1" Text="No age limit" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="1 day" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="3" Text="3 days" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="4" Text="1 week" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="5" Text="1 month" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Right"/>
                                 </Grid>
-                                <TextBlock Style="{StaticResource SubHint}" Margin="{StaticResource SettingsHintBelowMargin}"
+                                <TextBlock x:Name="HistoryRetentionHint" Style="{StaticResource SubHint}" Margin="{StaticResource SettingsHintBelowMargin}"
                                            Text="Age cleanup is separate from the local item limit shown in Capture History."/>
                             </StackPanel>
                         </Border>

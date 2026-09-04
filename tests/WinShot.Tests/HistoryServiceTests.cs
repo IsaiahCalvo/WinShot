@@ -18,7 +18,7 @@ public class HistoryServiceTests
             var history = new HistoryService(settings, () => historyDir);
             using var bitmap = new Bitmap(2, 2);
 
-            string path = history.Add(bitmap, HistoryCaptureKind.Scrolling);
+            string path = history.Add(bitmap, HistoryCaptureKind.Scrolling)!;
 
             Assert.EndsWith("-scroll.png", path, StringComparison.OrdinalIgnoreCase);
             Assert.True(File.Exists(path));
@@ -29,6 +29,31 @@ public class HistoryServiceTests
             DeleteTempDir(historyDir);
         }
     }
+    [Fact]
+    public void HistoryDisabled_WritesNothingToDisk()
+    {
+        string historyDir = CreateTempDir();
+        string sourceDir = CreateTempDir();
+        try
+        {
+            var settings = new SettingsService();
+            settings.Current.HistoryEnabled = false;
+            var history = new HistoryService(settings, () => historyDir);
+            using var bitmap = new Bitmap(2, 2);
+            string source = WriteFile(sourceDir, "source.mp4");
+
+            Assert.Null(history.Add(bitmap));
+            Assert.Null(history.AddFile(source));
+            Assert.Empty(history.GetItems());
+            Assert.Empty(Directory.GetFiles(historyDir));
+        }
+        finally
+        {
+            DeleteTempDir(historyDir);
+            DeleteTempDir(sourceDir);
+        }
+    }
+
     [Fact]
     public void AddFile_PrunesExpiredFilesWhenRetentionIsConfigured()
     {
@@ -44,7 +69,7 @@ public class HistoryServiceTests
             File.SetLastWriteTime(oldHistoryFile, DateTime.Now.AddDays(-2));
             string source = WriteFile(sourceDir, "source.png");
 
-            string added = history.AddFile(source);
+            string added = history.AddFile(source)!;
 
             Assert.False(File.Exists(oldHistoryFile));
             Assert.True(File.Exists(added));
@@ -72,7 +97,7 @@ public class HistoryServiceTests
             File.SetLastWriteTime(oldHistoryFile, DateTime.Now.AddDays(-2));
             string source = WriteFile(sourceDir, "source.png");
 
-            string added = history.AddFile(source);
+            string added = history.AddFile(source)!;
 
             Assert.True(File.Exists(oldHistoryFile));
             Assert.True(File.Exists(added));

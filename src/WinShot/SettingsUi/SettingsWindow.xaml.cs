@@ -347,7 +347,7 @@ public partial class SettingsWindow : Window
         PinnedRoundedCornersCheck.IsChecked = s.PinnedRoundedCorners;
         PinnedShadowCheck.IsChecked = s.PinnedShadow;
         PinnedBorderCheck.IsChecked = s.PinnedBorder;
-        HistorySlider.Value = RetentionDaysToSliderIndex(s.HistoryRetentionDays);
+        HistorySlider.Value = RetentionToSliderIndex(s.HistoryEnabled, s.HistoryRetentionDays);
         AllInOneRememberCheck.IsChecked = s.AllInOneRememberLast;
         SelectByTag(OcrLanguageCombo, s.OcrLanguage, fallbackIndex: 0);
         OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
@@ -358,20 +358,29 @@ public partial class SettingsWindow : Window
         UpdateTemplatePreview();
     }
 
-    // ----- Keep-history slider <-> retention-days mapping --------------------
-    // Slider stops: 0 Never, 1 = 1 day, 2 = 3 days, 3 = 1 week, 4 = 1 month.
-    private static readonly int[] HistoryRetentionDayStops = { 0, 1, 3, 7, 30 };
+    // ----- Keep-history slider <-> retention mapping --------------------------
+    // Stops: -1 = Never (history off, nothing is written to disk), 0 = keep forever,
+    // then 1 day / 3 days / 1 week / 1 month of age pruning. "Never" is the privacy
+    // escape hatch and is deliberately the far-left stop, next to "No age limit".
+    internal static readonly int[] HistoryRetentionDayStops = { HistoryOffStop, 0, 1, 3, 7, 30 };
 
-    private static int SliderIndexToRetentionDays(double index)
+    internal const int HistoryOffStop = -1;
+
+    internal static int SliderIndexToRetentionDays(double index)
     {
         int i = Math.Clamp((int)Math.Round(index), 0, HistoryRetentionDayStops.Length - 1);
         return HistoryRetentionDayStops[i];
     }
 
-    private static int RetentionDaysToSliderIndex(int days) =>
-        // Snap to the nearest defined stop (0 stays "Never"); ties keep the lower index.
-        Enumerable.Range(0, HistoryRetentionDayStops.Length)
-            .MinBy(i => Math.Abs(HistoryRetentionDayStops[i] - days));
+    /// <summary>The slider stop for a stored (enabled, days) pair. History switched off wins
+    /// over whatever retention was last chosen, so turning it back on restores that stop.</summary>
+    internal static int RetentionToSliderIndex(bool historyEnabled, int days) =>
+        historyEnabled
+            // Snap to the nearest real stop; ties keep the lower index. Never is not a
+            // "nearest day count", so it is excluded unless history is actually off.
+            ? Enumerable.Range(1, HistoryRetentionDayStops.Length - 1)
+                .MinBy(i => Math.Abs(HistoryRetentionDayStops[i] - days))
+            : 0;
 
     /// <summary>
     /// Keep-history slider moved: mirror the snapped stop into the hidden RetentionDaysBox so
@@ -381,7 +390,14 @@ public partial class SettingsWindow : Window
     private void OnHistorySliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (RetentionDaysBox is null) return;
-        RetentionDaysBox.Text = SliderIndexToRetentionDays(e.NewValue).ToString();
+        int stop = SliderIndexToRetentionDays(e.NewValue);
+        RetentionDaysBox.Text = Math.Max(0, stop).ToString();
+        if (HistoryRetentionHint is not null)
+        {
+            HistoryRetentionHint.Text = stop == HistoryOffStop
+                ? "Captures are not written to History at all, so nothing accumulates on disk."
+                : "Age cleanup is separate from the local item limit shown in Capture History.";
+        }
     }
 
     /// <summary>
@@ -607,6 +623,7 @@ public partial class SettingsWindow : Window
             // Naming & history (Advanced tab)
             s.FileNameTemplate = TemplateBox.Text.Trim();
             s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
+            s.HistoryEnabled = SliderIndexToRetentionDays(HistorySlider.Value) != HistoryOffStop;
             s.HistoryRetentionDays = retentionDays;
             s.PinnedRoundedCorners = PinnedRoundedCornersCheck.IsChecked == true;
             s.PinnedShadow = PinnedShadowCheck.IsChecked == true;

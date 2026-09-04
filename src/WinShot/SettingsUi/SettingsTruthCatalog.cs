@@ -39,6 +39,7 @@ internal static class SettingsTruthCatalog
             "WebcamOverlayPosition",
             "WebcamOverlaySizePercent",
             "OcrJoinLines",
+            "HistoryEnabled",
             "HistoryRetentionDays",
             "CheckForUpdatesOnStartup",
             "FreezeScreen",
