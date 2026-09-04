@@ -766,9 +766,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_mode == SelectorMode.Window)
         {
-            // Window highlight tracks the cursor.
-            _hoverWindow = ResolveWindow(_currentScreen);
-            InvalidateAllSurfaces();
+            // Window highlight tracks the cursor. Repaint the highlight only when the
+            // TARGET changed — this runs off the 8 ms follow tick, so repainting every
+            // monitor per cursor pixel is a full-screen redraw for nothing. The size
+            // readout rides the cursor, so its band still repaints every move.
+            SetHoverWindow(ResolveWindow(_currentScreen));
+            InvalidateFollowRegion(_lastFollowScreen, _currentScreen);
+            _lastFollowScreen = _currentScreen;
             return;
         }
 
@@ -1229,6 +1233,35 @@ public sealed class FastRegionSelectorDialog : WF.Form
             InvalidateAllSurfaces();
         }
         _hoverPane = rect;
+    }
+
+    /// <summary>
+    /// The one place the hovered WINDOW changes. Returns true when the target actually
+    /// moved (and the old + new highlights were repainted); false is the common case on a
+    /// cursor tick inside the same window, and repainting then is a whole-monitor redraw
+    /// that shows nothing new.
+    /// </summary>
+    internal bool SetHoverWindow(WindowInfo? next)
+    {
+        if (next == _hoverWindow)
+            return false;
+
+        WindowInfo? previous = _hoverWindow;
+        _hoverWindow = next;
+        if (previous is not null && next is not null)
+            InvalidateHoverRegion(previous.Bounds, next.Bounds);
+        else if (previous is not null)
+            InvalidateScreenRect(Inflated(previous.Bounds));
+        else if (next is not null)
+            InvalidateScreenRect(Inflated(next.Bounds));
+        return true;
+    }
+
+    /// <summary>A highlight's ground plus the border pen width and its antialiasing.</summary>
+    private static SD.Rectangle Inflated(SD.Rectangle rect)
+    {
+        rect.Inflate(4, 4);
+        return rect;
     }
 
     /// <summary>Edge-wise nearness: true when every side of the two rects is within
