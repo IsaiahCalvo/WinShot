@@ -411,6 +411,7 @@ public partial class EditorWindow : Window
     {
         BuildColorPickerPalette();
         BuildSavedColorRow();
+        BuildColorCopyMenu();
         SyncColorPickerInputs(_customColor);
         ApplyCustomColor(_customColor); // keep current selection consistent with the swatch
         ColorPickerPopup.IsOpen = true;
@@ -544,6 +545,49 @@ public partial class EditorWindow : Window
             ApplyCustomColor(c);
             ColorPickerPopup.IsOpen = false;
         }
+    }
+
+    /// <summary>
+    /// The formats a colour can be copied in, and their menu labels. Bare hex and OKLCH are
+    /// here because the two places a colour ends up are a CSS file and a chat message, and
+    /// neither wants the app's own #RRGGBB every time.
+    /// </summary>
+    private static readonly (string Label, WinShot.Core.ColorFormat Format)[] CopyFormats =
+    {
+        ("HEX", WinShot.Core.ColorFormat.Hex),
+        ("HEX without #", WinShot.Core.ColorFormat.HexBare),
+        ("HEX with alpha", WinShot.Core.ColorFormat.HexArgb),
+        ("rgb()", WinShot.Core.ColorFormat.Rgb),
+        ("hsl()", WinShot.Core.ColorFormat.Hsl),
+        ("OKLCH", WinShot.Core.ColorFormat.Oklch),
+    };
+
+    /// <summary>Builds the preview swatch's "Copy as" menu once.</summary>
+    private void BuildColorCopyMenu()
+    {
+        if (ColorPickerPreview.ContextMenu is not null) return;
+
+        var menu = new ContextMenu();
+        foreach ((string label, WinShot.Core.ColorFormat format) in CopyFormats)
+        {
+            var item = new MenuItem { Header = $"Copy as {label}", Tag = format };
+            AutomationProperties.SetName(item, $"Copy the colour as {label}");
+            item.Click += OnCopyColorAs;
+            menu.Items.Add(item);
+        }
+        ColorPickerPreview.ContextMenu = menu;
+        ColorPickerPreview.ToolTip = "Right-click to copy this colour in another format";
+    }
+
+    private void OnCopyColorAs(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item || item.Tag is not WinShot.Core.ColorFormat format)
+            return;
+
+        Color c = _customColor;
+        string text = WinShot.Core.ColorFormatter.Format(
+            System.Drawing.Color.FromArgb(c.A, c.R, c.G, c.B), format);
+        _ = CaptureService.SetTextToClipboardAsync(text);
     }
 
     /// <summary>Refreshes the popup's preview + hex box to a color without re-triggering the live preview handler.</summary>

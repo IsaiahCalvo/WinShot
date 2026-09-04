@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using Xunit;
 using SD = System.Drawing;
 
@@ -59,6 +59,22 @@ public class ColorFormatterTests
     {
         Assert.True(ColorFormatter.TryParse("#F30", out SD.Color parsed));
         Assert.Equal("#FF3300", ColorFormatter.Format(parsed, ColorFormat.Hex));
+    }
+
+    /// <summary>
+    /// Every format the picker's "Copy as" menu offers produces something, and no two of them
+    /// produce the same string -- a menu with two rows that copy identical text is a menu with
+    /// a mistake in it.
+    /// </summary>
+    [Fact]
+    public void EveryOfferedFormatIsDistinctAndNonEmpty()
+    {
+        string[] written = Enum.GetValues<ColorFormat>()
+            .Select(format => ColorFormatter.Format(Red, format))
+            .ToArray();
+
+        Assert.All(written, text => Assert.False(string.IsNullOrWhiteSpace(text)));
+        Assert.Equal(written.Length, written.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Theory]
