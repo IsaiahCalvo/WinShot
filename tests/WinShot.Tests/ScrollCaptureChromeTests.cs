@@ -84,6 +84,73 @@ public class ScrollCaptureChromeTests
     /// live monitor, so this is the only seam that can assert 150% behaviour on a machine
     /// that is not at 150%. Deleting ScrollChromeMetrics took the equivalent coverage with it.
     /// </summary>
+    /// <summary>
+    /// Before capture the bar is one Start Capture capsule. A status line reading "ready"
+    /// and an Auto-Scroll toggle for a run that hasn't begun are answers to questions
+    /// nobody has asked, so both stay hidden until Start reveals them -- and the bar grows
+    /// into them rather than being replaced. Runs the reveal to completion so the tween's
+    /// hold on the process-wide timer resolution is released.
+    /// </summary>
+    [Fact]
+    public void PreCaptureBar_IsOneCapsuleAndGrowsIntoTheCaptureControls()
+    {
+        Assert.Equal(0, Motion.Holders);
+        using var controls = new ScrollControlsBar(new SD.Rectangle(200, 200, 900, 600));
+        controls.StartPosition = WF.FormStartPosition.Manual;
+        controls.Location = new SD.Point(-20_000, -20_000);
+        controls.Show();
+        controls.Location = new SD.Point(-20_000, -20_000);
+        WF.Application.DoEvents();
+
+        var status = Assert.Single(controls.Controls.Find("ScrollCaptureStatus", true));
+        var auto = Assert.Single(controls.Controls.Find("ScrollCaptureAuto", true));
+        var start = Assert.Single(controls.Controls.Find("ScrollCaptureStart", true));
+        Assert.False(status.Visible);
+        Assert.False(auto.Visible);
+        Assert.True(start.Visible);
+        int capsuleWidth = controls.Width;
+
+        controls.PerformAction(ScrollChromeAction.Start);
+        PumpUntil(() => Motion.Holders == 0);
+
+        Assert.True(status.Visible);
+        Assert.True(auto.Visible);
+        Assert.False(start.Visible);
+        Assert.True(controls.Width > capsuleWidth,
+            $"the bar should grow past the capsule ({capsuleWidth}px), got {controls.Width}px");
+        Assert.Equal(0, Motion.Holders);
+        controls.Hide();
+    }
+
+    /// <summary>Closing the bar mid-reveal must not strand the timer-resolution hold.</summary>
+    [Fact]
+    public void ClosingTheBarMidReveal_ReleasesTheMotionHold()
+    {
+        Assert.Equal(0, Motion.Holders);
+        var controls = new ScrollControlsBar(new SD.Rectangle(200, 200, 900, 600));
+        controls.StartPosition = WF.FormStartPosition.Manual;
+        controls.Location = new SD.Point(-20_000, -20_000);
+        controls.Show();
+        WF.Application.DoEvents();
+
+        controls.PerformAction(ScrollChromeAction.Start);
+        controls.Close();
+        controls.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    private static void PumpUntil(Func<bool> condition, int ms = 5000)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < ms)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
+    }
+
     [Theory]
     [InlineData(1.00, 250, 24, 40)]
     [InlineData(1.25, 312, 30, 50)]   // Math.Round is to-even: 312.5 lands on 312

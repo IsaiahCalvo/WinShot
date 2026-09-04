@@ -204,6 +204,8 @@ public sealed class ScrollControlsBar : WF.Form
     private readonly SD.Rectangle _region;
     private bool _started;
     private bool _autoOn;
+    private readonly WinShot.Capture.RectangleTween _reveal = new();
+    private IDisposable? _revealTween;
     private ScrollHint _hint = ScrollHint.None; // a persistent hint overrides live status text
 
     // Point-based fonts render at the monitor's DPI, so the fixed-pixel layout has to be
@@ -245,6 +247,10 @@ public sealed class ScrollControlsBar : WF.Form
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
             Text = "Scroll capture ready",
+            // Before capture the bar is a single Start Capture capsule: a status line
+            // reading "ready" and a toggle for a run that hasn't begun are both answers to
+            // questions nobody has asked yet. Start() reveals them.
+            Visible = false,
             TextAlign = SD.ContentAlignment.MiddleLeft,
             Anchor = WF.AnchorStyles.None,
             AccessibleName = "Scrolling capture status",
@@ -260,6 +266,7 @@ public sealed class ScrollControlsBar : WF.Form
         _auto = MakeButton("Auto-Scroll", "ScrollCaptureAuto", "Toggle automatic scrolling",
             "Start or pause automatic scrolling. Keyboard shortcut: Alt+A.",
             ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
+        _auto.Visible = false; // revealed with the status line when capture starts
         _auto.Click += (_, _) => PerformAction(ScrollChromeAction.ToggleAuto);
 
         _start = MakeButton("Start Capture", "ScrollCaptureStart", "Start scrolling capture",
@@ -300,7 +307,11 @@ public sealed class ScrollControlsBar : WF.Form
         };
         // Re-round AND re-center when the bar resizes (Start swaps to Done), so it never
         // clips the content or drifts off-center.
-        SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, S(12)); PositionNear(_region); };
+        SizeChanged += (_, _) =>
+        {
+            ApplyRoundedRegion(Width, Height, S(12));
+            if (!_reveal.IsActive) PositionNear(_region); // the glide owns the position while it runs
+        };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -327,7 +338,49 @@ public sealed class ScrollControlsBar : WF.Form
         _started = true;
         _start.Visible = false;
         _done.Visible = true;
+        RevealCaptureControls();
         StartRequested?.Invoke();
+    }
+
+    /// <summary>
+    /// Grows the capsule into the full capture bar. The controls appear at their final size
+    /// and the window glides from the capsule's rect to the bar's, re-centred on the region,
+    /// so the bar reads as expanding rather than being replaced.
+    /// </summary>
+    private void RevealCaptureControls()
+    {
+        if (IsDisposed) return;
+        if (!IsHandleCreated)
+        {
+            _status.Visible = true;
+            _auto.Visible = true;
+            return;
+        }
+
+        SD.Rectangle from = Bounds;
+        AutoSize = false; // the glide sets Size itself; AutoSize would snap it back
+        _status.Visible = true;
+        _auto.Visible = true;
+        PerformLayout();
+        SD.Size grown = PreferredSize;
+        SD.Rectangle to = new(from.X + ((from.Width - grown.Width) / 2), from.Y, grown.Width, grown.Height);
+
+        _revealTween?.Dispose();
+        _reveal.Retarget(from, to);
+        _revealTween = Motion.Run(Motion.SwapMs, Motion.EaseOutCubic,
+            p =>
+            {
+                if (IsDisposed) return;
+                _reveal.Update((float)p);
+                Bounds = _reveal.Current;
+            },
+            () =>
+            {
+                _reveal.Stop();
+                if (IsDisposed) return;
+                AutoSize = true;
+                PositionNear(_region);
+            });
     }
 
     private void ToggleAuto()
@@ -428,6 +481,14 @@ public sealed class ScrollControlsBar : WF.Form
         {
             // UI Automation is optional; visible status remains the fallback.
         }
+    }
+
+    protected override void OnFormClosed(WF.FormClosedEventArgs e)
+    {
+        _revealTween?.Dispose();
+        _revealTween = null;
+        _reveal.Stop();
+        base.OnFormClosed(e);
     }
 
     private void PositionNear(SD.Rectangle region)
