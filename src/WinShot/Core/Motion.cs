@@ -20,7 +20,7 @@ internal static class Motion
     /// </summary>
     public const int FrameIntervalMs = 8;
 
-    /// <summary>Hover highlight gliding between elements (ShareX parity — see RectangleTween).</summary>
+    /// <summary>Hover highlight gliding between elements (modelled on ShareX — see RectangleTween).</summary>
     public const int GlideDurationMs = 200;
 
     /// <summary>Overlay cards restacking when another capture lands.</summary>

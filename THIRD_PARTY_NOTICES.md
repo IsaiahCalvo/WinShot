@@ -1,0 +1,127 @@
+# Third-party notices
+
+Everything WinShot ships, and where it came from. Verified 2026-09-04 against the
+resolved package graph in `src/WinShot/obj/project.assets.json` and each package's
+own `.nuspec` in the local NuGet cache — not from memory or from a badge.
+
+Fourteen packages reach the shipping binary: thirteen MIT, one Apache-2.0. Nothing
+in the graph is copyleft. Test-only packages (xunit, Newtonsoft.Json,
+`Microsoft.TestPlatform.*`) are not distributed and carry no notice obligation, so
+they are deliberately absent from the count and from the list below.
+
+MIT and Apache-2.0 both require their notices to accompany the **distributed
+binary**, not merely to sit in the source repo. See "Still open" at the bottom.
+
+## Studied, not copied
+
+### ShareX — https://github.com/ShareX/ShareX — GPL-3.0
+
+Behaviour reference only. **No ShareX source is copied, linked, or included in
+WinShot**, and WinShot links no GPL code.
+
+Two WinShot files were written after studying how ShareX's region selector
+behaves, and say so in their own headers:
+
+- `src/WinShot/Capture/RectangleTween.cs` — the hover highlight's ~200 ms glide,
+  and the rule that retargeting mid-flight resumes from where the rectangle
+  currently is rather than from the old target. WinShot's tween is its own code:
+  a single class, stopwatch-timed, pixel-snapped output, exact landing on the
+  target.
+- `src/WinShot/Core/WindowEnumerator.cs` — the window / client-area / child-control
+  snap model: deepest-first ordering, cloaked (UWP ghost) windows filtered out,
+  non-activatable and click-through windows skipped, DWM extended frame bounds
+  rather than `GetWindowRect`. These follow from the Win32 window model; the
+  enumeration itself, its P/Invoke layer, its time budget and its coverage pass
+  are WinShot's.
+
+The NVIDIA GeForce overlay's window class name (`CEF-OSC-WIDGET`), noted in
+`WindowEnumerator.cs`, is a fact about NVIDIA's software recorded in ShareX issue
+#2637.
+
+### Microsoft PowerToys — https://github.com/microsoft/PowerToys — MIT — **PENDING, not yet used**
+
+`docs/research/2026-09-02-cleanshot-video-sweep.md` plans a port of PowerToys'
+`MeasureToolCore` edge detection into a future `src/WinShot/Capture/EdgeSnap.cs`.
+Nothing is ported yet. **When that port lands**, MIT requires the copyright notice
+and the full permission notice to travel with all copies: the verbatim MIT licence
+text plus "Copyright (c) Microsoft Corporation" must be added to this file, must
+ship with the binary, and an attribution header must sit in `EdgeSnap.cs` itself.
+Until then this entry is a reminder, not a notice.
+
+## Shipped packages
+
+### MIT
+
+| Package | Version | Copyright | Source |
+|---|---|---|---|
+| ScreenRecorderLib | 6.6.0 | © Sverre Kristoffer Skodje 2025 | https://github.com/sskodje/ScreenRecorderLib |
+| SkiaSharp | 3.119.4 | © Microsoft Corporation | https://github.com/mono/SkiaSharp |
+| SkiaSharp.NativeAssets.Win32 | 3.119.4 | © Microsoft Corporation | https://github.com/mono/SkiaSharp |
+| SkiaSharp.NativeAssets.macOS | 3.119.4 | © Microsoft Corporation | in the graph, not shipped on win-x64 |
+| System.Text.Json | 9.0.1 | © Microsoft Corporation | https://github.com/dotnet/runtime |
+| System.Text.Encodings.Web | 9.0.1 | © Microsoft Corporation | https://github.com/dotnet/runtime |
+| System.IO.Pipelines | 9.0.1 | © Microsoft Corporation | https://github.com/dotnet/runtime |
+| Vortice.Direct3D11 | 3.8.3 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
+| Vortice.DXGI | 3.8.3 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
+| Vortice.DirectX | 3.8.3 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
+| Vortice.Mathematics | 2.1.0 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Mathematics |
+| SharpGen.Runtime | 2.4.2-beta | © Amer Koleci and Contributors | https://github.com/SharpGenTools/SharpGenTools |
+| SharpGen.Runtime.COM | 2.4.2-beta | © Amer Koleci and Contributors | https://github.com/SharpGenTools/SharpGenTools |
+
+The two `SharpGen.Runtime` packages resolve to a **prerelease** (`2.4.2-beta`) in
+the shipping build. That is a supply-chain note, not a licensing one.
+
+The MIT permission notice, reproduced once for all of the above:
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy of
+> this software and associated documentation files (the "Software"), to deal in
+> the Software without restriction, including without limitation the rights to
+> use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+> the Software, and to permit persons to whom the Software is furnished to do so,
+> subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+> FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+> COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+> IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+> CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### Apache-2.0
+
+**ZXing.Net 0.16.11** — https://github.com/micjahn/ZXing.Net — used for QR/barcode
+decoding. Apache-2.0 asks for more than MIT does: the full licence text must be
+included with the distribution, any upstream `NOTICE` file must be propagated, and
+modified files must be marked as changed. WinShot does not modify ZXing.Net.
+
+The package itself ships **no licence file** — only the SPDX expression in its
+`.nuspec` — so the Apache-2.0 text has to come from upstream
+(https://www.apache.org/licenses/LICENSE-2.0.txt) rather than out of the package.
+
+### Behind the MIT wrapper
+
+`SkiaSharp` is an MIT wrapper, but the native `libSkiaSharp` binary it ships
+embeds Google's **Skia**, which is **BSD-3-Clause**, along with Skia's own
+third-party dependencies. Do not let the wrapper's MIT stand in for them: the
+authoritative list is shipped inside the package as
+`skiasharp.nativeassets.win32/3.119.4/THIRD-PARTY-NOTICES.txt`, and that file
+should be reproduced verbatim with the distribution.
+
+## Related
+
+The browser extension has its own notices, covering different code:
+[browser-extension/THIRD_PARTY_NOTICES.md](browser-extension/THIRD_PARTY_NOTICES.md).
+
+## Still open
+
+- **WinShot itself has no LICENSE file.** With none, the default is "all rights
+  reserved" — nobody may copy, modify or redistribute it. That is a legitimate
+  choice for a personal, closed app, but right now it is an accident rather than a
+  decision. Isaiah's call.
+- **These notices must ship, not just live here.** MIT and Apache-2.0 obligations
+  attach to the distributed binary, so this file (plus the Apache-2.0 text and
+  Skia's `THIRD-PARTY-NOTICES.txt`) needs to be carried by the installer and
+  reachable from the About pane. Not wired yet.

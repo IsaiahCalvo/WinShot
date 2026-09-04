@@ -47,8 +47,12 @@ public sealed class FrameSignature
         StripHash = stripHash;
     }
 
-    /// <summary>Side margin excluded from all row math — same formula ShareX uses; wide enough
-    /// to cover a scrollbar even on narrow regions.</summary>
+    /// <summary>
+    /// Side margin excluded from all row math. 5% of the width covers a scrollbar on a normal
+    /// region, but a flat 5% is thinner than a ~17px scrollbar once the region is narrow, so
+    /// the floor is 50px — capped at a third of the width so a very narrow region still has a
+    /// middle left to compare.
+    /// </summary>
     public static int SideMargin(int width) => Math.Min(Math.Max(50, width / 20), width / 3);
 
     public static FrameSignature Build(SD.Bitmap bmp) => Build(bmp, 0, 0);

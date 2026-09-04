@@ -267,10 +267,9 @@ public static class ImageStitcher
     {
         int width = bmp.Width, height = bmp.Height;
         // Trim the sides before hashing so a moving scrollbar thumb / anti-aliased edge never
-        // breaks an exact row match. Clamp(width/20, min 50px, max width/3) — the same formula
-        // ShareX and odd-snap use; a flat 5% was too thin to cover a ~17px scrollbar on a
-        // narrow region.
-        int margin = Math.Min(Math.Max(50, width / 20), width / 3);
+        // breaks an exact row match. Same margin the frame signatures use, so the two agree
+        // on what counts as content.
+        int margin = FrameSignature.SideMargin(width);
         int startX = margin, endX = width - margin;
         if (endX <= startX) // degenerate width: hash the whole row
         {
