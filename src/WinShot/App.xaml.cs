@@ -48,6 +48,13 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // Before any window exists. ThemeResources.ApplyAnimationPreference can only zero a
+        // control template's transitions while its BeginStoryboards are still unsealed, and
+        // WPF seals them the first time a style is applied - so whichever window opened first
+        // used to decide whether "Animation effects: off" reached the WPF stack at all. The
+        // recovery dialog below was one such first window.
+        Core.ThemeResources.EnsureLoaded();
+
         string? incomingCommand = e.Args.Length > 0 ? CommandServer.ParseCommand(e.Args[0]) : null;
 
         _mutex = new Mutex(true, "WinShot-SingleInstance", out _ownsMutex);

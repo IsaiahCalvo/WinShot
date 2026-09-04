@@ -58,8 +58,14 @@ public static class ThemeResources
     /// Reaching those means realising the dictionary's Styles and templates. On a machine
     /// with animation ON this method returns before touching a single key; on one with it
     /// off, inflating ~146 deferred values once at startup is what the setting costs.
-    /// Called on the loaded dictionary before any window's InitializeComponent, so no
-    /// BeginStoryboard is sealed yet.
+    ///
+    /// App.OnStartup calls EnsureLoaded before the first window exists, so the actions are
+    /// normally still unsealed and can be repointed. A sealed one (a style already applied
+    /// to a live control) cannot be, so the zeroing is done in place wherever the storyboard
+    /// itself is editable: that reaches sealed holders too, since they keep the instance.
+    ///
+    /// The preference is read once per process. Motion.Run re-reads it per tween, so the
+    /// WinForms stack follows a mid-session toggle and the WPF stack needs a restart.
     /// </summary>
     internal static void ApplyAnimationPreference(ResourceDictionary theme)
     {
@@ -106,7 +112,8 @@ public static class ThemeResources
     /// <summary>
     /// Repoints every BeginStoryboard in a trigger collection at the instant twin of the
     /// storyboard it currently holds. A sealed action belongs to a style already in use and
-    /// cannot be repointed; nothing in this app is in that state at EnsureLoaded time.
+    /// cannot be repointed, and the storyboard it holds is frozen, so it cannot be edited in
+    /// place either — running before the first window is the whole guarantee.
     /// </summary>
     private static void ZeroTriggers(TriggerCollection triggers, Dictionary<Storyboard, Storyboard> cache)
     {
@@ -116,8 +123,21 @@ public static class ThemeResources
             {
                 foreach (TriggerAction action in actions)
                 {
-                    if (action is BeginStoryboard { Storyboard: { } board } begin && !begin.IsSealed)
-                        begin.Storyboard = Zero(board, cache);
+                    if (action is not BeginStoryboard { Storyboard: { } board } begin)
+                        continue;
+
+                    if (begin.IsSealed)
+                    {
+                        // Nothing can be done here: the action belongs to a template that is
+                        // already in use, and the storyboard it holds came out of the
+                        // dictionary frozen, so neither the holder nor the timeline can be
+                        // edited. The only cure is running earlier, which App.OnStartup now
+                        // guarantees — log rather than fail silently if that ever regresses.
+                        Log.Error("Animation preference reached a sealed template; EnsureLoaded ran too late");
+                        continue;
+                    }
+
+                    begin.Storyboard = Zero(board, cache);
                 }
             }
         }

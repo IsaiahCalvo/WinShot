@@ -184,6 +184,25 @@ public class DarkControlPaletteTests
             (double)theme["SettingsRowIndent"]));
 
     /// <summary>
+    /// XAML cannot compose a Thickness out of a sys:Double, so the four margin tokens the
+    /// UI actually consumes spell their values out and name the derivation in a comment.
+    /// A comment does not fail, so a step could move and leave every margin behind. This
+    /// is that comment, machine-checked.
+    /// </summary>
+    [Theory]
+    [InlineData("GroupLabelMargin", 0, "Space2", 0, "Space1")]
+    [InlineData("GroupSepMargin", 0, "Space2", 0, "Space2")]
+    [InlineData("LabelGutterMargin", 0, 0, "Space3", 0)]
+    [InlineData("ChipGutterMargin", 0, 0, "Space2", 0)]
+    public void SpacingTokens_ComposeFromTheScale(string key, object left, object top, object right, object bottom)
+        => OnTheme(theme =>
+        {
+            double Step(object step) => step is string name ? (double)theme[name] : Convert.ToDouble(step);
+            var margin = (Thickness)theme[key];
+            Assert.Equal(new Thickness(Step(left), Step(top), Step(right), Step(bottom)), margin);
+        });
+
+    /// <summary>
     /// A tool that IS selected has to read as more selected than a tool the pointer merely
     /// happens to be over. It did not: the neutral chip composited to 1.34:1 over the
     /// toolbar while the hover wash reached 1.46:1, so sweeping the pointer across the row
@@ -221,7 +240,7 @@ public class DarkControlPaletteTests
         Color text = ((SolidColorBrush)theme["TextPrimaryBrush"]).Color;
         Color chip = ((SolidColorBrush)theme["ToolChipBrush"]).Color;
         Color hover = ((SolidColorBrush)theme["HoverFillBrush"]).Color;
-        Color press = ((SolidColorBrush)theme["PressedFillBrush"]).Color;
+        Color press = ((SolidColorBrush)theme["PressedShadeBrush"]).Color;
 
         foreach ((string state, Color fill) in new[]
         {
@@ -310,6 +329,48 @@ public class DarkControlPaletteTests
 
                 // ToolButton alone carries six (hover/press/chip, in and out).
                 Assert.True(templateBoards >= 6, $"only found {templateBoards} storyboards inside templates");
+            });
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+        }
+    }
+
+    /// <summary>
+    /// Why App.OnStartup has to call EnsureLoaded before the first window exists. WPF seals
+    /// a ControlTemplate's trigger actions the first time the style is applied, and the
+    /// storyboards come out of the dictionary frozen — so a sealed BeginStoryboard can
+    /// neither be repointed nor edited in place, and the preference is lost for the rest of
+    /// the process. This pins that limit: the fix is ordering, not cleverness, and if WPF
+    /// ever stops sealing this test says so.
+    /// </summary>
+    [Fact]
+    public void Theme_ASealedTemplateIsBeyondReach_WhichIsWhyEnsureLoadedRunsAtStartup()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            OnTheme(theme =>
+            {
+                var style = (Style)theme["ToolButton"];
+                var template = (ControlTemplate)style.Setters.OfType<Setter>()
+                    .Single(x => x.Property == Control.TemplateProperty).Value;
+
+                // What applying the style to a live control does to the template.
+                template.Seal();
+
+                ThemeResources.ApplyAnimationPreference(theme);
+
+                Storyboard[] boards = template.Triggers
+                    .SelectMany(StoryboardsOf)
+                    .ToArray();
+
+                Assert.NotEmpty(boards);
+                Assert.All(boards, board => Assert.All(
+                    board.Children,
+                    child => Assert.NotEqual(new Duration(TimeSpan.Zero), child.Duration)));
             });
         }
         finally
