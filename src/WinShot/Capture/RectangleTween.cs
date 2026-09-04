@@ -7,10 +7,11 @@ namespace WinShot.Capture;
 /// Slides a rectangle from one position/size to another over a fixed duration, so the hover
 /// highlight glides between elements instead of teleporting.
 ///
-/// Port of ShareX's RectangleAnimation (GPL-3, ShareX.ScreenCaptureLib): a plain linear lerp
-/// of X/Y/W/H over 200 ms. Retargeting mid-flight starts from wherever the rect currently is,
-/// never from the old target — otherwise a fast mouse sweep makes the highlight jump backwards
-/// before catching up.
+/// Behaviour modelled on ShareX (GPL-3) — no code copied. What was taken is the observable
+/// rule, not an implementation: a plain linear lerp of X/Y/W/H, and a retarget mid-flight that
+/// starts from wherever the rect currently is rather than from the old target, because
+/// otherwise a fast mouse sweep makes the highlight jump backwards before catching up.
+/// See THIRD_PARTY_NOTICES.md.
 ///
 /// Time is read from a stopwatch rather than counted in frames, so a dropped repaint shortens
 /// the animation instead of stretching it.

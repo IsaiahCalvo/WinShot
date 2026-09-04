@@ -95,8 +95,10 @@ public static class WindowEnumerator
     /// z-order front to back. Hover detection is then a plain first-contains-point scan,
     /// which lands on the innermost element under the cursor.
     ///
-    /// Port of ShareX's WindowsRectangleList (GPL-3, ShareX.ScreenCaptureLib) — same
-    /// filters, same ordering, same containment dedupe. HWND-level only: apps that draw
+    /// Behaviour modelled on ShareX (GPL-3) — no code copied: the same *rules* about which
+    /// rectangles a window picker should offer and in what order (filters, ordering,
+    /// containment dedupe), reached by this file's own EnumWindows walk. See
+    /// THIRD_PARTY_NOTICES.md. HWND-level only: apps that draw
     /// their whole UI into one window (Chromium, Electron, WPF) expose just the window
     /// and its client area here; the MSAA/UIA and pixel tiers refine those.
     /// </summary>
