@@ -407,6 +407,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _pillTween = null;
         _pillHover = false;
         _pillSwap = 0d;
+        _pendingGlideTween?.Dispose();
+        _pendingGlideTween = null;
+        _pendingGlide.Stop();
         _hoverWindow = null;
         _hoverAppName = string.Empty;
         BeginHoverWash(arriving: false);
@@ -488,6 +491,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _hintHoldTween = null;
             _pillTween?.Dispose();
             _pillTween = null;
+            _pendingGlideTween?.Dispose();
+            _pendingGlideTween = null;
             _followTimer.Dispose();
             _followMotionClock?.Dispose();
             _followMotionClock = null;
@@ -795,10 +800,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             // Cancel / Done bar wins over move/resize. The press only arms the button —
             // the action fires on mouse-up over the same button, standard button feel.
-            var (barRect, cancelRect, doneRect) = ActionBarRects(pending);
+            var (barRect, padRect, cancelRect, doneRect) = ActionBarRects(pending);
             if (barRect.Contains(screen))
             {
-                _pressedBarButton = doneRect.Contains(screen) ? 1 : cancelRect.Contains(screen) ? 0 : -1;
+                _pressedBarButton = doneRect.Contains(screen) ? 1
+                    : cancelRect.Contains(screen) ? 0
+                    : padRect.Contains(screen) ? 2 : -1;
                 InvalidateScreenRect(barRect);
                 return; // consume any click on the bar (don't start a new marquee under it)
             }
@@ -815,6 +822,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 _resizeHandle = handle;
                 _adjustStartRect = pending;
                 return;
+            }
+
+            // Handles win the corners; a press on an edge with no drag behind it snaps that
+            // ONE edge onto the nearest real boundary, which is the tedious half of drawing a
+            // rectangle by hand.
+            MarqueeSide side = MarqueeEdge.HitTest(pending, screen);
+            if (side != MarqueeSide.None)
+            {
+                SD.Rectangle snapped = MarqueeEdge.SnapEdge(pending, side, _snapEdgesX, _snapEdgesY);
+                if (snapped != pending)
+                {
+                    GlideSelectionTo(snapped);
+                    return;
+                }
             }
 
             if (pending.Contains(screen))
@@ -837,6 +858,37 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     /// <summary>The adjustable selection, for tests and for the keyboard nudge helper.</summary>
     internal SD.Rectangle? PendingRegion => _pendingScreen;
+
+    /// <summary>Display-only glide when the selection jumps by itself (an edge snapping, a
+    /// padding step). The pending rect is the destination from the first frame, so Enter and
+    /// Done always commit the final rectangle even mid-glide.</summary>
+    private readonly RectangleTween _pendingGlide = new();
+    private IDisposable? _pendingGlideTween;
+
+    private void GlideSelectionTo(SD.Rectangle destination)
+    {
+        if (_pendingScreen is not SD.Rectangle from || destination == from)
+            return;
+
+        _pendingScreen = destination;
+        _pendingGlideTween?.Dispose();
+        _pendingGlide.Retarget(from, destination);
+        SD.Rectangle band = SD.Rectangle.Union(from, destination);
+        _pendingGlideTween = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutCubic,
+            progress =>
+            {
+                _pendingGlide.Update((float)progress);
+                InvalidateScreenRect(Inflated(band));
+            },
+            () =>
+            {
+                _pendingGlideTween = null;
+                _pendingGlide.Stop();
+                InvalidateAllSurfaces();
+            });
+    }
 
     /// <summary>
     /// Hands the selector an adjustable selection and pops its handles in. Eight dots
@@ -1093,9 +1145,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Cancel / Done hover feedback (only the bar rect repaints on a state change).
         if (_pendingScreen is SD.Rectangle barPending)
         {
-            var (barRect, cancelRect, doneRect) = ActionBarRects(barPending);
+            var (barRect, padRect, cancelRect, doneRect) = ActionBarRects(barPending);
             int hover = doneRect.Contains(_currentScreen) ? 1
-                : cancelRect.Contains(_currentScreen) ? 0 : -1;
+                : cancelRect.Contains(_currentScreen) ? 0
+                : padRect.Contains(_currentScreen) ? 2 : -1;
             if (hover != _hoverBarButton)
             {
                 _hoverBarButton = hover;
@@ -1217,10 +1270,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _pressedBarButton = -1;
             if (_pendingScreen is SD.Rectangle pend)
             {
-                var (bar, cancel, done) = ActionBarRects(pend);
+                var (bar, padButton, cancel, done) = ActionBarRects(pend);
                 InvalidateScreenRect(bar);
                 if (pressed == 1 && done.Contains(_currentScreen)) Confirm(VirtualFromScreen(pend));
                 else if (pressed == 0 && cancel.Contains(_currentScreen)) Complete(WF.DialogResult.Cancel);
+                else if (pressed == 2 && padButton.Contains(_currentScreen))
+                    GlideSelectionTo(MarqueeEdge.Pad(pend, MarqueeEdge.PaddingStepPx, _vs));
             }
             return;
         }
@@ -1313,7 +1368,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
         else if (_pendingScreen is SD.Rectangle pending)
         {
-            brightScreen = pending;
+            brightScreen = _pendingGlide.IsActive ? _pendingGlide.Current : pending;
             showHandles = true;
         }
         else if (_mode == SelectorMode.Window && _hoverWindow is not null)
@@ -1394,9 +1449,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // runs to the screen bottom, tucked inside the bottom when the region spans the full height.
         if (_pendingScreen is SD.Rectangle pendBar)
         {
-            var (bar, cancel, done) = ActionBarRects(pendBar);
+            var (bar, padButton, cancel, done) = ActionBarRects(pendBar);
             if (bar.IntersectsWith(monitorBounds))
-                DrawActionBar(g, monitorBounds, bar, cancel, done);
+                DrawActionBar(g, monitorBounds, bar, padButton, cancel, done);
         }
 
         if (_hintOpacity > 0d && cursorOnThisSurface && _pendingScreen is null && !_dragging)
@@ -1804,6 +1859,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _pillTween = null;
         _pillHover = false;
         _pillSwap = 0d;
+        _pendingGlideTween?.Dispose();
+        _pendingGlideTween = null;
+        _pendingGlide.Stop();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -1829,7 +1887,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_pendingScreen is SD.Rectangle p)
         {
             // The Cancel/Done bar reads as buttons, not as selection ground.
-            var (bar, _, _) = ActionBarRects(p);
+            var (bar, _, _, _) = ActionBarRects(p);
             if (bar.Contains(_currentScreen))
                 return WF.Cursors.Hand;
 
@@ -1856,7 +1914,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private static SD.Font ActionBarFont(double s) =>
         new("Segoe UI", Math.Max(9, (int)Math.Round(12 * s)), SD.FontStyle.Regular, SD.GraphicsUnit.Pixel);
 
-    private static (SD.Rectangle bar, SD.Rectangle cancel, SD.Rectangle done) ActionBarRects(SD.Rectangle r)
+    private static (SD.Rectangle bar, SD.Rectangle pad, SD.Rectangle cancel, SD.Rectangle done) ActionBarRects(SD.Rectangle r)
     {
         // Same proportions as the record modal's Cancel/Start pair, scaled to the
         // region's monitor: quiet regular-weight labels in roomy rounded buttons.
@@ -1869,14 +1927,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
         int btnH = (int)Math.Round(30 * s);
         int cancelW = WF.TextRenderer.MeasureText("Cancel", font).Width + hpad * 2;
         int doneW = Math.Max(cancelW, WF.TextRenderer.MeasureText("Done", font).Width + hpad * 2);
-        int barW = pad + cancelW + gap + doneW + pad;
+        int padW = btnH; // square cell, so the glyph reads as an icon button
+        int barW = pad + padW + gap + cancelW + gap + doneW + pad;
         int barH = pad + btnH + pad;
 
         SD.Point origin = PlaceActionBar(r, m, barW, barH);
         var bar = new SD.Rectangle(origin.X, origin.Y, barW, barH);
-        var cancel = new SD.Rectangle(origin.X + pad, origin.Y + pad, cancelW, btnH);
+        var padButton = new SD.Rectangle(origin.X + pad, origin.Y + pad, padW, btnH);
+        var cancel = new SD.Rectangle(padButton.Right + gap, origin.Y + pad, cancelW, btnH);
         var done = new SD.Rectangle(cancel.Right + gap, origin.Y + pad, doneW, btnH);
-        return (bar, cancel, done);
+        return (bar, padButton, cancel, done);
     }
 
     /// <summary>
@@ -1899,9 +1959,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return new SD.Point(x, y);
     }
 
-    private void DrawActionBar(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle bar, SD.Rectangle cancel, SD.Rectangle done)
+    private void DrawActionBar(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle bar, SD.Rectangle padButton, SD.Rectangle cancel, SD.Rectangle done)
     {
-        SD.Rectangle lb = ToLocal(bar, monitorBounds), lc = ToLocal(cancel, monitorBounds), ld = ToLocal(done, monitorBounds);
+        SD.Rectangle lb = ToLocal(bar, monitorBounds), lp = ToLocal(padButton, monitorBounds),
+            lc = ToLocal(cancel, monitorBounds), ld = ToLocal(done, monitorBounds);
         double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(WF.Screen.FromRectangle(bar).Bounds);
         using var font = ActionBarFont(s);
 
@@ -1912,6 +1973,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SD.Color doneFill = _pressedBarButton == 1 ? SD.Color.FromArgb(0x0A, 0x6F, 0xD6)
             : _hoverBarButton == 1 ? ThemePalette.AccentHover
             : Accent;
+        SD.Color padFill = _pressedBarButton == 2 ? SD.Color.FromArgb(0x30, 0x30, 0x32)
+            : _hoverBarButton == 2 ? ThemePalette.SurfaceHover
+            : SD.Color.FromArgb(0x3A, 0x3A, 0x3C);
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
@@ -1924,6 +1988,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
             using (var edge = new SD.Pen(ThemePalette.BorderStrong, 1))
                 g.DrawPath(edge, path);
         }
+        using (var pp = GdiPaths.RoundedRect(lp, btnRadius))
+        using (var pb = new SD.SolidBrush(padFill))
+            g.FillPath(pb, pp);
         using (var cp = GdiPaths.RoundedRect(lc, btnRadius))
         using (var cb = new SD.SolidBrush(cancelFill))
             g.FillPath(cb, cp);
@@ -1933,6 +2000,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.SmoothingMode = prev;
 
         const WF.TextFormatFlags center = WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding;
+        using (var padFont = ThemePalette.IconFont(Math.Max(9f, (float)(10 * s))))
+            WF.TextRenderer.DrawText(g, "", padFont, lp, ThemePalette.TextPrimary, center);
         WF.TextRenderer.DrawText(g, "Cancel", font, lc, ThemePalette.TextPrimary, center);
         WF.TextRenderer.DrawText(g, "Done", font, ld, SD.Color.White, center);
     }

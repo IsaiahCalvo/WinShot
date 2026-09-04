@@ -253,6 +253,42 @@ public class SelectorInteractionTests
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
     }
 
+    [Fact]
+    public void ClickingOneEdgeOfTheSelectionSnapsThatEdgeToARealBoundary()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings(s => s.AdjustSelectionBeforeCapturing = true));
+        SetSnapEdges(selector, [96, 520], [180, 496]);
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        selector.HandleMouseUp(Left());
+        Assert.Equal(new SD.Rectangle(100, 100, 240, 160), selector.PendingRegion);
+
+        // Press on the left edge, clear of the corner and mid-edge handles (those win the
+        // grab, which is why the edge gesture answers None at a corner).
+        pointer.At = new SD.Point(100, 130);
+        selector.HandleMouseDown(Left());
+
+        SD.Rectangle? snapped = selector.PendingRegion;
+        Assert.NotNull(snapped);
+        Assert.Equal(96, snapped!.Value.Left);
+        Assert.Equal(340, snapped.Value.Right);
+        Assert.Equal(100, snapped.Value.Top);
+        Assert.Equal(260, snapped.Value.Bottom);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
+    private static void SetSnapEdges(FastRegionSelectorDialog selector, int[] x, int[] y)
+    {
+        var type = typeof(FastRegionSelectorDialog);
+        const System.Reflection.BindingFlags Flags =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        type.GetField("_snapEdgesX", Flags)!.SetValue(selector, x);
+        type.GetField("_snapEdgesY", Flags)!.SetValue(selector, y);
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs = 8000)
     {
         var clock = Stopwatch.StartNew();
