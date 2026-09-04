@@ -714,6 +714,29 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Keyboard"/>
                                         <CheckBox x:Name="KeystrokesCheck" Content="Show keystrokes"/>
                                     </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
+                                        <CheckBox x:Name="KeystrokesCommandOnlyCheck" Content="Show only command keys"/>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Shortcuts are shown; plain typing is not."/>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Keystrokes at"/>
+                                        <ComboBox x:Name="KeystrokePositionCombo" HorizontalAlignment="Stretch">
+                                            <ComboBoxItem Content="Top left" Tag="top-left"/>
+                                            <ComboBoxItem Content="Top center" Tag="top-center"/>
+                                            <ComboBoxItem Content="Top right" Tag="top-right"/>
+                                            <ComboBoxItem Content="Bottom left" Tag="bottom-left"/>
+                                            <ComboBoxItem Content="Bottom center" Tag="bottom-center"/>
+                                            <ComboBoxItem Content="Bottom right" Tag="bottom-right"/>
+                                        </ComboBox>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
+                                        <CheckBox x:Name="HideCursorWhenTypingCheck" Content="Hide the cursor while typing"/>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Keeps the pointer out of the recording while you type, and brings it back when you stop."/>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 

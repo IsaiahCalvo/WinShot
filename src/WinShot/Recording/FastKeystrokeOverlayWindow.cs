@@ -6,6 +6,24 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Recording;
 
+/// <summary>How the keystroke overlay behaves for one take.</summary>
+/// <param name="Render">False makes the overlay a keyboard hook and nothing else — used when
+/// the user wants "hide cursor while typing" without a keystroke pill on screen.</param>
+/// <param name="CommandOnly">Show chords only; plain typing is not drawn.</param>
+/// <param name="Position">One of <see cref="RecordingOptions.NormalizeKeystrokePosition"/>.</param>
+public readonly record struct KeystrokeOverlayOptions(
+    bool Render,
+    bool CommandOnly,
+    string Position)
+{
+    public static KeystrokeOverlayOptions FromSettings(Settings settings) => new(
+        settings.ShowKeystrokes,
+        settings.KeystrokesCommandOnly,
+        RecordingOptions.NormalizeKeystrokePosition(settings.KeystrokePosition));
+
+    public static KeystrokeOverlayOptions Default => new(true, false, RecordingOptions.KeystrokeDefaultPosition);
+}
+
 public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingOverlay
 {
     private const int MaxRunLength = 18;
@@ -17,6 +35,7 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
 
     private readonly SD.Rectangle _regionPx;
+    private readonly KeystrokeOverlayOptions _options;
     private readonly HookProc _hookProc;
     private readonly bool _installHook;
     private readonly WF.Timer _timer = new() { Interval = WinShot.Core.Motion.FrameIntervalMs };
@@ -32,25 +51,42 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     private bool _modifierDownWithoutKey;
     private long _shownAtMs;
     private double _opacity;
+    private int _renderedWidth;
+    private bool _typing;
 
     public FastKeystrokeOverlayWindow(SD.Rectangle regionScreenPx)
-        : this(regionScreenPx, installHook: true)
+        : this(regionScreenPx, KeystrokeOverlayOptions.Default, installHook: true)
+    {
+    }
+
+    public FastKeystrokeOverlayWindow(SD.Rectangle regionScreenPx, KeystrokeOverlayOptions options)
+        : this(regionScreenPx, options, installHook: true)
     {
     }
 
     public static FastKeystrokeOverlayWindow CreateForSmokeTest(SD.Rectangle regionScreenPx) =>
-        new(regionScreenPx, installHook: false);
+        new(regionScreenPx, KeystrokeOverlayOptions.Default, installHook: false);
+
+    /// <summary>
+    /// Raised on the UI thread when typing starts and when it stops. "Hide the cursor while
+    /// typing" rides this: the hook is already the only thing in the app that knows.
+    /// </summary>
+    public event Action<bool>? TypingChanged;
 
     private int S(int logical) => (int)Math.Round(logical * _scale);
 
-    private FastKeystrokeOverlayWindow(SD.Rectangle regionScreenPx, bool installHook)
+    private FastKeystrokeOverlayWindow(
+        SD.Rectangle regionScreenPx,
+        KeystrokeOverlayOptions options,
+        bool installHook)
     {
         _regionPx = regionScreenPx;
+        _options = options;
         _installHook = installHook;
         _hookProc = KeyboardHookCallback;
         _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
         // Pixel-unit font so the glyphs scale with the pill box, not the monitor DPI.
-        _font = new SD.Font("Segoe UI", S(20), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        _font = new SD.Font("Segoe UI", S(30), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
 
         _timer.Tick += (_, _) => AdvanceFade();
     }
@@ -63,6 +99,8 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
             StopMotion();
             _opacity = 0;
             _runAppendable = false;
+            _renderedWidth = 0;
+            SetTyping(false);
             PresentEmpty();
         }
     }
@@ -79,25 +117,35 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     {
         RemoveHook();
         StopMotion();
+        SetTyping(false);
         _timer.Dispose();
         _font.Dispose();
         base.OnClosed(e);
     }
 
-    /// <summary>Draws the pill into an ARGB frame and presents it bottom-center of the
-    /// recorded region. The fade lives in the bitmap's alpha, so anti-aliased edges and
-    /// the fading pill blend against the real desktop.</summary>
+    /// <summary>Draws the pill into an ARGB frame and presents it at the chosen corner of the
+    /// recorded region. The fade lives in the bitmap's alpha, so anti-aliased edges and the
+    /// fading pill blend against the real desktop.</summary>
     private void RenderFrame()
     {
-        if (_opacity <= 0 || string.IsNullOrEmpty(_run))
+        if (!_options.Render || _opacity <= 0 || string.IsNullOrEmpty(_run))
         {
             PresentEmpty();
             return;
         }
 
+        int height = S(52);
         SD.Size textSize = WF.TextRenderer.MeasureText(_run, _font);
-        int height = S(36);
-        int width = Math.Min(Math.Max(16, _regionPx.Width - S(16)), Math.Max(S(74), textSize.Width + S(32)));
+        int target = Math.Min(
+            Math.Max(16, _regionPx.Width - S(16)),
+            Math.Max(S(96), textSize.Width + S(44)));
+        // The pill glides to its new width instead of snapping there as the chord grows. With
+        // animation off system-wide it lands immediately, like every other tween in the app.
+        _renderedWidth = WinShot.Core.Motion.AnimationsEnabled()
+            ? KeystrokeDisplay.EaseWidth(_renderedWidth, target)
+            : target;
+        int width = Math.Max(1, _renderedWidth);
+
         using var frame = new SD.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = SD.Graphics.FromImage(frame))
         {
@@ -109,24 +157,26 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
             g.FillPath(brush, path);
             g.DrawPath(pen, path);
 
-            var textBounds = new SD.Rectangle(S(16), 0, width - S(32), height);
-            var flags = WF.TextFormatFlags.HorizontalCenter |
-                        WF.TextFormatFlags.VerticalCenter |
-                        WF.TextFormatFlags.SingleLine |
-                        WF.TextFormatFlags.EndEllipsis;
+            // Centred in the pill's CURRENT width, so the text stays put while the pill grows
+            // around it rather than sliding as the edges move.
+            var textBounds = new SD.Rectangle(S(10), 0, Math.Max(1, width - S(20)), height);
             WF.TextRenderer.DrawText(
                 g,
                 _run,
                 _font,
                 textBounds,
                 SD.Color.FromArgb((int)Math.Round(255 * _opacity), TextColor),
-                flags);
+                WF.TextFormatFlags.HorizontalCenter |
+                WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine |
+                WF.TextFormatFlags.EndEllipsis);
         }
 
-        var at = new SD.Point(
-            _regionPx.X + Math.Max(0, (_regionPx.Width - width) / 2),
-            Math.Max(_regionPx.Y, _regionPx.Bottom - height - S(14)));
-        Present(frame, at);
+        Present(frame, KeystrokeDisplay.Anchor(
+            _regionPx,
+            new SD.Size(width, height),
+            _options.Position,
+            S(14)));
     }
 
     private void AdvanceFade()
@@ -141,7 +191,11 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
             _runAppendable = false;
             _opacity = Math.Max(0, 1 - ((elapsed - VisibleMs) / (double)FadeMs));
             if (_opacity <= 0)
+            {
+                _renderedWidth = 0;
+                SetTyping(false);
                 StopMotion();
+            }
         }
 
         RenderFrame();
@@ -154,7 +208,7 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
             if (_paused)
                 return;
 
-            bool isModifier = IsModifierVk(vk);
+            bool isModifier = KeystrokeDisplay.IsModifierVk(vk);
             if (down)
             {
                 if (isModifier)
@@ -164,13 +218,17 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
                 }
 
                 _modifierDownWithoutKey = false;
-                var (text, appendable) = BuildDisplay(vk);
-                Display(text, appendable);
+                bool ctrl = IsDown(0x11);
+                bool shift = IsDown(0x10);
+                bool alt = IsDown(0x12);
+                bool win = IsDown(0x5B) || IsDown(0x5C);
+                var (text, appendable) = KeystrokeDisplay.Build(vk, ctrl, shift, alt, win);
+                Display(text, appendable, KeystrokeDisplay.IsCommandChord(ctrl, alt, win));
             }
             else if (isModifier && _modifierDownWithoutKey && !AnyOtherModifierDown(vk))
             {
                 _modifierDownWithoutKey = false;
-                Display(ModifierName(vk), appendable: false);
+                Display(KeystrokeDisplay.ModifierName(vk), appendable: false, isCommandChord: true);
             }
         }
         catch (Exception ex)
@@ -179,8 +237,20 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
         }
     }
 
-    private void Display(string text, bool appendable)
+    private void Display(string text, bool appendable, bool isCommandChord)
     {
+        // Typing is happening either way — that is what "hide the cursor while typing" needs
+        // to know — even when the pill itself is filtered out or turned off.
+        SetTyping(true);
+
+        if (_options.CommandOnly && !isCommandChord)
+        {
+            _shownAtMs = Environment.TickCount64; // keep the typing state alive while they type
+            if (!_timer.Enabled)
+                StartMotion();
+            return;
+        }
+
         var now = DateTime.UtcNow;
         if (appendable && _runAppendable && now - _lastKeyAt < AppendWindow && _run.Length < MaxRunLength)
             _run += text;
@@ -196,40 +266,14 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
         RenderFrame();
     }
 
-    private static (string Text, bool Appendable) BuildDisplay(int vk)
+    private void SetTyping(bool typing)
     {
-        bool ctrl = IsDown(0x11);
-        bool shift = IsDown(0x10);
-        bool alt = IsDown(0x12);
-        bool win = IsDown(0x5B) || IsDown(0x5C);
-
-        if (ctrl || alt || win)
-        {
-            var parts = new List<string>(5);
-            if (ctrl) parts.Add("Ctrl");
-            if (alt) parts.Add("Alt");
-            if (shift) parts.Add("Shift");
-            if (win) parts.Add("Win");
-            parts.Add(KeyName(vk, upperCase: true));
-            return (string.Join("+", parts), false);
-        }
-
-        string name = KeyName(vk, upperCase: shift);
-        if (name.Length == 1)
-            return (name, true);
-        return (shift ? "Shift+" + name : name, false);
+        if (_typing == typing)
+            return;
+        _typing = typing;
+        try { TypingChanged?.Invoke(typing); }
+        catch (Exception ex) { Log.Error("Keystroke typing-state handler failed", ex); }
     }
-
-    private static bool IsModifierVk(int vk) =>
-        vk is 0x10 or 0x11 or 0x12 or 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5 or 0x5B or 0x5C;
-
-    private static string ModifierName(int vk) => vk switch
-    {
-        0x10 or 0xA0 or 0xA1 => "Shift",
-        0x11 or 0xA2 or 0xA3 => "Ctrl",
-        0x12 or 0xA4 or 0xA5 => "Alt",
-        _ => "Win",
-    };
 
     private static bool AnyOtherModifierDown(int releasedVk)
     {
@@ -244,57 +288,6 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     private static readonly int[] ModifierVks = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C };
 
     private static bool IsDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
-
-    private static string KeyName(int vk, bool upperCase)
-    {
-        if (vk is >= 0x41 and <= 0x5A)
-            return upperCase ? ((char)vk).ToString() : ((char)(vk + 32)).ToString();
-        if (vk is >= 0x30 and <= 0x39)
-            return ((char)vk).ToString();
-        if (vk is >= 0x60 and <= 0x69)
-            return ((char)('0' + vk - 0x60)).ToString();
-        if (vk is >= 0x70 and <= 0x87)
-            return "F" + (vk - 0x6F);
-
-        return vk switch
-        {
-            0x08 => "Backspace",
-            0x09 => "Tab",
-            0x0D => "Enter",
-            0x1B => "Esc",
-            0x14 => "CapsLock",
-            0x20 => "Space",
-            0x21 => "PgUp",
-            0x22 => "PgDn",
-            0x23 => "End",
-            0x24 => "Home",
-            0x25 => "Left",
-            0x26 => "Up",
-            0x27 => "Right",
-            0x28 => "Down",
-            0x2C => "PrtSc",
-            0x2D => "Ins",
-            0x2E => "Del",
-            0x5D => "Menu",
-            0x6A => "*",
-            0x6B => "+",
-            0x6D => "-",
-            0x6E => ".",
-            0x6F => "/",
-            0xBA => ";",
-            0xBB => "=",
-            0xBC => ",",
-            0xBD => "-",
-            0xBE => ".",
-            0xBF => "/",
-            0xC0 => "`",
-            0xDB => "[",
-            0xDC => "\\",
-            0xDD => "]",
-            0xDE => "'",
-            _ => ((WF.Keys)vk).ToString(),
-        };
-    }
 
     private void InstallHook()
     {
@@ -378,5 +371,4 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
         _motionClock?.Dispose();
         _motionClock = null;
     }
-
 }

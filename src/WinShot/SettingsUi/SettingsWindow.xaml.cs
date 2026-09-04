@@ -294,6 +294,12 @@ public partial class SettingsWindow : Window
         CaptureCursorCheck.IsChecked = s.CaptureCursor;
         ClickHighlightsCheck.IsChecked = s.ShowClickHighlights;
         KeystrokesCheck.IsChecked = s.ShowKeystrokes;
+        KeystrokesCommandOnlyCheck.IsChecked = s.KeystrokesCommandOnly;
+        HideCursorWhenTypingCheck.IsChecked = s.HideCursorWhenTyping;
+        SelectByTag(
+            KeystrokePositionCombo,
+            RecordingOptions.NormalizeKeystrokePosition(s.KeystrokePosition),
+            fallbackIndex: 4);
         RememberLastSelectionCheck.IsChecked = s.RememberLastSelection;
         DimScreenCheck.IsChecked = s.DimScreenWhileRecording;
         ShowCountdownCheck.IsChecked = s.ShowRecordingCountdown;
@@ -576,6 +582,10 @@ public partial class SettingsWindow : Window
             s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
             s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
             s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
+            s.KeystrokesCommandOnly = KeystrokesCommandOnlyCheck.IsChecked == true;
+            s.HideCursorWhenTyping = HideCursorWhenTypingCheck.IsChecked == true;
+            s.KeystrokePosition = RecordingOptions.NormalizeKeystrokePosition(
+                SelectedTag(KeystrokePositionCombo, RecordingOptions.KeystrokeDefaultPosition));
             s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
             s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
             s.RecordingCountdownSeconds = countdown;
@@ -653,6 +663,12 @@ public partial class SettingsWindow : Window
         Accessible(CaptureCursorCheck, "Record cursor", "Include the mouse pointer in recordings.");
         Accessible(ClickHighlightsCheck, "Highlight recording clicks", "Show a visual highlight for mouse clicks.");
         Accessible(KeystrokesCheck, "Show recording keystrokes", "Show pressed keys in recordings.");
+        Accessible(KeystrokesCommandOnlyCheck, "Show only command keys",
+            "Show keyboard shortcuts in recordings but not plain typing.");
+        Accessible(KeystrokePositionCombo, "Keystroke position",
+            "Choose which corner of the recorded area the keystroke pill sits in.");
+        Accessible(HideCursorWhenTypingCheck, "Hide the cursor while typing",
+            "Keeps the pointer out of the recording while you type, and brings it back when you stop.");
         Accessible(DoNotDisturbCheck, "Silence notifications while recording",
             "Turns notification banners off for the length of the recording and back on afterwards.");
         Accessible(RememberLastSelectionCheck, "Remember recording area", "Reuse the last valid recording rectangle.");
@@ -696,7 +712,9 @@ public partial class SettingsWindow : Window
             OverlayCloseAfterDragCheck, OverlaySaveBehaviorCombo, ShowRecordingControlsCheck,
             ShowRecordingTimerCheck, ScaleHiDpiVideoCheck, DoNotDisturbCheck,
             CaptureCursorCheck, ClickHighlightsCheck,
-            KeystrokesCheck, RememberLastSelectionCheck, DimScreenCheck, CountdownBox, WebcamCombo,
+            KeystrokesCheck, KeystrokesCommandOnlyCheck, KeystrokePositionCombo,
+            HideCursorWhenTypingCheck,
+            RememberLastSelectionCheck, DimScreenCheck, CountdownBox, WebcamCombo,
             WebcamSizeBox, RecordingShowOverlayCheck, RecordingCopyCheck, MaxResolutionCombo,
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,

@@ -1,4 +1,4 @@
-namespace WinShot.Core;
+﻿namespace WinShot.Core;
 
 public static class RecordingOptions
 {
@@ -28,4 +28,21 @@ public static class RecordingOptions
 
     public static string NormalizeWebcamPosition(string? position) =>
         position is not null && WebcamPositions.Contains(position) ? position : WebcamOff;
+
+    public const string KeystrokeDefaultPosition = "bottom-center";
+
+    // The webcam's corner vocabulary plus the two centred slots a keystroke pill actually
+    // wants; there is no "off" here, because the pill's own toggle is what turns it off.
+    private static readonly HashSet<string> KeystrokePositions =
+    [
+        "top-left",
+        "top-center",
+        "top-right",
+        "bottom-left",
+        KeystrokeDefaultPosition,
+        "bottom-right",
+    ];
+
+    public static string NormalizeKeystrokePosition(string? position) =>
+        position is not null && KeystrokePositions.Contains(position) ? position : KeystrokeDefaultPosition;
 }

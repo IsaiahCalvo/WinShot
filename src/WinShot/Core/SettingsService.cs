@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace WinShot.Core;
@@ -47,6 +47,9 @@ public class Settings
     public bool RecordSystemAudio { get; set; } = false;
     public bool ShowClickHighlights { get; set; } = false;
     public bool ShowKeystrokes { get; set; } = false;
+    public bool KeystrokesCommandOnly { get; set; } = false; // suppress plain typing, keep chords
+    public string KeystrokePosition { get; set; } = RecordingOptions.KeystrokeDefaultPosition;
+    public bool HideCursorWhenTyping { get; set; } = false;
     public int RecordingCountdownSeconds { get; set; } = 0;
     public bool CaptureCursor { get; set; } = true;
     public string WebcamOverlayPosition { get; set; } = "off"; // off | top-left | top-right | bottom-left | bottom-right | fullscreen

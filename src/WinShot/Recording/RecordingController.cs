@@ -44,6 +44,9 @@ public sealed class RecordingController
     private DispatcherTimer? _trayTimer;
     private bool _elapsedEnabled;
     private string? _tempPath;
+    // IDs of the sources the active MP4 recorder is composing, so cursor capture can be
+    // toggled on each of them while a take runs.
+    private string[] _recordingSourceIds = Array.Empty<string>();
 
     // Cached region + chosen options so Restart can re-run capture without
     // re-showing the options/region/countdown dialogs.
@@ -58,6 +61,8 @@ public sealed class RecordingController
         bool CaptureCursor,
         bool ShowClickHighlights,
         bool ShowKeystrokes,
+        KeystrokeOverlayOptions KeystrokeOptions,
+        bool HideCursorWhenTyping,
         string WebcamPosition,
         int WebcamSizePercent,
         string? WebcamDeviceName,
@@ -318,6 +323,8 @@ public sealed class RecordingController
             captureCursor,
             showClickHighlights,
             showKeystrokes,
+            KeystrokeOverlayOptions.FromSettings(s),
+            s.HideCursorWhenTyping,
             webcamPosition,
             webcamSizePercent,
             webcamDeviceName,
@@ -382,11 +389,21 @@ public sealed class RecordingController
         // Overlays go up before capture starts so the first frames already
         // have them. Both are click-through and intentionally visible to the
         // capture (rings/pills belong in the output).
+        // The keystroke overlay is also the only thing in the app that knows when typing is
+        // happening, so "hide the cursor while typing" starts it in render-off mode even when
+        // the pill itself is turned off.
+        bool needsKeyHook = p.ShowKeystrokes || p.HideCursorWhenTyping;
         var overlays = RecordingOverlayStartup.Start(
             p.ShowClickHighlights,
-            p.ShowKeystrokes,
+            needsKeyHook,
             () => new FastClickHighlightOverlayWindow(screenRect),
-            () => new FastKeystrokeOverlayWindow(screenRect),
+            () =>
+            {
+                var overlay = new FastKeystrokeOverlayWindow(screenRect, p.KeystrokeOptions);
+                if (p.HideCursorWhenTyping && p.CaptureCursor)
+                    overlay.TypingChanged += OnTypingChanged;
+                return overlay;
+            },
             Log.Error);
         _clickOverlay = overlays.ClickOverlay;
         _keyOverlay = overlays.KeyOverlay;
@@ -525,6 +542,10 @@ public sealed class RecordingController
 
         ApplyWebcamOverlay(options, p.WebcamPosition, p.WebcamSizePercent, p.WebcamDeviceName, crop);
 
+        _recordingSourceIds = options.SourceOptions.RecordingSources
+            .Select(source => source.ID)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .ToArray();
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnMp4Complete;
         _recorder.OnRecordingFailed += OnMp4Failed;
@@ -648,6 +669,38 @@ public sealed class RecordingController
             _gifRecorder?.Resume();
         else
             _recorder?.Resume();
+    }
+
+    /// <summary>
+    /// Takes the cursor out of the recording while the user is typing and puts it back when
+    /// they stop — nobody wants to watch a pointer sit in the middle of a sentence. Applied
+    /// live through the recorder's dynamic options (MP4) or the GIF encoder's own flag.
+    /// </summary>
+    private void OnTypingChanged(bool typing)
+    {
+        bool showCursor = !typing;
+        try
+        {
+            if (_isGif)
+            {
+                if (_gifRecorder is { } gif)
+                    gif.CaptureCursor = showCursor;
+                return;
+            }
+
+            if (_recorder is not { } recorder || _recordingSourceIds.Length == 0)
+                return;
+
+            var builder = recorder.GetDynamicOptionsBuilder();
+            foreach (string sourceId in _recordingSourceIds)
+                builder.SetCursorCaptureForRecordingSource(sourceId, showCursor);
+            builder.Apply();
+        }
+        catch (Exception ex)
+        {
+            // Best effort: a recorder that refuses the change simply keeps showing the cursor.
+            Log.Error("Failed to change cursor capture while typing", ex);
+        }
     }
 
     private void SetOverlaysPaused(bool paused)
