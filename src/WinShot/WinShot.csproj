@@ -44,6 +44,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Assets\download-window-svgrepo-com.svg"
                       LogicalName="WinShot.Assets.download-window-svgrepo-com.svg" />
+    <EmbeddedResource Include="Assets\quick-access-camcorder.svg"
+                      LogicalName="WinShot.Assets.quick-access-camcorder.svg" />
     <EmbeddedResource Include="Assets\quick-access-close.svg"
                       LogicalName="WinShot.Assets.quick-access-close.svg" />
     <EmbeddedResource Include="Assets\quick-access-copy.svg"

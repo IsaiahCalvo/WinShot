@@ -77,6 +77,13 @@ public static class ThemePalette
     public const float PinnedCardLabelPt = 7f;
 
     /// <summary>
+    /// Off the scale deliberately: the recording card's duration and size sit in a 17 px
+    /// strip inside the pinned card, and anything larger crowds the two ends together on
+    /// the smallest card size.
+    /// </summary>
+    public const float MediaStripLabelPt = 6.5f;
+
+    /// <summary>
     /// Off the scale deliberately: the quick-access tooltip is a 2 mm-tall chip whose
     /// width QuickAccessTooltipLayoutTests pins. TextMicroPt widens it by a character.
     /// </summary>

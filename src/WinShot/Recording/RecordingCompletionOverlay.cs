@@ -1,6 +1,7 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Overlay;
 using WinShot.Pin;
+using SD = System.Drawing;
 
 namespace WinShot.Recording;
 
@@ -15,12 +16,13 @@ public static class RecordingCompletionOverlay
     {
         try
         {
-            var thumbnail = await VideoThumbnail.CreateAsync(filePath);
+            (SD.Bitmap thumbnail, TimeSpan? duration) = await VideoThumbnail.CreateWithDurationAsync(filePath);
             var overlay = FastQuickActionsWindow.CreateForMediaFile(
                 filePath,
                 thumbnail,
                 settings,
-                canEdit: onEdit is not null);
+                canEdit: onEdit is not null,
+                duration: duration);
             if (onEdit is not null)
             {
                 overlay.EditRequested += o =>

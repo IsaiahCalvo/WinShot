@@ -952,6 +952,67 @@ public class QuickAccessOverlayInteractionTests
     private static WF.MouseEventArgs MouseArgs(SD.Point at, int clicks)
         => new(WF.MouseButtons.Left, clicks, at.X, at.Y, 0);
 
+    [Fact]
+    public void ARecordingCardDiffersFromAScreenshotCardOnlyInsideItsStrip()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"winshot-qao-strip-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string media = Path.Combine(directory, "recording.mp4");
+        File.WriteAllBytes(media, new byte[86016]);
+
+        try
+        {
+            RunSta(() =>
+            {
+                // Each card takes ownership of the bitmap it is handed, so the two get
+                // their own copy of the same pixels.
+                var settings = new SettingsService();
+                using var shot = FastQuickActionsWindow.CreateForTheme(
+                    CreateBusyCapture(), settings, QuickAccessOverlayTheme.Dark);
+                shot.CreateControl();
+                using (var source = CreateBusyCapture())
+                    InstallPreviews(shot, source);
+                using SD.Bitmap plain = RenderCard(shot);
+
+                using var recording = FastQuickActionsWindow.CreateForMediaFile(
+                    media, CreateBusyCapture(), settings, canEdit: true, duration: TimeSpan.FromSeconds(53));
+                recording.CreateControl();
+                using (var source = CreateBusyCapture())
+                    InstallPreviews(recording, source);
+                using SD.Bitmap withStrip = RenderCard(recording);
+
+                Assert.Equal(plain.Size, withStrip.Size);
+                var card = (SD.Rectangle)typeof(FastQuickActionsWindow)
+                    .GetField("_cardRect", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(recording)!;
+                SD.Rectangle band = MediaCardStrip.GradientBounds(card, recording.DeviceDpi);
+
+                // The card is pinned: everything above the strip has to be the same bytes.
+                for (int y = 0; y < band.Top; y++)
+                {
+                    for (int x = 0; x < plain.Width; x++)
+                        Assert.Equal(plain.GetPixel(x, y).ToArgb(), withStrip.GetPixel(x, y).ToArgb());
+                }
+
+                // And the strip has to actually be there — scanned, not eyeballed.
+                int changed = 0;
+                for (int y = band.Top; y < band.Bottom; y++)
+                {
+                    for (int x = 0; x < plain.Width; x++)
+                    {
+                        if (plain.GetPixel(x, y).ToArgb() != withStrip.GetPixel(x, y).ToArgb())
+                            changed++;
+                    }
+                }
+                Assert.True(changed > band.Width, $"the recording strip barely drew anything ({changed} pixels)");
+            });
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);

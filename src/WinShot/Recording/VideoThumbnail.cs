@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using Windows.Media.Editing;
 using Windows.Storage;
 using WinShot.Core;
@@ -14,13 +14,21 @@ namespace WinShot.Recording;
 public static class VideoThumbnail
 {
     public static async Task<SD.Bitmap> CreateAsync(string filePath)
+        => (await CreateWithDurationAsync(filePath)).Thumbnail;
+
+    /// <summary>
+    /// The poster frame and how long the recording runs. The card prints the duration in
+    /// its bottom strip, and the file is already open here — asking again later would mean
+    /// a second MediaComposition load.
+    /// </summary>
+    public static async Task<(SD.Bitmap Thumbnail, TimeSpan? Duration)> CreateWithDurationAsync(string filePath)
     {
         try
         {
             if (filePath.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
             {
                 using var image = SD.Image.FromFile(filePath);
-                return new SD.Bitmap(image);
+                return (new SD.Bitmap(image), GifDuration(image));
             }
 
             var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(filePath));
@@ -44,12 +52,37 @@ public static class VideoThumbnail
             await netStream.CopyToAsync(ms);
             ms.Position = 0;
             using var decoded = SD.Image.FromStream(ms);
-            return new SD.Bitmap(decoded);
+            return (new SD.Bitmap(decoded), clip.OriginalDuration);
         }
         catch (Exception ex)
         {
             Log.Error($"Could not render a thumbnail for {filePath}", ex);
-            return Placeholder();
+            return (Placeholder(), null);
+        }
+    }
+
+    /// <summary>
+    /// A GIF has no duration field; it is the sum of its per-frame delays, which GDI+ hands
+    /// back as one array of hundredths of a second in property 0x5100.
+    /// </summary>
+    private static TimeSpan? GifDuration(SD.Image image)
+    {
+        try
+        {
+            const int frameDelay = 0x5100;
+            if (Array.IndexOf(image.PropertyIdList, frameDelay) < 0)
+                return null;
+
+            byte[] value = image.GetPropertyItem(frameDelay)?.Value ?? Array.Empty<byte>();
+            long hundredths = 0;
+            for (int i = 0; i + 4 <= value.Length; i += 4)
+                hundredths += BitConverter.ToInt32(value, i);
+            return hundredths > 0 ? TimeSpan.FromMilliseconds(hundredths * 10) : null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not read a GIF's frame delays", ex);
+            return null;
         }
     }
 

@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
 using WinShot.Core;
@@ -99,6 +99,7 @@ public class QuickAccessOverlayRenderHarness
                 RenderState(black, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1,
                     Path.Combine(outDir, "dark-black-capture-idle.png"));
                 RenderStatusFlash(source, settings, "Text copied", Path.Combine(outDir, "card-flash-text-copied.png"));
+                RenderRecordingCard(source, settings, outDir);
             }
             catch (Exception ex)
             {
@@ -171,6 +172,33 @@ public class QuickAccessOverlayRenderHarness
         SetPreviewBitmaps(overlay, source);
         overlay.FlashStatus(message);
         Render(overlay, path);
+    }
+
+    /// <summary>The recording variant: the same card plus its duration / size strip.</summary>
+    private static void RenderRecordingCard(SD.Bitmap source, SettingsService settings, string outDir)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"winshot-render-media-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string media = Path.Combine(directory, "recording.mp4");
+            File.WriteAllBytes(media, new byte[7130316]);
+            using var overlay = FastQuickActionsWindow.CreateForMediaFile(
+                media,
+                (SD.Bitmap)source.Clone(),
+                settings,
+                canEdit: true,
+                duration: TimeSpan.FromSeconds(53));
+            overlay.CreateControl();
+            SetPreviewBitmaps(overlay, source);
+            Render(overlay, Path.Combine(outDir, "dark-recording-idle.png"));
+            Invoke(overlay, "SetHovering", true);
+            Render(overlay, Path.Combine(outDir, "dark-recording-hover.png"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static void SetPreviewBitmaps(FastQuickActionsWindow overlay, SD.Bitmap source)

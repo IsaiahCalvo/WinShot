@@ -34,6 +34,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     // fresh bitmap. _image is just the poster frame; copy/save/drag act on the file.
     private readonly string? _mediaFilePath;
     private readonly bool _mediaCanEdit;
+    private readonly TimeSpan? _mediaDuration;
+    private readonly long _mediaSizeBytes;
     private readonly Task? _releaseAfterTask;
     private readonly bool _requestMemoryCleanupOnClose;
     private readonly bool _loadPreview;
@@ -125,7 +127,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         string filePath,
         SD.Bitmap thumbnail,
         SettingsService settings,
-        bool canEdit)
+        bool canEdit,
+        TimeSpan? duration = null)
         => new(
             thumbnail,
             settings,
@@ -134,7 +137,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             releaseAfterTask: null,
             themeOverride: null,
             mediaFilePath: filePath,
-            mediaCanEdit: canEdit);
+            mediaCanEdit: canEdit,
+            mediaDuration: duration);
 
     private FastQuickActionsWindow(
         SD.Bitmap image,
@@ -146,12 +150,15 @@ public sealed class FastQuickActionsWindow : WF.Form
         bool loadPreview = true,
         QuickAccessOverlayTheme? themeOverride = null,
         string? mediaFilePath = null,
-        bool mediaCanEdit = true)
+        bool mediaCanEdit = true,
+        TimeSpan? mediaDuration = null)
     {
         _image = image;
         _settings = settings;
         _mediaFilePath = mediaFilePath;
         _mediaCanEdit = mediaCanEdit;
+        _mediaDuration = mediaDuration;
+        _mediaSizeBytes = MediaFileLength(mediaFilePath);
         _historyPath = historyPath;
         _releaseAfterTask = releaseAfterTask;
         _requestMemoryCleanupOnClose = requestMemoryCleanupOnClose;
@@ -496,6 +503,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // A message reuses the hover treatment verbatim, at full strength.
         double hover = flashing ? 1d : Math.Clamp(_hoverAmount, 0d, 1d);
         DrawThumbnail(g, hover);
+        DrawMediaStrip(g);
         DrawStatusFlash(g);
 
         // The hover chrome stays out of the way while a message is up — the cursor is
@@ -789,6 +797,91 @@ public sealed class FastQuickActionsWindow : WF.Form
         DrawThumbnail(g, blurred: false);
         if (blurAmount > 0d)
             DrawBlurredThumbnailOver(g, blurAmount);
+    }
+
+    private static long MediaFileLength(string? path)
+    {
+        try
+        {
+            return path is not null && File.Exists(path) ? new FileInfo(path).Length : 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Could not read the size of {path}", ex);
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// A recording's card carries a camcorder glyph and its duration on the left and the
+    /// file size on the right, over a short gradient inside the card's own rounded clip.
+    /// Nothing here runs for a screenshot: the screenshot card is unchanged, to the pixel.
+    /// </summary>
+    private void DrawMediaStrip(SD.Graphics g)
+    {
+        if (_mediaFilePath is null)
+            return;
+
+        SD.Rectangle strip = MediaCardStrip.Bounds(_cardRect, _dpi);
+        SD.Rectangle band = MediaCardStrip.GradientBounds(_cardRect, _dpi);
+        if (strip.Width <= 0 || strip.Height <= 0)
+            return;
+
+        using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
+        GraphicsState state = g.Save();
+        try
+        {
+            g.SetClip(clip, CombineMode.Intersect);
+            // Inflated brush rect: a gradient laid on exactly its own bounds wraps at the
+            // last pixel row and leaves a bright hairline.
+            using (var gradient = new LinearGradientBrush(
+                       SD.Rectangle.Inflate(band, 1, 1),
+                       SD.Color.FromArgb(0, 0, 0, 0),
+                       SD.Color.FromArgb(190, 0, 0, 0),
+                       LinearGradientMode.Vertical))
+                g.FillRectangle(gradient, band);
+
+            int pad = MediaCardStrip.Padding(_dpi);
+            using var font = ThemePalette.UiFont(ThemePalette.MediaStripLabelPt);
+            var flags = WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding | WF.TextFormatFlags.VerticalCenter;
+
+            int glyphSize = Math.Max(8, strip.Height - pad);
+            SD.Bitmap? glyph = CreateSvgIcon("quick-access-camcorder.svg", glyphSize, _visuals.Glyph);
+            int textLeft = strip.Left + pad;
+            if (glyph is not null)
+            {
+                g.DrawImageUnscaled(glyph, textLeft, strip.Top + (strip.Height - glyph.Height) / 2);
+                textLeft += glyph.Width + Math.Max(2, pad / 2);
+            }
+
+            if (_mediaDuration is { } duration)
+            {
+                WF.TextRenderer.DrawText(
+                    g,
+                    MediaCardStrip.FormatDuration(duration),
+                    font,
+                    new SD.Rectangle(textLeft, strip.Top, strip.Right - pad - textLeft, strip.Height),
+                    _visuals.Glyph,
+                    flags);
+            }
+
+            if (_mediaSizeBytes > 0)
+            {
+                string size = MediaCardStrip.FormatSize(_mediaSizeBytes);
+                SD.Size measured = WF.TextRenderer.MeasureText(g, size, font, SD.Size.Empty, flags);
+                WF.TextRenderer.DrawText(
+                    g,
+                    size,
+                    font,
+                    new SD.Rectangle(strip.Right - pad - measured.Width, strip.Top, measured.Width, strip.Height),
+                    _visuals.Glyph,
+                    flags);
+            }
+        }
+        finally
+        {
+            g.Restore(state);
+        }
     }
 
     private void DrawBlurredThumbnailOver(SD.Graphics g, double alpha)
