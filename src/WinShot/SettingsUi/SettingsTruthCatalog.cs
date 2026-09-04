@@ -1,4 +1,4 @@
-namespace WinShot.SettingsUi;
+﻿namespace WinShot.SettingsUi;
 
 /// <summary>
 /// Durable contract for the controls Settings is allowed to present. Every property in this
@@ -69,6 +69,8 @@ internal static class SettingsTruthCatalog
             "PinnedRoundedCorners",
             "PinnedShadow",
             "PinnedBorder",
+            "OcrDetectLinks",
+            "OcrLanguage",
         };
 
     internal static readonly IReadOnlyList<string> ExecutableShortcutIds =
@@ -95,7 +97,7 @@ internal static class SettingsTruthCatalog
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
             "AskForNameAfterCapture",
-            "AddRetinaSuffix", "CopyToClipboardFormat", "OcrDetectLinks", "OcrLanguage",
+            "AddRetinaSuffix", "CopyToClipboardFormat",
         };
 
     internal static readonly IReadOnlySet<string> NonInteractiveRuntimeStateProperties =

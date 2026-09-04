@@ -349,6 +349,7 @@ public partial class SettingsWindow : Window
         PinnedBorderCheck.IsChecked = s.PinnedBorder;
         HistorySlider.Value = RetentionDaysToSliderIndex(s.HistoryRetentionDays);
         AllInOneRememberCheck.IsChecked = s.AllInOneRememberLast;
+        LoadOcrLanguages();
         SelectByTag(OcrLanguageCombo, s.OcrLanguage, fallbackIndex: 0);
         OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
         OcrDetectLinksCheck.IsChecked = s.OcrDetectLinks;
@@ -596,6 +597,8 @@ public partial class SettingsWindow : Window
             s.GifSize = SelectedTag(GifSizeCombo, "800");
 
             s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
+            s.OcrDetectLinks = OcrDetectLinksCheck.IsChecked == true;
+            s.OcrLanguage = SelectedTag(OcrLanguageCombo, WinShot.Ocr.OcrService.AutoLanguage);
 
             // Screenshots
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
@@ -684,6 +687,8 @@ public partial class SettingsWindow : Window
         Accessible(PinnedBorderCheck, "Pinned screenshot border", "Show a border around pinned screenshots.");
         Accessible(AllInOneRememberCheck, "Remember All-In-One selection", "Restore the last All-In-One selection.");
         Accessible(OcrJoinLinesCheck, "Join recognized text lines", "Copy recognized text as joined lines instead of preserving line breaks.");
+        Accessible(OcrDetectLinksCheck, "Offer to open a detected link", "Show an Open link button when the recognized text is a single web address.");
+        Accessible(OcrLanguageCombo, "Text recognition language", "Choose which installed language pack reads the text.");
 
         foreach (Control control in new Control[]
         {
@@ -699,7 +704,7 @@ public partial class SettingsWindow : Window
             FormatCombo, HiDpiCheck, SelfTimerCombo,
             FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
-            OcrJoinLinesCheck,
+            OcrJoinLinesCheck, OcrDetectLinksCheck, OcrLanguageCombo,
         })
         {
             control.TabIndex = tabIndex++;
@@ -945,6 +950,25 @@ public partial class SettingsWindow : Window
             Log.Error($"Failed to open '{target}' for hotkey conflict", ex);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Fills the recognition-language combo from the packs this machine actually has.
+    /// A hard-coded list of seven languages offered choices most machines cannot honour --
+    /// picking one would silently fall back to the profile language with nothing said -- and
+    /// hid the dozens Windows does ship packs for. "Automatically detect" is always first and
+    /// is the whole list when no pack is installed, which is the honest answer.
+    /// </summary>
+    private void LoadOcrLanguages()
+    {
+        OcrLanguageCombo.Items.Clear();
+        OcrLanguageCombo.Items.Add(new ComboBoxItem
+        {
+            Content = "Automatically detect",
+            Tag = WinShot.Ocr.OcrService.AutoLanguage,
+        });
+        foreach ((string tag, string display) in WinShot.Ocr.OcrService.AvailableLanguages())
+            OcrLanguageCombo.Items.Add(new ComboBoxItem { Content = display, Tag = tag });
     }
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)

@@ -34,6 +34,54 @@ public static class OcrService
 
     private static OcrEngine? _engine;
     private static bool _engineInitialized;
+    private static string _engineLanguage = AutoLanguage;
+
+    /// <summary>The "let Windows decide" value of <see cref="PreferredLanguage"/>.</summary>
+    public const string AutoLanguage = "auto";
+
+    private static string _preferredLanguage = AutoLanguage;
+
+    /// <summary>
+    /// BCP-47 tag the recognizer should prefer, or <see cref="AutoLanguage"/> to follow the
+    /// user profile. App pushes Settings.OcrLanguage here at startup and whenever Settings is
+    /// saved; changing it rebuilds the cached engine on the next capture rather than
+    /// immediately, so a settings save never pays the engine-creation cost on the UI thread.
+    /// </summary>
+    public static string PreferredLanguage
+    {
+        get => _preferredLanguage;
+        set
+        {
+            string tag = string.IsNullOrWhiteSpace(value) ? AutoLanguage : value.Trim();
+            lock (EngineGate)
+            {
+                if (string.Equals(_preferredLanguage, tag, StringComparison.OrdinalIgnoreCase))
+                    return;
+                _preferredLanguage = tag;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The recognizer languages this machine actually has packs for, as BCP-47 tags with the
+    /// display names Windows gives them. Empty when no pack is installed at all -- the combo
+    /// then offers only "Automatically detect", which is the honest answer.
+    /// </summary>
+    public static IReadOnlyList<(string Tag, string Display)> AvailableLanguages()
+    {
+        try
+        {
+            return OcrEngine.AvailableRecognizerLanguages
+                .Select(l => (l.LanguageTag, string.IsNullOrWhiteSpace(l.DisplayName) ? l.LanguageTag : l.DisplayName))
+                .OrderBy(l => l.Item2, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not list OCR recognizer languages (non-fatal)", ex);
+            return Array.Empty<(string, string)>();
+        }
+    }
 
     private const double MaxInitialUpscale = 4.0;
     private const int OcrTargetLongSide = 1600;
@@ -371,16 +419,28 @@ public static class OcrService
 
     private static OcrEngine? GetEngine()
     {
-        if (_engineInitialized)
+        if (_engineInitialized && string.Equals(_engineLanguage, _preferredLanguage, StringComparison.OrdinalIgnoreCase))
             return _engine;
 
         lock (EngineGate)
         {
-            if (_engineInitialized)
+            string wanted = _preferredLanguage;
+            if (_engineInitialized && string.Equals(_engineLanguage, wanted, StringComparison.OrdinalIgnoreCase))
                 return _engine;
 
-            _engine = OcrEngine.TryCreateFromUserProfileLanguages()
+            // An explicit choice is a preference, not a demand: a user who picks a language
+            // and then uninstalls its pack must still get OCR rather than "no engine".
+            OcrEngine? engine = null;
+            if (!string.Equals(wanted, AutoLanguage, StringComparison.OrdinalIgnoreCase))
+            {
+                try { engine = OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language(wanted)); }
+                catch (Exception ex) { Log.Error($"OCR language '{wanted}' is not available; falling back", ex); }
+            }
+
+            _engine = engine
+                ?? OcrEngine.TryCreateFromUserProfileLanguages()
                 ?? OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
+            _engineLanguage = wanted;
             _engineInitialized = true;
             return _engine;
         }

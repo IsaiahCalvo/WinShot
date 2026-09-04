@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace WinShot.Core;
@@ -54,8 +54,12 @@ public class Settings
 
     // OCR
     public bool OcrJoinLines { get; set; } = false;
-    public bool OcrDetectLinks { get; set; } = true;   // TODO: wire behavior — detect URLs in recognized text
-    public string OcrLanguage { get; set; } = "auto";  // TODO: wire behavior — OCR recognition language ("auto" = detect)
+    /// <summary>Offer to open a decoded link (a QR code is usually a URL). Cleared by the
+    /// toast's own "Don't detect links" as well as by Settings.</summary>
+    public bool OcrDetectLinks { get; set; } = true;
+
+    /// <summary>BCP-47 recognizer language, or "auto" to follow the user profile.</summary>
+    public string OcrLanguage { get; set; } = "auto";
 
     // History
     public int HistoryRetentionDays { get; set; } = 0; // 0 = count-based pruning only

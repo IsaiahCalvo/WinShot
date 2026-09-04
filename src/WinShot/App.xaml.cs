@@ -115,6 +115,9 @@ public partial class App : Application
                 FileNamer.Next(_settings, candidate.Extension)),
             recoveredPath => _history.AddFile(recoveredPath));
         _settings.Changed += RegisterHotkeys;
+        // The recognizer is cached per language, so pushing the choice here is enough:
+        // the next capture rebuilds the engine, and a settings save never pays for it.
+        _settings.Changed += () => OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
 
         _ = Task.Run(() =>
         {
@@ -152,7 +155,9 @@ public partial class App : Application
         BorderlessCaptureAccess.RequestOnce();
 
         // Building the Windows OCR engine is a one-time cost; do it now rather than on
-        // whoever presses the Extract text hotkey first.
+        // whoever presses the Extract text hotkey first. The language has to be set first
+        // or the warm-up caches an engine the user did not ask for.
+        OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
         OcrService.Warm();
 
         if (_settings.Current.CheckForUpdatesOnStartup)
@@ -1286,10 +1291,20 @@ public partial class App : Application
             }
 
             await CaptureService.SetTextToClipboardAsync(payload.ClipboardText);
-            if (card is not null)
-                card.FlashStatus("Text copied");
+            Action? open = BuildOpenAction(payload.ClipboardText);
+            if (card is not null && open is null)
+            {
+                // "Text copied" was hard-coded here, so a QR code run from the card was
+                // announced as text. The formatter already knows which it was.
+                card.FlashStatus(payload.BalloonTitle);
+            }
             else
-                ShowOcrToast(payload.BalloonTitle, payload.Preview, anchor, BuildOpenAction(payload.ClipboardText));
+            {
+                // A decoded link is a decision, not a confirmation: the card's status flash
+                // has nowhere to put an Open button, so the toast comes up over the card.
+                ShowOcrToast(payload.BalloonTitle, payload.Preview,
+                    anchor ?? CardAnchor(card), open);
+            }
         }
         catch (COMException ex)
         {
@@ -1298,17 +1313,22 @@ public partial class App : Application
         }
     }
 
-    /// <summary>Returns an Open action when the copied text is a single http(s) URL
-    /// (e.g. a decoded QR code), else null.</summary>
-    private static Action? BuildOpenAction(string? clipboardText)
+    /// <summary>The centre of the quick-actions card, so a toast raised from the card path
+    /// lands over the capture it is about instead of in the tray corner.</summary>
+    private static SD.Point? CardAnchor(FastQuickActionsWindow? card)
     {
-        string text = clipboardText?.Trim() ?? string.Empty;
-        if (Uri.TryCreate(text, UriKind.Absolute, out Uri? uri) &&
-            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-        {
-            return () => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
-        }
-        return null;
+        if (card is null || card.IsDisposed) return null;
+        SD.Rectangle bounds = card.Bounds;
+        return new SD.Point(bounds.Left + (bounds.Width / 2), bounds.Top + (bounds.Height / 2));
+    }
+
+    /// <summary>Returns an Open action when the copied text is a single http(s) URL
+    /// (e.g. a decoded QR code) and the user still wants links detected, else null.</summary>
+    private Action? BuildOpenAction(string? clipboardText)
+    {
+        if (OcrLink.Detect(clipboardText, _settings.Current.OcrDetectLinks) is not Uri uri)
+            return null;
+        return () => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
     }
 
     /// <summary>Severity is per-call: "Nothing found" is not a success, and a checkmark on it
