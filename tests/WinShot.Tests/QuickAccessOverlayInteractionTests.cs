@@ -706,6 +706,48 @@ public class QuickAccessOverlayInteractionTests
         return bitmap;
     }
 
+    [Fact]
+    public void TheEditorRoundTripKeepsTheCardAndUpdatesItInPlace()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            settings.Current.OverlayAutoClose = true;
+            settings.Current.OverlayAutoCloseSeconds = 20;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            overlay.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            var timer = (WF.Timer)typeof(FastQuickActionsWindow)
+                .GetField("_autoCloseTimer", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            var versionField = typeof(FastQuickActionsWindow)
+                .GetField("_imageVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            overlay.HideForEditor();
+
+            // Out of the way, not gone — and it must not auto-close under the editor.
+            Assert.False(overlay.Visible);
+            Assert.False(overlay.IsDisposed);
+            Assert.False(timer.Enabled);
+
+            overlay.ReplaceImageFromEditor(new SD.Bitmap(640, 400));
+            PumpUntilRenderIdle(overlay);
+            overlay.ReturnFromEditor();
+
+            using var annotated = overlay.CloneImage();
+            Assert.Equal(new SD.Size(640, 400), annotated.Size);
+            Assert.Equal(1, (int)versionField.GetValue(overlay)!);
+            Assert.True(overlay.Visible);
+            Assert.True(timer.Enabled);
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(0, Motion.Holders);
+            overlay.Hide();
+        });
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);

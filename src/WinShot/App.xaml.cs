@@ -1402,8 +1402,13 @@ public partial class App : Application
     {
         var win = EditorWindow.CreateForCapture(overlay.CloneImage(), _settings, _history);
         TrackFirstRender(win, "editor window");
+        // The card steps aside rather than being consumed: annotate, save, and the same
+        // card comes back holding the annotated image, with Copy / drag-out still on it.
+        // Pin still consumes its card — the pin is the card, relocated.
+        overlay.HideForEditor();
+        win.ImageCommitted += overlay.ReplaceImageFromEditor;
+        win.Closed += (_, _) => overlay.ReturnFromEditor();
         win.Show();
-        overlay.Close();
     }
 
     private void PinFromOverlay(FastQuickActionsWindow overlay)

@@ -1340,6 +1340,53 @@ public sealed class FastQuickActionsWindow : WF.Form
         return !_closed && !IsDisposed;
     }
 
+    /// <summary>
+    /// Steps the card aside while the annotate editor is up. Opening the editor does not
+    /// consume the card: Copy, Save and drag-out all still apply to whatever comes back,
+    /// which is the point of having them on the card at all.
+    /// </summary>
+    internal void HideForEditor()
+    {
+        if (_closed || IsDisposed)
+            return;
+
+        HideActionTooltip();
+        if (_overflowMenu.Visible)
+            _overflowMenu.Close();
+        SetHovering(false);
+        PauseAutoCloseTimer();
+        Visible = false;
+    }
+
+    /// <summary>Brings the card back, in whatever slot is free by then.</summary>
+    internal void ReturnFromEditor()
+    {
+        if (_closed || IsDisposed)
+            return;
+
+        PositionFromSettings();
+        Visible = true;
+        ResumeAutoCloseTimer();
+    }
+
+    /// <summary>
+    /// Takes the editor's composed image. Ownership of <paramref name="replacement"/>
+    /// transfers; the thumbnail render in flight is waited out first, because GDI+ locks an
+    /// image for the duration of an operation.
+    /// </summary>
+    internal void ReplaceImageFromEditor(SD.Bitmap replacement)
+        => _ = ReplaceImageWhenIdleAsync(replacement);
+
+    private async Task ReplaceImageWhenIdleAsync(SD.Bitmap replacement)
+    {
+        if (!await WaitForRenderIdleAsync())
+        {
+            replacement.Dispose();
+            return;
+        }
+        ReplaceImage(replacement);
+    }
+
     private void ReplaceImage(SD.Bitmap replacement)
     {
         // Callers reach here only after WaitForRenderIdleAsync, so nothing is reading _image.

@@ -478,6 +478,13 @@ public partial class EditorWindow : Window
     /// zoom/pan (applied on the EditorSurface ancestor) never affects the output,
     /// and the selection/crop chrome lives on InteractionCanvas outside CanvasHost.
     /// </summary>
+    /// <summary>
+    /// The composed image, every time the editor commits one to disk. The quick-actions
+    /// card the session started from listens so it can update in place instead of being
+    /// left holding the unannotated capture. The handler owns the bitmap it is given.
+    /// </summary>
+    internal event Action<SD.Bitmap>? ImageCommitted;
+
     private SD.Bitmap Flatten()
     {
         CommitText();
@@ -703,6 +710,11 @@ public partial class EditorWindow : Window
                     _history.Add(flat);
                 }
             });
+            // Composed a second time rather than kept alive across the save: the one above
+            // is disposed on the worker thread, and this only runs when something (the
+            // quick-actions card) is actually listening.
+            if (!_closed && ImageCommitted is { } committed)
+                committed(Flatten());
         }
         catch (Exception ex)
         {
