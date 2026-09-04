@@ -260,8 +260,25 @@ public class AnnotationEditorRenderHarness
                     int livePts = live.Points.Count;
                     string tag = $"w{pw}{(slow ? "-slow" : "")}";
                     RenderToPng(editor, Path.Combine(outDir, $"audit-pen-preview-{tag}.png"), dpi: 192);
+                    // The reported symptom is that the stroke "resettles" on release, so diff the
+                    // CANVAS across pointer-up. Canvas only, never the whole window: committing
+                    // pushes an undo step, so a full-window diff also catches the undo arrow
+                    // going from disabled-grey to enabled-white and reports ~190 changed pixels
+                    // at maxChannelDelta 126 that contain no ink at all.
+                    var canvasHost = (FrameworkElement)editor.FindName("CanvasHost")!;
+                    using var beforeUp = BitmapEffects.RenderVisual(canvasHost, source.Width, source.Height);
                     editor.PointerUp(Pt(path[^1])); Pump(5);
                     RenderToPng(editor, Path.Combine(outDir, $"audit-pen-commit-{tag}.png"), dpi: 192);
+                    using var afterUp = BitmapEffects.RenderVisual(canvasHost, source.Width, source.Height);
+                    int popPixels = 0, popWorst = 0;
+                    for (int y = 0; y < afterUp.Height; y++)
+                        for (int x = 0; x < afterUp.Width; x++)
+                        {
+                            var p = beforeUp.GetPixel(x, y);
+                            var q = afterUp.GetPixel(x, y);
+                            int e = Math.Max(Math.Abs(p.R - q.R), Math.Max(Math.Abs(p.G - q.G), Math.Abs(p.B - q.B)));
+                            if (e > 3) { popPixels++; if (e > popWorst) popWorst = e; }
+                        }
                     var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
                     var compacted = PaperInk.Compact(live.Points);
                     log.AppendLine($"PEN {tag} rawSamples={path.Count} livePts(0.2)={livePts} " +
@@ -269,7 +286,8 @@ public class AnnotationEditorRenderHarness
                         $"outlineFigures={Figures(ink.Data!)} " +
                         $"outlineVerts={FlatVertexCount(ink.Data!)} " +
                         $"area={GeomArea(ink.Data!):F2} " +
-                        $"fillRule={((PathGeometry)ink.Data!).FillRule}");
+                        $"fillRule={((PathGeometry)ink.Data!).FillRule} " +
+                        $"releasePopPixels={popPixels} releasePopWorst={popWorst}");
                 }
 
                 // ---------- 2. eraser determinism: widths x pointer speeds ----------
@@ -378,11 +396,23 @@ public class AnnotationEditorRenderHarness
                 }
 
                 // ---------- 5. widened-outline fidelity: cap/join faceting ----------
+                // Measure at the tolerance the EDITOR uses, not WPF's default. PaperInk.Outline
+                // keeps its round caps/joins as PolyBezierSegments - exact arcs that the
+                // rasterizer evaluates at device resolution, so the drawn stroke has no facets at
+                // any width or zoom. Faceting only happens where something FLATTENS that outline
+                // (Subtract, CullSlivers, TranslateGeometry), and those all pass PaperInk.Tolerance.
+                // Reporting the default-flatten area here read as a 16%-thin 1px stroke that the
+                // editor never draws, so print both and the segment types that settle it.
                 foreach (double pw in new[] { 1.0, 3.0, 12.0, 30.0 })
                 {
                     var dot = PaperInk.Outline(new[] { new Point(100, 100), new Point(101, 100) }, pw);
-                    log.AppendLine($"CAP w={pw} verts={FlatVertexCount(dot)} " +
-                        $"bounds={dot.Bounds} area={dot.GetFlattenedPathGeometry().GetArea():F3} " +
+                    var atTol = dot.GetFlattenedPathGeometry(PaperInk.Tolerance, ToleranceType.Absolute);
+                    var segs = string.Join("+", dot.Figures.SelectMany(f => f.Segments)
+                        .Select(s => s.GetType().Name).Distinct());
+                    log.AppendLine($"CAP w={pw} segs={segs} bounds={dot.Bounds} " +
+                        $"editorVerts={FlatVertexCount(atTol)} editorArea={atTol.GetArea():F3} " +
+                        $"wpfDefaultVerts={FlatVertexCount(dot)} " +
+                        $"wpfDefaultArea={dot.GetFlattenedPathGeometry().GetArea():F3} " +
                         $"idealArea={(Math.PI * pw * pw / 4 + pw):F3}");
                 }
 

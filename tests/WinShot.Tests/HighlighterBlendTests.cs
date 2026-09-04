@@ -80,4 +80,57 @@ public class HighlighterBlendTests
         Assert.IsType<ImageBrush>(brush);
         Assert.Equal(BitmapScalingMode.HighQuality, RenderOptions.GetBitmapScalingMode(brush));
     }
+
+    [Fact]
+    public void ApplyLiveFill_MapsTheBlendOntoTheSourcePixelGridOneToOne()
+    {
+        // This is why WinShot does NOT need to re-composite the backdrop at the current device
+        // scale. The blended crop is one bitmap pixel per SOURCE pixel, pinned to an absolute
+        // viewport whose origin is integral and whose size equals the pixel size - the very same
+        // grid, at the very same scale, as BaseTiles. Both therefore reach the screen through
+        // exactly ONE HighQuality (Fant) resample, so the highlighted band is as crisp as the
+        // page beside it (harness ink-eraser-audit.txt: HL-FIDELITY dy=0 meanAbsErr=0.02,
+        // worstPixelErr=1 against the exact CSS multiply). Building the backdrop at zoom*dpi
+        // instead would upsample the screenshot and then resample THAT - two filters over source
+        // pixels that hold no extra detail - which is strictly worse than this.
+        RunSta(() =>
+        {
+            var ink = new System.Windows.Shapes.Path
+            {
+                Data = new RectangleGeometry(new System.Windows.Rect(10.5, 20.25, 30, 12)),
+            };
+            using var backdrop = new SD.Bitmap(200, 100, SD.Imaging.PixelFormat.Format32bppArgb);
+            HighlighterBlend.ApplyLiveFill(ink, backdrop, Color.FromArgb(0x4D, 0xFF, 0xC1, 0x07));
+
+            var brush = Assert.IsType<ImageBrush>(ink.Fill);
+            Assert.Equal(BrushMappingMode.Absolute, brush.ViewportUnits);
+            Assert.Equal(Stretch.Fill, brush.Stretch);
+            var src = (System.Windows.Media.Imaging.BitmapSource)brush.ImageSource;
+            Assert.Equal(brush.Viewport.X, Math.Floor(brush.Viewport.X));
+            Assert.Equal(brush.Viewport.Y, Math.Floor(brush.Viewport.Y));
+            Assert.Equal(src.PixelWidth, (int)brush.Viewport.Width);
+            Assert.Equal(src.PixelHeight, (int)brush.Viewport.Height);
+            // ...and it actually covers the ink, so the 1:1 map is not vacuously true.
+            Assert.True(brush.Viewport.Contains(ink.Data!.Bounds));
+        });
+    }
+
+    /// <summary>
+    /// A WPF Path is a FrameworkElement, so it can only be constructed on an STA thread. No
+    /// Application instance on purpose - xUnit runs test classes in parallel and creating one
+    /// races the other STA tests over the WPF Application singleton (as DragPreviewTests notes).
+    /// </summary>
+    private static void RunSta(Action body)
+    {
+        Exception? failure = null;
+        var thread = new System.Threading.Thread(() =>
+        {
+            try { body(); }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(System.Threading.ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
 }

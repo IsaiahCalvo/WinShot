@@ -182,6 +182,18 @@ internal static class HighlighterBlend
     /// the page underneath (EditorWindow.SetBaseTiles pins BaseTiles to HighQuality/Fant);
     /// on the default Linear filter the highlighted band was visibly softer than its
     /// surroundings at every zoom other than 100%.
+    ///
+    /// With that filter matched, WinShot is already at parity and must NOT chase Survey further
+    /// by rebuilding the backdrop at zoom*dpi. Survey blends against a re-rasterisable PDF, so a
+    /// device-scale composite there recovers real detail. WinShot's backdrop is a fixed-
+    /// resolution SCREENSHOT: this bitmap is one pixel per source pixel on an integral viewport
+    /// origin - the identical grid and scale as BaseTiles - so both reach the screen through
+    /// exactly ONE Fant resample. Compositing at device scale would upsample source pixels that
+    /// hold no extra detail and then resample the result, i.e. two filters instead of one, and
+    /// would force a full re-composite on every wheel tick. Measured at parity in the render
+    /// harness (ink-eraser-audit.txt: HL-FIDELITY dy=0 meanAbsErr=0.02, worstPixelErr=1 against
+    /// the exact CSS multiply; audit-highlighter-zoom300-HighQuality.png shows highlighted
+    /// glyphs as crisp as their unhighlighted neighbours).
     /// </summary>
     private static ImageBrush BlendBrush(SD.Bitmap blended, Rect viewport)
     {
