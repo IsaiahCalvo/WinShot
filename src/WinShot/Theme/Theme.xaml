@@ -945,20 +945,9 @@
         </Setter>
     </Style>
 
-    <!-- ====================================================================
-         FLOATING TOOLBAR CONTAINER — apply to a Border.
-         Dark charcoal, 14px corners, padding, soft drop shadow, top highlight.
-         Use for the editor's floating top pill and any HUD/overlay card.
-         ==================================================================== -->
-    <Style x:Key="FloatingToolbar" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource FloatingBgBrush}"/>
-        <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource TopHighlightBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="8,6"/>
-        <Setter Property="Effect" Value="{StaticResource FloatingShadow}"/>
-        <Setter Property="SnapsToDevicePixels" Value="True"/>
-    </Style>
+    <!-- FloatingToolbar (charcoal pill: 14px corners, ring, drop shadow) is gone with
+         BottomUtilityBar. Survey has no floating chrome in the editor — every band is
+         flat and full-bleed (AppShell.jsx:1337-1355, PDFViewer.jsx:32016-32032). -->
 
     <!-- A generic raised panel/sidebar surface (background composer left rail). -->
     <Style x:Key="PanelSurface" TargetType="Border">
