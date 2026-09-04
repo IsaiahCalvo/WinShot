@@ -153,6 +153,186 @@ public partial class EditorWindow : Window
             }));
     }
 
+    // ------------------------------------------------- copy / paste / duplicate
+
+    /// <summary>
+    /// One mark on the annotation clipboard: its serialisable description plus, for an
+    /// image annotation, the bitmap it draws — the description alone only carries an index
+    /// into a project's embedded images, which means nothing across windows.
+    /// </summary>
+    private sealed record ClipboardMark(AnnotationData Data, BitmapSource? Image);
+
+    /// <summary>
+    /// The current geometry of a live annotation as serialisable data. Reads the box off
+    /// the ELEMENT rather than the metadata, so a mark that has been resized copies at the
+    /// size it is on screen rather than the size it was drawn at.
+    /// </summary>
+    private static AnnotationData SnapshotAnnotation(FrameworkElement fe, AnnotationData meta)
+    {
+        var data = meta.Clone();
+        Vector offset = AnnotationTransform.OffsetOf(fe);
+        data.Tx = offset.X;
+        data.Ty = offset.Y;
+        data.Angle = AnnotationTransform.AngleOf(fe);
+
+        double left = Canvas.GetLeft(fe), top = Canvas.GetTop(fe);
+        if (data.Rect is { Length: >= 4 } && !double.IsNaN(left) && !double.IsNaN(top))
+        {
+            double w = double.IsNaN(fe.Width) ? fe.ActualWidth : fe.Width;
+            double h = double.IsNaN(fe.Height) ? fe.ActualHeight : fe.Height;
+            data.Rect = new[] { left, top, w, h };
+        }
+        if (data.Type == AnnotationData.TypeText && CurrentFontSize(fe) is double fontSize)
+            data.FontSize = fontSize;
+        return data;
+    }
+
+    private List<ClipboardMark> SnapshotSelection()
+    {
+        var marks = new List<ClipboardMark>();
+        IEnumerable<UIElement> picked = _multiSelected.Count > 1
+            ? _multiSelected
+            : _selected is null ? Array.Empty<UIElement>() : new[] { _selected };
+        foreach (UIElement el in picked)
+        {
+            if (el is not FrameworkElement fe || fe.Tag is not AnnotationData meta) continue;
+            BitmapSource? image = el is Image img ? img.Source as BitmapSource : null;
+            marks.Add(new ClipboardMark(SnapshotAnnotation(fe, meta), image));
+        }
+        return marks;
+    }
+
+    /// <summary>Copies the selection to the annotation clipboard; false when nothing is selected.</summary>
+    private bool CopySelectedAnnotations()
+    {
+        List<ClipboardMark> marks = SnapshotSelection();
+        if (marks.Count == 0) return false;
+        AnnotationClipboard.Clear();
+        AnnotationClipboard.AddRange(marks);
+        return true;
+    }
+
+    /// <summary>How far a pasted or duplicated mark lands from the one it came from.</summary>
+    private const double PasteOffset = 32;
+
+    private void PasteAnnotations() => PlaceCopies(AnnotationClipboard);
+
+    private void DuplicateSelectedAnnotations() => PlaceCopies(SnapshotSelection());
+
+    /// <summary>
+    /// Rebuilds a set of copied marks through the same factory a project reload uses, offset
+    /// so the copy is visibly a copy, then selects them — one undo step for the whole set.
+    /// </summary>
+    private void PlaceCopies(IReadOnlyList<ClipboardMark> marks)
+    {
+        if (marks.Count == 0) return;
+        CommitText();
+        CommitPendingCurve();
+
+        var added = new List<UIElement>();
+        foreach (ClipboardMark mark in marks)
+        {
+            var data = mark.Data.Clone();
+            data.Tx += PasteOffset;
+            data.Ty += PasteOffset;
+            if (data.ImageIndex is not null) data.ImageIndex = 0;
+            IReadOnlyList<BitmapSource> images = mark.Image is null
+                ? Array.Empty<BitmapSource>()
+                : new[] { mark.Image };
+            UIElement element;
+            try
+            {
+                element = ProjectSerializer.CreateElement(data, images, _source);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Could not paste a '{data.Type}' annotation", ex);
+                continue;
+            }
+            if (element is FrameworkElement fe)
+            {
+                fe.Tag = data;
+                if (data.Tx != 0 || data.Ty != 0 || data.Angle != 0)
+                    AnnotationTransform.Apply(fe, new Vector(data.Tx, data.Ty), data.Angle);
+            }
+            AnnotationCanvas.Children.Add(element);
+            added.Add(element);
+        }
+        if (added.Count == 0) return;
+
+        Push(new EditorAction(
+            undo: () =>
+            {
+                foreach (UIElement el in added) AnnotationCanvas.Children.Remove(el);
+                Select(null);
+                ClearMultiSelection();
+            },
+            redo: () =>
+            {
+                foreach (UIElement el in added)
+                    if (!AnnotationCanvas.Children.Contains(el))
+                        AnnotationCanvas.Children.Add(el);
+            }), apply: false);
+
+        // A rotation pivot is the element's own centre, which is only known once the copy
+        // has been measured — the same deferral a project reload needs.
+        if (added.OfType<FrameworkElement>().Any(fe => fe.Tag is AnnotationData { Angle: not 0 }))
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                foreach (FrameworkElement fe in added.OfType<FrameworkElement>())
+                    if (fe.Tag is AnnotationData { Angle: not 0 } d)
+                        AnnotationTransform.SetAngle(fe, d.Angle);
+            }));
+        }
+
+        ClearMultiSelection();
+        if (added.Count == 1)
+        {
+            Select(added[0]);
+        }
+        else
+        {
+            Select(null);
+            _multiSelected.AddRange(added);
+            UpdateMultiSelectionVisual();
+        }
+    }
+
+    /// <summary>
+    /// Alt-drag: leaves a copy behind and drags the copy, so the original stays put. The
+    /// clone lands exactly on top of the original (no paste offset) — the drag itself is
+    /// what separates them.
+    /// </summary>
+    private UIElement? CloneForAltDrag(UIElement source)
+    {
+        if (source is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return null;
+        var data = SnapshotAnnotation(fe, meta);
+        if (data.ImageIndex is not null) data.ImageIndex = 0;
+        IReadOnlyList<BitmapSource> images = source is Image img && img.Source is BitmapSource bs
+            ? new[] { bs }
+            : Array.Empty<BitmapSource>();
+        UIElement clone;
+        try
+        {
+            clone = ProjectSerializer.CreateElement(data, images, _source);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Could not clone a '{data.Type}' annotation", ex);
+            return null;
+        }
+        if (clone is FrameworkElement cloneFe)
+        {
+            cloneFe.Tag = data;
+            if (data.Tx != 0 || data.Ty != 0 || data.Angle != 0)
+                AnnotationTransform.Apply(cloneFe, new Vector(data.Tx, data.Ty), data.Angle);
+        }
+        AnnotationCanvas.Children.Add(clone);
+        PushAddElement(clone);
+        return clone;
+    }
+
     // -------------------------------------------------------------- redaction
 
     /// <summary>

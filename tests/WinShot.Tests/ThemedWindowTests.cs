@@ -85,6 +85,7 @@ public class ThemedWindowTests
                 editor.Show();
                 EditorShellContractSmoke(editor);
                 RedactionObjectSmoke(editor);
+                AnnotationClipboardSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
                 PinSmoke(editor);
@@ -614,6 +615,65 @@ public class ThemedWindowTests
         Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
 
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
+    }
+
+    /// <summary>
+    /// Copy / paste / duplicate work on annotation OBJECTS, and each lands as one undoable
+    /// step offset from the original so a copy is visibly a copy. The clipboard is static,
+    /// which is what makes a mark copied in one editor window paste into another.
+    /// </summary>
+    private static void AnnotationClipboardSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var select = type.GetMethod("Select", NP)!;
+        var copy = type.GetMethod("CopySelectedAnnotations", NP)!;
+        var paste = type.GetMethod("PasteAnnotations", NP)!;
+        var duplicate = type.GetMethod("DuplicateSelectedAnnotations", NP)!;
+        var undoAsync = type.GetMethod("UndoAsync", NP)!;
+
+        canvas.Children.Clear();
+        var original = new System.Windows.Shapes.Rectangle
+        {
+            Width = 30,
+            Height = 20,
+            Stroke = Brushes.Red,
+            StrokeThickness = 3,
+            Tag = AnnotationData.ForShape(
+                AnnotationData.TypeRectangle, new Rect(10, 10, 30, 20),
+                Colors.Red, 3, ShapeFillMode.None),
+        };
+        Canvas.SetLeft(original, 10);
+        Canvas.SetTop(original, 10);
+        canvas.Children.Add(original);
+
+        // Nothing selected: there is nothing to copy, and Ctrl+C falls through to the image.
+        select.Invoke(editor, new object?[] { null });
+        Assert.False((bool)copy.Invoke(editor, Array.Empty<object>())!);
+
+        select.Invoke(editor, new object?[] { original });
+        Assert.True((bool)copy.Invoke(editor, Array.Empty<object>())!);
+
+        paste.Invoke(editor, Array.Empty<object>());
+        Assert.Equal(2, canvas.Children.Count);
+        var pasted = (FrameworkElement)canvas.Children[1];
+        // Offset from the original, and carrying its own copy of the data.
+        Assert.Equal(32d, AnnotationTransform.OffsetOf(pasted).X, 3);
+        Assert.NotSame(original.Tag, pasted.Tag);
+
+        duplicate.Invoke(editor, Array.Empty<object>());
+        Assert.Equal(3, canvas.Children.Count);
+
+        // Each is exactly one undo step.
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(2, canvas.Children.Count);
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Single(canvas.Children);
+
+        select.Invoke(editor, new object?[] { null });
         canvas.Children.Clear();
     }
 

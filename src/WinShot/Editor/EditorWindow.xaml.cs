@@ -154,7 +154,15 @@ public partial class EditorWindow : Window
     private MarqueeMode _marqueeMode = MarqueeMode.Window;
     private bool _movingSelection;
     private Point _moveLast;   // content coords
-    private Vector _moveTotal; // accumulated drag delta for the undo record
+    private Vector _moveTotal; // the delta actually applied — the undo record
+    private Vector _moveRaw;   // the unconstrained drag, so Shift can be let go mid-move
+
+    /// <summary>
+    /// Cross-window annotation clipboard. Static so a mark copied in one editor pastes
+    /// into another — the data is a plain serialisable record, so there is nothing
+    /// window-specific to keep.
+    /// </summary>
+    private static readonly List<ClipboardMark> AnnotationClipboard = new();
 
     // Resize-handle state (shared between selected-annotation resize and crop adjust).
     // The eight box handles are indexed 0..7 (corners 0-3, edge midpoints 4-7); endpoint
@@ -458,6 +466,23 @@ public partial class EditorWindow : Window
         ViewTranslate.X = anchor.X - cx * _zoom;
         ViewTranslate.Y = anchor.Y - cy * _zoom;
         OnViewChanged();
+    }
+
+    /// <summary>The viewport's own middle — what a keyboard zoom pivots around.</summary>
+    private Point ViewportCentre() => new(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2);
+
+    /// <summary>Ctrl+0 and the zoom menu's fixed percentages.</summary>
+    private void ZoomToPercent(double zoom)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+        ZoomAt(ViewportCentre(), zoom);
+    }
+
+    /// <summary>Ctrl+plus / Ctrl+minus: one step of the same 1.2 ratio the wheel uses.</summary>
+    private void StepZoom(double factor)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+        ZoomAt(ViewportCentre(), _zoom * factor);
     }
 
     private void OnViewChanged()

@@ -103,27 +103,21 @@ public partial class EditorWindow : Window
         }
         if (_movingSelection && _multiSelected.Count > 1)
         {
-            var posGroup = e.GetPosition(AnnotationCanvas);
-            var dg = posGroup - _moveLast;
-            if (dg.X != 0 || dg.Y != 0)
+            Vector step = MoveStep(e.GetPosition(AnnotationCanvas));
+            if (step.X != 0 || step.Y != 0)
             {
                 foreach (UIElement member in _multiSelected)
-                    MoveElement(member, dg.X, dg.Y);
-                _moveTotal += dg;
-                _moveLast = posGroup;
+                    MoveElement(member, step.X, step.Y);
                 UpdateMultiSelectionVisual();
             }
             return;
         }
         if (_movingSelection && _selected is not null)
         {
-            var posMove = e.GetPosition(AnnotationCanvas);
-            var d = posMove - _moveLast;
-            if (d.X != 0 || d.Y != 0)
+            Vector step = MoveStep(e.GetPosition(AnnotationCanvas));
+            if (step.X != 0 || step.Y != 0)
             {
-                MoveElement(_selected, d.X, d.Y);
-                _moveTotal += d;
-                _moveLast = posMove;
+                MoveElement(_selected, step.X, step.Y);
                 UpdateSelectionVisual();
             }
             return;
@@ -139,18 +133,20 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
-                arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, pos, _thickness, _arrowStyle);
+                arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, ConstrainDraw(pos), _thickness, _arrowStyle);
                 break;
             case EditorTool.CurvedArrow when _activeShape is Path curve:
+                Point curveEnd = ConstrainDraw(pos);
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
-                    _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, pos), pos, _thickness);
+                    _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, curveEnd), curveEnd, _thickness);
                 break;
             case EditorTool.Line when _activeShape is Line line:
-                line.X2 = pos.X;
-                line.Y2 = pos.Y;
+                Point lineEnd = ConstrainDraw(pos);
+                line.X2 = lineEnd.X;
+                line.Y2 = lineEnd.Y;
                 break;
             case EditorTool.Rectangle or EditorTool.Ellipse when _activeShape is not null:
-                var r = new Rect(_dragStart, pos);
+                var r = new Rect(_dragStart, ConstrainDraw(pos));
                 Canvas.SetLeft(_activeShape, r.X);
                 Canvas.SetTop(_activeShape, r.Y);
                 _activeShape.Width = r.Width;
@@ -164,10 +160,10 @@ public partial class EditorWindow : Window
                 // The mark itself IS the preview: the effect runs on the pixels under the
                 // rubber band as it grows, instead of a dashed box that only becomes a
                 // redaction after the mouse comes up.
-                UpdateRedactionPreview(mark, new Rect(_dragStart, ClampToSurface(pos)), force: false);
+                UpdateRedactionPreview(mark, new Rect(_dragStart, ConstrainDrawClamped(pos)), force: false);
                 break;
             case EditorTool.Spotlight:
-                ShowDragRect(new Rect(_dragStart, ClampToSurface(pos)), dim: true);
+                ShowDragRect(new Rect(_dragStart, ConstrainDrawClamped(pos)), dim: true);
                 break;
             case EditorTool.Crop:
                 ShowDragRect(CropSelectionRect(pos), dim: true);
@@ -208,7 +204,9 @@ public partial class EditorWindow : Window
         }
         if (!_dragging) return;
         _dragging = false;
-        var pos = e.GetPosition(AnnotationCanvas);
+        // The release has to land on the SAME point the last preview frame drew, or a
+        // Shift-constrained mark snaps back to the raw pointer the instant it is committed.
+        var pos = ConstrainDraw(e.GetPosition(AnnotationCanvas));
         var shape = _activeShape;
         _activeShape = null;
         Viewport.ReleaseMouseCapture();
@@ -449,6 +447,48 @@ public partial class EditorWindow : Window
             AnnotationCanvas.Children.Add(_activeShape);
     }
 
+    // -------------------------------------------------------- Shift constraints
+
+    /// <summary>
+    /// Where the pointer counts as being for the tool currently drawing, with Shift folded
+    /// in: shapes square, lines and arrows snap to 45°, and everything else is unchanged.
+    /// Both the live preview and the mouse-up commit go through here, so a constrained mark
+    /// cannot snap back to the raw pointer the instant it is committed.
+    /// </summary>
+    private Point ConstrainDraw(Point pos)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) == 0) return pos;
+        return _tool switch
+        {
+            EditorTool.Line or EditorTool.Arrow or EditorTool.CurvedArrow =>
+                DragConstraints.QuantizeBearing(_dragStart, pos),
+            EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Redact or EditorTool.Spotlight =>
+                DragConstraints.Square(_dragStart, pos),
+            _ => pos,
+        };
+    }
+
+    /// <summary>The same, then clamped into the image — for the tools that never draw off it.</summary>
+    private Point ConstrainDrawClamped(Point pos) => ClampToSurface(ConstrainDraw(pos));
+
+    /// <summary>
+    /// How far the selection should move THIS frame. The raw drag is accumulated
+    /// separately from what has been applied, so holding Shift locks the move to one axis
+    /// and letting go picks the free move back up from where the pointer actually is —
+    /// locking each frame's delta on its own would let a diagonal drag creep in both axes.
+    /// </summary>
+    private Vector MoveStep(Point pos)
+    {
+        _moveRaw += pos - _moveLast;
+        _moveLast = pos;
+        Vector want = (Keyboard.Modifiers & ModifierKeys.Shift) != 0
+            ? DragConstraints.LockAxis(_moveRaw)
+            : _moveRaw;
+        Vector step = want - _moveTotal;
+        _moveTotal = want;
+        return step;
+    }
+
     /// <summary>Stroke color of a committed shape — the project metadata's source of truth.</summary>
     private static Color StrokeColorOf(Shape shape) =>
         shape.Stroke is SolidColorBrush brush ? brush.Color : Colors.White;
@@ -607,6 +647,7 @@ public partial class EditorWindow : Window
             _movingSelection = true;
             _moveLast = pos;
             _moveTotal = new Vector();
+            _moveRaw = new Vector();
             Viewport.CaptureMouse();
             e.Handled = true;
             return;
@@ -621,10 +662,14 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
+        // Alt-drag leaves a copy behind and drags the copy — the original stays where it is.
+        if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0 && CloneForAltDrag(hit) is UIElement clone)
+            hit = clone;
         Select(hit);
         _movingSelection = true;
         _moveLast = pos;
         _moveTotal = new Vector();
+        _moveRaw = new Vector();
         Viewport.CaptureMouse();
         e.Handled = true;
     }
@@ -735,6 +780,7 @@ public partial class EditorWindow : Window
                 redo: () => { foreach (var m in members) MoveElement(m, gdx, gdy); UpdateMultiSelectionVisual(); }),
                 apply: false);
             _moveTotal = new Vector();
+            _moveRaw = new Vector();
             return;
         }
 
@@ -748,6 +794,7 @@ public partial class EditorWindow : Window
                 redo: () => MoveElement(el, dx, dy)), apply: false);
         }
         _moveTotal = new Vector();
+        _moveRaw = new Vector();
     }
 
     private void AbortMove()
@@ -768,6 +815,7 @@ public partial class EditorWindow : Window
             }
         }
         _moveTotal = new Vector();
+        _moveRaw = new Vector();
         UpdateSelectionVisual();
     }
 

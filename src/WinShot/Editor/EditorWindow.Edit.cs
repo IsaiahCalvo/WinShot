@@ -265,7 +265,16 @@ public partial class EditorWindow : Window
                 case EditorShortcutCommand.Undo: _ = UndoAsync(); break;
                 case EditorShortcutCommand.Redo: _ = RedoAsync(); break;
                 case EditorShortcutCommand.FitAndCenter: FitToView(); break;
-                case EditorShortcutCommand.Copy: OnCopy(this, new RoutedEventArgs()); break;
+                case EditorShortcutCommand.ActualSize: ZoomToPercent(1.0); break;
+                case EditorShortcutCommand.ZoomIn: StepZoom(1.2); break;
+                case EditorShortcutCommand.ZoomOut: StepZoom(1 / 1.2); break;
+                // Marks first: Ctrl+C with something selected copies the MARKS, and only
+                // falls through to the picture when nothing is selected.
+                case EditorShortcutCommand.Copy:
+                    if (!CopySelectedAnnotations()) OnCopy(this, new RoutedEventArgs());
+                    break;
+                case EditorShortcutCommand.Paste: PasteAnnotations(); break;
+                case EditorShortcutCommand.Duplicate: DuplicateSelectedAnnotations(); break;
                 case EditorShortcutCommand.SaveAs: OnSave(this, new RoutedEventArgs()); break;
             }
             e.Handled = true;
@@ -593,7 +602,22 @@ public partial class EditorWindow : Window
         if (_sourceOperationActive) return;
         try
         {
-            var flat = Flatten();
+            // A pending crop rectangle means "copy this bit", not "copy the picture" — and
+            // it does NOT close the window, so the crop is still there to adjust afterwards.
+            SD.Bitmap flat = Flatten();
+            if (_pendingCrop is SD.Rectangle region && region.Width > 1 && region.Height > 1)
+            {
+                try
+                {
+                    SD.Bitmap cropped = CaptureService.Crop(flat, region);
+                    flat.Dispose();
+                    flat = cropped;
+                }
+                catch (ArgumentException)
+                {
+                    // Out-of-range crop: fall back to the whole image rather than nothing.
+                }
+            }
             await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
             if (!IsVisible) return;
             // BtnCopy is a round glyph button — flash a checkmark, then restore the copy glyph.
