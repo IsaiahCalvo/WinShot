@@ -664,6 +664,9 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
 
     internal void HandleKeyUp(WF.KeyEventArgs e)
     {
+        if (_mode == SelectorMode.Measure && HandleMeasureKeyUp(e))
+            return;
+
         if (e.KeyCode == WF.Keys.Menu)
             _altLatched = false;
     }

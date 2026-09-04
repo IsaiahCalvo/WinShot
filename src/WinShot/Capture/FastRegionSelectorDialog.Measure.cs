@@ -34,6 +34,10 @@ public sealed partial class FastRegionSelectorDialog
     private IDisposable? _hintTween;
     private double _hintAmount;
 
+    /// <summary>Shift is held rather than tapped, and key-repeat fires many times a second;
+    /// the latch keeps the axis-lock repaint to one on the way down and one on the way up.</summary>
+    private bool _shiftLatched;
+
     /// <summary>The one live right-click menu. Kept in a field rather than disposed from its
     /// own Closed handler: WinForms' Modal menu filter still touches a closing drop-down on
     /// the next few messages, and disposing inside that window takes the process down.</summary>
@@ -90,6 +94,7 @@ public sealed partial class FastRegionSelectorDialog
         _contrast = null;
         _contrastFor = SD.Rectangle.Empty;
         _draggingGuide = null;
+        _shiftLatched = false;
         _hintAmount = 0;
         StopHintEntrance();
     }
@@ -281,8 +286,12 @@ public sealed partial class FastRegionSelectorDialog
 
             case WF.Keys.ShiftKey:
                 // Shift locks the readout to one axis; the paint reads ModifierKeys, so all
-                // this has to do is ask for a repaint.
-                Handled(e);
+                // this has to do is ask for one repaint — not one per key-repeat.
+                if (!_shiftLatched)
+                {
+                    _shiftLatched = true;
+                    Handled(e);
+                }
                 return true;
 
             case WF.Keys.Menu:
@@ -295,6 +304,18 @@ public sealed partial class FastRegionSelectorDialog
         }
 
         return false;
+    }
+
+    /// <summary>Returns true when the key-up was a measurement gesture.</summary>
+    private bool HandleMeasureKeyUp(WF.KeyEventArgs e)
+    {
+        if (e.KeyCode != WF.Keys.ShiftKey || !_shiftLatched)
+            return false;
+
+        // Letting go of Shift puts the second axis back, so the cross has to be redrawn.
+        _shiftLatched = false;
+        InvalidateAllSurfaces();
+        return true;
     }
 
     private void Handled(WF.KeyEventArgs e)
@@ -528,13 +549,20 @@ public sealed partial class FastRegionSelectorDialog
     /// the eye was already on.</summary>
     private static bool LockedToWidth(SD.Rectangle run) => run.Width >= run.Height;
 
-    private string MeasureLiveLabel(SD.Rectangle run)
+    private string MeasureLiveLabel(SD.Rectangle run) => MeasureLiveLabel(run, AxisLocked);
+
+    private string MeasureLiveLabel(SD.Rectangle run, bool locked)
     {
         int dpi = MonitorDpiAt(_currentScreen);
-        if (!AxisLocked)
+        if (!locked)
             return MeasureFormat.CrossLabel(run.Size, dpi);
         return MeasureFormat.SpanLabel(LockedToWidth(run) ? run.Width : run.Height, dpi);
     }
+
+    /// <summary>Render seam: the live pill's text with the axis lock forced either way,
+    /// because a test cannot hold Shift down.</summary>
+    internal string LiveMeasurementLabelForRender(bool axisLocked) =>
+        _measured is SD.Rectangle run ? MeasureLiveLabel(run, axisLocked) : string.Empty;
 
     /// <summary>
     /// Where the live pill lands, in screen px. Paint and hit-test both come through here —

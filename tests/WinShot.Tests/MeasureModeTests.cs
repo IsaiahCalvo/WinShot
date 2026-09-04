@@ -179,6 +179,38 @@ public class MeasureModeTests
     }
 
     [Fact]
+    public void ShiftLocksTheReadoutToOneAxisAndLettingGoPutsTheOtherBack()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        // The card is 100 x 60, so the longer span is the width — that is the axis the eye
+        // was already on, and the one Shift keeps.
+        Assert.Contains("×", selector.LiveMeasurementLabelForRender(axisLocked: false));
+        Assert.StartsWith("100", selector.LiveMeasurementLabelForRender(axisLocked: true));
+        Assert.DoesNotContain("×", selector.LiveMeasurementLabelForRender(axisLocked: true));
+    }
+
+    [Fact]
+    public void HeldShiftRepaintsOnceOnTheWayDownAndOnceOnTheWayUp()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        // Key-repeat fires many times a second and each repaint is a whole 4K surface.
+        var down = new WF.KeyEventArgs(WF.Keys.ShiftKey | WF.Keys.Shift);
+        selector.HandleKeyDown(down);
+        Assert.True(down.Handled);
+
+        var repeat = new WF.KeyEventArgs(WF.Keys.ShiftKey | WF.Keys.Shift);
+        selector.HandleKeyDown(repeat);
+        Assert.False(repeat.Handled);
+
+        selector.HandleKeyUp(new WF.KeyEventArgs(WF.Keys.ShiftKey));
+        var again = new WF.KeyEventArgs(WF.Keys.ShiftKey | WF.Keys.Shift);
+        selector.HandleKeyDown(again);
+        Assert.True(again.Handled);
+    }
+
+    [Fact]
     public void EnterCapturesTheMeasuredObject()
     {
         using var selector = Measuring(new Point(80, 60), out _);
