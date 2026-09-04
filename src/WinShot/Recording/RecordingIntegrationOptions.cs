@@ -142,11 +142,15 @@ public static class RecordingOutputSize
         return Math.Clamp(16 + (int)Math.Round(normalized * 240 / 100.0), 16, 256);
     }
 
-    private static (int Width, int Height) NormalizeMaxResolution(string? value) => value?.ToLowerInvariant() switch
+    /// <summary>Landscape pixel budget for a max-resolution tier; (0, 0) means "no cap".
+    /// Portrait sources swap the pair in <see cref="CalculateVideo"/>.</summary>
+    internal static (int Width, int Height) NormalizeMaxResolution(string? value) => value?.ToLowerInvariant() switch
     {
         "4k" => (3840, 2160),
+        "1440p" => (2560, 1440),
         "1080p" => (1920, 1080),
         "720p" => (1280, 720),
+        "480p" => (854, 480),
         _ => (0, 0),
     };
 

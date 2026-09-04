@@ -783,8 +783,10 @@
                                         <ComboBox x:Name="MaxResolutionCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="Original" Tag="original"/>
                                             <ComboBoxItem Content="4K" Tag="4k"/>
+                                            <ComboBoxItem Content="1440p" Tag="1440p"/>
                                             <ComboBoxItem Content="1080p" Tag="1080p"/>
                                             <ComboBoxItem Content="720p" Tag="720p"/>
+                                            <ComboBoxItem Content="480p" Tag="480p"/>
                                         </ComboBox>
                                     </DockPanel>
                                     <TextBlock x:Name="MaxResolutionHint" Style="{StaticResource SubHint}"
