@@ -160,9 +160,11 @@ public partial class EditorWindow : Window
                 if (stroke.Points.Count == 0 || (pos - stroke.Points[^1]).Length > 1.2)
                     stroke.Points.Add(pos);
                 break;
-            case EditorTool.Blur:
-            case EditorTool.Pixelate:
-                ShowDragRect(new Rect(_dragStart, ClampToSurface(pos)), dim: false);
+            case EditorTool.Redact when _activeShape is System.Windows.Shapes.Rectangle mark:
+                // The mark itself IS the preview: the effect runs on the pixels under the
+                // rubber band as it grows, instead of a dashed box that only becomes a
+                // redaction after the mouse comes up.
+                UpdateRedactionPreview(mark, new Rect(_dragStart, ClampToSurface(pos)), force: false);
                 break;
             case EditorTool.Spotlight:
                 ShowDragRect(new Rect(_dragStart, ClampToSurface(pos)), dim: true);
@@ -274,13 +276,17 @@ public partial class EditorWindow : Window
                 }
                 else if (shape is not null) AnnotationCanvas.Children.Remove(shape);
                 return;
-            case EditorTool.Blur:
-                HideDragRect();
-                ApplyBlur(ToPixelRect(new Rect(_dragStart, ClampToSurface(pos))));
-                return;
-            case EditorTool.Pixelate:
-                HideDragRect();
-                ApplyPixelate(ToPixelRect(new Rect(_dragStart, ClampToSurface(pos))));
+            case EditorTool.Redact:
+                if (shape is not System.Windows.Shapes.Rectangle mark) return;
+                var area = new Rect(_dragStart, ClampToSurface(pos));
+                if (area.Width < 3 || area.Height < 3)
+                {
+                    AnnotationCanvas.Children.Remove(mark);
+                    return;
+                }
+                UpdateRedactionPreview(mark, area, force: true);
+                mark.Tag = AnnotationData.ForRedaction(area, _redactStyle, _redactStrength, _activeRedactSeed);
+                PushAddElement(mark);
                 return;
             case EditorTool.Spotlight:
                 HideDragRect();
@@ -337,7 +343,7 @@ public partial class EditorWindow : Window
             return;
         }
 
-        _dragStart = _tool is EditorTool.Blur or EditorTool.Crop or EditorTool.Pixelate or EditorTool.Spotlight
+        _dragStart = _tool is EditorTool.Redact or EditorTool.Crop or EditorTool.Spotlight
             ? ClampToSurface(pos) : pos;
         _dragging = true;
         Viewport.CaptureMouse();
@@ -427,9 +433,8 @@ public partial class EditorWindow : Window
                     Points = new PointCollection { pos },
                 };
                 break;
-            case EditorTool.Blur:
-            case EditorTool.Pixelate:
-                ShowDragRect(new Rect(_dragStart, _dragStart), dim: false);
+            case EditorTool.Redact:
+                _activeShape = BeginRedaction(new Rect(_dragStart, _dragStart));
                 break;
             case EditorTool.Spotlight:
                 ShowDragRect(new Rect(_dragStart, _dragStart), dim: true);
@@ -775,6 +780,15 @@ public partial class EditorWindow : Window
         // Picking one mark replaces any marquee group.
         if (element is not null) ClearMultiSelection();
         _selected = element;
+        // Selecting a redaction pulls its own style and strength into the toolbar, so the
+        // controls describe the mark you are looking at rather than the last one you drew.
+        if (element is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+            meta.Type == AnnotationData.TypeRedact && IsLoaded)
+        {
+            _redactStyle = Redaction.Parse(meta.Style);
+            _redactStrength = meta.Strength ?? Redaction.DefaultStrength;
+            UpdateContextPanels();
+        }
         UpdateSelectionVisual();
     }
 

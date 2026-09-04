@@ -577,14 +577,98 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------- blur/pixelate strength (parity tail)
 
-    private void OnEffectStrengthChecked(object sender, RoutedEventArgs e)
+    // ------------------------------------------------------------- redaction style
+
+    private void OnRedactStyleClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not RadioButton rb || rb.Tag is not string tag ||
-            !Enum.TryParse(tag, out EffectStrength strength))
+        BuildRedactStyleRows();
+        CheckRowByTag(RedactStyleList, SelectedRedactStyle() ?? _redactStyle);
+        RedactStylePopup.IsOpen = !RedactStylePopup.IsOpen;
+    }
+
+    private RedactStyle? SelectedRedactStyle() =>
+        _selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+        meta.Type == AnnotationData.TypeRedact
+            ? Redaction.Parse(meta.Style)
+            : null;
+
+    private void BuildRedactStyleRows()
+    {
+        if (RedactStyleList.Children.Count > 0) return;
+        (RedactStyle Style, string Label)[] rows =
+        {
+            (RedactStyle.Pixelate, "Pixelate"),
+            (RedactStyle.BlurSecure, "Blur (secure)"),
+            (RedactStyle.BlurSmooth, "Blur (smooth)"),
+            (RedactStyle.BlackOut, "Black out"),
+        };
+        foreach ((RedactStyle style, string label) in rows)
+        {
+            var row = AddPopoverRow(RedactStyleList, "RedactStyle",
+                new TextBlock { Text = label }, style, label);
+            RedactStyle picked = style;
+            row.Click += (_, _) =>
+            {
+                ApplyRedactStyle(picked);
+                RedactStylePopup.IsOpen = false;
+            };
+        }
+    }
+
+    /// <summary>
+    /// Restyles the selected redaction, and sets the style for the next one either way.
+    /// Black Out takes the strength slider off the toolbar entirely — a black rectangle
+    /// has no strength, and greying the control out would only leave dead space.
+    /// </summary>
+    private void ApplyRedactStyle(RedactStyle style)
+    {
+        RestyleSelectedRedaction(style, strength: null, push: true);
+        _redactStyle = style;
+        UpdateContextPanels();
+    }
+
+    private void OnRedactStrengthChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        int value = Redaction.ClampStrength((int)Math.Round(e.NewValue));
+        if (RedactStrengthValue is not null)
+            RedactStrengthValue.Text = value.ToString(CultureInfo.InvariantCulture);
+        if (!IsLoaded || _syncingThicknessButtons) return;
+        _redactStrength = value;
+
+        // Live preview on the selection, with ONE undo entry for the whole drag: the
+        // "before" is captured at the first tick and committed when the slider is let go.
+        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+            meta.Type == AnnotationData.TypeRedact)
+        {
+            if (_redactStrengthBefore is null || !ReferenceEquals(_redactStrengthElement, _selected))
+            {
+                CommitRedactStrengthGesture();
+                _redactStrengthBefore = meta.Clone();
+                _redactStrengthElement = _selected;
+            }
+            RestyleSelectedRedaction(style: null, strength: value, push: false);
+        }
+    }
+
+    private void OnRedactStrengthReleased(object sender, RoutedEventArgs e) => CommitRedactStrengthGesture();
+
+    private void CommitRedactStrengthGesture()
+    {
+        if (_redactStrengthBefore is not { } before ||
+            _redactStrengthElement is not FrameworkElement fe || fe.Tag is not AnnotationData after)
+        {
+            _redactStrengthBefore = null;
+            _redactStrengthElement = null;
             return;
-        // The same radio group drives both tools; route to whichever effect is active.
-        if (_tool == EditorTool.Pixelate) _pixelateStrength = strength;
-        else _blurStrength = strength;
+        }
+        UIElement el = _redactStrengthElement;
+        _redactStrengthBefore = null;
+        _redactStrengthElement = null;
+        if (before.Strength == after.Strength) return;
+
+        Push(new EditorAction(
+            undo: () => { fe.Tag = before; RefreshRedaction(el); },
+            redo: () => { fe.Tag = after; RefreshRedaction(el); }), apply: false);
     }
 
     private void ApplyCropRatio(string tag)

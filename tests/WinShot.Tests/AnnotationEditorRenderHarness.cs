@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -80,9 +80,9 @@ public class AnnotationEditorRenderHarness
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-rectangle-selection-context.png"));
 
                 InvokePrivate(editor, "Select", null);
-                SelectTool(editor, EditorTool.Blur);
+                SelectTool(editor, EditorTool.Redact);
                 Pump(4);
-                RenderToPng(editor, Path.Combine(outDir, "editor-after-blur-strength-context.png"));
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-redaction-context.png"));
 
                 SelectTool(editor, EditorTool.Text);
                 Pump(4);
@@ -112,7 +112,7 @@ public class AnnotationEditorRenderHarness
                     "Generated in-process with RenderTargetBitmap; WinShot.exe was not launched.\n" +
                     "Source content is synthetic and contains no user data.\n" +
                     "Renders: primary shell, filled rectangle context, More overflow, annotations,\n" +
-                    "200% DPI, rectangle selection, blur strength, text style, crop ratio, and spotlight.\n");
+                    "200% DPI, rectangle selection, redaction, text style, crop ratio, and spotlight.\n");
 
                 editor.Close();
                 Pump(2);

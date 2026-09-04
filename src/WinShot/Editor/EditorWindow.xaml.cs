@@ -89,8 +89,15 @@ public partial class EditorWindow : Window
     private TextStyle _textStyle = TextStyle.Plain;
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
     private double _opacity = 1.0; // annotation alpha multiplier (0.25–1.0) for new + restyled marks
-    private EffectStrength _blurStrength = EffectStrength.Medium;
-    private EffectStrength _pixelateStrength = EffectStrength.Medium;
+    // Redaction defaults for the NEXT mark; a selected redaction carries its own.
+    private RedactStyle _redactStyle = RedactStyle.Pixelate;
+    private int _redactStrength = Redaction.DefaultStrength;
+    private int _activeRedactSeed;
+    private readonly System.Diagnostics.Stopwatch _redactPreviewClock = new();
+
+    // Strength-slider gesture: a continuous drag previews live but records ONE undo entry.
+    private AnnotationData? _redactStrengthBefore;
+    private UIElement? _redactStrengthElement;
 
     // Opacity-slider gesture: a continuous drag previews live but records ONE undo entry.
     // _opacityBefore is the selected element's style captured at gesture start.
@@ -734,7 +741,10 @@ public partial class EditorWindow : Window
         FillPanel.Visibility = Show(Has(EditorContextControls.Fill));
         OpacityPanel.Visibility = Show(Has(EditorContextControls.Opacity));
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
-        EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
+        RedactStylePanel.Visibility = Show(Has(EditorContextControls.RedactStyle));
+        // Black Out has no strength, so the control leaves rather than greying out.
+        RedactStrengthPanel.Visibility = Show(
+            Has(EditorContextControls.RedactStrength) && Redaction.UsesStrength(_redactStyle));
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         CropToolsPanel.Visibility = Show(Has(EditorContextControls.CropTools));
@@ -746,8 +756,8 @@ public partial class EditorWindow : Window
         if (Has(EditorContextControls.Color))
             SyncColorFromTool();
 
-        if (Has(EditorContextControls.EffectStrength))
-            SyncEffectStrengthButtons(_tool == EditorTool.Blur ? _blurStrength : _pixelateStrength);
+        if (Has(EditorContextControls.RedactStrength))
+            SyncRedactStrengthSlider();
 
         ContextPanel.Visibility = controls == EditorContextControls.None
             ? Visibility.Collapsed
@@ -952,17 +962,20 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Reflects the active blur/pixelate strength on the strength radio group without re-triggering an apply.</summary>
-    private void SyncEffectStrengthButtons(EffectStrength strength)
+    /// <summary>Puts the current strength on the slider without treating it as a user edit.</summary>
+    private void SyncRedactStrengthSlider()
     {
-        RadioButton target = strength switch
+        if (RedactStrengthSlider is null) return;
+        _syncingThicknessButtons = true;
+        try
         {
-            EffectStrength.Light => StrengthLightBtn,
-            EffectStrength.Strong => StrengthStrongBtn,
-            _ => StrengthMediumBtn,
-        };
-        if (target.IsChecked != true)
-            target.IsChecked = true; // OnEffectStrengthChecked re-stores the same value (idempotent)
+            RedactStrengthSlider.Value = _redactStrength;
+            RedactStrengthValue.Text = _redactStrength.ToString(CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
+        }
     }
 
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>

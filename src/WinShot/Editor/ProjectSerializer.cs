@@ -37,6 +37,14 @@ internal sealed class AnnotationData
     public const string TypeSpotlight = "spotlight";
     public const string TypeImage = "image";
 
+    /// <summary>
+    /// A re-editable redaction: a rectangle filled with the effected crop of the source
+    /// underneath. Nothing is baked into the source bitmap — the mark can be moved,
+    /// resized, restyled or deleted at any time, and <c>Flatten()</c> bakes it on export
+    /// like every other annotation.
+    /// </summary>
+    public const string TypeRedact = "redact";
+
     public string Type { get; set; } = "";
 
     /// <summary>Geometry points: arrow/line = [from, to]; curved arrow = [from, control, to];
@@ -66,6 +74,15 @@ internal sealed class AnnotationData
 
     /// <summary>Step badge number.</summary>
     public int? Number { get; set; }
+
+    /// <summary>Redaction intensity, 1–100. Meaningless for the Black Out style.</summary>
+    public int? Strength { get; set; }
+
+    /// <summary>
+    /// Mosaic jitter seed. Stored so a redaction redraws identically after a move, an undo
+    /// or a project reload instead of reshuffling its blocks every time it is recomputed.
+    /// </summary>
+    public int? Seed { get; set; }
 
     /// <summary>Index into the project's embedded images/{n}.png entries.</summary>
     [JsonPropertyName("image")]
@@ -142,6 +159,15 @@ internal sealed class AnnotationData
             Rect = new[] { layout.Hole.X, layout.Hole.Y, layout.Hole.Width, layout.Hole.Height },
         };
     }
+
+    public static AnnotationData ForRedaction(Rect bounds, RedactStyle style, int strength, int seed) => new()
+    {
+        Type = TypeRedact,
+        Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
+        Style = style.ToString(),
+        Strength = Redaction.ClampStrength(strength),
+        Seed = seed,
+    };
 
     public static AnnotationData ForImage(Rect bounds) => new()
     {
@@ -275,10 +301,25 @@ internal static class ProjectSerializer
     /// coordinates (the caller applies the translate offset and adds it to the canvas).
     /// Throws InvalidDataException on malformed or unknown entries.
     /// </summary>
-    public static UIElement CreateElement(AnnotationData a, IReadOnlyList<BitmapSource> images)
+    /// <param name="source">
+    /// The current source bitmap, needed only to repaint a redaction from the pixels it
+    /// covers. Null yields a flat black redaction, which is the safe failure: a redaction
+    /// that cannot find its pixels must never come back transparent.
+    /// </param>
+    public static UIElement CreateElement(
+        AnnotationData a, IReadOnlyList<BitmapSource> images, SD.Bitmap? source = null)
     {
         switch (a.Type)
         {
+            case AnnotationData.TypeRedact:
+            {
+                var bounds = RequireRect(a);
+                var redaction = new Shapes.Rectangle { Width = bounds.Width, Height = bounds.Height };
+                SetPos(redaction, bounds.TopLeft);
+                AnnotationFactory.PaintRedaction(redaction, source, bounds, Redaction.Parse(a.Style),
+                    a.Strength ?? Redaction.DefaultStrength, a.Seed ?? 0);
+                return redaction;
+            }
             case AnnotationData.TypeArrow:
             case AnnotationData.TypeCurvedArrow:
             {

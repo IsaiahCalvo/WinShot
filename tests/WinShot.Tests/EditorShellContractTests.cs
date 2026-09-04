@@ -1,4 +1,4 @@
-using WinShot.Editor;
+﻿using WinShot.Editor;
 using Xunit;
 
 namespace WinShot.Tests;
@@ -21,7 +21,8 @@ public class EditorShellContractTests
         Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" },
             EditorShellContract.ToolsIn(EditorToolCategory.Shapes));
         Assert.Equal(new[] { "Text" }, EditorShellContract.ToolsIn(EditorToolCategory.Text));
-        Assert.Equal(new[] { "Blur", "Pixelate", "Spotlight" },
+        // One redaction tool, not two: pixelate and blur are styles on the mark it draws.
+        Assert.Equal(new[] { "Redact", "Spotlight" },
             EditorShellContract.ToolsIn(EditorToolCategory.Redact));
         Assert.Equal(new[] { "Crop" }, EditorShellContract.ToolsIn(EditorToolCategory.Image));
 
@@ -92,8 +93,10 @@ public class EditorShellContractTests
             .HasFlag(EditorContextControls.ArrowStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)
             .HasFlag(EditorContextControls.TextStyle));
-        Assert.Equal(EditorContextControls.EffectStrength,
-            EditorShellContract.ContextFor(EditorTool.Pixelate, false));
+        // Redaction shows its style menu and a continuous strength, and nothing else:
+        // colour and thickness mean nothing to a mark whose job is to hide pixels.
+        Assert.Equal(EditorContextControls.RedactStyle | EditorContextControls.RedactStrength,
+            EditorShellContract.ContextFor(EditorTool.Redact, false));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Step, false)
             .HasFlag(EditorContextControls.StepMode));
         // Rotate / flip / image size came out of the "More" popup and onto the crop bar.

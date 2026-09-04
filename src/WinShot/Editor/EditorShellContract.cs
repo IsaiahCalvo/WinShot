@@ -1,4 +1,4 @@
-namespace WinShot.Editor;
+﻿namespace WinShot.Editor;
 
 [Flags]
 internal enum EditorContextControls
@@ -9,13 +9,20 @@ internal enum EditorContextControls
     Fill = 1 << 2,
     Opacity = 1 << 3,
     ArrowStyle = 1 << 4,
-    EffectStrength = 1 << 5,
+    /// <summary>Which of the four ways a redaction hides what is under it.</summary>
+    RedactStyle = 1 << 5,
     TextStyle = 1 << 6,
     CropRatio = 1 << 7,
     StepMode = 1 << 8,
 
     /// <summary>Rotate / flip / image size — the transforms that used to hide in "More".</summary>
     CropTools = 1 << 9,
+
+    /// <summary>
+    /// The continuous redaction strength. It HIDES for Black Out rather than greying out,
+    /// so the toolbar shrinks to the controls that mean something.
+    /// </summary>
+    RedactStrength = 1 << 10,
 }
 
 /// <summary>The five tool families the toolbar's category buttons switch between.</summary>
@@ -69,7 +76,7 @@ internal static class EditorShellContract
             "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step",
         },
         EditorToolCategory.Text => new[] { "Text" },
-        EditorToolCategory.Redact => new[] { "Blur", "Pixelate", "Spotlight" },
+        EditorToolCategory.Redact => new[] { "Redact", "Spotlight" },
         EditorToolCategory.Image => new[] { "Crop" },
         _ => Array.Empty<string>(),
     };
@@ -85,7 +92,7 @@ internal static class EditorShellContract
         EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
             or EditorTool.CurvedArrow or EditorTool.Step => EditorToolCategory.Shapes,
         EditorTool.Text => EditorToolCategory.Text,
-        EditorTool.Blur or EditorTool.Pixelate or EditorTool.Spotlight => EditorToolCategory.Redact,
+        EditorTool.Redact or EditorTool.Spotlight => EditorToolCategory.Redact,
         EditorTool.Crop => EditorToolCategory.Image,
         _ => null,
     };
@@ -99,7 +106,7 @@ internal static class EditorShellContract
         EditorToolCategory.Draw => EditorTool.Freehand,
         EditorToolCategory.Shapes => EditorTool.Rectangle,
         EditorToolCategory.Text => EditorTool.Text,
-        EditorToolCategory.Redact => EditorTool.Blur,
+        EditorToolCategory.Redact => EditorTool.Redact,
         _ => null,
     };
 
@@ -137,7 +144,7 @@ internal static class EditorShellContract
         EditorTool.Step =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,
-        EditorTool.Blur or EditorTool.Pixelate => EditorContextControls.EffectStrength,
+        EditorTool.Redact => EditorContextControls.RedactStyle | EditorContextControls.RedactStrength,
         EditorTool.Crop => EditorContextControls.CropRatio | EditorContextControls.CropTools,
         _ => EditorContextControls.None,
     };

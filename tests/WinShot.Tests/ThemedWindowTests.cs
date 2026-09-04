@@ -84,7 +84,7 @@ public class ThemedWindowTests
                 var editor = new EditorWindow(NewBitmap(), settings, history);
                 editor.Show();
                 EditorShellContractSmoke(editor);
-                ApplyBlurUndoRedoSmoke(editor);
+                RedactionObjectSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
                 PinSmoke(editor);
@@ -395,11 +395,11 @@ public class ThemedWindowTests
             "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
             "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
-            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton",
+            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
         };
@@ -415,13 +415,13 @@ public class ThemedWindowTests
             "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
             "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn",
-            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton",
+            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
-            "StepNumberBtn", "StepLetterBtn", "StrengthLightBtn", "StrengthMediumBtn", "StrengthStrongBtn",
+            "StepNumberBtn", "StepLetterBtn",
             "BtnPin", "BtnCopy", "BtnCenter",
         };
         foreach (string name in iconOnlyControls)
@@ -436,7 +436,7 @@ public class ThemedWindowTests
         foreach (string name in new[]
         {
             "SelectModePopup", "ColorPickerPopup", "SizePresetPopup",
-            "ArrowStylePopup", "TextStylePopup", "CropRatioPopup",
+            "ArrowStylePopup", "TextStylePopup", "CropRatioPopup", "RedactStylePopup",
         })
         {
             var popup = Assert.IsType<Popup>(editor.FindName(name));
@@ -462,7 +462,8 @@ public class ThemedWindowTests
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
         var fill = (StackPanel)editor.FindName("FillPanel")!;
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
-        var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
+        var redactStyle = (StackPanel)editor.FindName("RedactStylePanel")!;
+        var redactStrength = (StackPanel)editor.FindName("RedactStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
         var cropTools = (StackPanel)editor.FindName("CropToolsPanel")!;
         var sizeBox = (TextBox)editor.FindName("SizeBox")!;
@@ -525,8 +526,11 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, thickness.Visibility);
         Assert.Equal(Visibility.Visible, fill.Visibility);
 
-        ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
-        Assert.Equal(Visibility.Visible, effects.Visibility);
+        // One redaction tool with a style menu and a continuous strength — no S/M/L radios,
+        // and no colour well, because a redaction has no colour to pick.
+        ((RadioButton)editor.FindName("RedactToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, redactStyle.Visibility);
+        Assert.Equal(Visibility.Visible, redactStrength.Visibility);
         Assert.Equal(Visibility.Collapsed, color.Visibility);
         Assert.True(((RadioButton)editor.FindName("CategoryRedactBtn")!).IsChecked);
 
@@ -555,29 +559,62 @@ public class ThemedWindowTests
         Assert.True(primaryRow.ActualHeight <= 42, $"Primary toolbar wrapped at minimum width: {primaryRow.ActualHeight}");
     }
 
-    private static void ApplyBlurUndoRedoSmoke(EditorWindow editor)
+    /// <summary>
+    /// A redaction is a live object: drawing one adds a canvas child and leaves the source
+    /// bitmap byte-for-byte alone, restyling it is one more undoable step, and undo walks
+    /// both back. The old destructive blur baked pixels and could only be undone by
+    /// restoring a backup crop — that whole path is gone.
+    /// </summary>
+    private static void RedactionObjectSmoke(EditorWindow editor)
     {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         var type = typeof(EditorWindow);
-        var activeField = type.GetField(
-            "_sourceOperationActive",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var applyBlur = type.GetMethod(
-            "ApplyBlur",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var undoAsync = type.GetMethod(
-            "UndoAsync",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var redoAsync = type.GetMethod(
-            "RedoAsync",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var source = (SD.Bitmap)type.GetField("_source", NP)!.GetValue(editor)!;
+        var undoAsync = type.GetMethod("UndoAsync", NP)!;
+        var redoAsync = type.GetMethod("RedoAsync", NP)!;
 
-        WaitForEditorOperation(editor, activeField);
-        applyBlur.Invoke(editor, new object[] { new SD.Rectangle(0, 0, 40, 40) });
-        WaitForEditorOperation(editor, activeField);
+        // Undo/redo refuse to run while the source is still loading, so let the initial
+        // image land first — otherwise every assertion below reads a no-op.
+        WaitForEditorOperation(editor, type.GetField("_sourceOperationActive", NP)!);
+        canvas.Children.Clear();
+        SD.Color before = source.GetPixel(12, 12);
+        var area = new Rect(4, 4, 40, 24);
+
+        var mark = (System.Windows.Shapes.Rectangle)type.GetMethod("BeginRedaction", NP)!
+            .Invoke(editor, new object[] { area })!;
+        canvas.Children.Add(mark);
+        type.GetMethod("UpdateRedactionPreview", NP)!.Invoke(editor, new object[] { mark, area, true });
+        mark.Tag = AnnotationData.ForRedaction(area, RedactStyle.Pixelate, 45, seed: 7);
+        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { mark });
+
+        Assert.Single(canvas.Children);
+        // The whole point: nothing was baked into the picture.
+        Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
+        Assert.IsType<ImageBrush>(mark.Fill);
+
+        // Restyling to Black Out is one undoable step and repaints flat black.
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { mark });
+        Assert.True((bool)type.GetMethod("RestyleSelectedRedaction", NP)!
+            .Invoke(editor, new object?[] { RedactStyle.BlackOut, null, true })!);
+        var blackedOut = Assert.IsType<SolidColorBrush>(mark.Fill);
+        Assert.Equal(Colors.Black, blackedOut.Color);
+
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
-        WaitForEditorOperation(editor, activeField);
+        Assert.IsType<ImageBrush>(mark.Fill);
         WaitForTask((Task)redoAsync.Invoke(editor, Array.Empty<object>())!);
-        WaitForEditorOperation(editor, activeField);
+        Assert.IsType<SolidColorBrush>(mark.Fill);
+
+        // Two more undos take the restyle and then the mark itself off the canvas; the
+        // source is untouched at every step.
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Empty(canvas.Children);
+        Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
+
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
     }
 
     private static void SaveProjectSmoke(EditorWindow editor, SettingsService settings, HistoryService history)

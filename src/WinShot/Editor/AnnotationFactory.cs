@@ -1,8 +1,11 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using WinShot.Core;
 using System.Windows.Shapes;
+using SD = System.Drawing;
 
 namespace WinShot.Editor;
 
@@ -67,6 +70,51 @@ internal static class AnnotationFactory
         EffectStrength.Strong => 22,
         _ => 12, // Medium — matches the previous hardcoded default
     };
+
+    /// <summary>
+    /// Fills a redaction rectangle with the effected pixels it covers, sized 1:1 so the
+    /// flattened export is pixel-exact. Anything that cannot be rendered — no source, a
+    /// degenerate rect, Black Out — paints flat black, which is the only safe failure for
+    /// a mark whose job is to hide something.
+    /// </summary>
+    public static void PaintRedaction(
+        Rectangle target, SD.Bitmap? source, Rect bounds,
+        RedactStyle style, int strength, int seed)
+    {
+        target.Width = Math.Max(1, bounds.Width);
+        target.Height = Math.Max(1, bounds.Height);
+
+        SD.Bitmap? effected = null;
+        if (source is not null && style != RedactStyle.BlackOut)
+        {
+            var region = new SD.Rectangle(
+                (int)Math.Round(bounds.X), (int)Math.Round(bounds.Y),
+                (int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height));
+            try
+            {
+                effected = Redaction.Render(source, region, style, strength, seed);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Redaction render failed; falling back to black", ex);
+            }
+        }
+
+        if (effected is null)
+        {
+            target.Fill = Brushes.Black;
+            return;
+        }
+
+        using (effected)
+        {
+            var image = CaptureService.ToBitmapSource(effected);
+            var brush = new ImageBrush(image) { Stretch = Stretch.Fill };
+            RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.NearestNeighbor);
+            if (brush.CanFreeze) brush.Freeze();
+            target.Fill = brush;
+        }
+    }
 
     /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
     public static ArrowStyle ParseArrowStyle(string? name) =>

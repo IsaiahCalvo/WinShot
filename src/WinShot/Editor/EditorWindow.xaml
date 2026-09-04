@@ -220,19 +220,34 @@
                                 Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>
                     </StackPanel>
 
-                    <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                        <RadioButton x:Name="StrengthLightBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Light" Content="S"
-                                     FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Light" Checked="OnEffectStrengthChecked"
-                                     AutomationProperties.Name="Light"
-                                     AutomationProperties.HelpText="Use the lightest redaction strength."/>
-                        <RadioButton x:Name="StrengthMediumBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Medium" Content="M"
-                                     FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True"
-                                     AutomationProperties.Name="Medium"
-                                     AutomationProperties.HelpText="Use the middle redaction strength."/>
-                        <RadioButton x:Name="StrengthStrongBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Strong" Content="L"
-                                     FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Strong" Checked="OnEffectStrengthChecked"
-                                     AutomationProperties.Name="Strong"
-                                     AutomationProperties.HelpText="Use the strongest redaction strength."/>
+                    <StackPanel x:Name="RedactStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                        <Button x:Name="RedactStyleButton" Style="{StaticResource ToolIconButton}" Content="&#xE7E6;"
+                                Click="OnRedactStyleClick" ToolTip="Redaction style"
+                                AutomationProperties.Name="Redaction style"
+                                AutomationProperties.HelpText="Choose pixelate, blur (secure), blur (smooth) or black out. The style can be changed after the mark is drawn."/>
+                        <Popup x:Name="RedactStylePopup" PlacementTarget="{Binding ElementName=RedactStyleButton}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border Style="{StaticResource PopoverSurface}">
+                                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                                <StackPanel Width="184">
+                                    <TextBlock Text="Hide with" Style="{StaticResource FieldLabel}" Margin="8,2,8,8"/>
+                                    <StackPanel x:Name="RedactStyleList"/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </StackPanel>
+
+                    <!-- Continuous, and gone entirely for Black Out — there is no such
+                         thing as a stronger or weaker black rectangle. -->
+                    <StackPanel x:Name="RedactStrengthPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                        <Slider x:Name="RedactStrengthSlider" Style="{StaticResource DarkSlider}" Width="110"
+                                Minimum="1" Maximum="100" Value="45" SmallChange="1" LargeChange="10"
+                                ValueChanged="OnRedactStrengthChanged" PreviewMouseUp="OnRedactStrengthReleased"
+                                LostMouseCapture="OnRedactStrengthReleased" KeyUp="OnRedactStrengthReleased"
+                                ToolTip="Redaction strength" AutomationProperties.Name="Redaction strength"
+                                AutomationProperties.HelpText="How coarse the mosaic or how wide the blur is."/>
+                        <TextBlock x:Name="RedactStrengthValue" Text="45" Style="{StaticResource ValueLabel}" MinWidth="28"
+                                   TextAlignment="Right" Margin="6,0,0,0"/>
                     </StackPanel>
 
                     <StackPanel x:Name="CropRatioPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -402,18 +417,14 @@
                     </StackPanel>
 
                     <StackPanel x:Name="RedactToolRow" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="BlurToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
-                                     Tag="Blur" Content="&#xE7E6;" Checked="OnToolChecked" ToolTip="Blur (B)"
-                                     AutomationProperties.Name="Blur"
-                                     AutomationProperties.HelpText="Apply a smooth local blur to a dragged region. Shortcut B."/>
-                        <RadioButton x:Name="PixelateToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
-                                     Tag="Pixelate" Content="&#xE80A;" Checked="OnToolChecked" ToolTip="Pixelate"
-                                     AutomationProperties.Name="Pixelate"
-                                     AutomationProperties.HelpText="Apply a randomized local mosaic redaction to a dragged region."/>
+                        <RadioButton x:Name="RedactToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
+                                     Tag="Redact" Content="&#xE7E6;" Checked="OnToolChecked" ToolTip="Redact (X)"
+                                     AutomationProperties.Name="Redact"
+                                     AutomationProperties.HelpText="Cover a dragged region with a movable, re-styleable redaction. Shortcut X."/>
                         <RadioButton x:Name="SpotlightToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
-                                     Tag="Spotlight" Content="&#xE8FB;" Checked="OnToolChecked" ToolTip="Spotlight"
+                                     Tag="Spotlight" Content="&#xE8FB;" Checked="OnToolChecked" ToolTip="Spotlight (O)"
                                      AutomationProperties.Name="Spotlight"
-                                     AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."/>
+                                     AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area. Shortcut O."/>
                     </StackPanel>
 
                     <StackPanel x:Name="ImageToolRow" Orientation="Horizontal" Visibility="Collapsed">

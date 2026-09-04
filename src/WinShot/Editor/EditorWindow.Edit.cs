@@ -799,7 +799,7 @@ public partial class EditorWindow : Window
             // malformed entry can never leak a half-initialized editor.
             var built = doc.Annotations
                 .OrderBy(a => a.Z)
-                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images)))
+                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images, source)))
                 .ToList();
 
             var win = new EditorWindow(bitmap, settings, history);
@@ -815,6 +815,9 @@ public partial class EditorWindow : Window
             }
             win._projectPath = path;
             win.Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+            // CreateElement painted each redaction at its ORIGINAL rect; the move offsets
+            // were applied above, so re-read the pixels each one actually covers now.
+            win.RefreshAllRedactions();
 
             // A rotation pivot is the element's own centre, which is only known once the
             // element has been measured. Re-seat the pivots after the first layout pass,

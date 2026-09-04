@@ -61,6 +61,7 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
             case AnnotationData.TypeImage:
+            case AnnotationData.TypeRedact:
                 LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe));
                 break;
             default:
@@ -423,6 +424,13 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeImage:
                 ResizeBoxShape(fe, b);
                 break;
+            case AnnotationData.TypeRedact:
+                // Resizing a redaction changes WHAT it covers, so the pixels behind it are
+                // re-run, live, on the same drag.
+                ResizeBoxShape(fe, b);
+                meta.Rect = new[] { b.X, b.Y, b.Width, b.Height };
+                RefreshRedaction(fe);
+                break;
             case AnnotationData.TypeText:
                 ResizeTextElement(fe, meta, b);
                 break;
@@ -595,6 +603,7 @@ public partial class EditorWindow : Window
 
         switch (snap.Type)
         {
+            case AnnotationData.TypeRedact:
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
             case AnnotationData.TypeImage:
@@ -657,6 +666,8 @@ public partial class EditorWindow : Window
         meta.Angle = snap.Angle;
 
         fe.Tag = meta;
+        if (meta.Type == AnnotationData.TypeRedact)
+            RefreshRedaction(fe);
     }
 
     /// <summary>Folds an element's TranslateTransform offset into its Canvas.Left/Top and clears the transform.</summary>
@@ -938,7 +949,8 @@ public partial class EditorWindow : Window
             Key.T => EditorTool.Text,
             Key.P => EditorTool.Freehand, // Pen / Draw
             Key.H => EditorTool.Highlighter,
-            Key.B => EditorTool.Blur,
+            Key.X => EditorTool.Redact,
+            Key.O => EditorTool.Spotlight,
             Key.S => EditorTool.Step,
             Key.C => EditorTool.Crop,
             _ => null,
@@ -952,7 +964,16 @@ public partial class EditorWindow : Window
     /// Moves an annotation by composing into its move offset (the same channel crop
     /// shifting uses). A rotation on the element is carried through untouched.
     /// </summary>
-    private static void MoveElement(UIElement element, double dx, double dy)
+    private void MoveElement(UIElement element, double dx, double dy)
+    {
+        MoveElementCore(element, dx, dy);
+        // A redaction hides whatever it is over, so moving it has to re-run the effect on
+        // the pixels it lands on. Every move — drag, nudge, crop shift, undo — comes
+        // through here, which is why the refresh lives here and not at each call site.
+        RefreshRedaction(element);
+    }
+
+    private static void MoveElementCore(UIElement element, double dx, double dy)
     {
         if (element is not FrameworkElement fe)
         {
