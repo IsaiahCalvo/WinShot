@@ -205,6 +205,20 @@ public class SelectorInteractionTests
         Assert.Equal(adjusts, options.ShouldAdjustSelection(control));
     }
 
+    [Fact]
+    public void TheSizePillSitsJustOffTheElementItLabels()
+    {
+        var element = new SD.Rectangle(100, 200, 400, 300);
+        var pill = new SD.Size(64, 24);
+
+        SD.Rectangle rect = SelectorChrome.SizePillRect(element, pill);
+
+        // Paint and hit-test call this same function, so the pill you can click is exactly
+        // the pill you can see — the shutter affordance was the only missing half.
+        Assert.Equal(new SD.Rectangle(508, 508, 64, 24), rect);
+        Assert.False(rect.IntersectsWith(element));
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs = 8000)
     {
         var clock = Stopwatch.StartNew();

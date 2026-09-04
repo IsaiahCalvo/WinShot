@@ -399,6 +399,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hintTween?.Dispose();
         _hintTween = null;
         _hintOpacity = 0d;
+        _pillTween?.Dispose();
+        _pillTween = null;
+        _pillHover = false;
+        _pillSwap = 0d;
         _hoverWindow = null;
         _hoverAppName = string.Empty;
         BeginHoverWash(arriving: false);
@@ -476,6 +480,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _handleTween = null;
             _hintTween?.Dispose();
             _hintTween = null;
+            _pillTween?.Dispose();
+            _pillTween = null;
             _followTimer.Dispose();
             _followMotionClock?.Dispose();
             _followMotionClock = null;
@@ -827,6 +833,51 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private double _handleScale = 1d;
     private IDisposable? _handleTween;
 
+    /// <summary>True while the pointer is over the detected element's size pill.</summary>
+    private bool _pillHover;
+    /// <summary>0..1 cross-fade from the size text to the camera glyph on that pill.</summary>
+    private double _pillSwap;
+    private IDisposable? _pillTween;
+
+    /// <summary>
+    /// The size pill for the currently detected element, in screen pixels — or null when
+    /// there is no detected element to label. Paint and hit-test share it so the pill you can
+    /// click is exactly the pill you can see.
+    /// </summary>
+    private SD.Rectangle? ShutterPillScreenRect()
+    {
+        if (!_paneHover || _pendingScreen is not null || _dragging || _hoverPane is not SD.Rectangle pane)
+            return null;
+        string text = $"{pane.Width} × {pane.Height}";
+        return SelectorChrome.SizePillRect(pane, SelectorChrome.MeasureLabel(text));
+    }
+
+    /// <summary>
+    /// Cross-fades the pill between its size text and a camera glyph. The capture half of
+    /// this already worked — a bare click takes the detected element — but nothing on screen
+    /// said the highlighted thing was clickable.
+    /// </summary>
+    private void SetPillHover(bool hovering)
+    {
+        if (_pillHover == hovering)
+            return;
+        _pillHover = hovering;
+
+        double from = _pillSwap;
+        double to = hovering ? 1d : 0d;
+        _pillTween?.Dispose();
+        _pillTween = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutCubic,
+            progress =>
+            {
+                _pillSwap = from + ((to - from) * progress);
+                if (ShutterPillScreenRect() is SD.Rectangle pill)
+                    InvalidateScreenRect(Inflated(pill));
+            },
+            () => _pillTween = null);
+    }
+
     /// <summary>0..1 opacity of the first-run hint pill; 0 means it is not on screen.</summary>
     private double _hintOpacity;
     private IDisposable? _hintTween;
@@ -939,7 +990,17 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // click-drag instead and the marquee wins — a drawn rect is never second-guessed.
         if (_paneHover && _pendingScreen is null && !_dragging)
         {
-            UpdateHoverElement(_currentScreen);
+            // Moving onto the pill must not re-resolve the element out from under it — the
+            // pill sits outside the rect it labels, so re-resolving would swap the highlight
+            // the instant you reached for the shutter.
+            bool onPill = ShutterPillScreenRect() is SD.Rectangle pill && pill.Contains(_currentScreen);
+            SetPillHover(onPill);
+            if (!onPill)
+                UpdateHoverElement(_currentScreen);
+        }
+        else if (_pillHover)
+        {
+            SetPillHover(false);
         }
 
         // Area mode, idle: keep the crosshair + loupe glued to the cursor. Repaint only the
@@ -1187,7 +1248,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     if (pillTop < 0) pillTop = local.Top + 8;
                     at = new SD.Point(Math.Max(0, local.Right - pill.Width), pillTop);
                 }
-                SelectorChrome.DrawLabel(g, clientSize, sizeText, at.X, at.Y);
+                if (labelScreen is not null)
+                    SelectorChrome.DrawShutterPill(g, clientSize, sizeText, at, _pillSwap);
+                else
+                    SelectorChrome.DrawLabel(g, clientSize, sizeText, at.X, at.Y);
             }
         }
 
@@ -1605,6 +1669,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hintTween?.Dispose();
         _hintTween = null;
         _hintOpacity = 0d;
+        _pillTween?.Dispose();
+        _pillTween = null;
+        _pillHover = false;
+        _pillSwap = 0d;
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -1624,7 +1692,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal WF.Cursor CursorForCurrent()
     {
-        if (_mode == SelectorMode.Window)
+        if (_mode == SelectorMode.Window || _pillHover)
             return SelectorCursors.Camera;
 
         if (_pendingScreen is SD.Rectangle p)

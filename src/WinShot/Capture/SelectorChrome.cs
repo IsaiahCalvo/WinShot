@@ -87,6 +87,45 @@ internal static class SelectorChrome
     private const int CursorReadoutOffsetX = 16;
     private const int CursorReadoutOffsetY = 20;
 
+    /// <summary>
+    /// Where the size pill for a detected element sits, in the same space as the rectangle it
+    /// labels. Paint and hit-test both call this, so the pill you can click is exactly the
+    /// pill you can see.
+    /// </summary>
+    public static SD.Rectangle SizePillRect(SD.Rectangle labelled, SD.Size pill) =>
+        new(labelled.Right + 8, labelled.Bottom + 8, pill.Width, pill.Height);
+
+    /// <summary>
+    /// The size pill cross-fading into a camera glyph as the pointer moves onto it. Same
+    /// geometry throughout — the pill is not a new control, it is the existing readout
+    /// admitting that clicking it takes the shot.
+    /// </summary>
+    public static void DrawShutterPill(SD.Graphics g, SD.Size clientSize, string text, SD.Point at, double swap)
+    {
+        double amount = Math.Clamp(swap, 0d, 1d);
+        DrawLabel(g, clientSize, text, at.X, at.Y, 1d - amount);
+        if (amount <= 0d)
+            return;
+
+        SD.Size pill = MeasureLabel(text);
+        int left = Math.Clamp(at.X, 0, Math.Max(0, clientSize.Width - pill.Width));
+        int top = Math.Clamp(at.Y, 0, Math.Max(0, clientSize.Height - pill.Height));
+        var bounds = new SD.Rectangle(left, top, pill.Width, pill.Height);
+
+        int alpha = (int)Math.Round(255 * amount);
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = GdiPaths.RoundedRect(bounds, 6))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, 0x1C, 0x1C, 0x1E)))
+            g.FillPath(bgBrush, path);
+        g.SmoothingMode = prev;
+
+        using var glyphFont = ThemePalette.IconFont(ThemePalette.TextBodyPt);
+        WF.TextRenderer.DrawText(g, "", glyphFont, bounds,
+            SD.Color.FromArgb(alpha, ThemePalette.TextPrimary),
+            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
+    }
+
     /// <summary>Draws the first-run hint pill centred near the top of a monitor.</summary>
     public static void DrawHint(SD.Graphics g, SD.Size clientSize, string text, double opacity)
     {
