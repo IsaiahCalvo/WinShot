@@ -240,7 +240,8 @@ public class ThemedWindowTests
             "PinnedShadowCheck", "PinnedBorderCheck", "AllInOneRememberCheck",
             "OcrJoinLinesCheck", "RestoreDefaultsButton", "CancelButton", "SaveButton",
             "AboutCheckUpdatesButton",
-            "AboutRepositoryButton", "AboutLogsButton",
+            "AboutRepositoryButton", "AboutLogsButton", "AboutDiagnosticsToggle",
+            "AboutNoticesToggle", "AboutLicensesButton",
         ];
 
         foreach (string name in accessibleControls)
@@ -741,6 +742,24 @@ public class ThemedWindowTests
         Assert.Single(live);
         Assert.Equal("SectionScreenshots", live[0].name);
         Assert.Equal(1d, live[0].pane.Opacity, 3);
+
+        // The About pane's disclosures start closed and reveal what they name.
+        var diagnostics = (ToggleButton)window.FindName("AboutDiagnosticsToggle")!;
+        var diagnosticsPanel = (StackPanel)window.FindName("AboutDiagnosticsPanel")!;
+        var notices = (ToggleButton)window.FindName("AboutNoticesToggle")!;
+        var noticesPanel = (StackPanel)window.FindName("AboutNoticesPanel")!;
+        Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
+        Assert.Equal(Visibility.Collapsed, noticesPanel.Visibility);
+        Assert.False(string.IsNullOrWhiteSpace(((TextBlock)window.FindName("AboutNoticesText")!).Text));
+        diagnostics.IsChecked = true;
+        notices.IsChecked = true;
+        PumpDispatcherOnce();
+        Assert.Equal(Visibility.Visible, diagnosticsPanel.Visibility);
+        Assert.Equal(Visibility.Visible, noticesPanel.Visibility);
+        diagnostics.IsChecked = false;
+        notices.IsChecked = false;
+        PumpDispatcherOnce();
+        Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
 
         // Back to General so the rest of the smoke sees the window it expects.
         list.SelectedIndex = 0;

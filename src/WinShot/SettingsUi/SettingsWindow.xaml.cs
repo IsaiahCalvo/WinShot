@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -68,6 +69,8 @@ public partial class SettingsWindow : Window
         if (index < 0) index = 0;
         CrossFade(sections, index);
         UpdateTitleForSection(index);
+        if (index == sections.Length - 1)
+            LoadReleaseNotesAsync();
     }
 
     /// <summary>Switches the Recording General/Video/GIF sub-tab.</summary>
@@ -554,6 +557,75 @@ public partial class SettingsWindow : Window
         AboutRuntimeValue.Text = $".NET {Environment.Version}";
         AboutOsValue.Text = Environment.OSVersion.VersionString;
         AboutInstallValue.Text = AppContext.BaseDirectory;
+        AboutNoticesText.Text = ThirdPartyNotices.Read();
+    }
+
+    /// <summary>Fetches the latest release body for "What's new". Never blocks opening the
+    /// pane, and says so plainly when GitHub cannot be reached.</summary>
+    private async void LoadReleaseNotesAsync()
+    {
+        if (_releaseNotesRequested) return;
+        _releaseNotesRequested = true;
+        try
+        {
+            var result = await UpdateService.CheckAsync();
+            string? notes = result.ReleaseNotes?.Trim();
+            if (string.IsNullOrWhiteSpace(notes))
+            {
+                AboutReleaseNotesStatus.Text = result.State == UpdateState.Error
+                    ? "Release notes are unavailable right now."
+                    : "This release published no notes.";
+                return;
+            }
+
+            AboutReleaseNotesStatus.Text = result.State == UpdateState.UpdateAvailable
+                ? $"WinShot {result.LatestVersion} is available."
+                : $"WinShot {result.LatestVersion ?? AppInfo.Version}";
+            AboutReleaseNotesText.Text = notes;
+            Reveal(AboutReleaseNotesScroll);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Release notes could not be loaded", ex);
+            AboutReleaseNotesStatus.Text = "Release notes are unavailable right now.";
+        }
+    }
+
+    private bool _releaseNotesRequested;
+
+    private void OnDiagnosticsToggled(object sender, RoutedEventArgs e) =>
+        ToggleDisclosure(AboutDiagnosticsToggle, AboutDiagnosticsPanel);
+
+    private void OnNoticesToggled(object sender, RoutedEventArgs e) =>
+        ToggleDisclosure(AboutNoticesToggle, AboutNoticesPanel);
+
+    private void ToggleDisclosure(ToggleButton toggle, UIElement panel)
+    {
+        if (toggle.IsChecked == true)
+            Reveal(panel);
+        else
+            panel.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Shows a block with the same fade the tab swap uses, so revealed content
+    /// arrives rather than appearing.</summary>
+    private void Reveal(UIElement element)
+    {
+        element.Visibility = Visibility.Visible;
+        if (AnimationsOff)
+        {
+            element.BeginAnimation(OpacityProperty, null);
+            element.Opacity = 1;
+            return;
+        }
+        element.Opacity = 0;
+        element.BeginAnimation(OpacityProperty, FadeTo(1, "MotionSwap"));
+    }
+
+    private void OnAboutOpenLicenses(object sender, RoutedEventArgs e)
+    {
+        string dir = ThirdPartyNotices.LicensesDirectory;
+        OpenExternal(Directory.Exists(dir) ? dir : AppContext.BaseDirectory);
     }
 
     private async void OnAboutCheckUpdates(object sender, RoutedEventArgs e)

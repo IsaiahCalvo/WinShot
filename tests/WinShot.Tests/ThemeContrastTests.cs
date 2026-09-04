@@ -31,14 +31,7 @@ public class ThemeContrastTests
         return map;
     }
 
-    private static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "THIRD_PARTY_NOTICES.md")))
-            dir = dir.Parent;
-        Assert.NotNull(dir);
-        return dir!.FullName;
-    }
+    private static string RepoRoot() => TestPaths.RepoRoot();
 
     private static double Channel(byte value)
     {

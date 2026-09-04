@@ -1153,28 +1153,82 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="What's new"/>
+                                <TextBlock x:Name="AboutReleaseNotesStatus" Style="{StaticResource SubHint}"
+                                           Margin="0,0,0,4" Text="Checking GitHub for the latest release notes…"/>
+                                <ScrollViewer x:Name="AboutReleaseNotesScroll" MaxHeight="150"
+                                              Visibility="Collapsed"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <TextBlock x:Name="AboutReleaseNotesText" TextWrapping="Wrap"
+                                               LineHeight="17" Margin="0,0,8,0"
+                                               FontSize="{StaticResource TextBody}"
+                                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="Build"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Version"/>
                                     <TextBlock x:Name="AboutVersionValue" VerticalAlignment="Center"
                                                Foreground="{StaticResource TextPrimaryBrush}"/>
                                 </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Runtime"/>
-                                    <TextBlock x:Name="AboutRuntimeValue" VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Windows"/>
-                                    <TextBlock x:Name="AboutOsValue" VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Install folder"/>
-                                    <TextBlock x:Name="AboutInstallValue" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"
-                                               Foreground="{StaticResource TextSecondaryBrush}"/>
-                                </DockPanel>
+
+                                <ToggleButton x:Name="AboutDiagnosticsToggle" Style="{StaticResource DisclosureToggle}"
+                                              Content="Diagnostics"
+                                              AutomationProperties.Name="Show diagnostics"
+                                              AutomationProperties.HelpText="Show the runtime, Windows version, and install folder."
+                                              Checked="OnDiagnosticsToggled" Unchecked="OnDiagnosticsToggled"/>
+                                <StackPanel x:Name="AboutDiagnosticsPanel" Visibility="Collapsed">
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Runtime"/>
+                                        <TextBlock x:Name="AboutRuntimeValue" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Windows"/>
+                                        <TextBlock x:Name="AboutOsValue" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Install folder"/>
+                                        <TextBlock x:Name="AboutInstallValue" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    </DockPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Third-party notices"/>
+                                <TextBlock Style="{StaticResource SubHint}" Margin="0,0,0,4" TextWrapping="Wrap"
+                                           Text="WinShot ships thirteen MIT packages and one under Apache-2.0. Their notices travel with the app."/>
+                                <ToggleButton x:Name="AboutNoticesToggle" Style="{StaticResource DisclosureToggle}"
+                                              Content="Read the notices"
+                                              AutomationProperties.Name="Show third-party notices"
+                                              AutomationProperties.HelpText="Show the licence notices for the packages WinShot ships."
+                                              Checked="OnNoticesToggled" Unchecked="OnNoticesToggled"/>
+                                <StackPanel x:Name="AboutNoticesPanel" Visibility="Collapsed">
+                                    <ScrollViewer MaxHeight="220" Margin="0,4,0,6"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <TextBlock x:Name="AboutNoticesText" TextWrapping="Wrap"
+                                                   LineHeight="16" Margin="0,0,8,0"
+                                                   FontSize="{StaticResource TextCaption}"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    </ScrollViewer>
+                                    <Button x:Name="AboutLicensesButton" Content="Open the licence files"
+                                            MinWidth="170" HorizontalAlignment="Left"
+                                            FocusVisualStyle="{StaticResource SettingsFocusVisual}"
+                                            AutomationProperties.Name="Open the licence files"
+                                            AutomationProperties.HelpText="Open the folder holding the full licence texts shipped with WinShot."
+                                            Style="{StaticResource PillButtonSecondary}" Click="OnAboutOpenLicenses"/>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
 

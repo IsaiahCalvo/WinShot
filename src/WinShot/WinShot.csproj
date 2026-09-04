@@ -42,6 +42,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- MIT and Apache-2.0 attach their notice obligations to the DISTRIBUTED BINARY, not to
+         the repository, so these travel into the publish output (and therefore into the
+         installer payload, which copies publish\WinShot\*) and the About pane reads them
+         from beside the exe. -->
+    <Content Include="..\..\THIRD_PARTY_NOTICES.md"
+             Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\licenses\*.txt"
+             Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Shutter sounds, synthesised by tools\make-sounds.ps1 (no sampled audio ships). -->
     <EmbeddedResource Include="Assets\sounds\shutter-default.wav"
                       LogicalName="WinShot.Assets.sounds.shutter-default.wav" />

@@ -1095,6 +1095,70 @@
          selected ring = white, default group color is red (set in markup).
          Reusable for the editor color row and composer plain-color grid.
          ==================================================================== -->
+    <!-- ====================================================================
+         DISCLOSURE TOGGLE — a chevron + label row that reveals a block below it.
+         The chevron rotates on the quick step, so the state change is visible even
+         when the revealed content is off-screen.
+         ==================================================================== -->
+    <Style x:Key="DisclosureToggle" TargetType="ToggleButton">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Padding" Value="6,4"/>
+        <Setter Property="Margin" Value="0,2"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bg" Background="Transparent" Padding="{TemplateBinding Padding}"
+                            CornerRadius="{StaticResource RadiusChip}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
+                                       FontSize="{StaticResource GlyphMicro}" VerticalAlignment="Center"
+                                       Margin="0,0,6,0" RenderTransformOrigin="0.5,0.5"
+                                       Foreground="{TemplateBinding Foreground}">
+                                <TextBlock.RenderTransform>
+                                    <RotateTransform x:Name="ChevronSpin" Angle="0"/>
+                                </TextBlock.RenderTransform>
+                            </TextBlock>
+                            <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </StackPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ChevronSpin"
+                                                         Storyboard.TargetProperty="Angle" To="90"
+                                                         Duration="{StaticResource MotionQuick}"
+                                                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ChevronSpin"
+                                                         Storyboard.TargetProperty="Angle" To="0"
+                                                         Duration="{StaticResource MotionQuick}"
+                                                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ColorSwatch" TargetType="RadioButton">
         <Setter Property="Width" Value="24"/>
         <Setter Property="Height" Value="24"/>
