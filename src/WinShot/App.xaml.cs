@@ -48,13 +48,6 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // Before any window exists. ThemeResources.ApplyAnimationPreference can only zero a
-        // control template's transitions while its BeginStoryboards are still unsealed, and
-        // WPF seals them the first time a style is applied - so whichever window opened first
-        // used to decide whether "Animation effects: off" reached the WPF stack at all. The
-        // recovery dialog below was one such first window.
-        Core.ThemeResources.EnsureLoaded();
-
         string? incomingCommand = e.Args.Length > 0 ? CommandServer.ParseCommand(e.Args[0]) : null;
 
         _mutex = new Mutex(true, "WinShot-SingleInstance", out _ownsMutex);
@@ -80,6 +73,16 @@ public partial class App : Application
             // launchable. We never acquired ownership, so OnExit won't try to release it.
             Log.Info("Single-instance mutex present but no live instance responded; starting as primary.");
         }
+
+        // Before any window exists, and after the hand-off has had its chance to exit.
+        // ThemeResources.ApplyAnimationPreference can only zero a control template's
+        // transitions while its BeginStoryboards are still unsealed, and WPF seals them the
+        // first time a style is applied - so whichever window opened first used to decide
+        // whether "Animation effects: off" reached the WPF stack at all. The recovery dialog
+        // below was one such first window. A `winshot <command>` launch that only forwards to
+        // the running instance opens no window, so it should not parse the dictionary at all;
+        // the "already running" dialog on that path loads it itself.
+        Core.ThemeResources.EnsureLoaded();
 
         DispatcherUnhandledException += (_, args) =>
         {
@@ -369,7 +372,16 @@ public partial class App : Application
         }
 
         _hotkeyRetryTimer?.Stop();
-        ShowBalloon("Some hotkeys unavailable", string.Join(", ", failed), ToastSeverity.Error);
+        // Listing eight "Ctrl+Shift+1"-style gestures runs past what the toast body shows, and
+        // the case that actually happens — a previous WinShot still holding them after a
+        // self-update — is the long one, so the tail that got cut was the hotkeys themselves.
+        // Past a couple, the count plus where to fix them is the message that fits.
+        ShowBalloon(
+            "Some hotkeys unavailable",
+            failed.Count <= 3
+                ? string.Join(", ", failed)
+                : $"{failed.Count} shortcuts are in use by other apps — see Settings > Shortcuts.",
+            ToastSeverity.Error);
     }
 
     private System.Windows.Threading.DispatcherTimer CreateHotkeyRetryTimer()
@@ -1494,20 +1506,27 @@ public partial class App : Application
     /// "Copied to clipboard" identically, and Focus Assist swallows it whole with no window
     /// to fall back to. Only one corner toast at a time - a second would land on top of it.
     /// </summary>
-    internal void ShowBalloon(string title, string message, ToastSeverity severity = ToastSeverity.Info) =>
-        ShowToast(title, message, anchor: null, onOpen: null, severity);
+    internal void ShowBalloon(
+        string title, string message, ToastSeverity severity = ToastSeverity.Info, bool holdLong = false) =>
+        ShowToast(title, message, anchor: null, onOpen: null, severity, holdLong);
 
-    private void ShowToast(string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity)
+    private void ShowToast(
+        string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity,
+        bool holdLong = false)
     {
         try
         {
             if (anchor is null)
             {
+                // Disposed, not closed: Dispose skips the exit fade on purpose. Two toasts
+                // share one corner rect, so letting the outgoing one fade while the incoming
+                // one fades in would cross-dissolve two different messages on top of each
+                // other. The replacement's own entrance is what covers the swap.
                 _cornerToast?.Dispose();
                 _cornerToast = null;
             }
 
-            var toast = new ToastWindow(title, message, anchor, onOpen, severity);
+            var toast = new ToastWindow(title, message, anchor, onOpen, severity, holdLong);
             if (anchor is null)
             {
                 _cornerToast = toast;
@@ -1520,14 +1539,21 @@ public partial class App : Application
             // The toast is a window and a window can fail to create; the balloon is the one
             // piece of feedback that never needs one.
             Log.Error("Toast failed; falling back to the tray balloon", ex);
-            ShowShellBalloon(title, message);
+            ShowShellBalloon(title, message, severity);
         }
     }
 
     /// <summary>The Windows tray balloon, kept for the one message that is clickable from
     /// the shell itself: an available update, which installs on click.</summary>
-    private void ShowShellBalloon(string title, string message) =>
-        _tray?.ShowBalloonTip(3000, title, message, WF.ToolTipIcon.Info);
+    private void ShowShellBalloon(string title, string message, ToastSeverity severity = ToastSeverity.Info) =>
+        _tray?.ShowBalloonTip(3000, title, message, severity switch
+        {
+            // The fallback runs on the one path where a window failed to create, which is
+            // exactly when the user most needs to know a save failed rather than succeeded.
+            ToastSeverity.Error => WF.ToolTipIcon.Error,
+            ToastSeverity.Success => WF.ToolTipIcon.Info,
+            _ => WF.ToolTipIcon.Info,
+        });
 
     // ---- Updates ----------------------------------------------------------
 
@@ -1542,7 +1568,10 @@ public partial class App : Application
     /// <summary>Manual "Check for updates…" — reports the outcome either way.</summary>
     private async Task CheckForUpdatesFlowAsync()
     {
-        ShowBalloon("Checking for updates…", "Asking GitHub for the latest release.");
+        // A GitHub round trip routinely outlives the 1.7 s a plain Info toast dwells, so the
+        // working state used to vanish mid-check and leave the user on a silent screen
+        // wondering whether the menu item registered.
+        ShowBalloon("Checking for updates…", "Asking GitHub for the latest release.", holdLong: true);
         var result = await UpdateService.CheckAsync();
         await Dispatcher.InvokeAsync(() =>
         {
@@ -1556,7 +1585,15 @@ public partial class App : Application
                     break;
                 default:
                     Log.Error($"Update check failed: {result.Message}");
-                    ShowBalloon("Update check failed", "WinShot couldn't reach the internet. Check your connection and try again.", ToastSeverity.Error);
+                    // UpdateService already turned the cause into a friendly line ("GitHub
+                    // returned 403.", "No Setup.exe asset on the latest release."). Asserting a
+                    // connectivity problem sent the user to fix a network that was fine.
+                    ShowBalloon(
+                        "Update check failed",
+                        string.IsNullOrWhiteSpace(result.Message)
+                            ? "WinShot couldn't reach GitHub. Try again in a moment."
+                            : result.Message,
+                        ToastSeverity.Error);
                     break;
             }
         });

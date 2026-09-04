@@ -67,7 +67,10 @@ public static class ThemedMessageDialog
             Width = 420,
             SizeToContent = SizeToContent.Height,
             ResizeMode = ResizeMode.NoResize,
-            ShowInTaskbar = false,
+            // An owner-less modal with no taskbar button can end up behind another app with
+            // nothing to click back to — the Win32 MessageBox these replaced at least
+            // activated itself. Owned dialogs stay off the taskbar, as a dialog should.
+            ShowInTaskbar = owner is null,
             WindowStartupLocation = owner is null
                 ? WindowStartupLocation.CenterScreen
                 : WindowStartupLocation.CenterOwner,

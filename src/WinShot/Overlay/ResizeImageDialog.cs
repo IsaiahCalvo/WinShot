@@ -51,7 +51,9 @@ public sealed class ResizeImageDialog : WF.Form
         var title = Label("Resize image", PadX, 200, bold: true, size: ThemePalette.TextTitlePt);
         title.Top = S(16);
         var original = Label($"{source.Width} × {source.Height} px", PadX, 200, color: ThemePalette.TextSecondary, size: ThemePalette.TextCaptionPt);
-        original.Top = S(38);
+        // 16 + the title row's own 24 (Label gives anything at TextTitlePt or above the taller
+        // row). At 38 the two opaque labels overlapped by 2 logical px and only z-order hid it.
+        original.Top = S(40);
 
         var widthLabel = Label("Width", PadX, 70);
         widthLabel.Top = S(70);

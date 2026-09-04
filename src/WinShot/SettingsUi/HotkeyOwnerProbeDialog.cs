@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using WinShot.Core;
 
@@ -27,7 +28,19 @@ internal static class HotkeyOwnerProbeDialog
         };
         status.SetResourceReference(TextBlock.FontSizeProperty, "TextBody");
         status.SetResourceReference(TextBlock.ForegroundProperty, "InfoBrush");
+        // The result lands eight seconds after the dialog opened, long after a screen reader
+        // has finished reading the card, so the line has to announce its own changes.
+        AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
         body.Children.Insert(body.Children.Count - 1, status);
+
+        // A failure never wears the calm blue the working state wears - the same rule the
+        // toast's severity glyph follows.
+        void Say(string text, bool failed)
+        {
+            status.Text = text;
+            status.SetResourceReference(
+                TextBlock.ForegroundProperty, failed ? "AnnotationRedBrush" : "InfoBrush");
+        }
 
         HotkeyOwnerProbe.Result? result = null;
 
@@ -49,7 +62,7 @@ internal static class HotkeyOwnerProbeDialog
                 // The one action on this card that used to swallow both outcomes: nothing
                 // happened on success (the dialog stayed up) and nothing on failure either.
                 Log.Error($"Failed to open '{target}' after hotkey probe", ex);
-                status.Text = FriendlyError.For(ex);
+                Say(FriendlyError.For(ex), failed: true);
             }
         });
         open.IsEnabled = false;
@@ -63,13 +76,13 @@ internal static class HotkeyOwnerProbeDialog
                 result = await HotkeyOwnerProbe.RunAsync(gesture, TimeSpan.FromSeconds(8), cts.Token);
                 if (result.Found)
                 {
-                    status.Text = $"Looks like {result.Source.DisplayName} caught {gesture}.";
+                    Say($"Looks like {result.Source.DisplayName} caught {gesture}.", failed: false);
                     open.IsEnabled = !string.IsNullOrWhiteSpace(result.Source.LaunchTarget);
                     dialog.Activate();
                 }
                 else
                 {
-                    status.Text = "WinShot could not identify the app. It may be a silent hotkey, or the app did not come forward.";
+                    Say("WinShot could not identify the app. It may be a silent hotkey, or the app did not come forward.", failed: true);
                 }
             }
             catch (OperationCanceledException)
@@ -78,7 +91,7 @@ internal static class HotkeyOwnerProbeDialog
             catch (Exception ex)
             {
                 Log.Error("Hotkey owner probe failed", ex);
-                status.Text = "WinShot could not run the hotkey watcher.";
+                Say("WinShot could not run the hotkey watcher.", failed: true);
             }
         };
 
