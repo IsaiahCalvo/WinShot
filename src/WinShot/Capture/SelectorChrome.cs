@@ -116,7 +116,7 @@ internal static class SelectorChrome
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bounds, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, 0x1C, 0x1C, 0x1E)))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
@@ -169,7 +169,7 @@ internal static class SelectorChrome
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, 0x1C, 0x1C, 0x1E)))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
