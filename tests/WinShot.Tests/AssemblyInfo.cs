@@ -1,0 +1,9 @@
+using Xunit;
+
+// These tests share the process, not just the machine: Motion's timer-resolution
+// refcount is one static counter, WPF allows one Application per process, and the
+// render harnesses drive real windows. Running two classes at once means a suite
+// that passes and then fails on identical code — Motion.Holders reads another
+// class's in-flight tween, or a theme load lands mid-Application-construction.
+// Xunit's default is a collection per class, in parallel; this turns that off.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]

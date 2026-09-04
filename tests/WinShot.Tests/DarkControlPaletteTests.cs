@@ -30,6 +30,98 @@ public class DarkControlPaletteTests
     }
 
     /// <summary>
+    /// Press does not stack on top of hover — the pointer is necessarily hovering
+    /// while it presses, and a button that lightened and then darkened by the sum
+    /// would read as a different colour than the one this app shipped for a year.
+    /// </summary>
+    [Theory]
+    [InlineData(0d, 0d, 0d)]
+    [InlineData(1d, 0d, 18d)]     // hovering: the old discrete +18
+    [InlineData(1d, 1d, -12d)]    // pressed while hovering: the old discrete -12
+    [InlineData(0.5d, 0d, 9d)]
+    public void HoverPressLighten_LandsOnTheOldDiscreteShadesAtTheEnds(
+        double hover, double press, double expected)
+        => Assert.Equal(expected, DarkControlPalette.HoverPressLighten(hover, press), 6);
+
+    [Fact]
+    public void HoverPressLighten_ClampsAmountsFromAnOverrunTween()
+    {
+        Assert.Equal(18d, DarkControlPalette.HoverPressLighten(4d, 0d), 6);
+        Assert.Equal(-12d, DarkControlPalette.HoverPressLighten(1d, 4d), 6);
+    }
+
+    [Fact]
+    public void Mix_EndsOnTheEndpointsAndMeetsInTheMiddle()
+    {
+        SD.Color from = SD.Color.FromArgb(255, 0, 20, 40);
+        SD.Color to = SD.Color.FromArgb(255, 100, 120, 140);
+
+        Assert.Equal(from, DarkControlPalette.Mix(from, to, 0));
+        Assert.Equal(to, DarkControlPalette.Mix(from, to, 1));
+        Assert.Equal(SD.Color.FromArgb(255, 50, 70, 90), DarkControlPalette.Mix(from, to, 0.5));
+
+        // A tween that overshoots or arrives late must never produce a channel out of range.
+        Assert.Equal(from, DarkControlPalette.Mix(from, to, -3));
+        Assert.Equal(to, DarkControlPalette.Mix(from, to, 3));
+    }
+
+    /// <summary>
+    /// The segmented pill is one rect that slides, so the cells it slides between
+    /// have to tile the track exactly: no gap and no overlap where a rounded cell
+    /// edge meets the next one, at any width that does not divide evenly.
+    /// </summary>
+    [Theory]
+    [InlineData(100, 3)]
+    [InlineData(101, 3)]
+    [InlineData(103, 4)]
+    [InlineData(61, 2)]
+    public void PillBounds_TileTheTrackWithoutSeamsOrOverlap(int width, int count)
+    {
+        var size = new SD.Size(width, 26);
+        const int inset = 3;
+
+        SD.Rectangle previous = SD.Rectangle.Empty;
+        for (int i = 0; i < count; i++)
+        {
+            SD.Rectangle pill = DarkSegmented.PillBounds(size, count, i, inset);
+
+            Assert.Equal(inset, pill.Y);
+            Assert.Equal(size.Height - (inset * 2), pill.Height);
+            Assert.True(pill.Width >= 1);
+            Assert.True(pill.Right <= size.Width);
+
+            if (i > 0)
+            {
+                // Neighbouring cells butt up: the gap between two pills is exactly
+                // the two insets that separate them.
+                Assert.Equal(inset * 2, pill.Left - previous.Right);
+            }
+
+            previous = pill;
+        }
+    }
+
+    /// <summary>
+    /// A track too narrow for its insets must still hand back a paintable rect —
+    /// GdiPaths.RoundedRect on a zero or negative width throws inside OnPaint, and
+    /// WinForms brands the control with a permanent red-X after one paint exception.
+    /// </summary>
+    [Fact]
+    public void PillBounds_StaysPaintableOnATrackTooNarrowForItsInsets()
+    {
+        SD.Rectangle pill = DarkSegmented.PillBounds(new SD.Size(7, 4), 2, 0, 3);
+        Assert.True(pill.Width >= 1);
+        Assert.True(pill.Height >= 1);
+    }
+
+    [Theory]
+    [InlineData(0, -1)]
+    [InlineData(3, 3)]
+    [InlineData(3, -1)]
+    public void PillBounds_IsEmptyWhenThereIsNoSuchCell(int count, int index)
+        => Assert.Equal(SD.Rectangle.Empty, DarkSegmented.PillBounds(new SD.Size(90, 26), count, index, 3));
+
+    /// <summary>
     /// The active annotation tool must not be solid accent blue. It was, which put
     /// the app's one loud colour on whichever pen happened to be selected and left
     /// nothing louder for the states that are genuinely modal. Selected reads as a

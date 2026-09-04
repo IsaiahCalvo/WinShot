@@ -23,6 +23,70 @@ internal static class DarkControlPalette
         Math.Clamp(c.R + amount, 0, 255),
         Math.Clamp(c.G + amount, 0, 255),
         Math.Clamp(c.B + amount, 0, 255));
+
+    /// <summary>Fractional <see cref="Lighten"/>, so a hover can ease in instead of stepping.</summary>
+    public static SD.Color Lighten(SD.Color c, double amount) => Lighten(c, (int)Math.Round(amount));
+
+    /// <summary>Straight channel lerp; <paramref name="amount"/> 0 gives <paramref name="from"/>.</summary>
+    public static SD.Color Mix(SD.Color from, SD.Color to, double amount)
+    {
+        double t = Math.Clamp(amount, 0d, 1d);
+        return SD.Color.FromArgb(
+            (int)Math.Round(from.A + ((to.A - from.A) * t)),
+            (int)Math.Round(from.R + ((to.R - from.R) * t)),
+            (int)Math.Round(from.G + ((to.G - from.G) * t)),
+            (int)Math.Round(from.B + ((to.B - from.B) * t)));
+    }
+
+    /// <summary>
+    /// How far to lighten a button fill given how far into hover and press it is.
+    /// Fully pressed reads the same as the old discrete -12 even though the pointer
+    /// is necessarily also hovering: press does not stack on hover, it overrides it.
+    /// </summary>
+    public static double HoverPressLighten(double hover, double press)
+        => (18d * Math.Clamp(hover, 0d, 1d)) - (30d * Math.Clamp(press, 0d, 1d));
+}
+
+/// <summary>
+/// A 0..1 amount that eases toward its target over <see cref="Motion.QuickMs"/> and
+/// repaints its owner each frame, so an owner-drawn WinForms control cross-fades
+/// between states the same way the WPF templates do instead of snapping.
+///
+/// Every owner must dispose it: an in-flight tween holds the process-wide
+/// high-resolution clock, and a control that goes away mid-fade would pin it.
+/// </summary>
+internal sealed class StateAmount : IDisposable
+{
+    private readonly WF.Control _owner;
+    private IDisposable? _run;
+    private double _from;
+    private double _target;
+
+    public StateAmount(WF.Control owner) => _owner = owner;
+
+    public double Value { get; private set; }
+
+    public void To(double target)
+    {
+        if (Math.Abs(target - _target) < 0.0001d)
+            return;
+
+        _run?.Dispose();
+        _from = Value;
+        _target = target;
+        _run = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic, eased =>
+        {
+            Value = _from + ((_target - _from) * eased);
+            if (!_owner.IsDisposed)
+                _owner.Invalidate();
+        });
+    }
+
+    public void Dispose()
+    {
+        _run?.Dispose();
+        _run = null;
+    }
 }
 
 /// <summary>
@@ -33,12 +97,14 @@ internal static class DarkControlPalette
 /// </summary>
 public sealed class DarkButton : WF.Control, WF.IButtonControl
 {
-    private bool _hot;
-    private bool _pressed;
+    private readonly StateAmount _hover;
+    private readonly StateAmount _press;
     private bool _isDefault;
 
     public DarkButton()
     {
+        _hover = new StateAmount(this);
+        _press = new StateAmount(this);
         SetStyle(
             WF.ControlStyles.UserPaint |
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -82,10 +148,20 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
         base.OnClick(e);
     }
 
-    protected override void OnMouseEnter(EventArgs e) { _hot = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnMouseLeave(EventArgs e) { _hot = false; _pressed = false; Invalidate(); base.OnMouseLeave(e); }
-    protected override void OnMouseDown(WF.MouseEventArgs e) { _pressed = true; Invalidate(); base.OnMouseDown(e); }
-    protected override void OnMouseUp(WF.MouseEventArgs e) { _pressed = false; Invalidate(); base.OnMouseUp(e); }
+    protected override void OnMouseEnter(EventArgs e) { _hover.To(1); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover.To(0); _press.To(0); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(WF.MouseEventArgs e) { _press.To(1); base.OnMouseDown(e); }
+    protected override void OnMouseUp(WF.MouseEventArgs e) { _press.To(0); base.OnMouseUp(e); }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _hover.Dispose();
+            _press.Dispose();
+        }
+        base.Dispose(disposing);
+    }
     protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
     protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
     protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
@@ -109,9 +185,9 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
 
         SD.Color fill = !Enabled
             ? DarkControlPalette.Lighten(DarkControlPalette.Card, 8)
-            : _pressed ? DarkControlPalette.Lighten(FillColor, -12)
-            : _hot ? DarkControlPalette.Lighten(FillColor, 18)
-            : FillColor;
+            : DarkControlPalette.Lighten(
+                FillColor,
+                DarkControlPalette.HoverPressLighten(_hover.Value, _press.Value));
 
         var rect = new SD.Rectangle(0, 0, Width - 1, Height - 1);
         using (var path = GdiPaths.RoundedRect(rect, S(CornerRadius)))
@@ -152,11 +228,12 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
 public sealed class DarkDropDown : WF.Control
 {
     private readonly WF.ContextMenuStrip _menu = new();
+    private readonly StateAmount _hover;
     private int _selectedIndex = -1;
-    private bool _hot;
 
     public DarkDropDown()
     {
+        _hover = new StateAmount(this);
         SetStyle(
             WF.ControlStyles.UserPaint |
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -169,9 +246,9 @@ public sealed class DarkDropDown : WF.Control
         ForeColor = DarkControlPalette.Text;
         _menu.Renderer = new DarkMenuRenderer();
         _menu.ShowImageMargin = false;
-        Disposed += (_, _) => _menu.Dispose();
-        MouseEnter += (_, _) => { _hot = true; Invalidate(); };
-        MouseLeave += (_, _) => { _hot = false; Invalidate(); };
+        Disposed += (_, _) => { _menu.Dispose(); _hover.Dispose(); };
+        MouseEnter += (_, _) => _hover.To(1);
+        MouseLeave += (_, _) => _hover.To(0);
     }
 
     public double Scale { get; init; } = 1.0;
@@ -253,7 +330,8 @@ public sealed class DarkDropDown : WF.Control
         g.Clear(BackColor);
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        SD.Color fill = _hot ? DarkControlPalette.FieldHot : DarkControlPalette.Field;
+        SD.Color fill = DarkControlPalette.Mix(
+            DarkControlPalette.Field, DarkControlPalette.FieldHot, _hover.Value);
         var rect = new SD.Rectangle(0, 0, Width - 1, Height - 1);
         using (var path = GdiPaths.RoundedRect(rect, S(5)))
         {
@@ -420,11 +498,20 @@ public sealed class DarkNumberBox : WF.Control
 /// </summary>
 public sealed class DarkSegmented : WF.Control
 {
+    // The selection pill slides between cells rather than reappearing in the new one,
+    // which is what makes a segmented control read as one moving thing. RectangleTween
+    // owns the geometry and has no clock of its own by design, so Motion.Run pumps it.
+    private readonly WinShot.Capture.RectangleTween _pill = new();
+    private readonly StateAmount _hover;
+    private IDisposable? _pillRun;
+    private SD.Rectangle _pillRect;
+    private bool _gliding;
     private int _selectedIndex;
     private int _hotIndex = -1;
 
     public DarkSegmented()
     {
+        _hover = new StateAmount(this);
         SetStyle(
             WF.ControlStyles.UserPaint |
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -450,8 +537,9 @@ public sealed class DarkSegmented : WF.Control
         {
             if (_selectedIndex == value || value < 0 || value >= Options.Length)
                 return;
+            SD.Rectangle from = CurrentPill();
             _selectedIndex = value;
-            Invalidate();
+            GlidePillFrom(from);
             SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -461,6 +549,85 @@ public sealed class DarkSegmented : WF.Control
     private int HitCell(int x) =>
         Options.Length == 0 ? -1 : Math.Clamp(x * Options.Length / Math.Max(1, Width), 0, Options.Length - 1);
 
+    /// <summary>
+    /// The pill for one cell: the cell's slice of the track, inset on every side.
+    /// Pure so the geometry can be tested without a window; cells are laid out from
+    /// float edges so rounding never leaves a one-pixel seam between them.
+    /// </summary>
+    internal static SD.Rectangle PillBounds(SD.Size size, int count, int index, int inset)
+    {
+        if (count <= 0 || index < 0 || index >= count)
+            return SD.Rectangle.Empty;
+
+        float cellWidth = (float)size.Width / count;
+        int left = (int)(index * cellWidth);
+        int right = (int)((index + 1) * cellWidth);
+        return new SD.Rectangle(
+            left + inset,
+            inset,
+            Math.Max(1, right - left - (inset * 2)),
+            Math.Max(1, size.Height - (inset * 2)));
+    }
+
+    private SD.Rectangle PillFor(int index) => PillBounds(Size, Options.Length, index, S(3));
+
+    /// <summary>Where the pill is right now — mid-glide if one is running.</summary>
+    private SD.Rectangle CurrentPill() => _gliding ? _pillRect : PillFor(_selectedIndex);
+
+    private void GlidePillFrom(SD.Rectangle from)
+    {
+        SD.Rectangle to = PillFor(_selectedIndex);
+        _pillRun?.Dispose();
+
+        if (from.IsEmpty || to.IsEmpty)
+        {
+            _gliding = false;
+            Invalidate();
+            return;
+        }
+
+        _pill.Retarget(from, to);
+        _pillRect = from;
+        _gliding = true;
+        _pillRun = Motion.Run(
+            Motion.GlideDurationMs,
+            progress => progress,
+            _ =>
+            {
+                _pill.Update();
+                _pillRect = _pill.Current;
+                Invalidate();
+            },
+            () =>
+            {
+                // The tween reads a wall clock, so the final frame is not necessarily
+                // at the target — and with animation off it never ticked at all.
+                _pill.Stop();
+                _gliding = false;
+                Invalidate();
+            });
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        // A resize mid-glide would animate toward a rect that no longer exists.
+        _pillRun?.Dispose();
+        _pillRun = null;
+        _pill.Stop();
+        _gliding = false;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _pillRun?.Dispose();
+            _hover.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
     protected override void OnMouseMove(WF.MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -468,6 +635,7 @@ public sealed class DarkSegmented : WF.Control
         if (hit != _hotIndex)
         {
             _hotIndex = hit;
+            _hover.To(hit >= 0 ? 1 : 0);
             Invalidate();
         }
     }
@@ -476,6 +644,7 @@ public sealed class DarkSegmented : WF.Control
     {
         base.OnMouseLeave(e);
         _hotIndex = -1;
+        _hover.To(0);
         Invalidate();
     }
 
@@ -518,29 +687,30 @@ public sealed class DarkSegmented : WF.Control
         if (Options.Length == 0)
             return;
 
+        int pillRadius = Math.Max(2, radius - 2);
+
+        // Hover wash first, under the pill: hovering the selected cell must not
+        // repaint over the accent.
+        if (_hotIndex >= 0 && _hotIndex != _selectedIndex && _hover.Value > 0.001d)
+        {
+            using var path = GdiPaths.RoundedRect(PillFor(_hotIndex), pillRadius);
+            using var brush = new SD.SolidBrush(DarkControlPalette.Mix(
+                DarkControlPalette.Field, DarkControlPalette.FieldHot, _hover.Value));
+            g.FillPath(brush, path);
+        }
+
+        SD.Rectangle selected = CurrentPill();
+        if (!selected.IsEmpty)
+        {
+            using var path = GdiPaths.RoundedRect(selected, pillRadius);
+            using var brush = new SD.SolidBrush(ThemePalette.Accent);
+            g.FillPath(brush, path);
+        }
+
         float cellWidth = (float)Width / Options.Length;
         for (int i = 0; i < Options.Length; i++)
         {
             var cell = new SD.Rectangle((int)(i * cellWidth), 0, (int)cellWidth, Height);
-            if (i == _selectedIndex)
-            {
-                int inset = S(3);
-                var pill = new SD.Rectangle(
-                    cell.X + inset, inset, cell.Width - inset * 2, Height - inset * 2);
-                using var path = GdiPaths.RoundedRect(pill, Math.Max(2, radius - 2));
-                using var brush = new SD.SolidBrush(ThemePalette.Accent);
-                g.FillPath(brush, path);
-            }
-            else if (i == _hotIndex)
-            {
-                int inset = S(3);
-                var pill = new SD.Rectangle(
-                    cell.X + inset, inset, cell.Width - inset * 2, Height - inset * 2);
-                using var path = GdiPaths.RoundedRect(pill, Math.Max(2, radius - 2));
-                using var brush = new SD.SolidBrush(DarkControlPalette.FieldHot);
-                g.FillPath(brush, path);
-            }
-
             WF.TextRenderer.DrawText(
                 g,
                 Options[i],
