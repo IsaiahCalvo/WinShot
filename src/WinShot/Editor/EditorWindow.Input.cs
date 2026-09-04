@@ -157,16 +157,27 @@ public partial class EditorWindow : Window
             ClampView();
             return;
         }
+        bool onHandle = false;
         if (_activeHandle < 0 && !_dragging && !_movingSelection && !_marqueeSelecting && _handleKind != HandleKind.None)
         {
             var hoverPos = e.GetPosition(AnnotationCanvas);
             UpdateRotationPillHover(hoverPos);
             // Survey paints a per-handle cursor (rotation-aware resize arrows, crosshair on
             // the rotation grip, grab on endpoints/tip). Restore the tool cursor on exit.
-            if (!UpdateHandleCursor(hoverPos)) UpdateCursor();
+            onHandle = UpdateHandleCursor(hoverPos);
+            if (!onHandle) UpdateCursor();
         }
         UpdateCalloutHover(e.GetPosition(AnnotationCanvas));
-        UpdateHoverHalo(e.GetPosition(AnnotationCanvas));
+        UIElement? hoverHit = UpdateHoverHalo(e.GetPosition(AnnotationCanvas));
+        // Survey gives every annotation its own cursor: 'move' once selected, 'pointer' while
+        // merely hovered (SVGAnnotationLayer.jsx:3928). A handle underneath keeps its own
+        // resize/grab cursor, and pan mode keeps the grab hand.
+        if (!onHandle && _tool == EditorTool.Select && !_panning && !_spaceDown)
+            SetSurfaceCursor(hoverHit is null
+                ? Cursors.Arrow
+                : ReferenceEquals(hoverHit, _selected) || _selection.Contains(hoverHit)
+                    ? Cursors.SizeAll
+                    : Cursors.Hand);
         UpdateEraserCursor(e.GetPosition(Viewport));
         if (_draggingCurveHandle && _pendingCurve is not null)
         {
@@ -183,7 +194,9 @@ public partial class EditorWindow : Window
         }
         if (_marqueeSelecting)
         {
-            var marqueePos = e.GetPosition(AnnotationCanvas);
+            // Survey measures the 5 px threshold on the point AFTER clamping to the page box
+            // (useSVGInteraction.js:1150-1159), so a drag that leaves the image adds no distance.
+            var marqueePos = ClampToSurface(e.GetPosition(AnnotationCanvas));
             // Survey latches `active` once the drag clears MIN_DRAG_PX and never clears it
             // (useSVGInteraction.js:1159), and draws no band below the threshold.
             _marqueeArmed |= MarqueeSelection.IsDrag(_marqueeStart, marqueePos);
@@ -989,6 +1002,10 @@ public partial class EditorWindow : Window
     private bool _marqueeSelecting;
     private bool _marqueeArmed;
     private Point _marqueeStart;
+    // Survey freezes the modifiers on the marquee state at pointer-down (useSVGInteraction.js:1118,
+    // :1123) and the release reads only those, so a mid-drag Shift/Alt cannot change the outcome.
+    private bool _marqueeShift;
+    private bool _marqueeAlt;
 
     /// <summary>
     /// Survey's post-drag dblclick guard (useSVGInteraction.js:250-257, 770-776): a
@@ -1010,6 +1027,9 @@ public partial class EditorWindow : Window
             _marqueeSelecting = true;
             _marqueeArmed = false;
             _marqueeStart = pos;
+            // PointerArgs carries no modifier state, so read the keyboard here.
+            _marqueeShift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+            _marqueeAlt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
             Viewport.CaptureMouse();
             e.Handled = true;
             return;
@@ -1160,8 +1180,11 @@ public partial class EditorWindow : Window
         HideDragRect();
         ResetDragRectStyle();
         Viewport.ReleaseMouseCapture();
-        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-        bool alt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+        // Survey's release reads only the frozen snapshot, never the live keyboard
+        // (useSVGInteraction.js:2717, :2782, :2804).
+        bool shift = _marqueeShift;
+        bool alt = _marqueeAlt;
+        _marqueeShift = _marqueeAlt = false;
         if (!armed)
         {
             // Sub-threshold release is a click: Survey deselects unless Shift is held
@@ -1240,7 +1263,8 @@ public partial class EditorWindow : Window
     /// hovered-but-unselected mark is traced in #4a90e2 at 0.4 opacity, using its OWN geometry
     /// and rotation rather than a bounding box, so a click's target is obvious before it lands.
     /// </summary>
-    private void UpdateHoverHalo(Point pos)
+    /// <returns>The annotation under the pointer, halo-suppressed or not, for the cursor.</returns>
+    private UIElement? UpdateHoverHalo(Point pos)
     {
         // Survey paints the same glow from the pan-mode `pendingHover` path
         // (SVGAnnotationLayer.jsx:598-633): "one glow implementation serves both modes."
@@ -1251,10 +1275,14 @@ public partial class EditorWindow : Window
             : null;
         // A member of a multi-selection already carries its halo from UpdateSelectionHalos;
         // a single-selected mark shows its own overlay instead (SVGAnnotationLayer.jsx:3839-3840).
+        // The raw hit still goes back to the caller — Survey's 'move' cursor is exactly the
+        // selected case this suppresses.
+        UIElement? hit = hovered;
         if (hovered is not null && _selection.Contains(hovered))
             hovered = null;
         if (hovered is not FrameworkElement fe || !PaintHalo(HoverHalo, fe))
             HoverHalo.Visibility = Visibility.Collapsed;
+        return hit;
     }
 
     /// <summary>

@@ -266,6 +266,7 @@ public partial class EditorWindow : Window
             {
                 _marqueeSelecting = false;
                 _marqueeArmed = false;
+                _marqueeShift = _marqueeAlt = false;
                 HideDragRect();
             }
         };
@@ -838,18 +839,50 @@ public partial class EditorWindow : Window
         UpdateCursor();
     }
 
+    /// <summary>
+    /// Survey's pan cursors are CSS <c>grab</c> / <c>grabbing</c> (PDFViewer.jsx:3071, :23599).
+    /// Windows ships neither, so WinShot carries its own 32x32 pair; Cursors.Hand is the
+    /// pointing-finger link cursor and Cursors.SizeAll is the move-object arrow — a different
+    /// idiom entirely. Null if the resource is missing, and the old cursor is used instead.
+    /// </summary>
+    private static readonly Cursor? GrabCursor = LoadCursor("cursor-grab");
+    private static readonly Cursor? GrabbingCursor = LoadCursor("cursor-grabbing");
+
+    private static Cursor? LoadCursor(string name)
+    {
+        using System.IO.Stream? stream = typeof(EditorWindow).Assembly
+            .GetManifestResourceStream($"WinShot.Assets.{name}.cur");
+        return stream is null ? null : new Cursor(stream);
+    }
+
+    /// <summary>
+    /// EditorSurface sits INSIDE Viewport, and WPF's QueryCursor bubbles outward, so the
+    /// innermost element with a non-null Cursor wins. Anything that wants a cursor over the
+    /// image has to set both.
+    /// </summary>
+    /// <summary>
+    /// Survey's preset popover is Radix <c>align="center"</c> (AnnotationSizeControl.jsx:143), so
+    /// the 126px panel centres on the ~69px field. WPF's Placement="Bottom" is left-aligned, so
+    /// shift it by half the difference — measured, never hardcoded, since the field is DPI-scaled.
+    /// </summary>
+    private void OnSizePresetsPopupOpened(object sender, EventArgs e)
+    {
+        if (SizeField is not null)
+            SizePresetsPopup.HorizontalOffset = (SizeField.ActualWidth - 126) / 2;
+    }
+
+    private void SetSurfaceCursor(Cursor cursor)
+    {
+        Viewport.Cursor = cursor;
+        EditorSurface.Cursor = cursor;
+    }
+
     private void UpdateCursor()
     {
         if (_panning)
-        {
-            Viewport.Cursor = Cursors.SizeAll;
-            EditorSurface.Cursor = Cursors.SizeAll;
-        }
+            SetSurfaceCursor(GrabbingCursor ?? Cursors.SizeAll);
         else if (_spaceDown || _tool == EditorTool.Pan)
-        {
-            Viewport.Cursor = Cursors.Hand;
-            EditorSurface.Cursor = Cursors.Hand;
-        }
+            SetSurfaceCursor(GrabCursor ?? Cursors.Hand);
         else if (_tool == EditorTool.Eraser)
         {
             // Survey's eraser surface is cursor:'none' so the ring is the ONLY cursor
@@ -1472,7 +1505,12 @@ public partial class EditorWindow : Window
             // (AppShell.jsx:2476).
             bool sizeLabel = _tool == EditorTool.Eraser || ChromeTool() is EditorTool.Step;
             string label = sizeLabel ? "Size" : "Width";
-            if (SizePresetsHeading is not null) SizePresetsHeading.Text = label.ToUpperInvariant();
+            if (SizePresetsHeading is not null)
+            {
+                // Survey tracks this heading out by 0.065em; keep the plain text for automation.
+                SizePresetsHeading.Text = Theme.HeadingTrackingConverter.Tracked(label.ToUpperInvariant());
+                AutomationProperties.SetName(SizePresetsHeading, label.ToUpperInvariant());
+            }
             if (SizePresetsBtn is not null)
             {
                 SizePresetsBtn.ToolTip = $"{label} presets";

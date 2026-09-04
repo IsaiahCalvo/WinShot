@@ -2454,6 +2454,160 @@ public class AnnotationEditorRenderHarness
                         });
                     sweep.AppendLine($"[HISTORY] before={depthBefore} pushed=130 depth={undoStack.Count} " +
                         $"discarded={discarded}");
+                    // ---- ROUND-2 SWEEP FIXES -------------------------------------------------
+                    // R2-3: Survey derives the rotation-grip offset from the RAW inverseScale
+                    // (selectionHandleVisibility.js:69-70), so it keeps growing below 25% zoom
+                    // instead of collapsing onto the 36px floor.
+                    var specM = typeof(EditorWindow).GetMethod("AdaptiveHandleSpec",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var zoomF = typeof(EditorWindow).GetField("_zoom",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    object zoomBefore = zoomF.GetValue(editor)!;
+                    foreach (double z in new[] { 1.0, 0.5, 0.25, 0.1 })
+                    {
+                        zoomF.SetValue(editor, z);
+                        object spec = specM.Invoke(editor, new object[] { 200.0, 150.0 })!;
+                        double got = (double)spec.GetType().GetProperty("RotationOffset")!.GetValue(spec)!;
+                        double rawIs = Math.Sqrt(1.0 / z);
+                        double want = Math.Max(36, 10 * rawIs + 8 * rawIs / 2 + 4 * rawIs);
+                        sweep.AppendLine($"[R2-3 rotationOffset] zoom={z} got={got:F2} survey={want:F2} -> " +
+                            $"{(Math.Abs(got - want) < 0.01 ? "PASS" : "FAIL")}");
+                    }
+                    zoomF.SetValue(editor, zoomBefore);
+                    Pump(2);
+
+                    // R2-4: Survey's letter chain puts the COUNTER on C (PDFViewer.jsx:23425-23437);
+                    // WinShot's own crop moves to the unbound X.
+                    var keyM = typeof(EditorWindow).GetMethod("TrySelectToolByKey",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var toolF = typeof(EditorWindow).GetField("_tool",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    foreach (var (key, want) in new[] { (Key.C, "Step"), (Key.X, "Crop"), (Key.S, "-") })
+                    {
+                        bool handled = (bool)keyM.Invoke(editor, new object[] { key, false })!;
+                        Pump(2);
+                        string got = handled ? toolF.GetValue(editor)!.ToString()! : "-";
+                        sweep.AppendLine($"[R2-4 letterChain] {key} handled={handled} tool={got} want={want} -> " +
+                            $"{(got == want ? "PASS" : "FAIL")}");
+                    }
+                    Check("SelectToolBtn");
+
+                    // R2-2: Survey measures the 5px marquee threshold on the CLAMPED point
+                    // (useSVGInteraction.js:1150-1159), so a drag that leaves the page never arms.
+                    var armedF = typeof(EditorWindow).GetField("_marqueeArmed",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    editor.PointerDown(PA(new Point(W - 2, H * 0.5))); Pump(1);
+                    for (int i = 1; i <= 8; i++) { editor.PointerMove(PA(new Point(W - 2 + i * 0.05 * W, H * 0.5))); Pump(1); }
+                    bool armedOffPage = (bool)armedF.GetValue(editor)!;
+                    editor.PointerUp(PA(new Point(W * 1.4, H * 0.5))); Pump(3);
+                    sweep.AppendLine($"[R2-2 marqueeClamp] started 2px from the edge, dragged off the page: " +
+                        $"armed={armedOffPage} want=False -> {(!armedOffPage ? "PASS" : "FAIL")}");
+
+                    // A point that genuinely lands on a mark, so the hover/selection probes below
+                    // exercise the real hit path rather than empty canvas.
+                    var hitM = typeof(EditorWindow).GetMethod("HitTestAnnotation",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var selectM = typeof(EditorWindow).GetMethod("Select",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    // The earlier sweeps leave no plain shapes on the canvas, so draw one.
+                    Check("RectangleToolBtn"); Drag(new[] { (0.15, 0.15), (0.75, 0.70) });
+                    Check("SelectToolBtn"); Pump(2);
+                    var handleM = typeof(EditorWindow).GetMethod("HitTestHandle",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    Point probePt = default; UIElement? probeMark = null;
+                    int shapeHits = 0, handleBlocked = 0;
+                    for (double fx = 0.04; fx < 0.99 && probeMark is null; fx += 0.01)
+                        for (double fy = 0.04; fy < 0.99; fy += 0.01)
+                        {
+                            var pt = new Point(fx * W, fy * H);
+                            // A plain shape, not a counter: the counter's own tip grip owns the
+                            // cursor there and would mask the per-annotation rule under test.
+                            if (hitM.Invoke(editor, new object[] { pt }) is not System.Windows.Shapes.Shape el)
+                                continue;
+                            shapeHits++;
+                            selectM.Invoke(editor, new object?[] { el }); Pump(2);
+                            // and a spot the selection handles do not cover, since those keep
+                            // their own resize cursor by design.
+                            if ((int)handleM.Invoke(editor, new object[] { pt })! < 0)
+                            { probePt = pt; probeMark = el; break; }
+                            handleBlocked++;
+                        }
+
+                    // R2-1: the release reads only the modifiers frozen at pointer-down, so a Shift
+                    // latched at the press keeps the selection even on a sub-threshold click.
+                    var selF = typeof(EditorWindow).GetField("_selected",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var shiftF = typeof(EditorWindow).GetField("_marqueeShift",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    foreach (bool shiftAtDown in new[] { true, false })
+                    {
+                        selectM.Invoke(editor, new object?[] { probeMark }); Pump(2);
+                        bool had = selF.GetValue(editor) is not null;
+                        editor.PointerDown(PA(new Point(W * 0.97, H * 0.03))); Pump(1);
+                        shiftF.SetValue(editor, shiftAtDown);        // as if Shift had been down at the press
+                        editor.PointerUp(PA(new Point(W * 0.97, H * 0.03))); Pump(3);
+                        bool kept = selF.GetValue(editor) is not null;
+                        sweep.AppendLine($"[R2-1 marqueeModifierSnapshot] shiftAtDown={shiftAtDown} hadSelection={had} " +
+                            $"keptSelection={kept} want={shiftAtDown} -> {(had && kept == shiftAtDown ? "PASS" : "FAIL")}");
+                    }
+
+                    // R2-5: Survey gives each annotation its own cursor - 'move' selected, 'pointer'
+                    // hovered (SVGAnnotationLayer.jsx:3928).
+                    var surface = (FrameworkElement)editor.FindName("EditorSurface")!;
+                    selectM.Invoke(editor, new object?[] { null }); Pump(2);
+                    editor.PointerMove(PA(probePt)); Pump(2);
+                    string onHovered = surface.Cursor?.ToString() ?? "null";
+                    selectM.Invoke(editor, new object?[] { probeMark }); Pump(2);
+                    editor.PointerMove(PA(probePt)); Pump(2);
+                    string onSelected = surface.Cursor?.ToString() ?? "null";
+                    editor.PointerMove(PA(new Point(W * 0.995, H * 0.99))); Pump(2);
+                    string onEmpty = surface.Cursor?.ToString() ?? "null";
+                    sweep.AppendLine($"[R2-5 scan] shapeHits={shapeHits} handleBlocked={handleBlocked} " +
+                        $"shapesOnCanvas={canvas.Children.OfType<System.Windows.Shapes.Shape>().Count(f => f.Tag is AnnotationData)}");
+                    sweep.AppendLine($"[R2-5 annotationCursor] mark={probeMark?.GetType().Name} hovered={onHovered} (want Hand) " +
+                        $"selected={onSelected} (want SizeAll) empty={onEmpty} (want Arrow) -> " +
+                        $"{(onHovered == "Hand" && onSelected == "SizeAll" && onEmpty == "Arrow" ? "PASS" : "FAIL")}");
+                    selectM.Invoke(editor, new object?[] { null }); Pump(2);
+
+                    // R2-6: pan mode is Survey's grab / grabbing pair, not Hand / SizeAll.
+                    var grabF = typeof(EditorWindow).GetField("GrabCursor",
+                        BindingFlags.Static | BindingFlags.NonPublic)!;
+                    Check("PanToolBtn"); Pump(2);
+                    var panCursor = surface.Cursor;
+                    sweep.AppendLine($"[R2-6 panCursor] armed cursor is the custom grab asset=" +
+                        $"{ReferenceEquals(panCursor, grabF.GetValue(null))} loaded={grabF.GetValue(null) is not null} " +
+                        $"isWin32Hand={ReferenceEquals(panCursor, Cursors.Hand)} -> " +
+                        $"{(grabF.GetValue(null) is not null && ReferenceEquals(panCursor, grabF.GetValue(null)) ? "PASS" : "FAIL")}");
+                    Check("SelectToolBtn"); Pump(2);
+
+                    // R2-7/8/9: the picker is modal between presets and spectrum, has no Apply button,
+                    // and matches Survey's 260/12 geometry with the hue row labelled.
+                    var pickerPopup = (System.Windows.Controls.Primitives.Popup)editor.FindName("ColorPickerPopup")!;
+                    InvokePrivate(editor, "BuildColorPickerPalette");
+                    InvokePrivate(editor, "SyncColorPickerInputs", Color.FromRgb(0x2E, 0x9B, 0xF0));
+                    pickerPopup.IsOpen = true; Pump(6);
+                    RenderElementToPng(pickerPopup.Child, Path.Combine(outDir, "sweep-color-picker-grid.png"));
+                    ((RadioButton)editor.FindName("PickerSpectrumModeBtn")!).IsChecked = true; Pump(6);
+                    RenderElementToPng(pickerPopup.Child, Path.Combine(outDir, "sweep-color-picker-spectrum.png"));
+                    var gridPanel = (FrameworkElement)editor.FindName("ColorPickerGrid")!;
+                    var spectrumPanel = (FrameworkElement)editor.FindName("ColorPickerSpectrum")!;
+                    sweep.AppendLine($"[R2-7 pickerMode] spectrum: grid={gridPanel.Visibility} spectrum={spectrumPanel.Visibility} " +
+                        $"hue={((TextBlock)editor.FindName("PickerHueValue")!).Text} " +
+                        $"applyButton={(editor.FindName("ColorPickerApply") is null ? "gone" : "present")}");
+                    ((RadioButton)editor.FindName("PickerGridModeBtn")!).IsChecked = true; Pump(4);
+                    sweep.AppendLine($"[R2-7 pickerMode] grid: grid={gridPanel.Visibility} spectrum={spectrumPanel.Visibility}");
+                    pickerPopup.IsOpen = false; Pump(3);
+
+                    // R2-10/11: the size popover centres on its field and draws Survey's arrow; both
+                    // popover headings carry the 0.065em tracking.
+                    var sizeBtn = (System.Windows.Controls.Primitives.ToggleButton)editor.FindName("SizePresetsBtn")!;
+                    var sizePopup = (System.Windows.Controls.Primitives.Popup)editor.FindName("SizePresetsPopup")!;
+                    var sizeField = (FrameworkElement)editor.FindName("SizeField")!;
+                    sizeBtn.IsChecked = true; Pump(6);
+                    RenderElementToPng(sizePopup.Child, Path.Combine(outDir, "sweep-size-popover.png"));
+                    sweep.AppendLine($"[R2-10 sizePopover] fieldW={sizeField.ActualWidth:F1} offset={sizePopup.HorizontalOffset:F1} " +
+                        $"want={(sizeField.ActualWidth - 126) / 2:F1} heading=[{((TextBlock)editor.FindName("SizePresetsHeading")!).Text}]");
+                    sizeBtn.IsChecked = false; Pump(3);
                     File.WriteAllText(Path.Combine(outDir, "sweep.txt"), sweep.ToString());
                 }
 

@@ -807,7 +807,21 @@ public partial class EditorWindow : Window
         BuildColorPickerPalette();
         SyncColorPickerInputs(_customColor);
         ApplyCustomColor(_customColor); // keep current selection consistent with the swatch
+        // Survey's useState('grid') resets on every mount (CompactColorPicker.jsx:86).
+        PickerGridModeBtn.IsChecked = true;
         ColorPickerPopup.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Survey's picker is MODAL between the preset grid and the spectrum — `mode === 'grid' ?
+    /// ... : ...` (CompactColorPicker.jsx:367, :430). Only one is ever on screen.
+    /// </summary>
+    private void OnPickerModeChecked(object sender, RoutedEventArgs e)
+    {
+        if (ColorPickerGrid is null || ColorPickerSpectrum is null) return;
+        bool grid = PickerGridModeBtn.IsChecked == true;
+        ColorPickerGrid.Visibility = grid ? Visibility.Visible : Visibility.Collapsed;
+        ColorPickerSpectrum.Visibility = grid ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>
@@ -926,8 +940,6 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void OnColorPickerApply(object sender, RoutedEventArgs e) => CommitHexColor();
-
     private void CommitHexColor()
     {
         if (ColorPickerHex.Text is string s && TryParseHexLoose(s, out var c))
@@ -959,7 +971,14 @@ public partial class EditorWindow : Window
             Canvas.SetTop(SvCursor, Math.Clamp((1 - v) * ColorPickerSv.Height - 5, 0, ColorPickerSv.Height - 10));
         }
         if (HueCursor is not null && ColorPickerHue is not null)
-            Canvas.SetLeft(HueCursor, Math.Clamp(h / 360.0 * ColorPickerHue.Width - 5, 0, ColorPickerHue.Width - 10));
+        {
+            double knob = HueCursor.Width;
+            Canvas.SetLeft(HueCursor, Math.Clamp(h / 360.0 * ColorPickerHue.Width - knob / 2,
+                0, ColorPickerHue.Width - knob));
+        }
+        // Survey's right-aligned `{Math.round(hue)}°` readout (CompactColorPicker.jsx:526).
+        if (PickerHueValue is not null)
+            PickerHueValue.Text = $"{Math.Round(h)}°";
         if (PickerOpacitySlider is not null)
             PickerOpacitySlider.Value = AnnotationStyle.OpacityOf(c) * 100;
     }

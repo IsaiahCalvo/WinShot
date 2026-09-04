@@ -258,9 +258,58 @@
                                                         <Popup x:Name="ColorPickerPopup" PlacementTarget="{Binding ElementName=ColorWellBtn}"
                                                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                                                             <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
-                                                                    BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,6,36,36"
+                                                                    BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,6,36,36"
                                                                     Effect="{StaticResource ChromePopoverShadow}">
-                                                                <StackPanel Width="248">
+                                                                <StackPanel Width="260">
+                                                                    <StackPanel.Resources>
+                                                                        <!-- Survey's segmented grid/spectrum toggle (CompactColorPicker.jsx:322-365):
+                                                                             a #2a3140 pill whose active half fills #5a6473. -->
+                                                                        <Style x:Key="PickerModeToggle" TargetType="RadioButton">
+                                                                            <Setter Property="Cursor" Value="Hand"/>
+                                                                            <Setter Property="Template">
+                                                                                <Setter.Value>
+                                                                                    <ControlTemplate TargetType="RadioButton">
+                                                                                        <Border x:Name="Chip" Background="Transparent" CornerRadius="2" Padding="4">
+                                                                                            <ContentPresenter/>
+                                                                                        </Border>
+                                                                                        <ControlTemplate.Triggers>
+                                                                                            <Trigger Property="IsChecked" Value="True">
+                                                                                                <Setter TargetName="Chip" Property="Background" Value="#FF5A6473"/>
+                                                                                            </Trigger>
+                                                                                        </ControlTemplate.Triggers>
+                                                                                    </ControlTemplate>
+                                                                                </Setter.Value>
+                                                                            </Setter>
+                                                                        </Style>
+                                                                    </StackPanel.Resources>
+                                                                    <!-- Survey's header row (CompactColorPicker.jsx:318-366): the word "Color"
+                                                                         and the two-button mode pill. The picker is MODAL between presets and
+                                                                         spectrum, never both at once (:367, :430). -->
+                                                                    <DockPanel Margin="0,0,0,12">
+                                                                        <TextBlock Text="Color" FontSize="13" FontWeight="SemiBold" Foreground="#FFE8E2D4"
+                                                                                   VerticalAlignment="Center" DockPanel.Dock="Left"/>
+                                                                        <Border DockPanel.Dock="Right" HorizontalAlignment="Right" Background="#FF2A3140"
+                                                                                CornerRadius="4" Padding="2">
+                                                                            <StackPanel Orientation="Horizontal">
+                                                                                <RadioButton x:Name="PickerGridModeBtn" GroupName="PickerMode" IsChecked="True"
+                                                                                             Style="{StaticResource PickerModeToggle}" Checked="OnPickerModeChecked"
+                                                                                             ToolTip="Preset colors" AutomationProperties.Name="Preset colors">
+                                                                                    <UniformGrid Width="12" Height="12" Columns="2" Rows="2">
+                                                                                        <Rectangle Fill="White" Margin="0,0,1,1"/>
+                                                                                        <Rectangle Fill="White" Margin="1,0,0,1"/>
+                                                                                        <Rectangle Fill="White" Margin="0,1,1,0"/>
+                                                                                        <Rectangle Fill="White" Margin="1,1,0,0"/>
+                                                                                    </UniformGrid>
+                                                                                </RadioButton>
+                                                                                <RadioButton x:Name="PickerSpectrumModeBtn" GroupName="PickerMode" Margin="4,0,0,0"
+                                                                                             Style="{StaticResource PickerModeToggle}" Checked="OnPickerModeChecked"
+                                                                                             ToolTip="Color spectrum" AutomationProperties.Name="Color spectrum">
+                                                                                    <Path Width="12" Height="12" Stretch="Uniform" Fill="White"
+                                                                                          Data="M8 2L10 6L14 8L10 10L8 14L6 10L2 8L6 6L8 2Z"/>
+                                                                                </RadioButton>
+                                                                            </StackPanel>
+                                                                        </Border>
+                                                                    </DockPanel>
                                                                     <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,8">
                                                                             <RadioButton x:Name="StrokeWellBtn" Style="{StaticResource StripTab}" GroupName="ColorWell" Tag="Stroke"
                                                                                          Content="Border" IsChecked="True"
@@ -283,65 +332,66 @@
                                                                         </StackPanel>
                                                                     </RadioButton>
                                                                     <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
-                                                                    <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
-                                                                    <Canvas x:Name="ColorPickerSv" Width="232" Height="110" Margin="0,0,8,0" Cursor="Cross"
-                                                                            Background="Transparent"
-                                                                            MouseDown="OnColorPickerSvDown" MouseMove="OnColorPickerSvMove" MouseUp="OnColorPickerSvUp"
-                                                                            AutomationProperties.Name="Color spectrum"
-                                                                            AutomationProperties.HelpText="Drag to pick saturation and brightness.">
-                                                                        <Rectangle x:Name="SvHueRect" Width="232" Height="110" RadiusX="6" RadiusY="6"
-                                                                                   Fill="#FFFF0000" IsHitTestVisible="False"/>
-                                                                        <Rectangle Width="232" Height="110" RadiusX="6" RadiusY="6" IsHitTestVisible="False">
-                                                                            <Rectangle.Fill>
-                                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                                                                    <GradientStop Color="#FFFFFFFF" Offset="0"/>
-                                                                                    <GradientStop Color="#00FFFFFF" Offset="1"/>
-                                                                                </LinearGradientBrush>
-                                                                            </Rectangle.Fill>
-                                                                        </Rectangle>
-                                                                        <Rectangle Width="232" Height="110" RadiusX="6" RadiusY="6" IsHitTestVisible="False">
-                                                                            <Rectangle.Fill>
-                                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                                                    <GradientStop Color="#00000000" Offset="0"/>
-                                                                                    <GradientStop Color="#FF000000" Offset="1"/>
-                                                                                </LinearGradientBrush>
-                                                                            </Rectangle.Fill>
-                                                                        </Rectangle>
-                                                                        <Ellipse x:Name="SvCursor" Width="10" Height="10" Stroke="White" StrokeThickness="2"
-                                                                                 IsHitTestVisible="False"/>
-                                                                    </Canvas>
-                                                                    <Canvas x:Name="ColorPickerHue" Width="232" Height="12" Margin="0,0,8,0" Cursor="Hand"
-                                                                            Background="Transparent"
-                                                                            MouseDown="OnColorPickerHueDown" MouseMove="OnColorPickerHueMove" MouseUp="OnColorPickerHueUp"
-                                                                            AutomationProperties.Name="Hue"
-                                                                            AutomationProperties.HelpText="Drag to pick hue.">
-                                                                        <Rectangle Width="232" Height="12" RadiusX="4" RadiusY="4">
-                                                                            <Rectangle.Fill>
-                                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                                                                    <GradientStop Color="#FFFF0000" Offset="0"/>
-                                                                                    <GradientStop Color="#FFFFFF00" Offset="0.17"/>
-                                                                                    <GradientStop Color="#FF00FF00" Offset="0.33"/>
-                                                                                    <GradientStop Color="#FF00FFFF" Offset="0.50"/>
-                                                                                    <GradientStop Color="#FF0000FF" Offset="0.67"/>
-                                                                                    <GradientStop Color="#FFFF00FF" Offset="0.83"/>
-                                                                                    <GradientStop Color="#FFFF0000" Offset="1"/>
-                                                                                </LinearGradientBrush>
-                                                                            </Rectangle.Fill>
-                                                                        </Rectangle>
-                                                                        <Ellipse x:Name="HueCursor" Width="10" Height="10" Stroke="White" StrokeThickness="2"
-                                                                                 Fill="Transparent" IsHitTestVisible="False" Canvas.Top="1"/>
-                                                                    </Canvas>
-                                                                    <Grid>
-                                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                                        <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
-                                                                                   Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
-                                                                        <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
-                                                                                 Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
-                                                                                 ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
-                                                                        <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource SurveyPrimaryButton}"
-                                                                                Content="Apply" Click="OnColorPickerApply" AutomationProperties.Name="Apply color"/>
-                                                                    </Grid>
-                                                                    <DockPanel Margin="0,8,0,0">
+                                                                    <!-- Survey's spectrum branch (CompactColorPicker.jsx:430-527): a full-width
+                                                                         150px SV box over a labelled hue row. It replaces the preset grid; the two
+                                                                         are never on screen together. -->
+                                                                    <StackPanel x:Name="ColorPickerSpectrum" Visibility="Collapsed">
+                                                                        <Canvas x:Name="ColorPickerSv" Width="236" Height="150" Cursor="Cross"
+                                                                                Background="Transparent"
+                                                                                MouseDown="OnColorPickerSvDown" MouseMove="OnColorPickerSvMove" MouseUp="OnColorPickerSvUp"
+                                                                                AutomationProperties.Name="Color spectrum"
+                                                                                AutomationProperties.HelpText="Drag to pick saturation and brightness.">
+                                                                            <Rectangle x:Name="SvHueRect" Width="236" Height="150" RadiusX="4" RadiusY="4"
+                                                                                       Fill="#FFFF0000" IsHitTestVisible="False"/>
+                                                                            <Rectangle Width="236" Height="150" RadiusX="4" RadiusY="4" IsHitTestVisible="False">
+                                                                                <Rectangle.Fill>
+                                                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                                                        <GradientStop Color="#FFFFFFFF" Offset="0"/>
+                                                                                        <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                                                    </LinearGradientBrush>
+                                                                                </Rectangle.Fill>
+                                                                            </Rectangle>
+                                                                            <Rectangle Width="236" Height="150" RadiusX="4" RadiusY="4" IsHitTestVisible="False">
+                                                                                <Rectangle.Fill>
+                                                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                                                        <GradientStop Color="#00000000" Offset="0"/>
+                                                                                        <GradientStop Color="#FF000000" Offset="1"/>
+                                                                                    </LinearGradientBrush>
+                                                                                </Rectangle.Fill>
+                                                                            </Rectangle>
+                                                                            <Ellipse x:Name="SvCursor" Width="10" Height="10" Stroke="White" StrokeThickness="2"
+                                                                                     IsHitTestVisible="False"/>
+                                                                        </Canvas>
+                                                                        <!-- HUE caption, 12px bar and the degree readout Survey shows on the right (:482-527). -->
+                                                                        <DockPanel Margin="0,12,0,0">
+                                                                            <TextBlock Text="HUE" FontSize="10" Foreground="#FF8D96A6" Width="20"
+                                                                                       VerticalAlignment="Center" DockPanel.Dock="Left"/>
+                                                                            <TextBlock x:Name="PickerHueValue" FontSize="11" Foreground="#FFE8E2D4" Width="24"
+                                                                                       TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
+                                                                            <Canvas x:Name="ColorPickerHue" Width="176" Height="12" Margin="8,0" Cursor="Hand"
+                                                                                    Background="Transparent"
+                                                                                    MouseDown="OnColorPickerHueDown" MouseMove="OnColorPickerHueMove" MouseUp="OnColorPickerHueUp"
+                                                                                    AutomationProperties.Name="Hue"
+                                                                                    AutomationProperties.HelpText="Drag to pick hue.">
+                                                                                <Rectangle Width="176" Height="12" RadiusX="6" RadiusY="6">
+                                                                                    <Rectangle.Fill>
+                                                                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                                                            <GradientStop Color="#FFFF0000" Offset="0"/>
+                                                                                            <GradientStop Color="#FFFFFF00" Offset="0.17"/>
+                                                                                            <GradientStop Color="#FF00FF00" Offset="0.33"/>
+                                                                                            <GradientStop Color="#FF00FFFF" Offset="0.50"/>
+                                                                                            <GradientStop Color="#FF0000FF" Offset="0.67"/>
+                                                                                            <GradientStop Color="#FFFF00FF" Offset="0.83"/>
+                                                                                            <GradientStop Color="#FFFF0000" Offset="1"/>
+                                                                                        </LinearGradientBrush>
+                                                                                    </Rectangle.Fill>
+                                                                                </Rectangle>
+                                                                                <Ellipse x:Name="HueCursor" Width="12" Height="12" Fill="White"
+                                                                                         IsHitTestVisible="False" Canvas.Top="0"/>
+                                                                            </Canvas>
+                                                                        </DockPanel>
+                                                                    </StackPanel>
+                                                                    <DockPanel Margin="0,12,0,0">
                                                                         <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" DockPanel.Dock="Left" Margin="0,0,8,0"/>
                                                                         <TextBlock x:Name="PickerOpacityValue" Text="100%" Style="{StaticResource ValueLabel}"
                                                                                    DockPanel.Dock="Right" MinWidth="38" TextAlignment="Right"/>
@@ -350,6 +400,17 @@
                                                                                 ValueChanged="OnPickerOpacityChanged"
                                                                                 AutomationProperties.Name="Picker opacity"/>
                                                                     </DockPanel>
+                                                                    <Border Height="1" Background="#FF2A3140" Margin="0,12,0,0"/>
+                                                                    <!-- Survey's footer is a live 32px swatch plus the hex field and nothing else: every
+                                                                         control commits on change, so there is no Apply button (:565-620). -->
+                                                                    <Grid Margin="0,8,0,0">
+                                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                                        <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="32" Height="32" RadiusX="4" RadiusY="4"
+                                                                                   Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
+                                                                        <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0,0,0"
+                                                                                 Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
+                                                                                 ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
+                                                                    </Grid>
                                                                 </StackPanel>
                                                             </Border>
                                                         </Popup>
@@ -386,7 +447,14 @@
                                                         </Border>
                                                         <Popup x:Name="SizePresetsPopup" PlacementTarget="{Binding ElementName=SizeField}"
                                                                Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True"
+                                                               Opened="OnSizePresetsPopupOpened"
                                                                IsOpen="{Binding IsChecked, ElementName=SizePresetsBtn, Mode=TwoWay}">
+                                                            <StackPanel>
+                                                            <!-- Survey draws a Popover.Arrow filled #3a4252 pointing at the trigger
+                                                                 (AnnotationSizeControl.jsx:184, .css:142-144). The 36px right margin
+                                                                 below is shadow room, so match it here to centre on the 126px body. -->
+                                                            <Path HorizontalAlignment="Center" Margin="0,0,36,0" Data="M0,5 L5,0 L10,5 Z"
+                                                                  Fill="{StaticResource ChromeControlBrush}"/>
                                                             <Border Width="126" Padding="5" CornerRadius="8" BorderThickness="1"
                                                                     Background="{StaticResource ChromePopoverBrush}"
                                                                     BorderBrush="{StaticResource ChromeControlBrush}"
@@ -402,6 +470,7 @@
                                                                     </ScrollViewer>
                                                                 </StackPanel>
                                                             </Border>
+                                                            </StackPanel>
                                                         </Popup>
                                                     </StackPanel>
                                                     <StackPanel x:Name="EffectStrengthPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">

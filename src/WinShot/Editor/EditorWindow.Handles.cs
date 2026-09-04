@@ -217,8 +217,9 @@ public partial class EditorWindow : Window
     /// <summary>
     /// Survey getAdaptiveSelectionHandleSpec (selectionHandleVisibility.js:42-77): drop the
     /// pills, then everything but the bottom-right corner, once the padded box can no longer
-    /// hold them. The tier maths deliberately uses the RAW inverse scale (unclamped) while
-    /// visual sizing uses the clamped one, so handles keep culling as you zoom out.
+    /// hold them. The tiers AND the rotation offset deliberately use the RAW inverse scale
+    /// (unclamped); only the drawn handle sizes use the clamped one, so handles keep culling
+    /// as you zoom out and the grip keeps clearing them.
     /// </summary>
     private HandleSpec AdaptiveHandleSpec(double width, double height)
     {
@@ -233,12 +234,13 @@ public partial class EditorWindow : Window
             && boxW >= cornerR * 2 + hPillW + minGap * 2
             && boxH >= cornerR * 2 + vPillH + minGap * 2;
 
-        // Survey uses the CLAMPED metrics for the rotation offset it actually draws.
-        double is_ = HandleScale;
-        double topHalf = allFit ? 8 * is_ / 2 : 5.5 * is_;
+        // Survey computes the rotation offset inside getAdaptiveSelectionHandleSpec, which
+        // receives the RAW inverseScale (SVGSelectionOverlay.jsx:68-73) — only the drawn
+        // handle SIZES use the clamped one (selectionHandleVisibility.js:69-70).
+        double topHalf = allFit ? hPillH / 2 : cornerR;
         // Already in content units: Survey's metrics carry `is` and the offset is applied
         // straight to the bbox in page units (SVGSelectionOverlay.jsx:76-80).
-        double offset = Math.Max(AnnotationRotation.HandleOffsetScreenPx, 10 * is_ + topHalf + 4 * is_);
+        double offset = Math.Max(AnnotationRotation.HandleOffsetScreenPx, 10 * rawIs + topHalf + minGap);
         return new HandleSpec(allFit, cornersFit, offset);
     }
 
@@ -660,7 +662,7 @@ public partial class EditorWindow : Window
                 => Cursors.Hand,
             _ => CursorForHandle(handle, angle),
         };
-        Viewport.Cursor = cursor;
+        SetSurfaceCursor(cursor);
         return true;
     }
 
@@ -1888,9 +1890,12 @@ public partial class EditorWindow : Window
 
     /// <summary>Maps a single-letter shortcut to a tool, mirroring the toolbar toggle. Returns false if unmapped.</summary>
     /// <summary>
-    /// Survey's letter chain (PDFViewer.jsx:23322-23373): V, P, H, E, Shift+E, T, Q, L, A, C.
+    /// Survey's letter chain (PDFViewer.jsx:23322-23437): V, P, H, E, Shift+E, T, Q, L, A, C —
+    /// C is the COUNTER (:23425-23437), matching its shortcuts overlay.
     /// E is the eraser and leaves its mode alone; Shift+E is the eraser forced to partial.
     /// Survey has an ellipse tool but no key for it, so E belongs to the eraser here too.
+    /// R (rectangle), B (blur) and X (crop) are WinShot-only extensions on keys Survey
+    /// leaves free; crop sits on X so C can keep Survey's meaning.
     /// </summary>
     private bool TrySelectToolByKey(Key key, bool shift = false)
     {
@@ -1912,8 +1917,8 @@ public partial class EditorWindow : Window
             Key.P => EditorTool.Freehand, // Pen / Draw
             Key.H => EditorTool.Highlighter,
             Key.B => EditorTool.Blur,
-            Key.S => EditorTool.Step,
-            Key.C => EditorTool.Crop,
+            Key.C => EditorTool.Step,   // Survey's counter key
+            Key.X => EditorTool.Crop,   // WinShot-only tool, off Survey's chain
             Key.Q => EditorTool.Callout,
             _ => null,
         };

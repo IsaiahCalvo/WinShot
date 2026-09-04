@@ -1,6 +1,7 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+                    xmlns:theme="clr-namespace:WinShot.Theme">
 
     <!-- ====================================================================
          WinShot Theme — CleanShot-X-inspired dark Win11 design system
@@ -23,6 +24,9 @@
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="SurveyToolIcons.xaml"/>
     </ResourceDictionary.MergedDictionaries>
+
+    <!-- Survey's 0.065em heading tracking, which WPF cannot express as a property. -->
+    <theme:HeadingTrackingConverter x:Key="HeadingTracking"/>
 
     <!-- ============================ PALETTE ============================ -->
     <!-- Surfaces (a disciplined 5-step dark elevation scale) -->
@@ -1198,7 +1202,8 @@
                                 <StackPanel>
                                     <TextBlock x:Name="Heading" Padding="7,7,9,8" FontSize="11" FontWeight="Bold"
                                                Foreground="#FFAEB6C3"
-                                               Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
+                                               Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent},
+                                                              Converter={StaticResource HeadingTracking}}"/>
                                     <Border x:Name="HeadingRule" Height="1" Background="{StaticResource ChromeHairlineBrush}"/>
                                     <ScrollViewer MaxHeight="280" Margin="0,4,0,0">
                                         <ItemsPresenter/>
