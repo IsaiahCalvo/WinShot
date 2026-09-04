@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using W = System.Windows;
+using WF = System.Windows.Forms;
 
 namespace WinShot.Core;
 
@@ -29,8 +32,24 @@ internal static class Motion
     /// <summary>Overlay card flying off screen on dismiss.</summary>
     public const int ExitDurationMs = 360;
 
+    /// <summary>Hover / press fills and other same-place tint changes.</summary>
+    public const int QuickMs = 140;
+
+    /// <summary>One panel or pane replacing another in the same slot.</summary>
+    public const int SwapMs = 220;
+
+    /// <summary>A surface arriving on screen for the first time.</summary>
+    public const int EnterDurationMs = 280;
+
     private static readonly object Gate = new();
     private static int _holders;
+
+    /// <summary>
+    /// Whether the user wants animation at all (Settings &gt; Accessibility &gt; Visual effects,
+    /// SPI_GETCLIENTAREAANIMATION). Every tween honours it by jumping straight to its end
+    /// state. Tests swap this out; nothing else should.
+    /// </summary>
+    internal static Func<bool> AnimationsEnabled { get; set; } = () => W.SystemParameters.ClientAreaAnimation;
 
     /// <summary>
     /// Raises the system timer resolution for as long as the returned handle is alive.
@@ -50,6 +69,127 @@ internal static class Motion
     {
         double value = 1d - Math.Clamp(progress, 0d, 1d);
         return 1d - value * value * value;
+    }
+
+    /// <summary>
+    /// Overshoots past the target and settles back — the ease for a surface arriving on
+    /// screen, so an entrance reads as landing rather than sliding to a halt. Starts at 0 and
+    /// ends at exactly 1; in between it goes above 1, which is the whole point, so callers
+    /// must not clamp the value they get.
+    /// </summary>
+    public static double EaseOutBack(double progress)
+    {
+        const double overshoot = 1.70158d;
+        double value = Math.Clamp(progress, 0d, 1d) - 1d;
+        return 1d + ((overshoot + 1d) * value * value * value) + (overshoot * value * value);
+    }
+
+    /// <summary>
+    /// Runs a tween: one shared timer at <see cref="FrameIntervalMs"/>, wall-clock time from a
+    /// stopwatch (a dropped frame shortens the animation instead of stretching it), and the
+    /// high-resolution clock held for exactly as long as it runs.
+    ///
+    /// <paramref name="onFrame"/> receives the eased position, and is always called one last
+    /// time with exactly 1.0 before <paramref name="onDone"/> — so a caller never has to paint
+    /// the end state itself. Disposing the returned handle mid-flight cancels: no final frame,
+    /// no <paramref name="onDone"/>. Disposing after it finished does nothing.
+    ///
+    /// With animation turned off system-wide the end state is applied inline and no timer is
+    /// ever created.
+    /// </summary>
+    public static IDisposable Run(
+        int durationMs,
+        Func<double, double> ease,
+        Action<double> onFrame,
+        Action? onDone = null)
+    {
+        ArgumentNullException.ThrowIfNull(ease);
+        ArgumentNullException.ThrowIfNull(onFrame);
+
+        if (durationMs <= 0 || !AnimationsEnabled())
+        {
+            onFrame(1d);
+            onDone?.Invoke();
+            return Finished;
+        }
+
+        return new Tween(durationMs, ease, onFrame, onDone);
+    }
+
+    /// <summary>A handle for a tween that never started; disposing it is a no-op.</summary>
+    private static readonly IDisposable Finished = new NoTween();
+
+    private sealed class NoTween : IDisposable
+    {
+        public void Dispose() { }
+    }
+
+    private sealed class Tween : IDisposable
+    {
+        private readonly Func<double, double> _ease;
+        private readonly Action<double> _onFrame;
+        private readonly Action? _onDone;
+        private readonly Stopwatch _clock = Stopwatch.StartNew();
+        private readonly double _durationMs;
+        private WF.Timer? _timer;
+        private IDisposable? _hold;
+
+        public Tween(int durationMs, Func<double, double> ease, Action<double> onFrame, Action? onDone)
+        {
+            _durationMs = durationMs;
+            _ease = ease;
+            _onFrame = onFrame;
+            _onDone = onDone;
+            _hold = Acquire();
+            _timer = new WF.Timer { Interval = FrameIntervalMs };
+            _timer.Tick += OnTick;
+            _timer.Start();
+        }
+
+        private void OnTick(object? sender, EventArgs e)
+        {
+            if (_timer is null)
+                return;
+
+            double progress = Math.Clamp(_clock.Elapsed.TotalMilliseconds / _durationMs, 0d, 1d);
+            try
+            {
+                if (progress < 1d)
+                {
+                    _onFrame(_ease(progress));
+                    return;
+                }
+
+                Release();
+                _onFrame(1d);
+                _onDone?.Invoke();
+            }
+            catch
+            {
+                // A throwing frame must not strand the process-wide timer resolution.
+                Release();
+                throw;
+            }
+        }
+
+        public void Dispose() => Release();
+
+        private void Release()
+        {
+            WF.Timer? timer = _timer;
+            _timer = null;
+            if (timer is not null)
+            {
+                timer.Tick -= OnTick;
+                timer.Stop();
+                timer.Dispose();
+            }
+
+            _clock.Stop();
+            IDisposable? hold = _hold;
+            _hold = null;
+            hold?.Dispose();
+        }
     }
 
     /// <summary>Live holder count; for tests.</summary>
