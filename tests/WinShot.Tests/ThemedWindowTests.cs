@@ -190,31 +190,54 @@ public class ThemedWindowTests
         window.Show();
         window.UpdateLayout();
 
-        var restored = new List<string>();
-        window.RestoreRequested += restored.Add;
-        var list = (ListBox)window.FindName("ItemsList");
+        try
+        {
+            var restored = new List<string>();
+            window.RestoreRequested += restored.Add;
+            var list = (ListBox)window.FindName("ItemsList");
 
-        list.SelectedItem = items[0];
-        Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
-        Assert.Equal(new[] { items[0].FilePath }, restored);
-        Assert.True(window.IsVisible);
+            list.SelectedItem = items[0];
+            Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+            Assert.Equal(new[] { items[0].FilePath }, restored);
+            Assert.True(window.IsVisible);
 
-        // Enter on the same image again stacks a second card rather than closing History.
-        Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
-        Assert.Equal(2, restored.Count);
+            // Enter on the same image again stacks a second card rather than closing History.
+            Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+            Assert.Equal(2, restored.Count);
 
-        list.SelectedItem = items[1];
-        Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
-        Assert.Equal(2, restored.Count);
+            list.SelectedItem = items[1];
+            Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+            Assert.Equal(2, restored.Count);
 
-        // Ctrl+C claims the key for a still image and leaves it alone for a video.
-        list.SelectedItem = items[0];
-        Assert.True(window.HandleKey(Key.C, ModifierKeys.Control));
-        list.SelectedItem = items[1];
-        Assert.False(window.HandleKey(Key.C, ModifierKeys.Control));
-        Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
+            // The video tile wears a bar across the whole card, not a badge in one corner: the
+            // clip length is what tells two recordings apart.
+            System.Windows.Controls.Border? mediaBar = null;
+            WaitUntil(() =>
+            {
+                list.UpdateLayout();
+                mediaBar = list.ItemContainerGenerator.ContainerFromItem(items[1]) is FrameworkElement card
+                    ? FindVisualNamed<System.Windows.Controls.Border>(card, "MediaBar")
+                    : null;
+                return mediaBar is { ActualWidth: > 200 };
+            });
+            Assert.NotNull(mediaBar);
+            Assert.Equal(System.Windows.Visibility.Visible, mediaBar!.Visibility);
+            Assert.True(
+                mediaBar.ActualWidth > 200,
+                $"the media bar should span the card, not sit in a corner: {mediaBar.ActualWidth}");
 
-        window.Close();
+            // Ctrl+C claims the key for a still image and leaves it alone for a video.
+            list.SelectedItem = items[0];
+            Assert.True(window.HandleKey(Key.C, ModifierKeys.Control));
+            list.SelectedItem = items[1];
+            Assert.False(window.HandleKey(Key.C, ModifierKeys.Control));
+            Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
+
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     /// <summary>Every card on a page ends up with a decoded thumbnail. The decode now runs
@@ -281,8 +304,10 @@ public class ThemedWindowTests
         window.Show();
         window.UpdateLayout();
 
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
         try
         {
+            Motion.AnimationsEnabled = () => true;
             var list = (ListBox)window.FindName("ItemsList");
             var panel = FindVisualChild<ReflowWrapPanel>(list);
             Assert.NotNull(panel);
@@ -295,17 +320,23 @@ public class ThemedWindowTests
             // the gap rather than being torn down and rebuilt in place.
             Assert.Equal(3, list.Items.Count);
             Assert.True(panel!.LastReflowCount > 0, $"expected cards to slide, moved {panel.LastReflowCount}");
+            Assert.True(panel.IsReflowing, "the slide should be running, not already over");
 
-            WaitUntil(() => !panel.IsReflowing);
+            // With animation off system-wide the same change lands on its end state inside the
+            // arrange pass and takes no clock at all.
+            Motion.AnimationsEnabled = () => false;
+            ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipAll")).IsChecked = true;
+            window.UpdateLayout();
+
+            Assert.Equal(5, list.Items.Count);
             Assert.False(panel.IsReflowing);
-            // The reflow tween must hand back the high-resolution clock it took. Other windows
-            // in this run may still hold their own, so the check is that the count did not grow.
             Assert.True(
                 Motion.Holders <= holdersBefore,
                 $"reflow leaked a Motion holder: {holdersBefore} -> {Motion.Holders}");
         }
         finally
         {
+            Motion.AnimationsEnabled = previousAnimations;
             // A failed assertion must not leave a window open: the STA thread would end with a
             // live WPF window and take the whole test host down with it.
             window.Close();
@@ -320,6 +351,20 @@ public class ThemedWindowTests
             PumpDispatcherOnce();
             Thread.Sleep(10);
         }
+    }
+
+    private static T? FindVisualNamed<T>(System.Windows.DependencyObject root, string name)
+        where T : System.Windows.FrameworkElement
+    {
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, index);
+            if (child is T match && match.Name == name) return match;
+            if (FindVisualNamed<T>(child, name) is T nested) return nested;
+        }
+
+        return null;
     }
 
     private static T? FindVisualChild<T>(System.Windows.DependencyObject root) where T : System.Windows.DependencyObject
@@ -467,28 +512,56 @@ public class ThemedWindowTests
         }
     }
 
+    /// <summary>The window fades in instead of appearing between two frames, Escape plays that
+    /// backwards instead of blinking it away, and with animation off system-wide both land on
+    /// their end state immediately.</summary>
     private static void HistoryWindowShowCloseSmoke(HistoryService history, SettingsService settings)
     {
         var window = HistoryWindow.Show(history, settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
 
-        // The window fades in rather than appearing between two frames, and Escape plays that
-        // backwards instead of blinking out.
-        bool animated = Motion.AnimationsEnabled();
-        WaitUntil(() => window.Opacity >= 1);
-        Assert.Equal(1d, window.Opacity, 3);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var fadeIn = typeof(HistoryWindow).GetMethod("FadeIn", NP)!;
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        try
+        {
+            Motion.AnimationsEnabled = () => false;
+            fadeIn.Invoke(window, null);
+            Assert.Equal(1d, window.Opacity, 3);
 
-        int holdersBefore = Motion.Holders;
-        Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
-        if (animated)
+            Motion.AnimationsEnabled = () => true;
+            fadeIn.Invoke(window, null);
+            Assert.Equal(0d, window.Opacity, 3);
+
+            // Escape starts the exit tween, so the window is still there on the next line.
+            Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
             Assert.True(window.IsVisible, "Escape should fade the window out, not blink it away");
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+            window.Close();
+        }
 
         WaitUntilHidden(window);
         Assert.False(window.IsVisible);
-        Assert.True(
-            Motion.Holders <= holdersBefore,
-            $"the dismissal tween leaked a Motion holder: {holdersBefore} -> {Motion.Holders}");
+
+        // With animation off, Escape has to close the window on the spot rather than waiting
+        // for a tween that will never run.
+        var second = HistoryWindow.Show(history, settings);
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            Assert.True(second.HandleKey(Key.Escape, ModifierKeys.None));
+            Assert.False(second.IsVisible);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+            second.Close();
+        }
     }
 
     private static T CreatePrivate<T>(params object[] args) where T : Window =>
