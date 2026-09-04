@@ -459,38 +459,12 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource Card}">
+                        <Border x:Name="AfterCaptureMatrix" Style="{StaticResource Card}">
                             <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="After screenshot"/>
-                                    <ComboBox x:Name="PostCaptureActionCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="Show Quick Access" Tag="overlay"/>
-                                        <ComboBoxItem Content="Copy to clipboard" Tag="copy"/>
-                                        <ComboBoxItem Content="Save to export location" Tag="save"/>
-                                        <ComboBoxItem Content="Open Annotate" Tag="edit"/>
-                                        <ComboBoxItem Content="Pin to screen" Tag="pin"/>
-                                        <ComboBoxItem Content="Add background" Tag="background"/>
-                                    </ComboBox>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Clipboard"/>
-                                    <CheckBox x:Name="PostCaptureCopyCheck" Content="Also copy after other actions"/>
-                                </DockPanel>
-                                <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Recording output is chosen in the recording window."/>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Kept only as a migration bridge for older saved matrix values. -->
-                        <Border x:Name="LegacyAfterCaptureMatrix" Style="{StaticResource Card}" Visibility="Collapsed">
-                            <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="After capture"
-                                               VerticalAlignment="Top"/>
-                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
-                                               TextWrapping="Wrap" VerticalAlignment="Top"
-                                               Text="Here you can decide what should happen after taking a screenshot or recording a video."/>
-                                </DockPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="After capture"/>
+                                <TextBlock Style="{StaticResource SubHint}" Margin="0,0,0,2"
+                                           TextWrapping="Wrap"
+                                           Text="Every action you tick runs. Nothing is exclusive."/>
 
                                 <Border Margin="0,10,0,0" HorizontalAlignment="Center"
                                         BorderBrush="{StaticResource BorderBrush}"
@@ -522,21 +496,21 @@
 
                                         <!-- Row: Show Quick Access Overlay -->
                                         <CheckBox Grid.Row="1" Grid.Column="0" x:Name="ScreenshotShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="1" Grid.Column="1" x:Name="LegacyRecordingShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <CheckBox Grid.Row="1" Grid.Column="1" x:Name="RecordingShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="1" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Show Quick Access Overlay"/>
 
                                         <!-- Row: Copy file to clipboard -->
                                         <CheckBox Grid.Row="2" Grid.Column="0" x:Name="ScreenshotCopyCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="2" Grid.Column="1" x:Name="LegacyRecordingCopyCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <CheckBox Grid.Row="2" Grid.Column="1" x:Name="RecordingCopyCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="2" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Copy file to clipboard"/>
 
                                         <!-- Row: Save -->
                                         <CheckBox Grid.Row="3" Grid.Column="0" x:Name="ScreenshotSaveCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="3" Grid.Column="1" x:Name="RecordingSaveCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="3" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Save"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Save to export location"/>
 
                                         <!-- Row: Open Annotate tool (screenshot only) -->
                                         <CheckBox Grid.Row="4" Grid.Column="0" x:Name="ScreenshotOpenAnnotateCheck" Style="{StaticResource MatrixCheck}"/>
@@ -555,9 +529,6 @@
                                         <CheckBox Grid.Row="6" Grid.Column="1" x:Name="RecordingOpenEditorCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="6" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
                                                    FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Open Video Editor"/>
-
-                                        <!-- Hidden screenshot-editor checkbox kept for parity/persistence (Open Annotate == screenshot editor). -->
-                                        <CheckBox x:Name="ScreenshotOpenEditorCheck" Visibility="Collapsed"/>
                                     </Grid>
                                 </Border>
                             </StackPanel>
@@ -757,21 +728,6 @@
                                     </DockPanel>
                                 </StackPanel>
                             </Border>
-
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel>
-                                    <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
-                                        <CheckBox x:Name="RecordingShowOverlayCheck" Content="Show Quick Access"/>
-                                    </DockPanel>
-                                    <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="RecordingCopyCheck" Content="Copy file to clipboard"/>
-                                    </DockPanel>
-                                    <TextBlock Style="{StaticResource SubHint}"
-                                               Text="Completed recordings stay local and are added to History."/>
-                                </StackPanel>
-                            </Border>
                         </StackPanel>
 
                         <!-- Recording > Video -->
@@ -812,15 +768,6 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                         <CheckBox x:Name="RecordAudioMonoCheck" Content="Record audio in mono"/>
                                     </DockPanel>
-
-                                    <Rectangle x:Name="VideoEditorSeparator" Style="{StaticResource GroupSep}"/>
-
-                                    <DockPanel x:Name="VideoEditorRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
-                                        <CheckBox x:Name="OpenVideoEditorCheck" Content="Open Video Editor after recording"/>
-                                    </DockPanel>
-                                    <TextBlock x:Name="VideoEditorHint" Style="{StaticResource SubHint}"
-                                               Text="Open the local editor to trim and export the finished video."/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>

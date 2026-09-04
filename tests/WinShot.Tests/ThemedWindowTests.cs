@@ -170,7 +170,8 @@ public class ThemedWindowTests
         settings.Current.ShortcutBindings["legacy-placeholder"] = "Ctrl+Alt+Q";
         settings.Current.ShowCrosshair = false;
         settings.Current.CrosshairMode = "always";
-        settings.Current.PostCaptureAction = "save";
+        settings.Current.ScreenshotSave = true;
+        settings.Current.ScreenshotShowOverlay = false;
         var window = SettingsWindow.Show(settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
@@ -179,10 +180,9 @@ public class ThemedWindowTests
             "never",
             ((System.Windows.Controls.ComboBoxItem)
                 ((System.Windows.Controls.ComboBox)window.FindName("CrosshairModeCombo")).SelectedItem).Tag);
-        Assert.Equal(
-            "save",
-            ((System.Windows.Controls.ComboBoxItem)
-                ((System.Windows.Controls.ComboBox)window.FindName("PostCaptureActionCombo")).SelectedItem).Tag);
+        // The after-capture matrix is a set: Save on, Quick Access off, independently.
+        Assert.True(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotSaveCheck")).IsChecked);
+        Assert.False(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotShowOverlayCheck")).IsChecked);
         typeof(SettingsWindow).GetMethod(
             "SaveShortcutBoxes",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -204,7 +204,7 @@ public class ThemedWindowTests
 
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("LegacyAfterCaptureMatrix").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("AfterCaptureMatrix").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("UnavailableSoundsRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
@@ -220,14 +220,17 @@ public class ThemedWindowTests
         string[] accessibleControls =
         [
             "StartupCheck", "UpdatesCheck", "SaveFolderBox", "BrowseSaveFolderButton",
-            "HideIconsCheck", "PostCaptureActionCombo", "PostCaptureCopyCheck", "OverlayPositionCombo",
+            "HideIconsCheck", "ScreenshotShowOverlayCheck", "RecordingShowOverlayCheck",
+            "ScreenshotCopyCheck", "RecordingCopyCheck", "ScreenshotSaveCheck",
+            "ScreenshotOpenAnnotateCheck", "ScreenshotPinCheck", "RecordingOpenEditorCheck",
+            "OverlayPositionCombo",
             "OverlayMoveToActiveScreenCheck", "OverlaySizeSlider", "OverlayAutoCloseCheck",
             "OverlayActionCombo", "OverlayCloseBox", "OverlayCloseAfterDragCheck", "OverlaySaveBehaviorCombo",
             "ShowRecordingControlsCheck", "ShowRecordingTimerCheck", "ScaleHiDpiVideoCheck", "CaptureCursorCheck",
             "ClickHighlightsCheck", "KeystrokesCheck", "RememberLastSelectionCheck", "DimScreenCheck",
-            "CountdownBox", "WebcamCombo", "WebcamSizeBox", "RecordingShowOverlayCheck",
-            "RecordingCopyCheck", "MaxResolutionCombo", "RecordingFpsBox", "RecordAudioCheck",
-            "SystemAudioCheck", "RecordAudioMonoCheck", "OpenVideoEditorCheck", "GifFpsBox",
+            "CountdownBox", "WebcamCombo", "WebcamSizeBox",
+            "MaxResolutionCombo", "RecordingFpsBox", "RecordAudioCheck",
+            "SystemAudioCheck", "RecordAudioMonoCheck", "GifFpsBox",
             "GifQualitySlider", "OptimizeGifsCheck", "GifSizeCombo", "FormatCombo",
             "HiDpiCheck", "SelfTimerCombo", "FreezeScreenCheck", "CrosshairModeCombo",
             "ShowMagnifierCheck", "TemplateBox", "HistorySlider", "PinnedRoundedCornersCheck",
@@ -256,7 +259,7 @@ public class ThemedWindowTests
         {
             Named<System.Windows.Controls.Control>("StartupCheck").TabIndex,
             Named<System.Windows.Controls.Control>("SaveFolderBox").TabIndex,
-            Named<System.Windows.Controls.Control>("PostCaptureActionCombo").TabIndex,
+            Named<System.Windows.Controls.Control>("ScreenshotShowOverlayCheck").TabIndex,
             Named<System.Windows.Controls.Control>("CaptureCursorCheck").TabIndex,
             Named<System.Windows.Controls.Control>("FormatCombo").TabIndex,
             Named<System.Windows.Controls.Control>("TemplateBox").TabIndex,

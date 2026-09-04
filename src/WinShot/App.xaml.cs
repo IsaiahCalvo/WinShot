@@ -803,11 +803,13 @@ public partial class App : Application
             TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
 
-    /// <summary>Every captured bitmap funnels through here: optional downscale, history, then the post-capture action.</summary>
+    /// <summary>Every captured bitmap funnels through here: optional downscale, then the
+    /// after-capture set (history included).</summary>
     private void HandleCapture(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
-        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        PostCaptureSet? actionsOverride = null)
     {
         if (_settings.Current.DownscaleHiDpi)
         {
@@ -823,71 +825,120 @@ public partial class App : Application
             }
         }
 
-        string action = PostCaptureAction.Normalize(postCaptureActionOverride ?? _settings.Current.PostCaptureAction);
-        if (!PostCaptureAction.IsDirectAction(action))
+        // "Add background" has no matrix cell — it only ever arrives as a per-invocation
+        // override (the tray's "Capture window with background").
+        if (postCaptureActionOverride == PostCaptureAction.Background)
         {
-            try { ShowOverlayWithDeferredCaptureWork(bmp, autoCopy: _settings.Current.AutoCopyToClipboard, historyKind); }
+            _ = AddHistoryAsync(bmp, cloneOnCallerThread: true, historyKind);
+            try
+            {
+                var composer = new BackgroundComposerWindow(bmp, _settings, _history);
+                TrackFirstRender(composer, "background window");
+                composer.Show();
+            }
             catch { bmp.Dispose(); throw; }
             return;
         }
 
-        if (action == PostCaptureAction.Edit)
-        {
-            OpenDirectEditCapture(bmp, historyKind);
-            return;
-        }
+        PostCaptureSet actions = actionsOverride
+            ?? (postCaptureActionOverride is not null
+                ? PostCaptureSet.Single(postCaptureActionOverride, alsoCopy: _settings.Current.ScreenshotCopy)
+                : PostCaptureSet.ForScreenshot(_settings.Current));
 
-        _ = AddHistoryAsync(
-            bmp,
-            cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action),
-            historyKind);
-        // Direct actions below take ownership of bmp (Save disposes it, Pin/Background
-        // hand it to a window), and the auto-copy clones on its OWN STA thread — sharing
-        // bmp raced use-against-dispose (save failing "Parameter is not valid", or the
-        // copy dying and arming the 8s auto-copy suppression). Clone on this thread so
-        // the copy owns its bitmap outright, mirroring the history path.
-        if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
-            _ = QueueAutoClipboardCopy(CaptureService.CloneBitmap(bmp), takeOwnership: true);
+        // Every box unticked would mean a capture that vanishes with no trace on screen.
+        // Show the card instead — history still has it, and the user can see what happened.
+        if (actions.IsEmpty)
+            actions = actions with { Overlay = true };
 
-        switch (action)
-        {
-            case PostCaptureAction.Copy:
-                _ = CopyToClipboardAndNotifyAsync(bmp, takeOwnership: true, showSuccess: true, showFailure: true, includePng: true, failureContext: "Copy failed");
-                break;
-            case PostCaptureAction.Save:
-                SaveSilently(bmp); // takes ownership
-                break;
-            case PostCaptureAction.Pin:
-                try
-                {
-                    var win = new FastPinWindow(bmp, _settings);
-                    PerfLog.TrackFirstShown(win, "pin window");
-                    win.Show();
-                }
-                catch { bmp.Dispose(); throw; }
-                break;
-            case PostCaptureAction.Background:
-                try
-                {
-                    var win = new BackgroundComposerWindow(bmp, _settings, _history);
-                    TrackFirstRender(win, "background window");
-                    win.Show();
-                }
-                catch { bmp.Dispose(); throw; }
-                break;
-        }
+        RunPostCaptureSet(bmp, actions, historyKind);
     }
 
-    private void OpenDirectEditCapture(SD.Bitmap bmp, HistoryCaptureKind historyKind)
+    /// <summary>
+    /// Runs the after-capture <b>set</b>. Order is fixed: disk and clipboard first, then the
+    /// windows that stay open, and the Quick Access card last so it lands on top.
+    /// </summary>
+    /// <remarks>
+    /// One consumer owns the original bitmap and the deferred history + auto-copy work that
+    /// hangs off it — the Quick Access card when it is on, otherwise the annotation editor.
+    /// Every other consumer gets its own clone taken on THIS thread: a background clone races
+    /// the new owner's LockBits/Dispose on a single-accessor GDI+ bitmap, and a set can hand
+    /// the same capture to four owners at once.
+    /// </remarks>
+    private void RunPostCaptureSet(SD.Bitmap bmp, PostCaptureSet actions, HistoryCaptureKind historyKind)
+    {
+        bool cardOwns = actions.Overlay;
+        bool editorOwns = !cardOwns && actions.Annotate;
+        bool ownerRunsHistoryAndCopy = cardOwns || editorOwns;
+
+        try
+        {
+            if (!ownerRunsHistoryAndCopy)
+                _ = AddHistoryAsync(bmp, cloneOnCallerThread: true, historyKind);
+
+            if (actions.Save)
+                SaveSilently(CaptureService.CloneBitmap(bmp)); // takes ownership
+
+            if (actions.Pin)
+            {
+                var pin = new FastPinWindow(CaptureService.CloneBitmap(bmp), _settings);
+                PerfLog.TrackFirstShown(pin, "pin window");
+                pin.Show();
+            }
+
+            if (actions.Annotate && !editorOwns)
+                OpenDirectEditCapture(CaptureService.CloneBitmap(bmp), historyKind, addHistory: false, autoCopy: false);
+
+            if (actions.Copy && !ownerRunsHistoryAndCopy)
+            {
+                _ = CopyToClipboardAndNotifyAsync(
+                    CaptureService.CloneBitmap(bmp),
+                    takeOwnership: true,
+                    showSuccess: true,
+                    showFailure: true,
+                    includePng: true,
+                    failureContext: "Copy failed");
+            }
+
+            if (cardOwns)
+            {
+                ShowOverlayWithDeferredCaptureWork(bmp, autoCopy: actions.Copy, historyKind);
+                return;
+            }
+
+            if (editorOwns)
+            {
+                OpenDirectEditCapture(bmp, historyKind, addHistory: true, autoCopy: actions.Copy);
+                return;
+            }
+        }
+        catch
+        {
+            bmp.Dispose();
+            throw;
+        }
+
+        // No owner took the original (copy/save/pin already hold their own clones).
+        bmp.Dispose();
+    }
+
+    /// <param name="addHistory">False when another consumer in the same after-capture set
+    /// already owns the single history add.</param>
+    private void OpenDirectEditCapture(
+        SD.Bitmap bmp,
+        HistoryCaptureKind historyKind,
+        bool addHistory = true,
+        bool autoCopy = true)
     {
         DirectEditCaptureTestHooks? hooks = DirectEditTestHooks;
-        Func<SD.Bitmap, Task> historyWork = hooks?.HistoryWork ?? (source =>
-            Task.Run(() =>
-            {
-                try { _history.Add(source, historyKind); }
-                catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
-            }));
-        Func<SD.Bitmap, Task>? autoCopyWork = _settings.Current.AutoCopyToClipboard
+        Func<SD.Bitmap, Task> historyWork = addHistory
+            ? hooks?.HistoryWork ?? (source =>
+                Task.Run(() =>
+                {
+                    try { _history.Add(source, historyKind); }
+                    catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
+                }))
+            : _ => Task.CompletedTask;
+        Func<SD.Bitmap, Task>? autoCopyWork = autoCopy
             ? hooks?.AutoCopyWork ?? CopyBorrowedCaptureToClipboardAsync
             : null;
         var handoff = new DirectEditCaptureHandoff(bmp, historyWork, autoCopyWork);
@@ -910,8 +961,9 @@ public partial class App : Application
     internal void HandleCaptureForTest(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
-        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular) =>
-        HandleCapture(bmp, postCaptureActionOverride, historyKind);
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        PostCaptureSet? actionsOverride = null) =>
+        HandleCapture(bmp, postCaptureActionOverride, historyKind, actionsOverride);
 
     internal void SetHistoryForTest(HistoryService history) => _history = history;
 

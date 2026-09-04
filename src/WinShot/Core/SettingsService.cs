@@ -9,7 +9,13 @@ public class Settings
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "WinShot");
 
     public string ImageFormat { get; set; } = "png";
+    /// <summary>Migration seed only. Superseded by the after-capture matrix's
+    /// <see cref="ScreenshotCopy"/>; kept so an upgrade preserves the old choice.</summary>
     public bool AutoCopyToClipboard { get; set; } = true;
+
+    /// <summary>Bumped by a migration that reshapes existing settings. 0 = a file written
+    /// before the after-capture matrix replaced the single-choice combo.</summary>
+    public int SettingsSchemaVersion { get; set; }
     public int OverlayAutoCloseSeconds { get; set; } = 0; // 0 = stay until dismissed
     public int HistoryLimit { get; set; } = 200;
 
@@ -31,6 +37,8 @@ public class Settings
     public bool DownscaleHiDpi { get; set; } = false;  // halve captures taken on >100% DPI displays
 
     // Capture behavior
+    /// <summary>Migration seed only. Superseded by the after-capture matrix; still the
+    /// vocabulary for per-invocation overrides (tray commands, winshot:// ?then=).</summary>
     public string PostCaptureAction { get; set; } = "overlay"; // overlay | copy | save | edit | pin | background
     public int SelfTimerSeconds { get; set; } = 3;
     public string LastCaptureRegion { get; set; } = "";        // "x,y,w,h" physical screen px
@@ -69,19 +77,18 @@ public class Settings
     public bool ShowTrayIcon { get; set; } = true;      // TODO: wire behavior — show the menu/tray icon
     public bool CheckForUpdatesOnStartup { get; set; } = true; // poll GitHub Releases on launch
 
-    // Legacy per-action settings. Recording overlay/copy/editor behavior is wired; screenshot
-    // behavior uses PostCaptureAction plus AutoCopyToClipboard. The remaining fields are kept
-    // for migration compatibility and stay hidden until their behavior is unambiguous.
-    public bool ScreenshotShowOverlay { get; set; } = true;   // legacy, hidden
+    // The after-capture matrix: an independent set of actions per capture type, not a
+    // single choice. Every one of these runs; see PostCaptureSet.
+    // "Save" has no Recording cell because a recording is always written to the export
+    // location — the temp file is its only other copy and the janitor reclaims it.
+    public bool ScreenshotShowOverlay { get; set; } = true;
     public bool RecordingShowOverlay { get; set; } = true;
-    public bool ScreenshotCopy { get; set; } = true;          // legacy, hidden
+    public bool ScreenshotCopy { get; set; } = true;
     public bool RecordingCopy { get; set; } = false;
-    public bool ScreenshotSave { get; set; } = false;         // TODO: wire behavior
-    public bool RecordingSave { get; set; } = false;          // TODO: wire behavior
-    public bool ScreenshotOpenAnnotate { get; set; } = false; // TODO: wire behavior
-    public bool ScreenshotOpenEditor { get; set; } = false;   // TODO: wire behavior (Open Annotate tool — screenshot only)
-    public bool ScreenshotPin { get; set; } = false;          // TODO: wire behavior (Pin to the screen — screenshot only)
-    public bool RecordingOpenEditor { get; set; } = false;    // legacy alias for OpenVideoEditorAfterRecording
+    public bool ScreenshotSave { get; set; } = false;
+    public bool ScreenshotOpenAnnotate { get; set; } = false;
+    public bool ScreenshotPin { get; set; } = false;
+    public bool RecordingOpenEditor { get; set; } = false;
 
     // Screenshots
     public bool AddPixelBorder { get; set; } = false;   // TODO: wire behavior — add 1px border to screenshots
@@ -112,6 +119,7 @@ public class Settings
     public bool ShowRecordingCountdown { get; set; } = false; // TODO: wire behavior — countdown before recording
     public string RecordingMaxResolution { get; set; } = "original"; // original | 4K | 1080p | 720p
     public bool RecordAudioMono { get; set; } = false;      // downmix microphone input
+    /// <summary>Migration seed only. Superseded by the matrix's <see cref="RecordingOpenEditor"/>.</summary>
     public bool OpenVideoEditorAfterRecording { get; set; } = false;
     public int GifQuality { get; set; } = 80;               // 0..100 palette quality
     public string GifSize { get; set; } = "800";            // max GIF width (px) or "auto"
@@ -172,6 +180,16 @@ public class SettingsService
     public void Load()
     {
         _loaded = true;
+        LoadCore();
+        // Reshape anything an older file predates (currently: the single-choice
+        // "After screenshot" combo becoming the after-capture matrix). Runs before any
+        // caller reads Current, so Settings and the capture flow never see the old shape.
+        if (PostCaptureMigration.Apply(Current))
+            Log.Info("Migrated settings to the after-capture matrix");
+    }
+
+    private void LoadCore()
+    {
         // Transient torn reads are real: an exiting instance's exit-save can overlap a starting
         // instance's read during upgrades/restarts (install.ps1 relaunch). The primary is
         // replaced atomically, but the .bak rotation uses File.Copy, which is NOT atomic — a

@@ -12,7 +12,6 @@ internal static class SettingsTruthCatalog
         {
             "SaveFolder",
             "ImageFormat",
-            "AutoCopyToClipboard",
             "HotkeyCaptureRegion",
             "HotkeyCaptureWindow",
             "HotkeyCaptureFullscreen",
@@ -27,7 +26,6 @@ internal static class SettingsTruthCatalog
             "LaunchAtStartup",
             "FileNameTemplate",
             "DownscaleHiDpi",
-            "PostCaptureAction",
             "SelfTimerSeconds",
             "HideDesktopIconsDuringCapture",
             "RecordSystemAudio",
@@ -45,8 +43,14 @@ internal static class SettingsTruthCatalog
             "ShowCrosshair",
             "ShowMagnifier",
             "AllInOneRememberLast",
+            "ScreenshotShowOverlay",
             "RecordingShowOverlay",
+            "ScreenshotCopy",
             "RecordingCopy",
+            "ScreenshotSave",
+            "ScreenshotOpenAnnotate",
+            "ScreenshotPin",
+            "RecordingOpenEditor",
             "OverlayAutoClose",
             "OverlayAutoCloseSeconds",
             "OverlayPosition",
@@ -62,7 +66,6 @@ internal static class SettingsTruthCatalog
             "DimScreenWhileRecording",
             "RecordingMaxResolution",
             "RecordAudioMono",
-            "OpenVideoEditorAfterRecording",
             "GifQuality",
             "GifSize",
             "OptimizeGifs",
@@ -87,9 +90,6 @@ internal static class SettingsTruthCatalog
         new HashSet<string>(StringComparer.Ordinal)
         {
             "PlaySounds", "ShutterSound", "ShowTrayIcon",
-            "ScreenshotShowOverlay", "ScreenshotCopy",
-            "ScreenshotSave", "RecordingSave", "ScreenshotOpenAnnotate", "ScreenshotOpenEditor",
-            "ScreenshotPin", "RecordingOpenEditor",
             "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
@@ -103,6 +103,12 @@ internal static class SettingsTruthCatalog
         {
             "HistoryLimit",
             "NextCounter",
+            "SettingsSchemaVersion",
+            // Migration seeds: read once by PostCaptureMigration to fill the after-capture
+            // matrix from the settings that preceded it, then never offered as a control.
+            "PostCaptureAction",
+            "AutoCopyToClipboard",
+            "OpenVideoEditorAfterRecording",
             "LastCaptureRegion",
             "LastRecordingRegion",
             "ShortcutBindings",
