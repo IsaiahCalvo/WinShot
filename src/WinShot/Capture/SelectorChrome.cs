@@ -87,6 +87,16 @@ internal static class SelectorChrome
     private const int CursorReadoutOffsetX = 16;
     private const int CursorReadoutOffsetY = 20;
 
+    /// <summary>Draws the first-run hint pill centred near the top of a monitor.</summary>
+    public static void DrawHint(SD.Graphics g, SD.Size clientSize, string text, double opacity)
+    {
+        SD.Size pill = MeasureLabel(text);
+        DrawLabel(g, clientSize, text,
+            (clientSize.Width - pill.Width) / 2,
+            Math.Max(0, clientSize.Height / 8),
+            opacity);
+    }
+
     /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
     /// that place the pill by an edge other than its top-left.</summary>
     public static SD.Size MeasureLabel(string text)
@@ -97,8 +107,18 @@ internal static class SelectorChrome
     }
 
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
-    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
+    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y) =>
+        DrawLabel(g, clientSize, text, x, y, 1d);
+
+    /// <summary>
+    /// The label pill at a given opacity, for chrome that fades in and out. Both the pill and
+    /// its text carry the alpha, so a fading pill never leaves ghost text behind.
+    /// </summary>
+    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y, double opacity)
     {
+        int alpha = (int)Math.Round(255 * Math.Clamp(opacity, 0d, 1d));
+        if (alpha <= 0)
+            return;
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
         int w = size.Width + 16;
@@ -110,11 +130,11 @@ internal static class SelectorChrome
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, 0x1C, 0x1C, 0x1E)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
-        WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,
+        WF.TextRenderer.DrawText(g, text, font, bg, SD.Color.FromArgb(alpha, ThemePalette.TextPrimary),
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
     }
 }

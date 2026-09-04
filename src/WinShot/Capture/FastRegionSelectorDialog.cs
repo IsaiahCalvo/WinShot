@@ -280,6 +280,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _altLatched = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
+        _hintOpacity = 0d;
+        if (_settings is not null && SelectorHint.ShouldShow(_settings.Current.SelectorHintSessions))
+        {
+            _settings.Current.SelectorHintSessions =
+                SelectorHint.NextSessionCount(_settings.Current.SelectorHintSessions);
+            FadeHint(arriving: true);
+            StartFollowMotion(); // the pill is drawn on the follow frames
+        }
         if (_options.NeedsCursorFollow || _paneHover)
             StartFollowMotion();
         if (_options.FreezeScreen)
@@ -388,6 +396,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _handleTween?.Dispose();
         _handleTween = null;
         _handleScale = 1d;
+        _hintTween?.Dispose();
+        _hintTween = null;
+        _hintOpacity = 0d;
         _hoverWindow = null;
         _hoverAppName = string.Empty;
         BeginHoverWash(arriving: false);
@@ -463,6 +474,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _hoverWashTween = null;
             _handleTween?.Dispose();
             _handleTween = null;
+            _hintTween?.Dispose();
+            _hintTween = null;
             _followTimer.Dispose();
             _followMotionClock?.Dispose();
             _followMotionClock = null;
@@ -814,6 +827,54 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private double _handleScale = 1d;
     private IDisposable? _handleTween;
 
+    /// <summary>0..1 opacity of the first-run hint pill; 0 means it is not on screen.</summary>
+    private double _hintOpacity;
+    private IDisposable? _hintTween;
+
+    /// <summary>
+    /// Fades the hint in when a session opens and out on the first drag. Both directions go
+    /// through here so the pill can never be left half-faded by a retarget mid-flight.
+    /// </summary>
+    private void FadeHint(bool arriving)
+    {
+        _hintTween?.Dispose();
+        _hintTween = null;
+        if (!arriving && _hintOpacity <= 0d)
+            return;
+
+        double from = _hintOpacity;
+        double to = arriving ? 1d : 0d;
+        _hintTween = WinShot.Core.Motion.Run(
+            arriving ? WinShot.Core.Motion.EnterDurationMs : WinShot.Core.Motion.QuickMs,
+            arriving ? WinShot.Core.Motion.EaseOutCubic : WinShot.Core.Motion.EaseInCubic,
+            progress =>
+            {
+                _hintOpacity = from + ((to - from) * progress);
+                InvalidateHintBand();
+            },
+            () => _hintTween = null);
+    }
+
+    /// <summary>Repaints only the strip the hint pill occupies, on every surface.</summary>
+    private void InvalidateHintBand()
+    {
+        foreach (SD.Rectangle monitor in HintMonitors())
+        {
+            InvalidateScreenRect(new SD.Rectangle(
+                monitor.Left, monitor.Top + (monitor.Height / 8) - 8, monitor.Width, 64));
+        }
+    }
+
+    private IEnumerable<SD.Rectangle> HintMonitors()
+    {
+        yield return _monitorBounds;
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed)
+                yield return pane.MonitorBounds;
+        }
+    }
+
     internal void HandleMouseMove()
     {
         _currentScreen = CursorScreen();
@@ -828,6 +889,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             }
 
             _dragMoved = true;
+            // The hint has done its job the moment a drag starts.
+            FadeHint(arriving: false);
             InvalidateAllSurfaces();
             return;
         }
@@ -1140,6 +1203,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             var (bar, cancel, done) = ActionBarRects(pendBar);
             if (bar.IntersectsWith(monitorBounds))
                 DrawActionBar(g, monitorBounds, bar, cancel, done);
+        }
+
+        if (_hintOpacity > 0d && cursorOnThisSurface && _pendingScreen is null && !_dragging)
+        {
+            SelectorChrome.DrawHint(g, clientSize,
+                SelectorHint.Text(_mode == SelectorMode.Window), _hintOpacity);
         }
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
@@ -1533,6 +1602,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _handleTween?.Dispose();
         _handleTween = null;
         _handleScale = 1d;
+        _hintTween?.Dispose();
+        _hintTween = null;
+        _hintOpacity = 0d;
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();

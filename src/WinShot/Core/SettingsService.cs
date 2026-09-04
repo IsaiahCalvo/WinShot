@@ -103,6 +103,8 @@ public class Settings
     // holding Shift as you take the shot.
     public string WindowCaptureBackground { get; set; } = "wallpaper"; // none | wallpaper
     public string WindowCapturePadding { get; set; } = "default";      // min | default | max
+    // How many selector sessions have carried the first-run hint pill. Saturates at the cap.
+    public int SelectorHintSessions { get; set; } = 0;
 
     // Quick Access overlay (extends the post-capture overlay block)
     public string OverlayPosition { get; set; } = "bottom-right"; // left | right | top | bottom | bottom-left | bottom-right

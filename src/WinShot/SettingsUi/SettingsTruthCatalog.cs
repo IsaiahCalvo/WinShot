@@ -109,6 +109,7 @@ internal static class SettingsTruthCatalog
             "HistoryLimit",
             "NextCounter",
             "LastCaptureRegion",
+            "SelectorHintSessions",
             "LastRecordingRegion",
             "ShortcutBindings",
         };
