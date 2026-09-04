@@ -197,6 +197,36 @@ public class HistoryAcceptanceTests
     }
 
     [Fact]
+    public void Shimmer_RunsOnlyWhileTheThumbnailIsMissing()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => true;
+        try
+        {
+            var item = new HistoryItem("20260803-120000-000.png");
+            Assert.Equal(Visibility.Visible, item.ShimmerVisibility);
+
+            item.Thumbnail = new System.Windows.Media.Imaging.WriteableBitmap(
+                2, 2, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+            Assert.Equal(Visibility.Collapsed, item.ShimmerVisibility);
+
+            // Animation off system-wide leaves the plain placeholder, not a frozen gradient.
+            Motion.AnimationsEnabled = () => false;
+            Assert.Equal(
+                Visibility.Collapsed,
+                new HistoryItem("20260803-120001-000.png").ShimmerVisibility);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+        }
+    }
+
+    [Fact]
+    public void ThumbnailDecode_RunsSeveralAtOnceWithoutTakingTheWholePool() =>
+        Assert.InRange(HistoryWindow.ThumbnailDecodeParallelism, 2, 6);
+
+    [Fact]
     public void StillImageTile_HasNoMediaBar()
     {
         var item = new HistoryItem("20260803-120000-000.png");

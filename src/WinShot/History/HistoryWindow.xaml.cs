@@ -472,6 +472,11 @@ public partial class HistoryWindow : Window
         }
     }
 
+    /// <summary>How many thumbnails decode at once. Enough to hide the latency, few enough
+    /// that a 200-card page does not take the whole thread pool away from the capture flow.</summary>
+    internal static readonly int ThumbnailDecodeParallelism =
+        Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
+
     private static BitmapImage? TryLoadThumbnail(string path)
     {
         try
@@ -497,15 +502,30 @@ public partial class HistoryWindow : Window
         IEnumerable<HistoryItem> items,
         CancellationToken cancellationToken)
     {
-        foreach (HistoryItem item in items.Where(item => (item.IsImage || item.IsGif) && item.Thumbnail is null))
+        var pending = items
+            .Where(item => (item.IsImage || item.IsGif) && item.Thumbnail is null)
+            .ToList();
+
+        // A page is 200 files; decoding them one after another is why the grid used to fill in
+        // visibly, top to bottom, over a static placeholder. They decode together instead, with
+        // a cap so a big page cannot swamp the thread pool the rest of the app shares.
+        using var decoding = new SemaphoreSlim(ThumbnailDecodeParallelism);
+        await Task.WhenAll(pending.Select(async item =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            BitmapImage? thumbnail = await Task.Run(
-                () => TryLoadThumbnail(item.FilePath),
-                cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);
-        }
+            await decoding.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                BitmapImage? thumbnail = await Task.Run(
+                    () => TryLoadThumbnail(item.FilePath),
+                    cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);
+            }
+            finally
+            {
+                decoding.Release();
+            }
+        })).ConfigureAwait(false);
 
         await LoadVideoThumbnailsAsync(items, cancellationToken).ConfigureAwait(false);
         await LoadSourceAppIconsAsync(items, cancellationToken).ConfigureAwait(false);
@@ -1430,6 +1450,14 @@ public sealed class HistoryItem : INotifyPropertyChanged
     /// if the file has no frame a decoder will give us).</summary>
     public Visibility MediaFallbackVisibility => IsVideo && Thumbnail is null ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MissingThumbnailVisibility => (IsImage || IsGif) && Thumbnail is null ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>The sweeping highlight over the placeholder. Off when the user has turned
+    /// animation off system-wide, which leaves the plain placeholder rather than a still
+    /// gradient sitting in the corner of every tile.</summary>
+    public Visibility ShimmerVisibility =>
+        MissingThumbnailVisibility == Visibility.Visible && Motion.AnimationsEnabled()
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     public Visibility ScrollingVisibility => IsScrollingCapture ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Bar across the bottom of a video tile: camcorder glyph, clip length, file size.</summary>
@@ -1464,6 +1492,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
             _thumbnail = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MissingThumbnailVisibility)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShimmerVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ThumbnailVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFallbackVisibility)));
         }

@@ -57,6 +57,7 @@ public class ThemedWindowTests
                 ShowAndClose(new HistoryWindow(history, settings));
                 HistorySelectionInteractionSmoke(history, settings);
                 HistoryActivationSmoke(history, settings);
+                HistoryThumbnailLoadSmoke(settings);
                 ShowAndClose(new SettingsWindow(settings));
                 SettingsWindowShowCloseSmoke(settings);
                 HistoryWindowShowCloseSmoke(history, settings);
@@ -201,6 +202,47 @@ public class ThemedWindowTests
         Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
 
         window.Close();
+    }
+
+    /// <summary>Every card on a page ends up with a decoded thumbnail. The decode now runs
+    /// several files at a time and marshals each result back to the UI thread, so this also
+    /// guards the shape that would deadlock if it were ever awaited from the UI thread.</summary>
+    private static void HistoryThumbnailLoadSmoke(SettingsService settings)
+    {
+        string dir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            for (int index = 0; index < 12; index++)
+            {
+                using var bitmap = new SD.Bitmap(40, 30);
+                using (var graphics = SD.Graphics.FromImage(bitmap))
+                    graphics.Clear(SD.Color.FromArgb(20 + (index * 5), 60, 90));
+                bitmap.Save(
+                    System.IO.Path.Combine(dir, $"20260803-1200{index:00}-000.png"),
+                    System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            var scoped = new HistoryService(settings, () => dir);
+            var window = new HistoryWindow(scoped, settings);
+            window.Show();
+            const System.Reflection.BindingFlags NP =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var reload = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(reload);
+            reload.GetAwaiter().GetResult();
+
+            var list = (ListBox)window.FindName("ItemsList");
+            Assert.Equal(12, list.Items.Count);
+            Assert.All(list.Items.Cast<HistoryItem>(), item => Assert.NotNull(item.Thumbnail));
+
+            window.Close();
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
+        }
     }
 
     private static void ShowAndClose(WF.Form form)

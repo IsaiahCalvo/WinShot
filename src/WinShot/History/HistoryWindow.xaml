@@ -222,8 +222,25 @@
                                             <Grid x:Name="MediaFallback" Visibility="{Binding MediaFallbackVisibility}" Background="{StaticResource SurfaceBrush}">
                                                 <TextBlock Text="{Binding ExtensionLabel}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextDisplay}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Grid>
+                                            <!-- Placeholder while the thumbnail decodes. The highlight sweeping
+                                                 across it says "loading" without a spinner; it is bound off when
+                                                 the user has animation turned off system-wide. -->
                                             <Border Background="{StaticResource SurfaceBrush}" Opacity="0.72" Visibility="{Binding MissingThumbnailVisibility}">
-                                                <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphIllustration}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Grid ClipToBounds="True">
+                                                    <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphIllustration}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    <Rectangle x:Name="Shimmer" Width="110" HorizontalAlignment="Left" Visibility="{Binding ShimmerVisibility}">
+                                                        <Rectangle.Fill>
+                                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                                <GradientStop Color="#00FFFFFF" Offset="0"/>
+                                                                <GradientStop Color="#1FFFFFFF" Offset="0.5"/>
+                                                                <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                                            </LinearGradientBrush>
+                                                        </Rectangle.Fill>
+                                                        <Rectangle.RenderTransform>
+                                                            <TranslateTransform X="-110"/>
+                                                        </Rectangle.RenderTransform>
+                                                    </Rectangle>
+                                                </Grid>
                                             </Border>
                                             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding ScrollingVisibility}">
                                                 <TextBlock Text="SCROLLING" Foreground="White" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"/>
@@ -298,6 +315,21 @@
                             </Grid>
                         </Border>
                         <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding ShimmerVisibility}" Value="Visible">
+                                <DataTrigger.EnterActions>
+                                    <BeginStoryboard x:Name="ShimmerLoop">
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetName="Shimmer"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                             From="-110" To="270" Duration="0:0:1.2"
+                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </DataTrigger.EnterActions>
+                                <DataTrigger.ExitActions>
+                                    <StopStoryboard BeginStoryboardName="ShimmerLoop"/>
+                                </DataTrigger.ExitActions>
+                            </DataTrigger>
                             <!-- A decoded thumbnail cross-fades over whatever was standing in for it
                                  (the placeholder, or a video's "MP4" card) instead of popping. -->
                             <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
