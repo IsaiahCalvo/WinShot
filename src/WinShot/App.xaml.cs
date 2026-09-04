@@ -1395,7 +1395,13 @@ public partial class App : Application
         win.RestoreRequested += RestoreFromHistory;
         win.MultiPinRequested -= PinMultipleFromHistory;
         win.MultiPinRequested += PinMultipleFromHistory;
+        win.NewCaptureRequested -= NewCaptureFromHistory;
+        win.NewCaptureRequested += NewCaptureFromHistory;
     }
+
+    /// <summary>The empty grid's "New capture" button. History stays open, so the capture
+    /// lands on the card and shows up in the grid behind it.</summary>
+    private void NewCaptureFromHistory() => QueueCaptureCommand("capture-area");
 
     private void OpenSettings()
     {

@@ -47,6 +47,8 @@ public partial class HistoryWindow : Window
     private bool _dragging;
     private bool _loadedOnce;
     private DragPreview? _dragPreview;
+    private string? _loadError;
+    private IDisposable? _emptyStateFade;
     private FileSystemWatcher? _watcher;
     private DispatcherTimer? _watcherDebounce;
 
@@ -54,6 +56,10 @@ public partial class HistoryWindow : Window
     public event Action<string>? PinRequested;
     public event Action<string>? RestoreRequested;
     public event Action<IReadOnlyList<string>>? MultiPinRequested;
+
+    /// <summary>Raised by the empty state's "New capture" button — the answer to a grid with
+    /// nothing in it is usually to take one.</summary>
+    public event Action? NewCaptureRequested;
 
     public HistoryWindow(HistoryService history, SettingsService settings)
     {
@@ -87,6 +93,8 @@ public partial class HistoryWindow : Window
             _loadCts?.Cancel();
             StopWatcher();
             _preview?.Close();
+            _emptyStateFade?.Dispose();
+            _emptyStateFade = null;
             _dragPreview?.Dispose();
             _dragPreview = null;
             ClearLoadedItems();
@@ -339,6 +347,7 @@ public partial class HistoryWindow : Window
             await Dispatcher.InvokeAsync(() =>
             {
                 cts.Token.ThrowIfCancellationRequested();
+                _loadError = null;
                 // Remember selection by path so a live refresh doesn't yank it away;
                 // the rebuilt list holds fresh HistoryItem instances.
                 string? selectedPath = SelectedItem()?.FilePath;
@@ -381,7 +390,14 @@ public partial class HistoryWindow : Window
         }
         catch (Exception ex)
         {
+            // A save folder on a disconnected drive is not "no captures yet" — say which it is,
+            // and leave a way to try again once the drive is back.
             Log.Error("Failed to load history", ex);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                _loadError = FriendlyError.For(ex);
+                UpdateEmptyState();
+            });
         }
     }
 
@@ -642,8 +658,39 @@ public partial class HistoryWindow : Window
         _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
     }
 
-    private void UpdateEmptyState() =>
-        EmptyState.Visibility = _items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    private void UpdateEmptyState()
+    {
+        if (_items.Count > 0 && _loadError is null)
+        {
+            _emptyStateFade?.Dispose();
+            _emptyStateFade = null;
+            EmptyState.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        HistoryEmptyState state = HistoryEmptyState.For(_filter, _settings.Current.HistoryEnabled, _loadError);
+        EmptyStateGlyph.Text = state.Glyph;
+        EmptyStateTitle.Text = state.Title;
+        EmptyStateBody.Text = state.Body;
+        NewCaptureButton.Visibility = state.ShowNewCapture ? Visibility.Visible : Visibility.Collapsed;
+        RetryLoadButton.Visibility = state.ShowRetry ? Visibility.Visible : Visibility.Collapsed;
+
+        bool wasVisible = EmptyState.Visibility == Visibility.Visible;
+        EmptyState.Visibility = Visibility.Visible;
+        if (wasVisible) return;
+
+        // Arriving on an empty grid: fade the message in rather than dropping it in place the
+        // instant the last card disappears.
+        _emptyStateFade?.Dispose();
+        EmptyState.Opacity = 0;
+        _emptyStateFade = Motion.Run(
+            Motion.SwapMs,
+            Motion.EaseOutCubic,
+            progress => EmptyState.Opacity = progress,
+            () => _emptyStateFade = null);
+    }
+
+    private void OnNewCapture(object sender, RoutedEventArgs e) => NewCaptureRequested?.Invoke();
 
     private bool MatchesFilter(HistoryItem item) => _filter switch
     {

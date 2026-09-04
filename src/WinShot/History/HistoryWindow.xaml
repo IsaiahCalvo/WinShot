@@ -409,10 +409,21 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
-            <StackPanel x:Name="EmptyState" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
-                <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphHero}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
-                <TextBlock Text="No captures yet" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center"/>
-                <TextBlock Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextBody}" Margin="0,6,0,0" HorizontalAlignment="Center"/>
+            <!-- One panel, three stories: nothing captured yet, nothing matching this filter,
+                 or the folder could not be read. It is clickable, because the answer to an
+                 empty grid is usually "take one now". -->
+            <StackPanel x:Name="EmptyState" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
+                <TextBlock x:Name="EmptyStateGlyph" Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphHero}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="EmptyStateTitle" Text="No captures yet" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock x:Name="EmptyStateBody" Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextBody}" Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                    <Button x:Name="NewCaptureButton" Content="New capture" Style="{StaticResource PillButtonPrimary}"
+                            Click="OnNewCapture" Visibility="Collapsed"
+                            AutomationProperties.Name="Take a new region capture"/>
+                    <Button x:Name="RetryLoadButton" Content="Try again" Style="{StaticResource PillButtonSecondary}"
+                            Click="OnRefresh" Visibility="Collapsed"
+                            AutomationProperties.Name="Read the history folder again"/>
+                </StackPanel>
             </StackPanel>
         </Grid>
     </Grid>
