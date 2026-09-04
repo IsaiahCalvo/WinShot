@@ -1,4 +1,5 @@
-﻿using WinShot.Core;
+﻿using System.Drawing.Drawing2D;
+using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -73,6 +74,37 @@ internal static class SelectorChrome
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
         return new SD.Size(size.Width + 16, size.Height + 8);
+    }
+
+    /// <summary>
+    /// Instructional pill: the inverse of the size label — a light fill with dark text —
+    /// centred horizontally near the top of the surface, so it reads as guidance rather than
+    /// as another readout. <paramref name="opacity"/> lets the caller fade it out on dismissal.
+    /// </summary>
+    public static void DrawHint(SD.Graphics g, SD.Size clientSize, string text, double opacity = 1)
+    {
+        if (string.IsNullOrEmpty(text) || opacity <= 0)
+            return;
+
+        using SD.Font font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
+        SD.Size size = WF.TextRenderer.MeasureText(text, font);
+        int w = size.Width + 28;
+        int h = size.Height + 14;
+        int left = Math.Max(0, (clientSize.Width - w) / 2);
+        int top = Math.Max(0, (int)Math.Round(clientSize.Height * 0.12));
+        var bg = new SD.Rectangle(left, top, w, h);
+
+        double amount = Math.Clamp(opacity, 0, 1);
+        SmoothingMode prev = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var path = GdiPaths.RoundedRect(bg, h / 2))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb((int)Math.Round(238 * amount), 0xF2, 0xF2, 0xF4)))
+            g.FillPath(bgBrush, path);
+        g.SmoothingMode = prev;
+
+        WF.TextRenderer.DrawText(g, text, font, bg,
+            SD.Color.FromArgb((int)Math.Round(255 * amount), 0x1C, 0x1C, 0x1E),
+            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
     }
 
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>

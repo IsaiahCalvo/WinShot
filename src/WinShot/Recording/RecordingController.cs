@@ -271,7 +271,10 @@ public sealed class RecordingController
             {
                 // Same feel as screenshot area capture: hover snaps to windows/elements,
                 // click takes the snap, click-drag draws a marquee.
-                if (await selector.ShowAsync(elementHover: true) != WF.DialogResult.OK ||
+                if (await selector.ShowAsync(
+                        elementHover: true,
+                        hint: "Drag to record part of the screen, or click a window to record it.")
+                    != WF.DialogResult.OK ||
                     selector.SelectedRegionPx is not SD.Rectangle selected)
                     return;
                 region = selected;

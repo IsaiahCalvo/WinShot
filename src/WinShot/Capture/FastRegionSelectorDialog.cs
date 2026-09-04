@@ -92,6 +92,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
     // ShowAsync, flipped by tapping Alt. The latch swallows key-repeat while Alt is held.
     private bool _magnifierOn;
     private bool _altLatched;
+    // Instructional pill: text for this session (empty = none), and its fade-out, which runs
+    // once on the first mouse-down and never comes back for that session.
+    private string _hint = "";
+    private double _hintOpacity;
+    private IDisposable? _hintFade;
 
     public FastRegionSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
@@ -196,10 +201,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
         Park();
     }
 
+    /// <param name="hint">Instructional pill shown until the first mouse-down. Empty for the
+    /// screenshot flows, which have their own onboarding; the recording flow passes one
+    /// because its selector is the only thing on screen when a take is being framed.</param>
     public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area,
-        bool paneHover = false, bool elementHover = false)
+        bool paneHover = false, bool elementHover = false, string? hint = null)
     {
         _mode = mode;
+        _hint = hint ?? "";
+        _hintOpacity = _hint.Length > 0 ? 1 : 0;
         _paneHover = paneHover || elementHover;
         _elementGranularity = elementHover;
         SelectedByPaneClick = false;
@@ -368,6 +378,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _dragging = false;
         _dragMoved = false;
         _pendingScreen = null;
+        _hintFade?.Dispose();
+        _hintFade = null;
+        _hint = "";
+        _hintOpacity = 0;
         _hoverBarButton = -1;
         _pressedBarButton = -1;
         _resizeHandle = -1;
@@ -716,7 +730,32 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _dragStartScreen = screen;
         _dragging = true;
         _dragMoved = false;
+        DismissHint();
         InvalidateAllSurfaces();
+    }
+
+    /// <summary>
+    /// Fades the instructional pill away on the first mouse-down — it has done its job the
+    /// moment the user acts, and yanking it off screen mid-gesture reads as a glitch.
+    /// </summary>
+    private void DismissHint()
+    {
+        if (_hint.Length == 0 || _hintFade is not null || _hintOpacity <= 0)
+            return;
+
+        _hintFade = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutCubic,
+            amount =>
+            {
+                _hintOpacity = 1 - amount;
+                InvalidateAllSurfaces();
+            },
+            () =>
+            {
+                _hintFade = null;
+                _hint = "";
+            });
     }
 
     internal void HandleMouseMove()
@@ -1014,6 +1053,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (bar.IntersectsWith(monitorBounds))
                 DrawActionBar(g, monitorBounds, bar, cancel, done);
         }
+
+        // Instructional pill, on the monitor the cursor is on, while nothing has been drawn.
+        if (_hintOpacity > 0 && cursorOnThisSurface && _pendingScreen is null)
+            SelectorChrome.DrawHint(g, clientSize, _hint, _hintOpacity);
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
         // rect, and never in Window mode where the window highlight is the affordance).
@@ -1342,6 +1385,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void Complete(WF.DialogResult result)
     {
         DialogResult = result;
+        // The pill's fade holds a timer-resolution handle; an Escape mid-fade must release it.
+        _hintFade?.Dispose();
+        _hintFade = null;
+        _hintOpacity = 0;
         StopFollowMotion();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
