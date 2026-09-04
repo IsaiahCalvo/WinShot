@@ -45,8 +45,9 @@
         <TextBlock x:Name="InfoText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}" Margin="0,8,0,0"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-            <Button Style="{StaticResource PillButtonPrimary}" Content="Resize" Click="OnOk" IsDefault="True"/>
+            <!-- Primary last: the same footer order as every other dialog in the app. -->
             <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" IsCancel="True"/>
+            <Button Style="{StaticResource PillButtonPrimary}" Content="Resize" Click="OnOk" IsDefault="True"/>
         </StackPanel>
     </StackPanel>
 </Window>

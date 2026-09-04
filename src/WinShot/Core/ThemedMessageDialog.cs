@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
@@ -49,7 +49,7 @@ public static class ThemedMessageDialog
     internal static Button AddButton(
         StackPanel footer, string label, bool primary, Action onClick, string? styleKey = null)
     {
-        var button = new Button { Content = label, MinWidth = 84, Margin = new Thickness(8, 0, 0, 0) };
+        var button = new Button { Content = label, MinWidth = 84 };
         button.SetResourceReference(
             FrameworkElement.StyleProperty,
             styleKey ?? (primary ? "PillButtonPrimary" : "PillButtonSecondary"));

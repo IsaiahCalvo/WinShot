@@ -82,13 +82,14 @@
 
         <StackPanel Grid.Row="3" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="0,18,0,0">
-            <!-- Enter runs the primary action (Recover); Esc keeps files for later. -->
-            <Button Content="Recover" Style="{StaticResource PillButtonPrimary}"
-                    Click="OnRecover" MinWidth="92" IsDefault="True"
-                    automation:AutomationProperties.Name="Recover unfinished recordings"/>
+            <!-- Primary last, so the default action is the rightmost one in every dialog.
+                 Enter runs the primary action (Recover); Esc keeps files for later. -->
             <Button Content="Keep for later" Style="{StaticResource PillButtonSecondary}"
                     IsCancel="True" MinWidth="112"
                     automation:AutomationProperties.Name="Keep unfinished recordings for later"/>
+            <Button Content="Recover" Style="{StaticResource PillButtonPrimary}"
+                    Click="OnRecover" MinWidth="92" IsDefault="True"
+                    automation:AutomationProperties.Name="Recover unfinished recordings"/>
         </StackPanel>
     </Grid>
 </Window>

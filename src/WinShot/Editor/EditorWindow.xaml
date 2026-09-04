@@ -162,10 +162,11 @@
                 <DockPanel x:Name="EditorStyleBar" Margin="0,8,0,0" Visibility="Collapsed">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="CropPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                            <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
-                                    AutomationProperties.Name="Apply crop"/>
+                            <!-- Primary last, like every other button pair in the app. -->
                             <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" Click="OnCancelCrop"
                                     AutomationProperties.Name="Cancel crop"/>
+                            <Button Style="{StaticResource PillButtonPrimary}" Content="Apply crop" Click="OnApplyCrop"
+                                    AutomationProperties.Name="Apply crop"/>
                         </StackPanel>
                     </StackPanel>
 
