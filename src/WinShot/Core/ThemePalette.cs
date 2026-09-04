@@ -1,4 +1,4 @@
-using System.Drawing.Text;
+﻿using System.Drawing.Text;
 using System.Linq;
 using SD = System.Drawing;
 
@@ -39,6 +39,36 @@ public static class ThemePalette
     public static readonly SD.Color HoverFill = SD.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF);
     public static readonly SD.Color Border = SD.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF);
     public static readonly SD.Color BorderStrong = SD.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF);
+
+    // ============================ TYPE SCALE ============================
+    // The same six steps Theme.xaml defines in DIP, in points, because GDI+ sizes
+    // fonts in points and WPF in DIP: 1 pt = 96/72 DIP. A WinForms label and the
+    // WPF one beside it are the same size only if both come from here.
+    public const float TextMicroPt = 7.5f;      // 10 DIP
+    public const float TextCaptionPt = 8.25f;   // 11 DIP
+    public const float TextBodyPt = 9f;         // 12 DIP
+    public const float TextBodyLgPt = 9.75f;    // 13 DIP
+    public const float TextTitlePt = 12f;       // 16 DIP
+    public const float TextDisplayPt = 16.5f;   // 22 DIP
+
+    /// <summary>
+    /// Off the scale deliberately: the quick-actions card is pinned, and its menu
+    /// was measured to 202x357 by hand at this size. TextCaptionPt reflows it.
+    /// </summary>
+    public const float PinnedMenuRowPt = 8.5f;
+
+    /// <summary>
+    /// Off the scale deliberately: the quick-actions card is pinned, and its action
+    /// labels were sized to fit under the card's glyphs at this value.
+    /// QuickAccessOverlayInteractionTests pins it.
+    /// </summary>
+    public const float PinnedCardLabelPt = 7f;
+
+    /// <summary>
+    /// Off the scale deliberately: the quick-access tooltip is a 2 mm-tall chip whose
+    /// width QuickAccessTooltipLayoutTests pins. TextMicroPt widens it by a character.
+    /// </summary>
+    public const float PinnedTooltipPt = 6.5f;
 
     private static readonly bool HasFluentIcons = IsFontInstalled("Segoe Fluent Icons");
 

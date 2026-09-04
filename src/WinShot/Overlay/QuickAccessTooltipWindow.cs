@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -113,7 +113,7 @@ internal static class QuickAccessTooltipRenderer
         QuickAccessOverlayVisuals visuals,
         int dpi = 96)
     {
-        using var font = ThemePalette.UiFont(6.5f);
+        using var font = ThemePalette.UiFont(ThemePalette.PinnedTooltipPt);
         QuickAccessTooltipLayout layout = QuickAccessTooltipLayout.Calculate(text, font, dpi);
         var bitmap = new SD.Bitmap(layout.Size.Width, layout.Size.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
         bitmap.SetResolution(dpi, dpi);
@@ -131,7 +131,7 @@ internal sealed class QuickAccessTooltipWindow : WF.Form
     private const int WsExNoActivate = 0x08000000;
     private readonly string _text;
     private readonly QuickAccessOverlayVisuals _visuals;
-    private readonly SD.Font _font = ThemePalette.UiFont(6.5f);
+    private readonly SD.Font _font = ThemePalette.UiFont(ThemePalette.PinnedTooltipPt);
     private readonly QuickAccessTooltipLayout _layout;
     private readonly int _dpi;
 

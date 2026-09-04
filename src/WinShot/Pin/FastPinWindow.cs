@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using WinShot.Core;
 using WinShot.Overlay;
@@ -349,7 +349,7 @@ public sealed class FastPinWindow : WF.Form
     private void DrawReadout(SD.Graphics g, string text, SD.Point near)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using var font = ThemePalette.UiFont(9f);
+        using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
         int w = size.Width + 16;
         int h = size.Height + 8;

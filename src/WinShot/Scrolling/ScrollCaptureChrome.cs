@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -229,7 +229,7 @@ public sealed class ScrollControlsBar : WF.Form
             Size = new SD.Size(250, 24),
             AutoEllipsis = true,
             ForeColor = ThemePalette.TextSecondary,
-            Font = ThemePalette.UiFont(9f),
+            Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
             Text = "Scroll capture ready",
             TextAlign = SD.ContentAlignment.MiddleLeft,
             Anchor = WF.AnchorStyles.None,
@@ -388,7 +388,7 @@ public sealed class ScrollControlsBar : WF.Form
             Margin = new WF.Padding(8, 0, 0, 0),
             Cursor = WF.Cursors.Hand,
             Anchor = WF.AnchorStyles.None,
-            Font = ThemePalette.UiFont(9.5f, SD.FontStyle.Bold),
+            Font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
             MinimumSize = new SD.Size(0, 40),
             AccessibleName = accessibleName,
             AccessibleDescription = accessibleDescription,
@@ -513,7 +513,7 @@ public sealed class ScrollPreviewPanel : WF.Form
             Dock = WF.DockStyle.Bottom,
             Height = 32, // two lines, so the "slow down" warning fits
             ForeColor = ThemePalette.TextSecondary,
-            Font = ThemePalette.UiFont(8.5f),
+            Font = ThemePalette.UiFont(ThemePalette.TextCaptionPt),
             Text = "Capturing…",
             TextAlign = SD.ContentAlignment.MiddleCenter,
             AccessibleName = "Scrolling capture preview status",

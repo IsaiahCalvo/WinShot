@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -98,7 +98,7 @@ public sealed class FastRecordingCountdownWindow : WF.Form
 
         // Real bold face, not faux-bold synthesized over Semibold.
         using var countFont = new SD.Font("Segoe UI", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
-        using var hintFont = new SD.Font("Segoe UI", 11f, SD.FontStyle.Regular, SD.GraphicsUnit.Point);
+        using var hintFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
         var countText = _remaining.ToString();
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |

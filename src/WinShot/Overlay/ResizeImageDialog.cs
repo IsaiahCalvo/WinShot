@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -40,7 +40,7 @@ public sealed class ResizeImageDialog : WF.Form
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.CenterScreen;
         TopMost = true;
-        Font = ThemePalette.UiFont(9f);
+        Font = ThemePalette.UiFont(ThemePalette.TextBodyPt);
         SetStyle(
             WF.ControlStyles.AllPaintingInWmPaint |
             WF.ControlStyles.OptimizedDoubleBuffer |

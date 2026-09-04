@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -54,7 +54,7 @@ public sealed class OcrToastWindow : WF.Form
         var titleLabel = Label(title, 14, 14, width - 28, 11f, ThemePalette.TextPrimary, bold: true);
         Controls.Add(titleLabel);
 
-        var previewLabel = Label(Trim(preview), 14, 38, width - 28, 9.5f, ThemePalette.TextSecondary);
+        var previewLabel = Label(Trim(preview), 14, 38, width - 28, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary);
         previewLabel.AutoEllipsis = true;
         previewLabel.UseMnemonic = false;
         Controls.Add(previewLabel);
@@ -159,7 +159,7 @@ public sealed class OcrToastWindow : WF.Form
         {
             AutoSize = false,
             BackColor = SD.Color.Transparent,
-            Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color,
             Location = new SD.Point(S(x), S(y)),
             Size = new SD.Size(S(width), S(22)),

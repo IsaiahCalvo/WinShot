@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Overlay;
 using Xunit;
 
@@ -12,7 +12,7 @@ public class QuickAccessTooltipLayoutTests
     [InlineData(192)]
     public void LayoutScalesWithoutClippingText(int dpi)
     {
-        using var font = ThemePalette.UiFont(6.5f);
+        using var font = ThemePalette.UiFont(ThemePalette.PinnedTooltipPt);
         QuickAccessTooltipLayout layout = QuickAccessTooltipLayout.Calculate("Open Annotate tool (Ctrl+E)", font, dpi);
 
         Assert.True(layout.Size.Width > layout.TextBounds.Width);

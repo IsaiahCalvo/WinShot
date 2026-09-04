@@ -46,7 +46,7 @@ public sealed class FastDisplayPickerDialog : WF.Form
         panel.Controls.Add(new WF.Label
         {
             AutoSize = false,
-            Font = new SD.Font("Segoe UI", 10f, SD.FontStyle.Bold),
+            Font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
             ForeColor = TextColor,
             Height = S(24),
             Margin = new WF.Padding(0, 0, 0, S(8)),

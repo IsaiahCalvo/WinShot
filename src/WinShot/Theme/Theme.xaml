@@ -99,6 +99,50 @@
     <sys:Double x:Key="CircleGlyphSize">17</sys:Double>
     <sys:Double x:Key="PillHeight">30</sys:Double>
 
+    <!-- ============================ TYPE SCALE ============================
+         Six steps, in DIP. Core/ThemePalette.cs carries the same six in points
+         for the WinForms surfaces, so a WPF label and the owner-drawn one beside
+         it are the same size. New UI picks a step; it does not invent a number.
+         ==================================================================== -->
+    <sys:Double x:Key="TextMicro">10</sys:Double>     <!-- dense list metadata, tray-adjacent chrome -->
+    <sys:Double x:Key="TextCaption">11</sys:Double>   <!-- hints, field labels, secondary values -->
+    <sys:Double x:Key="TextBody">12</sys:Double>      <!-- default running text -->
+    <sys:Double x:Key="TextBodyLg">13</sys:Double>    <!-- buttons, inputs, list titles -->
+    <sys:Double x:Key="TextTitle">16</sys:Double>     <!-- section and window headings -->
+    <sys:Double x:Key="TextDisplay">22</sys:Double>   <!-- the one big number or wordmark on a pane -->
+
+    <!-- Icon-font glyphs used as illustration rather than as type: empty-state art,
+         a thumbnail placeholder, the badge on a selected card, the small chevron
+         trailing a split button. Sized apart from the type scale — they are
+         pictures, and matching them to a text step makes them read as too small. -->
+    <sys:Double x:Key="GlyphMicro">9</sys:Double>
+    <sys:Double x:Key="GlyphBadge">14</sys:Double>
+    <sys:Double x:Key="GlyphIllustration">34</sys:Double>
+    <sys:Double x:Key="GlyphHero">48</sys:Double>
+
+    <!-- ========================== SPACING SCALE ==========================
+         Every gap in the app is one of these five. Margins are Thickness and
+         cannot be composed from a Double in XAML, so a layout that needs a
+         non-uniform gap names a Thickness here rather than writing digits
+         inline in four different files.
+         ==================================================================== -->
+    <sys:Double x:Key="Space1">4</sys:Double>
+    <sys:Double x:Key="Space2">8</sys:Double>
+    <sys:Double x:Key="Space3">12</sys:Double>
+    <sys:Double x:Key="Space4">16</sys:Double>
+    <sys:Double x:Key="Space5">24</sys:Double>
+
+    <!-- Settings' two-column geometry. Everything under a labelled row starts at
+         the control column: the label width plus one Space3 gutter. That sum was
+         written out as a bare 162 in four places and described in a comment in a
+         fifth, which is five things to remember the next time the label column
+         moves. It is one number now. -->
+    <sys:Double x:Key="SettingsRowLabelWidth">150</sys:Double>
+    <sys:Double x:Key="SettingsRowIndent">162</sys:Double>
+    <Thickness x:Key="SettingsRowIndentMargin">162,0,0,0</Thickness>
+    <Thickness x:Key="SettingsSubHintMargin">162,1,0,2</Thickness>
+    <Thickness x:Key="SettingsHintBelowMargin">162,4,0,0</Thickness>
+
     <!-- ============================= MOTION =============================
          Mirrors Core/Motion.cs, so a WPF window and a WinForms overlay move at
          the same speed: Quick for hover/press tints, Swap for one pane replacing
@@ -915,7 +959,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="CheckGlyph" Grid.Column="0" Text="&#xE73E;"
-                                       FontFamily="{StaticResource IconFont}" FontSize="12"
+                                       FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextBody}"
                                        VerticalAlignment="Center" Visibility="Hidden"/>
                             <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}"

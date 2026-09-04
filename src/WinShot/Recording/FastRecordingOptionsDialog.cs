@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using ScreenRecorderLib;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -555,7 +555,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         new()
         {
             AutoSize = false,
-            Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? MutedText,
             Location = new SD.Point(S(x), 0),
             Size = new SD.Size(S(width), S(22)),

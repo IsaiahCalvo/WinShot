@@ -502,7 +502,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             Label = label,
             // 25px in the 512px HTML reference scales to roughly 9px on this 192px card.
-            LabelFont = ThemePalette.UiFont(7f),
+            LabelFont = ThemePalette.UiFont(ThemePalette.PinnedCardLabelPt),
         });
 
     /// <summary>
@@ -608,7 +608,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             return;
 
         // The same understated face the Copy pill uses — this is a status line, not a banner.
-        using var font = ThemePalette.UiFont(7f);
+        using var font = ThemePalette.UiFont(ThemePalette.PinnedCardLabelPt);
         using var text = new SD.SolidBrush(SD.Color.FromArgb(alpha, _visuals.Glyph));
         using var format = new SD.StringFormat
         {

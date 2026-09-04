@@ -140,6 +140,46 @@ public class DarkControlPaletteTests
     });
 
     /// <summary>
+    /// Theme.xaml sizes type in DIP and ThemePalette in points, because WPF and GDI+
+    /// disagree about the unit. They are the same scale, so every step has to convert
+    /// exactly (1 pt = 96/72 DIP) — this file already drifted once on colours, where
+    /// a WinForms label quietly stopped matching the WPF one beside it.
+    /// </summary>
+    [Theory]
+    [InlineData("TextMicro", ThemePalette.TextMicroPt)]
+    [InlineData("TextCaption", ThemePalette.TextCaptionPt)]
+    [InlineData("TextBody", ThemePalette.TextBodyPt)]
+    [InlineData("TextBodyLg", ThemePalette.TextBodyLgPt)]
+    [InlineData("TextTitle", ThemePalette.TextTitlePt)]
+    [InlineData("TextDisplay", ThemePalette.TextDisplayPt)]
+    public void TypeScale_MeasuresTheSameInBothUnits(string dipToken, float points)
+        => OnTheme(theme => Assert.Equal((double)points * 96d / 72d, (double)theme[dipToken], 6));
+
+    /// <summary>
+    /// The steps have to stay distinct and ordered, or "one size up" stops meaning
+    /// anything and the scale is just six names for the same number.
+    /// </summary>
+    [Fact]
+    public void TypeScale_StepsRiseAndNeverRepeat() => OnTheme(theme =>
+    {
+        double[] steps = new[] { "TextMicro", "TextCaption", "TextBody", "TextBodyLg", "TextTitle", "TextDisplay" }
+            .Select(k => (double)theme[k]).ToArray();
+
+        Assert.Equal(steps.OrderBy(v => v), steps);
+        Assert.Equal(steps.Length, steps.Distinct().Count());
+    });
+
+    /// <summary>
+    /// Settings' control column is the label column plus one gutter. It used to be
+    /// spelled 162 in four margins with nothing tying it to the 150 it derives from.
+    /// </summary>
+    [Fact]
+    public void SettingsRowIndent_IsTheLabelColumnPlusOneGutter() => OnTheme(theme =>
+        Assert.Equal(
+            (double)theme["SettingsRowLabelWidth"] + (double)theme["Space3"],
+            (double)theme["SettingsRowIndent"]));
+
+    /// <summary>
     /// The chip paints from the style's Background, which is what lets ModeToolButton
     /// be one Setter instead of a second copy of the whole template.
     /// </summary>

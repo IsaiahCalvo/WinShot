@@ -199,7 +199,7 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
         // The rows own their left inset; the drop-down must not add one of its own.
         ShowImageMargin = false;
         Renderer = new RoundedMenuRenderer();
-        Font = ThemePalette.UiFont(8.5f);
+        Font = ThemePalette.UiFont(ThemePalette.PinnedMenuRowPt);
     }
 
     /// <summary>

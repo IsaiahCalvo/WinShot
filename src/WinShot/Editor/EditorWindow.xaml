@@ -268,11 +268,11 @@
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <TextBlock x:Name="EffectStrengthLabel" Text="Strength" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
                             <RadioButton x:Name="StrengthLightBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Light" Content="S"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Light" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Light"/>
+                                         FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Light" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Light"/>
                             <RadioButton x:Name="StrengthMediumBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Medium" Content="M"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
+                                         FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Medium" Checked="OnEffectStrengthChecked" IsChecked="True" AutomationProperties.Name="Medium"/>
                             <RadioButton x:Name="StrengthStrongBtn" Style="{StaticResource ToolButton}" GroupName="EffectStrength" Tag="Strong" Content="L"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Strong" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Strong"/>
+                                         FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Strong" Checked="OnEffectStrengthChecked" AutomationProperties.Name="Strong"/>
                         </StackPanel>
 
                         <StackPanel x:Name="TextStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -296,10 +296,10 @@
                         <StackPanel x:Name="StepModePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/><TextBlock Text="Count" Style="{StaticResource FieldLabel}" Margin="0,0,6,0"/>
                             <RadioButton x:Name="StepNumberBtn" Style="{StaticResource ToolButton}" GroupName="StepMode" Tag="Number" Content="1"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Number badges" Checked="OnStepModeChecked" IsChecked="True"
+                                         FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Number badges" Checked="OnStepModeChecked" IsChecked="True"
                                          AutomationProperties.Name="Number badges"/>
                             <RadioButton x:Name="StepLetterBtn" Style="{StaticResource ToolButton}" GroupName="StepMode" Tag="Letter" Content="A"
-                                         FontFamily="Segoe UI" FontSize="13" ToolTip="Letter badges" Checked="OnStepModeChecked"
+                                         FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" ToolTip="Letter badges" Checked="OnStepModeChecked"
                                          AutomationProperties.Name="Letter badges"/>
                             <Button Style="{StaticResource PillButtonSecondary}" Content="Reset to 1" ToolTip="Reset counter"
                                     Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>
@@ -370,7 +370,7 @@
                             <StackPanel Orientation="Horizontal">
                                 <Rectangle x:Name="EyedropColorRect" Width="14" Height="14" RadiusX="2" RadiusY="2"
                                            Stroke="#88FFFFFF" StrokeThickness="1"/>
-                                <TextBlock x:Name="EyedropHexText" Foreground="White" FontSize="11" Margin="6,0,0,0"/>
+                                <TextBlock x:Name="EyedropHexText" Foreground="White" FontSize="{StaticResource TextCaption}" Margin="6,0,0,0"/>
                             </StackPanel>
                         </Border>
                     </Canvas>
@@ -399,7 +399,7 @@
                         ToolTip="Drag this image into another app" AutomationProperties.Name="Drag and drop"
                         AutomationProperties.HelpText="Press and drag to drop the edited image as a file into another application.">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                        <TextBlock Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextBody}"
                                    VerticalAlignment="Center" Opacity="0.7" Margin="0,0,8,0"/>
                         <TextBlock Text="Drag &amp; Drop" VerticalAlignment="Center"/>
                     </StackPanel>
