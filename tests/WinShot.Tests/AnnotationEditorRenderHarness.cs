@@ -61,11 +61,13 @@ public class AnnotationEditorRenderHarness
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-filled-rectangle-context.png"));
 
-                var moreTools = (System.Windows.Controls.Primitives.Popup)editor.FindName("MoreToolsPopup")!;
-                moreTools.IsOpen = true;
+                SelectTool(editor, EditorTool.Arrow);
                 Pump(4);
-                RenderElementToPng(moreTools.Child, Path.Combine(outDir, "editor-after-more-tools-overflow.png"));
-                moreTools.IsOpen = false;
+                var arrowStyle = (System.Windows.Controls.Primitives.Popup)editor.FindName("ArrowStylePopup")!;
+                ((Button)editor.FindName("ArrowStyleButton")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump(6);
+                RenderElementToPng(arrowStyle.Child, Path.Combine(outDir, "editor-after-arrow-style-popover.png"));
+                arrowStyle.IsOpen = false;
 
                 UIElement selectedRectangle = AddRepresentativeAnnotations(canvas);
                 Pump(6);

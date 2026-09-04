@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -70,8 +71,14 @@ public partial class EditorWindow : Window
 
     private bool _syncingThicknessButtons;
 
-    /// <summary>Guards the swatch row while a tool switch re-checks it, so no restyle fires.</summary>
-    private bool _syncingColorSwatches;
+    /// <summary>Which category's sub-row is showing.</summary>
+    private EditorToolCategory _category = EditorToolCategory.Shapes;
+
+    /// <summary>Guards the category radios while a tool switch re-checks them, so no tool is re-armed.</summary>
+    private bool _syncingCategory;
+
+    /// <summary>The Select chevron's rubber-band rule; Auto keeps the drag-direction gesture.</summary>
+    private MarqueeModePreference _marqueePreference = MarqueeModePreference.Auto;
 
     /// <summary>Re-entrancy guard for the size field (see ApplySize).</summary>
     private bool _applyingSize;
@@ -90,6 +97,7 @@ public partial class EditorWindow : Window
     private StyleSnapshot? _opacityBefore;
     private UIElement? _opacityElement;
     private double? _cropRatio; // null = free
+    private string _cropRatioTag = ""; // the picked ratio menu row ("" = Free)
     private EditorTool _toolBeforeEyedropper = EditorTool.Select;
     private bool _colorPickerBuilt;
     private Color _customColor = Color.FromRgb(0xFF, 0x3B, 0x30); // last custom / eyedropper color
@@ -249,6 +257,12 @@ public partial class EditorWindow : Window
             DispatcherPriority.Background,
             new Action(() =>
             {
+                // The sub-row opens on Shapes so the editor never starts with an empty
+                // tool strip — but no tool is armed: the pointer stays the active tool.
+                _syncingCategory = true;
+                try { CategoryShapesBtn.IsChecked = true; }
+                finally { _syncingCategory = false; }
+                ShowCategoryRow(EditorToolCategory.Shapes);
                 UpdateContextPanels();
                 EditorBottomBar.Visibility = Visibility.Visible;
             }));
@@ -550,8 +564,8 @@ public partial class EditorWindow : Window
         if (IsLoaded)
         {
             UncheckOtherToolButtons(rb);
-            MoreToolsPopup.IsOpen = false;
-            SizePresetPopup.IsOpen = false;
+            CloseToolbarPopups();
+            SyncCategoryToTool();
             UpdateCursor();
             UpdateContextPanels();
         }
@@ -576,8 +590,8 @@ public partial class EditorWindow : Window
         if (FillSolidBtn is not null) FillSolidBtn.IsChecked = true;
         if (IsLoaded)
         {
-            MoreToolsPopup.IsOpen = false;
-            SizePresetPopup.IsOpen = false;
+            CloseToolbarPopups();
+            SyncCategoryToTool();
             UpdateCursor();
             UpdateContextPanels();
         }
@@ -585,12 +599,42 @@ public partial class EditorWindow : Window
 
     private IEnumerable<RadioButton> ToolButtons()
     {
-        if (CropUtilityBtn is not null) yield return CropUtilityBtn;
-        if (ToolPanel is not null)
-            foreach (var rb in ToolPanel.Children.OfType<RadioButton>()) yield return rb;
-        if (MoreToolPanel is not null)
-            foreach (var rb in MoreToolPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (SelectToolBtn is not null) yield return SelectToolBtn;
+        if (PanToolBtn is not null) yield return PanToolBtn;
+        if (CategoryToolRow is null) yield break;
+        foreach (Panel row in CategoryRows())
+            foreach (var rb in row.Children.OfType<RadioButton>())
+                yield return rb;
     }
+
+    private IEnumerable<Panel> CategoryRows()
+    {
+        if (DrawToolRow is not null) yield return DrawToolRow;
+        if (ShapesToolRow is not null) yield return ShapesToolRow;
+        if (TextToolRow is not null) yield return TextToolRow;
+        if (RedactToolRow is not null) yield return RedactToolRow;
+        if (ImageToolRow is not null) yield return ImageToolRow;
+    }
+
+    private Panel? RowFor(EditorToolCategory category) => category switch
+    {
+        EditorToolCategory.Draw => DrawToolRow,
+        EditorToolCategory.Shapes => ShapesToolRow,
+        EditorToolCategory.Text => TextToolRow,
+        EditorToolCategory.Redact => RedactToolRow,
+        EditorToolCategory.Image => ImageToolRow,
+        _ => null,
+    };
+
+    private RadioButton? CategoryButton(EditorToolCategory category) => category switch
+    {
+        EditorToolCategory.Draw => CategoryDrawBtn,
+        EditorToolCategory.Shapes => CategoryShapesBtn,
+        EditorToolCategory.Text => CategoryTextBtn,
+        EditorToolCategory.Redact => CategoryRedactBtn,
+        EditorToolCategory.Image => CategoryImageBtn,
+        _ => null,
+    };
 
     private void UncheckOtherToolButtons(RadioButton selected)
     {
@@ -599,10 +643,86 @@ public partial class EditorWindow : Window
                 rb.IsChecked = false;
     }
 
-    private void OnMoreToolsClick(object sender, RoutedEventArgs e) =>
-        MoreToolsPopup.IsOpen = !MoreToolsPopup.IsOpen;
+    private void CloseToolbarPopups()
+    {
+        SizePresetPopup.IsOpen = false;
+        SelectModePopup.IsOpen = false;
+        ArrowStylePopup.IsOpen = false;
+        TextStylePopup.IsOpen = false;
+        CropRatioPopup.IsOpen = false;
+        ColorPickerPopup.IsOpen = false;
+    }
 
-    /// <summary>Shows the crop-ratio, text-style, step-mode, arrow-style and effect-strength controls only while their tool is active.</summary>
+    // ------------------------------------------------------------- categories
+
+    /// <summary>
+    /// A category button opens its sub-row and arms the category's first tool — except
+    /// Image, whose row is mostly one-shot actions, so clicking it must not silently drop
+    /// the user into a crop. Re-picking the category the active tool already belongs to
+    /// leaves that tool alone.
+    /// </summary>
+    private void OnCategoryChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tag ||
+            !Enum.TryParse(tag, out EditorToolCategory category))
+            return;
+        if (!IsLoaded || _syncingCategory) { _category = category; return; }
+
+        _category = category;
+        ShowCategoryRow(category);
+        CloseToolbarPopups();
+
+        if (EditorShellContract.CategoryOf(_tool) == category)
+            return;
+        if (EditorShellContract.DefaultToolFor(category) is EditorTool armed)
+            CheckToolButton(armed);
+        else
+            UpdateContextPanels();
+    }
+
+    /// <summary>Lights the category that owns the active tool, without re-arming a tool.</summary>
+    private void SyncCategoryToTool()
+    {
+        if (EditorShellContract.CategoryOf(_tool) is not EditorToolCategory category)
+            return;
+        _category = category;
+        _syncingCategory = true;
+        try
+        {
+            if (CategoryButton(category) is { IsChecked: not true } button)
+                button.IsChecked = true;
+        }
+        finally
+        {
+            _syncingCategory = false;
+        }
+        ShowCategoryRow(category);
+    }
+
+    /// <summary>
+    /// Swaps the sub-row to one category's tools. The row floats over the canvas, so the
+    /// swap is a 6 DIP drop + fade rather than a cut — and the image never moves.
+    /// </summary>
+    private void ShowCategoryRow(EditorToolCategory category)
+    {
+        Panel? target = RowFor(category);
+        if (target is null) return;
+
+        bool wasHidden = CategoryToolRow.Visibility != Visibility.Visible;
+        bool changed = wasHidden;
+        foreach (Panel row in CategoryRows())
+        {
+            bool show = ReferenceEquals(row, target);
+            if (show && row.Visibility != Visibility.Visible) changed = true;
+            row.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        CategoryToolRow.Visibility = Visibility.Visible;
+        if (changed)
+            CategoryToolRow.BeginStoryboard((Storyboard)FindResource("SubRowIn"));
+    }
+
+    /// <summary>Shows the active tool's own controls, and hides the row entirely when it has none.</summary>
     private void UpdateContextPanels()
     {
         EditorContextControls controls = EditorShellContract.ContextFor(_tool, _filledRectangleMode);
@@ -617,6 +737,7 @@ public partial class EditorWindow : Window
         EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
+        CropToolsPanel.Visibility = Show(Has(EditorContextControls.CropTools));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
         if (Has(EditorContextControls.Thickness))
             SyncSizeField();
@@ -626,12 +747,9 @@ public partial class EditorWindow : Window
             SyncColorFromTool();
 
         if (Has(EditorContextControls.EffectStrength))
-        {
-            EffectStrengthLabel.Text = _tool == EditorTool.Blur ? "Blur" : "Pixelate";
             SyncEffectStrengthButtons(_tool == EditorTool.Blur ? _blurStrength : _pixelateStrength);
-        }
 
-        EditorStyleBar.Visibility = controls == EditorContextControls.None
+        ContextPanel.Visibility = controls == EditorContextControls.None
             ? Visibility.Collapsed
             : Visibility.Visible;
     }
@@ -648,10 +766,13 @@ public partial class EditorWindow : Window
         _syncingThicknessButtons = true;
         try
         {
+            // The field lost its "Width" / "Size" caption when the toolbar dropped its
+            // labels; the word now lives in the preset menu's heading, the tooltip and
+            // the accessible name, which is where it was always doing the real work.
             string label = AnnotationSize.LabelFor(_tool);
-            ThicknessLabel.Text = label;
             SizePresetHeading.Text = label;
             SizeBox.Text = ((int)_thickness).ToString(CultureInfo.InvariantCulture);
+            SizeFieldBorder.ToolTip = label;
             AutomationProperties.SetName(SizeBox, $"Annotation {label.ToLowerInvariant()}");
             SyncSizePresetRows();
         }
@@ -861,11 +982,18 @@ public partial class EditorWindow : Window
         UpdateContextPanels();
     }
 
-    private void OnColorChecked(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Arms a tool that has no button of its own — today only CurvedArrow, which is the
+    /// Curved row of the arrow-style menu. The Arrow button stays lit, because to the user
+    /// this is still the arrow tool wearing a different style.
+    /// </summary>
+    private void SetToolWithoutButton(EditorTool tool)
     {
-        if (_syncingColorSwatches) return;
-        if (sender is RadioButton rb && rb.Background is SolidColorBrush brush)
-            SetCurrentColor(brush.Color);
+        CommitText();
+        CommitPendingCurve();
+        _tool = tool;
+        UpdateCursor();
+        UpdateContextPanels();
     }
 
     /// <summary>
@@ -879,7 +1007,7 @@ public partial class EditorWindow : Window
         _opacity = style.BorderAlpha;
 
         if (CurrentColorIndicator is not null)
-            CurrentColorIndicator.Fill = new SolidColorBrush(style.BorderColor);
+            CurrentColorIndicator.Background = new SolidColorBrush(style.BorderColor);
 
         if (OpacitySlider is not null)
         {
@@ -895,36 +1023,6 @@ public partial class EditorWindow : Window
                 _syncingThicknessButtons = false;
             }
         }
-
-        // Reflect the remembered colour on the swatch row so the checked swatch matches.
-        SyncColorSwatches(style.BorderColor);
-    }
-
-    /// <summary>Checks whichever preset swatch matches the colour, or the custom swatch.</summary>
-    private void SyncColorSwatches(Color color)
-    {
-        if (ColorPanel is null) return;
-        RadioButton? match = null;
-        foreach (RadioButton swatch in ColorPanel.Children.OfType<RadioButton>())
-        {
-            if (ReferenceEquals(swatch, CustomSwatch)) continue;
-            if (swatch.Background is SolidColorBrush b && b.Color == color)
-            {
-                match = swatch;
-                break;
-            }
-        }
-
-        _syncingColorSwatches = true;
-        try
-        {
-            if (match is not null) match.IsChecked = true;
-            else if (CustomSwatch is not null) CustomSwatch.IsChecked = true;
-        }
-        finally
-        {
-            _syncingColorSwatches = false;
-        }
     }
 
     private void SetCurrentColor(Color color)
@@ -934,7 +1032,7 @@ public partial class EditorWindow : Window
         _toolPrefs.Update(_tool, s => s.WithBorderColor(color));
         // Fires during XAML parse for the default swatch, before the indicator exists.
         if (CurrentColorIndicator is not null)
-            CurrentColorIndicator.Fill = new SolidColorBrush(color);
+            CurrentColorIndicator.Background = new SolidColorBrush(color);
         if (IsLoaded)
             RestyleSelected(color: color, thickness: null, fill: null);
     }

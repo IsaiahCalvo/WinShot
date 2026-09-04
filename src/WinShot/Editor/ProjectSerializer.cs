@@ -286,11 +286,13 @@ internal static class ProjectSerializer
                 var pts = RequirePoints(a, curved ? 3 : 2);
                 double t = RequireThickness(a);
                 var brush = new SolidColorBrush(RequireColor(a));
+                bool fancy = !curved && AnnotationFactory.ParseArrowStyle(a.Style) == ArrowStyle.Fancy;
                 return new Shapes.Path
                 {
                     Stroke = brush,
                     Fill = brush,
-                    StrokeThickness = t,
+                    // Fancy is a closed filled silhouette; a stroke would round its tail.
+                    StrokeThickness = fancy ? 0 : t,
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,

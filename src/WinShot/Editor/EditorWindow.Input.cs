@@ -221,9 +221,11 @@ public partial class EditorWindow : Window
                 }
                 else
                 {
+                    // The tool's weight, not the visual's: a Fancy arrow draws with no
+                    // stroke at all, and reading 0 back would make the mark unloadable.
                     var strokeData = AnnotationData.ForStroke(
                         _tool == EditorTool.Arrow ? AnnotationData.TypeArrow : AnnotationData.TypeLine,
-                        new[] { _dragStart, pos }, StrokeColorOf(shape), shape.StrokeThickness);
+                        new[] { _dragStart, pos }, StrokeColorOf(shape), _thickness);
                     // Persist the head style so the resize/endpoint-handle code (and an
                     // in-session re-edit) rebuilds the right geometry.
                     if (_tool == EditorTool.Arrow) strokeData.Style = _arrowStyle.ToString();
@@ -349,7 +351,8 @@ public partial class EditorWindow : Window
                 {
                     Stroke = brush,
                     Fill = brush,
-                    StrokeThickness = _thickness,
+                    // Fancy is one filled silhouette; stroking it would fatten the tail.
+                    StrokeThickness = _arrowStyle == ArrowStyle.Fancy ? 0 : _thickness,
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
@@ -626,7 +629,7 @@ public partial class EditorWindow : Window
     /// <summary>Live rubber band: blue solid dragging right, green dashed dragging left.</summary>
     private void UpdateMarquee(Point pos)
     {
-        _marqueeMode = MarqueeSelection.ModeFor(_marqueeStart, pos);
+        _marqueeMode = MarqueeSelection.ModeFor(_marqueeStart, pos, _marqueePreference);
         Rect r = MarqueeSelection.RectFor(_marqueeStart, pos);
 
         bool window = _marqueeMode == MarqueeMode.Window;

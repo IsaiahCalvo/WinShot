@@ -13,39 +13,98 @@ internal enum EditorContextControls
     TextStyle = 1 << 6,
     CropRatio = 1 << 7,
     StepMode = 1 << 8,
+
+    /// <summary>Rotate / flip / image size — the transforms that used to hide in "More".</summary>
+    CropTools = 1 << 9,
+}
+
+/// <summary>The five tool families the toolbar's category buttons switch between.</summary>
+internal enum EditorToolCategory
+{
+    Draw,
+    Shapes,
+    Text,
+    Redact,
+    Image,
 }
 
 /// <summary>
-/// The verified CleanShot-derived hierarchy expressed with WinShot tool names. It drives
-/// contextual visibility and gives tests a stable order/layout contract without coupling to glyphs.
+/// The shape of the editor's toolbar, expressed with WinShot tool names. It drives
+/// contextual visibility and the category sub-row, and gives tests a stable
+/// order/layout contract without coupling to glyphs.
+///
+/// The toolbar is ONE row: undo/redo, the two pointer tools, five category buttons,
+/// then the active tool's own controls, with Save as… / Done docked right. A
+/// category's tools live in a 34 DIP sub-row that floats over the canvas, so
+/// switching category never moves the image. Nothing is behind an overflow popup.
 /// </summary>
 internal static class EditorShellContract
 {
-    public static readonly string[] PrimaryToolOrder =
+    /// <summary>The two tools that are always visible, left of the categories.</summary>
+    public static readonly string[] PointerToolOrder =
     {
         "Select",
-        "Rectangle",
-        "FilledRectangle",
-        "Ellipse",
-        "Line",
-        "Arrow",
-        "Text",
-        "Pixelate",
-        "Spotlight",
-        "Step",
-        "Freehand",
-        "Highlighter",
-    };
-
-    public static readonly string[] MoreToolOrder =
-    {
         "Pan",
-        "CurvedArrow",
-        "Blur",
-        "Eyedropper",
     };
 
-    // 3 leading actions + 12 primary tools + More + Save/Done and separators,
+    public static readonly EditorToolCategory[] CategoryOrder =
+    {
+        EditorToolCategory.Draw,
+        EditorToolCategory.Shapes,
+        EditorToolCategory.Text,
+        EditorToolCategory.Redact,
+        EditorToolCategory.Image,
+    };
+
+    /// <summary>
+    /// The tools in each category's sub-row, in the order they appear. Survey's own
+    /// groupings: draw = pen / highlighter (plus the eyedropper, which samples for
+    /// them), shapes = rectangle / ellipse / line / arrow / counter.
+    /// </summary>
+    public static string[] ToolsIn(EditorToolCategory category) => category switch
+    {
+        EditorToolCategory.Draw => new[] { "Freehand", "Highlighter", "Eyedropper" },
+        EditorToolCategory.Shapes => new[]
+        {
+            "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step",
+        },
+        EditorToolCategory.Text => new[] { "Text" },
+        EditorToolCategory.Redact => new[] { "Blur", "Pixelate", "Spotlight" },
+        EditorToolCategory.Image => new[] { "Crop" },
+        _ => Array.Empty<string>(),
+    };
+
+    /// <summary>
+    /// The category a tool belongs to, or null for the pointer tools and for
+    /// CurvedArrow — which has no button of its own any more: it is the Curved entry
+    /// in the arrow-style menu, so the Arrow button stays lit while it is active.
+    /// </summary>
+    public static EditorToolCategory? CategoryOf(EditorTool tool) => tool switch
+    {
+        EditorTool.Freehand or EditorTool.Highlighter or EditorTool.Eyedropper => EditorToolCategory.Draw,
+        EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
+            or EditorTool.CurvedArrow or EditorTool.Step => EditorToolCategory.Shapes,
+        EditorTool.Text => EditorToolCategory.Text,
+        EditorTool.Blur or EditorTool.Pixelate or EditorTool.Spotlight => EditorToolCategory.Redact,
+        EditorTool.Crop => EditorToolCategory.Image,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The tool a category button arms when it is clicked. Image arms nothing: its row
+    /// is mostly one-shot actions, and clicking it must not drop the user into a crop.
+    /// </summary>
+    public static EditorTool? DefaultToolFor(EditorToolCategory category) => category switch
+    {
+        EditorToolCategory.Draw => EditorTool.Freehand,
+        EditorToolCategory.Shapes => EditorTool.Rectangle,
+        EditorToolCategory.Text => EditorTool.Text,
+        EditorToolCategory.Redact => EditorTool.Blur,
+        _ => null,
+    };
+
+    // Undo/redo + 2 pointer tools + the chevron + 5 categories + the widest contextual
+    // group (colour well, size field, fill trio, opacity) + Save/Done and separators,
     // using the shared 36-DIP controls and margins from Theme.xaml.
     public const double PrimaryToolbarLogicalWidth = 872;
     public const double MinimumEditorLogicalWidth = 980;
@@ -67,9 +126,9 @@ internal static class EditorShellContract
         EditorTool.Rectangle or EditorTool.Ellipse =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.Fill | EditorContextControls.Opacity,
-        EditorTool.Line or EditorTool.CurvedArrow or EditorTool.Freehand or EditorTool.Highlighter =>
+        EditorTool.Line or EditorTool.Freehand or EditorTool.Highlighter =>
             EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
-        EditorTool.Arrow =>
+        EditorTool.Arrow or EditorTool.CurvedArrow =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity,
         EditorTool.Text =>
@@ -79,7 +138,7 @@ internal static class EditorShellContract
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,
         EditorTool.Blur or EditorTool.Pixelate => EditorContextControls.EffectStrength,
-        EditorTool.Crop => EditorContextControls.CropRatio,
+        EditorTool.Crop => EditorContextControls.CropRatio | EditorContextControls.CropTools,
         _ => EditorContextControls.None,
     };
 }

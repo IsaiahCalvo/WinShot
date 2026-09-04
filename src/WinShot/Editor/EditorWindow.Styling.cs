@@ -112,7 +112,10 @@ public partial class EditorWindow : Window
 
             var meta = Meta.Clone();
             meta.Color = ToHex(c);
-            if (thickness is not null) meta.Thickness = t;
+            // Always carried, even when this call did not change it: the arrow rebuild
+            // reads its weight back off the metadata, and a null there would reset the
+            // stroke to whatever the visual happened to hold.
+            meta.Thickness = t;
             if (fill is not null) meta.Fill = f.ToString();
             return new StyleSnapshot(c, t, f, meta);
         }
@@ -142,15 +145,9 @@ public partial class EditorWindow : Window
                     arrow.Stroke = stroke;
                     arrow.Fill = stroke;
                     arrow.StrokeThickness = snap.Thickness;
-                    // The triangular head scales with thickness, so rebuild geometry.
-                    if (snap.Meta.Points is { } pts && pts.Length >= 2)
-                    {
-                        var p = pts.Select(q => new Point(q[0], q[1])).ToArray();
-                        arrow.Data = meta.Type == AnnotationData.TypeCurvedArrow && p.Length >= 3
-                            ? AnnotationFactory.CurvedArrowGeometry(p[0], p[1], p[2], snap.Thickness)
-                            : AnnotationFactory.ArrowGeometry(p[0], p[1], snap.Thickness,
-                                AnnotationFactory.ParseArrowStyle(snap.Meta.Style));
-                    }
+                    // The triangular head scales with thickness, so rebuild geometry —
+                    // ApplyArrowStyleData also drops the stroke for the filled Fancy shape.
+                    ApplyArrowStyleData(arrow, snap.Meta);
                 }
                 break;
             case AnnotationData.TypeLine:
@@ -240,46 +237,242 @@ public partial class EditorWindow : Window
 
     private void OnResetStepCounter(object sender, RoutedEventArgs e) => _nextStep = 1;
 
-    private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item &&
-            item.Tag is string tag && Enum.TryParse(tag, out TextStyle style))
-            _textStyle = style;
-    }
-
-    // -------------------------------------------------- arrow style (parity tail)
+    // ------------------------------------------------------ glyph-button popovers
 
     /// <summary>
-    /// Arrow-style dropdown: sets the default style for new straight arrows, and re-shapes
-    /// the currently selected straight arrow in place (one undoable step) so a chosen look
-    /// can be applied after the fact too.
+    /// One row of a style menu: the preview IS the choice (an arrow at its real weight, a
+    /// text label in its own style), so no row needs a word to explain it. Shares
+    /// SizePresetRow so every menu in the editor highlights and checks the same way.
     /// </summary>
-    private void OnArrowStyleChanged(object sender, SelectionChangedEventArgs e)
+    private RadioButton AddPopoverRow(Panel list, string group, object content, object tag, string automationName)
     {
-        if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
-            item.Tag is not string tag || !Enum.TryParse(tag, out ArrowStyle style))
+        var row = new RadioButton
+        {
+            Style = (Style)FindResource("SizePresetRow"),
+            GroupName = group,
+            Tag = tag,
+            Content = content,
+        };
+        AutomationProperties.SetName(row, automationName);
+        list.Children.Add(row);
+        return row;
+    }
+
+    private static void CheckRowByTag(Panel list, object tag)
+    {
+        foreach (RadioButton row in list.Children.OfType<RadioButton>())
+            row.IsChecked = Equals(row.Tag, tag);
+    }
+
+    private void OnSelectModeClick(object sender, RoutedEventArgs e)
+    {
+        BuildSelectModeRows();
+        CheckRowByTag(SelectModeList, _marqueePreference);
+        SelectModePopup.IsOpen = !SelectModePopup.IsOpen;
+    }
+
+    private void BuildSelectModeRows()
+    {
+        if (SelectModeList.Children.Count > 0) return;
+        (MarqueeModePreference Mode, string Label)[] rows =
+        {
+            (MarqueeModePreference.Auto, "Auto — drag right encloses, left touches"),
+            (MarqueeModePreference.AlwaysWindow, "Window — fully enclosed only"),
+            (MarqueeModePreference.AlwaysCrossing, "Crossing — anything it touches"),
+        };
+        foreach ((MarqueeModePreference mode, string label) in rows)
+        {
+            var row = AddPopoverRow(SelectModeList, "SelectMode",
+                new TextBlock { Text = label, TextTrimming = TextTrimming.CharacterEllipsis },
+                mode, label);
+            row.Click += (_, _) =>
+            {
+                _marqueePreference = mode;
+                SelectModePopup.IsOpen = false;
+            };
+        }
+    }
+
+    private void OnArrowStyleClick(object sender, RoutedEventArgs e)
+    {
+        BuildArrowStyleRows();
+        CheckRowByTag(ArrowStyleList, _tool == EditorTool.CurvedArrow ? ArrowStyle.Curved : _arrowStyle);
+        ArrowStylePopup.IsOpen = !ArrowStylePopup.IsOpen;
+    }
+
+    private void BuildArrowStyleRows()
+    {
+        if (ArrowStyleList.Children.Count > 0) return;
+        foreach (ArrowStyle style in Enum.GetValues<ArrowStyle>())
+        {
+            var row = AddPopoverRow(ArrowStyleList, "ArrowStyle",
+                BuildArrowPreview(style), style, style.ToString());
+            ArrowStyle picked = style;
+            row.Click += (_, _) =>
+            {
+                ApplyArrowStyleChoice(picked);
+                ArrowStylePopup.IsOpen = false;
+            };
+        }
+    }
+
+    /// <summary>A 40x16 preview drawn from the same geometry the tool will draw.</summary>
+    private static Grid BuildArrowPreview(ArrowStyle style)
+    {
+        const double w = 40, h = 16, t = 3;
+        var from = new Point(1, h / 2);
+        var to = new Point(w - 1, h / 2);
+        Geometry data = style == ArrowStyle.Curved
+            ? AnnotationFactory.CurvedArrowGeometry(from, new Point(w / 2, 1), to, t)
+            : AnnotationFactory.ArrowGeometry(from, to, t, style);
+
+        var path = new Path
+        {
+            Data = data,
+            Stroke = Brushes.White,
+            Fill = Brushes.White,
+            StrokeThickness = style == ArrowStyle.Fancy ? 0 : t,
+            StrokeLineJoin = PenLineJoin.Round,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            Width = w,
+            Height = h,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        path.SetBinding(Shape.StrokeProperty, ForegroundOfRow());
+        path.SetBinding(Shape.FillProperty, ForegroundOfRow());
+
+        var grid = new Grid();
+        grid.Children.Add(path);
+        return grid;
+    }
+
+    /// <summary>Binds a preview's ink to the row's own Foreground, so checked/hover states carry.</summary>
+    private static System.Windows.Data.Binding ForegroundOfRow() =>
+        new("Foreground")
+        {
+            RelativeSource = new System.Windows.Data.RelativeSource(
+                System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(RadioButton), 1),
+        };
+
+    /// <summary>
+    /// Picking an arrow style sets it for new arrows AND restyles the selection. Curved is
+    /// the odd one: it is a different annotation type, so it arms the curved tool and
+    /// converts a selected straight arrow rather than reshaping a head.
+    /// </summary>
+    private void ApplyArrowStyleChoice(ArrowStyle style)
+    {
+        if (style == ArrowStyle.Curved)
+        {
+            RestyleSelectedArrow(style);
+            if (_selected is null && _tool != EditorTool.CurvedArrow)
+                SetToolWithoutButton(EditorTool.CurvedArrow);
             return;
+        }
+
         _arrowStyle = style;
+        if (_tool == EditorTool.CurvedArrow)
+            SetToolWithoutButton(EditorTool.Arrow);
         if (IsLoaded) RestyleSelectedArrow(style);
     }
 
+    private void OnTextStyleClick(object sender, RoutedEventArgs e)
+    {
+        BuildTextStyleRows();
+        CheckRowByTag(TextStyleList, _textStyle);
+        TextStylePopup.IsOpen = !TextStylePopup.IsOpen;
+    }
+
+    private void BuildTextStyleRows()
+    {
+        if (TextStyleList.Children.Count > 0) return;
+        foreach (TextStyle style in Enum.GetValues<TextStyle>())
+        {
+            // Huge is the same look at double size; previewing it at double size would
+            // blow the menu open, so every row previews at one readable size.
+            FrameworkElement preview = AnnotationFactory.CreateStyledTextLabel(
+                style.ToString(), Brushes.White, 14, style);
+            preview.VerticalAlignment = VerticalAlignment.Center;
+            var row = AddPopoverRow(TextStyleList, "TextStyle", preview, style, style.ToString());
+            TextStyle picked = style;
+            row.Click += (_, _) =>
+            {
+                _textStyle = picked;
+                TextStylePopup.IsOpen = false;
+            };
+        }
+    }
+
+    private void OnCropRatioClick(object sender, RoutedEventArgs e)
+    {
+        BuildCropRatioRows();
+        CheckRowByTag(CropRatioList, _cropRatioTag);
+        CropRatioPopup.IsOpen = !CropRatioPopup.IsOpen;
+    }
+
+    private void BuildCropRatioRows()
+    {
+        if (CropRatioList.Children.Count > 0) return;
+        foreach (string tag in new[] { "", "1:1", "4:3", "16:9", "9:16" })
+        {
+            string label = tag.Length == 0 ? "Free" : tag;
+            var row = AddPopoverRow(CropRatioList, "CropRatio",
+                new TextBlock { Text = label }, tag, label);
+            string picked = tag;
+            row.Click += (_, _) =>
+            {
+                ApplyCropRatio(picked);
+                CropRatioPopup.IsOpen = false;
+            };
+        }
+    }
+
     /// <summary>
-    /// Re-shapes the selected straight arrow to a new <see cref="ArrowStyle"/>, recording one
-    /// undoable action. No-op for non-arrow (and curved-arrow) selections. The endpoints stay
-    /// put; only the head geometry and the stored Style change.
+    /// Re-shapes the selected arrow to a new <see cref="ArrowStyle"/>, recording one undoable
+    /// action. Curved is a different annotation TYPE, not a different head, so picking it
+    /// converts the mark (seeding the bend from <see cref="AnnotationFactory.DefaultCurveControl"/>)
+    /// and picking a straight style converts it back. The endpoints stay put either way.
     /// </summary>
     private void RestyleSelectedArrow(ArrowStyle style)
     {
         if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
-            meta.Type != AnnotationData.TypeArrow)
+            meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow))
             return;
+
+        bool wasCurved = meta.Type == AnnotationData.TypeCurvedArrow;
+        bool wantCurved = style == ArrowStyle.Curved;
         var before = meta.Clone();
-        if (AnnotationFactory.ParseArrowStyle(before.Style) == style) return; // nothing to do
+        if (wasCurved == wantCurved &&
+            (wantCurved || AnnotationFactory.ParseArrowStyle(before.Style) == style))
+            return; // nothing to do
 
         var after = meta.Clone();
-        after.Style = style.ToString();
-        ApplyArrowStyleData(arrow, after);
+        Point[] pts = (after.Points ?? Array.Empty<double[]>())
+            .Where(p => p is { Length: >= 2 })
+            .Select(p => new Point(p[0], p[1]))
+            .ToArray();
+        if (pts.Length < 2) return;
+        Point from = pts[0], to = pts[^1];
 
+        if (wantCurved)
+        {
+            Point control = pts.Length >= 3 ? pts[1] : AnnotationFactory.DefaultCurveControl(from, to);
+            after.Type = AnnotationData.TypeCurvedArrow;
+            after.Style = null;
+            after.Points = new[]
+            {
+                new[] { from.X, from.Y }, new[] { control.X, control.Y }, new[] { to.X, to.Y },
+            };
+        }
+        else
+        {
+            after.Type = AnnotationData.TypeArrow;
+            after.Style = style.ToString();
+            after.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
+        }
+
+        ApplyArrowStyleData(arrow, after);
         Push(new EditorAction(
             undo: () => { ApplyArrowStyleData(arrow, before); if (ReferenceEquals(_selected, arrow)) UpdateSelectionVisual(); },
             redo: () => { ApplyArrowStyleData(arrow, after); if (ReferenceEquals(_selected, arrow)) UpdateSelectionVisual(); }),
@@ -287,7 +480,7 @@ public partial class EditorWindow : Window
         UpdateSelectionVisual();
     }
 
-    /// <summary>Rebuilds a straight arrow's geometry from its stored points + style and re-stores the metadata.</summary>
+    /// <summary>Rebuilds an arrow's geometry from its stored points + style and re-stores the metadata.</summary>
     private static void ApplyArrowStyleData(Path arrow, AnnotationData meta)
     {
         if (meta.Points is { } pts && pts.Length >= 2)
@@ -295,7 +488,19 @@ public partial class EditorWindow : Window
             Point from = new(pts[0][0], pts[0][1]);
             Point to = new(pts[^1][0], pts[^1][1]);
             double thickness = meta.Thickness ?? arrow.StrokeThickness;
-            arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style));
+            if (meta.Type == AnnotationData.TypeCurvedArrow && pts.Length >= 3)
+            {
+                arrow.Data = AnnotationFactory.CurvedArrowGeometry(
+                    from, new Point(pts[1][0], pts[1][1]), to, thickness);
+            }
+            else
+            {
+                ArrowStyle style = AnnotationFactory.ParseArrowStyle(meta.Style);
+                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, style);
+                // The fancy arrow is one filled silhouette; a stroke on top of it would
+                // fatten the tail back into a rounded line.
+                arrow.StrokeThickness = style == ArrowStyle.Fancy ? 0 : thickness;
+            }
         }
         arrow.Tag = meta;
     }
@@ -382,11 +587,10 @@ public partial class EditorWindow : Window
         else _blurStrength = strength;
     }
 
-    private void OnCropRatioChanged(object sender, SelectionChangedEventArgs e)
+    private void ApplyCropRatio(string tag)
     {
-        if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item)
-            return;
-        if (item.Tag is not string tag || string.IsNullOrEmpty(tag))
+        _cropRatioTag = tag;
+        if (string.IsNullOrEmpty(tag))
         {
             _cropRatio = null;
             return;
@@ -404,15 +608,15 @@ public partial class EditorWindow : Window
     // ----------------------------------------------------- custom color picker (Gap)
 
     /// <summary>
-    /// Custom-swatch click: applies the stored custom color (so a single click reselects it)
-    /// and opens the picker popup so a new color can be chosen from the grid or a hex value.
+    /// The colour well opens the picker. Nine inline radio swatches used to live in the
+    /// toolbar; they are the picker's grid now, so the row carries one control instead of
+    /// eleven and the current colour is legible at a glance.
     /// </summary>
-    private void OnCustomSwatchClick(object sender, RoutedEventArgs e)
+    private void OnColorWellClick(object sender, RoutedEventArgs e)
     {
         BuildColorPickerPalette();
-        SyncColorPickerInputs(_customColor);
-        ApplyCustomColor(_customColor); // keep current selection consistent with the swatch
-        ColorPickerPopup.IsOpen = true;
+        SyncColorPickerInputs(_color);
+        ColorPickerPopup.IsOpen = !ColorPickerPopup.IsOpen;
     }
 
     /// <summary>Builds the extended color grid once. A 5x8 palette of useful hues/shades.</summary>
@@ -517,10 +721,7 @@ public partial class EditorWindow : Window
     private void ApplyCustomColor(Color c)
     {
         _customColor = c;
-        // The swatch fill becomes the picked color (replacing the rainbow "unset" gradient).
-        CustomSwatch.Background = new SolidColorBrush(c);
-        CustomSwatch.IsChecked = true; // reflect it as the active swatch
-        SetCurrentColor(c);
+        SetCurrentColor(c); // the well repaints from here
     }
 
     /// <summary>Parses "#RGB", "#RRGGBB", "#AARRGGBB" or bare hex; tolerates a missing leading '#'.</summary>

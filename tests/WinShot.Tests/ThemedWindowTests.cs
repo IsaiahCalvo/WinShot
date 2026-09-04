@@ -1,9 +1,10 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -367,27 +368,39 @@ public class ThemedWindowTests
 
     private static void EditorShellContractSmoke(EditorWindow editor)
     {
-        var primary = (WrapPanel)editor.FindName("ToolPanel")!;
-        var primaryOrder = primary.Children.OfType<RadioButton>()
-            .Select(rb => (string)rb.Tag)
-            .ToArray();
-        Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
+        // The toolbar is one row now: undo/redo, the pointer pair, five categories, then
+        // the active tool's own controls. Nothing behind a "More" popup.
+        Assert.Null(editor.FindName("MoreToolsButton"));
+        Assert.Null(editor.FindName("MoreToolsPopup"));
+        Assert.Null(editor.FindName("MoreToolPanel"));
+        Assert.Null(editor.FindName("CurvedArrowToolBtn"));
+        Assert.Null(editor.FindName("EmojiToolBtn"));
+        Assert.Null(editor.FindName("DragMeHandle"));
 
-        var more = (UniformGrid)editor.FindName("MoreToolPanel")!;
-        var moreOrder = more.Children.OfType<RadioButton>()
-            .Select(rb => (string)rb.Tag)
-            .ToArray();
-        Assert.Equal(EditorShellContract.MoreToolOrder, moreOrder);
+        var categories = (StackPanel)editor.FindName("CategoryPanel")!;
+        Assert.Equal(
+            EditorShellContract.CategoryOrder.Select(c => c.ToString()).ToArray(),
+            categories.Children.OfType<RadioButton>().Select(rb => (string)rb.Tag).ToArray());
+
+        foreach (EditorToolCategory category in EditorShellContract.CategoryOrder)
+        {
+            var row = (StackPanel)editor.FindName($"{category}ToolRow")!;
+            Assert.Equal(
+                EditorShellContract.ToolsIn(category),
+                row.Children.OfType<RadioButton>().Select(rb => (string)rb.Tag).ToArray());
+        }
 
         string[] namedControls =
         {
-            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
+            "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
-            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
-            "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton",
+            "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
         };
         foreach (string name in namedControls)
@@ -396,15 +409,19 @@ public class ThemedWindowTests
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(element)), name);
         }
 
+        // Every control that shows only a glyph has to say what it does out loud.
         string[] iconOnlyControls =
         {
-            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
+            "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
-            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
-            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
-            "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
+            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn",
+            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton",
+            "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "StepNumberBtn", "StepLetterBtn", "StrengthLightBtn", "StrengthMediumBtn", "StrengthStrongBtn",
             "BtnPin", "BtnCopy", "BtnCenter",
         };
         foreach (string name in iconOnlyControls)
@@ -413,13 +430,25 @@ public class ThemedWindowTests
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(element)), name);
         }
 
-        Assert.Null(editor.FindName("EmojiToolBtn"));
-        Assert.Null(editor.FindName("DragMeHandle"));
+        // Every popover animates in from its anchor edge, which needs its own (unfrozen)
+        // ScaleTransform on the surface — a Style-set one would be shared and frozen, and
+        // animating a frozen Freezable throws the first time a popup opens.
+        foreach (string name in new[]
+        {
+            "SelectModePopup", "ColorPickerPopup", "SizePresetPopup",
+            "ArrowStylePopup", "TextStylePopup", "CropRatioPopup",
+        })
+        {
+            var popup = Assert.IsType<Popup>(editor.FindName(name));
+            var surface = Assert.IsType<Border>(popup.Child);
+            Assert.IsType<ScaleTransform>(surface.RenderTransform);
+            Assert.False(surface.RenderTransform.IsFrozen, name);
+        }
 
         var select = (RadioButton)editor.FindName("SelectToolBtn")!;
-        var moreButton = (Button)editor.FindName("MoreToolsButton")!;
+        var undo = (Button)editor.FindName("BtnUndo")!;
         var copy = (Button)editor.FindName("BtnCopy")!;
-        foreach (Control control in new Control[] { select, moreButton, copy })
+        foreach (Control control in new Control[] { select, undo, copy })
         {
             control.ApplyTemplate();
             Assert.NotNull(control.Template.FindName("FocusRing", control));
@@ -427,24 +456,39 @@ public class ThemedWindowTests
             Assert.True(control.IsTabStop);
         }
 
-        var styleBar = (DockPanel)editor.FindName("EditorStyleBar")!;
+        var context = (StackPanel)editor.FindName("ContextPanel")!;
+        var subRow = (Border)editor.FindName("CategoryToolRow")!;
         var color = (StackPanel)editor.FindName("ColorPanel")!;
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
         var fill = (StackPanel)editor.FindName("FillPanel")!;
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
         var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
+        var cropTools = (StackPanel)editor.FindName("CropToolsPanel")!;
         var sizeBox = (TextBox)editor.FindName("SizeBox")!;
-        var sizeLabel = (TextBlock)editor.FindName("ThicknessLabel")!;
+        var sizeField = (Border)editor.FindName("SizeFieldBorder")!;
+        var sizeHeading = (TextBlock)editor.FindName("SizePresetHeading")!;
         var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
+        var shapesRow = (StackPanel)editor.FindName("ShapesToolRow")!;
+        var drawRow = (StackPanel)editor.FindName("DrawToolRow")!;
 
-        Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
+        // The pointer tool has no controls of its own, so the row disappears entirely.
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Collapsed, context.Visibility);
+
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, context.Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
-        Assert.Equal("Width", sizeLabel.Text);
+        Assert.Equal("Width", sizeHeading.Text);
+
+        // Arming a tool lights its category and swaps the floating sub-row to that row.
+        Assert.True(((RadioButton)editor.FindName("CategoryShapesBtn")!).IsChecked);
+        Assert.Equal(Visibility.Visible, subRow.Visibility);
+        Assert.Equal(Visibility.Visible, shapesRow.Visibility);
+        Assert.Equal(Visibility.Collapsed, drawRow.Visibility);
 
         // The size field takes any whole number, not just the old 2 / 4 / 6.
         sizeBox.Text = "17";
@@ -464,13 +508,16 @@ public class ThemedWindowTests
             AnnotationSize.Presets,
             sizePresets.Children.OfType<RadioButton>().Select(r => (int)r.Tag!).ToArray());
 
-        // Each tool keeps its own size: Text is independent of Arrow.
+        // Each tool keeps its own size: Text is independent of Arrow. The word "Width" /
+        // "Size" left the toolbar with the other labels and lives on the field instead.
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
-        Assert.Equal("Size", sizeLabel.Text);
+        Assert.Equal("Size", sizeHeading.Text);
+        Assert.Equal("Size", sizeField.ToolTip);
         Assert.Equal("4", sizeBox.Text);
+        Assert.True(((RadioButton)editor.FindName("CategoryTextBtn")!).IsChecked);
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Equal("Width", sizeLabel.Text);
+        Assert.Equal("Width", sizeHeading.Text);
         Assert.Equal("7", sizeBox.Text);
 
         ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
@@ -481,16 +528,31 @@ public class ThemedWindowTests
         ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, effects.Visibility);
         Assert.Equal(Visibility.Collapsed, color.Visibility);
+        Assert.True(((RadioButton)editor.FindName("CategoryRedactBtn")!).IsChecked);
 
         ((RadioButton)editor.FindName("CropUtilityBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
+        Assert.Equal(Visibility.Visible, cropTools.Visibility);
+        Assert.True(((RadioButton)editor.FindName("CategoryImageBtn")!).IsChecked);
+
+        // A category button opens its own row and arms that row's first tool; Image is the
+        // one that arms nothing, so clicking it cannot drop the user into a crop.
+        ((RadioButton)editor.FindName("CategoryDrawBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, drawRow.Visibility);
+        Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
+        ((RadioButton)editor.FindName("CategoryImageBtn")!).IsChecked = true;
+        Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
+
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
         var toolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.True(toolbar.ActualWidth <= editor.ActualWidth);
-        Assert.True(primary.ActualHeight <= 42, $"Primary tools wrapped at minimum width: {primary.ActualHeight}");
+        // One row, always: the contextual controls are inline now, so nothing can wrap
+        // onto a second line and shove the canvas down mid-edit.
+        var primaryRow = (DockPanel)editor.FindName("ToolbarPrimaryRow")!;
+        Assert.True(primaryRow.ActualHeight <= 42, $"Primary toolbar wrapped at minimum width: {primaryRow.ActualHeight}");
     }
 
     private static void ApplyBlurUndoRedoSmoke(EditorWindow editor)

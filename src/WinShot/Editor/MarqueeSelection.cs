@@ -16,6 +16,17 @@ internal enum MarqueeMode
 }
 
 /// <summary>
+/// What the Select tool's chevron menu is set to. Auto keeps the AutoCAD gesture;
+/// the other two pin one rule so a drag reads the same in both directions.
+/// </summary>
+internal enum MarqueeModePreference
+{
+    Auto,
+    AlwaysWindow,
+    AlwaysCrossing,
+}
+
+/// <summary>
 /// Rubber-band selection maths. Ported from Survey's Phase 19 marquee
 /// (SVGAnnotationLayer's marqueeRect / marqueeDirection).
 /// </summary>
@@ -27,6 +38,18 @@ internal static class MarqueeSelection
     /// <summary>Window when the drag ran left→right, Crossing when it ran right→left.</summary>
     public static MarqueeMode ModeFor(Point start, Point current) =>
         current.X >= start.X ? MarqueeMode.Window : MarqueeMode.Crossing;
+
+    /// <summary>
+    /// The same call with the user's chevron-menu choice folded in: Auto still reads the
+    /// drag direction, the other two ignore it.
+    /// </summary>
+    public static MarqueeMode ModeFor(Point start, Point current, MarqueeModePreference preference) =>
+        preference switch
+        {
+            MarqueeModePreference.AlwaysWindow => MarqueeMode.Window,
+            MarqueeModePreference.AlwaysCrossing => MarqueeMode.Crossing,
+            _ => ModeFor(start, current),
+        };
 
     /// <summary>The normalised rectangle spanned by a drag.</summary>
     public static Rect RectFor(Point start, Point current) => new(

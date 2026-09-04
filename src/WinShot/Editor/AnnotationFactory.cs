@@ -22,6 +22,20 @@ internal enum ArrowStyle
 
     /// <summary>A slim tapered arrow: thinner head proportions and a hairline shaft accent.</summary>
     Thin,
+
+    /// <summary>
+    /// CleanShot's "fancy" arrow: a solid shaft that swells from a point at the tail into
+    /// the head, so the whole mark is one filled silhouette rather than a line plus a
+    /// triangle. Drawn as a closed figure, so it wants Fill and needs no stroke width.
+    /// </summary>
+    Fancy,
+
+    /// <summary>
+    /// Not a straight-arrow geometry at all: picking it arms the curved-arrow tool, and
+    /// restyling a selected straight arrow to it converts the annotation to a curved one.
+    /// It lives in this enum because it is a row in the same style menu.
+    /// </summary>
+    Curved,
 }
 
 /// <summary>
@@ -70,6 +84,9 @@ internal static class AnnotationFactory
         var dir = v;
         dir.Normalize();
 
+        if (style == ArrowStyle.Fancy)
+            return FancyArrowGeometry(from, to, dir, thickness);
+
         // Thin arrows use a smaller, narrower head so the whole mark looks slimmer.
         double headScale = style == ArrowStyle.Thin ? 2.6 : 3.5;
         double headWidth = style == ArrowStyle.Thin ? 0.34 : 0.45;
@@ -91,6 +108,31 @@ internal static class AnnotationFactory
         if (style == ArrowStyle.Double)
             geometry.Figures.Add(HeadFigure(from, startBase, perp));
 
+        return geometry;
+    }
+
+    /// <summary>
+    /// One closed silhouette: a shaft that starts at a point and swells to the head's
+    /// shoulders, then the head itself. Because it is filled rather than stroked, the
+    /// mark keeps a crisp tail at any thickness instead of a round line cap.
+    /// </summary>
+    private static Geometry FancyArrowGeometry(Point from, Point to, Vector dir, double thickness)
+    {
+        double head = Math.Clamp(thickness * 3.5, 10, 30);
+        var perp = new Vector(-dir.Y, dir.X);
+        Point headBase = to - dir * head;
+        // The shaft never gets wider than the head's shoulders, or the silhouette pinches.
+        double shaftHalf = Math.Min(thickness * 0.62, head * 0.45 * 0.8);
+
+        var figure = new PathFigure { StartPoint = from, IsClosed = true, IsFilled = true };
+        figure.Segments.Add(new LineSegment(headBase + perp * shaftHalf, isStroked: true));
+        figure.Segments.Add(new LineSegment(headBase + perp * (head * 0.45), isStroked: true));
+        figure.Segments.Add(new LineSegment(to, isStroked: true));
+        figure.Segments.Add(new LineSegment(headBase - perp * (head * 0.45), isStroked: true));
+        figure.Segments.Add(new LineSegment(headBase - perp * shaftHalf, isStroked: true));
+
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
         return geometry;
     }
 
