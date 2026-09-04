@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using WinShot.Core;
 using WinShot.Pin;
 using Xunit;
@@ -96,6 +96,69 @@ public class PinInteractionTests
     public void ResolveSaveFolder_PrefersConfiguredFolder(string configured, string fallback, string expected)
     {
         Assert.Equal(expected, PinInteraction.ResolveSaveFolder(configured, fallback));
+    }
+
+    /// <summary>
+    /// The pin is exactly the scaled image. It used to be two pixels larger with the image
+    /// inset by one over a black BackColor, which baked a dark hairline around every pin --
+    /// clearly visible on a light screenshot, and there with PinnedBorder off.
+    /// </summary>
+    [Fact]
+    public void ThePinIsExactlyTheScaledImage_WithNoBakedFrame()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(320, 180);
+            using var pin = new FastPinWindow(bitmap, new SettingsService());
+            pin.CreateControl();
+
+            SetScale(pin, 1.0);
+            Assert.Equal(new SD.Size(320, 180), pin.ClientSize);
+
+            SetScale(pin, 0.5);
+            Assert.Equal(new SD.Size(160, 90), pin.ClientSize);
+
+            // And the scale derived back from a resized client area agrees, so a border
+            // drag and a wheel notch cannot disagree about how big the pin is.
+            pin.ClientSize = new SD.Size(640, 360);
+            typeof(FastPinWindow)
+                .GetMethod("SyncScaleFromClientSize", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(pin, null);
+            Assert.Equal(2.0, (double)typeof(FastPinWindow)
+                .GetField("_scale", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(pin)!, 3);
+        });
+    }
+
+    /// <summary>
+    /// A settings-less pin has to look like a pin. The fallbacks were false, so any caller
+    /// that did not hand over a SettingsService got a hard-square, shadowless window.
+    /// </summary>
+    [Fact]
+    public void APinWithNoSettings_StillGetsRoundedCornersAndAShadow()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(320, 180);
+            using var pin = new FastPinWindow(bitmap);
+            pin.CreateControl();
+
+            Assert.NotNull(pin.Region);
+            var createParams = (WF.CreateParams)typeof(FastPinWindow)
+                .GetProperty("CreateParams", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(pin)!;
+            Assert.NotEqual(0, createParams.ClassStyle & 0x00020000);
+        });
+    }
+
+    private static void SetScale(FastPinWindow pin, double scale)
+    {
+        typeof(FastPinWindow)
+            .GetField("_scale", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(pin, scale);
+        typeof(FastPinWindow)
+            .GetMethod("ApplyScale", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, null);
     }
 
     [Fact]

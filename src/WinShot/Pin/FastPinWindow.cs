@@ -84,8 +84,11 @@ public sealed class FastPinWindow : WF.Form
     {
         _image = image;
         _settings = settings;
-        _roundedCorners = settings?.Current.PinnedRoundedCorners ?? false;
-        _shadow = settings?.Current.PinnedShadow ?? false;
+        // The fallbacks match Settings' own defaults. They used to be false, so any
+        // settings-less caller got a hard-square, shadowless pin that looked nothing like
+        // the one users actually see.
+        _roundedCorners = settings?.Current.PinnedRoundedCorners ?? true;
+        _shadow = settings?.Current.PinnedShadow ?? true;
         _border = settings?.Current.PinnedBorder ?? false;
         _naturalWidth = image.Width;
         _naturalHeight = image.Height;
@@ -216,7 +219,12 @@ public sealed class FastPinWindow : WF.Form
     {
         e.Graphics.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
         e.Graphics.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighQuality;
-        e.Graphics.DrawImage(_image, new SD.Rectangle(1, 1, Math.Max(1, ClientSize.Width - 2), Math.Max(1, ClientSize.Height - 2)));
+        // Full bleed to the rounded edge. The image used to be inset by 1 px over a black
+        // BackColor, which baked a dark hairline around every pin -- visible on a light
+        // screenshot even with PinnedBorder off. The optional border is
+        // PinWindowGeometry.DrawBorder's job, and the shadow is what separates a pin from
+        // the desktop.
+        e.Graphics.DrawImage(_image, new SD.Rectangle(0, 0, Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height)));
 
         if (_border)
         {
@@ -459,9 +467,11 @@ public sealed class FastPinWindow : WF.Form
 
     private void ApplyScale()
     {
+        // No +2: the image fills the client area now, so the window is exactly the scaled
+        // image. The two extra pixels existed only to make room for the baked hairline.
         ClientSize = new SD.Size(
-            Math.Max(1, (int)Math.Round(_naturalWidth * _scale) + 2),
-            Math.Max(1, (int)Math.Round(_naturalHeight * _scale) + 2));
+            Math.Max(1, (int)Math.Round(_naturalWidth * _scale)),
+            Math.Max(1, (int)Math.Round(_naturalHeight * _scale)));
     }
 
     private void SyncScaleFromClientSize()
@@ -472,8 +482,8 @@ public sealed class FastPinWindow : WF.Form
         // scrolling capture) is legitimately below MinScale, and clamping it up
         // desynced _scale from the actual window — the first wheel notch then jumped
         // the pin ~3x. Interactive paths (AdjustScale, WM_SIZING) enforce the minimum.
-        double sx = (ClientSize.Width - 2) / (double)_naturalWidth;
-        double sy = (ClientSize.Height - 2) / (double)_naturalHeight;
+        double sx = ClientSize.Width / (double)_naturalWidth;
+        double sy = ClientSize.Height / (double)_naturalHeight;
         _scale = Math.Min(Math.Max(sx, sy), PinInteraction.MaxScale);
     }
 
@@ -721,7 +731,8 @@ public sealed class FastPinWindow : WF.Form
         var rc = Marshal.PtrToStructure<Rect>(m.LParam);
         int edge = m.WParam.ToInt32();
 
-        // Non-client chrome is zero here (borderless form), but keep the +2 image margin.
+        // Non-client chrome is zero here (borderless form) and the image fills the client
+        // area, so the window rect IS the image rect.
         double aspect = _naturalWidth / (double)_naturalHeight;
         int newWidth = rc.Right - rc.Left;
         int newHeight = rc.Bottom - rc.Top;
@@ -729,8 +740,8 @@ public sealed class FastPinWindow : WF.Form
         // Floor matches PinInteraction.MinScale so a drag can't shrink the pin to nothing.
         int minImgW = Math.Max(16, (int)Math.Round(_naturalWidth * PinInteraction.MinScale));
         int minImgH = Math.Max(16, (int)Math.Round(_naturalHeight * PinInteraction.MinScale));
-        int imgW = Math.Max(minImgW, newWidth - 2);
-        int imgH = Math.Max(minImgH, newHeight - 2);
+        int imgW = Math.Max(minImgW, newWidth);
+        int imgH = Math.Max(minImgH, newHeight);
 
         bool horizontalDrag = edge is WmszLeft or WmszRight;
         bool verticalDrag = edge is WmszTop or WmszBottom;
@@ -754,8 +765,8 @@ public sealed class FastPinWindow : WF.Form
             targetImgH = (int)Math.Round(targetImgW / aspect);
         }
 
-        int targetW = targetImgW + 2;
-        int targetH = targetImgH + 2;
+        int targetW = targetImgW;
+        int targetH = targetImgH;
 
         // Apply the constrained size against the anchored edge so the opposite side stays put.
         switch (edge)
