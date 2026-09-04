@@ -38,6 +38,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private bool _dragging;
     private bool _dragMoved;
     private double? _dragRatio;
+    private int _resizeHandle = -1;        // 0..7 while dragging a handle, else -1
+    private bool _movingPending;           // dragging the pending rect body to move it
+    private SD.Point _adjustAnchor;        // cursor (screen px) at the start of a move
+    private SD.Rectangle _adjustStartRect; // pending rect (screen px) at the start of a move/resize
+    /// <summary>0..1 growth of the pending selection handles (overshoots past 1).</summary>
+    private double _handleScale = 1d;
+    private IDisposable? _handleTween;
     private WindowInfo? _hoverWindow;
     private SD.Rectangle? _pendingPx;
     private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
@@ -263,6 +270,11 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _dragging = false;
         _dragMoved = false;
         _dragRatio = null;
+        _resizeHandle = -1;
+        _movingPending = false;
+        _handleTween?.Dispose();
+        _handleTween = null;
+        _handleScale = 1d;
         _hoverWindow = null;
         _pendingPx = null;
         SelectedRegionPx = null;
@@ -407,13 +419,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     protected override void OnMouseDown(WF.MouseEventArgs e)
     {
         HandleMouseDown(e);
-        Capture = _dragging;
+        Capture = CapturingPointer;
         base.OnMouseDown(e);
     }
 
     protected override void OnMouseMove(WF.MouseEventArgs e)
     {
         HandleMouseMove();
+        Cursor = CursorForCurrent();
         base.OnMouseMove(e);
     }
 
@@ -440,6 +453,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             DisposePanes();
             DisposeFrozen();
+            _handleTween?.Dispose();
+            _handleTween = null;
             _followTimer.Dispose();
             _capturedRegion?.Dispose();
             _capturedRegion = null;
@@ -497,10 +512,34 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (e.Button != WF.MouseButtons.Left)
             return;
 
-        if (e.Clicks >= 2 && _pendingPx is SD.Rectangle pending)
+        if (e.Clicks >= 2 && _pendingPx is SD.Rectangle doubleClicked)
         {
-            Confirm(pending);
+            Confirm(doubleClicked);
             return;
+        }
+
+        if (_pendingPx is SD.Rectangle pending)
+        {
+            // The restored (or typed) region is a real object you can grab. Before this a
+            // press anywhere threw it away and started a fresh marquee, so remembering the
+            // last region only ever gave you a rectangle to accept or redraw.
+            SD.Rectangle pendingScreen = ScreenFromVirtual(pending);
+            int handle = SelectionHandles.HitTest(screen, pendingScreen);
+            if (handle >= 0)
+            {
+                _resizeHandle = handle;
+                _adjustStartRect = pendingScreen;
+                InvalidateAllSurfaces();
+                return;
+            }
+
+            if (pendingScreen.Contains(screen))
+            {
+                _movingPending = true;
+                _adjustAnchor = screen;
+                _adjustStartRect = pendingScreen;
+                return;
+            }
         }
 
         _dragStartScreen = screen;
@@ -515,6 +554,23 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     internal void HandleMouseMove()
     {
         _currentScreen = CursorScreen();
+
+        if (_resizeHandle >= 0)
+        {
+            SetPending(VirtualFromScreen(SelectionHandles.Resize(
+                _adjustStartRect, _resizeHandle, _currentScreen, _vs)));
+            return;
+        }
+
+        if (_movingPending)
+        {
+            SetPending(VirtualFromScreen(SelectionHandles.Move(
+                _adjustStartRect,
+                _currentScreen.X - _adjustAnchor.X,
+                _currentScreen.Y - _adjustAnchor.Y,
+                _vs)));
+            return;
+        }
 
         if (_dragging)
         {
@@ -627,6 +683,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (e.Button != WF.MouseButtons.Left)
             return;
 
+        if (_resizeHandle >= 0 || _movingPending)
+        {
+            _resizeHandle = -1;
+            _movingPending = false;
+            InvalidateAllSurfaces();
+            return;
+        }
+
         if (!_dragging) return;
         _dragging = false;
         _currentScreen = CursorScreen();
@@ -653,6 +717,62 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     }
 
     internal bool IsDragging => _dragging;
+
+    /// <summary>The pointer keeps reporting to the pressed surface while a marquee, a handle
+    /// or the pending rect body is being dragged.</summary>
+    internal bool CapturingPointer => _dragging || _resizeHandle >= 0 || _movingPending;
+
+    /// <summary>The adjustable selection in virtual pixels, for tests.</summary>
+    internal SD.Rectangle? PendingRegion => _pendingPx;
+
+    /// <summary>Applies an adjusted selection and keeps the size fields in step with it.</summary>
+    private void SetPending(SD.Rectangle virtualRect)
+    {
+        if (virtualRect.Width < 1 || virtualRect.Height < 1)
+            return;
+        _pendingPx = virtualRect;
+        _toolbar.SetSize(virtualRect.Width, virtualRect.Height);
+        InvalidateAllSurfaces();
+    }
+
+    /// <summary>
+    /// Pops the pending selection handles in over QuickMs. Eight dots arriving at full size
+    /// in one frame reads as a glitch; growing them reads as the region becoming grabbable —
+    /// which, until they existed here, it was not.
+    /// </summary>
+    private void BeginHandlePop()
+    {
+        _handleTween?.Dispose();
+        _handleScale = 0d;
+        _handleTween = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutBack,
+            progress =>
+            {
+                _handleScale = progress;
+                if (_pendingPx is SD.Rectangle p)
+                {
+                    SD.Rectangle rect = ScreenFromVirtual(p);
+                    rect.Inflate(SelectionHandles.HitTolerance, SelectionHandles.HitTolerance);
+                    InvalidateScreenRect(rect);
+                }
+            },
+            () => _handleTween = null);
+    }
+
+    internal WF.Cursor CursorForCurrent()
+    {
+        if (_pendingPx is SD.Rectangle pending)
+        {
+            SD.Rectangle screen = ScreenFromVirtual(pending);
+            int handle = _resizeHandle >= 0 ? _resizeHandle : SelectionHandles.HitTest(_currentScreen, screen);
+            if (SelectionHandles.CursorFor(handle) is WF.Cursor sizing)
+                return sizing;
+            if (_movingPending || screen.Contains(_currentScreen))
+                return WF.Cursors.SizeAll;
+        }
+        return WF.Cursors.Cross;
+    }
 
     internal void SetMode(int mode, AllInOneAction action)
     {
@@ -689,6 +809,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _hoverWindow = null;
         _toolbar.SetSize(rect.Width, rect.Height);
         _toolbar.RefreshPendingState();
+        BeginHandlePop();
         InvalidateAllSurfaces();
         Focus();
     }
@@ -752,6 +873,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             BrightenRegion(g, monitorBounds, local);
             using (var pen = new SD.Pen(Accent, 2))
                 g.DrawRectangle(pen, local);
+            if (_pendingPx is not null && !_dragging)
+                SelectionHandles.Draw(g, local, _handleScale, _resizeHandle);
             if (cursorOnThisSurface)
             {
                 var px = _hoverWindow is not null && !_dragging && _pendingPx is null
@@ -934,6 +1057,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _pendingPx = px;
         _toolbar.SetSize(px.Width, px.Height);
         _toolbar.RefreshPendingState();
+        BeginHandlePop();
         InvalidateAllSurfaces();
     }
 
@@ -959,6 +1083,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         DialogResult = result;
         StopFollowMotion();
+        // A tween outliving the session holds the process-wide 1 ms clock.
+        _handleTween?.Dispose();
+        _handleTween = null;
+        _handleScale = 1d;
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -998,10 +1126,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private SD.Rectangle ScreenFromVirtual(SD.Rectangle virtualRect) =>
         new(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height);
 
+    /// <summary>Test seam — see FastRegionSelectorDialog.CursorProvider.</summary>
+    internal static Func<SD.Point>? CursorProvider;
+
     /// <summary>True physical cursor position — DPI-independent across monitors, the
     /// anchor that keeps selection math correct on mixed-DPI setups.</summary>
     private static SD.Point CursorScreen()
     {
+        if (CursorProvider is Func<SD.Point> provider)
+            return provider();
         return GetCursorPos(out POINT p) ? new SD.Point(p.X, p.Y) : WF.Cursor.Position;
     }
 
@@ -1068,13 +1201,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         protected override void OnMouseDown(WF.MouseEventArgs e)
         {
             _owner.HandleMouseDown(e);
-            Capture = _owner.IsDragging;
+            Capture = _owner.CapturingPointer;
             base.OnMouseDown(e);
         }
 
         protected override void OnMouseMove(WF.MouseEventArgs e)
         {
             _owner.HandleMouseMove();
+            Cursor = _owner.CursorForCurrent();
             base.OnMouseMove(e);
         }
 

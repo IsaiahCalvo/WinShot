@@ -23,8 +23,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
     public enum SelectorMode { Area, Window }
 
     private const int DragThresholdPx = 4;
-    private const int HandleHalf = 5;       // handle circle is 2*HandleHalf px
-    private const int HandleHitTol = 9;     // grab tolerance around a handle center
     /// <summary>Peak alpha of the accent wash over a hover-targeted window.</summary>
     private const int WindowWashAlpha = 40;
     private static readonly SD.Color Accent = ThemePalette.Accent;
@@ -753,7 +751,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 return;
             }
 
-            int handle = HitTestHandle(screen, pending);
+            int handle = SelectionHandles.HitTest(screen, pending);
             if (handle >= 0)
             {
                 _resizeHandle = handle;
@@ -1215,26 +1213,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     }
 
     /// <summary>Draws the 8 move/resize handles on the pending selection.</summary>
-    private void DrawHandles(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle screenRect)
-    {
-        var prev = g.SmoothingMode;
-        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(60, 0, 0, 0));
-        using var fill = new SD.SolidBrush(SD.Color.White);
-        using var pen = new SD.Pen(Accent, 1.5f);
-        int half = Math.Max(1, (int)Math.Round(HandleHalf * Math.Clamp(_handleScale, 0.2d, 1.3d)));
-        foreach (SD.Point pt in HandlePoints(screenRect))
-        {
-            SD.Point l = ToLocal(pt, monitorBounds);
-            var dot = new SD.Rectangle(l.X - half, l.Y - half, half * 2, half * 2);
-            var under = dot;
-            under.Offset(0, 1);
-            g.FillEllipse(shadow, under);
-            g.FillEllipse(fill, dot);
-            g.DrawEllipse(pen, dot);
-        }
-        g.SmoothingMode = prev;
-    }
+    private void DrawHandles(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle screenRect) =>
+        SelectionHandles.Draw(g, ToLocal(screenRect, monitorBounds), _handleScale, _resizeHandle);
 
     private void DisposeFrozen()
     {
@@ -1553,58 +1533,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     // ----------------------------------------------------------- handle math
 
-    /// <summary>The 8 handle anchor points (screen px): TL, Top, TR, Right, BR, Bottom, BL, Left.</summary>
-    private static SD.Point[] HandlePoints(SD.Rectangle r)
-    {
-        int cx = r.Left + r.Width / 2;
-        int cy = r.Top + r.Height / 2;
-        return
-        [
-            new(r.Left, r.Top), new(cx, r.Top), new(r.Right, r.Top),
-            new(r.Right, cy), new(r.Right, r.Bottom),
-            new(cx, r.Bottom), new(r.Left, r.Bottom), new(r.Left, cy),
-        ];
-    }
+    // The handle geometry itself lives in SelectionHandles, shared with the all-in-one
+    // selector; these wrap it with this selector's clamp bounds.
+    private SD.Rectangle ResizeRect(SD.Rectangle start, int handle, SD.Point cursor) =>
+        SelectionHandles.Resize(start, handle, cursor, _vs);
 
-    private static int HitTestHandle(SD.Point cursor, SD.Rectangle r)
-    {
-        SD.Point[] pts = HandlePoints(r);
-        for (int i = 0; i < pts.Length; i++)
-        {
-            if (Math.Abs(cursor.X - pts[i].X) <= HandleHitTol && Math.Abs(cursor.Y - pts[i].Y) <= HandleHitTol)
-                return i;
-        }
-        return -1;
-    }
-
-    private SD.Rectangle ResizeRect(SD.Rectangle start, int handle, SD.Point cursor)
-    {
-        int l = start.Left, t = start.Top, r = start.Right, b = start.Bottom;
-        switch (handle)
-        {
-            case 0: l = cursor.X; t = cursor.Y; break;            // TL
-            case 1: t = cursor.Y; break;                          // Top
-            case 2: r = cursor.X; t = cursor.Y; break;            // TR
-            case 3: r = cursor.X; break;                          // Right
-            case 4: r = cursor.X; b = cursor.Y; break;            // BR
-            case 5: b = cursor.Y; break;                          // Bottom
-            case 6: l = cursor.X; b = cursor.Y; break;            // BL
-            case 7: l = cursor.X; break;                          // Left
-        }
-        var rect = SD.Rectangle.FromLTRB(Math.Min(l, r), Math.Min(t, b), Math.Max(l, r), Math.Max(t, b));
-        rect.Intersect(_vs);
-        return rect;
-    }
-
-    private SD.Rectangle MoveRect(SD.Rectangle start, int dx, int dy)
-    {
-        var rect = new SD.Rectangle(start.X + dx, start.Y + dy, start.Width, start.Height);
-        if (rect.Left < _vs.Left) rect.X = _vs.Left;
-        if (rect.Top < _vs.Top) rect.Y = _vs.Top;
-        if (rect.Right > _vs.Right) rect.X = _vs.Right - rect.Width;
-        if (rect.Bottom > _vs.Bottom) rect.Y = _vs.Bottom - rect.Height;
-        return rect;
-    }
+    private SD.Rectangle MoveRect(SD.Rectangle start, int dx, int dy) =>
+        SelectionHandles.Move(start, dx, dy, _vs);
 
     internal WF.Cursor CursorForCurrent()
     {
@@ -1618,14 +1553,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (bar.Contains(_currentScreen))
                 return WF.Cursors.Hand;
 
-            int h = _resizeHandle >= 0 ? _resizeHandle : HitTestHandle(_currentScreen, p);
-            switch (h)
-            {
-                case 0: case 4: return WF.Cursors.SizeNWSE;
-                case 2: case 6: return WF.Cursors.SizeNESW;
-                case 1: case 5: return WF.Cursors.SizeNS;
-                case 3: case 7: return WF.Cursors.SizeWE;
-            }
+            int h = _resizeHandle >= 0 ? _resizeHandle : SelectionHandles.HitTest(_currentScreen, p);
+            if (SelectionHandles.CursorFor(h) is WF.Cursor sizing)
+                return sizing;
             if (_movingPending || p.Contains(_currentScreen))
                 return WF.Cursors.SizeAll;
         }
