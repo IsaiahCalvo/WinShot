@@ -1,85 +1,86 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using WinShot.Core;
 
 namespace WinShot.SettingsUi;
 
-internal sealed class HotkeyOwnerProbeDialog : Window
+/// <summary>
+/// Watches for the app that swallows a hotkey. Built on ThemedMessageDialog so it matches
+/// the rest of the shell; the one thing it adds to that card is a live status line between
+/// the body copy and the buttons.
+/// </summary>
+internal static class HotkeyOwnerProbeDialog
 {
-    private readonly string _gesture;
-    private readonly TextBlock _statusText;
-    private readonly Button _openButton;
-    private readonly CancellationTokenSource _cts = new();
-    private HotkeyOwnerProbe.Result? _result;
-
-    private HotkeyOwnerProbeDialog(string gesture)
+    public static HotkeyOwnerProbe.Result Show(Window owner, string gesture)
     {
-        _gesture = gesture;
-        Title = "Find app using hotkey";
-        Width = 460;
-        SizeToContent = SizeToContent.Height;
-        ResizeMode = ResizeMode.NoResize;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x2B, 0x2B));
-        Foreground = Brushes.White;
-        ShowInTaskbar = false;
+        var (dialog, body, footer) = ThemedMessageDialog.Build(
+            owner,
+            $"Press {gesture} once",
+            "WinShot will watch which app comes forward. This may still trigger that app.");
 
-        var panel = new StackPanel { Margin = new Thickness(18) };
-        Content = panel;
-
-        panel.Children.Add(new TextBlock
+        var status = new TextBlock
         {
-            Text = $"Press {_gesture} once",
-            FontSize = 17,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Brushes.White,
-            Margin = new Thickness(0, 0, 0, 10),
-        });
-
-        panel.Children.Add(new TextBlock
-        {
-            Text = "WinShot will watch which app comes forward. This may still trigger that app.",
-            FontSize = 13,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDD)),
-            TextWrapping = TextWrapping.Wrap,
-            LineHeight = 20,
-            Margin = new Thickness(0, 0, 0, 14),
-        });
-
-        _statusText = new TextBlock
-        {
-            Text = "Watching for 8 seconds...",
-            FontSize = 13,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x4D, 0xA3, 0xFF)),
+            Text = "Watching for 8 seconds…",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 16),
         };
-        panel.Children.Add(_statusText);
+        status.SetResourceReference(TextBlock.FontSizeProperty, "TextBody");
+        status.SetResourceReference(TextBlock.ForegroundProperty, "InfoBrush");
+        body.Children.Insert(body.Children.Count - 1, status);
 
-        var buttons = new StackPanel
+        HotkeyOwnerProbe.Result? result = null;
+
+        ThemedMessageDialog.AddButton(footer, "Close", primary: false, () => { }).IsCancel = true;
+
+        Button open = ThemedMessageDialog.AddButton(footer, "Open app", primary: true, () =>
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            string? target = result?.Source.LaunchTarget;
+            if (string.IsNullOrWhiteSpace(target))
+                return;
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Failed to open '{target}' after hotkey probe", ex);
+            }
+        });
+        open.IsEnabled = false;
+
+        var cts = new CancellationTokenSource();
+        dialog.Closed += (_, _) => cts.Cancel();
+        dialog.Loaded += async (_, _) =>
+        {
+            try
+            {
+                result = await HotkeyOwnerProbe.RunAsync(gesture, TimeSpan.FromSeconds(8), cts.Token);
+                if (result.Found)
+                {
+                    status.Text = $"Looks like {result.Source.DisplayName} caught {gesture}.";
+                    open.IsEnabled = !string.IsNullOrWhiteSpace(result.Source.LaunchTarget);
+                    dialog.Activate();
+                }
+                else
+                {
+                    status.Text = "WinShot could not identify the app. It may be a silent hotkey, or the app did not come forward.";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Hotkey owner probe failed", ex);
+                status.Text = "WinShot could not run the hotkey watcher.";
+            }
         };
-        panel.Children.Add(buttons);
 
-        _openButton = HotkeyDialogButtons.CreateDialogButton("Open app", isPrimary: true, OpenDetectedApp);
-        _openButton.IsEnabled = false;
-        buttons.Children.Add(_openButton);
-
-        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Close", isPrimary: false, Close));
-
-        Loaded += OnLoaded;
-        Closed += (_, _) => _cts.Cancel();
-    }
-
-    public static HotkeyOwnerProbe.Result Show(Window owner, string gesture)
-    {
-        var dialog = new HotkeyOwnerProbeDialog(gesture) { Owner = owner };
         dialog.ShowDialog();
-        return dialog._result ?? new HotkeyOwnerProbe.Result(
+
+        return result ?? new HotkeyOwnerProbe.Result(
             false,
             new HotkeyConflictSource(
                 "another app on this PC",
@@ -88,47 +89,4 @@ internal sealed class HotkeyOwnerProbeDialog : Window
                 "WinShot could not identify the app that received the hotkey."),
             "WinShot could not identify the app that received the hotkey.");
     }
-
-    private async void OnLoaded(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            _result = await HotkeyOwnerProbe.RunAsync(_gesture, TimeSpan.FromSeconds(8), _cts.Token);
-            if (_result.Found)
-            {
-                _statusText.Text = $"Looks like {_result.Source.DisplayName} caught {_gesture}.";
-                _openButton.IsEnabled = !string.IsNullOrWhiteSpace(_result.Source.LaunchTarget);
-                Activate();
-            }
-            else
-            {
-                _statusText.Text = "WinShot could not identify the app. It may be a silent hotkey, or the app did not come forward.";
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Hotkey owner probe failed", ex);
-            _statusText.Text = "WinShot could not run the hotkey watcher.";
-        }
-    }
-
-    private void OpenDetectedApp()
-    {
-        string? target = _result?.Source.LaunchTarget;
-        if (string.IsNullOrWhiteSpace(target))
-            return;
-
-        try
-        {
-            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"Failed to open '{target}' after hotkey probe", ex);
-        }
-    }
-
 }

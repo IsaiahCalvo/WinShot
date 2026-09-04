@@ -22,6 +22,8 @@ public static class FriendlyError
         PathTooLongException => "That file path is too long. Choose a shorter folder or file name.",
         IOException io when io.HResult is ErrorDiskFull or ErrorHandleDiskFull => "The drive is full.",
         IOException => "The file could not be written. It may be open in another app.",
+        System.Net.Http.HttpRequestException or System.Net.Sockets.SocketException
+            => "WinShot couldn't reach the internet. Check your connection and try again.",
         OperationCanceledException or TimeoutException => "That took too long and was stopped.",
         OutOfMemoryException => "The image is too large to process on this PC.",
         // GDI+ reports both a bad image and a failed encode this way.

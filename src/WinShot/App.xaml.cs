@@ -63,7 +63,7 @@ public partial class App : Application
             if (handledByRunningInstance)
             {
                 if (incomingCommand is null)
-                    MessageBox.Show("WinShot is already running — look for it in the system tray.", "WinShot");
+                    ThemedMessageDialog.Show(null, "WinShot is already running", "Look for it in the system tray.");
                 Shutdown();
                 return;
             }
@@ -76,7 +76,7 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Error("Unhandled UI exception", args.Exception);
-            ShowBalloon("WinShot error", args.Exception.Message);
+            ShowBalloon("WinShot error", FriendlyError.For(args.Exception));
             args.Handled = true;
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
@@ -221,13 +221,10 @@ public partial class App : Application
         foreach (RecordingRecoveryFailure failure in result.Failures)
         {
             Log.Error($"Failed to recover recording; source retained at {failure.TempPath}", failure.Error);
-            MessageBox.Show(
-                $"WinShot couldn't recover this recording:\n\n{failure.TempPath}\n\n" +
-                $"The original file is still safe at that location. Check the save folder and available space, then try again next time.\n\n" +
-                failure.Error.Message,
-                "WinShot recording recovery",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ThemedMessageDialog.Show(null, "Couldn't recover a recording",
+                $"{failure.TempPath}\n\n" +
+                "The original file is still safe at that location. Check the save folder and available space, then try again next time.\n\n" +
+                FriendlyError.For(failure.Error));
         }
     }
 

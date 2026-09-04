@@ -75,7 +75,10 @@ public static class UpdateService
         }
         catch (Exception ex)
         {
-            return new UpdateCheckResult(UpdateState.Error, Message: ex.Message);
+            // SettingsWindow renders Message straight into a dialog, so a dead network must
+            // not surface as "No such host is known." with the stack left in the dark.
+            Log.Error("Update check failed", ex);
+            return new UpdateCheckResult(UpdateState.Error, Message: FriendlyError.For(ex));
         }
     }
 

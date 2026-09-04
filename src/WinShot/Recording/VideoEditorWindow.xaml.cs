@@ -702,7 +702,7 @@ public partial class VideoEditorWindow : Window
                 if (!removed && partialPath is not null)
                     message += $" WinShot could not remove the partial file: {partialPath}";
                 StatusText.Text = "Export failed. Review the message and try again.";
-                MessageBox.Show(this, message, "WinShot export", MessageBoxButton.OK, MessageBoxImage.Error);
+                ThemedMessageDialog.Show(this, "Export failed", message);
             }
         }
         finally

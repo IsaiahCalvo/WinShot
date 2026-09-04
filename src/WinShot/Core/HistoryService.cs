@@ -83,7 +83,8 @@ public class HistoryService
             catch (Exception ex)
             {
                 Log.Error($"Failed to delete history item {path}", ex);
-                return HistoryDeleteResult.Failure(ex.Message);
+                // HistoryWindow shows this verbatim in a "Delete failed" dialog.
+                return HistoryDeleteResult.Failure(FriendlyError.For(ex));
             }
         }
     }

@@ -1,6 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Media;
 using WinShot.Core;
 
 namespace WinShot.SettingsUi;
@@ -12,77 +10,45 @@ internal enum HotkeyConflictChoice
     FindApp,
 }
 
-internal sealed class HotkeyConflictDialog : Window
+/// <summary>
+/// "That gesture is taken — what now?" Built on ThemedMessageDialog so it gets the dark
+/// title bar and the app's pill buttons instead of a white Windows frame over the dark
+/// Settings shell.
+/// </summary>
+internal static class HotkeyConflictDialog
 {
-    private HotkeyConflictChoice _choice = HotkeyConflictChoice.Keep;
-
-    private HotkeyConflictDialog(string actionLabel, string gesture, HotkeyConflictSource source)
+    public static HotkeyConflictChoice Show(Window owner, string actionLabel, string gesture, HotkeyConflictSource source)
     {
-        Title = "Hotkey already used";
-        Width = 440;
-        SizeToContent = SizeToContent.Height;
-        ResizeMode = ResizeMode.NoResize;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x2B, 0x2B));
-        Foreground = Brushes.White;
-        ShowInTaskbar = false;
-
-        var panel = new StackPanel { Margin = new Thickness(18) };
-        Content = panel;
-
-        panel.Children.Add(new TextBlock
-        {
-            Text = $"{gesture} is already used",
-            FontSize = 17,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Brushes.White,
-            Margin = new Thickness(0, 0, 0, 10),
-        });
-
         string ownerText = source.IsExactMatch
             ? $"{gesture} is used by {source.DisplayName}."
             : $"{gesture} is taken. Best match: {source.DisplayName}.";
 
-        panel.Children.Add(new TextBlock
+        var (dialog, _, footer) = ThemedMessageDialog.Build(
+            owner,
+            $"{gesture} is already used",
+            $"{ownerText}\n\nFind app lets you press the hotkey once while WinShot watches what comes " +
+            $"forward. Change opens that app or its settings. Keep means {actionLabel} needs a different " +
+            "WinShot hotkey.");
+
+        var choice = HotkeyConflictChoice.Keep;
+
+        // Keep is the default outcome, so its button only has to close: IsCancel does that
+        // and makes Escape mean the same thing.
+        ThemedMessageDialog.AddButton(footer, "Keep", primary: false, () => { }).IsCancel = true;
+
+        ThemedMessageDialog.AddButton(footer, "Change", primary: false, () =>
         {
-            Text = $"{ownerText}\n\nFind app lets you press the hotkey once while WinShot watches what comes forward. Change opens that app or its settings. Keep means {actionLabel} needs a different WinShot hotkey.",
-            FontSize = 13,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDD)),
-            TextWrapping = TextWrapping.Wrap,
-            LineHeight = 20,
-            Margin = new Thickness(0, 0, 0, 16),
+            choice = HotkeyConflictChoice.Change;
+            dialog.DialogResult = true;
         });
 
-        var buttons = new StackPanel
+        ThemedMessageDialog.AddButton(footer, "Find app", primary: true, () =>
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-        };
-        panel.Children.Add(buttons);
+            choice = HotkeyConflictChoice.FindApp;
+            dialog.DialogResult = true;
+        }).IsDefault = true;
 
-        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Find app", isPrimary: true, () =>
-        {
-            _choice = HotkeyConflictChoice.FindApp;
-            DialogResult = true;
-        }));
-
-        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Change", isPrimary: false, () =>
-        {
-            _choice = HotkeyConflictChoice.Change;
-            DialogResult = true;
-        }));
-
-        buttons.Children.Add(HotkeyDialogButtons.CreateDialogButton("Keep", isPrimary: false, () =>
-        {
-            _choice = HotkeyConflictChoice.Keep;
-            DialogResult = false;
-        }));
-    }
-
-    public static HotkeyConflictChoice Show(Window owner, string actionLabel, string gesture, HotkeyConflictSource source)
-    {
-        var dialog = new HotkeyConflictDialog(actionLabel, gesture, source) { Owner = owner };
         dialog.ShowDialog();
-        return dialog._choice;
+        return choice;
     }
 }

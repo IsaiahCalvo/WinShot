@@ -888,11 +888,7 @@ public sealed class RecordingController
     {
         try
         {
-            MessageBox.Show(
-                message,
-                "WinShot recording",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ThemedMessageDialog.Show(null, "Recording failed", message);
         }
         catch (Exception ex)
         {

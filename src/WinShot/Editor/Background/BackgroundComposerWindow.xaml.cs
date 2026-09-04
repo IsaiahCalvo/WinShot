@@ -750,8 +750,7 @@ public partial class BackgroundComposerWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Background image load failed: {dialog.FileName}", ex);
-            MessageBox.Show(this, "Couldn't load that image.", "WinShot",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ThemedMessageDialog.Show(this, "Couldn't load that image", FriendlyError.For(ex));
         }
     }
 
