@@ -463,6 +463,9 @@ public class ThemedWindowTests
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
         var fill = (StackPanel)editor.FindName("FillPanel")!;
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
+        var zoomButton = (Button)editor.FindName("ZoomMenuButton")!;
+        var zoomLabel = (TextBlock)editor.FindName("ZoomLabel")!;
+        Assert.Null(editor.FindName("ZoomBox"));
         var redactStyle = (StackPanel)editor.FindName("RedactStylePanel")!;
         var redactStrength = (StackPanel)editor.FindName("RedactStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
@@ -549,6 +552,14 @@ public class ThemedWindowTests
         Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
 
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+
+        // The zoom readout is written in one place, on every view change — the old label +
+        // combo pair went stale after a wheel zoom and never came back.
+        typeof(EditorWindow).GetMethod("ZoomToPercent",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { 2.0 });
+        Assert.Equal("200%", zoomLabel.Text);
+        Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(zoomButton)));
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();

@@ -635,26 +635,36 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Bottom-bar zoom preset dropdown: Fit / 50% / 100% / 150% / 200%.</summary>
-    private void OnZoomPresetChanged(object sender, SelectionChangedEventArgs e)
+    /// <summary>
+    /// The zoom menu. Every row carries its shortcut in the gesture column, which is how
+    /// the editor advertises the keys it now binds instead of hiding them.
+    /// </summary>
+    private void OnZoomMenuClick(object sender, RoutedEventArgs e)
     {
-        if (ZoomBox.SelectedItem is not ComboBoxItem item) return;
-        string choice = (item.Content as string) ?? "Fit";
-        if (choice == "Fit")
+        var menu = new ContextMenu
         {
-            FitToView();
-            return;
-        }
-        if (choice == "Fit Width")
+            PlacementTarget = ZoomMenuButton,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+        };
+        void Row(string header, string gesture, Action run)
         {
-            FitToWidth();
-            return;
+            var item = new MenuItem { Header = header, InputGestureText = gesture };
+            item.Click += (_, _) => run();
+            menu.Items.Add(item);
         }
-        if (double.TryParse(choice.TrimEnd('%'), NumberStyles.Number, CultureInfo.InvariantCulture, out double pct)
-            && Viewport.ActualWidth > 1 && Viewport.ActualHeight > 1)
-        {
-            ZoomAt(new Point(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2), pct / 100.0);
-        }
+
+        Row("Fit", "Ctrl+1", FitToView);
+        Row("Fit width", "", FitToWidth);
+        menu.Items.Add(new Separator());
+        Row("50%", "", () => ZoomToPercent(0.5));
+        Row("100%", "Ctrl+0", () => ZoomToPercent(1.0));
+        Row("150%", "", () => ZoomToPercent(1.5));
+        Row("200%", "", () => ZoomToPercent(2.0));
+        menu.Items.Add(new Separator());
+        Row("Zoom in", "Ctrl++", () => StepZoom(1.2));
+        Row("Zoom out", "Ctrl+-", () => StepZoom(1 / 1.2));
+
+        menu.IsOpen = true;
     }
 
     /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>

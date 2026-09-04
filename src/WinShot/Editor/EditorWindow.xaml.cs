@@ -77,6 +77,9 @@ public partial class EditorWindow : Window
     /// <summary>Guards the category radios while a tool switch re-checks them, so no tool is re-armed.</summary>
     private bool _syncingCategory;
 
+    /// <summary>The contextual set currently on screen, so only a real change animates.</summary>
+    private EditorContextControls _shownContext = EditorContextControls.None;
+
     /// <summary>The Select chevron's rubber-band rule; Auto keeps the drag-direction gesture.</summary>
     private MarqueeModePreference _marqueePreference = MarqueeModePreference.Auto;
 
@@ -232,6 +235,8 @@ public partial class EditorWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            _growMotion?.Dispose();
+            _growMotion = null;
             _dragPreview?.Dispose();
             _dragPreview = null;
             Task sourceOperationsDrained = _sourceLifetime.BeginClose();
@@ -249,6 +254,10 @@ public partial class EditorWindow : Window
                 _ = DisposeOwnedAfterAsync(sourceOperationsDrained, owned);
             MemoryCleanup.Request();
         };
+        // "Keep the editor on top" was declared and never wired; the row it belongs to
+        // was collapsed because of it.
+        Topmost = _settings.Current.AlwaysOnTop;
+        SourceInitialized += (_, _) => BeginGrowFromOrigin();
         UpdateCursor();
         DarkTitleBar.Apply(this);
     }
@@ -286,6 +295,69 @@ public partial class EditorWindow : Window
     public static EditorWindow CreateForCapture(SD.Bitmap source, SettingsService settings, HistoryService history)
     {
         return new EditorWindow(source, settings, history);
+    }
+
+    /// <summary>
+    /// Where this editor came from on screen, in device pixels. Set it before Show() and
+    /// the window grows out of that rectangle and opens on THAT display — which for a
+    /// capture taken on a second monitor is the monitor the user is looking at, not the
+    /// primary. Leave it unset for History and the CLI: there is no origin to grow from,
+    /// so the window just opens centred.
+    /// </summary>
+    internal void GrowFrom(SD.Rectangle originScreenRect)
+    {
+        if (originScreenRect.Width < 1 || originScreenRect.Height < 1) return;
+        _origin = originScreenRect;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+    }
+
+    private SD.Rectangle? _origin;
+    private IDisposable? _growMotion;
+
+    /// <summary>~220 ms, the same "one surface becoming another" beat as the card's restack.</summary>
+    private const int GrowDurationMs = 220;
+
+    /// <summary>
+    /// Places the window on the origin's display and tweens it out of the origin rect.
+    /// Runs once, on the first frame that has an HWND — device-to-DIP conversion needs the
+    /// window's own PresentationSource, and on a mixed-DPI desktop the primary monitor's
+    /// scale is the wrong answer.
+    /// </summary>
+    private void BeginGrowFromOrigin()
+    {
+        if (_origin is not SD.Rectangle origin) return;
+        _origin = null;
+
+        if (PresentationSource.FromVisual(this)?.CompositionTarget is not CompositionTarget target)
+            return;
+        Matrix toDip = target.TransformFromDevice;
+
+        var screen = System.Windows.Forms.Screen.FromRectangle(origin);
+        SD.Rectangle work = screen.WorkingArea;
+        Point workTopLeft = toDip.Transform(new Point(work.Left, work.Top));
+        Point workSize = toDip.Transform(new Point(work.Width, work.Height));
+
+        double width = Math.Min(Width, workSize.X * 0.9);
+        double height = Math.Min(Height, workSize.Y * 0.9);
+        var to = new Rect(
+            workTopLeft.X + (workSize.X - width) / 2,
+            workTopLeft.Y + (workSize.Y - height) / 2,
+            width,
+            height);
+
+        Point fromTopLeft = toDip.Transform(new Point(origin.Left, origin.Top));
+        Point fromSize = toDip.Transform(new Point(origin.Width, origin.Height));
+        var from = new Rect(fromTopLeft.X, fromTopLeft.Y, Math.Max(1, fromSize.X), Math.Max(1, fromSize.Y));
+
+        _growMotion?.Dispose();
+        _growMotion = Motion.Run(GrowDurationMs, Motion.EaseOutCubic, p =>
+        {
+            if (_closed) return;
+            Left = from.X + (to.X - from.X) * p;
+            Top = from.Y + (to.Y - from.Y) * p;
+            Width = from.Width + (to.Width - from.Width) * p;
+            Height = from.Height + (to.Height - from.Height) * p;
+        }, onDone: () => _growMotion = null);
     }
 
     internal static EditorWindow CreateForDirectCapture(
@@ -487,6 +559,7 @@ public partial class EditorWindow : Window
 
     private void OnViewChanged()
     {
+        // The one place the zoom readout is written, so it can never go stale.
         ZoomLabel.Text = $"{Math.Round(_zoom * 100)}%";
         // Keep helper chrome hairline-thin on screen at any zoom; the dash
         // pattern is in thickness units, so it compensates automatically.
@@ -495,6 +568,46 @@ public partial class EditorWindow : Window
         SelectionRect.StrokeThickness = t;
         UpdateSelectionVisual();
         UpdateCurveHandleVisual();
+        UpdateScrollOverlay();
+    }
+
+    /// <summary>
+    /// Repositions the overlay scroll indicators and flashes them. They exist to answer
+    /// "is there more above this?" while the view moves, and to be gone once it has been
+    /// answered — so they fade out rather than sitting on the picture.
+    /// </summary>
+    private void UpdateScrollOverlay()
+    {
+        if (ScrollOverlay is null) return;
+        (Rect? horizontal, Rect? vertical) = EditorScrollBars.Calculate(
+            new Size(Viewport.ActualWidth, Viewport.ActualHeight),
+            new Size(_sourceWidth, _sourceHeight),
+            _zoom,
+            new Vector(ViewTranslate.X, ViewTranslate.Y));
+
+        static void Place(System.Windows.Shapes.Rectangle bar, Rect? area)
+        {
+            if (area is not Rect r)
+            {
+                bar.Visibility = Visibility.Collapsed;
+                return;
+            }
+            Canvas.SetLeft(bar, r.X);
+            Canvas.SetTop(bar, r.Y);
+            bar.Width = r.Width;
+            bar.Height = r.Height;
+            bar.Visibility = Visibility.Visible;
+        }
+
+        Place(ScrollBarH, horizontal);
+        Place(ScrollBarV, vertical);
+        if (horizontal is null && vertical is null)
+        {
+            ScrollOverlay.BeginAnimation(OpacityProperty, null);
+            ScrollOverlay.Opacity = 0;
+            return;
+        }
+        ScrollOverlay.BeginStoryboard((Storyboard)FindResource("ScrollHintFlash"));
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();
@@ -520,6 +633,7 @@ public partial class EditorWindow : Window
             // capture. (Ctrl+wheel still zooms.)
             ViewTranslate.Y += e.Delta;
         }
+        UpdateScrollOverlay();
         e.Handled = true;
     }
 
@@ -787,6 +901,13 @@ public partial class EditorWindow : Window
         ContextPanel.Visibility = controls == EditorContextControls.None
             ? Visibility.Collapsed
             : Visibility.Visible;
+
+        // The highest-frequency interaction in the app used to hard-cut nine panels in and
+        // out. Fading up from mostly-there reads as the row re-labelling itself rather than
+        // blinking; a full 0 -> 1 fade would read as a flash on every tool click.
+        if (IsLoaded && controls != _shownContext && controls != EditorContextControls.None)
+            ContextPanel.BeginStoryboard((Storyboard)FindResource("ContextSwapIn"));
+        _shownContext = controls;
     }
 
     /// <summary>

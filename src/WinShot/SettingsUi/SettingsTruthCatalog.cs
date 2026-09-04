@@ -1,4 +1,4 @@
-namespace WinShot.SettingsUi;
+﻿namespace WinShot.SettingsUi;
 
 /// <summary>
 /// Durable contract for the controls Settings is allowed to present. Every property in this
@@ -38,6 +38,7 @@ internal static class SettingsTruthCatalog
             "WebcamOverlayPosition",
             "WebcamOverlaySizePercent",
             "OcrJoinLines",
+            "AlwaysOnTop",
             "HistoryRetentionDays",
             "CheckForUpdatesOnStartup",
             "FreezeScreen",
@@ -93,7 +94,7 @@ internal static class SettingsTruthCatalog
             "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
-            "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
+            "AutoExpandCanvas", "ShowColorNames", "ShowDockIcon",
             "AskForNameAfterCapture",
             "AddRetinaSuffix", "CopyToClipboardFormat", "OcrDetectLinks", "OcrLanguage",
         };

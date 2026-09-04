@@ -81,6 +81,7 @@ public partial class EditorWindow : Window
             ViewTranslate.X += p.X - _panLast.X;
             ViewTranslate.Y += p.Y - _panLast.Y;
             _panLast = p;
+            UpdateScrollOverlay();
             return;
         }
         if (_draggingCurveHandle && _pendingCurve is not null)
@@ -853,9 +854,23 @@ public partial class EditorWindow : Window
         if (_selected is null || !AnnotationCanvas.Children.Contains(_selected))
         {
             SelectionRect.Visibility = Visibility.Collapsed;
+            ArrowSelectionGlow.Visibility = Visibility.Collapsed;
             HideHandles();
             return;
         }
+        // A dashed box around a diagonal arrow selects mostly empty space and says nothing
+        // about which mark is picked. An arrow shows as a wide translucent copy of ITSELF.
+        if (_selected is FrameworkElement stroke && stroke.Tag is AnnotationData strokeMeta &&
+            strokeMeta.Type is AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow
+                or AnnotationData.TypeLine)
+        {
+            ShowStrokeSelectionGlow(stroke, strokeMeta);
+            SelectionRect.Visibility = Visibility.Collapsed;
+            UpdateSelectionHandles();
+            return;
+        }
+        ArrowSelectionGlow.Visibility = Visibility.Collapsed;
+
         // The frame is drawn in the annotation's UNROTATED box and then turned by the same
         // angle, so it hugs a rotated mark instead of ballooning into its axis-aligned box.
         double angle = _selected is FrameworkElement sel ? AnnotationTransform.AngleOf(sel) : 0;
@@ -878,6 +893,42 @@ public partial class EditorWindow : Window
         SelectionRect.Visibility = Visibility.Visible;
 
         UpdateSelectionHandles();
+    }
+
+    /// <summary>
+    /// Paints the selected arrow / line as a wide translucent copy of its own geometry.
+    /// The copy rides the element's own move offset, so it stays glued to the mark while
+    /// the mark is dragged.
+    /// </summary>
+    private void ShowStrokeSelectionGlow(FrameworkElement element, AnnotationData meta)
+    {
+        Geometry? data = element switch
+        {
+            Path path => path.Data,
+            Line line => new LineGeometry(new Point(line.X1, line.Y1), new Point(line.X2, line.Y2)),
+            _ => null,
+        };
+        if (data is null)
+        {
+            ArrowSelectionGlow.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var ink = (Brush)FindResource("InfoBrush");
+        ArrowSelectionGlow.Data = data;
+        ArrowSelectionGlow.Stroke = ink;
+        // Only a filled head wants a fill; a bare line would swell into a blob.
+        ArrowSelectionGlow.Fill = meta.Type == AnnotationData.TypeLine ? null : ink;
+        ArrowSelectionGlow.StrokeThickness = (meta.Thickness ?? 4) + 7 / _zoom;
+        ArrowSelectionGlow.StrokeLineJoin = PenLineJoin.Round;
+        ArrowSelectionGlow.StrokeStartLineCap = PenLineCap.Round;
+        ArrowSelectionGlow.StrokeEndLineCap = PenLineCap.Round;
+        ArrowSelectionGlow.Opacity = 0.35;
+        Vector offset = AnnotationTransform.OffsetOf(element);
+        ArrowSelectionGlow.RenderTransform = offset.Length < 0.001
+            ? Transform.Identity
+            : new TranslateTransform(offset.X, offset.Y);
+        ArrowSelectionGlow.Visibility = Visibility.Visible;
     }
 
     /// <summary>Bounds of an annotation in canvas coordinates, including its own render transform.</summary>

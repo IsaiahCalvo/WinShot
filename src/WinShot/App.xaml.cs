@@ -1401,6 +1401,9 @@ public partial class App : Application
     private void OpenEditorFromOverlay(FastQuickActionsWindow overlay)
     {
         var win = EditorWindow.CreateForCapture(overlay.CloneImage(), _settings, _history);
+        // The editor grows out of the card it was opened from, and opens on THAT card's
+        // display — which for a capture taken on a second monitor is the one being looked at.
+        win.GrowFrom(overlay.Bounds);
         TrackFirstRender(win, "editor window");
         win.Show();
         overlay.Close();

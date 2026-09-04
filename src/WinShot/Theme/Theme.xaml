@@ -297,6 +297,38 @@
                          EasingFunction="{StaticResource EaseOutCubic}"/>
     </Storyboard>
 
+    <!-- The editor's contextual controls swapping to another tool's set. They used to
+         hard-cut on the highest-frequency interaction in the app; this is a short fade
+         up from mostly-there, so the row reads as re-labelling rather than blinking. -->
+    <Storyboard x:Key="ContextSwapIn">
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         From="0.35" To="1" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+
+    <!-- Overlay scroll indicators: visible while the view is moving, then gone. They
+         answer "is there more above this?" and have no other job, so they must not sit
+         on top of the picture once the answer has been read. -->
+    <Storyboard x:Key="ScrollHintFlash">
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         To="0.55" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         To="0" BeginTime="0:0:0.9" Duration="{StaticResource MotionSwap}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+
+    <!-- A counter badge landing. 0.6 -> 1 with a light overshoot, so a step number
+         arrives rather than appearing. -->
+    <Storyboard x:Key="CounterPopIn">
+        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)"
+                         From="0.6" To="1" Duration="0:0:0.12"
+                         EasingFunction="{StaticResource EaseOutBack}"/>
+        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)"
+                         From="0.6" To="1" Duration="0:0:0.12"
+                         EasingFunction="{StaticResource EaseOutBack}"/>
+    </Storyboard>
+
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!-- Shared drop shadow for floating surfaces -->

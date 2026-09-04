@@ -360,6 +360,15 @@
                 </Grid>
             </Canvas>
 
+            <!-- Where you are in a zoomed-in image. Indicators, never controls: the
+                 editor pans an infinite canvas, so there is no track to drag. -->
+            <Canvas x:Name="ScrollOverlay" IsHitTestVisible="False" Opacity="0">
+                <Rectangle x:Name="ScrollBarH" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource TextSecondaryBrush}"/>
+                <Rectangle x:Name="ScrollBarV" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource TextSecondaryBrush}"/>
+            </Canvas>
+
             <!-- The active category's tools, floating over the canvas rather than
                  pushing it down: switching category must not move the image. -->
             <Border x:Name="CategoryToolRow" Style="{StaticResource FloatingToolbar}"
@@ -451,14 +460,19 @@
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
-                    <TextBlock x:Name="ZoomLabel" Text="100%" Style="{StaticResource ValueLabel}" MinWidth="42"
-                               TextAlignment="Right" Margin="4,0,8,0" ToolTip="Zoom level"/>
-                    <ComboBox x:Name="ZoomBox" Style="{StaticResource DarkComboBox}" Width="84" SelectedIndex="0"
-                              SelectionChanged="OnZoomPresetChanged" ToolTip="Jump to a zoom level"
-                              AutomationProperties.Name="Zoom level">
-                        <ComboBoxItem Content="Fit"/><ComboBoxItem Content="Fit Width"/><ComboBoxItem Content="50%"/>
-                        <ComboBoxItem Content="100%"/><ComboBoxItem Content="150%"/><ComboBoxItem Content="200%"/>
-                    </ComboBox>
+                    <!-- One control, and it always reads the live zoom. The old label + combo
+                         pair went stale after any wheel zoom, and re-picking the entry it was
+                         still showing fired no SelectionChanged, so the most common recovery
+                         in the editor was a no-op. -->
+                    <Button x:Name="ZoomMenuButton" Style="{StaticResource PillButtonSecondary}"
+                            Click="OnZoomMenuClick" ToolTip="Zoom" AutomationProperties.Name="Zoom level"
+                            AutomationProperties.HelpText="Jump to a zoom level. Ctrl+plus and Ctrl+minus step, Ctrl+0 is 100 percent and Ctrl+1 fits.">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="ZoomLabel" Text="100%" MinWidth="42" TextAlignment="Right" VerticalAlignment="Center"/>
+                            <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextMicro}"
+                                       VerticalAlignment="Center" Opacity="0.7" Margin="6,0,0,0"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <Button x:Name="BtnDragOut" Grid.Column="1" Style="{StaticResource PillButtonSecondary}"

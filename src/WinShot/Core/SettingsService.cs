@@ -124,7 +124,7 @@ public class Settings
     public bool DrawShadowOnObjects { get; set; } = true;    // TODO: wire behavior
     public bool AutoExpandCanvas { get; set; } = false;      // TODO: wire behavior
     public bool ShowColorNames { get; set; } = false;        // TODO: wire behavior
-    public bool AlwaysOnTop { get; set; } = false;           // TODO: wire behavior — annotate window always on top
+    public bool AlwaysOnTop { get; set; } = false;           // annotation editor opens above other windows
     public bool ShowDockIcon { get; set; } = true;           // TODO: wire behavior
 
     // Pinned screenshots (CleanShot "Pin to screen")

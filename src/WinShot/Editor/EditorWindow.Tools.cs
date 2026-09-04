@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -135,6 +136,11 @@ public partial class EditorWindow : Window
         double left = pos.X - badge.Width / 2, top = pos.Y - badge.Height / 2;
         Canvas.SetLeft(badge, left);
         Canvas.SetTop(badge, top);
+        // A counter lands rather than appearing: 0.6 -> 1 with a light overshoot, about its
+        // own centre so the badge does not slide while it grows.
+        badge.RenderTransformOrigin = new Point(0.5, 0.5);
+        badge.RenderTransform = new ScaleTransform(1, 1);
+        badge.BeginStoryboard((Storyboard)FindResource("CounterPopIn"));
         var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
         // Record the caption mode so project reload rebuilds the same number/letter badge.
         if (letters) data.Style = "Letter";

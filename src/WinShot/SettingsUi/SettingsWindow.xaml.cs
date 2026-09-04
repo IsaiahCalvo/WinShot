@@ -597,6 +597,9 @@ public partial class SettingsWindow : Window
 
             s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
 
+            // Annotate
+            s.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
+
             // Screenshots
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
             s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");

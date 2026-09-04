@@ -81,8 +81,15 @@ public partial class EditorWindow : Window
         var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
         var pts = BoxHandlePoints(b);
         EnsureThumbs(pts.Length);
+        // Round handles say "drag me anywhere"; the ONE square one is the text tool's
+        // bottom-right corner, which scales the type rather than reshaping a box. Square
+        // versus round IS the language for "this one resizes differently", so it is worth
+        // exactly one exception and no more.
+        bool textResize = _selected is FrameworkElement sel && sel.Tag is AnnotationData m &&
+            m.Type == AnnotationData.TypeText;
         for (int i = 0; i < pts.Length; i++)
-            PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle));
+            PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle),
+                square: textResize && i == 2);
 
         // The rotation handle sits a constant SCREEN distance above the top edge, so it
         // never drifts away from the mark as the user zooms.
@@ -140,8 +147,6 @@ public partial class EditorWindow : Window
             {
                 Fill = new SolidColorBrush(Colors.White),
                 Stroke = (Brush)FindResource("InfoBrush"),
-                RadiusX = 1.5,
-                RadiusY = 1.5,
             };
             _handleThumbs.Add(thumb);
             HandleLayer.Children.Add(thumb);
@@ -150,13 +155,18 @@ public partial class EditorWindow : Window
             _handleThumbs[i].Visibility = i < count ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void PlaceThumb(int index, Point center)
+    /// <summary>
+    /// A rounded Rectangle with radius = half its side IS a circle, so the handle layer
+    /// stays one control type and one hit test rather than two parallel collections.
+    /// </summary>
+    private void PlaceThumb(int index, Point center, bool square = false)
     {
         if (index < 0 || index >= _handleThumbs.Count) return;
         var thumb = _handleThumbs[index];
         double s = HandleScreenPx / _zoom;
         thumb.Width = s;
         thumb.Height = s;
+        thumb.RadiusX = thumb.RadiusY = square ? 1.5 / _zoom : s / 2;
         thumb.StrokeThickness = 1.5 / _zoom;
         Canvas.SetLeft(thumb, center.X - s / 2);
         Canvas.SetTop(thumb, center.Y - s / 2);
