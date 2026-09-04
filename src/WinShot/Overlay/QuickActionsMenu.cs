@@ -37,6 +37,9 @@ internal static class QuickActionsMenu
     internal const string ShareGroup = "share";
     internal const string ShareBlip = "share-blip";
     internal const string ShareWindows = "share-windows";
+    internal const string SaveAll = "save-all";
+    internal const string CloseAll = "close-all";
+    internal const string TemporarilyHide = "hide";
     internal const string Close = "close";
 
     /// <summary>A menu row. <paramref name="Children"/> makes it a submenu instead of an action.</summary>
@@ -88,6 +91,11 @@ internal static class QuickActionsMenu
         rows.AddRange(ShareRows(canShare, canBlip));
 
         rows.Add(new Row(Separator, Separator));
+        // One block with Close: these are all "get this out of the way", strongest first.
+        // The two batch rows end in an ellipsis because both ask before they act.
+        rows.Add(new Row(SaveAll, "Save all…"));
+        rows.Add(new Row(CloseAll, "Close all…"));
+        rows.Add(new Row(TemporarilyHide, "Temporarily hide"));
         rows.Add(new Row(Close, "Close", "Ctrl+W"));
         return rows;
     }
@@ -254,6 +262,14 @@ internal static class QuickActionsMenu
     /// there — opening the context menu from a hook spins a modal message loop inside it.
     /// Every chord here is one the card advertises in a tooltip or its shortcut column.
     /// </summary>
+    /// <summary>
+    /// The rows that only make sense with more than one card on screen. They are built into
+    /// every menu and hidden when the stack is a single card, rather than rebuilt on every
+    /// capture: the menu is warmed while the card is idle so the right-click is instant, and
+    /// its row width is measured once over every row it holds.
+    /// </summary>
+    internal static bool NeedsAStack(string id) => id is SaveAll or CloseAll;
+
     internal static bool ClaimsKey(WF.Keys keyData, bool hasFocusedButton)
     {
         WF.Keys key = keyData & WF.Keys.KeyCode;

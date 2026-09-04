@@ -187,10 +187,13 @@ public class QuickAccessOverlayInteractionTests
             Assert.Contains("Print…", labels);
             Assert.Contains("Open with…", labels);
             Assert.Contains("Move to Recycle Bin", labels);
-            // Cloud upload, Quick Look and Temporarily Hide are the CleanShot rows we skipped.
+            Assert.Contains("Save all…", labels);
+            Assert.Contains("Close all…", labels);
+            Assert.Contains("Temporarily hide", labels);
+            // Cloud upload and Quick Look are the CleanShot rows we skipped — Quick Look
+            // because Pin already is one.
             Assert.DoesNotContain(labels, l => l.Contains("Cloud", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(labels, l => l.Contains("Quick Look", StringComparison.OrdinalIgnoreCase));
-            Assert.DoesNotContain(labels, l => l.Contains("Temporarily", StringComparison.OrdinalIgnoreCase));
         });
     }
 
@@ -490,7 +493,7 @@ public class QuickAccessOverlayInteractionTests
                 using var overlay = new FastQuickActionsWindow(bitmap, settings);
                 var method = typeof(FastQuickActionsWindow).GetMethod("SaveCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-                var task = (Task)method.Invoke(overlay, new object[] { false, false })!;
+                var task = (Task)method.Invoke(overlay, new object?[] { false, false, null })!;
                 var deadline = DateTime.UtcNow.AddSeconds(5);
                 while (!task.IsCompleted && DateTime.UtcNow < deadline)
                 {
@@ -725,7 +728,7 @@ public class QuickAccessOverlayInteractionTests
             var versionField = typeof(FastQuickActionsWindow)
                 .GetField("_imageVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-            overlay.HideForEditor();
+            overlay.StepAside();
 
             // Out of the way, not gone — and it must not auto-close under the editor.
             Assert.False(overlay.Visible);
@@ -734,7 +737,7 @@ public class QuickAccessOverlayInteractionTests
 
             overlay.ReplaceImageFromEditor(new SD.Bitmap(640, 400));
             PumpUntilRenderIdle(overlay);
-            overlay.ReturnFromEditor();
+            overlay.ComeBack();
 
             using var annotated = overlay.CloneImage();
             Assert.Equal(new SD.Size(640, 400), annotated.Size);
@@ -772,7 +775,7 @@ public class QuickAccessOverlayInteractionTests
             Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
 
             Invoke(overlay, "SetHovering", true);
-            overlay.HideForEditor();
+            overlay.StepAside();
             Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
 
             PumpUntil(() => Motion.Holders == 0, 4000);
@@ -830,6 +833,50 @@ public class QuickAccessOverlayInteractionTests
         => typeof(FastQuickActionsWindow)
             .GetField("_allowImmediateClose", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(card, true);
+
+    [Fact]
+    public void TemporarilyHideDiscardsNothingAndTheNextCaptureBringsTheStackBack()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"winshot-qao-hide-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string capture = Path.Combine(directory, "capture.png");
+        using (var written = new SD.Bitmap(16, 16))
+            written.Save(capture, SD.Imaging.ImageFormat.Png);
+
+        RunSta(() =>
+        {
+            // Drain anything an earlier test left on the recently-closed stack.
+            while (FastQuickActionsWindow.PopRecentlyClosed() is not null) { }
+
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            settings.Current.OverlayAutoClose = true;
+            settings.Current.OverlayAutoCloseSeconds = 20;
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var first = new FastQuickActionsWindow(bitmap, settings, capture);
+            using var second = new FastQuickActionsWindow(bitmap, settings);
+            first.Show();
+            second.Show();
+
+            Invoke(second, "RunMenuAction", QuickActionsMenu.TemporarilyHide);
+
+            Assert.False(first.Visible);
+            Assert.False(second.Visible);
+            Assert.False(first.IsDisposed);
+            Assert.False(second.IsDisposed);
+            // Non-destructive: nothing auto-closed, nothing went to recently-closed.
+            Assert.Null(FastQuickActionsWindow.PopRecentlyClosed());
+
+            using var third = new FastQuickActionsWindow(bitmap, settings);
+            Assert.True(first.Visible);
+            Assert.True(second.Visible);
+
+            third.Dispose();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+        });
+
+        Directory.Delete(directory, recursive: true);
+    }
 
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {

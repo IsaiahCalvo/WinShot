@@ -38,14 +38,16 @@ public class QuickActionsMenuTests
                 QuickActionsMenu.ShowInFolder,
                 QuickActionsMenu.MoveToRecycleBin,
                 QuickActionsMenu.ShareGroup,
+                QuickActionsMenu.SaveAll,
+                QuickActionsMenu.CloseAll,
+                QuickActionsMenu.TemporarilyHide,
                 QuickActionsMenu.Close,
             },
             ids);
         Assert.DoesNotContain(
             QuickActionsMenu.Rows(false, true, true, true),
             r => r.Text.Contains("Cloud", StringComparison.OrdinalIgnoreCase) ||
-                 r.Text.Contains("Quick Look", StringComparison.OrdinalIgnoreCase) ||
-                 r.Text.Contains("Temporarily", StringComparison.OrdinalIgnoreCase));
+                 r.Text.Contains("Quick Look", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -375,5 +377,52 @@ public class QuickActionsMenuTests
         Assert.False(QuickActionsMenu.ClaimsKey(WF.Keys.Space, hasFocusedButton: false));
         Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Enter, hasFocusedButton: true));
         Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Space, hasFocusedButton: true));
+    }
+
+    [Fact]
+    public void TheBatchRowsSitInTheSameBlockAsCloseAndAskBeforeTheyAct()
+    {
+        string[] ids = Ids();
+        int hide = Array.IndexOf(ids, QuickActionsMenu.TemporarilyHide);
+
+        // Directly above the single-item Close, not in a submenu.
+        Assert.Equal(
+            new[]
+            {
+                QuickActionsMenu.SaveAll,
+                QuickActionsMenu.CloseAll,
+                QuickActionsMenu.TemporarilyHide,
+                QuickActionsMenu.Close,
+            },
+            ids.Skip(hide - 2).ToArray());
+
+        var rows = QuickActionsMenu.Rows(false, true, true)
+            .Where(r => r.Id != QuickActionsMenu.Separator)
+            .ToDictionary(r => r.Id, r => r.Text);
+        Assert.EndsWith("…", rows[QuickActionsMenu.SaveAll], StringComparison.Ordinal);
+        Assert.EndsWith("…", rows[QuickActionsMenu.CloseAll], StringComparison.Ordinal);
+        // Temporarily hide is instant and reversible, so it does not ask.
+        Assert.False(rows[QuickActionsMenu.TemporarilyHide].EndsWith("…", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OnlyTheBatchRowsNeedMoreThanOneCard()
+    {
+        Assert.True(QuickActionsMenu.NeedsAStack(QuickActionsMenu.SaveAll));
+        Assert.True(QuickActionsMenu.NeedsAStack(QuickActionsMenu.CloseAll));
+        // Hiding one card is still worth offering.
+        Assert.False(QuickActionsMenu.NeedsAStack(QuickActionsMenu.TemporarilyHide));
+        Assert.False(QuickActionsMenu.NeedsAStack(QuickActionsMenu.Close));
+        Assert.False(QuickActionsMenu.NeedsAStack(QuickActionsMenu.Save));
+    }
+
+    [Fact]
+    public void ARecordingCardGetsTheBatchRowsToo()
+    {
+        string[] ids = Ids(mediaFile: true);
+
+        Assert.Contains(QuickActionsMenu.SaveAll, ids);
+        Assert.Contains(QuickActionsMenu.CloseAll, ids);
+        Assert.Contains(QuickActionsMenu.TemporarilyHide, ids);
     }
 }

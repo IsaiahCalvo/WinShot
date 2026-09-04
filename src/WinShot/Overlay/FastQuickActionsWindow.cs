@@ -81,6 +81,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private bool _dragArmed;
     private bool _closed;
     private bool _exitMotionStarted;
+    private bool _temporarilyHidden;
     private bool _allowImmediateClose;
     private bool _regionUpdateQueued;
     private SD.Point _dragStart;
@@ -211,6 +212,9 @@ public sealed class FastQuickActionsWindow : WF.Form
             DisposeImageWhenUnused();
             ReflowOpenWindowsAnimated();
         };
+        // A hidden stack is waiting to be wanted again; the next capture is that moment.
+        foreach (FastQuickActionsWindow card in OpenWindows.ToArray().Where(w => w._temporarilyHidden))
+            card.ComeBack();
         OpenWindows.Add(this);
         TrimStackToCapacity();
 
@@ -1226,6 +1230,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         };
         _overflowMenu.Opening += (_, _) =>
         {
+            bool stacked = OpenWindows.Count(w => !w.IsDisposed && !w._exitMotionStarted) > 1;
+            foreach (WF.ToolStripItem item in _overflowMenu.Items)
+            {
+                if (item is QuickActionMenuItem row && QuickActionsMenu.NeedsAStack(row.Id))
+                    row.Visible = stacked;
+            }
             SetHovering(true);
             PauseAutoCloseTimer();
         };
@@ -1395,6 +1405,20 @@ public sealed class FastQuickActionsWindow : WF.Form
                 case QuickActionsMenu.ShareBlip:
                     _ = ShareWithBlipAsync();
                     return;
+                case QuickActionsMenu.SaveAll:
+                    _ = SaveEveryCardAsync();
+                    return;
+                case QuickActionsMenu.CloseAll:
+                    foreach (FastQuickActionsWindow card in OpenWindows.ToArray())
+                        card.Close();
+                    return;
+                case QuickActionsMenu.TemporarilyHide:
+                    foreach (FastQuickActionsWindow card in OpenWindows.ToArray())
+                    {
+                        card.StepAside();
+                        card._temporarilyHidden = true;
+                    }
+                    return;
                 case QuickActionsMenu.Close:
                     Close();
                     return;
@@ -1440,11 +1464,13 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     /// <summary>
-    /// Steps the card aside while the annotate editor is up. Opening the editor does not
-    /// consume the card: Copy, Save and drag-out all still apply to whatever comes back,
-    /// which is the point of having them on the card at all.
+    /// Takes the card off screen without discarding the capture: the auto-close timer is
+    /// paused rather than run, and nothing is pushed to the recently-closed stack. Used
+    /// while the annotate editor is up — opening the editor does not consume the card, so
+    /// Copy, Save and drag-out all still apply to whatever comes back — and by the menu's
+    /// "Temporarily hide", which is the non-destructive way to clear the corner.
     /// </summary>
-    internal void HideForEditor()
+    internal void StepAside()
     {
         if (_closed || IsDisposed)
             return;
@@ -1459,11 +1485,12 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     /// <summary>Brings the card back, in whatever slot is free by then.</summary>
-    internal void ReturnFromEditor()
+    internal void ComeBack()
     {
         if (_closed || IsDisposed)
             return;
 
+        _temporarilyHidden = false;
         PositionFromSettings();
         Visible = true;
         ResumeAutoCloseTimer();
@@ -2275,17 +2302,55 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
+    /// <summary>
+    /// Saves every open card into one folder the user picks. Each card writes through its
+    /// own save path, so a recording copies its file and a screenshot encodes its bitmap,
+    /// and every card closes behind its own save exactly as a single Save does.
+    /// </summary>
+    private async Task SaveEveryCardAsync()
+    {
+        string folder;
+        using (var dialog = new WF.FolderBrowserDialog
+        {
+            Description = "Save every open capture into this folder",
+            UseDescriptionForTitle = true,
+            SelectedPath = _settings.Current.SaveFolder,
+        })
+        {
+            if (dialog.ShowDialog(this) != WF.DialogResult.OK)
+                return;
+            folder = dialog.SelectedPath;
+        }
+
+        foreach (FastQuickActionsWindow card in OpenWindows.ToArray())
+        {
+            if (card.IsDisposed || card._closed)
+                continue;
+            await card.SaveCoreAsync(askForDestination: false, closeAfterSave: true, folder: folder);
+        }
+    }
+
     private void SaveFromInput()
         => _ = SaveCoreAsync(
             askForDestination: IsAltDown() || QuickAccessOverlayLayout.NormalizeSaveBehavior(_settings.Current.OverlaySaveButtonBehavior) == "ask",
             closeAfterSave: true);
 
-    private async Task SaveCoreAsync(bool askForDestination, bool closeAfterSave)
+    private async Task SaveCoreAsync(bool askForDestination, bool closeAfterSave, string? folder = null)
     {
         try
         {
             if (_mediaFilePath is not null)
             {
+                if (folder is not null)
+                {
+                    // Batch save: a recording is already a file, so this is a copy into
+                    // the chosen folder rather than another dialog per card.
+                    await CopyMediaFileIntoAsync(folder);
+                    if (closeAfterSave && !_closed && !IsDisposed)
+                        Close();
+                    return;
+                }
+
                 // The recording is already saved; Save here means "save a copy as…".
                 string extension = Path.GetExtension(_mediaFilePath).TrimStart('.');
                 using var mediaDialog = new WF.SaveFileDialog
@@ -2297,13 +2362,14 @@ public sealed class FastQuickActionsWindow : WF.Form
                 if (mediaDialog.ShowDialog(this) != WF.DialogResult.OK)
                     return;
                 string source = _mediaFilePath;
-                string destination = mediaDialog.FileName;
-                await Task.Run(() => File.Copy(source, destination, overwrite: true));
+                string chosen = mediaDialog.FileName;
+                await Task.Run(() => File.Copy(source, chosen, overwrite: true));
                 if (closeAfterSave && !_closed && !IsDisposed)
                     Close();
                 return;
             }
-            Directory.CreateDirectory(_settings.Current.SaveFolder);
+            string destination = folder ?? _settings.Current.SaveFolder;
+            Directory.CreateDirectory(destination);
             string path;
             if (askForDestination)
             {
@@ -2325,7 +2391,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
             else
             {
-                path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, _settings.Current.ImageFormat);
+                path = FileNamer.NextUniquePath(_settings, destination, _settings.Current.ImageFormat);
             }
 
             var copy = CaptureService.CloneBitmap(_image);
@@ -2341,6 +2407,15 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             Log.Error("Save failed", ex);
         }
+    }
+
+    private async Task CopyMediaFileIntoAsync(string folder)
+    {
+        string source = _mediaFilePath!;
+        string extension = Path.GetExtension(source).TrimStart('.');
+        Directory.CreateDirectory(folder);
+        string destination = FileNamer.NextUniquePath(_settings, folder, extension);
+        await Task.Run(() => File.Copy(source, destination, overwrite: false));
     }
 
     private void OpenMediaFile()

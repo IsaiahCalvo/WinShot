@@ -1405,9 +1405,9 @@ public partial class App : Application
         // The card steps aside rather than being consumed: annotate, save, and the same
         // card comes back holding the annotated image, with Copy / drag-out still on it.
         // Pin still consumes its card — the pin is the card, relocated.
-        overlay.HideForEditor();
+        overlay.StepAside();
         win.ImageCommitted += overlay.ReplaceImageFromEditor;
-        win.Closed += (_, _) => overlay.ReturnFromEditor();
+        win.Closed += (_, _) => overlay.ComeBack();
         win.Show();
     }
 
