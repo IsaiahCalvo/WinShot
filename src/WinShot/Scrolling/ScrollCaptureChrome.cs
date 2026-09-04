@@ -206,19 +206,33 @@ public sealed class ScrollControlsBar : WF.Form
     private bool _autoOn;
     private ScrollHint _hint = ScrollHint.None; // a persistent hint overrides live status text
 
+    // Point-based fonts render at the monitor's DPI, so the fixed-pixel layout has to be
+    // scaled for the target monitor or the status label and buttons clip on a 125%/150%
+    // display. AutoScaleMode.Dpi cannot do this: it only reacts to DPI *changes*, so on
+    // the monitor a window is born on it never scales at all. Same treatment as every
+    // other WinForms surface in the app (FastRecordingControlBar, the selectors, ...).
+    private readonly double _scale;
+
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     // Amber warning — the palette only has red (error); these are nudges, not errors.
     private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
 
     public ScrollControlsBar(SD.Rectangle regionScreen)
     {
-        AutoScaleMode = WF.AutoScaleMode.Dpi;
-        AutoScaleDimensions = new SD.SizeF(96, 96);
+        SD.Rectangle targetScreen = WF.Screen.FromRectangle(regionScreen).Bounds;
+        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(targetScreen);
+        // Born ON the target monitor: a window created at (0,0) on the primary and moved
+        // later gets WM_DPICHANGED on the move and rescales on top of the pre-applied
+        // _scale, which double-scales the bar on a mixed-DPI setup.
+        Location = targetScreen.Location;
+        AutoScaleMode = WF.AutoScaleMode.None;
         FormBorderStyle = WF.FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
         BackColor = ThemePalette.Elevated;
-        Padding = new WF.Padding(12, 8, 12, 8);
+        Padding = new WF.Padding(S(12), S(8), S(12), S(8));
 
         // Fixed width so the live status text ("12 frames — 4000px") never grows the
         // bar mid-capture (which would otherwise leave the rounded region stale and clip Done).
@@ -226,7 +240,7 @@ public sealed class ScrollControlsBar : WF.Form
         {
             Name = "ScrollCaptureStatus",
             AutoSize = false,
-            Size = new SD.Size(250, 24),
+            Size = new SD.Size(S(250), S(24)),
             AutoEllipsis = true,
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
@@ -281,12 +295,12 @@ public sealed class ScrollControlsBar : WF.Form
         _region = regionScreen;
         Shown += (_, _) =>
         {
-            ApplyRoundedRegion(Width, Height, ScalePx(12));
+            ApplyRoundedRegion(Width, Height, S(12));
             PositionNear(_region);
         };
         // Re-round AND re-center when the bar resizes (Start swaps to Done), so it never
         // clips the content or drifts off-center.
-        SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, ScalePx(12)); PositionNear(_region); };
+        SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, S(12)); PositionNear(_region); };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -372,7 +386,7 @@ public sealed class ScrollControlsBar : WF.Form
         Announce(_status.Text);
     }
 
-    private static WF.Button MakeButton(string text, string name, string accessibleName,
+    private WF.Button MakeButton(string text, string name, string accessibleName,
         string accessibleDescription, SD.Color back, SD.Color fore, SD.Color hover)
     {
         var b = new WF.Button
@@ -384,12 +398,12 @@ public sealed class ScrollControlsBar : WF.Form
             FlatStyle = WF.FlatStyle.Flat,
             BackColor = back,
             ForeColor = fore,
-            Padding = new WF.Padding(14, 6, 14, 6),
-            Margin = new WF.Padding(8, 0, 0, 0),
+            Padding = new WF.Padding(S(14), S(6), S(14), S(6)),
+            Margin = new WF.Padding(S(8), 0, 0, 0),
             Cursor = WF.Cursors.Hand,
             Anchor = WF.AnchorStyles.None,
             Font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
-            MinimumSize = new SD.Size(0, 40),
+            MinimumSize = new SD.Size(0, S(40)),
             AccessibleName = accessibleName,
             AccessibleDescription = accessibleDescription,
             AccessibleRole = WF.AccessibleRole.PushButton,
@@ -419,7 +433,7 @@ public sealed class ScrollControlsBar : WF.Form
     private void PositionNear(SD.Rectangle region)
     {
         var mon = WF.Screen.FromRectangle(region).Bounds;
-        int gap = ScalePx(14), pad = ScalePx(8);
+        int gap = S(14), pad = S(8);
         int x = region.Left + (region.Width - Width) / 2;
 
         int below = region.Bottom + gap;
@@ -449,7 +463,6 @@ public sealed class ScrollControlsBar : WF.Form
         Region = new SD.Region(path);
     }
 
-    private int ScalePx(int logical) => ScrollChromeMetrics.Scale(logical, DeviceDpi);
 }
 
 internal enum ScrollChromeAction { Start, ToggleAuto, Done, Cancel }
@@ -460,12 +473,6 @@ internal static class ScrollKeyboardShortcuts
     public const string ToggleAuto = "Alt+A";
     public const string Done = "Alt+D";
     public const string Cancel = "Alt+X";
-}
-
-internal static class ScrollChromeMetrics
-{
-    public static int Scale(int logicalPixels, int dpi)
-        => Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, dpi) / 96.0));
 }
 
 /// <summary>User-facing text for the persistent capture hints, shared by the controls bar
@@ -495,23 +502,32 @@ public sealed class ScrollPreviewPanel : WF.Form
     // Amber warning — matches the controls bar's nudge color.
     private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
 
+    // Same reason as ScrollControlsBar: AutoScaleMode.Dpi never fires on the monitor a
+    // window is born on, so the panel laid out at 96-dpi metrics while its point-sized
+    // caption rendered at the real DPI.
+    private readonly double _scale;
+
+    private int S(int logical) => (int)Math.Round(logical * _scale);
+
     public ScrollPreviewPanel(SD.Rectangle regionScreen)
     {
-        AutoScaleMode = WF.AutoScaleMode.Dpi;
-        AutoScaleDimensions = new SD.SizeF(96, 96);
+        SD.Rectangle targetScreen = WF.Screen.FromRectangle(regionScreen).Bounds;
+        _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(targetScreen);
+        Location = targetScreen.Location;
+        AutoScaleMode = WF.AutoScaleMode.None;
         FormBorderStyle = WF.FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
         BackColor = ThemePalette.Elevated;
-        Padding = new WF.Padding(8);
-        Size = new SD.Size(220, 300);
+        Padding = new WF.Padding(S(8));
+        Size = new SD.Size(S(220), S(300));
 
         _caption = new WF.Label
         {
             Name = "ScrollPreviewStatus",
             Dock = WF.DockStyle.Bottom,
-            Height = 32, // two lines, so the "slow down" warning fits
+            Height = S(32), // two lines, so the "slow down" warning fits
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(ThemePalette.TextCaptionPt),
             Text = "Capturing…",
@@ -598,7 +614,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     private void PositionBottomRight(SD.Rectangle region)
     {
         var mon = WF.Screen.FromRectangle(region).Bounds;
-        int inset = ScrollChromeMetrics.Scale(20, DeviceDpi);
+        int inset = S(20);
         Location = new SD.Point(mon.Right - Width - inset, mon.Bottom - Height - inset);
     }
 }

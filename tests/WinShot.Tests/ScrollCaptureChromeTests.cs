@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using WinShot.Core;
 using WinShot.Scrolling;
 using Xunit;
@@ -62,10 +62,19 @@ public class ScrollCaptureChromeTests
         Assert.False(string.IsNullOrWhiteSpace(status.AccessibleName));
     }
 
-    [Theory]
-    [InlineData(96, 44)]
-    [InlineData(144, 66)]
-    [InlineData(192, 88)]
-    public void ChromeMetrics_ScaleHitTargetsForDpi(int dpi, int expected)
-        => Assert.Equal(expected, ScrollChromeMetrics.Scale(44, dpi));
+    /// <summary>
+    /// AutoScaleMode.Dpi only reacts to DPI *changes*, so a window born on a 150% monitor
+    /// never scales at all: the layout stays at 96-dpi metrics while the point-sized fonts
+    /// render at the real DPI, and the status label clips. Both scroll surfaces scale
+    /// manually now, like every other WinForms surface in the app.
+    /// </summary>
+    [Fact]
+    public void ScrollChrome_ScalesManually_NotWithAutoScaleModeDpi()
+    {
+        using var controls = new ScrollControlsBar(new SD.Rectangle(10, 10, 900, 600));
+        using var preview = new ScrollPreviewPanel(new SD.Rectangle(10, 10, 900, 600));
+
+        Assert.Equal(WF.AutoScaleMode.None, controls.AutoScaleMode);
+        Assert.Equal(WF.AutoScaleMode.None, preview.AutoScaleMode);
+    }
 }
