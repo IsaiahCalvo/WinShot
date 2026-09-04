@@ -175,7 +175,7 @@
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
                      ScrollViewer.CanContentScroll="False" KeyboardNavigation.TabNavigation="Continue"
                      AutomationProperties.Name="Capture history"
-                     AutomationProperties.HelpText="Use arrow keys to select, Enter to open, Space to preview, and Tab to reach item actions.">
+                     AutomationProperties.HelpText="Use arrow keys to select, Enter to restore, Ctrl+C to copy, Space to preview, and Tab to reach item actions.">
                 <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">

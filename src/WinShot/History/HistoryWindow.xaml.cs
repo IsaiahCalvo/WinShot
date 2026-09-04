@@ -242,6 +242,21 @@ public partial class HistoryWindow : Window
                     return true;
                 }
                 return false;
+            case Key.C when modifiers == ModifierKeys.Control:
+                // Selection mode is the batch gesture and already puts a file list on the
+                // clipboard; outside it, Ctrl+C copies the picture itself so it can be pasted
+                // straight into a chat or a document.
+                if (_selectionMode && ItemsList.SelectedItems.Count > 0)
+                {
+                    OnCopySelected(this, new RoutedEventArgs());
+                    return true;
+                }
+                if ((SelectedItem() ?? _previewItem) is { IsImage: true } toCopy)
+                {
+                    _ = CopyImageAsync(toCopy);
+                    return true;
+                }
+                return false;
         }
         return false;
     }
@@ -971,7 +986,16 @@ public partial class HistoryWindow : Window
 
     private async void OnCopy(object sender, RoutedEventArgs e)
     {
-        if (GetItem(sender) is not { IsImage: true } item) return;
+        if (GetItem(sender) is { IsImage: true } item)
+            await CopyImageAsync(item);
+    }
+
+    private async Task CopyImageAsync(HistoryItem item)
+    {
+        // Gone from disk (deleted under us, or a drive that went away): the watcher refresh
+        // will drop the tile, so say nothing rather than blaming the clipboard.
+        if (!File.Exists(item.FilePath))
+            return;
         try
         {
             var bmp = await Task.Run(() => HistoryImageLoader.LoadDetachedBitmap(item.FilePath));
@@ -980,6 +1004,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to copy history item {item.FilePath}", ex);
+            ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
         }
     }
 
@@ -1316,7 +1341,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public string AccessibleName => $"{(IsScrollingCapture ? "Scrolling screenshot" : IsImage ? "Screenshot" : ExtensionLabel)} captured {Caption}";
     public string AccessibleHelpText =>
         CanPin
-            ? "Press Enter to open, Space to preview, or Tab for Copy, Edit, Pin, and Delete actions."
+            ? "Press Enter to restore, Ctrl+C to copy, Space to preview, or Tab for Copy, Edit, Pin, and Delete actions."
             : "Press Enter to open, Space to preview, or Tab for Delete. Pin is available only for still images.";
 
     public ImageSource? Thumbnail

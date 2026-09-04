@@ -193,6 +193,13 @@ public class ThemedWindowTests
         Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
         Assert.Equal(2, restored.Count);
 
+        // Ctrl+C claims the key for a still image and leaves it alone for a video.
+        list.SelectedItem = items[0];
+        Assert.True(window.HandleKey(Key.C, ModifierKeys.Control));
+        list.SelectedItem = items[1];
+        Assert.False(window.HandleKey(Key.C, ModifierKeys.Control));
+        Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
+
         window.Close();
     }
 
