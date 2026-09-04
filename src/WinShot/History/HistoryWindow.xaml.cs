@@ -505,6 +505,26 @@ public partial class HistoryWindow : Window
             cancellationToken.ThrowIfCancellationRequested();
             await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);
         }
+
+        await LoadSourceAppIconsAsync(items, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Resolving an app icon walks the process list, so it happens off the UI thread
+    /// alongside the thumbnails and lands as a fade-in once the tile is already up.</summary>
+    private async Task LoadSourceAppIconsAsync(
+        IEnumerable<HistoryItem> items,
+        CancellationToken cancellationToken)
+    {
+        foreach (HistoryItem item in items.Where(item => item.SourceApp.Length > 0 && item.SourceAppIcon is null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ImageSource? icon = await Task.Run(
+                () => SourceAppIcons.For(item.SourceApp),
+                cancellationToken).ConfigureAwait(false);
+            if (icon is null) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            await Dispatcher.InvokeAsync(() => item.SourceAppIcon = icon);
+        }
     }
 
     private async Task LoadThumbnailsSafelyAsync(
@@ -1187,6 +1207,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
     private static readonly string[] VideoExtensions = { ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".webm" };
 
     private ImageSource? _thumbnail;
+    private ImageSource? _sourceAppIcon;
 
     public HistoryItem(string filePath)
     {
@@ -1195,7 +1216,14 @@ public sealed class HistoryItem : INotifyPropertyChanged
         IsImage = ImageExtensions.Contains(ext);
         IsVideo = VideoExtensions.Contains(ext);
         IsGif = ext == ".gif";
-        IsScrollingCapture = IsImage && Path.GetFileNameWithoutExtension(filePath).EndsWith("-scroll", StringComparison.OrdinalIgnoreCase);
+        // "20260904-141233-091-scroll@chrome.png": the source-app tag is last, so strip it
+        // before asking about the classification tag in front of it. Files written before
+        // the tag existed simply have nothing after the last '-'.
+        string stem = Path.GetFileNameWithoutExtension(filePath);
+        int tag = stem.LastIndexOf('@');
+        SourceApp = tag > 0 && tag < stem.Length - 1 ? stem[(tag + 1)..] : string.Empty;
+        if (tag > 0) stem = stem[..tag];
+        IsScrollingCapture = IsImage && stem.EndsWith("-scroll", StringComparison.OrdinalIgnoreCase);
         ExtensionLabel = ext.TrimStart('.').ToUpperInvariant();
         FileName = Path.GetFileName(filePath);
         CapturedAt = ParseCapturedAt(filePath);
@@ -1212,6 +1240,10 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public bool IsVideo { get; }
     public bool IsGif { get; }
     public bool IsScrollingCapture { get; }
+
+    /// <summary>Process that owned the window this capture was taken over, or empty when the
+    /// file carries no tag (everything written before the tag existed, and every recording).</summary>
+    public string SourceApp { get; }
     public bool CanPin => IsImage;
     public string ExtensionLabel { get; }
     public string FileName { get; }
@@ -1338,7 +1370,11 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public Visibility ScrollingVisibility => IsScrollingCapture ? Visibility.Visible : Visibility.Collapsed;
     public Visibility VideoBadgeVisibility => IsVideo ? Visibility.Visible : Visibility.Collapsed;
     public Visibility GifBadgeVisibility => IsGif ? Visibility.Visible : Visibility.Collapsed;
-    public string AccessibleName => $"{(IsScrollingCapture ? "Scrolling screenshot" : IsImage ? "Screenshot" : ExtensionLabel)} captured {Caption}";
+    public Visibility SourceAppVisibility => SourceAppIcon is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public string AccessibleName =>
+        $"{(IsScrollingCapture ? "Scrolling screenshot" : IsImage ? "Screenshot" : ExtensionLabel)}" +
+        $"{(SourceApp.Length == 0 ? string.Empty : $" from {SourceApp}")} captured {Caption}";
     public string AccessibleHelpText =>
         CanPin
             ? "Press Enter to restore, Ctrl+C to copy, Space to preview, or Tab for Copy, Edit, Pin, and Delete actions."
@@ -1352,6 +1388,19 @@ public sealed class HistoryItem : INotifyPropertyChanged
             _thumbnail = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MissingThumbnailVisibility)));
+        }
+    }
+
+    /// <summary>Icon of the app this capture was taken over. Resolved off the UI thread with
+    /// the thumbnail, so it arrives (and fades in) after the tile is already on screen.</summary>
+    public ImageSource? SourceAppIcon
+    {
+        get => _sourceAppIcon;
+        set
+        {
+            _sourceAppIcon = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SourceAppIcon)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SourceAppVisibility)));
         }
     }
 

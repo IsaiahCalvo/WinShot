@@ -34,6 +34,9 @@ public partial class App : Application
     private RecordingRecoveryStartup? _recordingRecovery;
     private bool _captureInProgress;
     private string? _pendingCaptureCommand;
+    /// <summary>Process that owned the foreground window when the current capture was asked
+    /// for. Stamped into the history file name so the tile can show a source-app badge.</summary>
+    private string? _captureSourceApp;
     private bool _pendingCaptureDrainActive;
     private long _autoCopySuppressedUntilTick;
     internal DirectEditCaptureTestHooks? DirectEditTestHooks { get; set; }
@@ -446,6 +449,10 @@ public partial class App : Application
         // (hotkey, tray, winshot://), and replaying a press made while the selector was
         // already open reads as a ghost re-trigger right after the user cancels with Esc.
         if (_captureInProgress || Recording.SelectionUiActive) return;
+        // Read the owning app now, while the user's window is still foreground — once the
+        // selector overlay is up, or the history write runs on the thread pool, the answer
+        // is WinShot. History tags the file with it so the card can wear an app badge.
+        _captureSourceApp = FileNamer.GetForegroundInfo().App;
         _pendingCaptureCommand = cmd;
         SchedulePendingCaptureDrain();
     }
@@ -885,7 +892,7 @@ public partial class App : Application
         Func<SD.Bitmap, Task> historyWork = hooks?.HistoryWork ?? (source =>
             Task.Run(() =>
             {
-                try { _history.Add(source, historyKind); }
+                try { _history.Add(source, historyKind, _captureSourceApp); }
                 catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
             }));
         Func<SD.Bitmap, Task>? autoCopyWork = _settings.Current.AutoCopyToClipboard
@@ -939,7 +946,7 @@ public partial class App : Application
             try
             {
                 using var copy = CaptureService.CloneBitmap(bmp);
-                return _history.Add(copy, historyKind);
+                return _history.Add(copy, historyKind, _captureSourceApp);
             }
             catch (Exception ex)
             {
@@ -957,7 +964,7 @@ public partial class App : Application
         {
             using (copy)
             {
-                try { return _history.Add(copy, historyKind); }
+                try { return _history.Add(copy, historyKind, _captureSourceApp); }
                 catch (Exception ex)
                 {
                     Log.Error("Failed to add capture to history", ex);
@@ -1108,7 +1115,7 @@ public partial class App : Application
                 try
                 {
                     using var copy = CaptureService.CloneBitmap(bmp);
-                    return _history.Add(copy, historyKind);
+                    return _history.Add(copy, historyKind, _captureSourceApp);
                 }
                 catch (Exception ex)
                 {

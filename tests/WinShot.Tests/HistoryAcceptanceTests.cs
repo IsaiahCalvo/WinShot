@@ -139,12 +139,79 @@ public class HistoryAcceptanceTests
     [InlineData("20260803-120000-000-scroll.png", true)]
     [InlineData("20260803-120000-000.png", false)]
     [InlineData("20260803-120000-000-scroll.mp4", false)]
+    // The source-app tag comes after the classification tag, so it must not hide it.
+    [InlineData("20260803-120000-000-scroll@chrome.png", true)]
+    [InlineData("20260803-120000-000@chrome.png", false)]
     public void ScrollingClassification_UsesExplicitHistoryTag(string fileName, bool expected)
     {
         var item = new HistoryItem(fileName);
 
         Assert.Equal(expected, item.IsScrollingCapture);
         Assert.Equal(expected ? Visibility.Visible : Visibility.Collapsed, item.ScrollingVisibility);
+    }
+
+    [Theory]
+    [InlineData("20260803-120000-000@chrome.png", "chrome")]
+    [InlineData("20260803-120000-000-scroll@Code.png", "Code")]
+    [InlineData("20260803-120000-000.png", "")]
+    // Nothing after the '@' is not a tag, and neither is a name that is only a tag.
+    [InlineData("20260803-120000-000@.png", "")]
+    [InlineData("@chrome.png", "")]
+    public void SourceAppTag_IsReadBackFromTheFileName(string fileName, string expected)
+    {
+        var item = new HistoryItem(fileName);
+
+        Assert.Equal(expected, item.SourceApp);
+        // The icon has not been resolved yet, so no badge is shown either way.
+        Assert.Equal(Visibility.Collapsed, item.SourceAppVisibility);
+    }
+
+    [Fact]
+    public void SourceAppTag_DoesNotDisturbTheTimestampInFront()
+    {
+        Assert.Equal(
+            new DateTime(2026, 8, 3, 12, 0, 0, 0),
+            new HistoryItem("20260803-120000-000-scroll@chrome.png").CapturedAt);
+    }
+
+    [Theory]
+    [InlineData("chrome", "@chrome")]
+    [InlineData("  Code  ", "@Code")]
+    // A process name cannot reintroduce the separator, a path, or a second extension.
+    [InlineData("we@ird", "@weird")]
+    [InlineData(@"a\b/c:d", "@abcd")]
+    [InlineData("my.app", "@myapp")]
+    // Nothing worth badging: no owner, or WinShot looking at itself.
+    [InlineData("Desktop", "")]
+    [InlineData("winshot", "")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    public void SourceAppSuffix_IsSafeToPutInAFileName(string? app, string expected)
+    {
+        string suffix = HistoryService.SourceAppSuffix(app);
+
+        Assert.Equal(expected, suffix);
+        Assert.DoesNotContain(suffix, Path.GetInvalidFileNameChars().Select(c => c.ToString()));
+    }
+
+    [Fact]
+    public void Add_StampsTheSourceAppIntoTheFileName()
+    {
+        string dir = CreateTempDir();
+        try
+        {
+            using var bitmap = new Bitmap(2, 2);
+            string path = CreateService(dir).Add(bitmap, HistoryCaptureKind.Scrolling, "chrome")!;
+
+            Assert.EndsWith("-scroll@chrome.png", path, StringComparison.Ordinal);
+            var item = new HistoryItem(path);
+            Assert.True(item.IsScrollingCapture);
+            Assert.Equal("chrome", item.SourceApp);
+        }
+        finally
+        {
+            DeleteTempDir(dir);
+        }
     }
 
     private static HistoryService CreateService(string dir)

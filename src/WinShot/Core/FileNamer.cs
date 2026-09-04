@@ -81,7 +81,9 @@ public static class FileNamer
         return result;
     }
 
-    private static (string App, string Title) GetForegroundInfo()
+    /// <summary>Process name and window title of the foreground window. History uses the app
+    /// half to tag a capture with the app it came from.</summary>
+    internal static (string App, string Title) GetForegroundInfo()
     {
         try
         {

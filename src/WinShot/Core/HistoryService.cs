@@ -24,8 +24,12 @@ public class HistoryService
     public static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinShot", "History");
 
-    /// <summary>Writes a capture into history, or returns null when history is switched off.</summary>
-    public string? Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular)
+    /// <summary>
+    /// Writes a capture into history, or returns null when history is switched off.
+    /// <paramref name="sourceApp"/> is the process the capture came from; it rides along in
+    /// the file name, which is the only metadata channel this flat folder has.
+    /// </summary>
+    public string? Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular, string? sourceApp = null)
     {
         if (!_settings.Current.HistoryEnabled) return null;
         lock (_gate)
@@ -33,7 +37,8 @@ public class HistoryService
             string dir = _directoryProvider();
             Directory.CreateDirectory(dir);
             string suffix = kind == HistoryCaptureKind.Scrolling ? "-scroll" : string.Empty;
-            string path = Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}{suffix}.png");
+            string path = Path.Combine(
+                dir, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}{suffix}{SourceAppSuffix(sourceApp)}.png");
             bmp.Save(path, ImageFormat.Png);
             PruneCore();
             PruneByAgeCore(_settings.Current.HistoryRetentionDays);
@@ -57,6 +62,31 @@ public class HistoryService
             PruneByAgeCore(_settings.Current.HistoryRetentionDays);
             return path;
         }
+    }
+
+    /// <summary>
+    /// "@chrome" for a capture taken over Chrome, empty when the owning app is unknown.
+    /// Everything Windows disallows in a name — and '@' itself, so the last '@' always
+    /// starts the tag — is dropped rather than replaced, since this is a label, not a name
+    /// the user typed. WinShot's own windows are not a source worth badging.
+    /// </summary>
+    internal static string SourceAppSuffix(string? app)
+    {
+        if (string.IsNullOrWhiteSpace(app)) return string.Empty;
+
+        var invalid = Path.GetInvalidFileNameChars();
+        string cleaned = new(app.Trim()
+            .Where(c => c != '@' && c != '.' && !invalid.Contains(c))
+            .Take(32)
+            .ToArray());
+        if (cleaned.Length == 0 ||
+            cleaned.Equals("Desktop", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("WinShot", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return "@" + cleaned;
     }
 
     /// <summary>All history items, newest first.</summary>
