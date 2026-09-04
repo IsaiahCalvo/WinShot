@@ -1204,10 +1204,10 @@ public sealed class FastQuickActionsWindow : WF.Form
                     Close();
                     return;
                 case BlipShareResult.NeedsRestart:
-                    ShowShareToast("Blip can't receive shares", "Restart Blip and try again.");
+                    ShowShareToast("Blip can't receive shares", "Restart Blip and try again.", Core.ToastSeverity.Error);
                     return;
                 default:
-                    ShowShareToast("Blip share failed", "The capture was not handed to Blip.");
+                    ShowShareToast("Blip share failed", "The capture was not handed to Blip.", Core.ToastSeverity.Error);
                     return;
             }
         }
@@ -1217,13 +1217,15 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    /// <summary>Reuses the OCR toast — it is the app's generic anchored dark notice.</summary>
-    private void ShowShareToast(string title, string message)
+    /// <summary>The app's one toast, anchored to this card. Every caller so far is a failure,
+    /// so the severity is passed rather than left at Info — an info glyph on "share failed"
+    /// looks exactly like the "Copied" confirmation.</summary>
+    private void ShowShareToast(string title, string message, Core.ToastSeverity severity)
     {
         try
         {
             SD.Rectangle card = RectangleToScreen(_cardRect);
-            new Core.ToastWindow(title, message, new SD.Point(card.Left, card.Top), null).Show();
+            new Core.ToastWindow(title, message, new SD.Point(card.Left, card.Top), null, severity).Show();
         }
         catch (Exception ex)
         {

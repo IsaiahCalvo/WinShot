@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 
 namespace WinShot.Core;
@@ -21,10 +21,16 @@ public static class FriendlyError
         DirectoryNotFoundException => "That folder no longer exists. Choose a different folder in Settings.",
         PathTooLongException => "That file path is too long. Choose a shorter folder or file name.",
         IOException io when io.HResult is ErrorDiskFull or ErrorHandleDiskFull => "The drive is full.",
-        IOException => "The file could not be written. It may be open in another app.",
+        // FriendlyError runs on read paths too (opening a background image, deleting a
+        // history file), so the generic line must not claim a write was attempted.
+        FileNotFoundException => "That file is no longer there.",
+        IOException => "Windows could not read or write that file. It may be open in another app.",
         System.Net.Http.HttpRequestException or System.Net.Sockets.SocketException
             => "WinShot couldn't reach the internet. Check your connection and try again.",
-        OperationCanceledException or TimeoutException => "That took too long and was stopped.",
+        // A deliberate cancel is not a timeout: TaskCanceledException derives from
+        // OperationCanceledException, and the recording and export paths both throw it.
+        OperationCanceledException => "That was cancelled.",
+        TimeoutException => "That took too long and was stopped.",
         OutOfMemoryException => "The image is too large to process on this PC.",
         // GDI+ reports both a bad image and a failed encode this way.
         ArgumentException or ExternalException => "The image could not be processed. Try the capture again.",

@@ -1024,7 +1024,7 @@ public partial class App : Application
         {
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
             if (showSuccess)
-                await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Copied to clipboard.", ToastSeverity.Success));
+                await Dispatcher.InvokeAsync(() => ShowBalloon("Copied", "The capture is on the clipboard.", ToastSeverity.Success));
         }
         catch (Exception ex)
         {
@@ -1229,19 +1229,33 @@ public partial class App : Application
         SD.Point? anchor = null,
         FastQuickActionsWindow? card = null)
     {
+        OcrCaptureResult result;
         try
         {
             var sw = Stopwatch.StartNew();
-            var result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
+            // Only OcrService's own InvalidOperationException messages are written for the
+            // user (no language pack installed, and so on), so only this call is allowed to
+            // put one on screen; anything the rest of the flow throws goes through the
+            // generic handler instead of quoting the framework.
+            result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
             LogPerf("ocr extract", sw);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log.Info($"OCR unavailable: {ex.Message}");
+            ShowBalloon("OCR unavailable", ex.Message, ToastSeverity.Error);
+            return;
+        }
 
+        try
+        {
             OcrClipboardPayload? payload = OcrClipboardFormatter.Build(result);
             if (payload is null)
             {
                 if (card is not null)
                     card.FlashStatus("No text found");
                 else
-                    ShowOcrToast("Nothing found", "No text or codes in the selection.", anchor, onOpen: null);
+                    ShowOcrToast("Nothing found", "No text or codes in the selection.", anchor, onOpen: null, ToastSeverity.Info);
                 return;
             }
 
@@ -1250,13 +1264,6 @@ public partial class App : Application
                 card.FlashStatus("Text copied");
             else
                 ShowOcrToast(payload.BalloonTitle, payload.Preview, anchor, BuildOpenAction(payload.ClipboardText));
-        }
-        catch (InvalidOperationException ex)
-        {
-            // OCR's own InvalidOperationException messages are already written for the user
-            // (no language pack installed, and so on) — keep them, log the rest.
-            Log.Info($"OCR unavailable: {ex.Message}");
-            ShowBalloon("OCR unavailable", ex.Message, ToastSeverity.Error);
         }
         catch (COMException ex)
         {
@@ -1278,8 +1285,12 @@ public partial class App : Application
         return null;
     }
 
-    private void ShowOcrToast(string title, string preview, SD.Point? anchor, Action? onOpen) =>
-        ShowToast(title, preview, anchor, onOpen, ToastSeverity.Success);
+    /// <summary>Severity is per-call: "Nothing found" is not a success, and a checkmark on it
+    /// reads as "it worked".</summary>
+    private void ShowOcrToast(
+        string title, string preview, SD.Point? anchor, Action? onOpen,
+        ToastSeverity severity = ToastSeverity.Success) =>
+        ShowToast(title, preview, anchor, onOpen, severity);
 
     private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
@@ -1467,7 +1478,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error($"Failed to load image {path}", ex);
-            ShowBalloon("WinShot", "Could not open that file as an image.", ToastSeverity.Error);
+            ShowBalloon("Couldn't open that file", "It is not an image WinShot can read.", ToastSeverity.Error);
             return null;
         }
     }
@@ -1531,7 +1542,7 @@ public partial class App : Application
     /// <summary>Manual "Check for updates…" — reports the outcome either way.</summary>
     private async Task CheckForUpdatesFlowAsync()
     {
-        ShowBalloon("WinShot", "Checking for updates…");
+        ShowBalloon("Checking for updates…", "Asking GitHub for the latest release.");
         var result = await UpdateService.CheckAsync();
         await Dispatcher.InvokeAsync(() =>
         {
@@ -1541,11 +1552,11 @@ public partial class App : Application
                     OnUpdateAvailable(result);
                     break;
                 case UpdateState.UpToDate:
-                    ShowBalloon("WinShot", "You're on the latest version.", ToastSeverity.Success);
+                    ShowBalloon("Up to date", "You're on the latest version.", ToastSeverity.Success);
                     break;
                 default:
                     Log.Error($"Update check failed: {result.Message}");
-                    ShowBalloon("WinShot", "Couldn't check for updates.", ToastSeverity.Error);
+                    ShowBalloon("Update check failed", "WinShot couldn't reach the internet. Check your connection and try again.", ToastSeverity.Error);
                     break;
             }
         });
@@ -1569,7 +1580,7 @@ public partial class App : Application
         _updateInProgress = true;
         try
         {
-            ShowBalloon("WinShot", "Downloading update…");
+            ShowBalloon("Downloading update…", "WinShot restarts once it is installed.");
             await UpdateService.DownloadAndLaunchAsync(update.DownloadUrl, update.LatestVersion ?? "latest");
             // Reached only when the installer launched (failures throw). Exit so it can replace our
             // files; the installer relaunches WinShot itself.
@@ -1579,13 +1590,13 @@ public partial class App : Application
         {
             Log.Error("Update verification failed", ex);
             _updateInProgress = false;
-            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update failed: download verification failed.", ToastSeverity.Error));
+            await Dispatcher.InvokeAsync(() => ShowBalloon("Update failed", "The download did not verify. Nothing was installed.", ToastSeverity.Error));
         }
         catch (Exception ex)
         {
             Log.Error("Update install failed", ex);
             _updateInProgress = false;
-            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update install failed. Log saved.", ToastSeverity.Error));
+            await Dispatcher.InvokeAsync(() => ShowBalloon("Update failed", "The installer could not start. The details are in the log.", ToastSeverity.Error));
         }
     }
 

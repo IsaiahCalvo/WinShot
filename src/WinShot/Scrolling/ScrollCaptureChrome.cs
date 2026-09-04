@@ -216,7 +216,7 @@ public sealed class ScrollControlsBar : WF.Form
     private int S(int logical) => WinShot.Recording.RecordingMonitorDpi.Px(logical, _scale);
 
     // Amber warning — the palette only has red (error); these are nudges, not errors.
-    private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
+    private static readonly SD.Color WarnColor = ThemePalette.Warn;
 
     public ScrollControlsBar(SD.Rectangle regionScreen)
     {
@@ -500,7 +500,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     private bool _hintShowing;
 
     // Amber warning — matches the controls bar's nudge color.
-    private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
+    private static readonly SD.Color WarnColor = ThemePalette.Warn;
 
     // Same reason as ScrollControlsBar: AutoScaleMode.Dpi never fires on the monitor a
     // window is born on, so the panel laid out at 96-dpi metrics while its point-sized
