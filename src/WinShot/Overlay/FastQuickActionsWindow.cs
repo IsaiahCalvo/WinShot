@@ -63,6 +63,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private Task? _copyTask;
     private Task<string>? _dragFileTask;
     private string? _tempDragPath;
+    private DragPreview? _dragPreview;
     private string? _historyPath;
     private int _imageVersion;
     private string? _flashMessage;
@@ -566,6 +567,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             EndStatusFlash();
             HideActionTooltip();
             _tooltipTimer.Dispose();
+            _dragPreview?.Dispose();
+            _dragPreview = null;
             _overflowMenu.Dispose();
             foreach (var button in _buttons)
                 button.Dispose();
@@ -2140,15 +2143,29 @@ public sealed class FastQuickActionsWindow : WF.Form
             return;
 
         _dragArmed = false;
+        DragPreview? ghost = null;
         try
         {
             string path = await EnsureDragFileAsync();
             if (_closed || IsDisposed) return;
 
             bool keepOpen = IsAltDown();
-            var data = new WF.DataObject();
-            data.SetData(WF.DataFormats.FileDrop, new[] { path });
-            var result = DoDragDrop(data, WF.DragDropEffects.Copy);
+            WF.DataObject data = CreateDragData(path, _image);
+            ghost = ShowDragGhost();
+
+            // OLE raises GiveFeedback on every mouse move, so the ghost tracks the cursor 1:1.
+            void OnFeedback(object? sender, WF.GiveFeedbackEventArgs args) => ghost?.MoveToCursor();
+            GiveFeedback += OnFeedback;
+            WF.DragDropEffects result;
+            try
+            {
+                result = DoDragDrop(data, WF.DragDropEffects.Copy);
+            }
+            finally
+            {
+                GiveFeedback -= OnFeedback;
+            }
+
             if (result != WF.DragDropEffects.None && _settings.Current.OverlayCloseAfterDragging && !keepOpen)
                 Close();
         }
@@ -2156,6 +2173,51 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             _dragFileTask = null;
             Log.Error("Thumbnail drag-out failed", ex);
+        }
+        finally
+        {
+            ghost?.Hide();
+        }
+    }
+
+    /// <summary>
+    /// The drag payload. The file is what mail clients want — they attach it rather than
+    /// pasting it inline — but a lot of chat and canvas apps take CF_BITMAP and not
+    /// CF_HDROP, and used to refuse the drop outright. Both go on the object.
+    /// </summary>
+    internal static WF.DataObject CreateDragData(string path, SD.Bitmap image)
+    {
+        var data = new WF.DataObject();
+        data.SetData(WF.DataFormats.FileDrop, new[] { path });
+        data.SetData(WF.DataFormats.Bitmap, image);
+        return data;
+    }
+
+    /// <summary>
+    /// A live, semi-transparent thumbnail of the capture under the cursor instead of the
+    /// shell's generic file icon — the same window the editor's drag-out already uses.
+    /// Losing it is cosmetic; the drag itself still has to work, so a failure is logged
+    /// and the drag continues.
+    /// </summary>
+    private DragPreview? ShowDragGhost()
+    {
+        try
+        {
+            double dpiScale = _dpi / 96d;
+            // The same lock CreatePreviewBitmap takes: the background thumbnail render
+            // reads _image directly, and GDI+ locks an image for a whole operation.
+            System.Windows.Media.Imaging.BitmapSource thumbnail;
+            lock (_image)
+                thumbnail = DragPreview.CreateThumbnail(_image, dpiScale);
+
+            _dragPreview ??= new DragPreview();
+            _dragPreview.Show(thumbnail, dpiScale);
+            return _dragPreview;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not show the drag thumbnail", ex);
+            return null;
         }
     }
 

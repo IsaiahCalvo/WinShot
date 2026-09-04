@@ -878,6 +878,22 @@ public class QuickAccessOverlayInteractionTests
         Directory.Delete(directory, recursive: true);
     }
 
+    [Fact]
+    public void DraggingOutOffersTheFileAndTheBitmap()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(64, 40);
+            WF.DataObject data = FastQuickActionsWindow.CreateDragData(@"C:\captures\shot.png", bitmap);
+
+            // The file is what mail clients attach; the bitmap is what canvas and chat
+            // apps take, and without it they refused the drop outright.
+            Assert.True(data.GetDataPresent(WF.DataFormats.FileDrop));
+            Assert.True(data.GetDataPresent(WF.DataFormats.Bitmap));
+            Assert.Equal(new[] { @"C:\captures\shot.png" }, (string[])data.GetData(WF.DataFormats.FileDrop)!);
+        });
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
