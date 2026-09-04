@@ -1999,7 +1999,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         SD.Color fill = primary
             ? (hot ? ThemePalette.AccentHover : Accent)
-            : (hot ? ThemePalette.HoverFill : SD.Color.FromArgb(0x3A, 0x3A, 0x3C));
+            : (hot ? ThemePalette.HoverFill : ThemePalette.SurfaceAlt);
         using (var path = GdiPaths.RoundedRect(SD.Rectangle.Inflate(row, 0, -(int)Math.Round(2 * s)), (int)Math.Round(7 * s)))
         using (var brush = new SD.SolidBrush(fill))
             g.FillPath(brush, path);

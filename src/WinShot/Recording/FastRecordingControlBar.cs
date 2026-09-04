@@ -185,6 +185,29 @@ public sealed class FastRecordingControlBar : WF.Form
         base.OnPaint(e);
     }
 
+    /// <summary>
+    /// Paints the pill into a bitmap through the real OnPaint, so a test can pixel-scan exactly
+    /// what ships rather than what DrawToBitmap happens to have cached.
+    /// </summary>
+    internal SD.Bitmap RenderToBitmap()
+    {
+        var image = new SD.Bitmap(
+            Math.Max(1, ClientSize.Width),
+            Math.Max(1, ClientSize.Height),
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (SD.Graphics g = SD.Graphics.FromImage(image))
+        using (var capsule = GdiPaths.RoundedRect(
+            new SD.Rectangle(SD.Point.Empty, image.Size), image.Height / 2))
+        using (var args = new WF.PaintEventArgs(g, new SD.Rectangle(SD.Point.Empty, image.Size)))
+        {
+            // The window Region rounds the real pill; clip the same shape so what a harness
+            // renders is the shape that ships rather than a square-cornered slab.
+            g.SetClip(capsule);
+            OnPaint(args);
+        }
+        return image;
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         _entrance?.Dispose();

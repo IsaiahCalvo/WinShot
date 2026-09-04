@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using WinShot.Recording;
@@ -44,14 +44,23 @@ public class RecordingIntegrationRenderHarness
                     Location = new SD.Point(-6000, -6000),
                 };
                 bar.Show();
-                bar.PerformLayout();
-                using var barImage = new SD.Bitmap(bar.Width, bar.Height, PixelFormat.Format32bppArgb);
-                bar.DrawToBitmap(barImage, new SD.Rectangle(SD.Point.Empty, barImage.Size));
-                bar.Close();
+                using (SD.Bitmap barImage = bar.RenderToBitmap())
+                {
+                    int barX = recording.Left + ((recording.Width - barImage.Width) / 2);
+                    int barY = recording.Bottom + 12;
+                    graphics.DrawImageUnscaled(barImage, barX, barY);
+                }
 
-                int barX = (canvas.Width - barImage.Width) / 2;
-                int barY = canvas.Height - barImage.Height - 24;
-                graphics.DrawImageUnscaled(barImage, barX, barY);
+                // The same pill in the state it holds between Stop and the completion card.
+                bar.BeginSaving();
+                using (SD.Bitmap savingImage = bar.RenderToBitmap())
+                {
+                    graphics.DrawImageUnscaled(
+                        savingImage,
+                        recording.Left + ((recording.Width - savingImage.Width) / 2),
+                        recording.Bottom + 12 + savingImage.Height + 12);
+                }
+                bar.Close();
 
                 canvas.Save(Path.Combine(outputDir, "recording-state-dim-controls-timer.png"), ImageFormat.Png);
             }

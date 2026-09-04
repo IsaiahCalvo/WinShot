@@ -226,6 +226,102 @@ public class RecordingControlBarTests
         bar.Dispose();
     }
 
+    // ---- what it actually paints ---------------------------------------------------
+
+    private static SD.Bitmap Render(FastRecordingControlBar bar) => bar.RenderToBitmap();
+
+    /// <summary>
+    /// Counts genuinely red pixels. The green and blue channels have to be BOTH low and close
+    /// to each other, because ClearType renders white text with orange sub-pixel fringes that a
+    /// naive "red is high" test happily counts as red.
+    /// </summary>
+    private static int CountRed(SD.Bitmap image)
+    {
+        int red = 0;
+        for (int y = 0; y < image.Height; y++)
+        {
+            for (int x = 0; x < image.Width; x++)
+            {
+                SD.Color pixel = image.GetPixel(x, y);
+                if (pixel.R > 150 &&
+                    pixel.R - pixel.G > 90 &&
+                    pixel.R - pixel.B > 90 &&
+                    Math.Abs(pixel.G - pixel.B) < 40)
+                {
+                    red++;
+                }
+            }
+        }
+        return red;
+    }
+
+    /// <summary>
+    /// Pixel-scanned rather than eyeballed: the recording dot and the stop glyph are the only
+    /// red on the pill, and the saving row has neither — if the saving state ever failed to
+    /// replace the cells it would show a live-looking stop button over a finished recording.
+    /// </summary>
+    [Fact]
+    public void Bar_PaintsRedForRecordingAndDropsItWhileSaving()
+    {
+        using var animation = new Anim(false); // no entrance: DrawToBitmap wants the rest state
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        using (SD.Bitmap recording = Render(bar))
+        {
+            Assert.True(CountRed(recording) > 20, "the recording pill painted no red at all");
+        }
+
+        bar.BeginSaving();
+        WF.Application.DoEvents();
+        using (SD.Bitmap saving = Render(bar))
+        {
+            Assert.True(CountRed(saving) < 5, $"the saving row is still painting {CountRed(saving)} red pixels");
+        }
+
+        bar.Close();
+        bar.Dispose();
+    }
+
+    [Fact]
+    public void Bar_PaintsSomethingInEveryCell()
+    {
+        using var animation = new Anim(false);
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        using SD.Bitmap image = Render(bar);
+        foreach ((RecordingControlBarCell cell, SD.Rectangle bounds) in
+                 RecordingControlBarLayout.Build(showTimer: true, scale: 1.0))
+        {
+            // The bar is built at the test monitor's scale, so only check cells that landed
+            // inside the rendered bitmap.
+            SD.Rectangle box = SD.Rectangle.Intersect(bounds, new SD.Rectangle(0, 0, image.Width, image.Height));
+            if (box.Width < 4 || box.Height < 4)
+                continue;
+
+            bool inked = false;
+            for (int y = box.Top + 4; y < box.Bottom - 4 && !inked; y++)
+            {
+                for (int x = box.Left + 2; x < box.Right - 2; x++)
+                {
+                    SD.Color pixel = image.GetPixel(x, y);
+                    if (pixel.R > 120 || pixel.G > 120 || pixel.B > 120)
+                    {
+                        inked = true;
+                        break;
+                    }
+                }
+            }
+            Assert.True(inked, $"{cell} rendered as an empty cell");
+        }
+
+        bar.Close();
+        bar.Dispose();
+    }
+
     [Fact]
     public void Bar_TipsNameTheActionAndItsKey()
     {
