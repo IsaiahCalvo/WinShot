@@ -14,6 +14,7 @@ public static class FriendlyError
 {
     private const int ErrorDiskFull = unchecked((int)0x80070070);
     private const int ErrorHandleDiskFull = unchecked((int)0x80070027);
+    private const int ClipboardCantOpen = unchecked((int)0x800401D0);
 
     public static string For(Exception? ex) => ex switch
     {
@@ -37,13 +38,19 @@ public static class FriendlyError
         // OperationCanceledException, and the recording and export paths both throw it.
         OperationCanceledException => "That was cancelled.",
         OutOfMemoryException => "The image is too large to process on this PC.",
+        // CLIPBRD_E_CANT_OPEN: another app owns the clipboard. The one COM failure with an
+        // answer better than "check the log", and the copy paths hit it regularly.
+        COMException { HResult: ClipboardCantOpen } => "Another app is holding the clipboard. Try again in a moment.",
         // GDI+ reports both a bad image and a failed encode this way - as the base types
         // exactly, never as a derived one. The derived types are not about images at all:
         // Win32Exception is a failed Process.Start or a denied API call, and
         // ArgumentNullException/ArgumentOutOfRangeException are ordinary bugs. Matching the
         // bases loosely told a user whose shortcut target had been uninstalled that
         // "the image could not be processed", on a path with no image in it.
-        ExternalException and not Win32Exception => "The image could not be processed. Try the capture again.",
+        // COMException derives from ExternalException too, and a COM/WinRT failure on a video
+        // stop or a history delete has no image in it — it was being told to retry the capture.
+        ExternalException and not (Win32Exception or COMException)
+            => "The image could not be processed. Try the capture again.",
         ArgumentException when ex.GetType() == typeof(ArgumentException)
             => "The image could not be processed. Try the capture again.",
         _ => "Something went wrong. The details are in the log.",

@@ -733,6 +733,30 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (index >= 0) Invalidate(_buttons[index].Bounds);
     }
 
+    /// <summary>
+    /// The screen rectangle the open cards occupy on <paramref name="area"/>, or
+    /// <see cref="SD.Rectangle.Empty"/> when none of them are there. The corner toast asks
+    /// before placing itself: the card and the toast both default to the working area's
+    /// bottom-right with the same 16-DIP inset, and a TopMost toast landing on the card hides
+    /// it and eats the first click aimed at Copy or Edit. Read-only — the card's own geometry
+    /// is untouched.
+    /// </summary>
+    internal static SD.Rectangle StackBounds(SD.Rectangle area)
+    {
+        // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
+        SD.Rectangle union = SD.Rectangle.Empty;
+        foreach (FastQuickActionsWindow window in OpenWindows.ToArray())
+        {
+            if (window.IsDisposed || !window.Visible)
+                continue;
+            SD.Rectangle bounds = window.Bounds;
+            if (bounds.Width <= 0 || bounds.Height <= 0 || !area.IntersectsWith(bounds))
+                continue;
+            union = union.IsEmpty ? bounds : SD.Rectangle.Union(union, bounds);
+        }
+        return union;
+    }
+
     private void PositionFromSettings()
     {
         var screen = _settings.Current.OverlayMoveToActiveScreen

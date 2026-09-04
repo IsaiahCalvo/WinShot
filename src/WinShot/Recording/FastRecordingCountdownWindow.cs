@@ -98,9 +98,11 @@ public sealed class FastRecordingCountdownWindow : WF.Form
 
         // Real bold face, not faux-bold synthesized over Semibold.
         using var countFont = new SD.Font("Segoe UI", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
-        // The one instruction on a three-second overlay, under an 84px numeral: it takes the
-        // title step, not the caption step. (It shipped at 11pt; TextCaptionPt is 8.25.)
-        using var hintFont = ThemePalette.UiFont(ThemePalette.TextTitlePt);
+        // The badge is a 170px circle, so the ellipse leaves this row about 130px of width.
+        // "Click or Esc to cancel" needs ~165px at the title step and ~150px at the 11pt it
+        // shipped at — both clipped flat at each end. The body step is what actually fits,
+        // and EndEllipsis makes any future string say so instead of losing its last word.
+        using var hintFont = ThemePalette.UiFont(ThemePalette.TextBodyPt);
         var countText = _remaining.ToString();
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
@@ -119,7 +121,7 @@ public sealed class FastRecordingCountdownWindow : WF.Form
             hintFont,
             new SD.Rectangle(0, Height - S(42), Width, S(24)),
             MutedText,
-            flags);
+            flags | WF.TextFormatFlags.EndEllipsis);
     }
 
     private void OnTick(object? sender, EventArgs e)

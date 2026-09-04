@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 
@@ -16,11 +16,13 @@ public static class ScrollingStatusWindow
     /// <summary>
     /// Shows the chrome around <paramref name="screenRegion"/> (physical screen coordinates),
     /// runs the scrolling capture and tears the chrome down when done. Must be called on the
-    /// UI thread. Returns the stitched bitmap (caller owns disposal), or null when nothing was
-    /// captured or the user cancelled. <paramref name="presetDirection"/> forces an axis
-    /// (the scroll-horizontal command); null auto-detects from the first movement.
+    /// UI thread. Returns the stitched bitmap (caller owns disposal), and whether the user
+    /// aborted deliberately — Escape or Cancel. Those two outcomes both arrive as a null
+    /// image and mean opposite things to the person watching: an abort must not be reported
+    /// back as a failure. <paramref name="presetDirection"/> forces an axis (the
+    /// scroll-horizontal command); null auto-detects from the first movement.
     /// </summary>
-    public static async Task<SD.Bitmap?> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null,
+    public static async Task<(SD.Bitmap? Image, bool Cancelled)> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null,
         bool autoStart = false, TimeSpan? autoStop = null, bool paneScoped = false)
     {
         using var cts = new CancellationTokenSource();
@@ -79,7 +81,7 @@ public static class ScrollingStatusWindow
                 await Task.Delay(50);
             }
             if (cancelled || !await started.Task)
-                return null;
+                return (null, cancelled);
 
             SD.Bitmap? result = await ScrollingCaptureService.RunAsync(
                 screenRegion,
@@ -94,14 +96,14 @@ public static class ScrollingStatusWindow
             if (cancelled)
             {
                 result?.Dispose();
-                return null;
+                return (null, true);
             }
-            return result;
+            return (result, false);
         }
         catch (Exception ex)
         {
             Log.Error("Scrolling capture failed", ex);
-            return null;
+            return (null, false);
         }
         finally
         {

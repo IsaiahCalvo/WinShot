@@ -180,8 +180,16 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
         // subtract, so the commit read as nothing happening. Land the press first, the same
         // way the keyboard branch does, then ease it off. A press held long enough to finish
         // is already at 1, so this changes nothing for a deliberate press.
-        _press.Reset(1);
-        _press.To(0);
+        //
+        // Only when the release is on the button, though. Pressing, dragging off and letting
+        // go is how a click is aborted: the mouse is captured so OnMouseUp still arrives here
+        // after OnMouseLeave already eased the press away, and re-lighting it acknowledged a
+        // commit that never happened — no Click is raised on that gesture.
+        if (ClientRectangle.Contains(e.Location))
+        {
+            _press.Reset(1);
+            _press.To(0);
+        }
         base.OnMouseUp(e);
     }
 
@@ -677,8 +685,7 @@ public sealed class DarkSegmented : WF.Control
         _pillRun = null;
         _pill.Stop();
         _gliding = false;
-        // ResizeRedraw is not set on this control, so a resize that exposes no new area
-        // repaints nothing and the pill stays drawn at the rect it was abandoned mid-glide.
+        // The pill would otherwise stay drawn at the rect it was abandoned mid-glide.
         Invalidate();
     }
 

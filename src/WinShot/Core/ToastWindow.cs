@@ -21,6 +21,16 @@ public enum ToastSeverity
 public sealed class ToastWindow : WF.Form
 {
     private static readonly SD.Color Back = ThemePalette.ToolbarBg;
+
+    /// <summary>
+    /// The toast currently on screen. One feedback channel means one toast — a second lands
+    /// on top of the first, exactly, whether they share the corner or an anchor rect. The
+    /// rule lives here rather than in the caller because there is more than one caller: the
+    /// quick-actions card raises its own share failures, and routing them past App's field
+    /// put two cards on the same spot. Disposed, not closed: skipping the outgoing exit fade
+    /// is deliberate, so two different messages never cross-dissolve into each other.
+    /// </summary>
+    private static ToastWindow? _live;
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
 
@@ -43,6 +53,10 @@ public sealed class ToastWindow : WF.Form
 
     /// <summary>Well past what three rows can show, and what bounds Trim's walk.</summary>
     private const int MaxChars = 512;
+
+    /// <summary>The working-area inset the corner toast keeps, matching the one
+    /// <see cref="Overlay.QuickAccessOverlayLayout.Place"/> gives the quick-actions card.</summary>
+    private const int EdgeInsetDip = 16;
 
     /// <summary>The card, its glyph gutter and its right pad, in DIP.</summary>
     private const int CardWidthDip = 300;
@@ -97,7 +111,6 @@ public sealed class ToastWindow : WF.Form
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
         FormBorderStyle = WF.FormBorderStyle.None;
-        KeyPreview = true;
         Opacity = 0;            // OnShown fades it up to RestOpacity
         Padding = new WF.Padding(S(14));
         ShowInTaskbar = false;
@@ -292,6 +305,9 @@ public sealed class ToastWindow : WF.Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        ToastWindow? previous = _live;
+        _live = this;
+        if (!ReferenceEquals(previous, this)) previous?.Dispose();
         UpdateRegion();
         Position();
         _restLocation = Location;
@@ -419,6 +435,7 @@ public sealed class ToastWindow : WF.Form
     {
         if (disposing)
         {
+            if (ReferenceEquals(_live, this)) _live = null;
             _dismiss.Stop();
             _dismiss.Dispose();
             _motion?.Dispose();
@@ -446,25 +463,50 @@ public sealed class ToastWindow : WF.Form
     private void Position()
     {
         SD.Rectangle area = WF.Screen.FromPoint(_anchor ?? WF.Cursor.Position).WorkingArea;
+        // The insets are logical DIP like every other measurement in this file: unscaled, the
+        // toast sat 16 physical px off the edge at 150 % where the quick-actions card sits 24,
+        // which reads as a near-miss rather than as alignment.
+        int edge = S(EdgeInsetDip);
+        int gap = S(8);
         int x, y;
         if (_anchor is SD.Point a)
         {
             // Centered above the selection; flip below if there isn't room.
             x = a.X - Width / 2;
-            y = a.Y - Height - 16;
-            x = Math.Clamp(x, area.Left + 8, Math.Max(area.Left + 8, area.Right - Width - 8));
-            if (y < area.Top + 8) y = a.Y + 16;
-            y = Math.Clamp(y, area.Top + 8, Math.Max(area.Top + 8, area.Bottom - Height - 8));
+            y = a.Y - Height - edge;
+            x = Math.Clamp(x, area.Left + gap, Math.Max(area.Left + gap, area.Right - Width - gap));
+            if (y < area.Top + gap) y = a.Y + edge;
+            y = Math.Clamp(y, area.Top + gap, Math.Max(area.Top + gap, area.Bottom - Height - gap));
         }
         else
         {
             // Nothing better to anchor to: the bottom-right corner of the monitor the user is
             // working on (the pointer's), which is where the balloon used to appear on a
             // single-monitor PC and is closer to the eye than the primary's tray on a stack.
-            x = area.Right - Width - 16;
-            y = area.Bottom - Height - 16;
+            SD.Point corner = CornerPlacement(
+                area, Size, Overlay.FastQuickActionsWindow.StackBounds(area), edge, gap);
+            x = corner.X;
+            y = corner.Y;
         }
         Location = new SD.Point(x, y);
+    }
+
+    /// <summary>
+    /// Where a toast with nothing to anchor to sits: the working area's bottom-right corner,
+    /// lifted clear of <paramref name="cards"/> when the quick-actions stack is already there.
+    /// The card and the toast default to the same corner at the same inset, and the card is
+    /// pinned and interactive — a TopMost toast over it hides the thumbnail and swallows the
+    /// first click aimed at Copy or Edit, for as long as an error dwells. Pass
+    /// <see cref="SD.Rectangle.Empty"/> for <paramref name="cards"/> when no card is up.
+    /// </summary>
+    internal static SD.Point CornerPlacement(
+        SD.Rectangle area, SD.Size size, SD.Rectangle cards, int edge, int gap)
+    {
+        int x = area.Right - size.Width - edge;
+        int y = area.Bottom - size.Height - edge;
+        if (!cards.IsEmpty && cards.IntersectsWith(new SD.Rectangle(x, y, size.Width, size.Height)))
+            y = Math.Max(area.Top + gap, cards.Top - size.Height - gap);
+        return new SD.Point(x, y);
     }
 
     /// <summary>
