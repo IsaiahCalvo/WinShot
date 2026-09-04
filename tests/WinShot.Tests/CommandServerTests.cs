@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using WinShot.Core;
 using Xunit;
 
@@ -88,5 +88,41 @@ public class CommandServerTests
         {
             File.Delete(txt);
         }
+    }
+
+    [Theory]
+    [InlineData("self-timer-region")]
+    [InlineData("winshot://self-timer-region")]
+    [InlineData("--self-timer-region")]
+    public void ParseCommand_AcceptsTimedRegionCapture(string input)
+    {
+        // The self-timer used to reach the whole desktop only; a timed REGION shot had no
+        // command, no tray row and no way to be bound.
+        Assert.Equal("self-timer-region", CommandServer.ParseCommand(input));
+    }
+
+    [Fact]
+    public void EveryDocumentedCommandIsAcceptedByTheParser()
+    {
+        string doc = File.ReadAllText(Path.Combine(RepoRoot(), "docs", "winshot-url-commands.md"));
+        var documented = doc.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith("- `", StringComparison.Ordinal) &&
+                           line.EndsWith("`", StringComparison.Ordinal))
+            .Select(line => line[3..^1])
+            .ToList();
+
+        Assert.NotEmpty(documented);
+        foreach (string command in documented)
+            Assert.Equal(command, CommandServer.ParseCommand(command));
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "README.md")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
     }
 }

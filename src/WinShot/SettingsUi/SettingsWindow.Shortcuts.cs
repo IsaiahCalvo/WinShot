@@ -53,6 +53,8 @@ public partial class SettingsWindow
                  s => s.HotkeyCaptureFullscreen, (s, v) => s.HotkeyCaptureFullscreen = v),
             Real("capture-window", "Capture Window", "Capture window",
                  s => s.HotkeyCaptureWindow, (s, v) => s.HotkeyCaptureWindow = v),
+            Real("self-timer", "Self-Timer", "Self-timer capture",
+                 s => s.HotkeySelfTimer, (s, v) => s.HotkeySelfTimer = v),
         ]},
         new ShortcutSection { Title = "Screen Recording", Items =
         [

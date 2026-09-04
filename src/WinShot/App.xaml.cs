@@ -289,7 +289,8 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window")));
         menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
         menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen")));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, () => QueueCaptureCommand("self-timer")));
+        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer")));
+        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region")));
         menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
         menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
         menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
@@ -351,6 +352,7 @@ public partial class App : Application
         Reg(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"));
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
+        Reg(s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"));
 
         if (failed.Count == 0)
         {
@@ -435,7 +437,7 @@ public partial class App : Application
     private static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
-        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
+        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer" or "self-timer-region"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
     private void QueueCaptureCommand(string cmd)
@@ -464,6 +466,7 @@ public partial class App : Application
             case "scrolling": ScrollingFlow(); break;
             case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
+            case "self-timer-region": CaptureRegionFlow(delaySeconds: _settings.Current.SelfTimerSeconds); break;
             // Automation hook (CleanShot's cleanshot://scrolling-capture analog):
             // scroll-region:x,y,w,h[,auto][,save] — physical screen coords, no selector.
             case var c when c.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase):
@@ -595,7 +598,8 @@ public partial class App : Application
 
     private void CaptureRegionFlow(
         string? postCaptureActionOverride = null,
-        FastRegionSelectorDialog.SelectorMode mode = FastRegionSelectorDialog.SelectorMode.Area) => RunCaptureFlow(
+        FastRegionSelectorDialog.SelectorMode mode = FastRegionSelectorDialog.SelectorMode.Area,
+        int delaySeconds = 0) => RunCaptureFlow(
         "Region capture failed", "Capture failed", async () =>
         {
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
@@ -605,12 +609,16 @@ public partial class App : Application
                 if (await selector.ShowAsync(mode, elementHover: mode == FastRegionSelectorDialog.SelectorMode.Area) == WF.DialogResult.OK &&
                     selector.SelectedRegionPx is SD.Rectangle region)
                 {
-                    // Screen-freeze: the selector already cropped the result from its frozen
-                    // snapshot, so use that (exact, no dismiss delay). Fall back to a live grab.
-                    SD.Bitmap? frozenCrop = selector.TakeCapturedRegion();
+                    // A delayed capture must photograph what the screen looks like AFTER the
+                    // countdown, so the frozen crop taken at confirm time is exactly wrong for it.
+                    SD.Bitmap? frozenCrop = SelfTimerOptions.ShouldRunDelay(delaySeconds)
+                        ? null
+                        : selector.TakeCapturedRegion();
                     if (frozenCrop is null)
                     {
                         await WaitForOverlayDismissAsync();
+                        if (SelfTimerOptions.ShouldRunDelay(delaySeconds))
+                            await FastSelfTimerWindow.RunAsync(delaySeconds);
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
                     }
                     HandleCapture(frozenCrop, postCaptureActionOverride);

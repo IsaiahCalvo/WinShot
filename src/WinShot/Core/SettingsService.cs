@@ -37,6 +37,9 @@ public class Settings
     public bool HideDesktopIconsDuringCapture { get; set; } = false;
     public string HotkeyCapturePrevious { get; set; } = "Ctrl+Shift+6";
     public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
+    // Unbound by default: Ctrl+Shift+1..8 are taken and there is no obvious ninth. The
+    // self-timer was reachable only from a tray row with an empty shortcut column.
+    public string HotkeySelfTimer { get; set; } = "";
 
     // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet
     // wired to behavior. Keyed by the catalog's stable action id -> gesture (e.g. "Ctrl+Alt+P").
