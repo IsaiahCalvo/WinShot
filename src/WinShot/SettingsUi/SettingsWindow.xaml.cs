@@ -572,6 +572,7 @@ public partial class SettingsWindow : Window
             s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
             s.ShowRecordingTimer = ShowRecordingTimerCheck.IsChecked == true;
             s.ScaleHiDpiVideo = ScaleHiDpiVideoCheck.IsChecked == true;
+            s.DoNotDisturbWhileRecording = DoNotDisturbCheck.IsChecked == true;
             s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
             s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
             s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
@@ -652,6 +653,8 @@ public partial class SettingsWindow : Window
         Accessible(CaptureCursorCheck, "Record cursor", "Include the mouse pointer in recordings.");
         Accessible(ClickHighlightsCheck, "Highlight recording clicks", "Show a visual highlight for mouse clicks.");
         Accessible(KeystrokesCheck, "Show recording keystrokes", "Show pressed keys in recordings.");
+        Accessible(DoNotDisturbCheck, "Silence notifications while recording",
+            "Turns notification banners off for the length of the recording and back on afterwards.");
         Accessible(RememberLastSelectionCheck, "Remember recording area", "Reuse the last valid recording rectangle.");
         Accessible(DimScreenCheck, "Dim outside recording area", "Dim the screen outside the selected recording rectangle.");
         Accessible(CountdownBox, "Recording countdown seconds", "Use zero to start immediately.");
@@ -691,7 +694,8 @@ public partial class SettingsWindow : Window
             PostCaptureActionCombo, PostCaptureCopyCheck, OverlayPositionCombo, OverlayMoveToActiveScreenCheck,
             OverlaySizeSlider, OverlayAutoCloseCheck, OverlayActionCombo, OverlayCloseBox,
             OverlayCloseAfterDragCheck, OverlaySaveBehaviorCombo, ShowRecordingControlsCheck,
-            ShowRecordingTimerCheck, ScaleHiDpiVideoCheck, CaptureCursorCheck, ClickHighlightsCheck,
+            ShowRecordingTimerCheck, ScaleHiDpiVideoCheck, DoNotDisturbCheck,
+            CaptureCursorCheck, ClickHighlightsCheck,
             KeystrokesCheck, RememberLastSelectionCheck, DimScreenCheck, CountdownBox, WebcamCombo,
             WebcamSizeBox, RecordingShowOverlayCheck, RecordingCopyCheck, MaxResolutionCombo,
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,

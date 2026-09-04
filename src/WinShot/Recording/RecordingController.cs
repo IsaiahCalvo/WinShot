@@ -33,6 +33,7 @@ public sealed class RecordingController
     private bool _paused;
     private bool _isGif;
     private bool _desktopIconsHidden; // we hid the desktop icons; restore them on teardown
+    private bool _notificationsSilenced; // we turned notification banners off; restore on teardown
     private Recorder? _recorder;
     private GifRecorder? _gifRecorder;
     private FastRecordingControlBar? _bar;
@@ -128,6 +129,7 @@ public sealed class RecordingController
         if (_stopping && !_discard)
         {
             Log.Info($"Exiting during recording finalization; keeping {_tempPath} for startup recovery");
+            RestoreNotifications(); // the app is going away; never leave banners switched off
             CloseBar();
             CloseOverlays();
             CloseDimOverlay();
@@ -136,6 +138,7 @@ public sealed class RecordingController
         }
 
         TryDelete(_tempPath);
+        RestoreNotifications();
         CloseBar();
         CloseOverlays();
         CloseDimOverlay();
@@ -360,6 +363,14 @@ public sealed class RecordingController
             }
         }
 
+        // Same save/restore shape: a toast banner landing mid-take is exactly what this
+        // setting exists to prevent, and the absence of the banner IS the whole feature.
+        if (_settings.Current.DoNotDisturbWhileRecording)
+        {
+            FocusAssist.Suppress();
+            _notificationsSilenced = true;
+        }
+
         // Overlays go up before capture starts so the first frames already
         // have them. Both are click-through and intentionally visible to the
         // capture (rings/pills belong in the output).
@@ -381,8 +392,9 @@ public sealed class RecordingController
         }
         catch
         {
-            // Make sure icons come back even if the recorder failed to start.
+            // Make sure icons and notifications come back even if the recorder failed to start.
             RestoreDesktopIcons();
+            RestoreNotifications();
             CloseOverlays();
             throw;
         }
@@ -817,6 +829,7 @@ public sealed class RecordingController
         CloseDimOverlay();
         StopElapsedTimer();
         RestoreDesktopIcons();
+        RestoreNotifications();
 
         if (_restarting && _lastCapture is { } capture)
         {
@@ -856,6 +869,13 @@ public sealed class RecordingController
         _desktopIconsHidden = false;
         try { DesktopIcons.Show(); }
         catch (Exception ex) { Log.Error("Failed to restore desktop icons after recording", ex); }
+    }
+
+    private void RestoreNotifications()
+    {
+        if (!_notificationsSilenced) return;
+        _notificationsSilenced = false;
+        FocusAssist.Restore();
     }
 
     private void CleanupAfterFailure(bool preserveTemp = false)

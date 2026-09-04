@@ -693,10 +693,12 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
                                         <CheckBox x:Name="ScaleHiDpiVideoCheck" Content="Scale HiDPI videos to 1x"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="UnavailableDoNotDisturbRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel x:Name="DoNotDisturbRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Notifications"/>
                                         <CheckBox x:Name="DoNotDisturbCheck" Content="Silence notifications while recording"/>
                                     </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Notification banners are turned back on when the recording ends."/>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 

@@ -1,4 +1,4 @@
-namespace WinShot.SettingsUi;
+﻿namespace WinShot.SettingsUi;
 
 /// <summary>
 /// Durable contract for the controls Settings is allowed to present. Every property in this
@@ -60,6 +60,7 @@ internal static class SettingsTruthCatalog
             "ScaleHiDpiVideo",
             "RememberLastSelection",
             "DimScreenWhileRecording",
+            "DoNotDisturbWhileRecording",
             "RecordingMaxResolution",
             "RecordAudioMono",
             "OpenVideoEditorAfterRecording",
@@ -91,7 +92,7 @@ internal static class SettingsTruthCatalog
             "ScreenshotSave", "RecordingSave", "ScreenshotOpenAnnotate", "ScreenshotOpenEditor",
             "ScreenshotPin", "RecordingOpenEditor",
             "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
-            "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
+            "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
             "AskForNameAfterCapture",
