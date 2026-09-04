@@ -681,6 +681,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             e.SuppressKeyPress = true;
             CopyColorUnderCursor();
         }
+        else if (e.KeyCode == WF.Keys.Tab && e.Shift)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            CopyTextColorUnderCursor();
+        }
         else if (e.KeyCode == WF.Keys.Space)
         {
             e.Handled = true;
@@ -923,10 +929,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
             });
     }
 
+    /// <summary>Box, in px, that the darkest-pixel sampler searches around the pointer.</summary>
+    private const int TextColorSampleBox = 20;
+
     /// <summary>
-    /// Copies the colour under the pointer as hex. The loupe has always shown that value and
-    /// there was no way to take it — reading six characters off the screen and retyping them
-    /// is exactly the job the loupe exists to remove.
+    /// Copies the colour under the pointer as hex — or, when a region is framed, that region's
+    /// AVERAGE colour. The loupe has always shown the single-pixel value and there was no way
+    /// to take it, and off a gradient, a photo or an antialiased logo the single pixel is the
+    /// wrong answer anyway.
     /// </summary>
     private void CopyColorUnderCursor()
     {
@@ -936,17 +946,57 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        SD.Point sample = FrozenPoint(_currentScreen);
-        SD.Color color = WinShot.Editor.EyedropperSampler.SampleAt(_frozen, sample);
-        CopyColor(color);
+        if (ColorSampleRegion() is SD.Rectangle region)
+        {
+            CopyColor(WinShot.Editor.EyedropperSampler.Average(_frozen, FrozenRect(region)), "average");
+            return;
+        }
+
+        CopyColor(WinShot.Editor.EyedropperSampler.SampleAt(_frozen, FrozenPoint(_currentScreen)));
     }
 
-    private void CopyColor(SD.Color color)
+    /// <summary>
+    /// Copies the darkest pixel in a small box around the pointer — the colour of a line of
+    /// type, without having to land the cursor on a glyph stroke, which at 9 pt is a coin toss.
+    /// </summary>
+    private void CopyTextColorUnderCursor()
+    {
+        if (_frozen is null)
+        {
+            FlashMessage("Colour needs the frozen screen; turn on Freeze screen in Settings.");
+            return;
+        }
+
+        CopyColor(
+            WinShot.Editor.EyedropperSampler.Darkest(_frozen, FrozenPoint(_currentScreen), TextColorSampleBox),
+            "text");
+    }
+
+    /// <summary>The framed region C should average, or null when nothing is framed and the
+    /// single pixel under the pointer is the answer.</summary>
+    internal SD.Rectangle? ColorSampleRegion()
+    {
+        if (_pendingScreen is SD.Rectangle pending)
+            return pending;
+        if (_dragging && _dragMoved)
+            return Normalize(_dragStartScreen, SnappedCursor());
+        if (_mode == SelectorMode.Window && _hoverWindow is not null)
+            return _hoverWindow.Bounds;
+        if (_paneHover && _hoverPane is SD.Rectangle pane)
+            return pane;
+        return null;
+    }
+
+    private void CopyColor(SD.Color color, string? kind = null)
     {
         string hex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         _ = CaptureService.SetTextToClipboardAsync(hex);
-        FlashMessage($"Copied {hex}");
+        FlashMessage(kind is null ? $"Copied {hex}" : $"Copied {kind} colour {hex}");
     }
+
+    /// <summary>A screen rectangle as an offset into the frozen virtual-desktop snapshot.</summary>
+    private SD.Rectangle FrozenRect(SD.Rectangle screen) =>
+        new(screen.X - _vs.X, screen.Y - _vs.Y, screen.Width, screen.Height);
 
     /// <summary>A screen point as an offset into the frozen virtual-desktop snapshot.</summary>
     private SD.Point FrozenPoint(SD.Point screen) => new(screen.X - _vs.X, screen.Y - _vs.Y);

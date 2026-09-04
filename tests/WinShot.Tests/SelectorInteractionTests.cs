@@ -219,6 +219,40 @@ public class SelectorInteractionTests
         Assert.False(rect.IntersectsWith(element));
     }
 
+    [Fact]
+    public void CopyingAColourAveragesTheFramedRegionRatherThanOnePixel()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings(s => s.AdjustSelectionBeforeCapturing = true));
+
+        // Nothing framed: the single pixel under the pointer is the answer.
+        Assert.Null(selector.ColorSampleRegion());
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        // Mid-drag the region being framed is already what C should average.
+        Assert.Equal(new SD.Rectangle(100, 100, 240, 160), selector.ColorSampleRegion());
+
+        selector.HandleMouseUp(Left());
+        Assert.Equal(new SD.Rectangle(100, 100, 240, 160), selector.ColorSampleRegion());
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
+    [Fact]
+    public void AHoveredWindowIsTheRegionAveraged()
+    {
+        using var pointer = new Pointer(120, 90);
+        using var selector = CreateSelector();
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Space));
+        selector.SetHoverWindow(Window(0, 0, 800, 600));
+
+        Assert.Equal(new SD.Rectangle(0, 0, 800, 600), selector.ColorSampleRegion());
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs = 8000)
     {
         var clock = Stopwatch.StartNew();
