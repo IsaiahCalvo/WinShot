@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Windows;
@@ -164,6 +164,45 @@ public class HistoryAcceptanceTests
         Assert.Equal(expected, item.SourceApp);
         // The icon has not been resolved yet, so no badge is shown either way.
         Assert.Equal(Visibility.Collapsed, item.SourceAppVisibility);
+    }
+
+    [Theory]
+    [InlineData(0, "")]
+    [InlineData(-3, "")]
+    [InlineData(0.4, "1s")]
+    [InlineData(17, "17s")]
+    [InlineData(59, "59s")]
+    [InlineData(60, "1:00")]
+    [InlineData(125, "2:05")]
+    [InlineData(3599, "59:59")]
+    [InlineData(3725, "1:02:05")]
+    public void DurationLabel_ReadsAsAClipLength(double seconds, string expected) =>
+        Assert.Equal(expected, HistoryItem.FormatDuration(TimeSpan.FromSeconds(seconds)));
+
+    [Fact]
+    public void VideoTile_ShowsTheFallbackCardUntilTheFrameArrives()
+    {
+        var item = new HistoryItem("20260803-120000-000.mp4");
+
+        Assert.Equal(Visibility.Visible, item.MediaFallbackVisibility);
+        Assert.Equal(Visibility.Collapsed, item.ThumbnailVisibility);
+        Assert.Equal(Visibility.Visible, item.MediaBarVisibility);
+
+        item.Duration = TimeSpan.FromSeconds(17);
+        item.Thumbnail = new System.Windows.Media.Imaging.WriteableBitmap(2, 2, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+
+        Assert.Equal(Visibility.Collapsed, item.MediaFallbackVisibility);
+        Assert.Equal(Visibility.Visible, item.ThumbnailVisibility);
+        Assert.StartsWith("17s", item.MediaBarText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StillImageTile_HasNoMediaBar()
+    {
+        var item = new HistoryItem("20260803-120000-000.png");
+
+        Assert.Equal(Visibility.Collapsed, item.MediaBarVisibility);
+        Assert.Equal(Visibility.Collapsed, item.MediaFallbackVisibility);
     }
 
     [Fact]

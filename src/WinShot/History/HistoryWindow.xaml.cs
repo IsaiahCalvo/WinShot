@@ -13,6 +13,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using WinShot.Core;
+using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -506,7 +507,54 @@ public partial class HistoryWindow : Window
             await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);
         }
 
+        await LoadVideoThumbnailsAsync(items, cancellationToken).ConfigureAwait(false);
         await LoadSourceAppIconsAsync(items, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Recordings get a real first frame and their length, the same way the completion card
+    /// already does. Decoding a video is far more expensive than a PNG, so it runs after the
+    /// still images — a grid of screenshots must not wait behind one MP4.
+    /// </summary>
+    private async Task LoadVideoThumbnailsAsync(
+        IEnumerable<HistoryItem> items,
+        CancellationToken cancellationToken)
+    {
+        foreach (HistoryItem item in items.Where(item => item.IsVideo && item.Thumbnail is null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(item.FilePath)) continue;
+
+            (BitmapSource? frame, TimeSpan duration) = await LoadVideoFrameAsync(item.FilePath).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            await Dispatcher.InvokeAsync(() =>
+            {
+                item.Duration = duration;
+                // A frame we could not decode leaves the "MP4" card up rather than blanking
+                // the tile; the bar underneath still carries the size.
+                if (frame is not null) item.Thumbnail = frame;
+            });
+        }
+    }
+
+    private static async Task<(BitmapSource? Frame, TimeSpan Duration)> LoadVideoFrameAsync(string path)
+    {
+        try
+        {
+            (SD.Bitmap image, TimeSpan duration) =
+                await VideoThumbnail.CreateWithDurationAsync(path).ConfigureAwait(false);
+            using (image)
+            {
+                BitmapSource frame = CaptureService.ToBitmapSource(image);
+                frame.Freeze();
+                return (frame, duration);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to load a video thumbnail for {path}", ex);
+            return (null, TimeSpan.Zero);
+        }
     }
 
     /// <summary>Resolving an app icon walks the process list, so it happens off the UI thread
@@ -1208,6 +1256,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
 
     private ImageSource? _thumbnail;
     private ImageSource? _sourceAppIcon;
+    private TimeSpan _duration;
 
     public HistoryItem(string filePath)
     {
@@ -1344,6 +1393,18 @@ public sealed class HistoryItem : INotifyPropertyChanged
         return captured.ToString("MMM d", System.Globalization.CultureInfo.CurrentCulture);
     }
 
+    /// <summary>Clip length for the media bar: "17s" under a minute, then "2:05", then
+    /// "1:02:05". Empty for a length that could not be read, so the bar shows only the size.</summary>
+    public static string FormatDuration(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero) return string.Empty;
+        // Round up: a 0.4s clip is "1s", not "0s".
+        int seconds = (int)Math.Ceiling(duration.TotalSeconds);
+        if (seconds < 60) return $"{seconds}s";
+        if (seconds < 3600) return $"{seconds / 60}:{seconds % 60:00}";
+        return $"{seconds / 3600}:{seconds / 60 % 60:00}:{seconds % 60:00}";
+    }
+
     public static string FormatFileSize(long bytes)
     {
         if (bytes <= 0) return string.Empty;
@@ -1364,11 +1425,26 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public Visibility EditableVisibility => IsEditable ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MediaOnlyVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
     public Visibility PinVisibility => CanPin ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility ThumbnailVisibility => IsImage || IsGif ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility MediaFallbackVisibility => IsVideo ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ThumbnailVisibility => IsImage || IsGif || Thumbnail is not null ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>The "MP4" text card, shown only until the real first frame lands (or for good,
+    /// if the file has no frame a decoder will give us).</summary>
+    public Visibility MediaFallbackVisibility => IsVideo && Thumbnail is null ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MissingThumbnailVisibility => (IsImage || IsGif) && Thumbnail is null ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ScrollingVisibility => IsScrollingCapture ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility VideoBadgeVisibility => IsVideo ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Bar across the bottom of a video tile: camcorder glyph, clip length, file size.</summary>
+    public Visibility MediaBarVisibility => IsVideo ? Visibility.Visible : Visibility.Collapsed;
+
+    public string MediaBarText
+    {
+        get
+        {
+            string length = FormatDuration(Duration);
+            string size = FormatFileSize(FileSize);
+            if (length.Length == 0) return size;
+            return size.Length == 0 ? length : $"{length}  ·  {size}";
+        }
+    }
     public Visibility GifBadgeVisibility => IsGif ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SourceAppVisibility => SourceAppIcon is null ? Visibility.Collapsed : Visibility.Visible;
 
@@ -1388,6 +1464,21 @@ public sealed class HistoryItem : INotifyPropertyChanged
             _thumbnail = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MissingThumbnailVisibility)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ThumbnailVisibility)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFallbackVisibility)));
+        }
+    }
+
+    /// <summary>How long a recording runs, once it has been read off the file. Zero until then
+    /// (and for good, for anything that is not a video).</summary>
+    public TimeSpan Duration
+    {
+        get => _duration;
+        set
+        {
+            _duration = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Duration)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaBarText)));
         }
     }
 

@@ -218,8 +218,8 @@
                                 <Border Grid.Row="0" CornerRadius="{StaticResource RadiusButton}" ClipToBounds="True" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                                     <Grid>
                                         <Grid x:Name="ThumbnailSurface">
-                                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Visibility="{Binding ThumbnailVisibility}"/>
-                                            <Grid Visibility="{Binding MediaFallbackVisibility}" Background="{StaticResource SurfaceBrush}">
+                                            <Image x:Name="ThumbnailImage" Source="{Binding Thumbnail}" Stretch="UniformToFill" Visibility="{Binding ThumbnailVisibility}"/>
+                                            <Grid x:Name="MediaFallback" Visibility="{Binding MediaFallbackVisibility}" Background="{StaticResource SurfaceBrush}">
                                                 <TextBlock Text="{Binding ExtensionLabel}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextDisplay}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Grid>
                                             <Border Background="{StaticResource SurfaceBrush}" Opacity="0.72" Visibility="{Binding MissingThumbnailVisibility}">
@@ -228,8 +228,15 @@
                                             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding ScrollingVisibility}">
                                                 <TextBlock Text="SCROLLING" Foreground="White" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Width="32" Height="25" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding VideoBadgeVisibility}">
-                                                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="{StaticResource GlyphBadge}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <!-- Video tiles get a full-width bar instead of a corner glyph: the
+                                                 length is what tells two recordings apart, and a bare camcorder
+                                                 mark does not. -->
+                                            <Border x:Name="MediaBar" VerticalAlignment="Bottom" Padding="8,4"
+                                                    Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding MediaBarVisibility}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="{StaticResource GlyphBadge}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding MediaBarText}" Foreground="White" FontSize="{StaticResource TextCaption}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                                </StackPanel>
                                             </Border>
                                             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,4" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding GifBadgeVisibility}">
                                                 <TextBlock Text="GIF" Foreground="White" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"/>
@@ -291,6 +298,23 @@
                             </Grid>
                         </Border>
                         <DataTemplate.Triggers>
+                            <!-- A decoded thumbnail cross-fades over whatever was standing in for it
+                                 (the placeholder, or a video's "MP4" card) instead of popping. -->
+                            <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
+                                <Setter TargetName="ThumbnailImage" Property="Opacity" Value="0"/>
+                                <DataTrigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="ThumbnailImage" Storyboard.TargetProperty="Opacity"
+                                                             To="1" Duration="{StaticResource MotionSwap}"
+                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
+                                            <DoubleAnimation Storyboard.TargetName="MediaFallback" Storyboard.TargetProperty="Opacity"
+                                                             To="0" Duration="{StaticResource MotionSwap}"
+                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </DataTrigger.ExitActions>
+                            </DataTrigger>
                             <DataTrigger Binding="{Binding SourceAppVisibility}" Value="Visible">
                                 <DataTrigger.EnterActions>
                                     <BeginStoryboard>

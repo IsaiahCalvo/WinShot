@@ -13,14 +13,23 @@ namespace WinShot.Recording;
 /// </summary>
 public static class VideoThumbnail
 {
-    public static async Task<SD.Bitmap> CreateAsync(string filePath)
+    public static async Task<SD.Bitmap> CreateAsync(string filePath) =>
+        (await CreateWithDurationAsync(filePath).ConfigureAwait(false)).Image;
+
+    /// <summary>
+    /// First frame plus how long the clip runs. History wants both and reading them in one
+    /// pass means one MediaComposition per file instead of two. Duration is
+    /// <see cref="TimeSpan.Zero"/> when it cannot be read (a GIF, or a file the decoder
+    /// refused), which the caller renders as no duration rather than "0s".
+    /// </summary>
+    public static async Task<(SD.Bitmap Image, TimeSpan Duration)> CreateWithDurationAsync(string filePath)
     {
         try
         {
             if (filePath.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
             {
                 using var image = SD.Image.FromFile(filePath);
-                return new SD.Bitmap(image);
+                return (new SD.Bitmap(image), TimeSpan.Zero);
             }
 
             var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(filePath));
@@ -44,12 +53,12 @@ public static class VideoThumbnail
             await netStream.CopyToAsync(ms);
             ms.Position = 0;
             using var decoded = SD.Image.FromStream(ms);
-            return new SD.Bitmap(decoded);
+            return (new SD.Bitmap(decoded), clip.OriginalDuration);
         }
         catch (Exception ex)
         {
             Log.Error($"Could not render a thumbnail for {filePath}", ex);
-            return Placeholder();
+            return (Placeholder(), TimeSpan.Zero);
         }
     }
 
