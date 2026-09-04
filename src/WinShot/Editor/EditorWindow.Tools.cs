@@ -730,6 +730,7 @@ public partial class EditorWindow : Window
         // Radius and mode come from the pointer-down snapshot, never the live toolbar
         // (FabricEraserCanvas.jsx:2146-2152).
         var cut = PaperInk.EraserStroke(new[] { from, to }, _gestureEraserSize);
+        bool changed = false;
         foreach (UIElement child in AnnotationCanvas.Children.Cast<UIElement>().ToList())
         {
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
@@ -745,9 +746,22 @@ public partial class EditorWindow : Window
                 var path = (Path)fe;
                 Vector off = ElementOffset(path);
                 var world = TranslateGeometry(path.Data!, off);
-                if (!GeometriesOverlap(world, cut)) continue;
+                // Survey layers these the OPPOSITE way round from what WinShot did. Candidacy
+                // for the authoritative pointer-up carve is decided by a CONSERVATIVE padded
+                // AABB that "must NEVER reject an object the real hit test would accept"
+                // (eraserBoundsPrefilter.js:5-21; paperAnnotationGeometry.js:2391-2402), and
+                // the exact boolean is used only for the live preview. Gating the SNAPSHOT on
+                // the exact test meant one rejected - or one failed - segment dropped the
+                // stroke from the commit carve entirely, silently and permanently.
+                if (!BoundsOverlap(world.Bounds, (meta.Thickness ?? 1) / 2 + EraserBoundsPad,
+                                   cut.Bounds, _gestureEraserSize / 2 + EraserBoundsPad))
+                    continue;
                 if (!_eraseBefore.ContainsKey(path))
                     _eraseBefore[path] = path.Data!.CloneCurrentValue();
+                // Preview only, and fail OPEN: Survey's partial branch has no touch pre-test at
+                // all and calls subtractPolygonRecord unconditionally (:2519-2538). A false
+                // positive costs one null-safe Subtract; a false negative would show stale ink.
+                if (GeometriesOverlap(world, cut) == false) continue;
                 var after = PaperInk.Subtract(world, cut);
                 // A failed cut is Survey's failed leaf: leave the preview alone. Deleting here
                 // (which "empty" used to mean) was silent data loss.
@@ -757,13 +771,21 @@ public partial class EditorWindow : Window
                 // carve that shows the same hairline residue until commit. Re-culling per sample
                 // made the surviving piece count a function of pointer sample density.
                 path.Data = TranslateGeometry(after, new Vector(-off.X, -off.Y));
+                changed = true;
             }
             else if (HitsEraser(fe, cut))
             {
                 AnnotationCanvas.Children.Remove(fe);
                 _eraseRemoved.Add(fe);
+                changed = true;
             }
         }
+        // Survey's mix-blend-mode:multiply is re-evaluated by the compositor every frame, so a
+        // highlighter shows whatever is under it RIGHT NOW (svgAnnotationRenderers.jsx:272 sets
+        // no isolation). WPF has to bake that blend into an ImageBrush, and until now it was
+        // rebuilt only on an undoable mutation - so erasing ink beneath a highlighter showed
+        // nothing until release, then popped. Free when the canvas holds no highlighter.
+        if (changed) RefreshHighlighters();
     }
 
     /// <summary>
@@ -860,20 +882,54 @@ public partial class EditorWindow : Window
     /// already in canvas coordinates. PaperInk.Tolerance, not WPF's 0.25 absolute default, at
     /// which a grazing pass over a thin stroke could be reported as no overlap at all.
     /// </summary>
-    private static bool GeometriesOverlap(Geometry world, Geometry cut)
+    /// <remarks>
+    /// Returns NULL for "the clipper failed, the answer is unknown", the same contract
+    /// PaperInk.Subtract already uses. Survey's polygonRecordTouches wraps its intersection in
+    /// try/catch and reports failedLeaves rather than guessing (paperAnnotationGeometry.js:
+    /// 2336-2358); this API demonstrably throws in this codebase (PaperInk.cs:119-124), and an
+    /// unguarded throw here escaped straight into the pointer-move handler. Each caller then
+    /// picks the direction Survey picks for its branch.
+    /// </remarks>
+    private static bool? GeometriesOverlap(Geometry world, Geometry cut)
     {
-        var inter = Geometry.Combine(
-            world, cut, GeometryCombineMode.Intersect, Transform.Identity,
-            PaperInk.Tolerance, ToleranceType.Absolute);
-        return inter is not null && !inter.IsEmpty();
+        try
+        {
+            var inter = Geometry.Combine(
+                world, cut, GeometryCombineMode.Intersect, Transform.Identity,
+                PaperInk.Tolerance, ToleranceType.Absolute);
+            return inter is null ? null : !inter.IsEmpty();
+        }
+        catch (Exception)
+        {
+            System.Diagnostics.Debug.WriteLine("GeometriesOverlap: clipper failed (Survey's failed leaf).");
+            return null;
+        }
+    }
+
+    /// <summary>eraserBoundsPrefilter BOUNDS_PAD (eraserBoundsPrefilter.js:24).</summary>
+    private const double EraserBoundsPad = 4;
+
+    /// <summary>
+    /// Survey's padded-AABB fast-reject (eraserBoundsPrefilter.js:37-48): each side inflated by
+    /// its own slop so the gate can never reject something the real hit test would accept.
+    /// </summary>
+    private static bool BoundsOverlap(Rect a, double padA, Rect b, double padB)
+    {
+        if (a.IsEmpty || b.IsEmpty) return false;
+        a.Inflate(padA, padA);
+        b.Inflate(padB, padB);
+        return a.IntersectsWith(b);
     }
 
     private bool HitsEraser(FrameworkElement fe, Geometry cut)
     {
+        // Deleting a whole annotation is unrecoverable inside the gesture, so this branch fails
+        // CLOSED on a clipper failure, matching Survey's 'full' branch (:2493-2516), which
+        // passes the annotation through untouched when every leaf fails.
         if (fe is CalloutAnnotation)
         {
             var bounds = GetCanvasBounds(fe);
-            return GeometriesOverlap(new RectangleGeometry(bounds), cut);
+            return GeometriesOverlap(new RectangleGeometry(bounds), cut) == true;
         }
         Rect b = new(
             Canvas.GetLeft(fe) + (double.IsNaN(Canvas.GetLeft(fe)) ? 0 : 0),
@@ -884,8 +940,26 @@ public partial class EditorWindow : Window
         b.X = (double.IsNaN(Canvas.GetLeft(fe)) ? 0 : Canvas.GetLeft(fe)) + off.X;
         b.Y = (double.IsNaN(Canvas.GetTop(fe)) ? 0 : Canvas.GetTop(fe)) + off.Y;
         if (fe is Path p && p.Data is not null)
-            return GeometriesOverlap(TranslateGeometry(p.Data, off), cut);
-        return GeometriesOverlap(new RectangleGeometry(b), cut);
+            return GeometriesOverlap(TranslateGeometry(p.Data, off), cut) == true;
+        if (fe is Shape s)
+        {
+            // Survey: an UNFILLED shape is only erasable where its stroke actually is -
+            // isPointOnRect / isPointOnCircle gate the filled-area branch on hasFill and
+            // otherwise test the border band only (geometryHitTest.js:902-925, :1002-1015),
+            // and eraseAnnotations routes the same case down the border-centerline capsule
+            // branch (paperAnnotationGeometry.js:2415-2422). The solid bounding box used here
+            // deleted a hollow rect swiped through its empty middle, and an ellipse tapped on
+            // a bbox CORNER where no ink exists. Fill is Brushes.Transparent (never null) for
+            // an unfilled shape, so test the alpha. Widening a closed geometry yields the ring.
+            Geometry g = s is Ellipse ? new EllipseGeometry(b) : new RectangleGeometry(b);
+            if ((s.Fill as SolidColorBrush)?.Color.A is null or 0)
+                g = g.GetWidenedPathGeometry(
+                    new Pen(Brushes.Black, Math.Max(1, s.StrokeThickness)),
+                    PaperInk.Tolerance, ToleranceType.Absolute);
+            return GeometriesOverlap(g, cut) == true;
+        }
+        // Text, counters and emoji: Survey's isPointOnTextbox is a box test.
+        return GeometriesOverlap(new RectangleGeometry(b), cut) == true;
     }
 
     // ------------------------------------------- counter press-drag-release placement

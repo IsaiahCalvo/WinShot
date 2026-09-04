@@ -59,11 +59,11 @@ internal static class PaperInk
     /// </summary>
     public static readonly double Tolerance = 0.5 * (1 - Math.Cos(Math.PI / 18));
 
-    public static PathGeometry Outline(IEnumerable<Point> raw, double width)
+    public static PathGeometry Outline(IEnumerable<Point> raw, double width, double? minDistance = null)
     {
         // Survey's radius is Math.max(0.5, width/2) - the same clamp as a diameter floor of 1.
         double w = Math.Max(1, width);
-        var pts = Compact(raw);
+        var pts = Compact(raw, minDistance ?? CompactMinDistance);
         if (pts.Count == 0)
             return new PathGeometry();
         if (pts.Count == 1)
@@ -96,8 +96,19 @@ internal static class PaperInk
         }
     }
 
-    public static PathGeometry EraserStroke(IEnumerable<Point> raw, double diameter) =>
-        Outline(raw, Math.Max(1, diameter));
+    /// <summary>
+    /// Survey eraseAnnotations (paperAnnotationGeometry.js:2367-2375) gives the eraser polyline
+    /// its OWN radius-relative sample distance - max(MIN_VALUE, min(0.1, radius*0.1)) - and
+    /// passes it to sweptDiskPolygonRecords AND to the centerline compaction. 0.35 is the INK
+    /// commit distance (createInkAnnotation :1539) and never applies to an eraser gesture;
+    /// reusing it here thinned the eraser's samples ~2:1 against the live 0.2 sampler, so the
+    /// same pointer path produced a different swept polygon than Survey's.
+    /// </summary>
+    public static PathGeometry EraserStroke(IEnumerable<Point> raw, double diameter)
+    {
+        double d = Math.Max(1, diameter);
+        return Outline(raw, d, Math.Max(double.Epsilon, Math.Min(0.1, d / 2 * 0.1)));
+    }
 
     /// <summary>
     /// One classified cut. Survey's subtractPolygonPart returns

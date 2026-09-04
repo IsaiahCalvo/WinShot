@@ -554,6 +554,9 @@ public partial class EditorWindow : Window
     /// </summary>
     private void ApplyAnchoredScale(double newZoom)
     {
+        // Survey commitPointerForZoom (FabricEraserCanvas.jsx:2255-2286): a zoom that lands
+        // mid-swipe commits the erase in flight rather than discarding it.
+        CommitInterruptedEraser();
         Point anchor = ViewportCentre();
         double cx = (anchor.X - ViewTranslate.X) / _zoom;
         double cy = (anchor.Y - ViewTranslate.Y) / _zoom;
@@ -718,6 +721,7 @@ public partial class EditorWindow : Window
     {
         newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
         if (Math.Abs(newZoom - _zoom) < 0.00001) return;
+        CommitInterruptedEraser(); // Survey commitPointerForZoom (FabricEraserCanvas.jsx:2255-2286)
         _viewFitMode = ViewFitMode.Free;
 
         double cx = (anchor.X - ViewTranslate.X) / _zoom;

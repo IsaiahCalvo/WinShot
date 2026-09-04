@@ -798,9 +798,30 @@ public partial class EditorWindow : Window
     private static Color StrokeColorOf(Shape shape) =>
         shape.Stroke is SolidColorBrush brush ? brush.Color : Colors.White;
 
+    /// <summary>
+    /// Survey commitInterruptedPointer (FabricEraserCanvas.jsx:2081-2098): a gesture cut short
+    /// by pointercancel, a lost capture or a mid-swipe zoom COMMITS what it already carved,
+    /// because - in Survey's own words - "silently un-erasing that work reads as 'the eraser
+    /// randomly doesn't take'". It routes through the normal release path (queueEraserCommit ->
+    /// applyEraserAndCommit), so the whole-gesture carve and its single undo entry both happen,
+    /// and pointerRef is nulled FIRST so nothing leaks into the next gesture.
+    /// Dropping the carve was worse than losing it: the preview mutation stayed painted with no
+    /// undo step, and the stale _eraseBefore snapshots made the NEXT gesture recompute those
+    /// strokes from their pristine originals - visibly restoring erased ink.
+    /// </summary>
+    private void CommitInterruptedEraser()
+    {
+        if (_tool == EditorTool.Eraser && _eraserPoints.Count > 0)
+            ApplyEraserStroke(_eraserPoints[^1]);
+        _eraserPoints.Clear();
+        _eraseBefore.Clear();
+        _eraseRemoved.Clear();
+    }
+
     private void AbortDrag()
     {
         if (!_dragging) return;
+        CommitInterruptedEraser();
         _dragging = false;
         _eraserPoints.Clear();
         if (_activeShape is not null)

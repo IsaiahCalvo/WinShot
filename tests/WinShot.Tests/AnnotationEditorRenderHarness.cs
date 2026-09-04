@@ -621,7 +621,7 @@ public class AnnotationEditorRenderHarness
                     ((System.Collections.ICollection)eraseRemovedField.GetValue(editor)!).Count;
                 int UndoDepth()
                 {
-                    var f = typeof(EditorWindow).GetField("_undo",
+                    var f = typeof(EditorWindow).GetField("_undoStack",
                         BindingFlags.Instance | BindingFlags.NonPublic);
                     return f?.GetValue(editor) is System.Collections.ICollection c ? c.Count : -1;
                 }
@@ -736,6 +736,22 @@ public class AnnotationEditorRenderHarness
                     editor.PointerDown(Pt(new Point(0.05 * W, 0.50 * H))); Pump(1);
                     editor.PointerMove(Pt(new Point(0.50 * W, 0.52 * H))); Pump(1);
                     editor.PointerMove(Pt(new Point(0.95 * W, 0.50 * H))); Pump(1);
+                    // Survey's invariant (eraserBoundsPrefilter.js:5-21): the prefilter "must
+                    // NEVER reject an object the real hit test would accept". Membership in
+                    // _eraseBefore - which is what the pointer-up carve iterates - must be the
+                    // conservative padded AABB, not the exact boolean.
+                    var gestureBox = new Rect(new Point(0.05 * W, 0.50 * H), new Point(0.95 * W, 0.52 * H));
+                    gestureBox.Inflate(18 / 2.0 + 4, 18 / 2.0 + 4);
+                    int shouldBeSnapshotted = strokes.Count(s =>
+                    {
+                        var bb = s.Data!.Bounds; bb.Inflate(1 / 2.0 + 4, 1 / 2.0 + 4);
+                        return bb.IntersectsWith(gestureBox);
+                    });
+                    int snapshotted = EraseBeforeCount();
+                    log.AppendLine($"R2-MEMBERSHIP conservativeCandidates={shouldBeSnapshotted} " +
+                        $"_eraseBefore={snapshotted} OK={snapshotted >= shouldBeSnapshotted}");
+                    Assert.True(snapshotted >= shouldBeSnapshotted,
+                        $"prefilter rejected {shouldBeSnapshotted - snapshotted} stroke(s) the commit carve must see");
                     editor.PointerUp(Pt(new Point(0.95 * W, 0.50 * H))); Pump(6);
                     int carved = 0, untouched = 0;
                     for (int i = 0; i < strokes.Count; i++)
@@ -846,6 +862,77 @@ public class AnnotationEditorRenderHarness
                         $"sharpnessLoss={(cWithout > 0 ? 1 - (cWith / cWithout) / factorG : 0):P1}");
                     RenderToPng(editor, Path.Combine(outDir, "r2-hl-zoom300.png"), dpi: 96);
                     InvokePrivate(editor, "FitToView"); Pump(4);
+                }
+
+                // 10F. HIGHLIGHTER OVER ERASED INK, MID-GESTURE. Survey's multiply is
+                //      compositor-live, so ink cut from under a highlighter disappears on the
+                //      frame it is cut. WPF bakes the blend, so the band kept painting the
+                //      pre-erase pixels for the whole drag and only snapped in on release.
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    var ink = DrawPen(14, new Point(0.20 * W, 0.45 * H), new Point(0.85 * W, 0.45 * H), 40);
+                    Check("HighlighterToolBtn");
+                    // Start clear of the ink: a press ON an existing mark selects it instead of
+                    // stacking a new one (DrawMouseDown), which would draw no highlighter at all.
+                    editor.PointerDown(Pt(new Point(0.05 * W, 0.45 * H))); Pump(1);
+                    for (int i = 1; i <= 20; i++)
+                        editor.PointerMove(Pt(new Point(0.05 * W + 0.85 * W * i / 20.0, 0.45 * H)));
+                    Pump(1);
+                    editor.PointerUp(Pt(new Point(0.90 * W, 0.45 * H))); Pump(6);
+                    var band = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    double inkFull = GeomArea(ink.Data!);
+                    // The proof is per-pixel inside the highlighted band, because the symptom is
+                    // that the BAKED brush is stale, not that the ink geometry is wrong.
+                    var bb = band.Data!.Bounds;
+                    Point tl2 = canvas.TranslatePoint(new Point(bb.Left, bb.Top), viewport);
+                    Point br3 = canvas.TranslatePoint(new Point(bb.Right, bb.Bottom), viewport);
+                    var crop = new Int32Rect(
+                        (int)Math.Max(0, tl2.X), (int)Math.Max(0, tl2.Y),
+                        (int)Math.Max(1, Math.Min(br3.X, viewport.ActualWidth - 1) - Math.Max(0, tl2.X)),
+                        (int)Math.Max(1, Math.Min(br3.Y, viewport.ActualHeight - 1) - Math.Max(0, tl2.Y)));
+                    SD.Bitmap Shot() => BitmapEffects.RenderVisual(viewport,
+                        (int)viewport.ActualWidth, (int)viewport.ActualHeight);
+                    double MeanDiff(SD.Bitmap a, SD.Bitmap b2)
+                    {
+                        double s = 0; int n4 = 0;
+                        for (int y = crop.Y; y < crop.Y + crop.Height; y++)
+                            for (int x = crop.X; x < crop.X + crop.Width; x++)
+                            {
+                                var pa = a.GetPixel(x, y); var pb = b2.GetPixel(x, y);
+                                s += Math.Abs(pa.R - pb.R) + Math.Abs(pa.G - pb.G) + Math.Abs(pa.B - pb.B);
+                                n4 += 3;
+                            }
+                        return n4 == 0 ? 0 : s / n4;
+                    }
+                    using var beforeErase = Shot();
+                    eraserSizeField.SetValue(editor, 40.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    editor.PointerDown(Pt(new Point(0.50 * W, 0.45 * H - 60))); Pump(1);
+                    for (int i = 1; i <= 30; i++)
+                        editor.PointerMove(Pt(new Point(0.50 * W, 0.45 * H - 60 + 120.0 * i / 30)));
+                    Pump(4);
+                    // MID-GESTURE: the gap must already show through the band, unreleased.
+                    using var midShot = Shot();
+                    RenderToPng(editor, Path.Combine(outDir, "r2-hl-erase-mid.png"), dpi: 96);
+                    double midInk = GeomArea(ink.Data!);
+                    editor.PointerUp(Pt(new Point(0.50 * W, 0.45 * H + 60))); Pump(6);
+                    using var afterShot = Shot();
+                    RenderToPng(editor, Path.Combine(outDir, "r2-hl-erase-after.png"), dpi: 96);
+                    double moved = MeanDiff(beforeErase, midShot), popped = MeanDiff(midShot, afterShot);
+                    log.AppendLine($"R2-HLERASE paths=[{string.Join(",", canvas.Children.OfType<System.Windows.Shapes.Path>().Select(p2 => $"{(p2.Tag as AnnotationData)?.Type}:{GeomArea(p2.Data!):F0}"))}] " +
+                        $"inkArea full={inkFull:F1} mid={midInk:F1} " +
+                        $"after={(canvas.Children.Contains(ink) ? GeomArea(ink.Data!) : 0):F1} " +
+                        $"bandPixels crop={crop.Width}x{crop.Height} " +
+                        $"meanDiff(beforeErase,mid)={moved:F2} meanDiff(mid,afterRelease)={popped:F2} " +
+                        "(live blend => mid already shows the cut, so the second number is ~0)");
+                    File.WriteAllText(Path.Combine(outDir, "ink-eraser-audit.txt"), log.ToString());
+                    // A setup that produced no highlighter, or an erase that changed nothing,
+                    // would make the comparison vacuous - so require both to be real first.
+                    Assert.Equal(2, canvas.Children.OfType<System.Windows.Shapes.Path>().Count());
+                    Assert.True(midInk < inkFull - 1, $"eraser cut nothing: {inkFull} -> {midInk}");
+                    Assert.True(moved > 1, $"the erase did not change the band at all ({moved:F2})");
+                    Assert.True(popped <= moved * 0.05 + 0.5,
+                        $"highlighter band popped on release: mid->after {popped:F2} vs before->mid {moved:F2}");
                 }
 
                 File.WriteAllText(Path.Combine(outDir, "ink-eraser-audit.txt"), log.ToString());

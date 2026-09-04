@@ -197,6 +197,25 @@ public class PaperInkTests
     }
 
     [Fact]
+    public void EraserStroke_CompactsAtItsOwnRadiusRelativeDistance()
+    {
+        // Survey gives the eraser polyline max(MIN_VALUE, min(0.1, radius*0.1)) and passes it to
+        // sweptDiskPolygonRecords (paperAnnotationGeometry.js:2367-2375). 0.35 is the INK commit
+        // distance (createInkAnnotation :1539) and reusing it thinned the eraser's samples ~2:1
+        // against the 0.2 live sampler, making the swept polygon differ from Survey's.
+        var zig = new List<Point>();
+        for (int i = 0; i <= 40; i++)
+            zig.Add(new Point(i * 0.25, i % 2 == 0 ? 0 : 0.15)); // ~0.29 apart: under 0.35, over 0.1
+        double Area(Geometry g) => g.GetFlattenedPathGeometry().GetArea();
+
+        double eraser = Area(PaperInk.EraserStroke(zig, 12));
+        Assert.Equal(Area(PaperInk.Outline(zig, 12, 0.1)), eraser, 6);
+        // The ink constant would have dropped every wiggle, sweeping a strictly smaller region.
+        Assert.True(eraser > Area(PaperInk.Outline(zig, 12)) + 0.5,
+            $"eraser swept {eraser}, ink-compacted swept {Area(PaperInk.Outline(zig, 12))}");
+    }
+
+    [Fact]
     public void HighlighterWidth_StillFloorsAtEight()
     {
         Assert.Equal(8, AnnotationStyle.HighlighterWidth(3));
