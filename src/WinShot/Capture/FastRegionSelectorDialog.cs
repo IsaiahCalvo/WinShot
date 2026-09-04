@@ -285,6 +285,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             _settings.Current.SelectorHintSessions =
                 SelectorHint.NextSessionCount(_settings.Current.SelectorHintSessions);
+            _hintText = SelectorHint.Text(_mode == SelectorMode.Window);
             FadeHint(arriving: true);
             StartFollowMotion(); // the pill is drawn on the follow frames
         }
@@ -398,7 +399,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _handleScale = 1d;
         _hintTween?.Dispose();
         _hintTween = null;
+        _hintHoldTween?.Dispose();
+        _hintHoldTween = null;
         _hintOpacity = 0d;
+        _hintText = string.Empty;
         _pillTween?.Dispose();
         _pillTween = null;
         _pillHover = false;
@@ -480,6 +484,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _handleTween = null;
             _hintTween?.Dispose();
             _hintTween = null;
+            _hintHoldTween?.Dispose();
+            _hintHoldTween = null;
             _pillTween?.Dispose();
             _pillTween = null;
             _followTimer.Dispose();
@@ -669,6 +675,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             e.Handled = true;
             Confirm(VirtualFromScreen(pending));
         }
+        else if (e.KeyCode == WF.Keys.C)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            CopyColorUnderCursor();
+        }
         else if (e.KeyCode == WF.Keys.Space)
         {
             e.Handled = true;
@@ -720,6 +732,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             SetHoverWindow(ResolveWindow(_currentScreen));
             StartFollowMotion(); // window mode tracks the cursor even with both chrome toggles off
         }
+        if (_hintHoldTween is null && _hintOpacity > 0d)
+            _hintText = SelectorHint.Text(_mode == SelectorMode.Window);
         Cursor = CursorForCurrent();
         InvalidateAllSurfaces();
     }
@@ -878,9 +892,64 @@ public sealed class FastRegionSelectorDialog : WF.Form
             () => _pillTween = null);
     }
 
-    /// <summary>0..1 opacity of the first-run hint pill; 0 means it is not on screen.</summary>
+    /// <summary>0..1 opacity of the hint/confirmation pill; 0 means it is not on screen.</summary>
     private double _hintOpacity;
     private IDisposable? _hintTween;
+    /// <summary>What that pill currently says — the first-run hint, or a copy confirmation.</summary>
+    private string _hintText = string.Empty;
+    private IDisposable? _hintHoldTween;
+
+    /// <summary>How long a copy confirmation stays up before it fades.</summary>
+    private const int MessageHoldMs = 1200;
+
+    /// <summary>
+    /// Puts a one-line confirmation where the hint pill goes, held briefly and then faded.
+    /// A toast window would be the wrong surface here: the selector is a topmost full-screen
+    /// overlay, so the toast lands behind it.
+    /// </summary>
+    private void FlashMessage(string text)
+    {
+        _hintText = text;
+        FadeHint(arriving: true);
+        _hintHoldTween?.Dispose();
+        _hintHoldTween = WinShot.Core.Motion.Run(
+            MessageHoldMs,
+            progress => progress,
+            _ => { },
+            () =>
+            {
+                _hintHoldTween = null;
+                FadeHint(arriving: false);
+            });
+    }
+
+    /// <summary>
+    /// Copies the colour under the pointer as hex. The loupe has always shown that value and
+    /// there was no way to take it — reading six characters off the screen and retyping them
+    /// is exactly the job the loupe exists to remove.
+    /// </summary>
+    private void CopyColorUnderCursor()
+    {
+        if (_frozen is null)
+        {
+            FlashMessage("Colour needs the frozen screen; turn on Freeze screen in Settings.");
+            return;
+        }
+
+        SD.Point sample = FrozenPoint(_currentScreen);
+        SD.Color color = WinShot.Editor.EyedropperSampler.SampleAt(_frozen, sample);
+        CopyColor(color);
+    }
+
+    private void CopyColor(SD.Color color)
+    {
+        string hex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        _ = CaptureService.SetTextToClipboardAsync(hex);
+        FlashMessage($"Copied {hex}");
+    }
+
+    /// <summary>A screen point as an offset into the frozen virtual-desktop snapshot.</summary>
+    private SD.Point FrozenPoint(SD.Point screen) => new(screen.X - _vs.X, screen.Y - _vs.Y);
 
     /// <summary>
     /// Fades the hint in when a session opens and out on the first drag. Both directions go
@@ -1271,8 +1340,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_hintOpacity > 0d && cursorOnThisSurface && _pendingScreen is null && !_dragging)
         {
-            SelectorChrome.DrawHint(g, clientSize,
-                SelectorHint.Text(_mode == SelectorMode.Window), _hintOpacity);
+            SelectorChrome.DrawHint(g, clientSize, _hintText, _hintOpacity);
         }
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
@@ -1668,6 +1736,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _handleScale = 1d;
         _hintTween?.Dispose();
         _hintTween = null;
+        _hintHoldTween?.Dispose();
+        _hintHoldTween = null;
         _hintOpacity = 0d;
         _pillTween?.Dispose();
         _pillTween = null;

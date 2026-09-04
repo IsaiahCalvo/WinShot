@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using WinShot.Editor;
 using Xunit;
@@ -55,6 +55,73 @@ public class EyedropperSamplerTests
         Assert.True(preview.Visible);
         Assert.Equal(4, preview.Left);
         Assert.Equal(5, preview.Top);
+    }
+
+    [Fact]
+    public void SampleAt_ClampsToTheBitmapInsteadOfThrowing()
+    {
+        using var bitmap = CreateBitmap(2, 2);
+        bitmap.SetPixel(1, 1, SD.Color.FromArgb(255, 10, 20, 30));
+
+        Assert.Equal(SD.Color.FromArgb(255, 10, 20, 30), EyedropperSampler.SampleAt(bitmap, new SD.Point(99, 99)));
+    }
+
+    [Fact]
+    public void Average_IsTheMeanOfTheRegionNotOfTheWholeBitmap()
+    {
+        using var bitmap = CreateBitmap(4, 2);
+        for (int y = 0; y < 2; y++)
+        {
+            bitmap.SetPixel(0, y, SD.Color.FromArgb(255, 0, 0, 0));
+            bitmap.SetPixel(1, y, SD.Color.FromArgb(255, 100, 100, 100));
+            bitmap.SetPixel(2, y, SD.Color.FromArgb(255, 255, 255, 255));
+            bitmap.SetPixel(3, y, SD.Color.FromArgb(255, 255, 255, 255));
+        }
+
+        SD.Color average = EyedropperSampler.Average(bitmap, new SD.Rectangle(0, 0, 2, 2));
+
+        Assert.Equal(50, average.R);
+        Assert.Equal(50, average.G);
+        Assert.Equal(50, average.B);
+    }
+
+    [Fact]
+    public void Average_OfAnEmptyOrOffscreenRegionFallsBackToOnePixel()
+    {
+        using var bitmap = CreateBitmap(2, 2);
+        bitmap.SetPixel(0, 0, SD.Color.FromArgb(255, 7, 8, 9));
+
+        Assert.Equal(
+            SD.Color.FromArgb(255, 7, 8, 9),
+            EyedropperSampler.Average(bitmap, new SD.Rectangle(-50, -50, 4, 4)));
+    }
+
+    [Fact]
+    public void Darkest_FindsTheTextStrokeWithoutLandingOnIt()
+    {
+        using var bitmap = CreateBitmap(20, 20);
+        using (var g = SD.Graphics.FromImage(bitmap))
+            g.Clear(SD.Color.White);
+        // One dark glyph pixel, ten px away from where the pointer is.
+        bitmap.SetPixel(4, 4, SD.Color.FromArgb(255, 20, 22, 24));
+
+        SD.Color darkest = EyedropperSampler.Darkest(bitmap, new SD.Point(10, 10), box: 20);
+
+        Assert.Equal(SD.Color.FromArgb(255, 20, 22, 24), darkest);
+    }
+
+    [Fact]
+    public void Darkest_RanksByLuminanceSoASaturatedBlueDoesNotBeatAMidGrey()
+    {
+        using var bitmap = CreateBitmap(6, 6);
+        using (var g = SD.Graphics.FromImage(bitmap))
+            g.Clear(SD.Color.White);
+        bitmap.SetPixel(2, 2, SD.Color.FromArgb(255, 0, 0, 255));   // channel sum 255
+        bitmap.SetPixel(3, 3, SD.Color.FromArgb(255, 60, 60, 60));  // channel sum 180, but brighter
+
+        SD.Color darkest = EyedropperSampler.Darkest(bitmap, new SD.Point(3, 3), box: 6);
+
+        Assert.Equal(SD.Color.FromArgb(255, 0, 0, 255), darkest);
     }
 
     private static SD.Bitmap CreateBitmap(int width, int height)
