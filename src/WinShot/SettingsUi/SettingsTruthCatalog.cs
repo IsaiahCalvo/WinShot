@@ -46,6 +46,8 @@ internal static class SettingsTruthCatalog
             "ShowCrosshair",
             "ShowMagnifier",
             "AdjustSelectionBeforeCapturing",
+            "WindowCaptureBackground",
+            "WindowCapturePadding",
             "AllInOneRememberLast",
             "RecordingShowOverlay",
             "RecordingCopy",

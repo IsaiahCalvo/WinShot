@@ -621,6 +621,13 @@ public partial class App : Application
                             await FastSelfTimerWindow.RunAsync(delaySeconds);
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
                     }
+                    if (mode == FastRegionSelectorDialog.SelectorMode.Window &&
+                        postCaptureActionOverride is null &&
+                        !selector.BareBackgroundRequested &&
+                        WindowBackdrop.IsEnabled(_settings.Current.WindowCaptureBackground))
+                    {
+                        frozenCrop = ComposeWindowBackdrop(frozenCrop);
+                    }
                     HandleCapture(frozenCrop, postCaptureActionOverride);
                 }
             }
@@ -629,6 +636,27 @@ public partial class App : Application
                 FastRegionSelectorDialog.Return(selector);
             }
         });
+
+    /// <summary>
+    /// Puts a captured window on its backdrop. Failure here must never lose the capture, so a
+    /// broken wallpaper or an out-of-memory canvas returns the bare shot and logs.
+    /// </summary>
+    private SD.Bitmap ComposeWindowBackdrop(SD.Bitmap window)
+    {
+        try
+        {
+            using SD.Image? wallpaper = WindowBackdrop.TryLoadWallpaper();
+            SD.Bitmap composed = WindowBackdrop.Compose(
+                window, wallpaper, WindowBackdrop.PaddingFor(_settings.Current.WindowCapturePadding));
+            window.Dispose();
+            return composed;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Window backdrop could not be composed; saving the bare window", ex);
+            return window;
+        }
+    }
 
     private void CaptureFullscreenFlow() => RunCaptureFlow(
         "Fullscreen capture failed", "Capture failed", async () =>

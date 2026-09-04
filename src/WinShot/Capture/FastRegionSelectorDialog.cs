@@ -125,6 +125,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     public SD.Rectangle? SelectedRegionPx { get; private set; }
 
+    /// <summary>
+    /// Shift was held when the selection was confirmed, which asks for the bare capture with
+    /// no composited backdrop. Read at confirm time rather than after the fact, because by
+    /// the time the caller looks the key is usually already up.
+    /// </summary>
+    public bool BareBackgroundRequested { get; private set; }
+
     // DoubleBuffered + SetStyle are protected on Control, so each surface enables its own
     // flicker-free painting from inside its own constructor.
     private const WF.ControlStyles PaintStyles =
@@ -393,6 +400,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _wheelPinned = null;
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
+        BareBackgroundRequested = false;
         DisposeFrozen();
         _capturedRegion?.Dispose();
         _capturedRegion = null;
@@ -1505,6 +1513,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (virtualRect.Width < 1 || virtualRect.Height < 1) return;
 
         SelectedRegionPx = virtualRect;
+        BareBackgroundRequested = (WF.Control.ModifierKeys & WF.Keys.Shift) == WF.Keys.Shift;
         // Crop the result from the frozen snapshot so the capture is exactly what was selected.
         _capturedRegion?.Dispose();
         _capturedRegion = CropFrozen(virtualRect);

@@ -98,6 +98,11 @@ public class Settings
     // Off = releasing the drag takes the shot. On = the release leaves an adjustable
     // selection you confirm with Enter/Done. Ctrl held at release picks the other one.
     public bool AdjustSelectionBeforeCapturing { get; set; } = false;
+    // Window capture composites onto the wallpaper with padding and a shadow, which is what
+    // a window shot is usually wanted for. "none" gives the bare rectangle, and so does
+    // holding Shift as you take the shot.
+    public string WindowCaptureBackground { get; set; } = "wallpaper"; // none | wallpaper
+    public string WindowCapturePadding { get; set; } = "default";      // min | default | max
 
     // Quick Access overlay (extends the post-capture overlay block)
     public string OverlayPosition { get; set; } = "bottom-right"; // left | right | top | bottom | bottom-left | bottom-right

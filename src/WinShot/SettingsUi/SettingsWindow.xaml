@@ -955,6 +955,23 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Off, releasing the drag takes the shot. Hold Ctrl as you release to get the other behaviour once."/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Window capture"/>
+                                    <ComboBox x:Name="WindowBackgroundCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="On the wallpaper" Tag="wallpaper"/>
+                                        <ComboBoxItem Content="Bare window" Tag="none"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Padding"/>
+                                    <ComboBox x:Name="WindowPaddingCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="Min" Tag="min"/>
+                                        <ComboBoxItem Content="Default" Tag="default"/>
+                                        <ComboBoxItem Content="Max" Tag="max"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Hold Shift while taking a window shot to get the bare window this once."/>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
                             </StackPanel>

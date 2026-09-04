@@ -329,6 +329,8 @@ public partial class SettingsWindow : Window
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
         AdjustSelectionCheck.IsChecked = s.AdjustSelectionBeforeCapturing;
+        SelectByTag(WindowBackgroundCombo, s.WindowCaptureBackground, fallbackIndex: 0);
+        SelectByTag(WindowPaddingCombo, s.WindowCapturePadding, fallbackIndex: 1);
 
         // Annotate
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
@@ -604,6 +606,8 @@ public partial class SettingsWindow : Window
             s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
             s.AdjustSelectionBeforeCapturing = AdjustSelectionCheck.IsChecked == true;
+            s.WindowCaptureBackground = SelectedTag(WindowBackgroundCombo, "wallpaper");
+            s.WindowCapturePadding = SelectedTag(WindowPaddingCombo, "default");
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
@@ -679,6 +683,10 @@ public partial class SettingsWindow : Window
         Accessible(CrosshairModeCombo, "Crosshair mode", "Choose when selector crosshair guides appear.");
         Accessible(AdjustSelectionCheck, "Adjust selection before capturing",
             "Leave the drag as an adjustable selection instead of capturing on release.");
+        Accessible(WindowBackgroundCombo, "Window capture background",
+            "Choose whether a window capture is composited onto the wallpaper.");
+        Accessible(WindowPaddingCombo, "Window capture padding",
+            "How much backdrop shows around a composited window capture.");
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
@@ -701,7 +709,7 @@ public partial class SettingsWindow : Window
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, SelfTimerCombo,
-            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, AdjustSelectionCheck, TemplateBox, HistorySlider,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, AdjustSelectionCheck, WindowBackgroundCombo, WindowPaddingCombo, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck,
         })
