@@ -1601,10 +1601,10 @@ public sealed class FastQuickActionsWindow : WF.Form
                     Close();
                     return;
                 case BlipShareResult.NeedsRestart:
-                    ShowShareToast("Blip can't receive shares", "Restart Blip and try again.", Core.ToastSeverity.Error);
+                    ShowCardToast("Blip can't receive shares", "Restart Blip and try again.", Core.ToastSeverity.Error);
                     return;
                 default:
-                    ShowShareToast("Blip share failed", "The capture was not handed to Blip.", Core.ToastSeverity.Error);
+                    ShowCardToast("Blip share failed", "The capture was not handed to Blip.", Core.ToastSeverity.Error);
                     return;
             }
         }
@@ -1614,10 +1614,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    /// <summary>The app's one toast, anchored to this card. Every caller so far is a failure,
-    /// so the severity is passed rather than left at Info — an info glyph on "share failed"
-    /// looks exactly like the "Copied" confirmation.</summary>
-    private void ShowShareToast(string title, string message, Core.ToastSeverity severity)
+    /// <summary>
+    /// The app's one toast, anchored where this card is (or was — a save closes the card, so
+    /// the message lands on the spot the user was already looking at). Severity is always
+    /// passed: an info glyph on "share failed" looks exactly like a confirmation.
+    /// </summary>
+    private void ShowCardToast(string title, string message, Core.ToastSeverity severity)
     {
         try
         {
@@ -2407,7 +2409,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 {
                     // Batch save: a recording is already a file, so this is a copy into
                     // the chosen folder rather than another dialog per card.
-                    await CopyMediaFileIntoAsync(folder);
+                    AnnounceSave(await CopyMediaFileIntoAsync(folder));
                     if (closeAfterSave && !_closed && !IsDisposed)
                         Close();
                     return;
@@ -2426,6 +2428,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 string source = _mediaFilePath;
                 string chosen = mediaDialog.FileName;
                 await Task.Run(() => File.Copy(source, chosen, overwrite: true));
+                AnnounceSave(chosen);
                 if (closeAfterSave && !_closed && !IsDisposed)
                     Close();
                 return;
@@ -2462,6 +2465,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 using (copy)
                     ImageSaver.Save(copy, path);
             });
+            AnnounceSave(path);
             if (closeAfterSave && !_closed && !IsDisposed)
                 Close();
         }
@@ -2471,14 +2475,30 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private async Task CopyMediaFileIntoAsync(string folder)
+    private async Task<string> CopyMediaFileIntoAsync(string folder)
     {
         string source = _mediaFilePath!;
         string extension = Path.GetExtension(source).TrimStart('.');
         Directory.CreateDirectory(folder);
         string destination = FileNamer.NextUniquePath(_settings, folder, extension);
         await Task.Run(() => File.Copy(source, destination, overwrite: false));
+        return destination;
     }
+
+    /// <summary>
+    /// Says where the file went. Saving from the card closes it, so without this the whole
+    /// interaction was a card flying off screen and nothing else — no filename, no folder,
+    /// no confirmation that anything was written at all.
+    /// </summary>
+    private void AnnounceSave(string path)
+    {
+        (string title, string body) = SaveConfirmation(path);
+        ShowCardToast(title, body, Core.ToastSeverity.Success);
+    }
+
+    /// <summary>The save confirmation as the toast phrases it: the file, not the path.</summary>
+    internal static (string Title, string Body) SaveConfirmation(string path)
+        => ("Saved", Path.GetFileName(path));
 
     private void OpenMediaFile()
     {

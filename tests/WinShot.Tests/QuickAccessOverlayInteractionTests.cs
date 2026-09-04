@@ -894,6 +894,18 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    [Fact]
+    public void SavingSaysWhichFileItWrote()
+    {
+        (string title, string body) = FastQuickActionsWindow.SaveConfirmation(
+            Path.Combine("C:", "Users", "someone", "Pictures", "WinShot 2026-09-04 at 11.02.14.png"));
+
+        // Sentence case, and the file rather than the whole path — the card closes on save,
+        // so this line is the only thing that says the capture went anywhere.
+        Assert.Equal("Saved", title);
+        Assert.Equal("WinShot 2026-09-04 at 11.02.14.png", body);
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
