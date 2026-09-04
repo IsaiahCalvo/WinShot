@@ -1029,9 +1029,25 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (CrosshairLinesVisible())
                 SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
+            // While dragging, the readout says how big the selection is; idle, where the
+            // pointer is. The loupe carries it when the magnifier is on, and the crosshair
+            // carries it on its own when the magnifier is off — either way the selector
+            // always answers "where am I".
+            SD.Size dragSize = _dragging && _dragMoved
+                ? Normalize(_dragStartScreen, SnappedCursor()).Size
+                : SD.Size.Empty;
             if (_magnifierOn)
+            {
                 FastSelectorLoupeRenderer.Draw(
-                    g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
+                    g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize);
+            }
+            else if (dragSize.IsEmpty)
+            {
+                // Mid-drag the selection's own size pill already sits at the corner the
+                // cursor is on; a second copy 16 px away is the same number twice.
+                SelectorChrome.DrawCursorReadout(g, clientSize,
+                    SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds));
+            }
         }
     }
 

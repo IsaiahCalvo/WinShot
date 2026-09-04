@@ -66,6 +66,27 @@ internal static class SelectorChrome
         g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
     }
 
+    /// <summary>
+    /// The cursor readout pill, offset down-and-right of the pointer and flipped back inside
+    /// when that would run off the surface. This is the readout the crosshair carries when the
+    /// magnifier is off — before this the coordinates lived only inside the loupe, so turning
+    /// the magnifier off (or tapping Alt) left the selector with no position readout at all.
+    /// </summary>
+    public static void DrawCursorReadout(SD.Graphics g, SD.Size clientSize, string text, SD.Point cursor)
+    {
+        SD.Size pill = MeasureLabel(text);
+        int left = cursor.X + CursorReadoutOffsetX;
+        int top = cursor.Y + CursorReadoutOffsetY;
+        if (left + pill.Width > clientSize.Width)
+            left = cursor.X - CursorReadoutOffsetX - pill.Width;
+        if (top + pill.Height > clientSize.Height)
+            top = cursor.Y - CursorReadoutOffsetY - pill.Height;
+        DrawLabel(g, clientSize, text, left, top);
+    }
+
+    private const int CursorReadoutOffsetX = 16;
+    private const int CursorReadoutOffsetY = 20;
+
     /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
     /// that place the pill by an edge other than its top-left.</summary>
     public static SD.Size MeasureLabel(string text)

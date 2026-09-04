@@ -768,10 +768,19 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (cursorOnThisSurface && _options.IsCrosshairVisible(controlPressed))
             SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
 
+        SD.Size dragSize = _dragging && _dragMoved
+            ? MakeDragRect(_currentScreen).Size
+            : SD.Size.Empty;
         if (cursorOnThisSurface && _magnifierOn)
         {
             FastSelectorLoupeRenderer.Draw(
-                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
+                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize);
+        }
+        else if (cursorOnThisSurface && dragSize.IsEmpty && _pendingPx is null && _hoverWindow is null)
+        {
+            // With the magnifier off nothing else on screen says where the pointer is.
+            SelectorChrome.DrawCursorReadout(g, clientSize,
+                SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds));
         }
     }
 

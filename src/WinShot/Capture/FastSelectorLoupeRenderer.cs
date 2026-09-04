@@ -16,7 +16,8 @@ internal static class FastSelectorLoupeRenderer
         SD.Rectangle virtualScreen,
         SD.Point cursorClient,
         SD.Point cursorScreen,
-        SD.Bitmap? frozen = null)
+        SD.Bitmap? frozen = null,
+        SD.Size dragSize = default)
     {
         var loupe = FastSelectorLoupeLayout.Calculate(
             clientSize,
@@ -24,7 +25,8 @@ internal static class FastSelectorLoupeRenderer
             cursorClient,
             cursorScreen,
             LoupeSize,
-            LoupeZoom);
+            LoupeZoom,
+            dragSize);
         if (!loupe.IsVisible)
             return;
 
