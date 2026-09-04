@@ -107,6 +107,25 @@ public class ShapeConstraintTests
         Assert.Equal(30, flipped.Height, 3);
     }
 
+    [Fact]
+    public void UniformResize_NoMirror_KeepsTheBoxOnTheHandlesOwnSideOfTheAnchor()
+    {
+        // The counter rule: Survey overwrites both scales with safeUniformScale, which is
+        // unconditionally POSITIVE (useSVGInteraction.js:2174-2183), so the flip negation at
+        // :2241/:2245 is dead code for a counter — it never crosses its anchor, it just keeps
+        // scaling at the full drag rate on the near side.
+        var original = new Rect(0, 0, 10, 20);
+        // TL handle, anchor BR = (10, 20), dragged a full box past the anchor.
+        var crossed = ShapeConstraint.UniformResize(original, handle: 0, new Rect(10, 20, 20, 20),
+            average: false, mirror: false);
+        Assert.Equal(20, crossed.Width, 3);      // magnitude still max(|sx|,|sy|) = 2
+        Assert.Equal(40, crossed.Height, 3);
+        Assert.Equal(-10, crossed.X, 3);         // grows AWAY from the anchor, never past it
+        Assert.Equal(-20, crossed.Y, 3);
+        Assert.Equal(10, crossed.Right, 3);      // the anchor itself never moves
+        Assert.Equal(20, crossed.Bottom, 3);
+    }
+
     [Theory]
     [InlineData(44, 45)]
     [InlineData(46, 45)]

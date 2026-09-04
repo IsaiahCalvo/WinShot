@@ -52,6 +52,15 @@ public partial class EditorWindow : Window
     /// </summary>
     private double _resizeAngle;
 
+    /// <summary>
+    /// Survey resizes a counter in the SAME frame its handles are drawn in: the canonical
+    /// nub-up rect, pivoting about the bubble centre (useSVGInteraction.js:3955-3972, :4109-4115,
+    /// :4232). Non-null only while a counter bbox-edit resize is in flight; every other type
+    /// keeps working from <c>_resizeBefore.Bounds</c>. The undo snapshot is left alone.
+    /// </summary>
+    private Rect? _resizeFrame;
+    private Point? _resizePivot;
+
     /// <summary>Handle index reserved for the rotation grip (box thumbs are 0..7).</summary>
     private const int RotateHandleIndex = 8;
 
@@ -90,16 +99,8 @@ public partial class EditorWindow : Window
             // tip instead of above an axis-aligned square (SVGAnnotationLayer.jsx:5562-5588).
             if (meta.Type == AnnotationData.TypeStep)
             {
-                Rect badgeBox = UnrotatedCanvasBounds(fe);
-                double r = badgeBox.Width / 3;   // the badge Grid is 3r square
-                double tipExt = r * 0.5;
-                var body = new Point(badgeBox.Left + badgeBox.Width / 2, badgeBox.Top + badgeBox.Height / 2);
-                LayoutBoxHandles(
-                    new Rect(body.X - r, body.Y - r - tipExt, 2 * r, 2 * r + tipExt),
-                    AnnotationRotation.Normalize(
-                        (meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle) + 90),
-                    padding: HandlePadding,
-                    rotationCentre: body);
+                var (frame, body, frameAngle) = CounterBboxFrame(fe, meta);
+                LayoutBoxHandles(frame, frameAngle, padding: HandlePadding, rotationCentre: body);
                 return;
             }
             // Survey's bbox-edit overlay is never border-flush, whatever the underlying type.
@@ -144,6 +145,30 @@ public partial class EditorWindow : Window
                 HideHandles(); // spotlight / emoji: move + delete only
                 break;
         }
+    }
+
+    /// <summary>
+    /// Survey's counter bbox (useSVGInteraction.js:3955-3972): the canonical nub-up rect
+    /// <c>2r × (2r + tipExt)</c> above the bubble centre, turned by <c>pointerAngle + 90</c>
+    /// about that centre. Handles, anchors, angle and pivot all come from here so the chrome
+    /// and the resize maths can never drift into two different frames.
+    /// </summary>
+    private static (Rect Frame, Point Body, double Angle) CounterBboxFrame(FrameworkElement fe, AnnotationData meta)
+    {
+        // The badge Grid is 3r square (TipDistance(r) * 2) with the bubble at its centre. Take
+        // that size from the Grid itself: UnrotatedCanvasBounds is GetDescendantBounds, i.e.
+        // the PIN's ink box — only ~2.06r wide AND off-centre, because the nub sticks out on
+        // one side. Measuring the frame with it shrinks it and slides it off the bubble.
+        double size = fe.Width;
+        if (double.IsNaN(size) || size <= 0) size = UnrotatedCanvasBounds(fe).Width;
+        double r = size / 3;
+        double tipExt = r * 0.5;
+        double left = Canvas.GetLeft(fe); if (double.IsNaN(left)) left = 0;
+        double top = Canvas.GetTop(fe); if (double.IsNaN(top)) top = 0;
+        Vector off = AnnotationTransform.OffsetOf(fe);
+        var body = new Point(left + off.X + size / 2, top + off.Y + size / 2);
+        return (new Rect(body.X - r, body.Y - r - tipExt, 2 * r, 2 * r + tipExt), body,
+            AnnotationRotation.Normalize((meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle) + 90));
     }
 
     /// <summary>
@@ -658,6 +683,18 @@ public partial class EditorWindow : Window
             // the drag (useSVGInteraction.js:4220-4258). Reading it live mixes frames, and the
             // shape walks away under the cursor.
             _resizeAngle = AnnotationTransform.AngleOf(fe);
+            _resizeFrame = null;
+            _resizePivot = null;
+            // A counter never carries a RotateTransform (its "rotation" aims the nub), so
+            // AngleOf is always 0 for one. Survey resizes it in its OWN rendered frame
+            // instead: the canonical nub-up rect at pointerAngle+90 about the bubble centre.
+            if (meta.Type == AnnotationData.TypeStep)
+            {
+                var (frame, body, frameAngle) = CounterBboxFrame(fe, meta);
+                _resizeAngle = frameAngle;
+                _resizeFrame = frame;
+                _resizePivot = body;
+            }
             _calloutDragStart = null;
             _calloutDragInvalid = false;
             if (_handleKind == HandleKind.Callout && _selected is CalloutAnnotation dragged)
@@ -685,12 +722,15 @@ public partial class EditorWindow : Window
             return;
         }
 
-        Rect oldBounds = _resizeBefore.Bounds;
+        // A counter resizes in its own rendered frame (Survey :3955-3972); everything else in
+        // its un-rotated bounds. The undo snapshot keeps the real badge box either way.
+        Rect oldBounds = _resizeFrame ?? _resizeBefore.Bounds;
         // Every branch works in the FROZEN un-rotated frame: the pivot is the pre-drag bounds
         // centre and the angle is the pre-drag angle, so the maths never chases a shape that
         // is changing underneath it (Survey useSVGInteraction.js:4104-4129).
         double angle = _resizeAngle;
-        var frozenCentre = new Point(oldBounds.Left + oldBounds.Width / 2, oldBounds.Top + oldBounds.Height / 2);
+        var frozenCentre = _resizePivot
+            ?? new Point(oldBounds.Left + oldBounds.Width / 2, oldBounds.Top + oldBounds.Height / 2);
         Point local = angle == 0 ? pos : AnnotationRotation.RotatePoint(pos, frozenCentre, -angle);
 
         if (_handleKind == HandleKind.Endpoints)
@@ -716,39 +756,70 @@ public partial class EditorWindow : Window
             ApplyCalloutResize(fe, meta, pos);   // callouts never rotate
         else
         {
-            // Survey floors the SCALE RATIO, never the absolute size (:2198-2218): rect /
-            // ellipse / image / line 0.01, text and counter 0.1, and exact-path ink no floor
-            // at all so microscopic geometry survives.
+            // Survey's supportsFlip set is rect / circle / ellipse / exact ink path ONLY
+            // (:2189-2197). Those take the signed 0.01 magnitude floor (ink: none at all, so
+            // microscopic geometry survives); every other type — image, text, line, arrow —
+            // takes `Math.max(0.1, scale)` (:2208-2210), which is BOTH a 10% floor and a
+            // no-mirror clamp: dragging past the anchor bounces instead of flipping. A counter
+            // is the odd one out: Survey abs()es its scale (:2174-2183), so it never mirrors
+            // but does keep growing at the full drag rate past the anchor.
+            bool supportsFlip = meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
+                or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
             local = FloorScale(oldBounds, _activeHandle, local, meta.Type switch
             {
                 AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter => 0,
-                AnnotationData.TypeText or AnnotationData.TypeStep => 0.1,
-                _ => 0.01,
-            });
+                AnnotationData.TypeRectangle or AnnotationData.TypeEllipse => 0.01,
+                _ => 0.1,
+            // A counter keeps the signed pointer even though it never mirrors: Math.abs() of a
+            // crossed scale still grows at the full drag rate on the near side (:2174-2180).
+            }, allowFlip: supportsFlip || meta.Type == AnnotationData.TypeStep);
             var next = NewBoundsForHandle(oldBounds, _activeHandle, local);
             // Survey forces a counter resize uniform, but with its OWN rule: max(|sx|,|sy|) on
             // a corner and the moved axis alone on an edge, with no averaging (:2174-2183).
+            // safeUniformScale is unconditionally POSITIVE there, so the "flipped" negation at
+            // :2241/:2245 is dead code for a counter — hence mirror: false.
             if (meta.Type == AnnotationData.TypeStep)
-                next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next, average: false);
+                next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next, average: false, mirror: false);
             else if (ShapeConstraint.ShiftHeld)
                 next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next);
 
             if (angle != 0)
             {
-                // Survey lands the new centre as worldAnchor + R(offsetFromAnchor) (:2222-2251):
-                // the edge you are pulling AGAINST stays on the same screen pixel at any angle.
-                // Translating `next` by the residual is the same thing in rect terms, because
-                // the element re-rotates about the new box centre.
+                // Survey lands the new centre as worldAnchor + R(offsetFromAnchor) (:2222-2252)
+                // and NEGATES that offset on a flipped axis (:2241, :2245), so a mirrored shape
+                // sits on the far side of the SAME anchor. Per driven axis the offset collapses
+                // to sign(local - anchor) * halfExtent, which is correct flipped AND unflipped.
+                // Take the direction from where the POINTER is, never from `next`:
+                // NewBoundsForHandle normalises the rect, so after a flip `next`'s anchor edge
+                // has swapped sides and AnchorPoint(next, ...) returns the wrong corner.
+                var (ax, ay) = ShapeConstraint.AxisAnchors(oldBounds, _activeHandle);
                 Point worldAnchor = AnnotationRotation.RotatePoint(
                     ShapeConstraint.AnchorPoint(oldBounds, _activeHandle), frozenCentre, angle);
-                var nextCentre = new Point(next.Left + next.Width / 2, next.Top + next.Height / 2);
-                Vector fix = worldAnchor - AnnotationRotation.RotatePoint(
-                    ShapeConstraint.AnchorPoint(next, _activeHandle), nextCentre, angle);
-                next = new Rect(next.X + fix.X, next.Y + fix.Y, next.Width, next.Height);
+                // An axis this handle does not drive gets offset 0, and AnchorPoint already
+                // supplies the box mid-line for it — Survey's affectsX/affectsY guards. A type
+                // that cannot flip takes the side from the HANDLE's own growth direction, which
+                // is what a positive scale means (image/text/line are clamped to that side
+                // anyway; a counter is not, so this is the line that stops it mirroring).
+                int SideX(double axv) => supportsFlip
+                    ? (local.X < axv ? -1 : 1)
+                    : (_activeHandle is 0 or 3 or 7 ? -1 : 1);
+                int SideY(double ayv) => supportsFlip
+                    ? (local.Y < ayv ? -1 : 1)
+                    : (_activeHandle is 0 or 1 or 4 ? -1 : 1);
+                var offset = new Point(
+                    ax is double axv ? SideX(axv) * next.Width / 2 : 0,
+                    ay is double ayv ? SideY(ayv) * next.Height / 2 : 0);
+                Point o = AnnotationRotation.RotatePoint(offset, new Point(0, 0), angle);
+                next = new Rect(worldAnchor.X + o.X - next.Width / 2,
+                                worldAnchor.Y + o.Y - next.Height / 2,
+                                next.Width, next.Height);
             }
 
             ApplyBoxResize(fe, meta, next, local);
-            if (angle != 0)
+            // A counter's frame angle is the NUB's bearing, not a transform: ResizeCounter has
+            // already absorbed it into the badge's position, and Survey never puts an angle on
+            // a counter (its renderer draws the nub at data.pointerAngle).
+            if (angle != 0 && meta.Type != AnnotationData.TypeStep)
             {
                 fe.UpdateLayout();
                 AnnotationTransform.SetAngle(fe, angle);
@@ -818,6 +889,8 @@ public partial class EditorWindow : Window
         var before = _resizeBefore;
         var after = CaptureResizeSnapshot(_selected, meta);
         _resizeBefore = null;
+        _resizeFrame = null;
+        _resizePivot = null;
 
         // Negligible change → no undo entry (e.g. a click that didn't move).
         if (after.NearlyEquals(before))
@@ -844,6 +917,8 @@ public partial class EditorWindow : Window
         _calloutDragInvalid = false;
         _adjustingCrop = false;
         _resizeBefore = null;
+        _resizeFrame = null;
+        _resizePivot = null;
         UpdateSelectionVisual();
     }
 
@@ -873,23 +948,40 @@ public partial class EditorWindow : Window
     /// <summary>
     /// Survey clamps the SCALE, not the size (useSVGInteraction.js:2198-2218), so a 400 px
     /// rectangle stops at 4 px while an 8 px mark keeps shrinking proportionally. Applying the
-    /// floor to the POINTER instead of the resulting rect keeps it per-axis and sign-preserving,
-    /// so a flip still flips. A floor of 0 is Survey's exact-path rule: no visible-size floor.
+    /// floor to the POINTER instead of the resulting rect keeps it per-axis. A floor of 0 is
+    /// Survey's exact-path rule: no visible-size floor.
+    /// <para><paramref name="allowFlip"/> true is the signed magnitude floor, so a flip still
+    /// flips. False is Survey's <c>Math.max(0.1, scale)</c> branch (:2208-2210), which is one
+    /// clamp doing two jobs: the 10% floor AND the no-mirror guard. The side comes from the
+    /// HANDLE (the box lives left of its anchor for 0/3/7, above it for 0/1/4), never from the
+    /// sign of the delta — that sign is exactly what is wrong once the drag has crossed.</para>
     /// </summary>
-    private static Point FloorScale(Rect old, int handle, Point local, double floor)
+    private static Point FloorScale(Rect old, int handle, Point local, double floor, bool allowFlip = true)
     {
-        if (floor <= 0) return local;
+        if (floor <= 0 && allowFlip) return local;
         var (ax, ay) = ShapeConstraint.AxisAnchors(old, handle);
         double x = local.X, y = local.Y;
         if (ax is double axv && old.Width > 1e-6)
         {
             double min = old.Width * floor, d = x - axv;
-            if (Math.Abs(d) < min) x = axv + (d < 0 ? -min : min);
+            if (!allowFlip)
+            {
+                bool leftOfAnchor = handle is 0 or 3 or 7;
+                double mag = Math.Max(min, leftOfAnchor ? -d : d);
+                x = axv + (leftOfAnchor ? -mag : mag);
+            }
+            else if (Math.Abs(d) < min) x = axv + (d < 0 ? -min : min);
         }
         if (ay is double ayv && old.Height > 1e-6)
         {
             double min = old.Height * floor, d = y - ayv;
-            if (Math.Abs(d) < min) y = ayv + (d < 0 ? -min : min);
+            if (!allowFlip)
+            {
+                bool aboveAnchor = handle is 0 or 1 or 4;
+                double mag = Math.Max(min, aboveAnchor ? -d : d);
+                y = ayv + (aboveAnchor ? -mag : mag);
+            }
+            else if (Math.Abs(d) < min) y = ayv + (d < 0 ? -min : min);
         }
         return new Point(x, y);
     }
@@ -970,18 +1062,27 @@ public partial class EditorWindow : Window
     /// Counter resize (Survey useSVGInteraction.js:2267-2272, commit at :3300-3305): the box
     /// drag drives the RADIUS, floored at 4, and the pin is rebuilt at the new size. The badge
     /// stays square because the resize path already forced a uniform scale.
+    /// <para><paramref name="b"/> is the CANONICAL nub-up frame (2r wide, 2r + 0.5r tall) the
+    /// handles are drawn on, not the 3r badge Grid — so map it back the way Survey's commit
+    /// does (<c>obj.top = newTop + newRadius * 0.5</c>, :3300-3305).</para>
     /// </summary>
     private void ResizeCounter(FrameworkElement fe, AnnotationData meta, Rect b)
     {
         if (fe is not Grid badge) return;
         // Survey floors the counter's SCALE at 0.1 (done on the pointer, upstream) and only
         // its committed RADIUS at 4 (:2181, :3301) — never the box's absolute pixel size.
-        double tipDist = Math.Max(b.Width, b.Height) / 2;
-        double radius = Math.Max(4, tipDist / 1.5); // CounterGeometry.TipDistance is radius * 1.5
+        double radius = Math.Max(4, Math.Max(b.Width / 2, b.Height / 2.5));
         double size = CounterGeometry.TipDistance(radius) * 2;
+        // The bubble centre implied by the new frame: half a tip-extension below the frame's
+        // own centre, in the FRAME's tilted axes (the badge itself never carries a transform —
+        // its "rotation" is the nub's bearing, so the position must absorb the tilt).
+        var frameCentre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
+        Point body = AnnotationRotation.RotatePoint(
+            new Point(frameCentre.X, frameCentre.Y + radius * 0.25), frameCentre, _resizeAngle);
+        double left = body.X - size / 2, top = body.Y - size / 2;
         FlattenTransformIntoCanvas(fe);
-        Canvas.SetLeft(fe, b.X);
-        Canvas.SetTop(fe, b.Y);
+        Canvas.SetLeft(fe, left);
+        Canvas.SetTop(fe, top);
         badge.Width = size;
         badge.Height = size;
         if (badge.Children.OfType<Path>().FirstOrDefault() is { } pin)
@@ -989,7 +1090,7 @@ public partial class EditorWindow : Window
                 meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle);
         AnnotationFactory.SetStepCaption(badge, meta.Number ?? 1, meta.Style == "Letter");
         meta.Thickness = radius;
-        meta.Points = new[] { new[] { b.X, b.Y } };
+        meta.Points = new[] { new[] { left, top } };
         meta.Tx = 0;
         meta.Ty = 0;
     }
@@ -1075,12 +1176,22 @@ public partial class EditorWindow : Window
         double anchorX = ax ?? baseBounds.Left + baseBounds.Width / 2;
         double anchorY = ay ?? baseBounds.Top + baseBounds.Height / 2;
 
+        // Scaling about the LOCAL anchor reproduces the un-rotated box; DragResize's
+        // world-anchor placement (Survey :2249-2253) lives entirely in newBounds.X/Y, and
+        // dropping it is what slid a rotated stroke off the handle you were dragging. With
+        // this the whole map is T(shift)·S about the local anchor + a re-rotation about the
+        // new centre, which composes to exactly Survey's scaleInRotatedFrameAroundMatrix
+        // about worldAnchorX/Y (inkGeometryTransform.js:669-690). At angle 0 shift is (0,0).
+        double expLeft = anchorX + ((sx >= 0 ? baseBounds.Left : baseBounds.Right) - anchorX) * sx;
+        double expTop = anchorY + ((sy >= 0 ? baseBounds.Top : baseBounds.Bottom) - anchorY) * sy;
+        var shift = new Vector(newBounds.X - expLeft, newBounds.Y - expTop);
+
         var raw = new double[basePts.Length][];
         for (int i = 0; i < basePts.Length; i++)
             raw[i] = new[]
             {
-                anchorX + (basePts[i].X - anchorX) * sx,
-                anchorY + (basePts[i].Y - anchorY) * sy,
+                anchorX + (basePts[i].X - anchorX) * sx + shift.X,
+                anchorY + (basePts[i].Y - anchorY) * sy + shift.Y,
             };
 
         double baseThickness = _resizeBefore.Meta.Thickness ?? 4;
@@ -1088,7 +1199,9 @@ public partial class EditorWindow : Window
         // affine carry the stroke width with the geometry. Re-outlining the scaled points at
         // a fixed width is what kept a 3x-enlarged stroke at hairline weight.
         var outline = PaperInk.Outline(basePts, baseThickness);
-        outline.Transform = new MatrixTransform(sx, 0, 0, sy, anchorX - anchorX * sx, anchorY - anchorY * sy);
+        outline.Transform = new MatrixTransform(sx, 0, 0, sy,
+            anchorX - anchorX * sx + shift.X,
+            anchorY - anchorY * sy + shift.Y);
         ink.RenderTransform = null;
         ink.Data = outline;
         meta.Points = raw;
@@ -1358,6 +1471,29 @@ public partial class EditorWindow : Window
                         CalloutDescender(snap.Meta));
                     ApplyCalloutMeta(callout, layout, snap.Meta);
                     meta = snap.Meta.Clone();
+                }
+                break;
+
+            case AnnotationData.TypeStep:
+                // SetStepPointerAngle below derives the radius from badge.Width, so the SIZE
+                // has to come back first or an undone counter resize keeps the new radius.
+                if (fe is Grid stepBadge)
+                {
+                    fe.RenderTransform = null;
+                    double r = CounterGeometry.RadiusFor(meta.Thickness ?? 14);
+                    double sz = CounterGeometry.TipDistance(r) * 2;
+                    // snap.Bounds is the PIN's ink box, not the Grid's canvas position — the
+                    // stored point is (meta.Points[0] is where ResizeCounter writes it).
+                    double sl = meta.Points is { Length: > 0 } sp0 && sp0[0].Length >= 2 ? sp0[0][0] : snap.Bounds.X;
+                    double st = meta.Points is { Length: > 0 } sp1 && sp1[0].Length >= 2 ? sp1[0][1] : snap.Bounds.Y;
+                    Canvas.SetLeft(fe, sl);
+                    Canvas.SetTop(fe, st);
+                    stepBadge.Width = sz;
+                    stepBadge.Height = sz;
+                    AnnotationFactory.SetStepCaption(stepBadge, meta.Number ?? 1, meta.Style == "Letter");
+                    meta.Points = new[] { new[] { sl, st } };
+                    meta.Tx = 0;
+                    meta.Ty = 0;
                 }
                 break;
 

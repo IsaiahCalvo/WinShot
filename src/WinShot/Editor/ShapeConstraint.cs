@@ -80,8 +80,12 @@ internal static class ShapeConstraint
     /// shape grows at HALF the drag, not the full drag against the original aspect.
     /// <paramref name="average"/> false is the counter rule (useSVGInteraction.js:2174-2183):
     /// <c>max(|sx|,|sy|)</c> on a corner, the moved axis alone on an edge, no averaging.
+    /// <paramref name="mirror"/> false goes with it: <c>safeUniformScale</c> is unconditionally
+    /// positive, so a counter's offset-from-anchor is never negated (:2232-2246) and the badge
+    /// stays on the dragged handle's own side of the anchor however far past it you pull.
     /// </summary>
-    public static Rect UniformResize(Rect original, int handle, Rect unconstrained, bool average = true)
+    public static Rect UniformResize(Rect original, int handle, Rect unconstrained,
+        bool average = true, bool mirror = true)
     {
         if (original.Width < 0.5 || original.Height < 0.5)
             return unconstrained;
@@ -98,7 +102,7 @@ internal static class ShapeConstraint
         }
         else return unconstrained;
 
-        return Place(original, handle, original.Width * s, original.Height * s, unconstrained);
+        return Place(original, handle, original.Width * s, original.Height * s, unconstrained, mirror);
     }
 
     /// <summary>Survey rotation snap: pull to the nearest 45° when within <paramref name="thresholdDegrees"/>.</summary>
@@ -113,15 +117,18 @@ internal static class ShapeConstraint
     /// on. Survey keeps the sign of each axis through the Shift lock (useSVGInteraction.js:2167-2171),
     /// so a Shift+corner drag past the anchor still mirrors instead of bouncing back.
     /// An axis this handle does not drive stays centred on the original box.
+    /// With <paramref name="mirror"/> false the side comes from the handle's own growth
+    /// direction instead, which is what Survey's always-positive counter scale means.
     /// </summary>
-    private static Rect Place(Rect original, int handle, double w, double h, Rect unconstrained)
+    private static Rect Place(Rect original, int handle, double w, double h, Rect unconstrained,
+        bool mirror = true)
     {
         var (ax, ay) = AxisAnchors(original, handle);
         double x = ax is double axv
-            ? (unconstrained.X >= axv - 1e-6 ? axv : axv - w)
+            ? ((mirror ? unconstrained.X >= axv - 1e-6 : handle is not (0 or 3 or 7)) ? axv : axv - w)
             : original.Left + (original.Width - w) / 2;
         double y = ay is double ayv
-            ? (unconstrained.Y >= ayv - 1e-6 ? ayv : ayv - h)
+            ? ((mirror ? unconstrained.Y >= ayv - 1e-6 : handle is not (0 or 1 or 4)) ? ayv : ayv - h)
             : original.Top + (original.Height - h) / 2;
         return new Rect(x, y, w, h);
     }

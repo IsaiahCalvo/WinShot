@@ -1812,6 +1812,180 @@ public class AnnotationEditorRenderHarness
                         $"badge={Unrot(counterSel).Width:F1}x{Unrot(counterSel).Height:F1} " +
                         $"pointerAngle={((AnnotationData)counterSel.Tag!).PointerAngle}");
 
+                    // RESIZE-16: a ROTATED ink stroke resizes about the WORLD anchor, exactly
+                    // like the rotated rect in R1 (Survey scales paths through
+                    // scaleInRotatedFrameAroundMatrix(worldAnchorX/Y), :2255-2263). ResizeInk
+                    // used to drop DragResize's anchor correction and the stroke slid off the
+                    // handle by the difference between the two pivots.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    typeof(EditorWindow).GetField("_penSize", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .SetValue(editor, 6.0);
+                    Check("FreehandToolBtn");
+                    Drag(new[] { (0.25, 0.35), (0.35, 0.28), (0.45, 0.42), (0.55, 0.34) }, steps: 4);
+                    Check("SelectToolBtn");
+                    var rotInk = canvas.Children.OfType<System.Windows.Shapes.Path>()
+                        .Last(q => q.Tag is AnnotationData { Type: AnnotationData.TypeFreehand });
+                    selField.SetValue(editor, rotInk);
+                    InvokePrivate(editor, "UpdateSelectionVisual"); Pump(3);
+                    Rotate(rotInk, 30);
+                    Shot("resize-rotated-ink-before.png");
+                    Point inkAnchor = WorldCorner(rotInk, r => r.BottomRight);
+                    Point inkGrab = WorldCorner(rotInk, r => r.TopLeft);
+                    var inkTrack = new List<Point>();
+                    editor.PointerDown(PA(inkGrab)); Pump(1);
+                    var inkPull = inkGrab + new Vector(-0.06 * W, -0.05 * H);
+                    for (int i = 1; i <= 10; i++)
+                    {
+                        editor.PointerMove(PA(inkGrab + (inkPull - inkGrab) * (i / 10.0))); Pump(1);
+                        inkTrack.Add(WorldCorner(rotInk, r => r.BottomRight));
+                    }
+                    Shot("resize-rotated-ink-dragging.png");
+                    editor.PointerUp(PA(inkPull)); Pump(3);
+                    Shot("resize-rotated-ink-after.png");
+                    log.AppendLine($"[R16] rotated ink TL drag: angle={AnnotationTransform.AngleOf(rotInk):F2} " +
+                        $"anchorBR before={inkAnchor:F2} after={WorldCorner(rotInk, r => r.BottomRight):F2} " +
+                        $"maxDrift={inkTrack.Max(p => (p - inkAnchor).Length):F3}");
+
+                    // RESIZE-17: a rotated rect whose LEFT handle is pulled past the right edge
+                    // must MIRROR about that anchor (Survey negates offsetFromAnchor, :2241) —
+                    // not leap a full rotated box-width away, which is what reading the anchor
+                    // off the NORMALISED `next` rect did.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    Check("RectangleToolBtn"); Drag(new[] { (0.25, 0.35), (0.45, 0.55) });
+                    Check("SelectToolBtn"); Click(0.25, 0.45);   // the stroke, not the hollow interior
+                    var flipRect = Sel();
+                    Rotate(flipRect, 30);
+                    Point flipAnchor = WorldCorner(flipRect, r => new Point(r.Right, r.Top + r.Height / 2));
+                    Point flipGrab = WorldCorner(flipRect, r => new Point(r.Left, r.Top + r.Height / 2));
+                    Shot("resize-flip-rotated-before.png");
+                    var flipTrack = new List<Point>();
+                    var flipEnd = flipAnchor + (flipAnchor - flipGrab) * 0.8;   // well past the anchor
+                    editor.PointerDown(PA(flipGrab)); Pump(1);
+                    for (int i = 1; i <= 12; i++)
+                    {
+                        editor.PointerMove(PA(flipGrab + (flipEnd - flipGrab) * (i / 12.0))); Pump(1);
+                        flipTrack.Add(WorldCorner(flipRect, r => new Point(r.Right, r.Top + r.Height / 2)));
+                    }
+                    Shot("resize-flip-rotated-dragging.png");
+                    editor.PointerUp(PA(flipEnd)); Pump(3);
+                    Shot("resize-flip-rotated-after.png");
+                    // After the mirror the anchor is the box's LOCAL LEFT edge and the dragged
+                    // edge is the local RIGHT one, so measure both: the anchor must not have
+                    // moved a pixel, and the dragged edge must sit under the cursor.
+                    Point flipPinned = WorldCorner(flipRect, r => new Point(r.Left, r.Top + r.Height / 2));
+                    Point flipDragged = WorldCorner(flipRect, r => new Point(r.Right, r.Top + r.Height / 2));
+                    log.AppendLine($"[R17] rotated rect L handle pulled past its anchor: " +
+                        $"anchor={flipAnchor:F2} pinnedEdge={flipPinned:F2} (drift={(flipPinned - flipAnchor).Length:F3}) " +
+                        $"cursor={flipEnd:F2} draggedEdge={flipDragged:F2} (gap={(flipDragged - flipEnd).Length:F3}) " +
+                        $"width {flipRect.Width:F1}");
+
+                    // RESIZE-18: text/image are NOT in Survey's supportsFlip set — the drag
+                    // bounces at 10% on the anchor's own side instead of mirroring (:2208-2210).
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    InvokePrivate(editor, "PlaceText", new Point(0.30 * W, 0.40 * H));
+                    Pump(4);
+                    var noFlipBox = canvas.Children.OfType<TextBox>().Last();
+                    noFlipBox.Text = "No flip clamp at ten percent"; Pump(3);
+                    Click(0.02, 0.02); Pump(4);
+                    Check("SelectToolBtn");
+                    var noFlipText = canvas.Children.OfType<FrameworkElement>()
+                        .Last(f => (f.Tag as AnnotationData)?.Type == AnnotationData.TypeText);
+                    selField.SetValue(editor, noFlipText);
+                    InvokePrivate(editor, "UpdateSelectionVisual"); Pump(3);
+                    Rect noFlipBefore = Unrot(noFlipText);
+                    Shot("resize-noflip-text-before.png");
+                    Point noFlipTl = noFlipBefore.TopLeft;
+                    int noFlipIdx = (int)typeof(EditorWindow)
+                        .GetMethod("HitTestHandle", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object[] { noFlipTl })!;
+                    DragAbs(noFlipTl, new Point(noFlipBefore.Right + noFlipBefore.Width,
+                        noFlipBefore.Bottom + noFlipBefore.Height), 14);
+                    Shot("resize-noflip-text-after.png");
+                    Rect noFlipAfter = Unrot(noFlipText);
+                    log.AppendLine($"[R18] text TL handle dragged a full box past its BR anchor: handle={noFlipIdx} " +
+                        $"before={noFlipBefore} after={noFlipAfter} " +
+                        $"anchorBR ({noFlipBefore.Right:F2},{noFlipBefore.Bottom:F2}) -> ({noFlipAfter.Right:F2},{noFlipAfter.Bottom:F2}) " +
+                        $"ratio={noFlipAfter.Width / noFlipBefore.Width:F3}x{noFlipAfter.Height / noFlipBefore.Height:F3} " +
+                        $"(must be 0.100 both, and the box must stay left of / above the anchor)");
+
+                    // RESIZE-19: a counter in bbox edit mode resizes in the frame its handles
+                    // are DRAWN in (Survey :4232 angle = bbox.angle, :4256 pivot = bubble
+                    // centre). Grabbing a thumb must not snap the radius, dragging outward must
+                    // grow it, and pulling past the anchor must NOT mirror the badge
+                    // (safeUniformScale is always positive, :2174-2183).
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    counterBtn.IsChecked = true; Pump(3);
+                    Click(0.45, 0.45);
+                    Check("SelectToolBtn");
+                    Click(0.45, 0.45, clicks: 2); Pump(4);
+                    var cnt = Sel();
+                    var cntMeta = (AnnotationData)cnt.Tag!;
+                    // The RENDERED radius and bubble centre come from the badge GRID (3r
+                    // square, bubble at its centre) — never from UnrotatedCanvasBounds, which
+                    // is the pin's ink box: ~2.06r and off-centre toward the nub.
+                    double Radius() => cnt.Width / 3;
+                    Point Bubble() => new(Canvas.GetLeft(cnt) + cnt.Width / 2,
+                                          Canvas.GetTop(cnt) + cnt.Height / 2);
+                    Rect Frame()
+                    {
+                        double rr = Radius(); var bb = Bubble();
+                        return new Rect(bb.X - rr, bb.Y - rr - rr * 0.5, 2 * rr, 2 * rr + rr * 0.5);
+                    }
+                    double rBefore = Radius();
+                    Shot("resize-counter-bbox-before.png");
+                    // The TL thumb, at its actually drawn position on the tilted frame.
+                    var thumbs = ((Canvas)editor.FindName("HandleLayer")!).Children
+                        .OfType<System.Windows.Shapes.Shape>()
+                        .Where(t => t.Visibility == Visibility.Visible).ToList();
+                    var frameAngle = AnnotationRotation.Normalize(
+                        (cntMeta.PointerAngle ?? CounterGeometry.DefaultPointerAngle) + 90);
+                    double r0 = Radius();
+                    Point body0 = Bubble();
+                    var frame0 = Frame();
+                    Point tlThumb = AnnotationRotation.RotatePoint(
+                        new Point(frame0.Left - 2, frame0.Top - 2), body0, frameAngle);
+                    int tlIdx = (int)typeof(EditorWindow)
+                        .GetMethod("HitTestHandle", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object[] { tlThumb })!;
+                    // (a) zero-length drag: no snap-on-grab.
+                    editor.PointerDown(PA(tlThumb)); Pump(1);
+                    editor.PointerMove(PA(tlThumb)); Pump(1);
+                    editor.PointerUp(PA(tlThumb)); Pump(3);
+                    double rGrab = Radius();
+                    // (b) outward along the frame's OWN diagonal: the radius must grow.
+                    Point outward = AnnotationRotation.RotatePoint(
+                        new Point(frame0.Left - 2 - r0, frame0.Top - 2 - r0), body0, frameAngle);
+                    DragAbs(tlThumb, outward, 10);
+                    Pump(3);
+                    double rGrown = Radius();
+                    Shot("resize-counter-bbox-grown.png");
+                    // (c) past the anchor: Survey never mirrors a counter, it keeps growing.
+                    double r1 = Radius();
+                    Point body1 = Bubble();
+                    var frame1 = Frame();
+                    Point tl1 = AnnotationRotation.RotatePoint(new Point(frame1.Left - 2, frame1.Top - 2), body1, frameAngle);
+                    Point past = AnnotationRotation.RotatePoint(
+                        new Point(frame1.Right + r1, frame1.Bottom + r1), body1, frameAngle);
+                    int pastIdx = (int)typeof(EditorWindow)
+                        .GetMethod("HitTestHandle", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object[] { tl1 })!;
+                    DragAbs(tl1, past, 12);
+                    Pump(3);
+                    Shot("resize-counter-bbox-past-anchor.png");
+                    Point body2 = Bubble();
+                    // Survey: uniformScale = max(|sx|,|sy|) of the CROSSED drag, abs()ed
+                    // (:2174-2183), so past the anchor a counter keeps growing at full rate.
+                    double expectPast = r1 * Math.Max(r1 / frame1.Width, r1 / frame1.Height);
+                    log.AppendLine($"[R19] counter bbox resize: handle={tlIdx} frameAngle={frameAngle:F1} " +
+                        $"radius {rBefore:F2} -> grab {rGrab:F2} (padding-2 grab offset only) " +
+                        $"-> outward {rGrown:F2} (must grow) -> pastAnchor {Radius():F2} " +
+                        $"(handle={pastIdx}, Survey expects {expectPast:F2}, and NO mirror); " +
+                        $"bubble {body0:F1} -> {body1:F1} -> {body2:F1}");
+
                     File.WriteAllText(Path.Combine(outDir, "resize-parity.txt"), log.ToString());
                     InvokePrivate(editor, "Select", null);
                     canvas.Children.Clear(); Pump(4);
