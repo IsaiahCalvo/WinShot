@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -568,8 +568,10 @@ public partial class BackgroundComposerWindow : Window
     /// Gives each of the nine alignment ToggleButtons a distinct directional
     /// indicator: a small dot positioned within an 18x18 frame per the button's
     /// Tag (top-left dot for TL, etc.) so the checked anchor is obvious. The dot
-    /// binds to the button Foreground, which the ToolButton style flips to white
-    /// when checked (over the solid blue fill) and a light gray at rest.
+    /// tracks the button's Foreground at rest and goes white on the checked one,
+    /// so the anchor is readable from the dot as well as from the chip behind it
+    /// — nine identical dots with only a background difference is one signal too
+    /// few for a control whose entire job is "which of these nine".
     /// </summary>
     private void BuildAlignmentGlyphs()
     {
@@ -604,9 +606,22 @@ public partial class BackgroundComposerWindow : Window
                 _ => VerticalAlignment.Center,
             },
         };
-        // Track the host button's Foreground (white when checked, light at rest).
-        dot.SetBinding(System.Windows.Shapes.Shape.FillProperty,
-            new System.Windows.Data.Binding(nameof(Control.Foreground)) { Source = owner });
+        // Muted at rest, white when checked. Tracking the button's own Foreground put the
+        // rest dot at TextPrimary #F2F2F4, which is 1.05:1 against white - the trigger below
+        // was invisible and the anchor read only from the chip ring behind it.
+        var style = new Style(typeof(System.Windows.Shapes.Ellipse));
+        style.Setters.Add(new Setter(
+            System.Windows.Shapes.Shape.FillProperty,
+            (System.Windows.Media.Brush)owner.FindResource("TextSecondaryBrush")));
+        var checkedTrigger = new System.Windows.DataTrigger
+        {
+            Binding = new System.Windows.Data.Binding(nameof(ToggleButton.IsChecked)) { Source = owner },
+            Value = true,
+        };
+        checkedTrigger.Setters.Add(new Setter(
+            System.Windows.Shapes.Shape.FillProperty, System.Windows.Media.Brushes.White));
+        style.Triggers.Add(checkedTrigger);
+        dot.Style = style;
         grid.Children.Add(dot);
         return grid;
     }
@@ -737,8 +752,7 @@ public partial class BackgroundComposerWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Background image load failed: {dialog.FileName}", ex);
-            MessageBox.Show(this, "Couldn't load that image.", "WinShot",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ThemedMessageDialog.Show(this, "Couldn't load that image", FriendlyError.For(ex));
         }
     }
 

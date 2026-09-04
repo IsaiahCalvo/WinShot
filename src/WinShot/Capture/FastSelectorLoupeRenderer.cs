@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -190,7 +190,7 @@ internal static class FastSelectorLoupeRenderer
         const int LineGap = 3;
         const int Pad = 6;
 
-        using var font = ThemePalette.UiFont(8.25f);
+        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
         SD.Size coordSize = WF.TextRenderer.MeasureText(loupe.Coordinates, font);
         SD.Size hexSize = WF.TextRenderer.MeasureText(hex, font);
 

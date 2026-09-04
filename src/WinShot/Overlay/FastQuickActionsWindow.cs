@@ -502,7 +502,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             Label = label,
             // 25px in the 512px HTML reference scales to roughly 9px on this 192px card.
-            LabelFont = ThemePalette.UiFont(7f),
+            LabelFont = ThemePalette.UiFont(ThemePalette.PinnedCardLabelPt),
         });
 
     /// <summary>
@@ -608,7 +608,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             return;
 
         // The same understated face the Copy pill uses — this is a status line, not a banner.
-        using var font = ThemePalette.UiFont(7f);
+        using var font = ThemePalette.UiFont(ThemePalette.PinnedCardLabelPt);
         using var text = new SD.SolidBrush(SD.Color.FromArgb(alpha, _visuals.Glyph));
         using var format = new SD.StringFormat
         {
@@ -731,6 +731,30 @@ public sealed class FastQuickActionsWindow : WF.Form
         _pressedButton = index;
         if (old >= 0 && old < _buttons.Count) Invalidate(_buttons[old].Bounds);
         if (index >= 0) Invalidate(_buttons[index].Bounds);
+    }
+
+    /// <summary>
+    /// The screen rectangle the open cards occupy on <paramref name="area"/>, or
+    /// <see cref="SD.Rectangle.Empty"/> when none of them are there. The corner toast asks
+    /// before placing itself: the card and the toast both default to the working area's
+    /// bottom-right with the same 16-DIP inset, and a TopMost toast landing on the card hides
+    /// it and eats the first click aimed at Copy or Edit. Read-only — the card's own geometry
+    /// is untouched.
+    /// </summary>
+    internal static SD.Rectangle StackBounds(SD.Rectangle area)
+    {
+        // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
+        SD.Rectangle union = SD.Rectangle.Empty;
+        foreach (FastQuickActionsWindow window in OpenWindows.ToArray())
+        {
+            if (window.IsDisposed || !window.Visible)
+                continue;
+            SD.Rectangle bounds = window.Bounds;
+            if (bounds.Width <= 0 || bounds.Height <= 0 || !area.IntersectsWith(bounds))
+                continue;
+            union = union.IsEmpty ? bounds : SD.Rectangle.Union(union, bounds);
+        }
+        return union;
     }
 
     private void PositionFromSettings()
@@ -1204,10 +1228,10 @@ public sealed class FastQuickActionsWindow : WF.Form
                     Close();
                     return;
                 case BlipShareResult.NeedsRestart:
-                    ShowShareToast("Blip can't receive shares", "Restart Blip and try again.");
+                    ShowShareToast("Blip can't receive shares", "Restart Blip and try again.", Core.ToastSeverity.Error);
                     return;
                 default:
-                    ShowShareToast("Blip share failed", "The capture was not handed to Blip.");
+                    ShowShareToast("Blip share failed", "The capture was not handed to Blip.", Core.ToastSeverity.Error);
                     return;
             }
         }
@@ -1217,13 +1241,18 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    /// <summary>Reuses the OCR toast — it is the app's generic anchored dark notice.</summary>
-    private void ShowShareToast(string title, string message)
+    /// <summary>The app's one toast, anchored to this card. Every caller so far is a failure,
+    /// so the severity is passed rather than left at Info — an info glyph on "share failed"
+    /// looks exactly like the "Copied" confirmation.</summary>
+    private void ShowShareToast(string title, string message, Core.ToastSeverity severity)
     {
         try
         {
             SD.Rectangle card = RectangleToScreen(_cardRect);
-            new Ocr.OcrToastWindow(title, message, new SD.Point(card.Left, card.Top), null).Show();
+            // Through App, not a bare `new ToastWindow(...).Show()`: that is where the
+            // dispose-on-throw guard and the tray-balloon fallback live, and a share failure
+            // is exactly the message that must not go quiet when a window won't create.
+            App.Toast(title, message, new SD.Point(card.Left, card.Top), severity: severity);
         }
         catch (Exception ex)
         {

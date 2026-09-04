@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -23,7 +23,7 @@ public partial class SettingsWindow : Window
     /// <summary>The theme's error red (single shared instance, so ReferenceEquals
     /// identifies borders we set). Restores go through ClearValue so the style's
     /// hairline BorderBrush resumes instead of a hard-coded gray.</summary>
-    private static Brush ErrorBrush => (Brush)Application.Current.FindResource("AnnotationRedBrush");
+    private static Brush ErrorBrush => (Brush)Application.Current.FindResource("TextErrorBrush");
 
     private readonly SettingsService _settings;
     private bool _saving;

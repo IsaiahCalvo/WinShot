@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using WinShot.Recording;
 using Xunit;
 
@@ -67,7 +67,35 @@ public class RecordingTempRecoveryTests
         Assert.Contains(@"C:\Temp\WinShot\recording-a.mp4", message);
         Assert.Contains("still safe", message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("free space", message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Drive offline", message);
+    }
+
+    /// <summary>
+    /// Finalization is a File.Move into the user's save folder, so a removed drive or a
+    /// read-only folder is its ordinary failure - and the dialog used to quote .NET's own
+    /// sentence for it ("Could not find a part of the path 'Z:\...'").
+    /// </summary>
+    [Theory]
+    [InlineData("Drive offline")]
+    [InlineData(@"Could not find a part of the path 'Z:\Unavailable\capture.mp4'.")]
+    public void FinalizationMessage_MapsTheExceptionInsteadOfQuotingIt(string raw)
+    {
+        var error = new DirectoryNotFoundException(raw);
+        string message = RecordingFailureMessage.ForFinalization(
+            @"Z:\Unavailable", @"C:\Temp\WinShot\recording-a.mp4", error);
+
+        Assert.DoesNotContain(raw, message);
+        Assert.Contains(WinShot.Core.FriendlyError.For(error), message);
+    }
+
+    [Fact]
+    public void FinalizationMessage_NamesTheFolderPermissionCase()
+    {
+        string message = RecordingFailureMessage.ForFinalization(
+            @"D:\Shots", @"C:\Temp\WinShot\recording-a.mp4",
+            new UnauthorizedAccessException(@"Access to the path 'D:\Shots\clip.mp4' is denied."));
+
+        Assert.DoesNotContain("denied", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not allowed to write there", message);
     }
 
     private sealed class TempScope : IDisposable

@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using ScreenRecorderLib;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -93,7 +93,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var title = Label("Record screen", PadX, 250, bold: true, size: 11);
+        var title = Label("Record screen", PadX, 250, bold: true, size: ThemePalette.TextTitlePt);
 
         _format = new DarkSegmented
         {
@@ -136,7 +136,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
         _webcamSizeLabel = Label("Webcam size", PadX, LabelWidth);
         _webcamSizeBox = NumberBox(RecordingOptions.DefaultWebcamSizePercent.ToString());
-        _webcamSizeHint = Label("10–45%", FieldX + 56, 90, color: HintText, size: 8);
+        _webcamSizeHint = Label("10–45%", FieldX + 56, 90, color: HintText, size: ThemePalette.TextCaptionPt);
 
         _cursorCheck = Check("Capture cursor", isChecked: false);
         _clickHighlightCheck = Check("Highlight mouse clicks", isChecked: false);
@@ -144,7 +144,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
         var countdownLabel = Label("Countdown (s)", PadX, LabelWidth);
         _countdownBox = NumberBox("0");
-        var countdownHint = Label("0 = off", FieldX + 56, 90, color: HintText, size: 8);
+        var countdownHint = Label("0 = off", FieldX + 56, 90, color: HintText, size: ThemePalette.TextCaptionPt);
 
         var start = ActionButton("Start", Accent);
         start.Click += (_, _) => Complete(WF.DialogResult.OK);
@@ -550,15 +550,17 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         int x,
         int width,
         bool bold = false,
-        float size = 9,
+        float size = ThemePalette.TextBodyPt,
         SD.Color? color = null) =>
         new()
         {
             AutoSize = false,
-            Font = new SD.Font("Segoe UI", size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? MutedText,
             Location = new SD.Point(S(x), 0),
-            Size = new SD.Size(S(width), S(22)),
+            // 12 pt Segoe UI Bold needs ~22 px of line box, so the title step gets its own
+            // row height; the 22 px shared row clipped the descender in "Record screen".
+            Size = new SD.Size(S(width), S(size >= ThemePalette.TextTitlePt ? 24 : 22)),
             Text = text,
         };
 

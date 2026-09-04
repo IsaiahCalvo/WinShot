@@ -1,4 +1,4 @@
-<Window x:Class="WinShot.History.HistoryWindow"
+﻿<Window x:Class="WinShot.History.HistoryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="WinShot History" Width="1200" Height="760" MinWidth="720" MinHeight="480"
@@ -11,7 +11,7 @@
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="12,8"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
@@ -42,7 +42,7 @@
 
         <Style x:Key="FilterChip" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Margin" Value="3,0"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -104,38 +104,38 @@
 
                 <StackPanel x:Name="SelectionToolbar" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                     <Button x:Name="DoneButton" Style="{StaticResource AccentToolbarButton}" Click="OnToggleSelectionMode">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Done"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Done"/></StackPanel>
                     </Button>
                     <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
-                               FontSize="13" VerticalAlignment="Center" Margin="20,0,16,0"/>
+                               FontSize="{StaticResource TextBodyLg}" VerticalAlignment="Center" Margin="20,0,16,0"/>
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
                     <Button x:Name="AllSelectionButton" Style="{StaticResource ToolbarButton}" Click="OnShowAllFromSelection" AutomationProperties.Name="Select or clear all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="All"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="All"/></StackPanel>
                     </Button>
                     <Button x:Name="SelectAllButton" Style="{StaticResource ToolbarButton}" Click="OnSelectAll" AutomationProperties.Name="Select all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Select all"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Select all"/></StackPanel>
                     </Button>
                     <Button x:Name="CopyToButton" Style="{StaticResource ToolbarButton}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Copy to"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Copy to"/></StackPanel>
                     </Button>
                     <Button x:Name="PinSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnPinSelected" IsEnabled="False" AutomationProperties.Name="Pin selected screenshots">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Pin"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Pin"/></StackPanel>
                     </Button>
                     <Button x:Name="ShareButton" Style="{StaticResource ToolbarButton}" Click="OnShareSelected" IsEnabled="False" AutomationProperties.Name="Share selected files">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Share"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="8,1,0,0"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Share"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphMicro}" Margin="8,1,0,0"/></StackPanel>
                     </Button>
                     <Button x:Name="DeleteSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnDeleteSelected" IsEnabled="False" AutomationProperties.Name="Delete selected history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Delete"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Delete"/></StackPanel>
                     </Button>
                 </StackPanel>
 
                 <StackPanel x:Name="SortControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="{StaticResource ChipGutterMargin}"/>
                     <Button x:Name="SortFieldButton" Style="{StaticResource ToolbarButton}" Click="OnSortFieldMenu" Background="{StaticResource SurfaceBrush}" Padding="12,7">
-                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="12,2,0,0"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphMicro}" Margin="12,2,0,0"/></StackPanel>
                     </Button>
                     <Button x:Name="SortDirectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSortDirection" Margin="4,0,0,0"
-                            AutomationProperties.Name="Sort descending"><TextBlock x:Name="SortDirectionGlyph" Text="&#xE74B;" FontFamily="{StaticResource IconFont}" FontSize="16"/></Button>
+                            AutomationProperties.Name="Sort descending"><TextBlock x:Name="SortDirectionGlyph" Text="&#xE74B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextTitle}"/></Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -158,13 +158,13 @@
                 <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more" Style="{StaticResource ToolbarButton}"
                         Click="OnLoadMore" Visibility="Collapsed" AutomationProperties.Name="Load more history items"
                         AutomationProperties.HelpText="Shows the next 200 local history items without loading the entire library at once."/>
-                <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Click="OnRefresh" Margin="0,0,8,0" AutomationProperties.Name="Refresh history">
+                <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Click="OnRefresh" Margin="{StaticResource ChipGutterMargin}" AutomationProperties.Name="Refresh history">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" Margin="0,0,7,0"/><TextBlock Text="Refresh"/></StackPanel>
                 </Button>
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock x:Name="CountText" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
+                    <TextBlock x:Name="CountText" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextBody}" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
                     <Border Width="1" Height="18" Background="{StaticResource BorderBrush}" Margin="16,0"/>
-                    <TextBlock x:Name="SelectionSummaryText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="SelectionSummaryText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextBody}" VerticalAlignment="Center"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -220,19 +220,19 @@
                                         <Grid x:Name="ThumbnailSurface">
                                             <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Visibility="{Binding ThumbnailVisibility}"/>
                                             <Grid Visibility="{Binding MediaFallbackVisibility}" Background="{StaticResource SurfaceBrush}">
-                                                <TextBlock Text="{Binding ExtensionLabel}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding ExtensionLabel}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextDisplay}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Grid>
                                             <Border Background="{StaticResource SurfaceBrush}" Opacity="0.72" Visibility="{Binding MissingThumbnailVisibility}">
-                                                <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="34" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphIllustration}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding ScrollingVisibility}">
-                                                <TextBlock Text="SCROLLING" Foreground="White" FontSize="10" FontWeight="SemiBold"/>
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,3" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding ScrollingVisibility}">
+                                                <TextBlock Text="SCROLLING" Foreground="White" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Width="32" Height="25" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding VideoBadgeVisibility}">
-                                                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Width="32" Height="25" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding VideoBadgeVisibility}">
+                                                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="{StaticResource GlyphBadge}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
-                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Padding="7,4" CornerRadius="4" Background="#D91D1D1D" Visibility="{Binding GifBadgeVisibility}">
-                                                <TextBlock Text="GIF" Foreground="White" FontSize="10" FontWeight="SemiBold"/>
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="7" Padding="7,4" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding GifBadgeVisibility}">
+                                                <TextBlock Text="GIF" Foreground="White" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"/>
                                             </Border>
                                         </Grid>
 
@@ -247,19 +247,19 @@
                                             </Border.Background>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,3">
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnRestore" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Restore to Quick Access">
-                                                    <StackPanel><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Restore" FontSize="10" Margin="0,3,0,0"/></StackPanel>
+                                                    <StackPanel><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextTitle}" HorizontalAlignment="Center"/><TextBlock Text="Restore" FontSize="{StaticResource TextMicro}" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnCopy" Visibility="{Binding ImageOnlyVisibility}" AutomationProperties.Name="Copy screenshot">
-                                                    <StackPanel><TextBlock Text="&#xE8C8;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Copy" FontSize="10" Margin="0,3,0,0"/></StackPanel>
+                                                    <StackPanel><TextBlock Text="&#xE8C8;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextTitle}" HorizontalAlignment="Center"/><TextBlock Text="Copy" FontSize="{StaticResource TextMicro}" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnEdit" Visibility="{Binding EditableVisibility}" AutomationProperties.Name="Edit capture">
-                                                    <StackPanel><TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Edit" FontSize="10" Margin="0,3,0,0"/></StackPanel>
+                                                    <StackPanel><TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextTitle}" HorizontalAlignment="Center"/><TextBlock Text="Edit" FontSize="{StaticResource TextMicro}" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnPin" Visibility="{Binding PinVisibility}" AutomationProperties.Name="Pin screenshot">
-                                                    <StackPanel><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Pin" FontSize="10" Margin="0,3,0,0"/></StackPanel>
+                                                    <StackPanel><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextTitle}" HorizontalAlignment="Center"/><TextBlock Text="Pin" FontSize="{StaticResource TextMicro}" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
                                                 <Button Style="{StaticResource OverlayActionButton}" Click="OnDelete" AutomationProperties.Name="Delete history item">
-                                                    <StackPanel><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="Delete" FontSize="10" Margin="0,3,0,0"/></StackPanel>
+                                                    <StackPanel><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextTitle}" HorizontalAlignment="Center"/><TextBlock Text="Delete" FontSize="{StaticResource TextMicro}" Margin="0,3,0,0"/></StackPanel>
                                                 </Button>
                                             </StackPanel>
                                         </Border>
@@ -268,13 +268,13 @@
                                              selecting fills it accent with the check glyph. -->
                                         <Border x:Name="SelectionCheck" Width="24" Height="24" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
                                                 Background="#66000000" BorderBrush="White" BorderThickness="1.5" CornerRadius="5" Visibility="Collapsed">
-                                            <TextBlock x:Name="SelectionCheckGlyph" Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                                            <TextBlock x:Name="SelectionCheckGlyph" Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="{StaticResource TextBodyLg}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                                         </Border>
                                     </Grid>
                                 </Border>
                                 <StackPanel Grid.Row="1" Margin="7,7,7,10" ToolTip="{Binding FileName}">
-                                    <TextBlock Text="{Binding RelativeTime}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="{Binding MetadataText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0"/>
+                                    <TextBlock Text="{Binding RelativeTime}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextBody}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding MetadataText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}" Margin="0,3,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -288,7 +288,7 @@
                                 <MultiDataTrigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.12">
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="{StaticResource MotionQuick}">
                                                 <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
                                             </DoubleAnimation>
                                         </Storyboard>
@@ -304,7 +304,7 @@
                                 <MultiDataTrigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.12">
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="{StaticResource MotionQuick}">
                                                 <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
                                             </DoubleAnimation>
                                         </Storyboard>
@@ -329,9 +329,9 @@
             </ListBox>
 
             <StackPanel x:Name="EmptyState" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
-                <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="48" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
-                <TextBlock Text="No captures yet" Foreground="{StaticResource TextSecondaryBrush}" FontSize="15" Margin="0,12,0,0" HorizontalAlignment="Center"/>
-                <TextBlock Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextDisabledBrush}" FontSize="12" Margin="0,6,0,0" HorizontalAlignment="Center"/>
+                <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphHero}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
+                <TextBlock Text="No captures yet" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center"/>
+                <TextBlock Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextBody}" Margin="0,6,0,0" HorizontalAlignment="Center"/>
             </StackPanel>
         </Grid>
     </Grid>

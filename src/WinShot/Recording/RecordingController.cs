@@ -664,7 +664,8 @@ public sealed class RecordingController
             Log.Error("Failed to stop recording", ex);
             string? tempPath = _tempPath;
             CleanupAfterFailure(preserveTemp: true);
-            ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(tempPath, ex.Message));
+            ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(
+                tempPath, Core.FriendlyError.For(ex)));
         }
     }
 
@@ -887,11 +888,7 @@ public sealed class RecordingController
     {
         try
         {
-            MessageBox.Show(
-                message,
-                "WinShot recording",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ThemedMessageDialog.Show(null, "Recording failed", message);
         }
         catch (Exception ex)
         {

@@ -1,4 +1,4 @@
-<Window x:Class="WinShot.Editor.ResizeDialog"
+﻿<Window x:Class="WinShot.Editor.ResizeDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Resize image" Background="{StaticResource WindowBgBrush}"
@@ -40,13 +40,14 @@
         </Grid>
 
         <CheckBox x:Name="LockRatio" Content="Lock aspect ratio" IsChecked="True"
-                  Style="{StaticResource DarkCheckBox}" FontSize="12" Margin="0,10,0,0"/>
+                  Style="{StaticResource DarkCheckBox}" FontSize="{StaticResource TextBody}" Margin="0,10,0,0"/>
 
-        <TextBlock x:Name="InfoText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,8,0,0"/>
+        <TextBlock x:Name="InfoText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}" Margin="0,8,0,0"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-            <Button Style="{StaticResource PillButtonPrimary}" Content="Resize" Click="OnOk" IsDefault="True"/>
+            <!-- Primary last: the same footer order as every other dialog in the app. -->
             <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" IsCancel="True"/>
+            <Button Style="{StaticResource PillButtonPrimary}" Content="Resize" Click="OnOk" IsDefault="True"/>
         </StackPanel>
     </StackPanel>
 </Window>

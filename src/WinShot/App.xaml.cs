@@ -63,7 +63,7 @@ public partial class App : Application
             if (handledByRunningInstance)
             {
                 if (incomingCommand is null)
-                    MessageBox.Show("WinShot is already running — look for it in the system tray.", "WinShot");
+                    ThemedMessageDialog.Show(null, "WinShot is already running", "Look for it in the system tray.");
                 Shutdown();
                 return;
             }
@@ -76,11 +76,24 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Error("Unhandled UI exception", args.Exception);
-            ShowBalloon("WinShot error", args.Exception.Message);
+            ShowBalloon("WinShot error", FriendlyError.For(args.Exception), ToastSeverity.Error);
             args.Handled = true;
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             Log.Error("Unhandled exception", args.ExceptionObject as Exception);
+
+        // Before any window exists, and after the hand-off has had its chance to exit.
+        // ThemeResources.ApplyAnimationPreference can only zero a control template's
+        // transitions while its BeginStoryboards are still unsealed, and WPF seals them the
+        // first time a style is applied - so whichever window opened first used to decide
+        // whether "Animation effects: off" reached the WPF stack at all. The recovery dialog
+        // below was one such first window. A `winshot <command>` launch that only forwards to
+        // the running instance opens no window, so it should not parse the dictionary at all;
+        // the "already running" dialog on that path loads it itself.
+        // Deliberately below the two handlers above: with animation off this inflates ~146
+        // deferred values and walks every template, and a bad pack URI in a repackaged build
+        // would otherwise kill startup with nothing installed to log it.
+        Core.ThemeResources.EnsureLoaded();
 
         // WinForms controls (the Fast* selectors, scrolling chrome) route UI-thread exceptions
         // through their own NativeWindow callback, which would otherwise pop the default .NET
@@ -186,7 +199,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error("Recording startup recovery check failed; temp files were not changed", ex);
-            ShowBalloon("Recording recovery", "Couldn't check unfinished recordings. Temp files were not changed.");
+            ShowBalloon("Recording recovery", "Couldn't check unfinished recordings. Temp files were not changed.", ToastSeverity.Error);
             return;
         }
 
@@ -211,23 +224,20 @@ public partial class App : Application
             catch (Exception ex)
             {
                 Log.Error("Failed to show recording recovery toast", ex);
-                ShowBalloon("Recording recovered", Path.GetFileName(latest));
+                ShowBalloon("Recording recovered", Path.GetFileName(latest), ToastSeverity.Success);
             }
 
             if (result.RecoveredPaths.Count > 1)
-                ShowBalloon("Recordings recovered", $"Recovered {result.RecoveredPaths.Count} recordings.");
+                ShowBalloon("Recordings recovered", $"Recovered {result.RecoveredPaths.Count} recordings.", ToastSeverity.Success);
         }
 
         foreach (RecordingRecoveryFailure failure in result.Failures)
         {
             Log.Error($"Failed to recover recording; source retained at {failure.TempPath}", failure.Error);
-            MessageBox.Show(
-                $"WinShot couldn't recover this recording:\n\n{failure.TempPath}\n\n" +
-                $"The original file is still safe at that location. Check the save folder and available space, then try again next time.\n\n" +
-                failure.Error.Message,
-                "WinShot recording recovery",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ThemedMessageDialog.Show(null, "Couldn't recover a recording",
+                $"{failure.TempPath}\n\n" +
+                "The original file is still safe at that location. Check the save folder and available space, then try again next time.\n\n" +
+                FriendlyError.For(failure.Error));
         }
     }
 
@@ -364,7 +374,16 @@ public partial class App : Application
         }
 
         _hotkeyRetryTimer?.Stop();
-        ShowBalloon("Some hotkeys unavailable", string.Join(", ", failed));
+        // Listing eight "Ctrl+Shift+1"-style gestures runs past what the toast body shows, and
+        // the case that actually happens — a previous WinShot still holding them after a
+        // self-update — is the long one, so the tail that got cut was the hotkeys themselves.
+        // Past a couple, the count plus where to fix them is the message that fits.
+        ShowBalloon(
+            "Some hotkeys unavailable",
+            failed.Count <= 3
+                ? string.Join(", ", failed)
+                : $"{failed.Count} shortcuts are in use by other apps — see Settings > Shortcuts.",
+            ToastSeverity.Error);
     }
 
     private System.Windows.Threading.DispatcherTimer CreateHotkeyRetryTimer()
@@ -464,7 +483,7 @@ public partial class App : Application
                 !int.TryParse(parts[0], out int x) || !int.TryParse(parts[1], out int y) ||
                 !int.TryParse(parts[2], out int w) || !int.TryParse(parts[3], out int h))
             {
-                ShowBalloon("Scrolling capture", "Bad scroll-region command (need x,y,w,h).");
+                ShowBalloon("Scrolling capture", "Bad scroll-region command (need x,y,w,h).", ToastSeverity.Error);
                 return;
             }
             bool auto = parts.Contains("auto", StringComparer.OrdinalIgnoreCase);
@@ -492,11 +511,11 @@ public partial class App : Application
                 paneScoped = region != requested;
             }
 
-            var stitched = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop, paneScoped: paneScoped);
+            var (stitched, cancelled) = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop, paneScoped: paneScoped);
             if (stitched is not null)
                 HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling);
-            else
-                ShowBalloon("Scrolling capture", "Nothing captured.");
+            else if (!cancelled)
+                ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
 
     private void FinishCaptureFlow()
@@ -527,7 +546,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error(failureLog, ex);
-            ShowBalloon(failureBalloon, ex.Message);
+            ShowBalloon(failureBalloon, FriendlyError.For(ex), ToastSeverity.Error);
         }
         finally
         {
@@ -647,7 +666,10 @@ public partial class App : Application
                 HandleCapture(capture);
             }
             else
-                ShowBalloon("Capture previous region", "No previous region yet — capture a region first.");
+                // Info, not Error: nothing went wrong, a prerequisite is simply not met yet —
+                // the same shape as OCR's "Nothing found", which for the same reason does not
+                // wear a red glyph. The long dwell is what gives the sentence time to read.
+                ShowBalloon("Capture previous region", "No previous region yet — capture a region first.", ToastSeverity.Info, holdLong: true);
         });
 
     private void AllInOneFlow() => RunCaptureFlow(
@@ -697,11 +719,11 @@ public partial class App : Application
                 case AllInOneAction.Scroll:
                     var region = regionPx;
                     region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
-                    var stitched = await ScrollingStatusWindow.Run(region);
+                    var (stitched, cancelled) = await ScrollingStatusWindow.Run(region);
                     if (stitched is not null)
                         HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
-                    else
-                        ShowBalloon("Scrolling capture", "Nothing captured.");
+                    else if (!cancelled)
+                        ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
                     break;
             }
         });
@@ -1019,14 +1041,14 @@ public partial class App : Application
         {
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
             if (showSuccess)
-                await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Copied to clipboard."));
+                await Dispatcher.InvokeAsync(() => ShowBalloon("Copied", "The capture is on the clipboard.", ToastSeverity.Success));
         }
         catch (Exception ex)
         {
             if (showFailure)
             {
                 Log.Error(failureContext, ex);
-                await Dispatcher.InvokeAsync(() => ShowBalloon("Copy failed", ex.Message));
+                await Dispatcher.InvokeAsync(() => ShowBalloon("Copy failed", FriendlyError.For(ex), ToastSeverity.Error));
             }
             else
             {
@@ -1148,7 +1170,8 @@ public partial class App : Application
         catch (Exception ex)
         {
             bmp.Dispose();
-            ShowBalloon("Save failed", ex.Message);
+            Log.Error("Could not choose a save path", ex);
+            ShowBalloon("Save failed", FriendlyError.For(ex), ToastSeverity.Error);
             return;
         }
 
@@ -1159,12 +1182,12 @@ public partial class App : Application
                 try
                 {
                     ImageSaver.Save(bmp, path);
-                    Dispatcher.InvokeAsync(() => ShowBalloon("Saved", Path.GetFileName(path)));
+                    Dispatcher.InvokeAsync(() => ShowBalloon("Saved", Path.GetFileName(path), ToastSeverity.Success));
                 }
                 catch (Exception ex)
                 {
                     Log.Error("Silent save failed", ex);
-                    Dispatcher.InvokeAsync(() => ShowBalloon("Save failed", ex.Message));
+                    Dispatcher.InvokeAsync(() => ShowBalloon("Save failed", FriendlyError.For(ex), ToastSeverity.Error));
                 }
             }
         });
@@ -1223,19 +1246,37 @@ public partial class App : Application
         SD.Point? anchor = null,
         FastQuickActionsWindow? card = null)
     {
+        OcrCaptureResult result;
         try
         {
             var sw = Stopwatch.StartNew();
-            var result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
+            // Only OcrService's own InvalidOperationException messages are written for the
+            // user (no language pack installed, and so on), so only this call is allowed to
+            // put one on screen; anything the rest of the flow throws goes through the
+            // generic handler instead of quoting the framework.
+            result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
             LogPerf("ocr extract", sw);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log.Info($"OCR unavailable: {ex.Message}");
+            ShowBalloon("OCR unavailable", ex.Message, ToastSeverity.Error);
+            return;
+        }
 
+        try
+        {
             OcrClipboardPayload? payload = OcrClipboardFormatter.Build(result);
             if (payload is null)
             {
                 if (card is not null)
                     card.FlashStatus("No text found");
                 else
-                    ShowOcrToast("Nothing found", "No text or codes in the selection.", anchor, onOpen: null);
+                    // The one OCR result the user has to read and act on, and the only one
+                    // with no action attached - so it holds the screen as long as a success.
+                    ShowOcrToast(
+                        "Nothing found", "No text or codes in the selection.", anchor,
+                        onOpen: null, ToastSeverity.Info, holdLong: true);
                 return;
             }
 
@@ -1245,14 +1286,10 @@ public partial class App : Application
             else
                 ShowOcrToast(payload.BalloonTitle, payload.Preview, anchor, BuildOpenAction(payload.ClipboardText));
         }
-        catch (InvalidOperationException ex)
-        {
-            ShowBalloon("OCR unavailable", ex.Message);
-        }
         catch (COMException ex)
         {
             Log.Info($"OCR clipboard copy skipped: {ex.Message}");
-            ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.");
+            ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.", ToastSeverity.Error);
         }
     }
 
@@ -1269,19 +1306,12 @@ public partial class App : Application
         return null;
     }
 
-    private void ShowOcrToast(string title, string preview, SD.Point? anchor, Action? onOpen)
-    {
-        try
-        {
-            var toast = new OcrToastWindow(title, preview, anchor, onOpen);
-            toast.Show();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("OCR toast failed; falling back to balloon", ex);
-            ShowBalloon(title, preview);
-        }
-    }
+    /// <summary>Severity is per-call: "Nothing found" is not a success, and a checkmark on it
+    /// reads as "it worked".</summary>
+    private void ShowOcrToast(
+        string title, string preview, SD.Point? anchor, Action? onOpen,
+        ToastSeverity severity = ToastSeverity.Success, bool holdLong = false) =>
+        ShowToast(title, preview, anchor, onOpen, severity, holdLong);
 
     private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
@@ -1322,11 +1352,13 @@ public partial class App : Application
                 });
             }
 
-            var stitched = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick);
+            // Escape and Cancel are the user finishing the flow the way they chose to; only a
+            // run that came back with nothing to show for it is a failure worth a red card.
+            var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick);
             if (stitched is not null)
                 HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
-            else
-                ShowBalloon("Scrolling capture", "Nothing captured.");
+            else if (!cancelled)
+                ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
 
     private async void RestoreLastFlow()
@@ -1334,7 +1366,8 @@ public partial class App : Application
         string? path = FastQuickActionsWindow.PopRecentlyClosed();
         if (path is null)
         {
-            ShowBalloon("Restore", "No recently closed capture to restore.");
+            // Prerequisite not met, not a failure — see CapturePreviousFlow.
+            ShowBalloon("Restore", "No recently closed capture to restore.", ToastSeverity.Info, holdLong: true);
             return;
         }
         if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
@@ -1393,7 +1426,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error("OCR from overlay failed", ex);
-            ShowBalloon("OCR failed", ex.Message);
+            ShowBalloon("OCR failed", FriendlyError.For(ex), ToastSeverity.Error);
         }
     }
 
@@ -1469,7 +1502,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error($"Failed to load image {path}", ex);
-            ShowBalloon("WinShot", "Could not open that file as an image.");
+            ShowBalloon("Couldn't open that file", "It is not an image WinShot can read.", ToastSeverity.Error);
             return null;
         }
     }
@@ -1479,8 +1512,71 @@ public partial class App : Application
         get { try { return GetDpiForSystem() / 96.0; } catch { return 1.0; } }
     }
 
-    internal void ShowBalloon(string title, string message) =>
-        _tray?.ShowBalloonTip(3000, title, message, WF.ToolTipIcon.Info);
+    /// <summary>
+    /// The app's one feedback channel. Everything except "update available" goes to the
+    /// in-app toast at the tray corner: the shell balloon renders "Save failed" and
+    /// "Copied to clipboard" identically, and Focus Assist swallows it whole with no window
+    /// to fall back to. Only one toast at a time — <see cref="ToastWindow"/> enforces that
+    /// itself, for every caller, not just this one.
+    /// </summary>
+    internal void ShowBalloon(
+        string title, string message, ToastSeverity severity = ToastSeverity.Info, bool holdLong = false) =>
+        ShowToast(title, message, anchor: null, onOpen: null, severity, holdLong);
+
+    /// <summary>
+    /// The one way to put a toast on screen, for callers outside App as well: it is what
+    /// carries the dispose-on-throw guard and the tray-balloon fallback, so a window that
+    /// fails to create still tells the user something instead of leaking a form and going
+    /// quiet. Silently does nothing when there is no running App (tests).
+    /// </summary>
+    internal static void Toast(
+        string title, string message, SD.Point? anchor = null, Action? onOpen = null,
+        ToastSeverity severity = ToastSeverity.Info, bool holdLong = false)
+    {
+        if (Current is App app)
+            app.ShowToast(title, message, anchor, onOpen, severity, holdLong);
+    }
+
+    private void ShowToast(
+        string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity,
+        bool holdLong = false)
+    {
+        try
+        {
+            var shown = new ToastWindow(title, message, anchor, onOpen, severity, holdLong);
+            try
+            {
+                // Showing is what replaces whatever toast was already up.
+                shown.Show();
+            }
+            catch
+            {
+                // A form that never made it on screen is not the live toast, and nothing else
+                // will ever dispose it — the fallback below is what the user sees instead.
+                shown.Dispose();
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            // The toast is a window and a window can fail to create; the balloon is the one
+            // piece of feedback that never needs one.
+            Log.Error("Toast failed; falling back to the tray balloon", ex);
+            ShowShellBalloon(title, message, severity);
+        }
+    }
+
+    /// <summary>The Windows tray balloon, kept for the one message that is clickable from
+    /// the shell itself: an available update, which installs on click.</summary>
+    private void ShowShellBalloon(string title, string message, ToastSeverity severity = ToastSeverity.Info) =>
+        _tray?.ShowBalloonTip(3000, title, message, severity switch
+        {
+            // The fallback runs on the one path where a window failed to create, which is
+            // exactly when the user most needs to know a save failed rather than succeeded.
+            ToastSeverity.Error => WF.ToolTipIcon.Error,
+            ToastSeverity.Success => WF.ToolTipIcon.Info,
+            _ => WF.ToolTipIcon.Info,
+        });
 
     // ---- Updates ----------------------------------------------------------
 
@@ -1495,7 +1591,10 @@ public partial class App : Application
     /// <summary>Manual "Check for updates…" — reports the outcome either way.</summary>
     private async Task CheckForUpdatesFlowAsync()
     {
-        ShowBalloon("WinShot", "Checking for updates…");
+        // A GitHub round trip routinely outlives the 1.7 s a plain Info toast dwells, so the
+        // working state used to vanish mid-check and leave the user on a silent screen
+        // wondering whether the menu item registered.
+        ShowBalloon("Checking for updates…", "Asking GitHub for the latest release.", holdLong: true);
         var result = await UpdateService.CheckAsync();
         await Dispatcher.InvokeAsync(() =>
         {
@@ -1505,11 +1604,19 @@ public partial class App : Application
                     OnUpdateAvailable(result);
                     break;
                 case UpdateState.UpToDate:
-                    ShowBalloon("WinShot", "You're on the latest version.");
+                    ShowBalloon("Up to date", "You're on the latest version.", ToastSeverity.Success);
                     break;
                 default:
                     Log.Error($"Update check failed: {result.Message}");
-                    ShowBalloon("WinShot", "Couldn't check for updates.");
+                    // UpdateService already turned the cause into a friendly line ("GitHub
+                    // returned 403.", "No Setup.exe asset on the latest release."). Asserting a
+                    // connectivity problem sent the user to fix a network that was fine.
+                    ShowBalloon(
+                        "Update check failed",
+                        string.IsNullOrWhiteSpace(result.Message)
+                            ? "WinShot couldn't reach GitHub. Try again in a moment."
+                            : result.Message,
+                        ToastSeverity.Error);
                     break;
             }
         });
@@ -1523,7 +1630,7 @@ public partial class App : Application
             _updateMenuItem.Text = $"Install update ({result.LatestVersion})";
             _updateMenuItem.Visible = true;
         }
-        ShowBalloon("Update available", $"WinShot {result.LatestVersion} is ready — click to install.");
+        ShowShellBalloon("Update available", $"WinShot {result.LatestVersion} is ready — click to install.");
     }
 
     private async Task InstallPendingUpdateAsync()
@@ -1533,7 +1640,10 @@ public partial class App : Application
         _updateInProgress = true;
         try
         {
-            ShowBalloon("WinShot", "Downloading update…");
+            // Downloading an installer outlives a check for one, so it holds at least as
+            // long: without this the working state vanished and the user watched a silent
+            // screen until the app exited and the installer took over.
+            ShowBalloon("Downloading update…", "WinShot restarts once it is installed.", holdLong: true);
             await UpdateService.DownloadAndLaunchAsync(update.DownloadUrl, update.LatestVersion ?? "latest");
             // Reached only when the installer launched (failures throw). Exit so it can replace our
             // files; the installer relaunches WinShot itself.
@@ -1543,13 +1653,13 @@ public partial class App : Application
         {
             Log.Error("Update verification failed", ex);
             _updateInProgress = false;
-            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update failed: download verification failed."));
+            await Dispatcher.InvokeAsync(() => ShowBalloon("Update failed", "The download did not verify. Nothing was installed.", ToastSeverity.Error));
         }
         catch (Exception ex)
         {
             Log.Error("Update install failed", ex);
             _updateInProgress = false;
-            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update install failed. Log saved."));
+            await Dispatcher.InvokeAsync(() => ShowBalloon("Update failed", "The installer could not start. The details are in the log.", ToastSeverity.Error));
         }
     }
 

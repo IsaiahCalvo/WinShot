@@ -93,6 +93,8 @@ internal sealed class RecordingRecoveryStartup
                 {
                     // The recording is already safely finalized. A History copy failure
                     // must not turn a successful recovery into a destructive retry.
+                    // This list is written to the log and never shown (App.xaml.cs), so the
+                    // raw framework text is the point of it — keep it unfriendly.
                     historyWarnings.Add($"{result.FinalPath}: {ex.Message}");
                 }
             }

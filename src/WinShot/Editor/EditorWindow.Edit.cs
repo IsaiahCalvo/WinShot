@@ -72,10 +72,10 @@ public partial class EditorWindow : Window
 
         var annotations = AnnotationCanvas.Children.Cast<UIElement>().ToList();
         if (annotations.Count > 0 &&
-            MessageBox.Show(this,
-                "Your annotations will be flattened into the image before this operation. " +
-                "They will no longer be editable as separate objects. Continue?",
-                "WinShot", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            !ThemedMessageDialog.Confirm(this, "Flatten annotations?",
+                "Your annotations will be baked into the image before this operation. " +
+                "They will no longer be editable as separate objects.",
+                "Flatten"))
             return;
 
         Select(null);

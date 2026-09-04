@@ -110,9 +110,11 @@ public static class OcrService
                 LogOcrBreakdown(snapshot, snapshotMs, softwareBitmapMs, recognizeMs, barcodeMs, deepBarcodeMs, total.ElapsedMilliseconds);
                 if (qrOnly.Results.Count > 0)
                     return new OcrCaptureResult(string.Empty, qrOnly.Results);
+                // Goes straight onto the toast, whose body box holds three 244-DIP rows. The
+                // long form ran past that and lost its tail — and the tail is the whole point
+                // of this message, so it says where to go and stops.
                 throw new InvalidOperationException(
-                    "No OCR language pack is installed. Add a language under Windows Settings > " +
-                    "Time & Language > Language & Region, then try again.");
+                    "No OCR language pack is installed. Add one in Settings > Time & language.");
             }
 
             // Windows OCR misses glyphs under ~20 px tall, and screen text in a

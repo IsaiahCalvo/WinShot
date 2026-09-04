@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 
 namespace WinShot.Recording;
 
@@ -22,7 +22,11 @@ internal static class RecordingFailureMessage
                $"Details: {FriendlyDetail(detail)}";
     }
 
-    private static string FriendlyDetail(Exception error) => FriendlyDetail(error.Message);
+    // The mapping lives here rather than at the call site so every exception that ever
+    // reaches this file is mapped. The finalization path is a File.Move into the user's
+    // save folder - the disconnected-drive and read-only-folder cases FriendlyError has
+    // exact lines for - and it used to hand the raw .NET sentence straight to the dialog.
+    private static string FriendlyDetail(Exception error) => Core.FriendlyError.For(error);
 
     private static string FriendlyDetail(string? detail) =>
         string.IsNullOrWhiteSpace(detail) ? "Unknown recording error." : detail.Trim();

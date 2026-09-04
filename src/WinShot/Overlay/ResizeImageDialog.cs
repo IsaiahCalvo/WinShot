@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -40,7 +40,7 @@ public sealed class ResizeImageDialog : WF.Form
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.CenterScreen;
         TopMost = true;
-        Font = ThemePalette.UiFont(9f);
+        Font = ThemePalette.UiFont(ThemePalette.TextBodyPt);
         SetStyle(
             WF.ControlStyles.AllPaintingInWmPaint |
             WF.ControlStyles.OptimizedDoubleBuffer |
@@ -48,10 +48,12 @@ public sealed class ResizeImageDialog : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var title = Label("Resize image", PadX, 200, bold: true, size: 11);
+        var title = Label("Resize image", PadX, 200, bold: true, size: ThemePalette.TextTitlePt);
         title.Top = S(16);
-        var original = Label($"{source.Width} × {source.Height} px", PadX, 200, color: ThemePalette.TextSecondary, size: 8);
-        original.Top = S(38);
+        var original = Label($"{source.Width} × {source.Height} px", PadX, 200, color: ThemePalette.TextSecondary, size: ThemePalette.TextCaptionPt);
+        // 16 + the title row's own 24 (Label gives anything at TextTitlePt or above the taller
+        // row). At 38 the two opaque labels overlapped by 2 logical px and only z-order hid it.
+        original.Top = S(40);
 
         var widthLabel = Label("Width", PadX, 70);
         widthLabel.Top = S(70);
@@ -133,7 +135,7 @@ public sealed class ResizeImageDialog : WF.Form
             PopupChrome.ApplyRegion(this, S(10));
     }
 
-    private WF.Label Label(string text, int x, int width, bool bold = false, float size = 9, SD.Color? color = null) =>
+    private WF.Label Label(string text, int x, int width, bool bold = false, float size = ThemePalette.TextBodyPt, SD.Color? color = null) =>
         new()
         {
             AutoSize = false,
@@ -141,7 +143,9 @@ public sealed class ResizeImageDialog : WF.Form
             Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? ThemePalette.TextPrimary,
             Location = new SD.Point(S(x), 0),
-            Size = new SD.Size(S(width), S(22)),
+            // 12 pt Segoe UI Bold needs ~22 px of line box, so the title step gets its own
+            // row height; the 22 px shared row clipped the descender in "Resize image".
+            Size = new SD.Size(S(width), S(size >= ThemePalette.TextTitlePt ? 24 : 22)),
             Text = text,
             TextAlign = SD.ContentAlignment.MiddleLeft,
         };

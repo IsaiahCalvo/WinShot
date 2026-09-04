@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -93,8 +93,9 @@ public partial class SettingsWindow
 
             foreach (var item in section.Items)
             {
-                // Same 150px label + 162px control column every other tab uses (RowLabel),
-                // so switching tabs never re-anchors the content grid.
+                // Same label + control column every other tab uses (RowLabel,
+                // SettingsRowLabelWidth / SettingsRowIndent in Theme.xaml), so
+                // switching tabs never re-anchors the content grid.
                 var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = false };
                 row.Children.Add(new TextBlock
                 {
