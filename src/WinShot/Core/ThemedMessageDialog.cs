@@ -43,6 +43,33 @@ public static class ThemedMessageDialog
     }
 
     /// <summary>
+    /// Asks for one line of text. Returns null when the user cancels, so an empty answer and
+    /// a cancelled prompt stay distinguishable. Same card and footer as the other two, so a
+    /// rename prompt does not have to be a second dialog style.
+    /// </summary>
+    public static string? Prompt(
+        Window? owner, string title, string message, string initialValue, string confirmLabel)
+    {
+        var (dialog, body, footer) = Build(owner, title, message);
+
+        var input = new TextBox { Text = initialValue, Margin = new Thickness(0, 0, 0, 18) };
+        input.SetResourceReference(FrameworkElement.StyleProperty, "DarkTextBox");
+        // Build hands back the whole card, footer included, so the field goes in above it.
+        body.Children.Insert(body.Children.IndexOf(footer), input);
+        dialog.Loaded += (_, _) =>
+        {
+            input.Focus();
+            input.SelectAll();
+        };
+
+        AddButton(footer, "Cancel", primary: false, () => { }).IsCancel = true;
+        Button confirm = AddButton(footer, confirmLabel, primary: true, () => dialog.DialogResult = true);
+        confirm.IsDefault = true;
+
+        return dialog.ShowDialog() == true ? input.Text : null;
+    }
+
+    /// <summary>
     /// Appends a themed footer button. Every dialog in the app gets its buttons from
     /// here, so nothing has to hand-roll a Background/Foreground pair again.
     /// </summary>

@@ -207,7 +207,14 @@
                                     <MenuItem Header="Copy" Click="OnCopy" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
                                     <MenuItem Header="Edit" Click="OnEdit" Visibility="{Binding EditableVisibility}" Style="{StaticResource DarkMenuItem}"/>
                                     <MenuItem Header="Pin" Click="OnPin" Visibility="{Binding PinVisibility}" Style="{StaticResource DarkMenuItem}"/>
+                                    <Separator/>
+                                    <MenuItem Header="Rotate left" Click="OnRotate" Tag="rotate-left" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
+                                    <MenuItem Header="Rotate right" Click="OnRotate" Tag="rotate-right" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
+                                    <MenuItem Header="Rename…" Click="OnRename" Style="{StaticResource DarkMenuItem}"/>
+                                    <MenuItem Header="Print…" Click="OnPrint" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
+                                    <Separator/>
                                     <MenuItem Header="Open" Click="OnOpen" Style="{StaticResource DarkMenuItem}"/>
+                                    <MenuItem Header="Open with…" Click="OnOpenWith" Style="{StaticResource DarkMenuItem}"/>
                                     <MenuItem Header="Reveal in Explorer" Click="OnReveal" Style="{StaticResource DarkMenuItem}"/>
                                     <Separator/><MenuItem Header="Delete" Click="OnDelete" Style="{StaticResource DarkMenuItem}"/>
                                 </ContextMenu>

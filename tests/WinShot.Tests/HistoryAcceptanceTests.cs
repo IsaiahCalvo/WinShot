@@ -130,6 +130,14 @@ public class HistoryAcceptanceTests
         Assert.Contains("Click=\"OnCopySelected\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnShareSelected\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnDeleteSelected\"", xaml, StringComparison.Ordinal);
+        // Everything the quick-actions card can do to a capture is reachable here too.
+        Assert.Contains("Click=\"OnRotate\" Tag=\"rotate-left\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnRotate\" Tag=\"rotate-right\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnRename\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnPrint\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnOpenWith\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"NewCaptureButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RetryLoadButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"LoadMoreButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"OnLoadMore\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Shows the next 200 local history items", xaml, StringComparison.Ordinal);

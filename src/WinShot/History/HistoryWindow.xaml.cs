@@ -13,6 +13,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using WinShot.Core;
+using WinShot.Overlay;
 using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -1210,6 +1211,124 @@ public partial class HistoryWindow : Window
     {
         if (GetItem(sender) is { } item)
             OpenItem(item);
+    }
+
+    /// <summary>
+    /// Rotate, Rename, Print and Open-with all shipped on the quick-actions card and were
+    /// unreachable in History at any depth — so the only way to rotate a capture you already
+    /// took was to restore it to the card first.
+    /// </summary>
+    private async void OnRotate(object sender, RoutedEventArgs e)
+    {
+        if (GetItem(sender) is not { IsImage: true } item) return;
+        if (QuickActionsMenu.TransformFor((sender as FrameworkElement)?.Tag as string ?? string.Empty)
+            is not SD.RotateFlipType transform)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                using SD.Bitmap image = HistoryImageLoader.LoadDetachedBitmap(item.FilePath);
+                image.RotateFlip(transform);
+                // Write to temp and swap: a half-written history file is worse than a failed
+                // rotate, and staging inside the folder would flash up as a card of its own.
+                string staging = Path.Combine(
+                    Path.GetTempPath(),
+                    $"winshot-rotate-{Guid.NewGuid():N}{Path.GetExtension(item.FilePath)}");
+                ImageSaver.Save(image, staging);
+                File.Move(staging, item.FilePath, overwrite: true);
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to rotate history item {item.FilePath}", ex);
+            ThemedMessageDialog.Show(this, "Rotate failed", FriendlyError.For(ex));
+            return;
+        }
+
+        // The folder watcher picks the rewrite up and re-decodes the thumbnail.
+        await ReloadAsync();
+    }
+
+    private void OnRename(object sender, RoutedEventArgs e)
+    {
+        if (GetItem(sender) is not { } item) return;
+
+        string suggestion = Path.GetFileNameWithoutExtension(item.FileName);
+        while (true)
+        {
+            string? answer = ThemedMessageDialog.Prompt(
+                this,
+                "Rename capture",
+                "WinShot keeps this capture's type tag and file extension.",
+                suggestion,
+                "Rename");
+            if (answer is null) return;
+
+            HistoryRename.Result result = HistoryRename.Resolve(item.FilePath, answer);
+            if (result.Error is not null)
+            {
+                suggestion = answer;
+                ThemedMessageDialog.Show(this, "Rename failed", result.Error);
+                continue;
+            }
+
+            if (string.Equals(result.Path, item.FilePath, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            try
+            {
+                File.Move(item.FilePath, result.Path!);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Failed to rename history item {item.FilePath}", ex);
+                ThemedMessageDialog.Show(this, "Rename failed", FriendlyError.For(ex));
+            }
+
+            _ = ReloadAsync();
+            return;
+        }
+    }
+
+    private async void OnPrint(object sender, RoutedEventArgs e)
+    {
+        if (GetItem(sender) is not { IsImage: true } item || !File.Exists(item.FilePath)) return;
+        try
+        {
+            using SD.Bitmap image = await Task.Run(() => HistoryImageLoader.LoadDetachedBitmap(item.FilePath));
+            QuickActionsMenu.PrintImage(new WindowHandle(new WindowInteropHelper(this).Handle), image);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to print history item {item.FilePath}", ex);
+            ThemedMessageDialog.Show(this, "Print failed", FriendlyError.For(ex));
+        }
+    }
+
+    private void OnOpenWith(object sender, RoutedEventArgs e)
+    {
+        if (GetItem(sender) is not { } item || !File.Exists(item.FilePath)) return;
+        try
+        {
+            QuickActionsMenu.ShowOpenWith(item.FilePath);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to show Open with for {item.FilePath}", ex);
+            ThemedMessageDialog.Show(this, "Open with failed", FriendlyError.For(ex));
+        }
+    }
+
+    /// <summary>The WinForms print dialog wants an IWin32Window; History is WPF.</summary>
+    private sealed class WindowHandle : WF.IWin32Window
+    {
+        public WindowHandle(IntPtr handle) => Handle = handle;
+
+        public IntPtr Handle { get; }
     }
 
     private void OnReveal(object sender, RoutedEventArgs e)
