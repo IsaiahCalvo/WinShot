@@ -32,7 +32,9 @@ internal sealed class RectangleTween
     /// <summary>Begins (or redirects) a glide toward <paramref name="to"/>.</summary>
     public void Retarget(SD.Rectangle from, SD.Rectangle to)
     {
-        // Mid-flight: keep the on-screen position as the new origin.
+        // Mid-flight: keep the on-screen position as the new origin. Below a couple of pixels
+        // the in-flight rect is degenerate and gliding out of it looks like a glitch, so fall
+        // back to the caller's origin — don't "tidy up" the threshold.
         _from = IsActive && Current.Width > 2 && Current.Height > 2 ? Current : from;
         _to = to;
         Current = SD.Rectangle.Round(_from);

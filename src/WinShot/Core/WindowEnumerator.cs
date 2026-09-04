@@ -27,8 +27,10 @@ public static class WindowEnumerator
     private const long WsExToolWindow = 0x00000080;
     private const long WsExNoActivate = 0x08000000;
 
-    // Classes that enumerate as ordinary windows but are never a capture target.
-    private static readonly string[] IgnoreClassNames = { "CEF-OSC-WIDGET" }; // NVIDIA overlay
+    // Window classes that enumerate exactly like an ordinary top-level app but are never
+    // something a user points at. "CEF-OSC-WIDGET" is NVIDIA's GeForce overlay: it is a
+    // real visible top-level window, so nothing below filters it and it has to be named.
+    private static readonly string[] IgnoreClassNames = { "CEF-OSC-WIDGET" };
 
     /// <summary>
     /// Returns the top-level (root) window handle under <paramref name="screenPoint"/>
@@ -95,106 +97,174 @@ public static class WindowEnumerator
     /// z-order front to back. Hover detection is then a plain first-contains-point scan,
     /// which lands on the innermost element under the cursor.
     ///
-    /// Behaviour modelled on ShareX (GPL-3) — no code copied: the same *rules* about which
-    /// rectangles a window picker should offer and in what order (filters, ordering,
-    /// containment dedupe), reached by this file's own EnumWindows walk. See
-    /// THIRD_PARTY_NOTICES.md. HWND-level only: apps that draw
-    /// their whole UI into one window (Chromium, Electron, WPF) expose just the window
-    /// and its client area here; the MSAA/UIA and pixel tiers refine those.
+    /// The shape of this list — deepest-first, cloaked and non-interactive windows filtered
+    /// out, a window's client area listed before its frame — matches what ShareX's region
+    /// selector produces, because that is what the Win32 window model makes correct. ShareX
+    /// (GPL-3) was studied for behaviour only; no ShareX code is included here. See
+    /// THIRD_PARTY_NOTICES.md.
+    ///
+    /// HWND-level only: apps that draw their whole UI into one window (Chromium, Electron,
+    /// WPF) expose just the window and its client area here; the MSAA/UIA and pixel tiers
+    /// refine those.
     /// </summary>
     public static List<SnapRect> GetSnapRectangles(HashSet<IntPtr>? exclude = null, int timeoutMs = 400)
     {
-        var collected = new List<SnapRect>();
-        var visited = new HashSet<IntPtr>();
-        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var scan = new SnapScan(exclude, timeoutMs);
 
         try
         {
-            EnumWindows((hwnd, _) => Collect(hwnd, null, collected, visited, exclude, clock, timeoutMs), IntPtr.Zero);
+            EnumWindows((hwnd, _) => scan.CollectTopLevel(hwnd), IntPtr.Zero);
         }
         catch (Exception)
         {
             // A provider crashing mid-enumeration must never take the selector with it.
         }
 
-        // Drop any control rect entirely covered by a deeper rect already accepted — an
-        // inner control that exactly fills its parent would otherwise be unreachable.
-        var result = new List<SnapRect>(collected.Count);
-        foreach (var candidate in collected)
-        {
-            if (!candidate.IsWindow && result.Any(r => r.Bounds.Contains(candidate.Bounds)))
-                continue;
-            result.Add(candidate);
-        }
-        return result;
+        return DropCoveredControls(scan.Rects);
     }
 
-    private static bool Collect(IntPtr hwnd, Rectangle? clip, List<SnapRect> collected,
-        HashSet<IntPtr> visited, HashSet<IntPtr>? exclude, System.Diagnostics.Stopwatch clock, int timeoutMs)
+    /// <summary>
+    /// A control rect is dropped when something already accepted covers it completely. The
+    /// list is built deepest-first, so "already accepted" means "deeper", and a control that
+    /// exactly fills its parent would otherwise sit behind it and be unreachable to the
+    /// first-contains-point hover scan. Window rects are never dropped — the ladder always
+    /// needs a rung for the window itself.
+    /// </summary>
+    private static List<SnapRect> DropCoveredControls(List<SnapRect> rects)
     {
-        if (clock.ElapsedMilliseconds > timeoutMs)
-            return false;
-        if (exclude is not null && exclude.Contains(hwnd))
-            return true;
-        if (!IsWindowVisible(hwnd))
-            return true;
-
-        Rectangle bounds;
-
-        if (clip is not Rectangle parentBounds)
+        var kept = new List<SnapRect>(rects.Count);
+        foreach (var rect in rects)
         {
-            if (DwmGetWindowAttributeInt(hwnd, DwmwaCloaked, out int cloaked, sizeof(int)) == 0 && cloaked != 0)
+            if (!rect.IsWindow && kept.Any(k => k.Bounds.Contains(rect.Bounds)))
+                continue;
+            kept.Add(rect);
+        }
+        return kept;
+    }
+
+    /// <summary>
+    /// One pass of the snap-rect walk. Top-level windows and child controls are collected by
+    /// two separate entry points because they answer to different rules: a window is filtered
+    /// on its class and extended styles and measured by its DWM frame, a control is neither
+    /// filtered nor measured that way and is always clipped to its parent. The whole walk
+    /// shares one elapsed-time budget and one descended-into set.
+    /// </summary>
+    private sealed class SnapScan
+    {
+        public readonly List<SnapRect> Rects = new();
+
+        private readonly HashSet<IntPtr> _descended = new();
+        private readonly HashSet<IntPtr>? _exclude;
+        private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+        private readonly int _budgetMs;
+
+        public SnapScan(HashSet<IntPtr>? exclude, int budgetMs)
+        {
+            _exclude = exclude;
+            _budgetMs = budgetMs;
+        }
+
+        /// <summary>Top-level window. False stops the enumeration; true means "carry on".</summary>
+        public bool CollectTopLevel(IntPtr hwnd)
+        {
+            if (_clock.ElapsedMilliseconds > _budgetMs)
+                return false;
+            if (Skip(hwnd) || !IsCapturableWindow(hwnd))
                 return true;
-            if (IgnoreClassNames.Contains(ClassNameOf(hwnd), StringComparer.OrdinalIgnoreCase))
+            if (FrameBoundsOf(hwnd) is not Rectangle frame || frame.Width <= 0 || frame.Height <= 0)
                 return true;
 
-            long exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
-            // Non-activatable tool windows (tiling overlays, system auxiliaries) are never
-            // the app the user means, and click-through layers can't be interacted with.
-            if ((exStyle & WsExToolWindow) != 0 && (exStyle & WsExNoActivate) != 0)
-                return true;
-            if ((exStyle & WsExTransparent) != 0 && (exStyle & WsExLayered) != 0)
-                return true;
+            Descend(hwnd, frame);
 
-            if (DwmGetWindowAttributeRect(hwnd, DwmwaExtendedFrameBounds, out Rect frame, Marshal.SizeOf<Rect>()) != 0 &&
-                !GetWindowRect(hwnd, out frame))
+            // The client area is a rung of its own wherever the frame adds chrome around it.
+            if (ClientRectOf(hwnd) is Rectangle client && client != frame &&
+                client.Width > 0 && client.Height > 0)
             {
-                return true;
+                Rects.Add(new SnapRect(hwnd, client, IsWindow: false));
             }
-            bounds = Rectangle.FromLTRB(frame.Left, frame.Top, frame.Right, frame.Bottom);
-        }
-        else
-        {
-            if (!GetWindowRect(hwnd, out Rect wr))
-                return true;
-            bounds = Rectangle.Intersect(
-                Rectangle.FromLTRB(wr.Left, wr.Top, wr.Right, wr.Bottom), parentBounds);
-        }
 
-        if (bounds.Width <= 0 || bounds.Height <= 0)
+            Rects.Add(new SnapRect(hwnd, frame, IsWindow: true));
             return true;
+        }
 
-        // Children first so the finished list reads deepest-first.
-        if (visited.Add(hwnd))
+        /// <summary>Child control, clipped to the parent rect it was found under.</summary>
+        private bool CollectChild(IntPtr hwnd, Rectangle parent)
         {
+            if (_clock.ElapsedMilliseconds > _budgetMs)
+                return false;
+            if (Skip(hwnd))
+                return true;
+            if (!GetWindowRect(hwnd, out Rect r))
+                return true;
+
+            var bounds = Rectangle.Intersect(
+                Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom), parent);
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return true;
+
+            Descend(hwnd, bounds);
+            Rects.Add(new SnapRect(hwnd, bounds, IsWindow: false));
+            return true;
+        }
+
+        /// <summary>
+        /// Emits everything below <paramref name="hwnd"/> before <paramref name="hwnd"/> itself,
+        /// which is what leaves the finished list reading deepest-first. Each handle is descended
+        /// into at most once, so a window reachable by two routes can't loop the walk.
+        /// </summary>
+        private void Descend(IntPtr hwnd, Rectangle bounds)
+        {
+            if (!_descended.Add(hwnd))
+                return;
             try
             {
-                EnumChildWindows(hwnd, (child, _) =>
-                    Collect(child, bounds, collected, visited, exclude, clock, timeoutMs), IntPtr.Zero);
+                EnumChildWindows(hwnd, (child, _) => CollectChild(child, bounds), IntPtr.Zero);
             }
             catch (Exception)
             {
             }
         }
 
-        if (clip is null && ClientRectOf(hwnd) is Rectangle client && client != bounds &&
-            client.Width > 0 && client.Height > 0)
-        {
-            collected.Add(new SnapRect(hwnd, client, IsWindow: false));
-        }
+        private bool Skip(IntPtr hwnd) =>
+            (_exclude is not null && _exclude.Contains(hwnd)) || !IsWindowVisible(hwnd);
+    }
 
-        collected.Add(new SnapRect(hwnd, bounds, IsWindow: clip is null));
+    /// <summary>
+    /// Whether a visible top-level window can be what the user is pointing at. Cloaked windows
+    /// (UWP ghosts) are enumerable but not on screen. Two extended-style pairs also disqualify
+    /// one outright: WS_EX_TOOLWINDOW with WS_EX_NOACTIVATE can never take focus, and
+    /// WS_EX_TRANSPARENT with WS_EX_LAYERED can never take a click. Either way the pixels the
+    /// cursor is over belong to the window underneath.
+    /// </summary>
+    private static bool IsCapturableWindow(IntPtr hwnd)
+    {
+        if (DwmGetWindowAttributeInt(hwnd, DwmwaCloaked, out int cloaked, sizeof(int)) == 0 && cloaked != 0)
+            return false;
+        if (IgnoreClassNames.Contains(ClassNameOf(hwnd), StringComparer.OrdinalIgnoreCase))
+            return false;
+
+        long exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+        if ((exStyle & WsExToolWindow) != 0 && (exStyle & WsExNoActivate) != 0)
+            return false;
+        if ((exStyle & WsExTransparent) != 0 && (exStyle & WsExLayered) != 0)
+            return false;
+
         return true;
+    }
+
+    /// <summary>
+    /// The window's visible frame: the DWM extended frame bounds, which exclude the invisible
+    /// resize border, falling back to GetWindowRect where DWM has no answer. Null if neither
+    /// call succeeds.
+    /// </summary>
+    private static Rectangle? FrameBoundsOf(IntPtr hwnd)
+    {
+        if (DwmGetWindowAttributeRect(hwnd, DwmwaExtendedFrameBounds, out Rect frame, Marshal.SizeOf<Rect>()) != 0 &&
+            !GetWindowRect(hwnd, out frame))
+        {
+            return null;
+        }
+        return Rectangle.FromLTRB(frame.Left, frame.Top, frame.Right, frame.Bottom);
     }
 
     private static Rectangle? ClientRectOf(IntPtr hwnd)

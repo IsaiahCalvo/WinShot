@@ -1147,12 +1147,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     }
 
     /// <summary>
-    /// ShareX-exact hover resolution: the FIRST rect in the snap list containing the cursor,
+    /// Hover resolution is the FIRST rect in the snap list containing the cursor,
     /// nothing else. The list is EnumWindows + EnumChildWindows + client rects, deepest-first
     /// in z-order, built once before the overlay opened — so the answer is instant, identical
     /// on every pass, and never revised after the fact. Where an app draws its whole UI into
-    /// one HWND (Chromium, Electron, WPF) the answer is the window; that is what ShareX gives
-    /// too, and the confidence of never being second-guessed is the feature.
+    /// one HWND (Chromium, Electron, WPF) the answer is the window, same as every other
+    /// HWND-level selector — and the confidence of never being second-guessed is the feature.
     /// </summary>
     private void UpdateHoverElement(SD.Point point)
     {

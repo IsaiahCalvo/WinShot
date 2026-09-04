@@ -52,3 +52,11 @@ Settings live in `%APPDATA%\WinShot\settings.json`; history and logs in
 ## Design
 
 See [docs/specs/2026-06-12-winshot-design.md](docs/specs/2026-06-12-winshot-design.md).
+
+## Licensing
+
+WinShot ships no LICENSE file yet, so no licence is granted — all rights reserved.
+
+Third-party code and packages, with their licences, are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). ShareX (GPL-3) is referenced
+there for behaviour only; no ShareX code is included in WinShot.

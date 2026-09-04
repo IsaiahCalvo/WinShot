@@ -6,6 +6,25 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Tests;
 
+/// <summary>
+/// Motion.Holders is a process-global refcount and five shipping surfaces acquire it (the
+/// quick-actions card, both selectors, and the click/keystroke overlays), so any test that
+/// reads it has to be the only thing running. Every other class in this assembly is its own
+/// parallel collection, so without this the counter moves under the assertions.
+///
+/// A baseline delta does not fix that — it only moves the race from "a holder is already up
+/// when the test starts" to "a holder goes up or down between the baseline read and the
+/// assert", which is a wider window, not a narrower one. Serializing is what makes the counter
+/// readable, and it is also what lets the absolute `== 0` assertions come back: those are the
+/// leak invariant the plan asks for, and a delta cannot see a leak because the baseline
+/// absorbs it.
+/// </summary>
+[CollectionDefinition("MotionRefcount", DisableParallelization = true)]
+public sealed class MotionRefcountCollection
+{
+}
+
+[Collection("MotionRefcount")]
 public class MotionTests
 {
     static MotionTests() => WarmTheMessagePump();
@@ -57,6 +76,8 @@ public class MotionTests
     [Fact]
     public async Task Acquire_IsSafeFromManyThreadsAtOnce()
     {
+        Assert.Equal(0, Motion.Holders);
+
         var holds = await Task.WhenAll(Enumerable.Range(0, 64).Select(_ => Task.Run(Motion.Acquire)));
         Assert.Equal(64, Motion.Holders);
 

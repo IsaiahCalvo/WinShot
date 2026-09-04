@@ -5,7 +5,7 @@ using Xunit;
 namespace WinShot.Tests;
 
 /// <summary>
-/// Contract checks for the ShareX-style snap-rect list, run against whatever windows the
+/// Contract checks for the snap-rect list, run against whatever windows the
 /// host desktop happens to have. The suite runs on a hidden desktop that can legitimately
 /// be empty, so these assert invariants over the list rather than a minimum size.
 /// </summary>

@@ -47,8 +47,12 @@ public sealed class FrameSignature
         StripHash = stripHash;
     }
 
-    /// <summary>Side margin excluded from all row math — same formula ShareX uses; wide enough
-    /// to cover a scrollbar even on narrow regions.</summary>
+    /// <summary>
+    /// Side margin excluded from all row math. 5% of the width covers a scrollbar on a normal
+    /// region, but a flat 5% is thinner than a ~17px scrollbar once the region is narrow, so
+    /// the floor is 50px — capped at a third of the width so a very narrow region still has a
+    /// middle left to compare.
+    /// </summary>
     public static int SideMargin(int width) => Math.Min(Math.Max(50, width / 20), width / 3);
 
     public static FrameSignature Build(SD.Bitmap bmp) => Build(bmp, 0, 0);
@@ -88,6 +92,9 @@ public sealed class FrameSignature
             var row = new byte[width * 4];
             var luma = new int[span];
             var prevLuma = new int[span];
+            // Allocated once, refilled per row: a stackalloc inside the loop grows the frame by
+            // one buffer per scanline and can overflow the stack on a tall capture (CA2014).
+            Span<ulong> hs = stackalloc ulong[Strips];
             for (int y = 0; y < height; y++)
             {
                 Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
@@ -99,7 +106,6 @@ public sealed class FrameSignature
 
                 long[] sum = new long[Strips];
                 long[] grad = new long[Strips];
-                Span<ulong> hs = stackalloc ulong[Strips];
                 hs.Fill(ImageStitcher.FnvOffsetBasis);
                 for (int x = 0; x < span; x++)
                 {
@@ -123,7 +129,11 @@ public sealed class FrameSignature
                 long totalSum = 0, totalGrad = 0;
                 for (int s = 0; s < Strips; s++)
                 {
-                    int len = s == Strips - 1 ? span - stripLen * (Strips - 1) : stripLen;
+                    // Clamped: below three columns the last strip's arithmetic length goes to
+                    // zero or negative, which used to divide the strip mean into NaN (span 2)
+                    // or a negative mean (span 1). Such a strip holds no pixels, so its sum is
+                    // zero and a length of 1 is simply a mean of 0.
+                    int len = Math.Max(1, s == Strips - 1 ? span - stripLen * (Strips - 1) : stripLen);
                     stripMean[s][y] = sum[s] / (float)len;
                     stripEnergy[s][y] = y == 0 ? 0f : grad[s] / (float)len;
                     totalSum += sum[s];
