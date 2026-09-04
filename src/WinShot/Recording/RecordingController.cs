@@ -188,110 +188,145 @@ public sealed class RecordingController
         }
     }
 
+    /// <summary>
+    /// Region first, options second. The selector opens straight away — with the remembered or
+    /// pre-picked region already pending where there is one — and the two-card HUD anchored to
+    /// that selection carries the toggles and the two record actions. Everything the HUD does
+    /// not show (frame rates, quality, devices, countdown) is a persisted setting and stays in
+    /// Settings, which is where the old fifteen-row modal was reading it from anyway.
+    ///
+    /// Picking whole displays keeps the modal: there is no selection to anchor a HUD to.
+    /// </summary>
     private async Task StartFlowAsync(bool pickDisplay, SD.Rectangle? selectedVirtualRegion)
     {
-        var dialog = FastRecordingOptionsDialog.Create(_settings.Current);
-        PerfLog.TrackFirstShown(dialog, "record options");
-        bool isGif;
-        bool recordMicrophone;
-        bool recordSystemAudio;
-        bool captureCursor;
-        bool showClickHighlights;
-        bool showKeystrokes;
-        int countdownSeconds;
-        string webcamPosition;
-        int webcamSizePercent;
-        string? webcamDeviceName;
-        string? microphoneDeviceName;
-        int recordingFps;
-        int videoQuality;
-        int gifFps;
+        Settings s = _settings.Current;
+
+        if (pickDisplay)
+        {
+            await StartDisplayFlowAsync(s);
+            return;
+        }
+
+        // A remembered or All-in-One region opens the HUD already framed rather than skipping
+        // straight past the options.
+        SD.Rectangle? initialSelection = null;
+        if (RecordingAreaMemory.TryResolve(
+                selectedVirtualRegion,
+                s.RememberLastSelection,
+                s.LastRecordingRegion,
+                CaptureService.VirtualScreen,
+                out RecordingRegionSelection remembered) &&
+            remembered.IsUsable)
+        {
+            initialSelection = remembered.ScreenRect;
+            Log.Info(selectedVirtualRegion is not null
+                ? "Opening the recording HUD on the area selected in All-in-One"
+                : "Opening the recording HUD on the remembered recording area");
+        }
+
+        RecordingHudChoice choice;
+        SD.Rectangle region;
+        var selector = FastRegionSelectorDialog.Rent(
+            () => Task.Run(() => WindowEnumerator.GetTopLevelWindows()),
+            settings: null);
+        PerfLog.TrackFirstShown(selector, "record selector");
         try
         {
-            if (await dialog.ShowAsync() != WF.DialogResult.OK) return;
+            // Same feel as screenshot area capture: hover snaps to windows/elements, click
+            // takes the snap, click-drag draws a marquee — but a click frames the take rather
+            // than starting it, because the HUD still has to be answered.
+            WF.DialogResult result = await selector.ShowAsync(
+                elementHover: true,
+                hint: "Drag to record part of the screen, or click a window to record it.",
+                recordingHud: RecordingHudToggles.FromSettings(s),
+                initialSelection: initialSelection);
+            if (result != WF.DialogResult.OK ||
+                selector.SelectedRegionPx is not SD.Rectangle selected ||
+                selector.RecordingChoice is not RecordingHudChoice picked)
+            {
+                return;
+            }
+            region = selected;
+            choice = picked;
+        }
+        finally
+        {
+            FastRegionSelectorDialog.Return(selector);
+        }
+
+        // Remember the HUD's answers as the new defaults. Deliberately no Save() here — the
+        // orchestrating app persists settings (Save re-registers hotkeys).
+        s.RecordAudio = choice.Toggles.Microphone;
+        s.RecordSystemAudio = choice.Toggles.SystemAudio;
+        s.ShowClickHighlights = choice.Toggles.Clicks;
+        s.ShowKeystrokes = choice.Toggles.Keystrokes;
+        s.WebcamOverlayPosition = WebcamPositionFor(choice.Toggles.Webcam, s.WebcamOverlayPosition);
+
+        RecordingRegionSelection selection =
+            RecordingRegionSelection.FromVirtualSelection(region, CaptureService.VirtualScreen);
+        await BeginTakeAsync(s, selection, sourceDisplays: null, choice.IsGif, choice.Toggles);
+    }
+
+    /// <summary>
+    /// Whole-display recording: the region-first HUD has nothing to anchor to, so this keeps
+    /// the options modal as the fallback the sweep called for.
+    /// </summary>
+    private async Task StartDisplayFlowAsync(Settings s)
+    {
+        var dialog = FastRecordingOptionsDialog.Create(s);
+        PerfLog.TrackFirstShown(dialog, "record options");
+        bool isGif;
+        RecordingHudToggles toggles;
+        try
+        {
+            if (await dialog.ShowAsync() != WF.DialogResult.OK)
+                return;
 
             isGif = dialog.IsGif;
-            recordMicrophone = dialog.RecordMicrophone;
-            recordSystemAudio = dialog.RecordSystemAudio;
-            captureCursor = dialog.CaptureCursor;
-            showClickHighlights = dialog.ShowClickHighlights;
-            showKeystrokes = dialog.ShowKeystrokes;
-            countdownSeconds = dialog.CountdownSeconds;
-            webcamPosition = dialog.WebcamPosition;
-            webcamSizePercent = dialog.WebcamSizePercent;
-            webcamDeviceName = dialog.WebcamDeviceName;
-            microphoneDeviceName = dialog.MicrophoneDeviceName;
-            recordingFps = dialog.RecordingFps;
-            videoQuality = dialog.VideoQuality;
-            gifFps = dialog.GifFps;
+            toggles = new RecordingHudToggles(
+                dialog.RecordMicrophone,
+                dialog.RecordSystemAudio,
+                !string.Equals(dialog.WebcamPosition, RecordingOptions.WebcamOff, StringComparison.Ordinal),
+                dialog.ShowClickHighlights,
+                dialog.ShowKeystrokes);
+
+            s.RecordAudio = dialog.RecordMicrophone;
+            s.RecordSystemAudio = dialog.RecordSystemAudio;
+            s.CaptureCursor = dialog.CaptureCursor;
+            s.ShowClickHighlights = dialog.ShowClickHighlights;
+            s.ShowKeystrokes = dialog.ShowKeystrokes;
+            s.RecordingCountdownSeconds = dialog.CountdownSeconds;
+            s.WebcamOverlayPosition = dialog.WebcamPosition;
+            s.WebcamOverlaySizePercent = dialog.WebcamSizePercent;
+            s.RecordingFps = dialog.RecordingFps;
+            s.GifFps = dialog.GifFps;
         }
         finally
         {
             FastRecordingOptionsDialog.Return(dialog);
         }
 
-        // Remember the choices as new defaults. Deliberately no Save() here —
-        // the orchestrating app persists settings (Save re-registers hotkeys).
-        var s = _settings.Current;
-        s.RecordAudio = recordMicrophone;
-        s.RecordSystemAudio = recordSystemAudio;
-        s.CaptureCursor = captureCursor;
-        s.ShowClickHighlights = showClickHighlights;
-        s.ShowKeystrokes = showKeystrokes;
-        s.RecordingCountdownSeconds = countdownSeconds;
-        s.WebcamOverlayPosition = webcamPosition;
-        s.WebcamOverlaySizePercent = webcamSizePercent;
-        s.RecordingFps = recordingFps;
-        s.GifFps = gifFps;
+        SD.Rectangle[]? displays = FastDisplayPickerDialog.ChooseDisplays();
+        if (displays is null || displays.Length == 0)
+            return;
 
-        RecordingRegionSelection selection;
-        SD.Rectangle[]? sourceDisplays = null;
-        if (pickDisplay)
-        {
-            SD.Rectangle[]? displays = FastDisplayPickerDialog.ChooseDisplays();
-            if (displays is null || displays.Length == 0)
-                return;
-            selection = RecordingRegionSelection.FromDisplays(displays);
-            sourceDisplays = displays;
-        }
-        else if (RecordingAreaMemory.TryResolve(
-            selectedVirtualRegion,
-            s.RememberLastSelection,
-            s.LastRecordingRegion,
-            CaptureService.VirtualScreen,
-            out selection))
-        {
-            Log.Info(selectedVirtualRegion is not null
-                ? "Using the area selected in All-in-One for recording"
-                : "Reusing the remembered recording area");
-        }
-        else
-        {
-            var selector = FastRegionSelectorDialog.Rent(
-                () => Task.Run(() => WindowEnumerator.GetTopLevelWindows()),
-                settings: null);
-            PerfLog.TrackFirstShown(selector, "record selector");
-            SD.Rectangle region;
-            try
-            {
-                // Same feel as screenshot area capture: hover snaps to windows/elements,
-                // click takes the snap, click-drag draws a marquee.
-                if (await selector.ShowAsync(
-                        elementHover: true,
-                        hint: "Drag to record part of the screen, or click a window to record it.")
-                    != WF.DialogResult.OK ||
-                    selector.SelectedRegionPx is not SD.Rectangle selected)
-                    return;
-                region = selected;
-            }
-            finally
-            {
-                FastRegionSelectorDialog.Return(selector);
-            }
+        await BeginTakeAsync(
+            s,
+            RecordingRegionSelection.FromDisplays(displays),
+            displays,
+            isGif,
+            toggles);
+    }
 
-            selection = RecordingRegionSelection.FromVirtualSelection(region, CaptureService.VirtualScreen);
-        }
-
+    /// <summary>Everything both entry points share: the countdown, the region bookkeeping, and
+    /// building the capture parameters out of settings plus the chosen toggles.</summary>
+    private async Task BeginTakeAsync(
+        Settings s,
+        RecordingRegionSelection selection,
+        SD.Rectangle[]? sourceDisplays,
+        bool isGif,
+        RecordingHudToggles toggles)
+    {
         await Task.Delay(OverlayDismissDelayMs);
 
         // H.264 needs even dimensions; region selections also need the virtual
@@ -306,6 +341,7 @@ public sealed class RecordingController
         if (s.RememberLastSelection)
             s.LastRecordingRegion = PreviousRegion.Format(screenRect);
 
+        int countdownSeconds = RecordingOptions.ClampCountdownSeconds(s.RecordingCountdownSeconds);
         if (countdownSeconds > 0)
         {
             using var countdown = new FastRecordingCountdownWindow(countdownSeconds, screenRect);
@@ -318,20 +354,20 @@ public sealed class RecordingController
             screenRect,
             sourceDisplays,
             isGif,
-            recordMicrophone,
-            recordSystemAudio,
-            captureCursor,
-            showClickHighlights,
-            showKeystrokes,
-            KeystrokeOverlayOptions.FromSettings(s),
+            toggles.Microphone,
+            toggles.SystemAudio,
+            s.CaptureCursor,
+            toggles.Clicks,
+            toggles.Keystrokes,
+            KeystrokeOverlayOptions.FromSettings(s) with { Render = toggles.Keystrokes },
             s.HideCursorWhenTyping,
-            webcamPosition,
-            webcamSizePercent,
-            webcamDeviceName,
-            microphoneDeviceName,
-            recordingFps,
-            videoQuality,
-            gifFps,
+            WebcamPositionFor(toggles.Webcam, s.WebcamOverlayPosition),
+            s.WebcamOverlaySizePercent,
+            WebcamDeviceName: null,
+            MicrophoneDeviceName: null,
+            s.RecordingFps,
+            DefaultVideoQuality,
+            s.GifFps,
             sessionUi.ShowControls,
             sessionUi.ShowTimer,
             sessionUi.DimScreen,
@@ -343,6 +379,25 @@ public sealed class RecordingController
             s.OptimizeGifs);
 
         StartCapture(parameters, trackBarPerf: true);
+    }
+
+    /// <summary>Quality is not on the HUD; it is a persisted preference and this is the value
+    /// the options modal has always defaulted to.</summary>
+    private const int DefaultVideoQuality = 70;
+
+    /// <summary>
+    /// The HUD's webcam cell is a plain on/off, so turning it on restores whatever corner was
+    /// last chosen in Settings and falls back to the bottom right the first time.
+    /// </summary>
+    internal static string WebcamPositionFor(bool enabled, string? storedPosition)
+    {
+        if (!enabled)
+            return RecordingOptions.WebcamOff;
+
+        string stored = RecordingOptions.NormalizeWebcamPosition(storedPosition);
+        return string.Equals(stored, RecordingOptions.WebcamOff, StringComparison.Ordinal)
+            ? "bottom-right"
+            : stored;
     }
 
     /// <summary>

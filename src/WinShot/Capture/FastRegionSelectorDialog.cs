@@ -1,5 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using WinShot.Core;
+using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -97,6 +98,22 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private string _hint = "";
     private double _hintOpacity;
     private IDisposable? _hintFade;
+
+    // Recording HUD: the two-card settings/action pair that replaces the centred modal. Only
+    // the recording flow turns it on; every other caller keeps the Cancel/Done bar.
+    private bool _recordingHud;
+    private RecordingHudToggles _recordingToggles;
+    private int _aspectIndex = RecordingAspectPresets.FreeformIndex;
+    private bool _aspectMenuOpen;
+    private RecordingHudCell? _hudHover;
+    private RecordingHudCell? _hudPressed;
+    private int _aspectHover = -1;
+    private RectangleTween? _aspectTween;
+    private IDisposable? _aspectMotion;
+
+    /// <summary>Set when the HUD confirmed a recording; null when the selector was used for
+    /// anything else, or cancelled.</summary>
+    public RecordingHudChoice? RecordingChoice { get; private set; }
 
     public FastRegionSelectorDialog(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)
     {
@@ -204,12 +221,26 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// <param name="hint">Instructional pill shown until the first mouse-down. Empty for the
     /// screenshot flows, which have their own onboarding; the recording flow passes one
     /// because its selector is the only thing on screen when a take is being framed.</param>
+    /// <param name="recordingHud">Toggles the two-card recording HUD on in place of the
+    /// Cancel/Done bar, seeded with these toggle states.</param>
+    /// <param name="initialSelection">Opens with this rect already pending (screen px), so a
+    /// remembered or pre-picked region still goes through the same adjust-and-confirm chrome
+    /// instead of skipping it.</param>
     public async Task<WF.DialogResult> ShowAsync(SelectorMode mode = SelectorMode.Area,
-        bool paneHover = false, bool elementHover = false, string? hint = null)
+        bool paneHover = false, bool elementHover = false, string? hint = null,
+        RecordingHudToggles? recordingHud = null,
+        SD.Rectangle? initialSelection = null)
     {
         _mode = mode;
         _hint = hint ?? "";
         _hintOpacity = _hint.Length > 0 ? 1 : 0;
+        _recordingHud = recordingHud is not null;
+        _recordingToggles = recordingHud ?? default;
+        _aspectIndex = RecordingAspectPresets.FreeformIndex;
+        _aspectMenuOpen = false;
+        _hudHover = null;
+        _hudPressed = null;
+        RecordingChoice = null;
         _paneHover = paneHover || elementHover;
         _elementGranularity = elementHover;
         SelectedByPaneClick = false;
@@ -217,6 +248,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             TaskCreationOptions.RunContinuationsAsynchronously);
 
         _vs = CaptureService.VirtualScreen;
+        if (initialSelection is SD.Rectangle seeded)
+        {
+            SD.Rectangle clipped = SD.Rectangle.Intersect(seeded, _vs);
+            _pendingScreen = clipped.Width >= 2 && clipped.Height >= 2 ? clipped : null;
+            _hintOpacity = 0; // nothing to instruct: there is already a selection on screen
+        }
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForRegion(_settings?.Current);
@@ -382,6 +419,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hintFade = null;
         _hint = "";
         _hintOpacity = 0;
+        StopAspectSnap();
+        _recordingHud = false;
+        _recordingToggles = default;
+        _aspectIndex = RecordingAspectPresets.FreeformIndex;
+        _aspectMenuOpen = false;
+        _hudHover = null;
+        _hudPressed = null;
+        RecordingChoice = null;
         _hoverBarButton = -1;
         _pressedBarButton = -1;
         _resizeHandle = -1;
@@ -639,6 +684,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         else if (e.KeyCode == WF.Keys.Enter && _pendingScreen is SD.Rectangle pending)
         {
             e.Handled = true;
+            // With the HUD up, Enter records video and Alt+Enter records a GIF — the two
+            // shortcuts the action rows advertise.
+            if (_recordingHud)
+            {
+                e.SuppressKeyPress = true;
+                ConfirmRecording(isGif: e.Alt);
+                return;
+            }
             Confirm(VirtualFromScreen(pending));
         }
         else if (e.KeyCode == WF.Keys.Menu)
@@ -689,6 +742,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return; // window mode confirms on mouse-up
 
         // Area mode.
+        if (_recordingHud && _pendingScreen is SD.Rectangle hudPending)
+        {
+            if (HandleHudMouseDown(hudPending, screen))
+                return;
+        }
+
         if (_pendingScreen is SD.Rectangle pending)
         {
             // Cancel / Done bar wins over move/resize. The press only arms the button —
@@ -788,6 +847,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _pendingScreen = MoveRect(_adjustStartRect, _currentScreen.X - _adjustAnchor.X, _currentScreen.Y - _adjustAnchor.Y);
             InvalidateAllSurfaces();
             return;
+        }
+
+        if (_recordingHud)
+        {
+            UpdateHudHover();
+            if (_pendingScreen is not null)
+                return; // the HUD owns hover while a selection is pending
         }
 
         // Cancel / Done hover feedback (only the bar rect repaints on a state change).
@@ -897,6 +963,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
+        if (_recordingHud && _hudPressed is RecordingHudCell pressedCell)
+        {
+            _hudPressed = null;
+            HandleHudClick(pressedCell);
+            return;
+        }
+
         if (_pressedBarButton >= 0)
         {
             int pressed = _pressedBarButton;
@@ -931,6 +1004,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
             rect.Intersect(_vs);
             if (rect.Width > 0 && rect.Height > 0)
                 _pendingScreen = rect;
+            InvalidateAllSurfaces();
+        }
+        else if (_recordingHud && _pendingScreen is null && _hoverPane is SD.Rectangle hudPane)
+        {
+            // With the HUD up a window click frames the take rather than starting it — the
+            // options still have to be chosen, and the HUD is where they live.
+            SelectedByPaneClick = true;
+            _pendingScreen = hudPane;
+            DismissHint();
             InvalidateAllSurfaces();
         }
         else if (_paneHover && _pendingScreen is null && _hoverPane is SD.Rectangle pane)
@@ -1047,7 +1129,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         // Cancel / Done bar on the adjustable selection: below the region, flipped above when it
         // runs to the screen bottom, tucked inside the bottom when the region spans the full height.
-        if (_pendingScreen is SD.Rectangle pendBar)
+        if (_recordingHud)
+        {
+            if (_pendingScreen is SD.Rectangle hudPending)
+                DrawRecordingHud(g, monitorBounds, hudPending);
+        }
+        else if (_pendingScreen is SD.Rectangle pendBar)
         {
             var (bar, cancel, done) = ActionBarRects(pendBar);
             if (bar.IntersectsWith(monitorBounds))
@@ -1389,6 +1476,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hintFade?.Dispose();
         _hintFade = null;
         _hintOpacity = 0;
+        StopAspectSnap();
         StopFollowMotion();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
@@ -1497,7 +1585,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Same proportions as the record modal's Cancel/Start pair, scaled to the
         // region's monitor: quiet regular-weight labels in roomy rounded buttons.
         SD.Rectangle m = WF.Screen.FromRectangle(r).Bounds;
-        double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(m);
+        double s = RecordingMonitorDpi.ScaleFor(m);
         using var font = ActionBarFont(s);
         int hpad = (int)Math.Round(16 * s);
         int pad = (int)Math.Round(6 * s);
@@ -1538,7 +1626,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void DrawActionBar(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle bar, SD.Rectangle cancel, SD.Rectangle done)
     {
         SD.Rectangle lb = ToLocal(bar, monitorBounds), lc = ToLocal(cancel, monitorBounds), ld = ToLocal(done, monitorBounds);
-        double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(WF.Screen.FromRectangle(bar).Bounds);
+        double s = RecordingMonitorDpi.ScaleFor(WF.Screen.FromRectangle(bar).Bounds);
         using var font = ActionBarFont(s);
 
         // Hover lifts, press darkens — the same interaction language as the toolbar/card.
@@ -1571,6 +1659,348 @@ public sealed class FastRegionSelectorDialog : WF.Form
         const WF.TextFormatFlags center = WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding;
         WF.TextRenderer.DrawText(g, "Cancel", font, lc, ThemePalette.TextPrimary, center);
         WF.TextRenderer.DrawText(g, "Done", font, ld, SD.Color.White, center);
+    }
+
+    // ----------------------------------------------------------- recording HUD
+
+    private RecordingHudGeometry HudGeometry(SD.Rectangle region) =>
+        RecordingHudLayout.Build(
+            region,
+            WF.Screen.FromRectangle(region).Bounds,
+            RecordingMonitorDpi.ScaleFor(WF.Screen.FromRectangle(region).Bounds));
+
+    private (SD.Rectangle Card, IReadOnlyList<SD.Rectangle> Rows) AspectMenuRects(SD.Rectangle region)
+    {
+        SD.Rectangle monitor = WF.Screen.FromRectangle(region).Bounds;
+        return RecordingHudLayout.AspectMenu(
+            HudGeometry(region).CellBounds(RecordingHudCell.Aspect),
+            monitor,
+            RecordingMonitorDpi.ScaleFor(monitor),
+            RecordingAspectPresets.All.Count);
+    }
+
+    /// <summary>Returns true when the HUD swallowed the press.</summary>
+    private bool HandleHudMouseDown(SD.Rectangle region, SD.Point screen)
+    {
+        if (_aspectMenuOpen)
+        {
+            var (menuCard, rows) = AspectMenuRects(region);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].Contains(screen))
+                {
+                    PickAspect(i, region);
+                    return true;
+                }
+            }
+            // A click anywhere else closes the menu and is not passed through, so dismissing
+            // it can never also start a new marquee.
+            _aspectMenuOpen = false;
+            _aspectHover = -1;
+            InvalidateScreenRect(menuCard);
+            return true;
+        }
+
+        RecordingHudCell? hit = HudGeometry(region).HitTest(screen);
+        if (hit is null || hit == RecordingHudCell.Dimensions)
+            return hit is not null; // the readout is inert but still part of the card
+
+        _hudPressed = hit;
+        InvalidateScreenRect(HudGeometry(region).Bounds);
+        return true;
+    }
+
+    private void HandleHudClick(RecordingHudCell cell)
+    {
+        if (_pendingScreen is not SD.Rectangle region)
+            return;
+
+        switch (cell)
+        {
+            case RecordingHudCell.Aspect:
+                _aspectMenuOpen = !_aspectMenuOpen;
+                _aspectHover = -1;
+                InvalidateAllSurfaces();
+                return;
+            case RecordingHudCell.RecordGif:
+            case RecordingHudCell.RecordVideo:
+                ConfirmRecording(cell == RecordingHudCell.RecordGif);
+                return;
+            default:
+                _recordingToggles = _recordingToggles.Toggled(cell);
+                InvalidateScreenRect(HudGeometry(region).Bounds);
+                return;
+        }
+    }
+
+    private void UpdateHudHover()
+    {
+        if (_pendingScreen is not SD.Rectangle region)
+        {
+            if (_hudHover is null && _aspectHover < 0)
+                return;
+            _hudHover = null;
+            _aspectHover = -1;
+            InvalidateAllSurfaces();
+            return;
+        }
+
+        if (_aspectMenuOpen)
+        {
+            var (_, rows) = AspectMenuRects(region);
+            int hover = -1;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].Contains(_currentScreen))
+                {
+                    hover = i;
+                    break;
+                }
+            }
+            if (hover != _aspectHover)
+            {
+                _aspectHover = hover;
+                InvalidateAllSurfaces();
+            }
+            return;
+        }
+
+        RecordingHudCell? hit = HudGeometry(region).HitTest(_currentScreen);
+        if (hit == _hudHover)
+            return;
+        _hudHover = hit;
+        InvalidateScreenRect(HudGeometry(region).Bounds);
+    }
+
+    /// <summary>
+    /// Snaps the pending selection into the picked ratio over a short glide. An instant
+    /// correction reads as a glitch; watching the rect travel is what makes the ratio legible.
+    /// </summary>
+    private void PickAspect(int index, SD.Rectangle region)
+    {
+        _aspectMenuOpen = false;
+        _aspectHover = -1;
+        _aspectIndex = Math.Clamp(index, 0, RecordingAspectPresets.All.Count - 1);
+        InvalidateAllSurfaces();
+
+        double? ratio = RecordingAspectPresets.All[_aspectIndex].Ratio;
+        if (ratio is not double value)
+            return;
+
+        SD.Rectangle target = RecordingAspectPresets.Apply(region, value, _vs);
+        if (target == region)
+            return;
+
+        StopAspectSnap();
+        var tween = new RectangleTween();
+        tween.Retarget(region, target);
+        _aspectTween = tween;
+        _aspectMotion = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.GlideDurationMs,
+            WinShot.Core.Motion.EaseOutCubic,
+            amount =>
+            {
+                if (_aspectTween is not RectangleTween live)
+                    return;
+                live.Update((float)amount);
+                _pendingScreen = amount >= 1 ? target : live.Current;
+                InvalidateAllSurfaces();
+            },
+            () =>
+            {
+                _aspectTween = null;
+                _aspectMotion = null;
+                _pendingScreen = target;
+                InvalidateAllSurfaces();
+            });
+    }
+
+    private void StopAspectSnap()
+    {
+        _aspectMotion?.Dispose();
+        _aspectMotion = null;
+        _aspectTween?.Stop();
+        _aspectTween = null;
+    }
+
+    private void ConfirmRecording(bool isGif)
+    {
+        if (_pendingScreen is not SD.Rectangle region)
+            return;
+
+        StopAspectSnap();
+        RecordingChoice = new RecordingHudChoice(isGif, _recordingToggles);
+        Confirm(VirtualFromScreen(region));
+    }
+
+    private void DrawRecordingHud(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle region)
+    {
+        SD.Rectangle monitor = WF.Screen.FromRectangle(region).Bounds;
+        double s = RecordingMonitorDpi.ScaleFor(monitor);
+        RecordingHudGeometry hud = HudGeometry(region);
+        if (!hud.Bounds.IntersectsWith(monitorBounds))
+            return;
+
+        using SD.Font labelFont = ThemePalette.UiFontPx(Math.Max(9, (int)Math.Round(12 * s)));
+        using SD.Font valueFont = ThemePalette.UiFontPx(Math.Max(10, (int)Math.Round(15 * s)), SD.FontStyle.Bold);
+        using SD.Font glyphFont = ThemePalette.IconFontPx(Math.Max(10, (int)Math.Round(18 * s)));
+
+        DrawHudCard(g, monitorBounds, hud.SettingsCard, s);
+        DrawHudCard(g, monitorBounds, hud.ActionCard, s);
+
+        const WF.TextFormatFlags Centre = WF.TextFormatFlags.HorizontalCenter |
+                                          WF.TextFormatFlags.VerticalCenter |
+                                          WF.TextFormatFlags.SingleLine |
+                                          WF.TextFormatFlags.NoPadding;
+
+        foreach ((RecordingHudCell cell, SD.Rectangle bounds) in hud.Cells)
+        {
+            SD.Rectangle local = ToLocal(bounds, monitorBounds);
+            bool hot = _hudHover == cell || _hudPressed == cell;
+
+            switch (cell)
+            {
+                case RecordingHudCell.Dimensions:
+                    WF.TextRenderer.DrawText(
+                        g, $"{region.Width} \u00d7 {region.Height}", valueFont, local,
+                        ThemePalette.TextPrimary, Centre);
+                    break;
+
+                case RecordingHudCell.Aspect:
+                {
+                    DrawHudPlate(g, local, s, hot || _aspectMenuOpen, accent: _aspectIndex != RecordingAspectPresets.FreeformIndex);
+                    WF.TextRenderer.DrawText(
+                        g, RecordingAspectPresets.All[_aspectIndex].Label, labelFont, local,
+                        _aspectIndex == RecordingAspectPresets.FreeformIndex
+                            ? ThemePalette.TextPrimary
+                            : SD.Color.White,
+                        Centre);
+                    break;
+                }
+
+                case RecordingHudCell.RecordGif:
+                case RecordingHudCell.RecordVideo:
+                {
+                    bool primary = cell == RecordingHudCell.RecordVideo;
+                    DrawHudRow(g, local, s, hot, primary);
+                    int inset = (int)Math.Round(12 * s);
+                    var labelRect = new SD.Rectangle(
+                        local.Left + inset, local.Top, local.Width - (inset * 2), local.Height);
+                    WF.TextRenderer.DrawText(
+                        g, RecordingHudLayout.LabelFor(cell), labelFont, labelRect,
+                        primary ? SD.Color.White : ThemePalette.TextPrimary,
+                        WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
+                        WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+                    WF.TextRenderer.DrawText(
+                        g, RecordingHudLayout.ShortcutFor(cell), labelFont, labelRect,
+                        primary
+                            ? SD.Color.FromArgb(0xD0, SD.Color.White)
+                            : ThemePalette.TextSecondary,
+                        WF.TextFormatFlags.Right | WF.TextFormatFlags.VerticalCenter |
+                        WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+                    break;
+                }
+
+                default:
+                {
+                    bool on = _recordingToggles[cell];
+                    DrawHudPlate(g, local, s, hot, accent: on);
+                    var glyphRect = new SD.Rectangle(
+                        local.Left, local.Top, local.Width, local.Height - (int)Math.Round(8 * s));
+                    WF.TextRenderer.DrawText(
+                        g, RecordingHudLayout.GlyphFor(cell), glyphFont, glyphRect,
+                        on ? SD.Color.White : ThemePalette.TextPrimary, Centre);
+                    if (on)
+                    {
+                        // A checkmark under the glyph, so "on" survives a screenshot of the HUD
+                        // in greyscale as well as in colour.
+                        var tickRect = new SD.Rectangle(
+                            local.Left, local.Bottom - (int)Math.Round(16 * s), local.Width, (int)Math.Round(12 * s));
+                        WF.TextRenderer.DrawText(
+                            g, "\u2713", labelFont, tickRect, SD.Color.White, Centre);
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Full-height hairlines between the settings cells.
+        using (var pen = new SD.Pen(ThemePalette.BorderStrong, 1))
+        {
+            for (int i = 1; i < hud.Cells.Count; i++)
+            {
+                (RecordingHudCell cell, SD.Rectangle bounds) = hud.Cells[i];
+                if (cell is RecordingHudCell.RecordGif or RecordingHudCell.RecordVideo)
+                    continue;
+                SD.Rectangle local = ToLocal(bounds, monitorBounds);
+                int inset = (int)Math.Round(10 * s);
+                g.DrawLine(pen, local.Left, local.Top + inset, local.Left, local.Bottom - inset);
+            }
+        }
+
+        if (_aspectMenuOpen)
+            DrawAspectMenu(g, monitorBounds, region, s, labelFont);
+    }
+
+    private void DrawAspectMenu(
+        SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle region, double s, SD.Font font)
+    {
+        var (card, rows) = AspectMenuRects(region);
+        DrawHudCard(g, monitorBounds, card, s);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            SD.Rectangle local = ToLocal(rows[i], monitorBounds);
+            if (i == _aspectHover)
+                DrawHudPlate(g, local, s, hot: true, accent: false);
+            int inset = (int)Math.Round(10 * s);
+            var textRect = new SD.Rectangle(local.Left + inset, local.Top, local.Width - (inset * 2), local.Height);
+            WF.TextRenderer.DrawText(
+                g, RecordingAspectPresets.All[i].Label, font, textRect,
+                i == _aspectIndex ? Accent : ThemePalette.TextPrimary,
+                WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+        }
+    }
+
+    private static void DrawHudCard(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle card, double s)
+    {
+        SD.Rectangle local = ToLocal(card, monitorBounds);
+        var previous = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = GdiPaths.RoundedRect(local, (int)Math.Round(12 * s)))
+        {
+            using (var fill = new SD.SolidBrush(SD.Color.FromArgb(245, ThemePalette.WindowBg)))
+                g.FillPath(fill, path);
+            using (var edge = new SD.Pen(ThemePalette.BorderStrong, 1))
+                g.DrawPath(edge, path);
+        }
+        g.SmoothingMode = previous;
+    }
+
+    private static void DrawHudPlate(SD.Graphics g, SD.Rectangle cell, double s, bool hot, bool accent)
+    {
+        if (!hot && !accent)
+            return;
+        var previous = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        SD.Rectangle plate = SD.Rectangle.Inflate(cell, -(int)Math.Round(4 * s), -(int)Math.Round(8 * s));
+        using (var path = GdiPaths.RoundedRect(plate, (int)Math.Round(7 * s)))
+        using (var brush = new SD.SolidBrush(accent ? Accent : ThemePalette.HoverFill))
+            g.FillPath(brush, path);
+        g.SmoothingMode = previous;
+    }
+
+    private static void DrawHudRow(SD.Graphics g, SD.Rectangle row, double s, bool hot, bool primary)
+    {
+        var previous = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        SD.Color fill = primary
+            ? (hot ? ThemePalette.AccentHover : Accent)
+            : (hot ? ThemePalette.HoverFill : SD.Color.FromArgb(0x3A, 0x3A, 0x3C));
+        using (var path = GdiPaths.RoundedRect(SD.Rectangle.Inflate(row, 0, -(int)Math.Round(2 * s)), (int)Math.Round(7 * s)))
+        using (var brush = new SD.SolidBrush(fill))
+            g.FillPath(brush, path);
+        g.SmoothingMode = previous;
     }
 
     // ----------------------------------------------------------- coordinate helpers
