@@ -83,13 +83,13 @@
                                      AutomationProperties.Name="Text tools"
                                      AutomationProperties.HelpText="Show the text tool."/>
                         <RadioButton x:Name="CategoryRedactBtn" Style="{StaticResource ToolButton}" GroupName="Category"
-                                     Tag="Redact" Content="&#xE7E6;" Checked="OnCategoryChecked" ToolTip="Redact (B)"
+                                     Tag="Redact" Content="&#xE7E6;" Checked="OnCategoryChecked" ToolTip="Redact (X)"
                                      AutomationProperties.Name="Redaction tools"
                                      AutomationProperties.HelpText="Show the redaction and spotlight tools."/>
                         <RadioButton x:Name="CategoryImageBtn" Style="{StaticResource ToolButton}" GroupName="Category"
                                      Tag="Image" Content="&#xEE71;" Checked="OnCategoryChecked" ToolTip="Image"
                                      AutomationProperties.Name="Image tools"
-                                     AutomationProperties.HelpText="Show crop, add image and add background."/>
+                                     AutomationProperties.HelpText="Show crop, add image and add background. Shortcuts C, I and B."/>
                     </StackPanel>
                 </StackPanel>
 
@@ -307,6 +307,11 @@
                                 AutomationProperties.HelpText="How coarse the mosaic or how wide the blur is."/>
                         <TextBlock x:Name="RedactStrengthValue" Text="45" Style="{StaticResource ValueLabel}" MinWidth="28"
                                    TextAlignment="Right" Margin="6,0,0,0"/>
+                        <CheckBox x:Name="RedactTextOnlyCheck" Style="{StaticResource DarkCheckBox}" Content="Text only"
+                                  Margin="10,0,0,0"
+                                  ToolTip="Cover only the words in the region, leaving pictures visible"
+                                  AutomationProperties.Name="Redact text only"
+                                  AutomationProperties.HelpText="Read the region and cover each word it finds, leaving photos and graphics visible."/>
                     </StackPanel>
 
                     <StackPanel x:Name="CropRatioPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -351,6 +356,11 @@
                                 AutomationProperties.HelpText="Open local source-image resize controls.">
                             <TextBlock x:Name="ImageSizeLabel" Text="Image size"/>
                         </Button>
+                        <CheckBox x:Name="SnapToEdgesCheck" Style="{StaticResource DarkCheckBox}" Content="Snap"
+                                  IsChecked="True" Margin="8,0,0,0"
+                                  ToolTip="Snap crop edges to the image edge — hold Ctrl to override"
+                                  AutomationProperties.Name="Snap to edges"
+                                  AutomationProperties.HelpText="Snap crop edges to the image edge. Hold Ctrl while dragging to override."/>
                     </StackPanel>
 
                     <StackPanel x:Name="OpacityPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -413,8 +423,13 @@
                         <!-- Magnified eyedropper loupe: the selector's nearest-neighbour grid,
                              pointed at the source bitmap instead of the screen. -->
                         <Canvas x:Name="EyedropLoupe" Visibility="Collapsed" IsHitTestVisible="False"/>
-                        <!-- Thirds guides while cropping. -->
-                        <Canvas x:Name="CropGuides" Visibility="Collapsed" IsHitTestVisible="False"/>
+                        <!-- Rule-of-thirds guides inside the crop rectangle. -->
+                        <Canvas x:Name="CropGuides" Visibility="Collapsed" IsHitTestVisible="False">
+                            <Line x:Name="ThirdV1" Stroke="#66FFFFFF"/>
+                            <Line x:Name="ThirdV2" Stroke="#66FFFFFF"/>
+                            <Line x:Name="ThirdH1" Stroke="#66FFFFFF"/>
+                            <Line x:Name="ThirdH2" Stroke="#66FFFFFF"/>
+                        </Canvas>
                     </Canvas>
                 </Grid>
             </Canvas>
@@ -505,10 +520,18 @@
                                 Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                 AutomationProperties.Name="Add screenshot or image"
                                 AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
+                        <Button x:Name="AddCaptureBtn" Style="{StaticResource SubToolIconButton}" Content="&#xE722;"
+                                Click="OnAddCapture" ToolTip="Add capture…"
+                                AutomationProperties.Name="Add capture"
+                                AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
                         <Button x:Name="AddBackgroundBtn" Style="{StaticResource SubToolIconButton}" Content="&#xE790;"
                                 Click="OnAddBackground" ToolTip="Add background (B)"
                                 AutomationProperties.Name="Add background"
                                 AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>
+                        <Button x:Name="OcrRegionBtn" Style="{StaticResource SubToolIconButton}" Content="&#xE8E9;"
+                                Click="OnExtractText" ToolTip="Extract text"
+                                AutomationProperties.Name="Extract text"
+                                AutomationProperties.HelpText="Read the text in the crop region, or the whole image, and copy it to the clipboard."/>
                     </StackPanel>
                 </Grid>
             </Border>

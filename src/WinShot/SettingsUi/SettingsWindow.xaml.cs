@@ -599,6 +599,7 @@ public partial class SettingsWindow : Window
 
             // Annotate
             s.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
+            s.AutoExpandCanvas = AutoExpandCanvasCheck.IsChecked == true;
 
             // Screenshots
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;

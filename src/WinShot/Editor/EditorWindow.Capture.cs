@@ -1,0 +1,216 @@
+﻿using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media.Imaging;
+using WinShot.Core;
+using WinShot.Ocr;
+using SD = System.Drawing;
+
+namespace WinShot.Editor;
+
+public partial class EditorWindow : Window
+{
+    /// <summary>
+    /// How the editor asks for another region capture. App fills this in at startup; the
+    /// editor cannot reach the capture flow itself, and a static hook is a smaller seam than
+    /// threading a capture service through every constructor that makes an editor.
+    /// Null in tests and in a standalone editor, where Add capture simply does nothing.
+    /// </summary>
+    internal static Func<Task<SD.Bitmap?>>? RegionCaptureProvider { get; set; }
+
+    // ------------------------------------------------------------- add capture
+
+    /// <summary>
+    /// Takes another region shot and adds it to this canvas. The editor hides for the
+    /// duration — it is almost certainly covering whatever the user wants to grab.
+    /// </summary>
+    private async void OnAddCapture(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
+        if (RegionCaptureProvider is not { } capture) return;
+
+        CommitText();
+        CommitPendingCurve();
+        WindowState state = WindowState;
+        Hide();
+
+        SD.Bitmap? shot = null;
+        try
+        {
+            shot = await capture();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Add capture failed", ex);
+        }
+        finally
+        {
+            if (!_closed)
+            {
+                Show();
+                WindowState = state;
+                Activate();
+            }
+        }
+
+        if (shot is null || _closed)
+        {
+            shot?.Dispose();
+            return;
+        }
+
+        try
+        {
+            if (_settings.Current.AutoExpandCanvas)
+                await AppendCaptureBelowAsync(shot);
+            else
+                InsertImageAnnotation(CaptureService.ToBitmapSource(shot), ViewportCenterInContent());
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Adding the capture to the canvas failed", ex);
+            ThemedMessageDialog.Show(this, "Could not add the capture",
+                "WinShot took the shot but could not add it to this canvas.");
+        }
+        finally
+        {
+            shot.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Grows the canvas downward and drops the new shot in flush under the old one. Nothing
+    /// already on the canvas moves — every annotation keeps its coordinates — so unlike the
+    /// rotate/resize path this does not have to flatten anything first.
+    /// </summary>
+    private async Task AppendCaptureBelowAsync(SD.Bitmap capture)
+    {
+        SD.Bitmap before = _source;
+        int width = Math.Max(before.Width, capture.Width);
+        int height = before.Height + capture.Height;
+
+        var after = new SD.Bitmap(width, height, SD.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(after))
+        {
+            g.Clear(SD.Color.Transparent);
+            g.DrawImageUnscaled(before, 0, 0);
+            g.DrawImageUnscaled(capture, 0, before.Height);
+        }
+        _owned.Add(after);
+
+        _source = after;
+        await OnSourceReplacedAsync();
+        if (_closed) return;
+
+        Push(new EditorAction(
+            undo: async () => { _source = before; await OnSourceReplacedAsync(); },
+            redo: async () => { _source = after; await OnSourceReplacedAsync(); }), apply: false);
+    }
+
+    // ------------------------------------------------------------------- OCR
+
+    /// <summary>
+    /// Reads the text in the crop region — or the whole picture when nothing is cropped —
+    /// and copies it. OCR was reachable only from the tray and the quick-actions card, so
+    /// once an image was open in the editor the only way to read it was to close the editor.
+    /// </summary>
+    private async void OnExtractText(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
+        SD.Bitmap flat = Flatten();
+        try
+        {
+            if (_pendingCrop is SD.Rectangle region && region.Width > 1 && region.Height > 1)
+            {
+                SD.Bitmap cropped = CaptureService.Crop(flat, region);
+                flat.Dispose();
+                flat = cropped;
+            }
+
+            OcrCaptureResult result = await OcrService.ExtractAsync(flat, _settings.Current.OcrJoinLines);
+            // The same formatter the tray and the card use, so the editor's result reads
+            // identically to every other way of getting text out of a shot.
+            if (OcrClipboardFormatter.Build(result) is not { } payload)
+            {
+                App.Toast("Extract text", "No text found in that area.");
+                return;
+            }
+
+            await CaptureService.SetTextToClipboardAsync(payload.ClipboardText);
+            App.Toast(payload.BalloonTitle, payload.Preview, severity: ToastSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor OCR failed", ex);
+            App.Toast("Extract text", "WinShot could not read the text in that area.",
+                severity: ToastSeverity.Error);
+        }
+        finally
+        {
+            flat.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// "Text only": covers each WORD the OCR engine finds inside the dragged region and
+    /// leaves photos and graphics visible. Every box becomes an ordinary redaction object,
+    /// so each one can still be moved, restyled or deleted afterwards — and the whole set is
+    /// one undo step, because "hide the text here" was one gesture.
+    /// </summary>
+    private async Task RedactTextInRegionAsync(Rect area)
+    {
+        SD.Rectangle region = ToPixelRect(area);
+        if (region.Width < 4 || region.Height < 4) return;
+
+        IReadOnlyList<SD.Rectangle> boxes;
+        try
+        {
+            using SD.Bitmap crop = CaptureService.Crop(_source, region);
+            boxes = await OcrService.ExtractWordBoxesAsync(crop);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Text-only redaction failed to read the region", ex);
+            App.Toast("Redact text", "WinShot could not read that area.", severity: ToastSeverity.Error);
+            return;
+        }
+        if (_closed) return;
+
+        if (boxes.Count == 0)
+        {
+            App.Toast("Redact text", "No text found in that area.");
+            return;
+        }
+
+        var added = new List<UIElement>();
+        foreach (SD.Rectangle box in boxes)
+        {
+            // The engine's boxes hug the glyphs; a couple of pixels of margin stops a
+            // descender or an antialiased edge peeking out from under the mark.
+            var padded = SD.Rectangle.Inflate(box, 2, 2);
+            var bounds = new Rect(
+                region.X + padded.X, region.Y + padded.Y,
+                Math.Max(1, padded.Width), Math.Max(1, padded.Height));
+
+            int seed = ToolRandom.Next();
+            var mark = new System.Windows.Shapes.Rectangle();
+            Canvas.SetLeft(mark, bounds.X);
+            Canvas.SetTop(mark, bounds.Y);
+            AnnotationFactory.PaintRedaction(mark, _source, bounds, _redactStyle, _redactStrength, seed);
+            mark.Tag = AnnotationData.ForRedaction(bounds, _redactStyle, _redactStrength, seed);
+            AnnotationCanvas.Children.Add(mark);
+            added.Add(mark);
+        }
+
+        Push(new EditorAction(
+            undo: () =>
+            {
+                foreach (UIElement el in added) AnnotationCanvas.Children.Remove(el);
+            },
+            redo: () =>
+            {
+                foreach (UIElement el in added)
+                    if (!AnnotationCanvas.Children.Contains(el))
+                        AnnotationCanvas.Children.Add(el);
+            }), apply: false);
+    }
+}

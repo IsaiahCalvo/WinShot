@@ -154,6 +154,8 @@ public partial class App : Application
         // Building the Windows OCR engine is a one-time cost; do it now rather than on
         // whoever presses the Extract text hotkey first.
         OcrService.Warm();
+        // The editor cannot reach the capture flow itself; this is the seam it asks through.
+        Editor.EditorWindow.RegionCaptureProvider = CaptureRegionForEditorAsync;
 
         if (_settings.Current.CheckForUpdatesOnStartup)
             _ = StartupUpdateCheckAsync();
@@ -621,6 +623,35 @@ public partial class App : Application
                 FastRegionSelectorDialog.Return(selector);
             }
         });
+
+    /// <summary>
+    /// A bare region capture for the editor's "Add capture": the same selector as
+    /// capture-area, but the result comes back to the caller instead of going through the
+    /// after-capture actions — it is being added to an open canvas, not captured afresh.
+    /// </summary>
+    private async Task<SD.Bitmap?> CaptureRegionForEditorAsync()
+    {
+        var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+        try
+        {
+            if (await selector.ShowAsync(FastRegionSelectorDialog.SelectorMode.Area, elementHover: true)
+                    != WF.DialogResult.OK ||
+                selector.SelectedRegionPx is not SD.Rectangle region)
+                return null;
+
+            SD.Bitmap? crop = selector.TakeCapturedRegion();
+            if (crop is null)
+            {
+                await WaitForOverlayDismissAsync();
+                crop = await CaptureSelectedRegionAsync(region, "add-capture");
+            }
+            return crop;
+        }
+        finally
+        {
+            FastRegionSelectorDialog.Return(selector);
+        }
+    }
 
     private void CaptureFullscreenFlow() => RunCaptureFlow(
         "Fullscreen capture failed", "Capture failed", async () =>

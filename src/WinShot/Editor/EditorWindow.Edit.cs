@@ -41,6 +41,14 @@ public partial class EditorWindow : Window
         ApplySourceTransform(SD.RotateFlipType.RotateNoneFlipY);
     }
 
+    /// <summary>Keeps the crop bar's Image size button reading the real dimensions.</summary>
+    private void SyncImageSizeLabel()
+    {
+        if (ImageSizeLabel is null) return;
+        ImageSizeLabel.Text = string.Create(CultureInfo.InvariantCulture,
+            $"Image size: {_source.Width} × {_source.Height}");
+    }
+
     private void OnResizeImage(object sender, RoutedEventArgs e)
     {
         if (_sourceOperationActive) return;
@@ -151,6 +159,7 @@ public partial class EditorWindow : Window
     {
         DragRect.Visibility = Visibility.Collapsed;
         CropDim.Visibility = Visibility.Collapsed;
+        CropGuides.Visibility = Visibility.Collapsed;
     }
 
     private void ClearCropPreview()

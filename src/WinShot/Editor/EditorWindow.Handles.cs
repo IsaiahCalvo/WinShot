@@ -808,6 +808,7 @@ public partial class EditorWindow : Window
 
         var shown = new Rect(newPx.X, newPx.Y, newPx.Width, newPx.Height);
         ShowDragRect(shown, dim: true);
+        ShowThirdsGuides(shown);
         UpdateCropAdjustHandles();
     }
 

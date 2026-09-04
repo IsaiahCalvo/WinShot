@@ -519,6 +519,7 @@ public partial class EditorWindow : Window
         if (_closed)
             return;
         SetSurfaceSize(_source.Width, _source.Height);
+        SyncImageSizeLabel();
         // The source under every redaction just changed (crop / rotate / resize), so each
         // one has to re-read the pixels it now covers or it keeps showing the old ones.
         RefreshAllRedactions();

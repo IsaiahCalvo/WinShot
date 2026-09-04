@@ -167,9 +167,40 @@ public partial class EditorWindow : Window
                 ShowDragRect(new Rect(_dragStart, ConstrainDrawClamped(pos)), dim: true);
                 break;
             case EditorTool.Crop:
-                ShowDragRect(CropSelectionRect(pos), dim: true);
+                Rect cropArea = CropSelectionRect(pos);
+                ShowDragRect(cropArea, dim: true);
+                ShowThirdsGuides(cropArea);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Rule-of-thirds guides inside the crop rectangle. Drawn at a constant screen weight,
+    /// so they stay hairlines however far the canvas is zoomed.
+    /// </summary>
+    private void ShowThirdsGuides(Rect area)
+    {
+        if (area.Width < 12 || area.Height < 12)
+        {
+            CropGuides.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        double t = 1 / _zoom;
+        void Place(Line line, Point from, Point to)
+        {
+            line.X1 = from.X; line.Y1 = from.Y;
+            line.X2 = to.X; line.Y2 = to.Y;
+            line.StrokeThickness = t;
+        }
+
+        double x1 = area.Left + area.Width / 3, x2 = area.Left + area.Width * 2 / 3;
+        double y1 = area.Top + area.Height / 3, y2 = area.Top + area.Height * 2 / 3;
+        Place(ThirdV1, new Point(x1, area.Top), new Point(x1, area.Bottom));
+        Place(ThirdV2, new Point(x2, area.Top), new Point(x2, area.Bottom));
+        Place(ThirdH1, new Point(area.Left, y1), new Point(area.Right, y1));
+        Place(ThirdH2, new Point(area.Left, y2), new Point(area.Right, y2));
+        CropGuides.Visibility = Visibility.Visible;
     }
 
     private void OnViewportMouseUp(object sender, MouseButtonEventArgs e)
@@ -283,6 +314,14 @@ public partial class EditorWindow : Window
                     AnnotationCanvas.Children.Remove(mark);
                     return;
                 }
+                if (RedactTextOnlyCheck.IsChecked == true)
+                {
+                    // The dragged rectangle was only ever the SEARCH area: what lands is one
+                    // mark per word, so photos and graphics inside it stay visible.
+                    AnnotationCanvas.Children.Remove(mark);
+                    _ = RedactTextInRegionAsync(area);
+                    return;
+                }
                 UpdateRedactionPreview(mark, area, force: true);
                 mark.Tag = AnnotationData.ForRedaction(area, _redactStyle, _redactStrength, _activeRedactSeed);
                 PushAddElement(mark);
@@ -309,6 +348,7 @@ public partial class EditorWindow : Window
                 }
                 _pendingCrop = px;
                 ShowDragRect(sel, dim: true);
+                ShowThirdsGuides(sel);
                 CropPanel.Visibility = Visibility.Visible;
                 ShowCropAdjustHandles(); // 8 handles to fine-tune the rect before Apply
                 return;
@@ -530,7 +570,17 @@ public partial class EditorWindow : Window
             _dragStart,
             pos,
             _cropRatio,
-            CropSnapPx);
+            EdgeSnapDistance);
+
+    /// <summary>
+    /// How close a crop edge has to get before it sticks to the image edge. The toggle
+    /// turns it off for good; holding Ctrl turns it off for one drag, which is the escape
+    /// hatch for the one crop that has to end a pixel short of the edge.
+    /// </summary>
+    private double EdgeSnapDistance =>
+        SnapToEdgesCheck?.IsChecked == true && (Keyboard.Modifiers & ModifierKeys.Control) == 0
+            ? CropSnapPx
+            : 0;
 
     // ------------------------------------------------------ curved arrow tool
 

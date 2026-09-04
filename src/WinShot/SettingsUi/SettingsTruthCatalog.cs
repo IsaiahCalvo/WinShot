@@ -39,6 +39,7 @@ internal static class SettingsTruthCatalog
             "WebcamOverlaySizePercent",
             "OcrJoinLines",
             "AlwaysOnTop",
+            "AutoExpandCanvas",
             "HistoryRetentionDays",
             "CheckForUpdatesOnStartup",
             "FreezeScreen",
@@ -94,7 +95,7 @@ internal static class SettingsTruthCatalog
             "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
-            "AutoExpandCanvas", "ShowColorNames", "ShowDockIcon",
+            "ShowColorNames", "ShowDockIcon",
             "AskForNameAfterCapture",
             "AddRetinaSuffix", "CopyToClipboardFormat", "OcrDetectLinks", "OcrLanguage",
         };

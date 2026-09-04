@@ -924,6 +924,9 @@ public partial class EditorWindow : Window
         if (Has(EditorContextControls.RedactStrength))
             SyncRedactStrengthSlider();
 
+        if (Has(EditorContextControls.CropTools))
+            SyncImageSizeLabel();
+
         ContextPanel.Visibility = controls == EditorContextControls.None
             ? Visibility.Collapsed
             : Visibility.Visible;

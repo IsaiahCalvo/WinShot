@@ -399,8 +399,9 @@ public class ThemedWindowTests
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
-            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck",
             "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
             "BorderTabBtn", "FillTabBtn", "SaveColorBtn", "PickerEyedropperBtn", "HueSlider", "AlphaSlider",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
@@ -420,8 +421,9 @@ public class ThemedWindowTests
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
             "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
-            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck",
             "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
             "SaveColorBtn", "PickerEyedropperBtn",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
@@ -544,6 +546,9 @@ public class ThemedWindowTests
         ((RadioButton)editor.FindName("CropUtilityBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
         Assert.Equal(Visibility.Visible, cropTools.Visibility);
+        // The crop bar says how big the picture is, so "Image size" is an answer as well
+        // as a button.
+        Assert.Contains("×", ((TextBlock)editor.FindName("ImageSizeLabel")!).Text);
         Assert.True(((RadioButton)editor.FindName("CategoryImageBtn")!).IsChecked);
 
         // A category button opens its own row and arms that row's first tool; Image is the

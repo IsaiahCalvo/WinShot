@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace WinShot.Core;
@@ -122,7 +122,7 @@ public class Settings
     public bool SmoothPencil { get; set; } = true;           // TODO: wire behavior
     public bool RememberLastTool { get; set; } = false;      // TODO: wire behavior — background tool remembers last
     public bool DrawShadowOnObjects { get; set; } = true;    // TODO: wire behavior
-    public bool AutoExpandCanvas { get; set; } = false;      // TODO: wire behavior
+    public bool AutoExpandCanvas { get; set; } = false;      // Add capture grows the canvas instead of dropping a floating image
     public bool ShowColorNames { get; set; } = false;        // TODO: wire behavior
     public bool AlwaysOnTop { get; set; } = false;           // annotation editor opens above other windows
     public bool ShowDockIcon { get; set; } = true;           // TODO: wire behavior
