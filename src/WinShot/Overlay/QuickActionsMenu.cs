@@ -247,5 +247,46 @@ internal static class QuickActionsMenu
         document.Print();
     }
 
+    /// <summary>
+    /// Whether the card claims <paramref name="keyData"/> while the pointer is on it.
+    /// Deliberately separate from the handler: the hover-gated keyboard hook has to decide
+    /// whether to swallow a key inside the hook callback, but must not run the action
+    /// there — opening the context menu from a hook spins a modal message loop inside it.
+    /// Every chord here is one the card advertises in a tooltip or its shortcut column.
+    /// </summary>
+    internal static bool ClaimsKey(WF.Keys keyData, bool hasFocusedButton)
+    {
+        WF.Keys key = keyData & WF.Keys.KeyCode;
+        WF.Keys modifiers = keyData & WF.Keys.Modifiers;
+        bool ctrl = (modifiers & WF.Keys.Control) != 0;
+        bool alt = (modifiers & WF.Keys.Alt) != 0;
+        bool shift = (modifiers & WF.Keys.Shift) != 0;
+
+        // Alt is the app's own "keep the card open" modifier on the mouse actions, and
+        // Alt+anything belongs to the window underneath.
+        if (alt)
+            return false;
+        if (key == WF.Keys.Tab && !ctrl)
+            return true;
+        if (key is WF.Keys.Enter or WF.Keys.Space && modifiers == WF.Keys.None)
+            return hasFocusedButton;
+        if (key == WF.Keys.Apps && !ctrl)
+            return true;
+        if (key == WF.Keys.F10 && shift && !ctrl)
+            return true;
+
+        // Shift disqualifies the letter chords: Ctrl+Shift+S is somebody else's Save as.
+        if (shift)
+            return false;
+
+        return key switch
+        {
+            WF.Keys.C or WF.Keys.S or WF.Keys.E => ctrl || modifiers == WF.Keys.None,
+            WF.Keys.W => ctrl,
+            WF.Keys.Escape or WF.Keys.P or WF.Keys.O or WF.Keys.B => modifiers == WF.Keys.None,
+            _ => false,
+        };
+    }
+
     internal static bool FileReady(string? path) => path is not null && File.Exists(path);
 }

@@ -72,6 +72,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private SD.Point _flashCursor;
     private bool _hovering;
     private double _hoverAmount;
+    private IntPtr _keyHook;
+    private KeyboardHookProc? _keyHookProc;
     private IDisposable? _hoverMotion;
     private int _hoverButton = -1;
     private int _pressedButton = -1;
@@ -198,6 +200,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             ClosePreviewPipeline();
             StopEnterMotion();
             StopHoverMotion();
+            SetShortcutHook(false);
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
             HideActionTooltip();
@@ -309,6 +312,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // already painted once at its settled slot, which is a visible flash of the
             // card at its destination before the slide-in starts.
             BeginEnterMotion();
+            SetShortcutHook(_hovering);
             QueueRegionUpdate();
             QueuePreviewLoad();
         }
@@ -353,7 +357,77 @@ public sealed class FastQuickActionsWindow : WF.Form
             SetPressed(-1);
         }
         BeginHoverMotion(hovering ? 1d : 0d);
+        SetShortcutHook(hovering);
         Invalidate();
+    }
+
+    /// <summary>
+    /// The card is deliberately never activated — it appears without stealing focus — so
+    /// nothing was ever delivering the Ctrl+C / Ctrl+S / Ctrl+E / Ctrl+W its own tooltips
+    /// and menu advertise. A low-level keyboard hook, installed only while the pointer is
+    /// actually on the card, routes exactly the chords the card claims into its handler and
+    /// swallows them; every other key goes straight through to whatever the user is working
+    /// in. Hover-gating is the whole safety property: without it the card would eat Ctrl+S
+    /// from the real app for as long as it sat in the corner.
+    /// </summary>
+    private void SetShortcutHook(bool wanted)
+    {
+        bool install = wanted && Visible && !_closed && !IsDisposed;
+        if (install == (_keyHook != IntPtr.Zero))
+            return;
+
+        if (install)
+        {
+            // The delegate has to outlive this call or the CLR collects it and the next
+            // keystroke calls into freed memory.
+            _keyHookProc = OnShortcutKey;
+            _keyHook = SetWindowsHookExW(WhKeyboardLl, _keyHookProc, GetModuleHandleW(null), 0);
+            if (_keyHook == IntPtr.Zero)
+            {
+                _keyHookProc = null;
+                Log.Error($"Failed to install the quick-actions shortcut hook (error {Marshal.GetLastWin32Error()})");
+            }
+            return;
+        }
+
+        if (!UnhookWindowsHookEx(_keyHook))
+            Log.Error("Failed to remove the quick-actions shortcut hook");
+        _keyHook = IntPtr.Zero;
+        _keyHookProc = null;
+    }
+
+    private IntPtr OnShortcutKey(int code, IntPtr wParam, IntPtr lParam)
+    {
+        IntPtr hook = _keyHook;
+        if (code >= 0 && _hovering && !_closed && !IsDisposed)
+        {
+            long message = wParam.ToInt64();
+            if (message is WmKeyDown or WmSysKeyDown)
+            {
+                var data = Marshal.PtrToStructure<KeyboardHookStruct>(lParam);
+                WF.Keys keyData = (WF.Keys)data.VirtualKey | WF.Control.ModifierKeys;
+                if (QuickActionsMenu.ClaimsKey(keyData, _focusedButton >= 0))
+                {
+                    // Posted, not called: the action can open the context menu, and doing
+                    // that from inside a hook callback runs a modal loop in the hook.
+                    try
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            if (!_closed && !IsDisposed)
+                                OnOverlayKeyDown(this, new WF.KeyEventArgs(keyData));
+                        }));
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error("Quick-actions shortcut could not be delivered", ex);
+                        return CallNextHookEx(hook, code, wParam, lParam);
+                    }
+                    return new IntPtr(1);
+                }
+            }
+        }
+        return CallNextHookEx(hook, code, wParam, lParam);
     }
 
     /// <summary>
@@ -477,6 +551,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             ClosePreviewPipeline();
             StopEnterMotion();
             StopHoverMotion();
+            SetShortcutHook(false);
             StopExitMotionTimer();
             StopStackMotionTimer();
             StopAutoCloseTimer();
@@ -1356,6 +1431,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         SetHovering(false);
         PauseAutoCloseTimer();
         Visible = false;
+        SetShortcutHook(false);
     }
 
     /// <summary>Brings the card back, in whatever slot is free by then.</summary>
@@ -2257,6 +2333,34 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     private static bool IsAltDown() => (WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt;
+
+    private const int WhKeyboardLl = 13;
+    private const int WmKeyDown = 0x0100;
+    private const int WmSysKeyDown = 0x0104;
+
+    private delegate IntPtr KeyboardHookProc(int code, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardHookStruct
+    {
+        public uint VirtualKey;
+        public uint ScanCode;
+        public uint Flags;
+        public uint Time;
+        public IntPtr ExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookExW(int idHook, KeyboardHookProc callback, IntPtr module, uint threadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandleW(string? name);
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();

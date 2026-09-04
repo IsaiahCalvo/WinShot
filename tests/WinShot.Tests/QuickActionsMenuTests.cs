@@ -1,7 +1,8 @@
-using System.IO;
+﻿using System.IO;
 using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
+using WF = System.Windows.Forms;
 
 namespace WinShot.Tests;
 
@@ -338,5 +339,41 @@ public class QuickActionsMenuTests
         {
             File.Delete(path);
         }
+    }
+
+    [Theory]
+    // Everything the card's tooltips and shortcut column advertise.
+    [InlineData(WF.Keys.Control | WF.Keys.C, true)]
+    [InlineData(WF.Keys.Control | WF.Keys.S, true)]
+    [InlineData(WF.Keys.Control | WF.Keys.E, true)]
+    [InlineData(WF.Keys.Control | WF.Keys.W, true)]
+    [InlineData(WF.Keys.C, true)]
+    [InlineData(WF.Keys.P, true)]
+    [InlineData(WF.Keys.O, true)]
+    [InlineData(WF.Keys.B, true)]
+    [InlineData(WF.Keys.Escape, true)]
+    [InlineData(WF.Keys.Tab, true)]
+    [InlineData(WF.Keys.Shift | WF.Keys.Tab, true)]
+    [InlineData(WF.Keys.Apps, true)]
+    [InlineData(WF.Keys.Shift | WF.Keys.F10, true)]
+    // Everything that belongs to the window underneath.
+    [InlineData(WF.Keys.W, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.V, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.Z, false)]
+    [InlineData(WF.Keys.Alt | WF.Keys.F4, false)]
+    [InlineData(WF.Keys.Alt | WF.Keys.S, false)]
+    [InlineData(WF.Keys.A, false)]
+    [InlineData(WF.Keys.F10, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.Shift | WF.Keys.S, false)]
+    public void TheCardClaimsOnlyTheChordsItAdvertises(WF.Keys keyData, bool claimed)
+        => Assert.Equal(claimed, QuickActionsMenu.ClaimsKey(keyData, hasFocusedButton: false));
+
+    [Fact]
+    public void EnterAndSpaceAreClaimedOnlyWhileAButtonHasKeyboardFocus()
+    {
+        Assert.False(QuickActionsMenu.ClaimsKey(WF.Keys.Enter, hasFocusedButton: false));
+        Assert.False(QuickActionsMenu.ClaimsKey(WF.Keys.Space, hasFocusedButton: false));
+        Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Enter, hasFocusedButton: true));
+        Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Space, hasFocusedButton: true));
     }
 }

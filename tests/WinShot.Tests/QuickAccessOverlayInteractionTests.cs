@@ -748,6 +748,37 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    [Fact]
+    public void TheShortcutHookLivesExactlyAsLongAsTheHover()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            var hook = typeof(FastQuickActionsWindow)
+                .GetField("_keyHook", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            // Off-screen the card must never take a keystroke off the app underneath.
+            Invoke(overlay, "SetHovering", true);
+            Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            overlay.Show();
+            Invoke(overlay, "SetHovering", true);
+            Assert.NotEqual(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            Invoke(overlay, "SetHovering", false);
+            Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            Invoke(overlay, "SetHovering", true);
+            overlay.HideForEditor();
+            Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+        });
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
