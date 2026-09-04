@@ -154,9 +154,25 @@ public sealed class HistoryIncrementalCollection
 
     private void ReplaceVisible(int count)
     {
-        VisibleItems.Clear();
+        for (int index = VisibleItems.Count - 1; index >= 0; index--)
+        {
+            int target = _filteredItems.IndexOf(VisibleItems[index]);
+            if (target < 0 || target >= count)
+                VisibleItems.RemoveAt(index);
+        }
+
         for (int index = 0; index < count; index++)
-            VisibleItems.Add(_filteredItems[index]);
+        {
+            HistoryItem wanted = _filteredItems[index];
+            if (index < VisibleItems.Count && ReferenceEquals(VisibleItems[index], wanted))
+                continue;
+
+            int current = VisibleItems.IndexOf(wanted);
+            if (current >= 0)
+                VisibleItems.Move(current, index);
+            else
+                VisibleItems.Insert(index, wanted);
+        }
     }
 
     private HistoryItem? FindVisible(string? path)

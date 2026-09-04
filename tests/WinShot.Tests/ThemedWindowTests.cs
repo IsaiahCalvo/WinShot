@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -58,6 +58,7 @@ public class ThemedWindowTests
                 HistorySelectionInteractionSmoke(history, settings);
                 HistoryActivationSmoke(history, settings);
                 HistoryThumbnailLoadSmoke(settings);
+                HistoryReflowSmoke(history, settings);
                 ShowAndClose(new SettingsWindow(settings));
                 SettingsWindowShowCloseSmoke(settings);
                 HistoryWindowShowCloseSmoke(history, settings);
@@ -243,6 +244,79 @@ public class ThemedWindowTests
         {
             try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
         }
+    }
+
+    /// <summary>Filtering the grid slides the survivors into their new slots instead of
+    /// rebuilding the page, and the tween lets go of the high-resolution clock when it ends.</summary>
+
+    /// <summary>Filtering the grid slides the survivors into their new slots instead of
+    /// rebuilding the page, and the tween lets go of the high-resolution clock when it ends.</summary>
+    private static void HistoryReflowSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        var items = new List<HistoryItem>
+        {
+            new(@"C:\sanitized-history\20260803-120000-000.png"),
+            new(@"C:\sanitized-history\20260803-120001-000.mp4"),
+            new(@"C:\sanitized-history\20260803-120002-000.png"),
+            new(@"C:\sanitized-history\20260803-120003-000.mp4"),
+            new(@"C:\sanitized-history\20260803-120004-000.png"),
+        };
+        paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        try
+        {
+            var list = (ListBox)window.FindName("ItemsList");
+            var panel = FindVisualChild<ReflowWrapPanel>(list);
+            Assert.NotNull(panel);
+            int holdersBefore = Motion.Holders;
+
+            ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipImages")).IsChecked = true;
+            window.UpdateLayout();
+
+            // The videos leave from the middle of the grid, so the stills behind them slide into
+            // the gap rather than being torn down and rebuilt in place.
+            Assert.Equal(3, list.Items.Count);
+            Assert.True(panel!.LastReflowCount > 0, $"expected cards to slide, moved {panel.LastReflowCount}");
+
+            WaitUntil(() => !panel.IsReflowing);
+            Assert.False(panel.IsReflowing);
+            Assert.Equal(holdersBefore, Motion.Holders);
+        }
+        finally
+        {
+            // A failed assertion must not leave a window open: the STA thread would end with a
+            // live WPF window and take the whole test host down with it.
+            window.Close();
+        }
+    }
+
+    private static void WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            PumpDispatcherOnce();
+            Thread.Sleep(10);
+        }
+    }
+
+    private static T? FindVisualChild<T>(System.Windows.DependencyObject root) where T : System.Windows.DependencyObject
+    {
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, index);
+            if (child is T match) return match;
+            if (FindVisualChild<T>(child) is T nested) return nested;
+        }
+
+        return null;
     }
 
     private static void ShowAndClose(WF.Form form)

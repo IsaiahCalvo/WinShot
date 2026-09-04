@@ -1,6 +1,7 @@
 ﻿<Window x:Class="WinShot.History.HistoryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:WinShot.History"
         Title="WinShot History" Width="1200" Height="760" MinWidth="720" MinHeight="480"
         Background="{StaticResource WindowBgBrush}" ShowInTaskbar="True" WindowStartupLocation="Manual"
         AutomationProperties.Name="WinShot history"
@@ -176,7 +177,7 @@
                      ScrollViewer.CanContentScroll="False" KeyboardNavigation.TabNavigation="Continue"
                      AutomationProperties.Name="Capture history"
                      AutomationProperties.HelpText="Use arrow keys to select, Enter to restore, Ctrl+C to copy, Space to preview, and Tab to reach item actions.">
-                <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
+                <ListBox.ItemsPanel><ItemsPanelTemplate><local:ReflowWrapPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="Focusable" Value="True"/><Setter Property="Margin" Value="0"/><Setter Property="Padding" Value="0"/>
