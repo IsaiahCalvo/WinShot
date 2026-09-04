@@ -38,46 +38,59 @@ public static class SvgIcons
             if (root is null)
                 return null;
 
-            W.Rect viewBox = ParseViewBox(root.Attribute("viewBox")?.Value);
-            double inset = Math.Max(1, pixelSize * 0.06);
-            double scale = Math.Min((pixelSize - inset * 2) / viewBox.Width, (pixelSize - inset * 2) / viewBox.Height);
-            var transform = new WM.MatrixTransform(new WM.Matrix(scale, 0, 0, scale,
-                (pixelSize - viewBox.Width * scale) / 2 - viewBox.X * scale,
-                (pixelSize - viewBox.Height * scale) / 2 - viewBox.Y * scale));
             var iconBrush = new WM.SolidColorBrush(WM.Color.FromArgb(color.A, color.R, color.G, color.B));
+            var shapes = new List<(WM.Geometry Geometry, WM.Brush? Fill, WM.Pen? Pen)>();
+            foreach (XElement element in root.Descendants())
+            {
+                WM.Geometry? geometry = element.Name.LocalName switch
+                {
+                    "path" when !string.IsNullOrWhiteSpace(element.Attribute("d")?.Value)
+                        => WM.Geometry.Parse(element.Attribute("d")!.Value),
+                    "rect" => CreateRectGeometry(element),
+                    _ => null,
+                };
+                if (geometry is null)
+                    continue;
+
+                string fillValue = AttributeValue(element, root, "fill", "none");
+                string strokeValue = AttributeValue(element, root, "stroke", "none");
+                WM.Brush? fill = fillValue.Equals("none", StringComparison.OrdinalIgnoreCase) ? null : iconBrush;
+                WM.Pen? pen = null;
+                if (!strokeValue.Equals("none", StringComparison.OrdinalIgnoreCase))
+                {
+                    double width = ParseDouble(AttributeValue(element, root, "stroke-width", "1"), 1);
+                    pen = new WM.Pen(iconBrush, width)
+                    {
+                        StartLineCap = WM.PenLineCap.Round,
+                        EndLineCap = WM.PenLineCap.Round,
+                        LineJoin = WM.PenLineJoin.Round,
+                    };
+                }
+                shapes.Add((geometry, fill, pen));
+            }
+
+            // Fit by CONTENT, not by the declared viewBox. Two icons drawn on the same
+            // 24-grid rarely fill the same fraction of it — scaling by the box made the pin
+            // render ~75% larger than the X beside it, which is the "vibe-coded" tell the
+            // audit named. The union of the rendered (stroke-inclusive) bounds is the real
+            // optical extent, so fitting that gives every glyph the same visual weight.
+            W.Rect content = ContentBounds(shapes);
+            if (content.IsEmpty || content.Width <= 0 || content.Height <= 0)
+                content = ParseViewBox(root.Attribute("viewBox")?.Value);
+
+            double inset = Math.Max(1, pixelSize * 0.06);
+            double box = pixelSize - inset * 2;
+            double scale = Math.Min(box / content.Width, box / content.Height);
+            var transform = new WM.MatrixTransform(new WM.Matrix(scale, 0, 0, scale,
+                (pixelSize - content.Width * scale) / 2 - content.X * scale,
+                (pixelSize - content.Height * scale) / 2 - content.Y * scale));
 
             var visual = new WM.DrawingVisual();
             using (WM.DrawingContext context = visual.RenderOpen())
             {
                 context.PushTransform(transform);
-                foreach (XElement element in root.Descendants())
-                {
-                    WM.Geometry? geometry = element.Name.LocalName switch
-                    {
-                        "path" when !string.IsNullOrWhiteSpace(element.Attribute("d")?.Value)
-                            => WM.Geometry.Parse(element.Attribute("d")!.Value),
-                        "rect" => CreateRectGeometry(element),
-                        _ => null,
-                    };
-                    if (geometry is null)
-                        continue;
-
-                    string fillValue = AttributeValue(element, root, "fill", "none");
-                    string strokeValue = AttributeValue(element, root, "stroke", "none");
-                    WM.Brush? fill = fillValue.Equals("none", StringComparison.OrdinalIgnoreCase) ? null : iconBrush;
-                    WM.Pen? pen = null;
-                    if (!strokeValue.Equals("none", StringComparison.OrdinalIgnoreCase))
-                    {
-                        double width = ParseDouble(AttributeValue(element, root, "stroke-width", "1"), 1);
-                        pen = new WM.Pen(iconBrush, width)
-                        {
-                            StartLineCap = WM.PenLineCap.Round,
-                            EndLineCap = WM.PenLineCap.Round,
-                            LineJoin = WM.PenLineJoin.Round,
-                        };
-                    }
+                foreach ((WM.Geometry geometry, WM.Brush? fill, WM.Pen? pen) in shapes)
                     context.DrawGeometry(fill, pen, geometry);
-                }
                 context.Pop();
             }
 
@@ -113,6 +126,20 @@ public static class SvgIcons
             Log.Error($"SVG icon '{assetName}' could not be rendered", ex);
             return null;
         }
+    }
+
+    /// <summary>Union of every shape's rendered extent, stroke included — the box the glyph
+    /// actually occupies inside its grid.</summary>
+    private static W.Rect ContentBounds(List<(WM.Geometry Geometry, WM.Brush? Fill, WM.Pen? Pen)> shapes)
+    {
+        W.Rect bounds = W.Rect.Empty;
+        foreach ((WM.Geometry geometry, _, WM.Pen? pen) in shapes)
+        {
+            W.Rect shape = pen is null ? geometry.Bounds : geometry.GetRenderBounds(pen);
+            if (!shape.IsEmpty)
+                bounds.Union(shape);
+        }
+        return bounds;
     }
 
     private static W.Rect ParseViewBox(string? value)

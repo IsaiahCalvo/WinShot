@@ -56,6 +56,10 @@
                       LogicalName="WinShot.Assets.quick-access-lock.svg" />
     <EmbeddedResource Include="Assets\quick-access-pin.svg"
                       LogicalName="WinShot.Assets.quick-access-pin.svg" />
+    <!-- The filled half of the pin's outline/filled pair: the pinned (active) state only.
+         The outlined asset above is the default, matching the thirteen stroked siblings. -->
+    <EmbeddedResource Include="Assets\quick-access-pin-filled.svg"
+                      LogicalName="WinShot.Assets.quick-access-pin-filled.svg" />
     <EmbeddedResource Include="Assets\quick-access-unlock.svg"
                       LogicalName="WinShot.Assets.quick-access-unlock.svg" />
     <EmbeddedResource Include="Assets\quick-access-save.svg"

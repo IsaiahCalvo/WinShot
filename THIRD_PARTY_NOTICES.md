@@ -168,22 +168,19 @@ should be reproduced verbatim with the distribution.
 ## Icon assets
 
 Sixteen files sit under `src/WinShot/Assets/` and all sixteen ship inside the binary:
-fifteen SVGs as `EmbeddedResource`, plus `winshot.ico` as the `ApplicationIcon`.
+fifteen SVGs as `EmbeddedResource`, plus `winshot.ico` — which is both the
+`ApplicationIcon` and an `EmbeddedResource`, because the tray icon and the About pane
+load the same file rather than drawing a second mark.
 
-Fifteen of them — `winshot.ico` and the fourteen `quick-access-*.svg` — are WinShot's
-own, drawn for this app and carrying no upstream marker. The fourteen SVGs share a
-viewBox of `0 0 24 24` and paint with `currentColor`. Their stroke weights do not yet
-agree: six are 1.85, seven are 2, and `quick-access-pin.svg` is a solid filled path
-with no stroke at all. Normalising them to 1.85 belongs to T7, which also replaces the
-pin glyph.
+All sixteen are WinShot's own, drawn for this app and carrying no upstream marker.
+`winshot.ico` is generated from `tools\make-icon.ps1`. The fifteen SVGs share a
+viewBox of `0 0 24 24` and paint with `currentColor`; fourteen are stroked at 1.85,
+and `quick-access-pin-filled.svg` is a solid path with no stroke — deliberately, as
+the filled half of the pin's outline/filled pair.
 
-One is not. `download-window-svgrepo-com.svg` came from **SVG Repo**
-(https://www.svgrepo.com) — its own header comment says so, and unlike the others it
-is 800×800 with a hard-coded `#000000` fill. SVG Repo licences per icon, anywhere
-from CC0 to CC-BY with attribution required, so this file's terms are **unverified**.
-Nothing in the code references it; only `WinShot.csproj` still embeds it. T7 deletes
-it, which resolves this entry — if it is ever kept instead, its individual SVG Repo
-licence has to be looked up and recorded here.
+`download-window-svgrepo-com.svg`, which came from **SVG Repo**
+(https://www.svgrepo.com) under unverified per-icon terms and had no consumers in the
+code, has been deleted. No third-party icon art ships with WinShot.
 
 ## Fonts
 
@@ -202,11 +199,10 @@ The browser extension has its own notices, covering different code:
   reserved" — nobody may copy, modify or redistribute it. That is a legitimate
   choice for a personal, closed app, but right now it is an accident rather than a
   decision. Isaiah's call.
-- **These notices must ship, not just live here.** MIT and Apache-2.0 obligations
-  attach to the distributed binary, so this file (plus the Apache-2.0 text and
-  Skia's `THIRD-PARTY-NOTICES.txt`) needs to be carried by the installer and
-  reachable from the About pane. Not wired yet. Tracked in the master plan under
-  T7's About-pane row so it does not go with this branch.
+- ~~**These notices must ship, not just live here.**~~ Done: this file, the
+  Apache-2.0 text and Skia's `THIRD-PARTY-NOTICES.txt` are copied into the build
+  output (see `WinShot.csproj`), so the installer carries them, and the About pane
+  links to them.
 - **This file is written for whoever maintains WinShot, not for its users.** It
   names a first name, internal track IDs, and unfinished work. Whoever wires the
   About pane should render the user-facing part — "Studied, not copied", "Shipped
