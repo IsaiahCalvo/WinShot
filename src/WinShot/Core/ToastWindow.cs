@@ -36,10 +36,13 @@ public sealed class ToastWindow : WF.Form
     private const int DwellMs = 1700;
     private const int LongDwellMs = 4500;
 
-    /// <summary>One 13-DIP row of body text, and the most rows Trim's 90-character cap
-    /// can ever fill at 244 DIP wide.</summary>
+    /// <summary>One 13-DIP row of body text, and the most rows the toast will grow to.
+    /// Trim measures against these rather than guessing a character count.</summary>
     private const int BodyLineH = 22;
     private const int BodyMaxLines = 3;
+
+    /// <summary>The body column: the 300-DIP card less the glyph gutter and the right pad.</summary>
+    internal const int BodyWidthDip = 300 - 42 - 14;
 
     private IDisposable? _motion;
     private bool _exiting;
@@ -58,7 +61,8 @@ public sealed class ToastWindow : WF.Form
         string preview,
         SD.Point? anchorScreen,
         Action? onOpen,
-        ToastSeverity severity = ToastSeverity.Info)
+        ToastSeverity severity = ToastSeverity.Info,
+        bool holdLong = false)
     {
         _anchor = anchorScreen;
         _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
@@ -110,8 +114,8 @@ public sealed class ToastWindow : WF.Form
         // The friendly-error lines are 45-77 characters, which is two to three of these
         // 244 px rows. A single ellipsed line cut off exactly the half that says what to do
         // about it ("Choose a different folder in Settings"), so the body wraps and the
-        // window grows to whatever it needs, up to the BodyMaxLines the 90-char cap can fill.
-        _body = Trim(preview);
+        // window grows to whatever it needs, up to BodyMaxLines — which is also what Trim cuts to.
+        _body = Trim(preview, textW);
         int bodyLines = LinesNeeded(_body, textW);
         int bodyH = BodyLineH + ((bodyLines - 1) * BodyLineH);
         var previewLabel = Label(_body, textX, 38, textW, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary, height: bodyH);
@@ -146,7 +150,9 @@ public sealed class ToastWindow : WF.Form
         AccessibleName = title;
         AccessibleDescription = _body;
 
-        _dismiss.Interval = hasOpen || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
+        // holdLong is for a working state ("Checking for updates…") whose work outlives the
+        // confirmation dwell: it must not self-dismiss before its own result arrives.
+        _dismiss.Interval = hasOpen || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
         _dismiss.Tick += (_, _) => Close();
         MouseEnter += (_, _) => HoldOpen();
         MouseLeave += (_, _) => _dismiss.Start();
@@ -160,11 +166,21 @@ public sealed class ToastWindow : WF.Form
 
     /// <summary>
     /// How many body rows <paramref name="text"/> needs inside a <paramref name="availableDip"/>-wide
-    /// column. Measured through a pixel-unit font so the answer is the same on every monitor:
-    /// the layout is in DIP and only S() turns it into device pixels, so a point-sized probe
-    /// would return 150 % numbers on Isaiah's primary and over-count the rows.
+    /// column, capped at <see cref="BodyMaxLines"/>. The layout is in DIP and only S() turns it
+    /// into device pixels, so this number has to come out the same on every monitor.
     /// </summary>
-    internal static int LinesNeeded(string text, int availableDip)
+    internal static int LinesNeeded(string text, int availableDip) =>
+        Math.Clamp(RowsFor(text, availableDip), 1, BodyMaxLines);
+
+    /// <summary>
+    /// The uncapped row count. A pixel-unit font is not DPI-free: GDI+ still converts it
+    /// through the screen DC, so the probe is 13 px em at 96 DPI and 19.5 px on Isaiah's 150 %
+    /// primary. Measuring a DIP-wide column against that wrapped a row early and parked every
+    /// wrapped toast on the BodyMaxLines clamp — 43 px of dead space under a two-line message,
+    /// and clipping for anything that genuinely needed three. Scaling the column by the same
+    /// DPI the font was scaled by makes the two cancel.
+    /// </summary>
+    private static int RowsFor(string text, int availableDip)
     {
         if (string.IsNullOrEmpty(text)) return 1;
         try
@@ -172,7 +188,11 @@ public sealed class ToastWindow : WF.Form
             using SD.Font ui = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
             using var dip = new SD.Font(ui.FontFamily, ThemePalette.TextBodyLgPt * 96f / 72f, SD.GraphicsUnit.Pixel);
             const WF.TextFormatFlags flags = WF.TextFormatFlags.WordBreak | WF.TextFormatFlags.NoPrefix;
-            var column = new SD.Size(availableDip, int.MaxValue);
+
+            float dpi;
+            using (var screen = SD.Graphics.FromHwnd(IntPtr.Zero))
+                dpi = screen.DpiX > 0 ? screen.DpiX : 96f;
+            var column = new SD.Size(Math.Max(1, (int)Math.Round(availableDip * dpi / 96f)), int.MaxValue);
 
             // MeasureText adds a constant padding to the height on top of n line boxes, so
             // dividing by the font's line height over-counts. Two references give both terms.
@@ -182,7 +202,7 @@ public sealed class ToastWindow : WF.Form
             int padding = one - lineH;
 
             int wrapped = WF.TextRenderer.MeasureText(text, dip, column, flags).Height;
-            return Math.Clamp((int)Math.Round((wrapped - padding) / (double)lineH), 1, BodyMaxLines);
+            return Math.Max(1, (int)Math.Round((wrapped - padding) / (double)lineH));
         }
         catch
         {
@@ -251,7 +271,11 @@ public sealed class ToastWindow : WF.Form
 
         _exiting = false;
         _motion?.Dispose();
-        _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
+        // Resume from wherever the fade-out had reached — the mirror of OnFormClosing. A fresh
+        // run from 0 dropped a half-faded toast to transparent for a frame and climbed back,
+        // which flashed on exactly the gesture this method exists to serve.
+        double from = _entranceAmount;
+        _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(from + ((1d - from) * p)));
     }
 
     /// <summary>0 = fully out (transparent, dropped by the rise distance), 1 = at rest.</summary>
@@ -357,10 +381,26 @@ public sealed class ToastWindow : WF.Form
         Location = new SD.Point(x, y);
     }
 
-    private static string Trim(string text)
+    /// <summary>
+    /// Flattens the message to one paragraph and cuts it to what the body box can actually
+    /// show. The cap used to be a flat 90 characters, which sat *inside* the three-row box and
+    /// chopped the "no OCR language pack" line at "Time &amp; Language…", throwing away the half
+    /// that names the Settings page — the only half that message exists for. The box knows its
+    /// own capacity, so ask it, and cut on a word so what survives is a whole phrase.
+    /// </summary>
+    internal static string Trim(string text, int availableDip = BodyWidthDip)
     {
         text = (text ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
-        return text.Length > 90 ? text[..90] + "…" : text;
+        if (text.Length == 0 || RowsFor(text, availableDip) <= BodyMaxLines)
+            return text;
+
+        string cut = text;
+        while (cut.Length > 1 && RowsFor(cut + "…", availableDip) > BodyMaxLines)
+        {
+            int space = cut.LastIndexOf(' ', cut.Length - 2);
+            cut = (space > 0 ? cut[..space] : cut[..(cut.Length - 1)]).TrimEnd();
+        }
+        return cut + "…";
     }
 
     private void UpdateRegion() => PopupChrome.ApplyRegion(this, S(14));

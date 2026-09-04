@@ -17,6 +17,9 @@ public class FeedbackCopyTests
     /// <summary>Every line ShowBalloon can send, as the user would read it.</summary>
     private static string[] Messages() => new[]
     {
+        // The longest fixed string in the app, and the one whose whole value is its tail.
+        "No OCR language pack is installed. Add one in Settings > Time & language.",
+        "8 shortcuts are in use by other apps — see Settings > Shortcuts.",
         FriendlyError.For(new UnauthorizedAccessException()),
         FriendlyError.For(new DirectoryNotFoundException()),
         FriendlyError.For(new PathTooLongException()),
@@ -72,13 +75,46 @@ public class FeedbackCopyTests
         Assert.Equal(1, ToastWindow.LinesNeeded("shot.png", BodyWidthDip));
     }
 
-    /// <summary>Trim's 90-character cap is the ceiling the row budget was chosen for:
-    /// nothing the app can send should ever hit the clamp and get cut.</summary>
+    /// <summary>
+    /// Nothing the app can send should reach the three-row ceiling — at the ceiling the next
+    /// word is gone, and every one of these lines ends on the instruction that makes it useful.
+    /// This is also the DPI canary: measuring the body font at the screen's DPI against a
+    /// DIP-wide column over-counted rows by one on any non-100 % display, which put a plain
+    /// two-line error on the clamp and made this fail whenever an earlier test had already
+    /// made the process DPI-aware.
+    /// </summary>
     [Fact]
     public void NoMessageNeedsMoreRowsThanTheToastGivesIt()
     {
         foreach (string m in Messages())
             Assert.True(ToastWindow.LinesNeeded(m, BodyWidthDip) < 3, m);
+    }
+
+    /// <summary>
+    /// The cap used to be a flat 90 characters, which sat inside the box and cut the OCR
+    /// message at "Time &amp; Language…" — losing the half that names the Settings page.
+    /// Nothing the app sends may come back shortened.
+    /// </summary>
+    [Fact]
+    public void TheToastShowsEveryMessageWhole()
+    {
+        foreach (string m in Messages())
+            Assert.Equal(m, ToastWindow.Trim(m, BodyWidthDip));
+    }
+
+    /// <summary>But a message that genuinely will not fit still gets cut on a word, not
+    /// mid-token, so what survives reads as a phrase.</summary>
+    [Fact]
+    public void AnOversizeMessageIsCutOnAWordBoundary()
+    {
+        string huge = string.Join(" ", Enumerable.Repeat("overflowing", 40));
+        string cut = ToastWindow.Trim(huge, BodyWidthDip);
+
+        Assert.EndsWith("…", cut);
+        Assert.True(cut.Length < huge.Length, "an oversize message was not cut at all");
+        Assert.StartsWith("overflowing", cut);
+        Assert.DoesNotContain("overflowin…", cut);
+        Assert.True(ToastWindow.LinesNeeded(cut, BodyWidthDip) <= 3, cut);
     }
 
     /// <summary>The toast replaced a tray balloon that Narrator announced; it has to name
