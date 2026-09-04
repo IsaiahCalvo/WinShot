@@ -1,4 +1,4 @@
-﻿using System.Drawing.Imaging;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using SD = System.Drawing;
 

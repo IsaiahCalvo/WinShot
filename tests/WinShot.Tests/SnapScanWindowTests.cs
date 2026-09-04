@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using WF = System.Windows.Forms;
 using WinShot.Core;
 using Xunit;
@@ -35,7 +35,17 @@ public sealed class SnapProbeWindowCollection
 /// spaces cannot diverge: at scale s the frame spans physical 0..500s while the outermost child
 /// sits at logical 18..318, so the child stays inside the frame for every s >= 1. Move the probe
 /// away from the origin and the presence assertions below start depending on the monitor's
-/// scale factor.
+/// scale factor: at (0, -350) on a monitor above the laptop the walk emits the frame and a
+/// clipped outer panel and loses the inner button entirely.
+///
+/// So the breaker checklist's "negative-Y and mixed-DPI monitors" is UNCOVERED for the snap
+/// walk, not merely awkward to write. It stays uncovered until the test host gets its own
+/// PerMonitorV2 manifest; do not read the origin-pinned probe below as having checked it.
+///
+/// These forms are also built and shown on whatever thread xUnit hands the test, which is MTA.
+/// It works for a Form/Panel/Button that only gets shown and measured, but WinForms on MTA is
+/// unsupported for the apartment-sensitive paths, so do not grow a clipboard, drag-drop or
+/// common-dialog assertion onto this probe.
 /// </summary>
 [Collection("SnapProbeWindows")]
 public class SnapScanWindowTests
@@ -113,8 +123,16 @@ public class SnapScanWindowTests
         Assert.Single(rects, r => r.Handle == form.Handle && r.IsWindow);
     }
 
+    /// <summary>
+    /// Exclusion is only transitive for a TOP-LEVEL handle, which is the only kind the one
+    /// production caller (FastRegionSelectorDialog) ever passes: the top-level pass drops the
+    /// window before it descends, so the whole subtree goes with it. Excluding a mid-tree
+    /// control does NOT take its children — EnumChildWindows enumerates every descendant
+    /// directly off the top-level window, so the skipped control is never on the path to them.
+    /// If you reach for `exclude` with a control handle, expect its children back.
+    /// </summary>
     [Fact]
-    public void ExcludingAWindowDropsItsClientAndControlRectsToo()
+    public void ExcludingATopLevelWindowDropsItsClientAndControlRectsToo()
     {
         using var form = ShowProbeWindow(out var outer, out var inner);
 

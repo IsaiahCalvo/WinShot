@@ -45,7 +45,11 @@ observations about behaviour, not ported code. `Core/HotkeyConflictInspector.cs`
 also names ShareX, as one of the apps whose hotkeys can clash with WinShot's; that
 is a data row, not a citation — and its test fixture,
 `tests/WinShot.Tests/HotkeyConflictTests.cs`, names it for the same reason. Those
-five files plus the two headers above are every mention of ShareX in the tree.
+five files plus the two headers above are every mention of ShareX in `src/` and
+`tests/` — that is, every mention in shipped code. ShareX is also named in prose
+elsewhere in the repo (`README.md`'s Licensing section, `docs/research/2026-09-02-cleanshot-video-sweep.md`,
+`docs/scrolling-capture-edge-case-audit.md`, `browser-extension/README.md` and
+`browser-extension/THIRD_PARTY_NOTICES.md`); none of those are code citations.
 
 **How that was checked, and what it found.** ShareX's own sources for the two
 files in question — the region selector's rectangle list and its rectangle
