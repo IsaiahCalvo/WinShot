@@ -399,11 +399,10 @@ public sealed class RecordingController
             throw;
         }
 
-        if (p.DimScreen)
-        {
-            _dimOverlay = new FastRecordingDimOverlay(screenRect);
-            _dimOverlay.Show();
-        }
+        // Always one or the other: with dimming off the region used to have no on-screen
+        // marker at all, so nothing said what was being recorded.
+        _dimOverlay = new FastRecordingDimOverlay(screenRect, p.DimScreen);
+        _dimOverlay.Show();
 
         if (p.ShowControls)
         {
