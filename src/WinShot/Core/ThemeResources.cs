@@ -1,4 +1,6 @@
 ﻿using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media.Animation;
 
 namespace WinShot.Core;
 
@@ -41,27 +43,109 @@ public static class ThemeResources
     /// Honours Settings &gt; Accessibility &gt; Visual effects &gt; Animation effects on the
     /// WPF side. Core/Motion.cs already jumps straight to the end state when the user has
     /// animation off; the control templates' cross-fades had no equivalent, so with the
-    /// setting off every WinForms control snapped while every WPF one still faded. Zeroing
-    /// the shared storyboards' durations leaves the end states exactly as they were and
-    /// removes the transition, which is what "off" means. Called on the loaded dictionary
-    /// before any template is realised.
+    /// setting off every WinForms control snapped while every WPF one still faded.
+    ///
+    /// Zeroing the shared storyboards' durations leaves the end states exactly as they were
+    /// and removes the transition, which is what "off" means — but it has to be done in TWO
+    /// places. A <c>{StaticResource HoverIn}</c> inside a ControlTemplate trigger resolves
+    /// against a snapshot taken when the dictionary was parsed and holds that Storyboard
+    /// INSTANCE for the life of the template, so writing a zeroed clone back into
+    /// theme["HoverIn"] changes the dictionary entry and nothing else: every template keeps
+    /// running the original 140 ms cross-fade. The storyboards come out of the dictionary
+    /// frozen and cannot be edited in place, so the zeroed clone has to be pushed into every
+    /// BeginStoryboard that holds the original too.
+    ///
+    /// Reaching those means realising the dictionary's Styles and templates. On a machine
+    /// with animation ON this method returns before touching a single key; on one with it
+    /// off, inflating ~146 deferred values once at startup is what the setting costs.
+    /// Called on the loaded dictionary before any window's InitializeComponent, so no
+    /// BeginStoryboard is sealed yet.
     /// </summary>
     internal static void ApplyAnimationPreference(ResourceDictionary theme)
     {
         if (Motion.AnimationsEnabled())
             return;
 
+        var zeroed = new Dictionary<Storyboard, Storyboard>();
+
         foreach (object key in theme.Keys.Cast<object>().ToList())
         {
-            if (theme[key] is not System.Windows.Media.Animation.Storyboard board)
-                continue;
+            switch (theme[key])
+            {
+                case Storyboard board:
+                    theme[key] = Zero(board, zeroed);
+                    break;
+                case Style style:
+                    ZeroTriggers(style.Triggers, zeroed);
+                    foreach (SetterBase setterBase in style.Setters)
+                        if (setterBase is Setter { Value: ControlTemplate styleTemplate })
+                            ZeroTriggers(styleTemplate.Triggers, zeroed);
+                    break;
+                case ControlTemplate template:
+                    ZeroTriggers(template.Triggers, zeroed);
+                    break;
+            }
+        }
+    }
 
-            // A Freezable in a dictionary may already be frozen; clone before editing.
-            System.Windows.Media.Animation.Storyboard editable = board.IsFrozen ? board.Clone() : board;
-            foreach (System.Windows.Media.Animation.Timeline child in editable.Children)
-                child.Duration = new Duration(TimeSpan.Zero);
+    /// <summary>The instant twin of a storyboard, made once and shared by every holder.</summary>
+    private static Storyboard Zero(Storyboard board, Dictionary<Storyboard, Storyboard> cache)
+    {
+        if (cache.TryGetValue(board, out Storyboard? existing))
+            return existing;
 
-            theme[key] = editable;
+        // A Freezable in a dictionary is normally already frozen; clone before editing.
+        Storyboard editable = board.IsFrozen ? board.Clone() : board;
+        foreach (Timeline child in editable.Children)
+            child.Duration = new Duration(TimeSpan.Zero);
+
+        cache[board] = editable;
+        return editable;
+    }
+
+    /// <summary>
+    /// Repoints every BeginStoryboard in a trigger collection at the instant twin of the
+    /// storyboard it currently holds. A sealed action belongs to a style already in use and
+    /// cannot be repointed; nothing in this app is in that state at EnsureLoaded time.
+    /// </summary>
+    private static void ZeroTriggers(TriggerCollection triggers, Dictionary<Storyboard, Storyboard> cache)
+    {
+        foreach (TriggerBase trigger in triggers)
+        {
+            foreach (TriggerActionCollection actions in ActionsOf(trigger))
+            {
+                foreach (TriggerAction action in actions)
+                {
+                    if (action is BeginStoryboard { Storyboard: { } board } begin && !begin.IsSealed)
+                        begin.Storyboard = Zero(board, cache);
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<TriggerActionCollection> ActionsOf(TriggerBase trigger)
+    {
+        switch (trigger)
+        {
+            case Trigger t:
+                yield return t.EnterActions;
+                yield return t.ExitActions;
+                break;
+            case MultiTrigger mt:
+                yield return mt.EnterActions;
+                yield return mt.ExitActions;
+                break;
+            case DataTrigger dt:
+                yield return dt.EnterActions;
+                yield return dt.ExitActions;
+                break;
+            case MultiDataTrigger mdt:
+                yield return mdt.EnterActions;
+                yield return mdt.ExitActions;
+                break;
+            case EventTrigger et:
+                yield return et.Actions;
+                break;
         }
     }
 }
