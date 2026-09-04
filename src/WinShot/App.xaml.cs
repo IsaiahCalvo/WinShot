@@ -1257,6 +1257,7 @@ public partial class App : Application
         FastQuickActionsWindow? card = null)
     {
         OcrCaptureResult result;
+        ToastWindow? working = null;
         try
         {
             var sw = Stopwatch.StartNew();
@@ -1264,7 +1265,19 @@ public partial class App : Application
             // user (no language pack installed, and so on), so only this call is allowed to
             // put one on screen; anything the rest of the flow throws goes through the
             // generic handler instead of quoting the framework.
-            result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
+            Task<OcrCaptureResult> extraction = OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
+
+            // The selector is already gone and the result toast is not up yet, so a slow read
+            // used to happen against a completely unchanged screen. Only a read the user
+            // would actually notice is announced: a warm engine on a small crop finishes
+            // inside the delay and says nothing at all.
+            if (await Task.WhenAny(extraction, Task.Delay(WorkingIndicatorDelayMs)) != extraction)
+            {
+                working = ShowOcrToast("Reading text", "Working on the selection.",
+                    anchor ?? CardAnchor(card), onOpen: null, ToastSeverity.Info, holdLong: true);
+            }
+
+            result = await extraction;
             LogPerf("ocr extract", sw);
         }
         catch (InvalidOperationException ex)
@@ -1280,7 +1293,12 @@ public partial class App : Application
             if (payload is null)
             {
                 if (card is not null)
+                {
+                    // The card's status flash is the feedback here, so nothing replaces the
+                    // working toast; close it rather than leave it dwelling over the answer.
+                    CloseWorkingToast(working);
                     card.FlashStatus("No text found");
+                }
                 else
                     // The one OCR result the user has to read and act on, and the only one
                     // with no action attached - so it holds the screen as long as a success.
@@ -1296,6 +1314,7 @@ public partial class App : Application
             {
                 // "Text copied" was hard-coded here, so a QR code run from the card was
                 // announced as text. The formatter already knows which it was.
+                CloseWorkingToast(working);
                 card.FlashStatus(payload.BalloonTitle);
             }
             else
@@ -1312,6 +1331,19 @@ public partial class App : Application
             Log.Info($"OCR clipboard copy skipped: {ex.Message}");
             ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.", ToastSeverity.Error);
         }
+    }
+
+    /// <summary>How long a read has to run before it is worth telling the user it is
+    /// running. Under this, the result lands before an indicator could be read.</summary>
+    private const int WorkingIndicatorDelayMs = 220;
+
+    /// <summary>Takes the working state down when the result is not itself a toast (the card
+    /// paths). A toast result replaces it on its own -- that is what showing one does.</summary>
+    private static void CloseWorkingToast(ToastWindow? working)
+    {
+        if (working is null || working.IsDisposed) return;
+        try { working.Close(); }
+        catch (Exception ex) { Log.Error("Could not close the OCR working toast (non-fatal)", ex); }
     }
 
     /// <summary>
@@ -1376,7 +1408,7 @@ public partial class App : Application
 
     /// <summary>Severity is per-call: "Nothing found" is not a success, and a checkmark on it
     /// reads as "it worked".</summary>
-    private void ShowOcrToast(
+    private ToastWindow? ShowOcrToast(
         string title, string preview, SD.Point? anchor, Action? onOpen,
         ToastSeverity severity = ToastSeverity.Success, bool holdLong = false,
         ToastExtras? extras = null) =>
@@ -1609,7 +1641,10 @@ public partial class App : Application
             app.ShowToast(title, message, anchor, onOpen, severity, holdLong);
     }
 
-    private void ShowToast(
+    /// <summary>Returns the toast that went up, or null when the balloon fallback ran. A
+    /// caller that put up a working state needs the handle to take it down again when its
+    /// result is not itself a toast.</summary>
+    private ToastWindow? ShowToast(
         string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity,
         bool holdLong = false, ToastExtras? extras = null)
     {
@@ -1628,6 +1663,7 @@ public partial class App : Application
                 shown.Dispose();
                 throw;
             }
+            return shown;
         }
         catch (Exception ex)
         {
@@ -1635,6 +1671,7 @@ public partial class App : Application
             // piece of feedback that never needs one.
             Log.Error("Toast failed; falling back to the tray balloon", ex);
             ShowShellBalloon(title, message, severity);
+            return null;
         }
     }
 
