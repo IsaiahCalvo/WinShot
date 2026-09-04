@@ -53,7 +53,8 @@
                     MouseLeftButtonDown="OnTimelineClicked"
                     MouseMove="OnTimelineDragScrub"
                     MouseLeftButtonUp="OnTimelineScrubReleased"
-                    LostMouseCapture="OnTimelineScrubReleased">
+                    LostMouseCapture="OnTimelineScrubReleased"
+                    MouseWheel="OnTimelineWheel">
                 <Canvas x:Name="TimelineCanvas" ClipToBounds="True">
                     <!-- Frame thumbnails (best-effort) live here, added in code. -->
                     <ItemsControl x:Name="FilmstripItems" Canvas.Left="0" Canvas.Top="0">
@@ -134,8 +135,16 @@
                            FontFamily="Consolas" Text="In 0:00"/>
                 <TextBlock x:Name="TrimRangeLabel" HorizontalAlignment="Center" Style="{StaticResource FieldLabel}"
                            FontFamily="Consolas" Text="0:00"/>
-                <TextBlock x:Name="TrimEndLabel" HorizontalAlignment="Right" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="Out 0:00"/>
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button x:Name="BtnZoomFit" Style="{StaticResource PillButtonSecondary}"
+                            Content="Fit" MinWidth="52" Visibility="Collapsed"
+                            Margin="{StaticResource ChipGutterMargin}" Click="OnZoomFit"
+                            AutomationProperties.Name="Fit the whole clip on the timeline"
+                            AutomationProperties.HelpText="Zooms the timeline back out to the whole recording."/>
+                    <TextBlock x:Name="TrimEndLabel" VerticalAlignment="Center"
+                               Style="{StaticResource FieldLabel}"
+                               FontFamily="Consolas" Text="Out 0:00"/>
+                </StackPanel>
             </Grid>
         </Grid>
 

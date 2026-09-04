@@ -43,6 +43,15 @@ public partial class VideoEditorWindow : Window
     private double _trimEndSec;
     private bool _filmstripBuilt; // thumbnails are generated at most once
 
+    // The slice of the clip the strip is showing. At full zoom this is the whole recording;
+    // zoomed in it is a pannable window, which is what makes frame-accurate trimming possible
+    // on a long take.
+    private TimelineView _view = TimelineView.Full(0);
+    private IDisposable? _zoomTween;
+    private IReadOnlyList<System.Windows.Media.Imaging.BitmapImage?> _frameImages =
+        Array.Empty<System.Windows.Media.Imaging.BitmapImage?>();
+    private int _frameHeight = 54;
+
     // Export resolution choices resolved against this project's real dimensions, so the
     // picker can label the pixels each one produces instead of a bare percentage.
     private IReadOnlyList<VideoResolutionPreset> _resolutions =
@@ -68,6 +77,8 @@ public partial class VideoEditorWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            _zoomTween?.Dispose();
+            _zoomTween = null;
             _positionTimer.Stop();
             RequestExportCancellation();
             if (_exporting && !_exportCompleted && _pendingOutputPath is not null)
@@ -124,6 +135,7 @@ public partial class VideoEditorWindow : Window
             _trimInitialized = true;
             _trimStartSec = 0;
             _trimEndSec = Math.Max(0.1, _durationSec);
+            _view = TimelineView.Full(_durationSec);
             UpdateTrimUi();
             _ = BuildFilmstripAsync();
         }
@@ -244,20 +256,19 @@ public partial class VideoEditorWindow : Window
     /// <summary>Usable horizontal span of the track (px) the playhead and thumbs map onto.</summary>
     private double TimelineSpan => Math.Max(1, TimelineTrack.ActualWidth - ThumbWidth * 2);
 
-    /// <summary>Maps a position in seconds to an x offset (px) on the timeline canvas.</summary>
-    private double SecondsToX(double seconds)
-    {
-        double duration = Math.Max(0.1, _durationSec);
-        double fraction = Math.Clamp(seconds / duration, 0, 1);
-        return ThumbWidth + fraction * TimelineSpan;
-    }
+    /// <summary>Maps a position in seconds to an x offset (px) on the timeline canvas, through
+    /// whatever slice of the clip is currently in view.</summary>
+    private double SecondsToX(double seconds) =>
+        ThumbWidth + (_view.ToFraction(seconds) * TimelineSpan);
+
+    /// <summary>Unclamped sibling of <see cref="SecondsToX"/>, so a thumbnail that starts off
+    /// the left edge is drawn partly off the strip instead of piling up against it.</summary>
+    private double SecondsToXUnclamped(double seconds) =>
+        ThumbWidth + ((seconds - _view.StartSeconds) / _view.Span * TimelineSpan);
 
     /// <summary>Maps an x offset (px) on the timeline back to seconds.</summary>
-    private double XToSeconds(double x)
-    {
-        double fraction = Math.Clamp((x - ThumbWidth) / TimelineSpan, 0, 1);
-        return fraction * Math.Max(0.1, _durationSec);
-    }
+    private double XToSeconds(double x) =>
+        _view.ToSeconds((x - ThumbWidth) / TimelineSpan);
 
     private void OnTimelineSizeChanged(object sender, SizeChangedEventArgs e) => UpdateTrimUi();
 
@@ -296,6 +307,56 @@ public partial class VideoEditorWindow : Window
         Media.Position = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, Math.Max(0, _durationSec)));
         UpdatePlayhead();
         UpdateTimeLabel();
+    }
+
+    /// <summary>
+    /// The wheel zooms the strip about the pointer; Shift pans instead. Direct manipulation, so
+    /// it lands on the frame rather than easing — the pointer has to stay on the moment it is
+    /// pointing at. The animated move is the Fit button, which is a command, not a drag.
+    /// </summary>
+    private void OnTimelineWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (_exporting || _durationSec <= 0 || e.Delta == 0)
+            return;
+
+        _zoomTween?.Dispose();
+        _zoomTween = null;
+        int notches = Math.Sign(e.Delta);
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            _view = _view.Panned(-notches * _view.Span * 0.15, _durationSec);
+        }
+        else
+        {
+            double factor = notches > 0 ? TimelineView.WheelZoomFactor : 1 / TimelineView.WheelZoomFactor;
+            _view = _view.Zoomed(factor, XToSeconds(e.GetPosition(TimelineCanvas).X), _durationSec);
+        }
+
+        UpdateTrimUi();
+        e.Handled = true;
+    }
+
+    /// <summary>Zooms back out to the whole clip. Unlike the wheel this is a command with no
+    /// finger on it, so it eases rather than cutting.</summary>
+    private void OnZoomFit(object sender, RoutedEventArgs e)
+    {
+        if (_durationSec <= 0)
+            return;
+
+        TimelineView from = _view;
+        TimelineView to = TimelineView.Full(_durationSec);
+        _zoomTween?.Dispose();
+        _zoomTween = Motion.Run(
+            Motion.SwapMs,
+            Motion.EaseOutCubic,
+            amount =>
+            {
+                if (_closed)
+                    return;
+                _view = TimelineView.Lerp(from, to, amount);
+                UpdateTrimUi();
+            },
+            () => _zoomTween = null);
     }
 
     private void OnTrimStartDrag(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
@@ -403,6 +464,8 @@ public partial class VideoEditorWindow : Window
     {
         _trimStartSec = range.StartSeconds;
         _trimEndSec = range.EndSeconds;
+        // Nudging a handle off the visible slice would leave it un-nudgeable.
+        _view = _view.Containing(previewSeconds, _durationSec);
         Media.Position = TimeSpan.FromSeconds(previewSeconds);
         UpdateTrimUi();
         UpdateTimeLabel();
@@ -440,6 +503,13 @@ public partial class VideoEditorWindow : Window
         if (TrimRangeLabel is not null) TrimRangeLabel.Text = FormatTime(Math.Max(0, _trimEndSec - _trimStartSec));
 
         UpdateOutputSummary(); // the estimate is a function of the trimmed duration
+        if (BtnZoomFit is not null)
+        {
+            BtnZoomFit.Visibility = _durationSec > 0 && !_view.IsFull(_durationSec)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        LayOutFilmstrip();
         UpdatePlayhead();
     }
 
@@ -487,7 +557,9 @@ public partial class VideoEditorWindow : Window
             }
 
             if (_closed) return;
-            RenderFilmstrip(images, thumbWidth, thumbHeight);
+            _frameImages = images;
+            _frameHeight = thumbHeight;
+            LayOutFilmstrip();
         }
         catch (Exception ex)
         {
@@ -525,26 +597,40 @@ public partial class VideoEditorWindow : Window
         }
     }
 
-    private void RenderFilmstrip(
-        IReadOnlyList<System.Windows.Media.Imaging.BitmapImage?> images, int thumbWidth, int thumbHeight)
+    /// <summary>
+    /// Lays the sampled frames across the strip at the times they were taken from, mapped
+    /// through the current view — so zooming in stretches the tiles that are still on screen
+    /// instead of re-sampling a video that may no longer be open.
+    /// </summary>
+    private void LayOutFilmstrip()
     {
-        FilmstripItems.Items.Clear();
-        if (images.Count == 0) return;
+        if (FilmstripItems is null || TimelineTrack is null)
+            return;
 
-        // Tile thumbnails left-to-right across the full track width.
-        double span = Math.Max(thumbWidth, TimelineTrack.ActualWidth);
-        double step = span / images.Count;
-        for (int i = 0; i < images.Count; i++)
+        FilmstripItems.Items.Clear();
+        if (_frameImages.Count == 0 || _durationSec <= 0)
+            return;
+
+        double slice = _durationSec / _frameImages.Count;
+        for (int i = 0; i < _frameImages.Count; i++)
         {
-            if (images[i] is null) continue;
+            if (_frameImages[i] is null)
+                continue;
+
+            double startSeconds = i * slice;
+            double left = SecondsToXUnclamped(startSeconds);
+            double right = SecondsToXUnclamped(startSeconds + slice);
+            if (right <= 0 || left >= TimelineTrack.ActualWidth)
+                continue; // scrolled out of the visible slice
+
             var image = new System.Windows.Controls.Image
             {
-                Source = images[i],
-                Width = step + 1, // +1 avoids hairline gaps between tiles
-                Height = thumbHeight,
+                Source = _frameImages[i],
+                Width = Math.Max(1, right - left) + 1, // +1 avoids hairline gaps between tiles
+                Height = _frameHeight,
                 Stretch = System.Windows.Media.Stretch.UniformToFill,
             };
-            Canvas.SetLeft(image, i * step);
+            Canvas.SetLeft(image, left);
             Canvas.SetTop(image, 0);
             FilmstripItems.Items.Add(image);
         }
