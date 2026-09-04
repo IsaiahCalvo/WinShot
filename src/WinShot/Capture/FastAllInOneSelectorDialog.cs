@@ -807,6 +807,25 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     internal void ConfirmFullscreen() =>
         Confirm(new SD.Rectangle(0, 0, _vs.Width, _vs.Height));
 
+    /// <summary>
+    /// Expand to full size: the size-bar glyph that always looked like this now does it. It
+    /// SELECTS the whole desktop rather than capturing it, so the region is still yours to
+    /// trim before you confirm.
+    /// </summary>
+    internal void SelectWholeScreen() => ApplyExactSize(_vs.Width, _vs.Height);
+
+    /// <summary>
+    /// Reshapes the pending region to a newly chosen ratio, keeping its top-left and width.
+    /// Picking 16:9 and watching the selection you already framed stay 4:3 until you redrew
+    /// it would make the menu look broken.
+    /// </summary>
+    internal void ApplyAspectRatio(double? ratio)
+    {
+        if (ratio is not double value || value <= 0 || _pendingPx is not SD.Rectangle pending)
+            return;
+        ApplyExactSize(pending.Width, AspectRatioPresets.HeightFor(pending.Width, value));
+    }
+
     internal void ApplyExactSize(int width, int height)
     {
         if (width < 1 || height < 1)
@@ -1307,12 +1326,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         private SD.Rectangle _mainBar;       // client-space bounds of the mode bar
         private SD.Rectangle _sizeBar;       // client-space bounds of the size bar
-        private SD.Rectangle _expandRect;    // aspect-lock toggle inside the size bar
-        private SD.Rectangle _cropRect;      // confirm/crop button inside the size bar
+        private SD.Rectangle _ratioRect;     // aspect-ratio menu inside the size bar
+        private SD.Rectangle _expandRect;    // expand-to-full-size inside the size bar
+        private SD.Rectangle _cropRect;      // confirm button inside the size bar
         private SD.Rectangle _xLabelRect;    // the "×" between the size fields
         private int _selectedMode;
         private int _hoverIndex = -1;
-        private bool _aspectLocked;
+        private int _ratioIndex;             // index into AspectRatioPresets.All; 0 = Freeform
+        private double _badgeFade = 1d;      // 0..1 ramp on the ratio badge after a change
+        private IDisposable? _badgeTween;
 
         public ToolbarForm(FastAllInOneSelectorDialog owner)
         {
@@ -1378,20 +1400,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         protected override bool ShowWithoutActivation => true;
 
-        /// <summary>Locked aspect ratio when the expand toggle is on (drives drag/exact-size).</summary>
-        public double? AspectRatio
-        {
-            get
-            {
-                if (!_aspectLocked)
-                    return null;
-                if (!int.TryParse(_widthBox.Text, out int w) || !int.TryParse(_heightBox.Text, out int h))
-                    return null;
-                if (w < 1 || h < 1)
-                    return null;
-                return (double)w / h;
-            }
-        }
+        /// <summary>
+        /// The chosen preset ratio, which constrains the live drag. Freeform returns null.
+        /// The width and height fields still set an exact size with Enter — a ratio picked by
+        /// name beats a ratio inferred from two numbers someone had to know first.
+        /// </summary>
+        public double? AspectRatio => AspectRatioPresets.At(_ratioIndex).Ratio;
 
         public void PositionWithin(SD.Rectangle monitorBounds)
         {
@@ -1471,14 +1485,62 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         /// <summary>Repaints the confirm button when the pending region appears/disappears.</summary>
         public void RefreshPendingState() => Invalidate(_sizeBar);
 
-        /// <summary>Clears the aspect-lock toggle between pooled sessions.</summary>
+        /// <summary>Clears the chosen ratio between pooled sessions — a stale one made every
+        /// new drag snap to the previous session's shape.</summary>
         public void ResetAspectLock()
         {
-            if (!_aspectLocked)
+            _badgeTween?.Dispose();
+            _badgeTween = null;
+            _badgeFade = 1d;
+            if (_ratioIndex == 0)
                 return;
-            _aspectLocked = false;
+            _ratioIndex = 0;
             Invalidate();
         }
+
+        /// <summary>The ratio list, opened from the crop cell.</summary>
+        private void ShowRatioMenu()
+        {
+            var menu = new WF.ContextMenuStrip
+            {
+                Renderer = new DarkDropDown.DarkMenuRenderer(),
+                ShowImageMargin = false,
+            };
+            for (int i = 0; i < AspectRatioPresets.All.Count; i++)
+            {
+                int index = i;
+                var item = new WF.ToolStripMenuItem(AspectRatioPresets.All[i].Label)
+                {
+                    Checked = index == _ratioIndex,
+                };
+                item.Click += (_, _) => ChooseRatio(index);
+                menu.Items.Add(item);
+            }
+            menu.Closed += (_, _) => menu.Dispose();
+            menu.Show(this, new SD.Point(_ratioRect.Left, _ratioRect.Bottom + U(4)));
+        }
+
+        private void ChooseRatio(int index)
+        {
+            if (_ratioIndex == index)
+                return;
+            _ratioIndex = index;
+            _owner.ApplyAspectRatio(AspectRatioPresets.At(index).Ratio);
+
+            // The badge fades up rather than blinking into place — it is the only thing on
+            // the bar that says what shape the next drag will take.
+            _badgeTween?.Dispose();
+            _badgeFade = 0d;
+            _badgeTween = WinShot.Core.Motion.Run(
+                WinShot.Core.Motion.QuickMs,
+                WinShot.Core.Motion.EaseOutCubic,
+                progress => { _badgeFade = progress; Invalidate(_sizeBar); },
+                () => _badgeTween = null);
+            Invalidate();
+        }
+
+        /// <summary>The chosen ratio index, for tests.</summary>
+        internal int RatioIndex => _ratioIndex;
 
         // ---------------------------------------------------------------- layout
 
@@ -1512,6 +1574,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _heightBox.SetBounds(sx, fieldY, fieldW, fieldH);
             sx += fieldW + U(8);
 
+            _ratioRect = new SD.Rectangle(sx, (barHeight - U(40)) / 2, iconW, U(40));
+            sx += iconW + U(4);
             _expandRect = new SD.Rectangle(sx, (barHeight - U(40)) / 2, iconW, U(40));
             sx += iconW + U(4);
             _cropRect = new SD.Rectangle(sx, (barHeight - U(40)) / 2, iconW, U(40));
@@ -1611,16 +1675,41 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
 
-            // Expand / aspect-lock toggle (diagonal arrows). Accent-filled while locked.
-            bool expandHot = _hoverIndex == HoverExpand;
-            if (_aspectLocked || expandHot)
+            // Aspect-ratio menu: crop glyph with the chosen ratio as a badge under it.
+            AspectRatioPreset preset = AspectRatioPresets.At(_ratioIndex);
+            bool ratioChosen = preset.Ratio is not null;
+            if (ratioChosen || _hoverIndex == HoverRatio)
             {
-                using var path = GdiPaths.RoundedRect(_expandRect, 8);
-                using var brush = new SD.SolidBrush(_aspectLocked ? SelectedFill : HoverFill);
+                using var path = GdiPaths.RoundedRect(_ratioRect, 8);
+                using var brush = new SD.SolidBrush(ratioChosen ? SelectedFill : HoverFill);
                 g.FillPath(brush, path);
             }
-            WF.TextRenderer.DrawText(g, "", _glyphFont, _expandRect,
-                _aspectLocked ? SD.Color.White : GlyphColor,
+            var ratioGlyphRect = _ratioRect;
+            if (ratioChosen)
+                ratioGlyphRect.Height -= U(11); // make room for the badge under the glyph
+            WF.TextRenderer.DrawText(g, "", _glyphFont, ratioGlyphRect,
+                ratioChosen ? SD.Color.White : GlyphColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+            if (ratioChosen)
+            {
+                int badgeAlpha = (int)Math.Round(255 * Math.Clamp(_badgeFade, 0d, 1d));
+                var badgeRect = new SD.Rectangle(
+                    _ratioRect.X, _ratioRect.Bottom - U(13), _ratioRect.Width, U(11));
+                WF.TextRenderer.DrawText(g, preset.Badge, _labelFont, badgeRect,
+                    SD.Color.FromArgb(badgeAlpha, SD.Color.White),
+                    WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                    WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+            }
+
+            // Expand to full size (diagonal arrows) — it finally does what it looks like.
+            if (_hoverIndex == HoverExpand)
+            {
+                using var path = GdiPaths.RoundedRect(_expandRect, 8);
+                using var brush = new SD.SolidBrush(HoverFill);
+                g.FillPath(brush, path);
+            }
+            WF.TextRenderer.DrawText(g, "", _glyphFont, _expandRect, GlyphColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
 
@@ -1635,7 +1724,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 g.FillPath(brush, path);
             }
             var cropGlyphRect = _cropRect;
-            WF.TextRenderer.DrawText(g, "", _glyphFont, cropGlyphRect,
+            // A check, not a second crop glyph: the crop glyph is the ratio menu now.
+            WF.TextRenderer.DrawText(g, "", _glyphFont, cropGlyphRect,
                 cropEnabled ? GlyphColor : SD.Color.FromArgb(0x60, GlyphColor),
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
@@ -1653,6 +1743,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         private const int HoverExpand = 1000;
         private const int HoverCrop = 1001;
+        private const int HoverRatio = 1002;
 
         private void OnBarMouseMove(object? sender, WF.MouseEventArgs e)
         {
@@ -1670,7 +1761,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // Tooltips only for the two caption-less controls; the mode buttons already
             // carry visible captions under their glyphs.
             _toolTip.SetToolTip(this,
-                index == HoverExpand ? "Lock aspect ratio"
+                index == HoverRatio ? "Aspect ratio"
+                : index == HoverExpand ? "Select the whole screen"
                 : index == HoverCrop ? (cropDisabled ? "Capture selected region (draw or restore one first)" : "Capture selected region")
                 : null);
             Invalidate();
@@ -1682,10 +1774,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 return;
 
             int hit = HitTest(e.Location);
+            if (hit == HoverRatio)
+            {
+                ShowRatioMenu();
+                return;
+            }
             if (hit == HoverExpand)
             {
-                _aspectLocked = !_aspectLocked;
-                Invalidate();
+                _owner.SelectWholeScreen();
                 return;
             }
             if (hit == HoverCrop)
@@ -1710,6 +1806,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 if (_buttons[i].Bounds.Contains(p))
                     return i;
             }
+            if (_ratioRect.Contains(p))
+                return HoverRatio;
             if (_expandRect.Contains(p))
                 return HoverExpand;
             if (_cropRect.Contains(p))
@@ -1754,6 +1852,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 _chipTween?.Dispose();
                 _chipTween = null;
+                _badgeTween?.Dispose();
+                _badgeTween = null;
                 _glyphFont.Dispose();
                 _tipFont.Dispose();
                 _ocrFont.Dispose();
