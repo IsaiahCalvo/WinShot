@@ -876,9 +876,7 @@ public partial class App : Application
             case PostCaptureAction.Pin:
                 try
                 {
-                    var win = new FastPinWindow(bmp, _settings);
-                    PerfLog.TrackFirstShown(win, "pin window");
-                    win.Show();
+                    ShowPin(bmp);
                 }
                 catch { bmp.Dispose(); throw; }
                 break;
@@ -1544,17 +1542,35 @@ public partial class App : Application
         if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
             return;
 
-        var win = new FastPinWindow(bmp, _settings);
-        PerfLog.TrackFirstShown(win, "pin window");
-        win.Show();
+        ShowPin(bmp);
     }
 
     private void PinFromOverlay(FastQuickActionsWindow overlay)
     {
-        var win = new FastPinWindow(overlay.CloneImage(), _settings);
-        PerfLog.TrackFirstShown(win, "pin window");
-        win.Show();
+        ShowPin(overlay.CloneImage());
         overlay.Close();
+    }
+
+    /// <summary>
+    /// Every pin in the app is created here, so its pencil chip is wired in exactly one
+    /// place. Five call sites had each grown their own two-line copy of this.
+    /// </summary>
+    private FastPinWindow ShowPin(SD.Bitmap image, string perfLabel = "pin window")
+    {
+        var win = new FastPinWindow(image, _settings);
+        win.EditRequested += OpenEditorFromPin;
+        PerfLog.TrackFirstShown(win, perfLabel);
+        win.Show();
+        return win;
+    }
+
+    /// <summary>The pin's pencil chip: the handoff Annotate already performs from the card,
+    /// with the pin left on screen and the editor given its own copy.</summary>
+    private void OpenEditorFromPin(SD.Bitmap image)
+    {
+        var win = EditorWindow.CreateForCapture(image, _settings, _history);
+        TrackFirstRender(win, "editor window");
+        win.Show();
     }
 
     private async void OcrFromOverlay(FastQuickActionsWindow overlay)
@@ -1605,11 +1621,7 @@ public partial class App : Application
     private async void PinFromHistory(string path)
     {
         if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
-        {
-            var win = new FastPinWindow(bmp, _settings);
-            PerfLog.TrackFirstShown(win, "pin window");
-            win.Show();
-        }
+            ShowPin(bmp);
     }
 
     private async void RestoreFromHistory(string path)
@@ -1625,9 +1637,7 @@ public partial class App : Application
             if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
                 continue;
 
-            var win = new FastPinWindow(bmp, _settings);
-            PerfLog.TrackFirstShown(win, "history pin window");
-            win.Show();
+            ShowPin(bmp, "history pin window");
         }
     }
 

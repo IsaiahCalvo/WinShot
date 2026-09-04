@@ -253,26 +253,27 @@ public class PinInteractionTests
             pin.CreateControl();
             SetField(pin, "_mouseInside", true);
 
-            Assert.Equal(new[] { 0, 1, 2, 3 }, VisibleButtons(pin));
+            Assert.Equal(new[] { 0, 1, 2, 3, 4 }, VisibleButtons(pin));
             SetLocked(pin, true);
-            Assert.Equal(new[] { 2, 3 }, VisibleButtons(pin));
+            Assert.Equal(new[] { 3, 4 }, VisibleButtons(pin));
 
             // Lock and Close are hit-testable; Copy and Save are not offered at all.
-            SD.Rectangle lockChip = ButtonBounds(pin, 2);
-            SD.Rectangle closeChip = ButtonBounds(pin, 3);
+            SD.Rectangle lockChip = ButtonBounds(pin, 3);
+            SD.Rectangle closeChip = ButtonBounds(pin, 4);
             Assert.False(lockChip.IsEmpty);
             Assert.False(closeChip.IsEmpty);
             Assert.True(ButtonBounds(pin, 0).IsEmpty);
             Assert.True(ButtonBounds(pin, 1).IsEmpty);
+            Assert.True(ButtonBounds(pin, 2).IsEmpty);
             Assert.False(lockChip.IntersectsWith(closeChip));
 
-            Assert.Equal(2, HitTest(pin, Centre(lockChip)));
-            Assert.Equal(3, HitTest(pin, Centre(closeChip)));
+            Assert.Equal(3, HitTest(pin, Centre(lockChip)));
+            Assert.Equal(4, HitTest(pin, Centre(closeChip)));
             Assert.Equal(-1, HitTest(pin, new SD.Point(pin.ClientSize.Width / 2, pin.ClientSize.Height - 4)));
 
             // Unlocking puts everything back.
             SetLocked(pin, false);
-            Assert.Equal(new[] { 0, 1, 2, 3 }, VisibleButtons(pin));
+            Assert.Equal(new[] { 0, 1, 2, 3, 4 }, VisibleButtons(pin));
         });
     }
 
@@ -373,6 +374,34 @@ public class PinInteractionTests
         });
     }
 
+    /// <summary>
+    /// The pencil chip hands the editor a copy and leaves the pin alone. Both halves matter:
+    /// the pin is still painting from its own bitmap, and editing a reference is a second
+    /// look at it rather than a replacement for it.
+    /// </summary>
+    [Fact]
+    public void TheEditChipHandsOutACopyAndLeavesThePinUp()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(120, 80);
+            using var pin = new FastPinWindow(bitmap, new SettingsService());
+            pin.CreateControl();
+
+            SD.Bitmap? handed = null;
+            pin.EditRequested += image => handed = image;
+            typeof(FastPinWindow)
+                .GetMethod("RaiseEditRequested", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(pin, null);
+
+            Assert.NotNull(handed);
+            Assert.NotSame(bitmap, handed);
+            Assert.Equal(bitmap.Size, handed!.Size);
+            Assert.False(pin.IsDisposed);
+            handed.Dispose();
+        });
+    }
+
     private static void SetLocked(FastPinWindow pin, bool locked)
         => typeof(FastPinWindow)
             .GetMethod("SetLocked", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -464,10 +493,10 @@ public class PinInteractionTests
 
             WF.AccessibleObject accessible = pin.AccessibilityObject;
             Assert.Equal("Pinned screenshot", accessible.Name);
-            Assert.Equal(4, accessible.GetChildCount());
-            Assert.Equal(new[] { "Copy", "Save", "Lock", "Close" },
-                Enumerable.Range(0, 4).Select(i => accessible.GetChild(i)!.Name));
-            Assert.All(Enumerable.Range(0, 4), i =>
+            Assert.Equal(5, accessible.GetChildCount());
+            Assert.Equal(new[] { "Edit", "Copy", "Save", "Lock", "Close" },
+                Enumerable.Range(0, 5).Select(i => accessible.GetChild(i)!.Name));
+            Assert.All(Enumerable.Range(0, 5), i =>
             {
                 WF.AccessibleObject child = accessible.GetChild(i)!;
                 Assert.Equal(WF.AccessibleRole.PushButton, child.Role);
@@ -475,7 +504,7 @@ public class PinInteractionTests
                 Assert.Equal("Press", child.DefaultAction);
             });
 
-            accessible.GetChild(1)!.Select(WF.AccessibleSelection.TakeFocus);
+            accessible.GetChild(2)!.Select(WF.AccessibleSelection.TakeFocus);
             Assert.Equal("Save", accessible.GetFocused()!.Name);
 
             Assert.True(InvokeCommandKey(pin, WF.Keys.Tab));

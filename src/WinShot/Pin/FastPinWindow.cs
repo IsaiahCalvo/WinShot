@@ -9,6 +9,11 @@ namespace WinShot.Pin;
 
 public sealed class FastPinWindow : WF.Form
 {
+    /// <summary>The pin wants to be reopened in the editor. Raised with a private copy of the
+    /// image, so the pin stays on screen and keeps its own bitmap; App routes it through the
+    /// same handoff the quick-actions card's Annotate uses.</summary>
+    public event Action<SD.Bitmap>? EditRequested;
+
     private const int WmNclbuttondown = 0x00A1;
     private const int WmNchittest = 0x0084;
     private const int WmSizing = 0x0214;
@@ -130,6 +135,11 @@ public sealed class FastPinWindow : WF.Form
             Renderer = new DarkDropDown.DarkMenuRenderer(),
             ShowImageMargin = false,
         };
+        var editItem = new WF.ToolStripMenuItem("Edit", null, (_, _) => RaiseEditRequested())
+        {
+            ToolTipText = "Open the pinned screenshot in the editor",
+        };
+        _menu.Items.Add(editItem);
         var copyItem = new WF.ToolStripMenuItem("Copy", null, async (_, _) => await CopyAsync())
         {
             ToolTipText = "Copy the pinned screenshot to the clipboard",
@@ -152,10 +162,16 @@ public sealed class FastPinWindow : WF.Form
         ContextMenuStrip = _menu;
 
         // The hover toolbar reuses the exact actions the context menu already exposes.
+        _toolbarButtons.Add(new ToolbarButton("quick-access-edit.svg", "Edit", RaiseEditRequested));
         _toolbarButtons.Add(new ToolbarButton("quick-access-copy.svg", "Copy", () => _ = CopyAsync()));
         _toolbarButtons.Add(new ToolbarButton("quick-access-save.svg", "Save", () => _ = SaveAsync()));
         _toolbarButtons.Add(new ToolbarButton("quick-access-unlock.svg", "Lock", () => SetLocked(!_locked)));
         _toolbarButtons.Add(new ToolbarButton("quick-access-close.svg", "Close", Close));
+
+        _allButtons = Enumerable.Range(0, _toolbarButtons.Count).ToArray();
+        _lockedButtons = _allButtons
+            .Where(i => _toolbarButtons[i].Tip is "Lock" or "Close")
+            .ToArray();
 
         var area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
         _scale = Math.Min(1.0, Math.Min(area.Width * 0.6 / _naturalWidth, area.Height * 0.6 / _naturalHeight));
@@ -411,10 +427,12 @@ public sealed class FastPinWindow : WF.Form
     /// Which toolbar buttons are on offer. A locked pin shows only Lock and Close: everything
     /// else it could do would need the click that lock exists to pass through.
     /// </summary>
-    private int[] VisibleButtons => _locked ? LockedButtons : AllButtons;
+    private int[] VisibleButtons => _locked ? _lockedButtons : _allButtons;
 
-    private static readonly int[] AllButtons = { 0, 1, 2, 3 };
-    private static readonly int[] LockedButtons = { 2, 3 };
+    // Derived from the button list rather than written out, so inserting an action cannot
+    // silently turn "Lock and Close" into something else.
+    private int[] _allButtons = Array.Empty<int>();
+    private int[] _lockedButtons = Array.Empty<int>();
 
     private SD.Rectangle ToolbarBounds()
     {
@@ -936,6 +954,27 @@ public sealed class FastPinWindow : WF.Form
     /// in WM_NCHITTEST instead, which lets the lock and close chips stay hit-testable while
     /// every other pixel passes clicks through exactly as before.
     /// </summary>
+    /// <summary>
+    /// Hands the editor its own copy and leaves the pin where it is. Editing a pinned
+    /// reference is a second look at it, not a replacement for it -- and the pin's bitmap is
+    /// still being painted from.
+    /// </summary>
+    private void RaiseEditRequested()
+    {
+        Action<SD.Bitmap>? handler = EditRequested;
+        if (handler is null)
+            return;
+
+        try
+        {
+            handler(CaptureService.CloneBitmap(_image));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not open the pinned screenshot in the editor", ex);
+        }
+    }
+
     private void SetLocked(bool locked)
     {
         if (_locked == locked)
