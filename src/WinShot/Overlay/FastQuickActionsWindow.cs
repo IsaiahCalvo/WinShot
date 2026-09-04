@@ -304,6 +304,21 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     public SD.Bitmap CloneImage() => CaptureService.CloneBitmap(_image);
 
+    /// <summary>The card's own rounded rectangle in screen pixels — where a pin grows from.</summary>
+    internal SD.Rectangle CardScreenBounds =>
+        IsHandleCreated && !IsDisposed ? RectangleToScreen(_cardRect) : Bounds;
+
+    /// <summary>
+    /// Closes without the exit flight. For a handoff where something else takes the card's
+    /// place on screen: two copies of the same capture, one growing and one flying off,
+    /// reads as a duplicate rather than as one object moving.
+    /// </summary>
+    internal void CloseWithoutMotion()
+    {
+        _allowImmediateClose = true;
+        Close();
+    }
+
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);

@@ -1013,6 +1013,57 @@ public class QuickAccessOverlayInteractionTests
         }
     }
 
+    [Fact]
+    public void APinGrowsOutOfTheCardItCameFrom()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var card = new FastQuickActionsWindow(bitmap, settings);
+            card.CreateControl();
+            SD.Rectangle origin = card.CardScreenBounds;
+
+            using var pin = new WinShot.Pin.FastPinWindow(card.CloneImage(), settings);
+            pin.CreateControl();
+            SD.Rectangle settled = pin.Bounds;
+            pin.GrowFrom(origin);
+
+            pin.Show();
+            Assert.Equal(origin, pin.Bounds);
+
+            PumpUntil(() => Motion.Holders == 0 && pin.Bounds == settled, 4000);
+
+            Assert.Equal(settled, pin.Bounds);
+            Assert.Equal(0, Motion.Holders);
+            pin.Hide();
+        });
+    }
+
+    [Fact]
+    public void ClosingTheCardForAPinSkipsTheExitFlight()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            var card = new FastQuickActionsWindow(bitmap, settings);
+            card.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            card.CloseWithoutMotion();
+
+            // Two copies of the same capture, one growing and one flying off, reads as a
+            // duplicate rather than as one object moving.
+            Assert.False(IsLeaving(card));
+            Assert.True(card.IsDisposed);
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);

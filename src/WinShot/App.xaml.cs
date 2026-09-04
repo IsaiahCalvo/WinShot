@@ -1414,9 +1414,12 @@ public partial class App : Application
     private void PinFromOverlay(FastQuickActionsWindow overlay)
     {
         var win = new FastPinWindow(overlay.CloneImage(), _settings);
+        // The pin is the card, relocated: it grows out of the card's own rectangle, and the
+        // card goes without its exit flight so there are never two of the same capture.
+        win.GrowFrom(overlay.CardScreenBounds);
         PerfLog.TrackFirstShown(win, "pin window");
         win.Show();
-        overlay.Close();
+        overlay.CloseWithoutMotion();
     }
 
     private async void OcrFromOverlay(FastQuickActionsWindow overlay)

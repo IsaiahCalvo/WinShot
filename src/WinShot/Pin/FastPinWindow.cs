@@ -1,5 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Overlay;
 using SD = System.Drawing;
@@ -79,6 +80,9 @@ public sealed class FastPinWindow : WF.Form
     private int _focusButton = -1;
     private string? _readoutText;
     private SD.Point _readoutPoint;
+
+    private SD.Rectangle? _growFrom;
+    private IDisposable? _growMotion;
 
     public FastPinWindow(SD.Bitmap image, SettingsService? settings = null)
     {
@@ -783,6 +787,58 @@ public sealed class FastPinWindow : WF.Form
         }
 
         Marshal.StructureToPtr(rc, m.LParam, false);
+    }
+
+    /// <summary>
+    /// Makes the pin grow out of <paramref name="origin"/> (screen pixels) the first time it
+    /// is shown. The pin *is* the quick-actions card, relocated — without this it simply
+    /// appeared in the middle of the screen while the card vanished in a corner, and nothing
+    /// connected the two. Call before <see cref="WF.Form.Show"/>.
+    /// </summary>
+    public void GrowFrom(SD.Rectangle origin) => _growFrom = origin;
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible)
+            BeginGrowMotion();
+    }
+
+    private void BeginGrowMotion()
+    {
+        if (_growFrom is not { Width: > 1, Height: > 1 } origin || !IsHandleCreated || IsDisposed)
+            return;
+
+        _growFrom = null;
+        SD.Rectangle target = Bounds;
+        if (origin == target)
+            return;
+
+        var tween = new RectangleTween();
+        tween.Retarget(origin, target);
+        Bounds = origin;
+        _growMotion?.Dispose();
+        _growMotion = Motion.Run(
+            Motion.EnterDurationMs,
+            Motion.EaseOutCubic,
+            eased =>
+            {
+                if (IsDisposed)
+                    return;
+                Bounds = tween.Update((float)eased) ? tween.Current : target;
+            },
+            () => _growMotion = null);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // An in-flight tween holds the process-wide high-resolution clock.
+            _growMotion?.Dispose();
+            _growMotion = null;
+        }
+        base.Dispose(disposing);
     }
 
     protected override void OnResize(EventArgs e)
