@@ -402,7 +402,7 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextBody}"
                                    VerticalAlignment="Center" Opacity="0.7" Margin="{StaticResource ChipGutterMargin}"/>
-                        <TextBlock Text="Drag &amp; Drop" VerticalAlignment="Center"/>
+                        <TextBlock Text="Drag and drop" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
 

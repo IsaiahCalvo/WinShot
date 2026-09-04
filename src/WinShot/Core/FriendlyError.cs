@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace WinShot.Core;
@@ -27,13 +28,24 @@ public static class FriendlyError
         IOException => "Windows could not read or write that file. It may be open in another app.",
         System.Net.Http.HttpRequestException or System.Net.Sockets.SocketException
             => "WinShot couldn't reach the internet. Check your connection and try again.",
+        // HttpClient reports a request timeout as a TaskCanceledException wrapping a
+        // TimeoutException, so read the inner one before telling a user who waited through
+        // a network stall that they cancelled it.
+        OperationCanceledException { InnerException: TimeoutException } or TimeoutException
+            => "That took too long and was stopped.",
         // A deliberate cancel is not a timeout: TaskCanceledException derives from
         // OperationCanceledException, and the recording and export paths both throw it.
         OperationCanceledException => "That was cancelled.",
-        TimeoutException => "That took too long and was stopped.",
         OutOfMemoryException => "The image is too large to process on this PC.",
-        // GDI+ reports both a bad image and a failed encode this way.
-        ArgumentException or ExternalException => "The image could not be processed. Try the capture again.",
+        // GDI+ reports both a bad image and a failed encode this way - as the base types
+        // exactly, never as a derived one. The derived types are not about images at all:
+        // Win32Exception is a failed Process.Start or a denied API call, and
+        // ArgumentNullException/ArgumentOutOfRangeException are ordinary bugs. Matching the
+        // bases loosely told a user whose shortcut target had been uninstalled that
+        // "the image could not be processed", on a path with no image in it.
+        ExternalException and not Win32Exception => "The image could not be processed. Try the capture again.",
+        ArgumentException when ex.GetType() == typeof(ArgumentException)
+            => "The image could not be processed. Try the capture again.",
         _ => "Something went wrong. The details are in the log.",
     };
 }

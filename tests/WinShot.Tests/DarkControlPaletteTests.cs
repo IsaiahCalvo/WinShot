@@ -269,6 +269,34 @@ public class DarkControlPaletteTests
     });
 
     /// <summary>
+    /// Text brushes have to clear 4.5:1 on every ground the app puts them on. The failure
+    /// line on a dialog is the case that broke: AnnotationRedBrush is a stroke/fill colour
+    /// that clears the bar on WindowBg (4.99:1) and misses it on the ToolbarBg a dialog card
+    /// is painted with (4.43:1) - so the one message the user has to read was the one below
+    /// the bar. TextErrorBrush exists to be red that is type rather than fill.
+    /// </summary>
+    [Fact]
+    public void Theme_TextBrushesClearTheBarOnEveryGroundTheySitOn() => OnTheme(theme =>
+    {
+        Color window = ((SolidColorBrush)theme["WindowBgBrush"]).Color;
+
+        foreach (string textKey in new[] { "TextPrimaryBrush", "TextSecondaryBrush", "InfoBrush", "TextErrorBrush" })
+        {
+            Color text = ((SolidColorBrush)theme[textKey]).Color;
+            foreach (string groundKey in new[] { "WindowBgBrush", "ToolbarBgBrush", "SurfaceBrush", "ElevatedBrush" })
+            {
+                Color raw = ((SolidColorBrush)theme[groundKey]).Color;
+                Color ground = raw.A == 255 ? raw : Over(raw, window);
+                Color over = text.A == 255 ? text : Over(text, ground);
+
+                Assert.True(
+                    Contrast(over, ground) >= 4.5d,
+                    $"{textKey} on {groundKey} is {Contrast(over, ground):0.00}:1");
+            }
+        }
+    });
+
+    /// <summary>
     /// Every FontSize the theme sets is a step on the type scale or the glyph scale.
     /// The first migration only rewrote the attribute form and left ten Setters behind,
     /// so the file that DEFINES the scale was the biggest place still inventing numbers.
@@ -437,6 +465,47 @@ public class DarkControlPaletteTests
     /// vocabulary. Colour drifted exactly this way once already (ThemePalette against the
     /// dictionary it claims to mirror); this pins the timings before they can.
     /// </summary>
+    /// <summary>
+    /// The animation-off tests build a standalone dictionary and call ApplyAnimationPreference
+    /// directly, so nothing exercised the step before it: EnsureLoaded has to FIND the
+    /// dictionary App.xaml already merged, by comparing Source.OriginalString against
+    /// ThemePath. If that comparison stops matching — a Uri normalisation, a path move, a
+    /// deeper merge — EnsureLoaded adds a second copy, zeroes that copy, and every window
+    /// keeps resolving against the original: animation-off silently stops working while
+    /// every existing test stays green.
+    /// </summary>
+    [Fact]
+    public void Theme_EnsureLoadedFindsTheMergedDictionaryInsteadOfAddingASecond() => OnTheme(_ =>
+    {
+        // Shaped exactly like App.xaml: Application.Resources is a ResourceDictionary whose
+        // MergedDictionaries holds Theme.xaml, so the entry is already one level down.
+        var wrapper = new ResourceDictionary();
+        wrapper.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri(ThemeResources.ThemePath, UriKind.Absolute),
+        });
+        var appResources = new ResourceDictionary();
+        appResources.MergedDictionaries.Add(wrapper);
+
+        ResourceDictionary? found = ThemeResources.Find(appResources);
+
+        Assert.NotNull(found);
+        Assert.Equal(ThemeResources.ThemePath, found!.Source?.OriginalString);
+        // And it does not invent one that was never merged.
+        Assert.Null(ThemeResources.Find(new ResourceDictionary()));
+    });
+
+    /// <summary>The WinForms half of the same token: a toast's failure line and a WPF
+    /// dialog's failure line have to be the same red, or the two stacks drift apart.</summary>
+    [Fact]
+    public void Theme_TextErrorMatchesOnBothStacks() => OnTheme(theme =>
+    {
+        Color wpf = ((SolidColorBrush)theme["TextErrorBrush"]).Color;
+        SD.Color forms = ThemePalette.TextError;
+
+        Assert.Equal((wpf.R, wpf.G, wpf.B), (forms.R, forms.G, forms.B));
+    });
+
     [Fact]
     public void Theme_MotionDurationsMatchTheMotionConstants() => OnTheme(theme =>
     {

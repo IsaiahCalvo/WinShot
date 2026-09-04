@@ -41,14 +41,19 @@ public sealed class ToastWindow : WF.Form
     private const int BodyLineH = 22;
     private const int BodyMaxLines = 3;
 
+    /// <summary>Well past what three rows can show, and what bounds Trim's walk.</summary>
+    private const int MaxChars = 512;
+
     /// <summary>The body column: the 300-DIP card less the glyph gutter and the right pad.</summary>
     internal const int BodyWidthDip = 300 - 42 - 14;
 
     private IDisposable? _motion;
     private bool _exiting;
     private SD.Point _restLocation;
-    private readonly string _body;
+    private string _body;
     private double _entranceAmount;
+    private readonly WF.Label _glyphLabel;
+    private readonly WF.Label _previewLabel;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
     // the anchor monitor or labels truncate on 125%/150% displays.
@@ -94,11 +99,11 @@ public sealed class ToastWindow : WF.Form
 
         // The severity glyph is the only thing that separates "Saved" from "Save failed" at
         // a glance, so it gets its own colour as well as its own shape.
-        var glyphLabel = Label(GlyphOf(severity), 14, 14, 22, ThemePalette.TextTitlePt, ColorOf(severity), height: 24);
-        glyphLabel.Font = ThemePalette.IconFont(ThemePalette.TextTitlePt);
-        glyphLabel.AccessibleRole = WF.AccessibleRole.Graphic;
-        glyphLabel.AccessibleName = severity.ToString();
-        Controls.Add(glyphLabel);
+        _glyphLabel = Label(GlyphOf(severity), 14, 14, 22, ThemePalette.TextTitlePt, ColorOf(severity), height: 24);
+        _glyphLabel.Font = ThemePalette.IconFont(ThemePalette.TextTitlePt);
+        _glyphLabel.AccessibleRole = WF.AccessibleRole.Graphic;
+        _glyphLabel.AccessibleName = severity.ToString();
+        Controls.Add(_glyphLabel);
 
         const int textX = 42;
         int textW = width - textX - 14;
@@ -118,13 +123,13 @@ public sealed class ToastWindow : WF.Form
         _body = Trim(preview, textW);
         int bodyLines = LinesNeeded(_body, textW);
         int bodyH = BodyLineH + ((bodyLines - 1) * BodyLineH);
-        var previewLabel = Label(_body, textX, 38, textW, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary, height: bodyH);
-        previewLabel.AutoEllipsis = true;
-        previewLabel.UseMnemonic = false;
-        previewLabel.TextAlign = bodyLines > 1 ? SD.ContentAlignment.TopLeft : SD.ContentAlignment.MiddleLeft;
-        previewLabel.AccessibleName = _body;
-        previewLabel.AccessibleRole = WF.AccessibleRole.StaticText;
-        Controls.Add(previewLabel);
+        _previewLabel = Label(_body, textX, 38, textW, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary, height: bodyH);
+        _previewLabel.AutoEllipsis = true;
+        _previewLabel.UseMnemonic = false;
+        _previewLabel.TextAlign = bodyLines > 1 ? SD.ContentAlignment.TopLeft : SD.ContentAlignment.MiddleLeft;
+        _previewLabel.AccessibleName = _body;
+        _previewLabel.AccessibleRole = WF.AccessibleRole.StaticText;
+        Controls.Add(_previewLabel);
 
         int bodyBottom = 38 + bodyH;
         ClientSize = new SD.Size(S(width), S(hasOpen ? bodyBottom + 8 + 26 + 10 : bodyBottom + 10));
@@ -140,7 +145,22 @@ public sealed class ToastWindow : WF.Form
                 Size = new SD.Size(S(96), S(26)),
                 Text = "Open link",
             };
-            open.Click += (_, _) => { try { onOpen(); } catch (Exception ex) { Log.Error("Toast action failed", ex); } Close(); };
+            open.Click += (_, _) =>
+            {
+                try
+                {
+                    onOpen();
+                    Close();
+                }
+                catch (Exception ex)
+                {
+                    // Closing on a failure is the success-but-no-failure-feedback pattern:
+                    // the toast vanished and nothing opened. Say what happened on the card
+                    // that is already on screen, and hold it there long enough to read.
+                    Log.Error("Toast action failed", ex);
+                    ShowActionFailure(FriendlyError.For(ex));
+                }
+            };
             Controls.Add(open);
         }
 
@@ -201,8 +221,16 @@ public sealed class ToastWindow : WF.Form
             int lineH = Math.Max(1, two - one);
             int padding = one - lineH;
 
-            int wrapped = WF.TextRenderer.MeasureText(text, dip, column, flags).Height;
-            return Math.Max(1, (int)Math.Round((wrapped - padding) / (double)lineH));
+            SD.Size measured = WF.TextRenderer.MeasureText(text, dip, column, flags);
+            int rows = Math.Max(1, (int)Math.Round((measured.Height - padding) / (double)lineH));
+
+            // WordBreak cannot break inside a word, so one long space-free token (a saved
+            // file name) measures as a single row wider than the column and then renders
+            // clipped at the label edge with no trim applied. Charge it what it really costs,
+            // so LinesNeeded and Trim agree about it.
+            if (measured.Width > column.Width)
+                rows = Math.Max(rows, (int)Math.Ceiling(measured.Width / (double)column.Width));
+            return rows;
         }
         catch
         {
@@ -257,6 +285,27 @@ public sealed class ToastWindow : WF.Form
         {
             // UI Automation is optional; the visible toast remains the fallback.
         }
+    }
+
+    /// <summary>
+    /// The action failed. The toast becomes its own error report: the glyph and the body say
+    /// so in place, rather than the card disappearing with nothing to show for the click.
+    /// </summary>
+    private void ShowActionFailure(string message)
+    {
+        if (IsDisposed) return;
+        _dismiss.Stop();
+        _body = Trim(message);
+        _previewLabel.Text = _body;
+        _previewLabel.AccessibleName = _body;
+        _previewLabel.ForeColor = ThemePalette.TextError;
+        _glyphLabel.Text = GlyphOf(ToastSeverity.Error);
+        _glyphLabel.ForeColor = ColorOf(ToastSeverity.Error);
+        _glyphLabel.AccessibleName = nameof(ToastSeverity.Error);
+        AccessibleDescription = _body;
+        _dismiss.Interval = LongDwellMs;
+        _dismiss.Start();
+        Announce();
     }
 
     /// <summary>
@@ -391,7 +440,15 @@ public sealed class ToastWindow : WF.Form
     internal static string Trim(string text, int availableDip = BodyWidthDip)
     {
         text = (text ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
-        if (text.Length == 0 || RowsFor(text, availableDip) <= BodyMaxLines)
+        if (text.Length == 0) return text;
+
+        // The walk below re-measures the whole remainder on every pass, so its cost is
+        // quadratic in the length: 2 000 characters already cost a second on the UI thread.
+        // Three rows hold well under 200 characters at any DPI, so cutting to a ceiling
+        // first is free for every real message and bounds the walk for anything else.
+        bool capped = text.Length > MaxChars;
+        if (capped) text = text[..MaxChars];
+        if (!capped && RowsFor(text, availableDip) <= BodyMaxLines)
             return text;
 
         string cut = text;

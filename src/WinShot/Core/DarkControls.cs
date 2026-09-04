@@ -134,6 +134,10 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
         BackColor = DarkControlPalette.Card;
         Cursor = WF.Cursors.Hand;
         ForeColor = DarkControlPalette.Text;
+        // A custom-painted WF.Control announces itself as a generic client area, so the
+        // toast's "Open link" and every button in the WinForms dialogs were unnamed shapes
+        // to a screen reader. AccessibleName follows Text on its own.
+        AccessibleRole = WF.AccessibleRole.PushButton;
     }
 
     public double Scale { get; init; } = 1.0;

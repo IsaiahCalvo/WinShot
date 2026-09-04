@@ -34,6 +34,9 @@ public static class ThemePalette
     // Theme.xaml paints secondary text as #B3FFFFFF; this is that 70% white composited
     // over ToolbarBg, so a WinForms label matches the WPF one beside it.
     public static readonly SD.Color TextSecondary = SD.Color.FromArgb(0xBE, 0xBE, 0xBF);
+    // Red as type rather than fill, mirroring Theme.xaml's TextErrorBrush: Red itself is a
+    // stroke colour and only reads 4.43:1 on ToolbarBg, which is what these surfaces are.
+    public static readonly SD.Color TextError = SD.Color.FromArgb(0xFF, 0x6B, 0x60);
 
     // White-alpha interaction fills / hairlines (GDI+ blends the alpha over dark).
     public static readonly SD.Color HoverFill = SD.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF);

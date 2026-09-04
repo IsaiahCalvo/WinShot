@@ -94,6 +94,12 @@
     <SolidColorBrush x:Key="AnnotationRedBrush" Color="{StaticResource AnnotationRedColor}"/>
     <SolidColorBrush x:Key="RedHoverBrush"      Color="{StaticResource RedHoverColor}"/>
     <SolidColorBrush x:Key="RedPressedBrush"    Color="{StaticResource RedPressedColor}"/>
+    <!-- Red as TYPE, not as fill. AnnotationRedColor is a stroke/fill colour and only
+         clears 4.5:1 on the darkest ground (4.99:1 on WindowBg, 4.43:1 on ToolbarBg),
+         so a failure line on a dialog card - which is ToolbarBg - fell under the bar
+         with exactly the message the user has to read. The brighter red clears every
+         ground the app puts text on (5.41:1 on ToolbarBg, 6.09:1 on WindowBg). -->
+    <SolidColorBrush x:Key="TextErrorBrush"     Color="{StaticResource RedHoverColor}"/>
 
     <SolidColorBrush x:Key="TextPrimaryBrush"   Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>

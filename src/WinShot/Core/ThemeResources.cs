@@ -25,8 +25,7 @@ public static class ThemeResources
 
         if (_loaded) return;
 
-        ResourceDictionary? theme = app.Resources.MergedDictionaries.FirstOrDefault(d =>
-            string.Equals(d.Source?.OriginalString, ThemePath, StringComparison.OrdinalIgnoreCase));
+        ResourceDictionary? theme = Find(app.Resources);
 
         if (theme is null)
         {
@@ -37,6 +36,27 @@ public static class ThemeResources
         ApplyAnimationPreference(theme);
 
         _loaded = true;
+    }
+
+    /// <summary>
+    /// The dictionary App.xaml already merged, or null. Finding it is the whole job:
+    /// failing to find it makes EnsureLoaded ADD a second copy, zero that copy, and leave
+    /// every window resolving against the original — animation-off would quietly stop
+    /// working on the WPF side with nothing to show for it. The search is recursive because
+    /// the merge is already nested one level (App.xaml wraps it in a ResourceDictionary)
+    /// and nothing stops it being nested deeper.
+    /// </summary>
+    internal static ResourceDictionary? Find(ResourceDictionary owner)
+    {
+        foreach (ResourceDictionary merged in owner.MergedDictionaries)
+        {
+            if (string.Equals(merged.Source?.OriginalString, ThemePath, StringComparison.OrdinalIgnoreCase))
+                return merged;
+            if (Find(merged) is { } nested)
+                return nested;
+        }
+
+        return null;
     }
 
     /// <summary>

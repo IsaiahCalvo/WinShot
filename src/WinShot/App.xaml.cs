@@ -1267,7 +1267,11 @@ public partial class App : Application
                 if (card is not null)
                     card.FlashStatus("No text found");
                 else
-                    ShowOcrToast("Nothing found", "No text or codes in the selection.", anchor, onOpen: null, ToastSeverity.Info);
+                    // The one OCR result the user has to read and act on, and the only one
+                    // with no action attached - so it holds the screen as long as a success.
+                    ShowOcrToast(
+                        "Nothing found", "No text or codes in the selection.", anchor,
+                        onOpen: null, ToastSeverity.Info, holdLong: true);
                 return;
             }
 
@@ -1301,8 +1305,8 @@ public partial class App : Application
     /// reads as "it worked".</summary>
     private void ShowOcrToast(
         string title, string preview, SD.Point? anchor, Action? onOpen,
-        ToastSeverity severity = ToastSeverity.Success) =>
-        ShowToast(title, preview, anchor, onOpen, severity);
+        ToastSeverity severity = ToastSeverity.Success, bool holdLong = false) =>
+        ShowToast(title, preview, anchor, onOpen, severity, holdLong);
 
     private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
@@ -1617,7 +1621,10 @@ public partial class App : Application
         _updateInProgress = true;
         try
         {
-            ShowBalloon("Downloading update…", "WinShot restarts once it is installed.");
+            // Downloading an installer outlives a check for one, so it holds at least as
+            // long: without this the working state vanished and the user watched a silent
+            // screen until the app exited and the installer took over.
+            ShowBalloon("Downloading update…", "WinShot restarts once it is installed.", holdLong: true);
             await UpdateService.DownloadAndLaunchAsync(update.DownloadUrl, update.LatestVersion ?? "latest");
             // Reached only when the installer launched (failures throw). Exit so it can replace our
             // files; the installer relaunches WinShot itself.

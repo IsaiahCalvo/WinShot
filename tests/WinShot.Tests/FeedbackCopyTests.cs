@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using WinShot.Core;
 using Xunit;
 using SD = System.Drawing;
@@ -149,5 +149,62 @@ public class FeedbackCopyTests
         Assert.DoesNotContain("too long", FriendlyError.For(new OperationCanceledException()));
         Assert.DoesNotContain("too long", FriendlyError.For(new TaskCanceledException()));
         Assert.Contains("too long", FriendlyError.For(new TimeoutException()));
+    }
+
+    /// <summary>...but HttpClient reports a request timeout as a TaskCanceledException
+    /// wrapping a TimeoutException, and a user who waited through a network stall on
+    /// "Check for updates…" was told they had cancelled it.</summary>
+    [Fact]
+    public void AnHttpTimeoutIsNotReportedAsACancel()
+    {
+        string message = FriendlyError.For(
+            new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.",
+                new TimeoutException()));
+
+        Assert.Contains("too long", message);
+        Assert.DoesNotContain("cancelled", message);
+    }
+
+    /// <summary>
+    /// The GDI+ arm matched the base types, so every Win32Exception (a Process.Start on a
+    /// deleted exe) and every ArgumentNullException anywhere in the app was reported to the
+    /// user as "The image could not be processed" on paths with no image in them.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(System.ComponentModel.Win32Exception))]
+    [InlineData(typeof(ArgumentNullException))]
+    [InlineData(typeof(ArgumentOutOfRangeException))]
+    public void AFailureWithNoImageInItIsNotCalledAnImageFailure(Type type)
+    {
+        var ex = (Exception)Activator.CreateInstance(type)!;
+        Assert.DoesNotContain("image", FriendlyError.For(ex), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Something went wrong. The details are in the log.", FriendlyError.For(ex));
+    }
+
+    /// <summary>The GDI+ cases the arm is actually for still map.</summary>
+    [Fact]
+    public void AGdiPlusFailureStillReadsAsAnImageFailure()
+    {
+        Assert.Contains("image", FriendlyError.For(new ArgumentException("Parameter is not valid.")));
+        Assert.Contains("image", FriendlyError.For(
+            new System.Runtime.InteropServices.ExternalException("A generic error occurred in GDI+.")));
+    }
+
+    /// <summary>
+    /// Trim walks the message one word at a time and re-measures the whole remainder each
+    /// pass, so its cost is quadratic. Nothing produces a huge message today, but Trim is
+    /// reachable from any future caller and it runs on the UI thread.
+    /// </summary>
+    [Fact]
+    public void TrimIsBoundedForAMessageNoOneShouldHaveSent()
+    {
+        string huge = string.Join(" ", Enumerable.Repeat("overflowing", 20_000));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        string cut = ToastWindow.Trim(huge, BodyWidthDip);
+        clock.Stop();
+
+        Assert.EndsWith("…", cut);
+        Assert.True(ToastWindow.LinesNeeded(cut, BodyWidthDip) <= 3, cut);
+        Assert.True(clock.ElapsedMilliseconds < 2000, $"Trim took {clock.ElapsedMilliseconds} ms");
     }
 }

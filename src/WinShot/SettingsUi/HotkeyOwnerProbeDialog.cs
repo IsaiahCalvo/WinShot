@@ -37,9 +37,11 @@ internal static class HotkeyOwnerProbeDialog
         // toast's severity glyph follows.
         void Say(string text, bool failed)
         {
+            // The probe runs for eight seconds; the user can close the card before it lands.
+            if (!dialog.IsLoaded) return;
             status.Text = text;
             status.SetResourceReference(
-                TextBlock.ForegroundProperty, failed ? "AnnotationRedBrush" : "InfoBrush");
+                TextBlock.ForegroundProperty, failed ? "TextErrorBrush" : "InfoBrush");
         }
 
         HotkeyOwnerProbe.Result? result = null;
@@ -67,7 +69,7 @@ internal static class HotkeyOwnerProbeDialog
         });
         open.IsEnabled = false;
 
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         dialog.Closed += (_, _) => cts.Cancel();
         dialog.Loaded += async (_, _) =>
         {
