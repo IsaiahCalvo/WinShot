@@ -205,7 +205,8 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("AfterCaptureMatrix").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("UnavailableSoundsRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("SoundsRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("UnavailableCopyFormatCard").Visibility);

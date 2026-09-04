@@ -253,7 +253,7 @@ public partial class SettingsWindow : Window
         UpdatesCheck.IsChecked = s.CheckForUpdatesOnStartup;
         HideIconsCheck.IsChecked = s.HideDesktopIconsDuringCapture;
         PlaySoundsCheck.IsChecked = s.PlaySounds;
-        SelectByTag(ShutterSoundCombo, s.ShutterSound, fallbackIndex: 0);
+        SelectByTag(ShutterSoundCombo, CaptureSound.Normalize(s.ShutterSound), fallbackIndex: 0);
         ShowTrayIconCheck.IsChecked = s.ShowTrayIcon;
 
         // General > "After capture" matrix — a set of independent actions, not a choice.
@@ -540,6 +540,8 @@ public partial class SettingsWindow : Window
             s.LaunchAtStartup = StartupCheck.IsChecked == true;
             s.CheckForUpdatesOnStartup = UpdatesCheck.IsChecked == true;
             s.HideDesktopIconsDuringCapture = HideIconsCheck.IsChecked == true;
+            s.PlaySounds = PlaySoundsCheck.IsChecked == true;
+            s.ShutterSound = CaptureSound.Normalize(SelectedTag(ShutterSoundCombo, CaptureSound.Default));
             s.DownscaleHiDpi = HiDpiCheck.IsChecked == true;
 
             // After-capture matrix. Every ticked cell runs; none excludes another.
@@ -629,6 +631,8 @@ public partial class SettingsWindow : Window
         int tabIndex = 10;
         Accessible(StartupCheck, "Start WinShot at login", "Adds or removes WinShot from Windows startup.");
         Accessible(UpdatesCheck, "Check for updates at startup", "Checks GitHub Releases when WinShot starts.");
+        Accessible(PlaySoundsCheck, "Play a sound on capture", "Play a shutter sound each time WinShot captures.");
+        Accessible(ShutterSoundCombo, "Shutter sound", "Choose which shutter sound plays on capture.");
         Accessible(SaveFolderBox, "Export location", "Folder where captures are saved.");
         Accessible(BrowseSaveFolderButton, "Browse for export location", "Choose the folder where captures are saved.");
         Accessible(HideIconsCheck, "Hide desktop icons while capturing", "Temporarily hides desktop icons during capture.");
@@ -688,7 +692,8 @@ public partial class SettingsWindow : Window
 
         foreach (Control control in new Control[]
         {
-            StartupCheck, UpdatesCheck, SaveFolderBox, BrowseSaveFolderButton, HideIconsCheck,
+            StartupCheck, UpdatesCheck, PlaySoundsCheck, ShutterSoundCombo, SaveFolderBox,
+            BrowseSaveFolderButton, HideIconsCheck,
             ScreenshotShowOverlayCheck, RecordingShowOverlayCheck, ScreenshotCopyCheck, RecordingCopyCheck,
             ScreenshotSaveCheck, ScreenshotOpenAnnotateCheck, ScreenshotPinCheck, RecordingOpenEditorCheck,
             OverlayPositionCombo, OverlayMoveToActiveScreenCheck,

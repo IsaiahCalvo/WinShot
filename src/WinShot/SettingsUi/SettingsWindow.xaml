@@ -423,11 +423,11 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Updates"/>
                                     <CheckBox x:Name="UpdatesCheck" Content="Check for updates on startup"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableSoundsRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="SoundsRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Sounds"/>
                                     <CheckBox x:Name="PlaySoundsCheck" Content="Play sounds"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableShutterSoundRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="ShutterSoundRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Shutter sound"/>
                                     <ComboBox x:Name="ShutterSoundCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Default" Tag="default"/>

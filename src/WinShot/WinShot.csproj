@@ -42,6 +42,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Shutter sounds, synthesised by tools\make-sounds.ps1 (no sampled audio ships). -->
+    <EmbeddedResource Include="Assets\sounds\shutter-default.wav"
+                      LogicalName="WinShot.Assets.sounds.shutter-default.wav" />
+    <EmbeddedResource Include="Assets\sounds\shutter-classic.wav"
+                      LogicalName="WinShot.Assets.sounds.shutter-classic.wav" />
+    <EmbeddedResource Include="Assets\sounds\shutter-subtle.wav"
+                      LogicalName="WinShot.Assets.sounds.shutter-subtle.wav" />
     <!-- The one WinShot mark: exe icon (ApplicationIcon above), tray icon and About pane
          all read this file. Re-cut it with tools\make-icon.ps1. -->
     <EmbeddedResource Include="Assets\winshot.ico"

@@ -811,6 +811,10 @@ public partial class App : Application
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
         PostCaptureSet? actionsOverride = null)
     {
+        // The shutter, at the moment the pixels exist. Fire-and-forget: audio never
+        // delays the capture or the surface that follows it.
+        CaptureSound.Play(_settings.Current);
+
         if (_settings.Current.DownscaleHiDpi)
         {
             if (HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, SystemDpiScale, out int w, out int h))

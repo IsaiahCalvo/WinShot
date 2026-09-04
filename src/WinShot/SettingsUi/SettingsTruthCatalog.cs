@@ -38,6 +38,8 @@ internal static class SettingsTruthCatalog
             "OcrJoinLines",
             "HistoryRetentionDays",
             "CheckForUpdatesOnStartup",
+            "PlaySounds",
+            "ShutterSound",
             "FreezeScreen",
             "CrosshairMode",
             "ShowCrosshair",
@@ -89,7 +91,7 @@ internal static class SettingsTruthCatalog
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            "PlaySounds", "ShutterSound", "ShowTrayIcon",
+            "ShowTrayIcon",
             "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
