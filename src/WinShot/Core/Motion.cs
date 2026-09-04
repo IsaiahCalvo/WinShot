@@ -20,7 +20,11 @@ internal static class Motion
     /// </summary>
     public const int FrameIntervalMs = 8;
 
-    /// <summary>Hover highlight gliding between elements (modelled on ShareX — see RectangleTween).</summary>
+    /// <summary>
+    /// Hover highlight gliding between elements in the region selector (see RectangleTween).
+    /// Do not retune this to match the other durations — 200 ms is the feel Isaiah signed off
+    /// on for the selector, and it is deliberately its own number.
+    /// </summary>
     public const int GlideDurationMs = 200;
 
     /// <summary>Overlay cards restacking when another capture lands.</summary>

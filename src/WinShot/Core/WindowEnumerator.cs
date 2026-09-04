@@ -28,8 +28,8 @@ public static class WindowEnumerator
     private const long WsExNoActivate = 0x08000000;
 
     // Window classes that enumerate exactly like an ordinary top-level app but are never
-    // something a user points at. "CEF-OSC-WIDGET" is NVIDIA's GeForce overlay; the class
-    // name is recorded in ShareX issue #2637.
+    // something a user points at. "CEF-OSC-WIDGET" is NVIDIA's GeForce overlay: it is a
+    // real visible top-level window, so nothing below filters it and it has to be named.
     private static readonly string[] IgnoreClassNames = { "CEF-OSC-WIDGET" };
 
     /// <summary>

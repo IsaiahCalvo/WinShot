@@ -19,8 +19,8 @@ binary**, not merely to sit in the source repo. See "Still open" at the bottom.
 Behaviour reference only. **No ShareX source is copied, linked, or included in
 WinShot**, and WinShot links no GPL code.
 
-Two WinShot files were written after studying how ShareX's region selector
-behaves, and say so in their own headers:
+WinShot's region selector and its scrolling capture were written after studying how
+ShareX behaves. Two files carry that note in their own headers:
 
 - `src/WinShot/Capture/RectangleTween.cs` — the hover highlight's ~200 ms glide,
   and the rule that retargeting mid-flight resumes from where the rectangle
@@ -34,9 +34,18 @@ behaves, and say so in their own headers:
   enumeration itself, its P/Invoke layer, its time budget and its coverage pass
   are WinShot's.
 
+Three other files name ShareX in a comment — `Capture/FastRegionSelectorDialog.cs`,
+`Scrolling/ImageStitcher.cs` and `Scrolling/ScrollingCaptureService.cs` — but only
+to say what ShareX is observed to do (always-on element detection, longest-run row
+matching when stitching, re-foregrounding the window before a scroll key). Those are
+observations about behaviour, not ported code. `Core/HotkeyConflictInspector.cs`
+also names ShareX, as one of the apps whose hotkeys can clash with WinShot's; that
+is a data row, not a citation.
+
 The NVIDIA GeForce overlay's window class name (`CEF-OSC-WIDGET`), noted in
-`WindowEnumerator.cs`, is a fact about NVIDIA's software recorded in ShareX issue
-#2637.
+`WindowEnumerator.cs`, is a fact about NVIDIA's software: the overlay enumerates as
+an ordinary top-level window. Every screenshot tool that walks the window list hits
+it.
 
 ### Microsoft PowerToys — https://github.com/microsoft/PowerToys — MIT — **PENDING, not yet used**
 
@@ -52,21 +61,24 @@ Until then this entry is a reminder, not a notice.
 
 ### MIT
 
+Copyright cells are the verbatim `<copyright>` string from each package's own
+`.nuspec`, because that is the notice MIT requires to travel with the binary.
+
 | Package | Version | Copyright | Source |
 |---|---|---|---|
-| ScreenRecorderLib | 6.6.0 | © Sverre Kristoffer Skodje 2025 | https://github.com/sskodje/ScreenRecorderLib |
-| SkiaSharp | 3.119.4 | © Microsoft Corporation | https://github.com/mono/SkiaSharp |
-| SkiaSharp.NativeAssets.Win32 | 3.119.4 | © Microsoft Corporation | https://github.com/mono/SkiaSharp |
-| SkiaSharp.NativeAssets.macOS | 3.119.4 | © Microsoft Corporation | in the graph, not shipped on win-x64 |
-| System.Text.Json | 9.0.1 | © Microsoft Corporation | https://github.com/dotnet/runtime |
-| System.Text.Encodings.Web | 9.0.1 | © Microsoft Corporation | https://github.com/dotnet/runtime |
-| System.IO.Pipelines | 9.0.1 | © Microsoft Corporation | https://github.com/dotnet/runtime |
-| Vortice.Direct3D11 | 3.8.3 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
-| Vortice.DXGI | 3.8.3 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
-| Vortice.DirectX | 3.8.3 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
-| Vortice.Mathematics | 2.1.0 | © Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Mathematics |
-| SharpGen.Runtime | 2.4.2-beta | © Amer Koleci and Contributors | https://github.com/SharpGenTools/SharpGenTools |
-| SharpGen.Runtime.COM | 2.4.2-beta | © Amer Koleci and Contributors | https://github.com/SharpGenTools/SharpGenTools |
+| ScreenRecorderLib | 6.6.0 | Copyright © Sverre Kristoffer Skodje 2025 | https://github.com/sskodje/ScreenRecorderLib |
+| SkiaSharp | 3.119.4 | © Microsoft Corporation. All rights reserved. | https://github.com/mono/SkiaSharp |
+| SkiaSharp.NativeAssets.Win32 | 3.119.4 | © Microsoft Corporation. All rights reserved. | https://github.com/mono/SkiaSharp |
+| SkiaSharp.NativeAssets.macOS | 3.119.4 | © Microsoft Corporation. All rights reserved. | in the graph, not shipped on win-x64 |
+| System.Text.Json | 9.0.1 | © Microsoft Corporation. All rights reserved. | https://github.com/dotnet/runtime |
+| System.Text.Encodings.Web | 9.0.1 | © Microsoft Corporation. All rights reserved. | https://github.com/dotnet/runtime |
+| System.IO.Pipelines | 9.0.1 | © Microsoft Corporation. All rights reserved. | https://github.com/dotnet/runtime |
+| Vortice.Direct3D11 | 3.8.3 | Copyright (c) Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
+| Vortice.DXGI | 3.8.3 | Copyright (c) Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
+| Vortice.DirectX | 3.8.3 | Copyright (c) Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Windows |
+| Vortice.Mathematics | 2.1.0 | Copyright (c) Amer Koleci and Contributors | https://github.com/amerkoleci/Vortice.Mathematics |
+| SharpGen.Runtime | 2.4.2-beta | (c) 2010-2017 Alexandre Mutel, 2017-2023 Jeremy Koritzinsky, 2023-2024 Amer Koleci | https://github.com/SharpGenTools/SharpGenTools |
+| SharpGen.Runtime.COM | 2.4.2-beta | (c) 2010-2017 Alexandre Mutel, 2017-2023 Jeremy Koritzinsky, 2023-2024 Amer Koleci | https://github.com/SharpGenTools/SharpGenTools |
 
 The two `SharpGen.Runtime` packages resolve to a **prerelease** (`2.4.2-beta`) in
 the shipping build. That is a supply-chain note, not a licensing one.
