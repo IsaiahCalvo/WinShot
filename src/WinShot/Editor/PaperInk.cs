@@ -40,6 +40,25 @@ internal static class PaperInk
         return pts;
     }
 
+    /// <summary>
+    /// Flattening / boolean tolerance, in ABSOLUTE canvas units. Survey's round caps and joins
+    /// are ALWAYS an 18-facet semicircle at every stroke width - sweptDiskSemicircleSteps falls
+    /// through to DEFAULT_ARC_STEPS = 18 unless the caller passes arcSteps/curveTolerance, and
+    /// neither createInkAnnotation nor eraseAnnotations does (paperAnnotationGeometry.js:5,
+    /// :468-487, :1537-1555, :2367-2380), so Survey's chord error is r*(1-cos(pi/36)) and its
+    /// facet count never depends on the width. WPF instead takes a max chord error, and its
+    /// default (Geometry.StandardFlatteningTolerance = 0.25, also absolute) makes the facet
+    /// count COLLAPSE as the stroke thins: a 1px capsule flattened to 7 vertices - a triangular
+    /// "round" cap losing 16% of its area - while a 30px one kept 35. That bit every path that
+    /// turns ink into a fixed polygon: erasing, moving, culling and the overlap tests.
+    /// One absolute value covers every width here: ~0.0076 canvas units is under 1/100 of the
+    /// THINNEST stroke WinShot draws, so the chord error is sub-pixel at any width and any zoom,
+    /// where WPF's 0.25 was a quarter of a whole 1px stroke. Width-scaling it to Survey's exact
+    /// r*(1-cos(pi/36)) would buy no visible accuracy and would mean choosing between the ink's
+    /// width and the eraser's on every boolean.
+    /// </summary>
+    public static readonly double Tolerance = 0.5 * (1 - Math.Cos(Math.PI / 18));
+
     public static PathGeometry Outline(IEnumerable<Point> raw, double width)
     {
         // Survey's radius is Math.max(0.5, width/2) - the same clamp as a diameter floor of 1.
@@ -65,6 +84,10 @@ internal static class PaperInk
         };
         try
         {
+            // No tolerance argument: WPF widens round caps/joins into PolyBezierSegments, not
+            // facets, and passing a tolerance here provably changes nothing (identical segment
+            // types, vertex counts and areas at w = 1/3/12/30). The outline is exact; only the
+            // consumers that FLATTEN it need Tolerance.
             return centerline.GetWidenedPathGeometry(pen);
         }
         catch (InvalidOperationException)
@@ -76,17 +99,75 @@ internal static class PaperInk
     public static PathGeometry EraserStroke(IEnumerable<Point> raw, double diameter) =>
         Outline(raw, Math.Max(1, diameter));
 
-    public static Geometry Subtract(Geometry ink, Geometry cut)
+    /// <summary>
+    /// One classified cut. Survey's subtractPolygonPart returns
+    /// <c>{status:'failed', stage:'intersection'|'subtraction'|'containment'}</c> and never a
+    /// silent result (paperAnnotationGeometry.js:2241-2296), so this returns NULL for "the
+    /// clipper failed, the answer is unknown" and a (possibly empty) geometry otherwise.
+    /// The old code mapped both failure modes onto a value: a throw returned the UNCUT ink
+    /// (so the eraser left the stroke whole where it passed) and a null Combine returned
+    /// Geometry.Empty, which callers read as "fully erased" and used to DELETE the stroke.
+    /// </summary>
+    public static Geometry? Subtract(Geometry ink, Geometry cut)
     {
+        Geometry? result;
         try
         {
-            var result = Geometry.Combine(ink, cut, GeometryCombineMode.Exclude, Transform.Identity);
-            return result ?? Geometry.Empty;
+            result = Geometry.Combine(
+                ink, cut, GeometryCombineMode.Exclude, Transform.Identity, Tolerance, ToleranceType.Absolute);
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
-            return ink;
+            // Survey's bare `catch` around diff(): any clipper blow-up is a failed cut, not a
+            // crash. A narrower catch here escaped into the pointer-move handler.
+            return null;
         }
+        if (result is null) return null;
+
+        // Survey's subtractionStayedInsideSubject postcondition (:1627-1720): a difference that
+        // leaves the subject is a clipper artefact, so reject it rather than paint it. Bounds is
+        // the half that catches the eraser-shaped streak; Survey's extra edge-interval audit
+        // exists for martinez needles, which WPF's widen path does not emit.
+        if (!result.IsEmpty())
+        {
+            Rect r = result.Bounds, s = ink.Bounds;
+            double eps = Math.Max(1e-9, s.Width + s.Height) * 1e-9 + Tolerance;
+            if (r.Left < s.Left - eps || r.Top < s.Top - eps ||
+                r.Right > s.Right + eps || r.Bottom > s.Bottom + eps)
+                return null;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Cut one whole eraser gesture out of <paramref name="ink"/>, retrying failures through
+    /// smaller pieces the way Survey's subtractPolygonRecord re-attempts a rejected merged
+    /// branch through the record's children (paperAnnotationGeometry.js:2298-2333, :536-580).
+    /// The set identity that makes this legal is Survey's own (:525-535): for C = C1 u C2,
+    /// <c>S \ C == (S \ C1) \ C2</c>. WinShot's record is the eraser polyline, so "children"
+    /// is that polyline split in half. A piece that still fails at the recursion floor is
+    /// Survey's failed leaf: leave the ink UNCHANGED there - never delete on a failed cut.
+    /// </summary>
+    public static Geometry SubtractStroke(Geometry ink, IReadOnlyList<Point> gesture, double diameter, int depth = 4)
+    {
+        if (ink is null || ink.IsEmpty() || gesture.Count == 0) return ink ?? Geometry.Empty;
+        var cut = EraserStroke(gesture, diameter);
+        var direct = Subtract(ink, cut);
+        if (direct is not null) return direct;
+        if (depth <= 0) return ink;
+
+        if (gesture.Count > 2)
+        {
+            int mid = gesture.Count / 2; // the split point belongs to BOTH halves, so C1 u C2 == C
+            return SubtractStroke(
+                SubtractStroke(ink, gesture.Take(mid + 1).ToList(), diameter, depth - 1),
+                gesture.Skip(mid).ToList(), diameter, depth - 1);
+        }
+        if (gesture.Count < 2 || (gesture[1] - gesture[0]).Length < 1) return ink; // failed leaf
+        var m = new Point((gesture[0].X + gesture[1].X) / 2, (gesture[0].Y + gesture[1].Y) / 2);
+        return SubtractStroke(
+            SubtractStroke(ink, new[] { gesture[0], m }, diameter, depth - 1),
+            new[] { m, gesture[1] }, diameter, depth - 1);
     }
 
     /// <summary>
@@ -105,7 +186,7 @@ internal static class PaperInk
         double minArea = Math.Max(numericAreaFloor, Math.Min(0.4 * w, 0.35 * w * w));
         double meanWidthCullFloor = 0.15 * w * 0.94;
 
-        var flat = geometry.GetFlattenedPathGeometry();
+        var flat = geometry.GetFlattenedPathGeometry(Tolerance, ToleranceType.Absolute);
         int n = flat.Figures.Count;
         if (n == 0) return Geometry.Empty;
 
@@ -162,7 +243,7 @@ internal static class PaperInk
     public static bool IsEmpty(Geometry geometry)
     {
         if (geometry is null || geometry.IsEmpty()) return true;
-        var flat = geometry.GetFlattenedPathGeometry();
+        var flat = geometry.GetFlattenedPathGeometry(Tolerance, ToleranceType.Absolute);
         foreach (var fig in flat.Figures)
         {
             (double a, _) = FigureMetrics(fig);

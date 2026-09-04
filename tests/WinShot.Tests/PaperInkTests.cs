@@ -105,7 +105,8 @@ public class PaperInkTests
     {
         var ink = PaperInk.Outline(new[] { new Point(0, 0), new Point(50, 0) }, 10);
         var cut = PaperInk.Outline(new[] { new Point(25, 0) }, 8);
-        var left = PaperInk.Subtract(ink, cut);
+        var left = PaperInk.Subtract(ink, cut)!;
+        Assert.NotNull(left);
         Assert.False(left.FillContains(new Point(25, 0)));
         Assert.True(left.FillContains(new Point(5, 0)));
         Assert.True(left.FillContains(new Point(45, 0)));
@@ -126,7 +127,73 @@ public class PaperInkTests
         var ink = PaperInk.Outline(new[] { new Point(0, 0), new Point(8, 0) }, 4);
         var cut = PaperInk.Outline(new[] { new Point(-4, 0), new Point(12, 0) }, 12);
         var left = PaperInk.Subtract(ink, cut);
-        Assert.True(PaperInk.IsEmpty(left));
+        Assert.NotNull(left);
+        Assert.True(PaperInk.IsEmpty(left!));
+    }
+
+    [Fact]
+    public void Tolerance_KeepsFlattenedInkInsideSurveys18FacetErrorBudget()
+    {
+        // Survey's cap/join facet count is width-INDEPENDENT (DEFAULT_ARC_STEPS = 18,
+        // paperAnnotationGeometry.js:5, :468-487), so its committed disk is always within
+        // ~0.5% of the exact one. WPF's default flattening tolerance is 0.25 in ABSOLUTE canvas
+        // units, so the facet count collapsed as the pen thinned - and every erase/move
+        // round-trips ink through a flatten. A near-dot 1px capsule came back as 7 vertices
+        // holding 84% of its area.
+        foreach (double w in new[] { 1.0, 3.0, 12.0, 30.0 })
+        {
+            var g = PaperInk.Outline(new[] { new Point(100, 100), new Point(101, 100) }, w);
+            double ideal = Math.PI * w * w / 4 + w; // disk of diameter w + a 1px-long body
+            double ours = g.GetFlattenedPathGeometry(PaperInk.Tolerance, ToleranceType.Absolute).GetArea();
+            Assert.InRange(ours, ideal * 0.995, ideal * 1.005);
+        }
+        // And the regression this replaced: WPF's own default still loses 16% at width 1.
+        var thin = PaperInk.Outline(new[] { new Point(100, 100), new Point(101, 100) }, 1);
+        Assert.True(thin.GetFlattenedPathGeometry().GetArea() < (Math.PI / 4 + 1) * 0.9);
+    }
+
+    [Fact]
+    public void SubtractStroke_IgnoresExtraSamplesThatLieOnTheGesture()
+    {
+        // Survey's carve is a pure function of (geometry, WHOLE gesture polyline, radius): one
+        // swept-disk record set for the gesture, subtracted once (paperAnnotationGeometry.js:
+        // 2367-2380, FabricEraserCanvas.jsx:1820-1846). Inserting midpoints does not change the
+        // swept region, so it must not change the ink. It did when every pointer sample ran its
+        // own subtract + sliver cull: the survivors tracked sample density, not the gesture.
+        var ink = PaperInk.Outline(new[] { new Point(0, 20), new Point(200, 20) }, 8);
+        var gesture = Enumerable.Range(0, 25)
+            .Select(i => new Point(20 + 160.0 * i / 24, 20 + 24 * Math.Sin(i * 0.7))).ToList();
+        List<Point> Subdivide(List<Point> src)
+        {
+            var outp = new List<Point> { src[0] };
+            for (int i = 1; i < src.Count; i++)
+            {
+                outp.Add(new Point((src[i - 1].X + src[i].X) / 2, (src[i - 1].Y + src[i].Y) / 2));
+                outp.Add(src[i]);
+            }
+            return outp;
+        }
+
+        double Area(Geometry g) => g.GetFlattenedPathGeometry().GetArea();
+        double coarse = Area(PaperInk.CullSlivers(PaperInk.SubtractStroke(ink, gesture, 16), 8));
+        double dense = Area(PaperInk.CullSlivers(
+            PaperInk.SubtractStroke(ink, Subdivide(Subdivide(gesture)), 16), 8));
+        Assert.Equal(coarse, dense, 3);
+        Assert.True(coarse < Area(ink) * 0.9, "the sweep must actually cut the stroke");
+    }
+
+    [Fact]
+    public void Subtract_ReportsFailureAsNullSoNothingIsSilentlyDeleted()
+    {
+        // A null/throwing Geometry.Combine used to become Geometry.Empty, which EraseLive read
+        // as "fully erased" and used to delete the whole annotation.
+        var ink = PaperInk.Outline(new[] { new Point(0, 0), new Point(50, 0) }, 10);
+        var miss = PaperInk.Outline(new[] { new Point(0, 400), new Point(50, 400) }, 10);
+        var untouched = PaperInk.Subtract(ink, miss);
+        Assert.NotNull(untouched);
+        Assert.False(PaperInk.IsEmpty(untouched!));
+        // A gesture that cannot cut anything leaves the ink whole, never empty.
+        Assert.False(PaperInk.IsEmpty(PaperInk.SubtractStroke(ink, new[] { new Point(0, 400) }, 16)));
     }
 
     [Fact]

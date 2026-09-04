@@ -364,7 +364,7 @@ public class AnnotationEditorRenderHarness
                         var to = new Point(400, 240 + (i + 1) * 3);
                         var cut = PaperInk.EraserStroke(new[] { from, to }, 20);
                         double a0 = acc.GetFlattenedPathGeometry().GetArea();
-                        var next = PaperInk.Subtract(acc, cut);
+                        var next = PaperInk.Subtract(acc, cut) ?? acc;
                         next = PaperInk.CullSlivers(next, pw);
                         double a1 = next.GetFlattenedPathGeometry().GetArea();
                         if (Math.Abs(a0 - a1) < 1e-9) noChange++;
@@ -391,8 +391,18 @@ public class AnnotationEditorRenderHarness
                     canvas.Children.Clear(); Pump(3);
                     penSizeField.SetValue(editor, 12.0);
                     Check("HighlighterToolBtn");
-                    // Straight across the card text row "Arrow Shape Pen Text" (y=182 in source px).
-                    var ha = new Point(85, 186); var hb = new Point(340, 186);
+                    // Straight across the card text row "Arrow Shape Pen Text". Find it rather than
+                    // hard-coding a y: the highlight has to LAND ON glyphs for the blend's
+                    // resampling to be visible at all.
+                    int textY = 186, bestInk = -1;
+                    for (int y = 140; y < 260; y++)
+                    {
+                        int dark = 0;
+                        for (int x = 100; x <= 320; x++)
+                            if (source.GetPixel(x, y).R < 140) dark++;
+                        if (dark > bestInk) { bestInk = dark; textY = y; }
+                    }
+                    var ha = new Point(85, textY); var hb = new Point(340, textY);
                     editor.PointerDown(Pt(ha)); Pump(1);
                     for (int i = 1; i <= 60; i++)
                         { editor.PointerMove(Pt(new Point(ha.X + (hb.X - ha.X) * i / 60.0, ha.Y))); Pump(1); }
@@ -408,7 +418,7 @@ public class AnnotationEditorRenderHarness
                     for (int dy = -2; dy <= 2; dy++)
                     {
                         long err = 0; int n2 = 0; int worst = 0;
-                        for (int y = 181; y <= 192; y++)
+                        for (int y = textY - 5; y <= textY + 5; y++)
                             for (int x = 100; x <= 320; x++)
                             {
                                 var got = live.GetPixel(x, y);
@@ -420,10 +430,35 @@ public class AnnotationEditorRenderHarness
                             }
                         log.AppendLine($"HL-FIDELITY dy={dy} meanAbsErr={(double)err / n2 / 3:F2} worstPixelErr={worst}");
                     }
-                    log.AppendLine($"HL bounds={hl.Data!.Bounds} fill={hl.Fill.GetType().Name} " +
+                    log.AppendLine($"HL textY={textY} bounds={hl.Data!.Bounds} fill={hl.Fill.GetType().Name} " +
+                        $"scaling={RenderOptions.GetBitmapScalingMode(hl.Fill)} " +
+                        $"baseTilesScaling={RenderOptions.GetBitmapScalingMode(((Panel)editor.FindName("BaseTiles")!).Children[0])} " +
                         $"width={((AnnotationData)hl.Tag!).Thickness} color={((AnnotationData)hl.Tag!).Color} " +
                         $"host={hostField?.Name}");
                     RenderToPng(editor, Path.Combine(outDir, "audit-highlighter-over-text-200pct.png"), dpi: 192);
+
+                    // The blend is baked into an ImageBrush, so WPF resamples it through the zoom
+                    // transform. Survey's browser evaluates mix-blend-mode per DEVICE pixel, so the
+                    // content under a highlight is exactly as crisp as the content beside it. The
+                    // closest WPF gets is using the SAME filter as the page (BaseTiles = Fant /
+                    // HighQuality); the brush shipped on the default Linear. Render both at 300% so
+                    // the difference is eyeballable rather than argued about.
+                    // Anchor on the highlight itself so zooming leaves it under the same viewport
+                    // point instead of scrolling it off screen.
+                    typeof(EditorWindow).GetMethod("ZoomAt", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object[]
+                        {
+                            canvas.TranslatePoint(new Point(210, textY), viewport), 3.0,
+                        });
+                    Pump(6);
+                    foreach (var mode in new[] { BitmapScalingMode.Linear, BitmapScalingMode.HighQuality })
+                    {
+                        RenderOptions.SetBitmapScalingMode(hl.Fill, mode);
+                        Pump(4);
+                        RenderToPng(editor, Path.Combine(outDir, $"audit-highlighter-zoom300-{mode}.png"), dpi: 96);
+                    }
+                    InvokePrivate(editor, "FitToView");
+                    Pump(4);
                 }
 
                 // ---------- 7. eraser on a MOVED stroke (nonzero element offset) ----------
@@ -499,6 +534,50 @@ public class AnnotationEditorRenderHarness
                         $"survived={survived} figures={(survived ? Figures(ink.Data!) : 0)} " +
                         $"area {a0:F1}->{(survived ? GeomArea(ink.Data!) : 0):F1}");
                     RenderToPng(editor, Path.Combine(outDir, "audit-erase-multipass.png"), dpi: 192);
+                }
+
+                // ---------- 9. SAMPLE-RATE DETERMINISM ----------
+                // Survey's carve is a pure function of (original geometry, whole gesture
+                // polyline, radius) because it runs ONCE at pointer-up over the full point list
+                // (FabricEraserCanvas.jsx:1820-1846). Feeding the SAME wavy path with extra
+                // samples that lie on it (1x/2x/8x subdivision) leaves the swept region
+                // identical, so the surviving ink must be identical too. When every pointer
+                // move ran its own subtract + sliver cull, it was not.
+                var waveBase = Enumerable.Range(0, 25)
+                    .Select(i => new Point(0.15 * W + 0.70 * W * i / 24.0,
+                                           0.5 * H + 26 * Math.Sin(i / 24.0 * Math.PI * 5))).ToList();
+                foreach (int sub in new[] { 1, 2, 8 })
+                {
+                    // Every extra sample sits ON a base segment, so the swept region is unchanged.
+                    var wave = new List<Point> { waveBase[0] };
+                    for (int i = 1; i < waveBase.Count; i++)
+                        for (int k = 1; k <= sub; k++)
+                            wave.Add(new Point(
+                                waveBase[i - 1].X + (waveBase[i].X - waveBase[i - 1].X) * k / sub,
+                                waveBase[i - 1].Y + (waveBase[i].Y - waveBase[i - 1].Y) * k / sub));
+
+                    canvas.Children.Clear(); Pump(3);
+                    penSizeField.SetValue(editor, 8.0);
+                    Check("FreehandToolBtn");
+                    var a = new Point(0.08 * W, 0.5 * H);
+                    var b = new Point(0.92 * W, 0.5 * H);
+                    editor.PointerDown(Pt(a)); Pump(1);
+                    for (int i = 1; i <= 120; i++)
+                        { editor.PointerMove(Pt(new Point(a.X + (b.X - a.X) * i / 120.0, a.Y))); Pump(1); }
+                    editor.PointerUp(Pt(b)); Pump(4);
+                    var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    double a0 = GeomArea(ink.Data!);
+
+                    eraserSizeField.SetValue(editor, 18.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    editor.PointerDown(Pt(wave[0])); Pump(1);
+                    for (int i = 1; i < wave.Count; i++) { editor.PointerMove(Pt(wave[i])); Pump(1); }
+                    editor.PointerUp(Pt(wave[^1])); Pump(5);
+                    bool survived = canvas.Children.Contains(ink);
+                    log.AppendLine($"SAMPLERATE subdiv={sub} samples={wave.Count} survived={survived} " +
+                        $"figures={(survived ? Figures(ink.Data!) : 0)} " +
+                        $"area {a0:F1}->{(survived ? GeomArea(ink.Data!) : 0):F2}");
+                    RenderToPng(editor, Path.Combine(outDir, $"audit-erase-samplerate-x{sub}.png"), dpi: 192);
                 }
 
                 File.WriteAllText(Path.Combine(outDir, "ink-eraser-audit.txt"), log.ToString());

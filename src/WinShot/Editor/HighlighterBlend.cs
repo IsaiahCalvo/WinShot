@@ -125,14 +125,7 @@ internal static class HighlighterBlend
         using (var g = SD.Graphics.FromImage(overlay))
             g.Clear(SD.Color.FromArgb(color.A, color.R, color.G, color.B));
         MultiplyOnto(dest, overlay);
-        return new ImageBrush(ToBitmapSource(dest))
-        {
-            Stretch = Stretch.Fill,
-            ViewportUnits = BrushMappingMode.Absolute,
-            Viewport = new Rect(0, 0, dest.Width, dest.Height),
-            AlignmentX = AlignmentX.Left,
-            AlignmentY = AlignmentY.Top,
-        };
+        return BlendBrush(dest, new Rect(0, 0, dest.Width, dest.Height));
     }
 
     public static bool IsHighlighter(UIElement el) =>
@@ -178,15 +171,30 @@ internal static class HighlighterBlend
         using (var g = SD.Graphics.FromImage(overlay))
             g.Clear(SD.Color.FromArgb(color.A, color.R, color.G, color.B));
         MultiplyOnto(dest, overlay);
+        ink.Fill = BlendBrush(dest, new Rect(crop.X, crop.Y, crop.Width, crop.Height));
+    }
 
-        ink.Fill = new ImageBrush(ToBitmapSource(dest))
+    /// <summary>
+    /// The blended crop, mapped 1:1 onto <paramref name="viewport"/> in canvas coordinates.
+    /// Survey's blend is evaluated by the browser per DEVICE pixel, so the pixels under a
+    /// highlight are exactly as crisp as the pixels beside it at any zoom. WPF resamples this
+    /// bitmap through the zoom transform instead, so it must at least use the SAME filter as
+    /// the page underneath (EditorWindow.SetBaseTiles pins BaseTiles to HighQuality/Fant);
+    /// on the default Linear filter the highlighted band was visibly softer than its
+    /// surroundings at every zoom other than 100%.
+    /// </summary>
+    private static ImageBrush BlendBrush(SD.Bitmap blended, Rect viewport)
+    {
+        var brush = new ImageBrush(ToBitmapSource(blended))
         {
             Stretch = Stretch.Fill,
             ViewportUnits = BrushMappingMode.Absolute,
-            Viewport = new Rect(crop.X, crop.Y, crop.Width, crop.Height),
+            Viewport = viewport,
             AlignmentX = AlignmentX.Left,
             AlignmentY = AlignmentY.Top,
         };
+        RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.HighQuality);
+        return brush;
     }
 
     private static BitmapSource ToBitmapSource(SD.Bitmap bitmap)

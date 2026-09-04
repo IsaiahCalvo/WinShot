@@ -667,9 +667,10 @@ public partial class EditorWindow : Window
 
     // ------------------------------------------------------------- step tool
 
-    // Erasing is live: every pointer move cuts the segment just drawn out of the ink
-    // under it (Survey behaviour). Originals are remembered per element so the whole
-    // drag becomes one undo step when the pointer is released.
+    // Erasing shows live feedback: every pointer move cuts the segment just drawn out of the
+    // ink under it. That is PREVIEW ONLY - the authoritative carve runs once in
+    // ApplyEraserStroke. Originals are remembered per element both to feed that recompute and
+    // so the whole drag becomes one undo step when the pointer is released.
     private readonly Dictionary<Path, Geometry> _eraseBefore = new();
     private readonly List<UIElement> _eraseRemoved = new();
 
@@ -691,24 +692,20 @@ public partial class EditorWindow : Window
             if (partial)
             {
                 var path = (Path)fe;
-                if (!GeometriesOverlap(path.Data!, cut, fe)) continue;
+                Vector off = ElementOffset(path);
+                var world = TranslateGeometry(path.Data!, off);
+                if (!GeometriesOverlap(world, cut)) continue;
                 if (!_eraseBefore.ContainsKey(path))
                     _eraseBefore[path] = path.Data!.CloneCurrentValue();
-                var after = PaperInk.Subtract(TranslateGeometry(path.Data!, ElementOffset(path)), cut);
-                // Survey culls the hairline crescents boolean subtraction leaves behind
-                // (cullInkSliverPolygons, paperAnnotationGeometry.js:1586-1615) using the
-                // annotation's own sourceWidth, then decides emptiness from what survives.
-                after = PaperInk.CullSlivers(after, meta.Thickness ?? 1);
-                after = TranslateGeometry(after, new Vector(-ElementOffset(path).X, -ElementOffset(path).Y));
-                if (PaperInk.IsEmpty(after))
-                {
-                    AnnotationCanvas.Children.Remove(path);
-                    _eraseRemoved.Add(path);
-                }
-                else
-                {
-                    path.Data = after;
-                }
+                var after = PaperInk.Subtract(world, cut);
+                // A failed cut is Survey's failed leaf: leave the preview alone. Deleting here
+                // (which "empty" used to mean) was silent data loss.
+                if (after is null) continue;
+                // No CullSlivers here. Survey culls exactly once, inside the pointer-up
+                // subtraction (paperAnnotationGeometry.js:2258-2266); its drag preview is a mask
+                // carve that shows the same hairline residue until commit. Re-culling per sample
+                // made the surviving piece count a function of pointer sample density.
+                path.Data = TranslateGeometry(after, new Vector(-off.X, -off.Y));
             }
             else if (HitsEraser(fe, cut))
             {
@@ -719,26 +716,58 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Pointer released: cut the final segment up to the release position (Survey's
-    /// finishPointer, FabricEraserCanvas.jsx:2223-2232) and fold the live edits into one
-    /// undo step. The press itself already carved, so a click needs no extra dot here.
+    /// Pointer released. Survey's carve is a pure function of (original geometry, WHOLE gesture
+    /// polyline, radius): the drag only paints a preview mask, and applyEraserAndCommit runs
+    /// erasePageAnnotations ONCE over the entire accumulated point list against the ORIGINAL
+    /// page annotations, building a single swept-disk record set for the gesture
+    /// (FabricEraserCanvas.jsx:1820-1846, :2223-2240; paperAnnotationGeometry.js:2367-2380).
+    /// So recompute here from the pristine snapshots instead of keeping whatever the per-sample
+    /// preview happened to leave - that result depended on the pointer sample sequence, which is
+    /// what made a slow drag erase differently from a fast one over the same path.
     /// </summary>
     private void ApplyEraserStroke(Point release)
     {
         if (_eraserPoints.Count > 0 && (release - _eraserPoints[^1]).Length >= PaperInk.LiveMinDistance)
             EraseLive(_eraserPoints[^1], release);
+        if (_eraserPoints.Count > 0 && release != _eraserPoints[^1])
+            _eraserPoints.Add(release);
+
+        var inkEdits = new List<(Path path, Geometry before, Geometry? after)>();
+        foreach (var (path, before) in _eraseBefore.Select(kv => (kv.Key, kv.Value)).ToList())
+        {
+            Vector off = ElementOffset(path);
+            var carved = PaperInk.SubtractStroke(
+                TranslateGeometry(before, off), _eraserPoints, _gestureEraserSize);
+            // Survey culls the hairline crescents boolean subtraction leaves behind
+            // (cullInkSliverPolygons, paperAnnotationGeometry.js:1586-1615) using the
+            // annotation's own sourceWidth - once, here, then decides emptiness from what survives.
+            carved = PaperInk.CullSlivers(carved, (path.Tag as AnnotationData)?.Thickness ?? 1);
+            var after = TranslateGeometry(carved, new Vector(-off.X, -off.Y));
+            if (PaperInk.IsEmpty(after))
+            {
+                path.Data = before; // undo baseline; the element leaves the canvas instead
+                if (!_eraseRemoved.Contains(path)) _eraseRemoved.Add(path);
+                AnnotationCanvas.Children.Remove(path);
+            }
+            else
+            {
+                // A mid-drag sliver cull could have emptied it wrongly; the gesture recompute
+                // is authoritative, so put it back.
+                _eraseRemoved.Remove(path);
+                if (!AnnotationCanvas.Children.Contains(path))
+                    AnnotationCanvas.Children.Add(path);
+                path.Data = after;
+                inkEdits.Add((path, before, after));
+            }
+        }
         _eraserPoints.Clear();
-        if (_eraseBefore.Count == 0 && _eraseRemoved.Count == 0) return;
 
         var removed = _eraseRemoved.ToList();
-        var inkEdits = _eraseBefore
-            .Where(kv => !removed.Contains(kv.Key))
-            .Select(kv => (path: kv.Key, before: kv.Value, after: kv.Key.Data))
-            .ToList();
         var removedBefore = removed.OfType<Path>().Where(p => _eraseBefore.ContainsKey(p))
             .ToDictionary(p => p, p => _eraseBefore[p]);
         _eraseBefore.Clear();
         _eraseRemoved.Clear();
+        if (inkEdits.Count == 0 && removed.Count == 0) return;
 
         Push(new EditorAction(
             undo: () =>
@@ -766,17 +795,25 @@ public partial class EditorWindow : Window
         if (offset.Length < 0.01) return geometry;
         var copy = geometry.CloneCurrentValue();
         copy.Transform = new TranslateTransform(offset.X, offset.Y);
-        return copy.GetFlattenedPathGeometry();
+        // Baking a translation must not coarsen the outline, so flatten at PaperInk.Tolerance
+        // and never at WPF's 0.25 absolute default, which turned a 1px stroke's round caps into
+        // triangles every time an erase or a move round-tripped through here.
+        return copy.GetFlattenedPathGeometry(PaperInk.Tolerance, ToleranceType.Absolute);
     }
 
-    private static bool GeometriesOverlap(Geometry ink, Geometry cut, FrameworkElement owner)
+    /// <summary>
+    /// Survey decides overlap by real geometric intersection, with bounds used only as a
+    /// fast-reject that can never drop a true hit (paperAnnotationGeometry.js:2396-2421;
+    /// eraserBoundsPrefilter.js:5-20). A bounding-box area proxy is neither an upper nor a lower
+    /// bound on the intersection, so any non-empty intersection counts. Both operands are
+    /// already in canvas coordinates. PaperInk.Tolerance, not WPF's 0.25 absolute default, at
+    /// which a grazing pass over a thin stroke could be reported as no overlap at all.
+    /// </summary>
+    private static bool GeometriesOverlap(Geometry world, Geometry cut)
     {
-        // Survey decides overlap by real geometric intersection, with bounds used only as
-        // a fast-reject that can never drop a true hit (paperAnnotationGeometry.js:2396-2421;
-        // eraserBoundsPrefilter.js:5-20). A bounding-box area proxy is neither an upper nor
-        // a lower bound on the intersection, so any non-empty intersection counts.
-        var world = TranslateGeometry(ink, ElementOffset(owner));
-        var inter = Geometry.Combine(world, cut, GeometryCombineMode.Intersect, Transform.Identity);
+        var inter = Geometry.Combine(
+            world, cut, GeometryCombineMode.Intersect, Transform.Identity,
+            PaperInk.Tolerance, ToleranceType.Absolute);
         return inter is not null && !inter.IsEmpty();
     }
 
@@ -785,9 +822,7 @@ public partial class EditorWindow : Window
         if (fe is CalloutAnnotation)
         {
             var bounds = GetCanvasBounds(fe);
-            var box = new RectangleGeometry(bounds);
-            var inter = Geometry.Combine(box, cut, GeometryCombineMode.Intersect, Transform.Identity);
-            return inter is not null && !inter.IsEmpty() && inter.Bounds.Width > 0 && inter.Bounds.Height > 0;
+            return GeometriesOverlap(new RectangleGeometry(bounds), cut);
         }
         Rect b = new(
             Canvas.GetLeft(fe) + (double.IsNaN(Canvas.GetLeft(fe)) ? 0 : 0),
@@ -798,10 +833,8 @@ public partial class EditorWindow : Window
         b.X = (double.IsNaN(Canvas.GetLeft(fe)) ? 0 : Canvas.GetLeft(fe)) + off.X;
         b.Y = (double.IsNaN(Canvas.GetTop(fe)) ? 0 : Canvas.GetTop(fe)) + off.Y;
         if (fe is Path p && p.Data is not null)
-            return GeometriesOverlap(p.Data, cut, fe);
-        var hit = new RectangleGeometry(b);
-        var overlap = Geometry.Combine(hit, cut, GeometryCombineMode.Intersect, Transform.Identity);
-        return overlap is not null && !overlap.IsEmpty() && overlap.Bounds.Width > 0 && overlap.Bounds.Height > 0;
+            return GeometriesOverlap(TranslateGeometry(p.Data, off), cut);
+        return GeometriesOverlap(new RectangleGeometry(b), cut);
     }
 
     // ------------------------------------------- counter press-drag-release placement
