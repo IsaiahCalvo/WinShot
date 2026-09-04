@@ -36,9 +36,16 @@ public sealed class ToastWindow : WF.Form
     private const int DwellMs = 1700;
     private const int LongDwellMs = 4500;
 
+    /// <summary>One 13-DIP row of body text, and the most rows Trim's 90-character cap
+    /// can ever fill at 244 DIP wide.</summary>
+    private const int BodyLineH = 22;
+    private const int BodyMaxLines = 3;
+
     private IDisposable? _motion;
     private bool _exiting;
     private SD.Point _restLocation;
+    private readonly string _body;
+    private double _entranceAmount;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
     // the anchor monitor or labels truncate on 125%/150% displays.
@@ -80,13 +87,13 @@ public sealed class ToastWindow : WF.Form
 
         const int width = 300;
         bool hasOpen = onOpen is not null;
-        int height = hasOpen ? 104 : 70;
-        ClientSize = new SD.Size(S(width), S(height));
 
         // The severity glyph is the only thing that separates "Saved" from "Save failed" at
         // a glance, so it gets its own colour as well as its own shape.
         var glyphLabel = Label(GlyphOf(severity), 14, 14, 22, ThemePalette.TextTitlePt, ColorOf(severity), height: 24);
         glyphLabel.Font = ThemePalette.IconFont(ThemePalette.TextTitlePt);
+        glyphLabel.AccessibleRole = WF.AccessibleRole.Graphic;
+        glyphLabel.AccessibleName = severity.ToString();
         Controls.Add(glyphLabel);
 
         const int textX = 42;
@@ -96,12 +103,27 @@ public sealed class ToastWindow : WF.Form
         // 12 pt Segoe UI Bold needs ~22 px of line box; the shared 22 px row left the
         // descenders on the clip edge, so the title gets its own (still clearing y=38).
         var titleLabel = Label(title, textX, 14, textW, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true, height: 24);
+        titleLabel.AccessibleName = title;
+        titleLabel.AccessibleRole = WF.AccessibleRole.StaticText;
         Controls.Add(titleLabel);
 
-        var previewLabel = Label(Trim(preview), textX, 38, textW, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary);
+        // The friendly-error lines are 45-77 characters, which is two to three of these
+        // 244 px rows. A single ellipsed line cut off exactly the half that says what to do
+        // about it ("Choose a different folder in Settings"), so the body wraps and the
+        // window grows to whatever it needs, up to the BodyMaxLines the 90-char cap can fill.
+        _body = Trim(preview);
+        int bodyLines = LinesNeeded(_body, textW);
+        int bodyH = BodyLineH + ((bodyLines - 1) * BodyLineH);
+        var previewLabel = Label(_body, textX, 38, textW, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary, height: bodyH);
         previewLabel.AutoEllipsis = true;
         previewLabel.UseMnemonic = false;
+        previewLabel.TextAlign = bodyLines > 1 ? SD.ContentAlignment.TopLeft : SD.ContentAlignment.MiddleLeft;
+        previewLabel.AccessibleName = _body;
+        previewLabel.AccessibleRole = WF.AccessibleRole.StaticText;
         Controls.Add(previewLabel);
+
+        int bodyBottom = 38 + bodyH;
+        ClientSize = new SD.Size(S(width), S(hasOpen ? bodyBottom + 8 + 26 + 10 : bodyBottom + 10));
 
         if (onOpen is not null)
         {
@@ -110,13 +132,19 @@ public sealed class ToastWindow : WF.Form
                 Scale = _scale,
                 BackColor = Back,
                 FillColor = ThemePalette.Accent,
-                Location = new SD.Point(S(width - 14 - 96), S(68)),
+                Location = new SD.Point(S(width - 14 - 96), S(bodyBottom + 8)),
                 Size = new SD.Size(S(96), S(26)),
                 Text = "Open link",
             };
             open.Click += (_, _) => { try { onOpen(); } catch (Exception ex) { Log.Error("Toast action failed", ex); } Close(); };
             Controls.Add(open);
         }
+
+        // FormBorderStyle.None with no Text leaves an unnamed window: Narrator announced the
+        // tray balloon this replaced, so the toast has to name itself the same way.
+        AccessibleRole = WF.AccessibleRole.Alert;
+        AccessibleName = title;
+        AccessibleDescription = _body;
 
         _dismiss.Interval = hasOpen || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
         _dismiss.Tick += (_, _) => Close();
@@ -128,6 +156,39 @@ public sealed class ToastWindow : WF.Form
             c.MouseLeave += (_, _) => _dismiss.Start();
         }
         KeyDown += (_, e) => { if (e.KeyCode == WF.Keys.Escape) Close(); };
+    }
+
+    /// <summary>
+    /// How many body rows <paramref name="text"/> needs inside a <paramref name="availableDip"/>-wide
+    /// column. Measured through a pixel-unit font so the answer is the same on every monitor:
+    /// the layout is in DIP and only S() turns it into device pixels, so a point-sized probe
+    /// would return 150 % numbers on Isaiah's primary and over-count the rows.
+    /// </summary>
+    internal static int LinesNeeded(string text, int availableDip)
+    {
+        if (string.IsNullOrEmpty(text)) return 1;
+        try
+        {
+            using SD.Font ui = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
+            using var dip = new SD.Font(ui.FontFamily, ThemePalette.TextBodyLgPt * 96f / 72f, SD.GraphicsUnit.Pixel);
+            const WF.TextFormatFlags flags = WF.TextFormatFlags.WordBreak | WF.TextFormatFlags.NoPrefix;
+            var column = new SD.Size(availableDip, int.MaxValue);
+
+            // MeasureText adds a constant padding to the height on top of n line boxes, so
+            // dividing by the font's line height over-counts. Two references give both terms.
+            int one = WF.TextRenderer.MeasureText("Mg", dip, column, flags).Height;
+            int two = WF.TextRenderer.MeasureText("Mg\nMg", dip, column, flags).Height;
+            int lineH = Math.Max(1, two - one);
+            int padding = one - lineH;
+
+            int wrapped = WF.TextRenderer.MeasureText(text, dip, column, flags).Height;
+            return Math.Clamp((int)Math.Round((wrapped - padding) / (double)lineH), 1, BodyMaxLines);
+        }
+        catch
+        {
+            // No font, no measurement — one row is what the toast always used to give.
+            return 1;
+        }
     }
 
     /// <summary>Segoe MDL2 / Fluent codepoints that exist in both fonts.</summary>
@@ -156,6 +217,26 @@ public sealed class ToastWindow : WF.Form
         _motion?.Dispose();
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
         _dismiss.Start();
+        Announce();
+    }
+
+    /// <summary>
+    /// The toast never takes focus, so nothing about it reaches a screen reader on its own.
+    /// The tray balloon it replaced was spoken; one UIA notification restores that.
+    /// </summary>
+    private void Announce()
+    {
+        try
+        {
+            AccessibilityObject.RaiseAutomationNotification(
+                WF.Automation.AutomationNotificationKind.Other,
+                WF.Automation.AutomationNotificationProcessing.MostRecent,
+                string.IsNullOrEmpty(_body) ? AccessibleName ?? string.Empty : $"{AccessibleName}. {_body}");
+        }
+        catch
+        {
+            // UI Automation is optional; the visible toast remains the fallback.
+        }
     }
 
     /// <summary>
@@ -177,6 +258,7 @@ public sealed class ToastWindow : WF.Form
     private void ApplyEntrance(double amount)
     {
         if (IsDisposed || !IsHandleCreated) return;
+        _entranceAmount = Math.Clamp(amount, 0d, 1d);
         Opacity = RestOpacity * Math.Clamp(amount, 0d, 1d);
         Location = new SD.Point(_restLocation.X, _restLocation.Y + (int)Math.Round(S(8) * (1d - amount)));
     }
@@ -184,14 +266,21 @@ public sealed class ToastWindow : WF.Form
     protected override void OnFormClosing(WF.FormClosingEventArgs e)
     {
         // Entrance and exit are the same move in reverse; without this the toast
-        // disappeared at full opacity the instant the dismiss timer fired.
-        if (!_exiting && IsHandleCreated && !IsDisposed && Motion.AnimationsEnabled())
+        // disappeared at full opacity the instant the dismiss timer fired. Windows shutting
+        // down is the exception: nothing is left to watch the fade and the pump may already
+        // be gone, so a cancelled close there would never come back.
+        bool ordinaryClose =
+            e.CloseReason is WF.CloseReason.None or WF.CloseReason.UserClosing or WF.CloseReason.FormOwnerClosing;
+        if (!_exiting && ordinaryClose && IsHandleCreated && !IsDisposed && Motion.AnimationsEnabled())
         {
             e.Cancel = true;
             _exiting = true;
             _dismiss.Stop();
             _motion?.Dispose();
-            _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(1d - p), CloseIfStillExiting);
+            // From wherever the entrance had reached, not from full opacity: a toast replaced
+            // 60 ms in used to snap to rest before fading.
+            double from = _entranceAmount;
+            _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(from * (1d - p)), CloseIfStillExiting);
             return;
         }
 
@@ -259,7 +348,9 @@ public sealed class ToastWindow : WF.Form
         }
         else
         {
-            // Nothing better to anchor to: the tray corner, where the balloon used to appear.
+            // Nothing better to anchor to: the bottom-right corner of the monitor the user is
+            // working on (the pointer's), which is where the balloon used to appear on a
+            // single-monitor PC and is closer to the eye than the primary's tray on a stack.
             x = area.Right - Width - 16;
             y = area.Bottom - Height - 16;
         }
