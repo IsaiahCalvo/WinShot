@@ -125,17 +125,23 @@ public partial class EditorWindow : Window
     /// </summary>
     private void HookCalloutGrow(TextBox tb, CalloutAnnotation visual)
     {
-        double floor = visual.Layout.Box.Height;
-        tb.TextChanged += (_, _) =>
-        {
-            var layout = visual.Layout;
-            double grown = Math.Max(floor, MeasureCalloutText(visual, tb.Text ?? "", layout.Box.Width));
-            if (Math.Abs(grown - layout.Box.Height) < 0.5) return;
-            ApplyCalloutLayout(visual, layout.WithBox(
-                new Rect(layout.Box.X, layout.Box.Y, layout.Box.Width, grown)));
-            tb.Height = visual.Layout.RenderBox.Height;
-            UpdateSelectionVisual();
-        };
+        // Kept in a field, not a closure local, so a style click can re-run the same grow pass
+        // (Survey re-measures on applyStyle's rAF too, not only on a keystroke).
+        _calloutEditorFloorH = visual.Layout.Box.Height;
+        tb.TextChanged += (_, _) => GrowCalloutEditor(tb, visual);
+    }
+
+    /// <summary>Re-measures the live callout text and grows the box (and editor) to fit it.</summary>
+    private void GrowCalloutEditor(TextBox tb, CalloutAnnotation visual)
+    {
+        var layout = visual.Layout;
+        double grown = Math.Max(_calloutEditorFloorH,
+            MeasureCalloutText(visual, tb.Text ?? "", layout.Box.Width));
+        if (Math.Abs(grown - layout.Box.Height) < 0.5) return;
+        ApplyCalloutLayout(visual, layout.WithBox(
+            new Rect(layout.Box.X, layout.Box.Y, layout.Box.Width, grown)));
+        tb.Height = visual.Layout.RenderBox.Height;
+        UpdateSelectionVisual();
     }
 
     /// <summary>Wrapped height of <paramref name="text"/> inside a callout box of that width.</summary>

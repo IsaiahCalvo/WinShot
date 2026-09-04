@@ -99,6 +99,9 @@ public partial class EditorWindow : Window
     /// <summary>Mount-time height of the open plain-text editor — the grow-only floor.</summary>
     private double _textEditorFloorH;
 
+    /// <summary>Same grow-only floor for the open callout editor: the drag-created box height.</summary>
+    private double _calloutEditorFloorH;
+
     /// <summary>The committed label a text re-edit replaced, so blanking or cancelling restores it.</summary>
     private FrameworkElement? _reeditSource;
 

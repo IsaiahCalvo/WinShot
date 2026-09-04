@@ -794,6 +794,7 @@ public class AnnotationEditorRenderHarness
                 Shot("pointer-pen-thick.png");
                 RenderToPng(editor, Path.Combine(outDir, "pointer-pen-thick-200pct.png"), dpi: 192);
 
+
                 // Text: click to open, type, commit by clicking away, then reselect.
                 Check("TextToolBtn");
                 Click(0.10, 0.92); Pump(4);
@@ -996,10 +997,17 @@ public class AnnotationEditorRenderHarness
                     // TXT-3 + TXT-8: bold writes through to meta and label AT CLICK TIME.
                     Fire(boldBtn);
                     log.AppendLine($"[CALLOUT] afterBold(open) editorWeight={Live()?.FontWeight} meta.Bold={(selCallout?.Tag as AnnotationData)?.Bold} labelWeight={selCallout?.Label.FontWeight} labelVisible={selCallout?.Label.Visibility}");
-                    // TXT-4: family + size are not excluded for callouts any more.
+                    // TXT-4: family + size are not excluded for callouts any more. Type first,
+                    // so the style click has to render the LIVE text (Survey's overlay owns it)
+                    // and re-measure the box under the new metrics on the same click instead of
+                    // reverting to the pre-edit string at the pre-edit height.
+                    if (Live() is TextBox ctb) { ctb.Text = "Callout gjpq wraps onto more lines"; Pump(4); }
+                    double cBoxBefore = selCallout?.Layout.Box.Height ?? 0;
                     PickFamily("Courier New");
                     PickSize(36);
                     var cMeta = selCallout?.Tag as AnnotationData;
+                    log.AppendLine($"[CALLOUT] liveText label={selCallout?.Label.Text} editor={Live()?.Text}");
+                    log.AppendLine($"[CALLOUT] regrow boxBefore={cBoxBefore:F1} boxAfter={selCallout?.Layout.Box.Height:F1} editorH={Live()?.Height:F1}");
                     log.AppendLine($"[CALLOUT] afterFamily/Size(open) editorFamily={Live()?.FontFamily} editorSize={Live()?.FontSize} labelFamily={selCallout?.Label.FontFamily} labelSize={selCallout?.Label.FontSize} meta.Family={cMeta?.FontFamily} meta.Size={cMeta?.FontSize}");
                     Shot("pointer-callout-format-open.png");
                     Invoke("CommitCalloutText"); Pump(4);

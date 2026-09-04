@@ -1494,7 +1494,9 @@ public partial class EditorWindow : Window
     private void ApplyCalloutLayout(CalloutAnnotation callout, CalloutLayout layout)
     {
         if (callout.Tag is not AnnotationData meta) return;
-        ApplyCalloutMeta(callout, layout, meta);
+        // A re-layout must not rewrite the text: mid-edit the label already carries what the
+        // open editor shows, while meta.Text is still the pre-edit string until the commit.
+        ApplyCalloutMeta(callout, layout, meta, callout.Text);
         callout.Tag = CalloutDataFrom(callout.Layout, meta);
     }
 

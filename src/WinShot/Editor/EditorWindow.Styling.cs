@@ -314,12 +314,19 @@ public partial class EditorWindow : Window
             // write-back in Survey — it rides the single commit CommitText already pushes.
             if (editor.Tag is CalloutAnnotation live)
             {
-                RestyleOneTextFormat(live);
+                // ApplyCalloutMeta renders meta.Text, which is still the PRE-edit string while
+                // the overlay owns the text — hand it what is actually on screen instead, or a
+                // style click silently reverts everything typed since the editor opened.
+                RestyleOneTextFormat(live, editor.Text ?? string.Empty);
+                // A bigger font needs more lines: Survey re-measures scrollHeight on the same
+                // click (applyStyle -> rAF(broadcastLiveBounds)) rather than waiting for a
+                // keystroke, so the box grows under the new metrics right away.
+                GrowCalloutEditor(editor, live);
                 // CalloutAnnotation.Apply re-shows the label; the editor sits on top of it
                 // for as long as the edit is open.
                 live.Label.Visibility = Visibility.Collapsed;
-                // A font-size change moves the box's buffered bottom edge, so the editor has
-                // to follow it (Survey re-broadcasts live bounds on the same click).
+                // A font-size change also moves the box's buffered bottom edge, so the editor
+                // has to follow it (Survey re-broadcasts live bounds on the same click).
                 editor.Height = live.Layout.RenderBox.Height;
                 UpdateSelectionVisual();
             }
@@ -369,7 +376,11 @@ public partial class EditorWindow : Window
         if (!callout) GrowTextEditor(tb, _textEditorFloorH);
     }
 
-    private void RestyleOneTextFormat(UIElement element)
+    /// <param name="liveText">
+    /// Text currently in the open editor, when there is one. It is only rendered, never stored:
+    /// the commit owns the text, so undo/redo of this style change replay the stored string.
+    /// </param>
+    private void RestyleOneTextFormat(UIElement element, string? liveText = null)
     {
         if (element is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
         if (meta.Type is not (AnnotationData.TypeText or AnnotationData.TypeCallout)) return;
@@ -407,7 +418,7 @@ public partial class EditorWindow : Window
         }
         else if (fe is CalloutAnnotation callout)
         {
-            ApplyCalloutMeta(callout, callout.Layout, after);
+            ApplyCalloutMeta(callout, callout.Layout, after, liveText);
             fe.Tag = after;
             Push(new EditorAction(
                 undo: () =>
@@ -486,7 +497,8 @@ public partial class EditorWindow : Window
     /// style survives every drag. This is the one funnel that redraws a callout from its
     /// stored AnnotationData - colours, dash, font AND the text format flags.
     /// </summary>
-    private static void ApplyCalloutMeta(CalloutAnnotation callout, CalloutLayout layout, AnnotationData meta)
+    private static void ApplyCalloutMeta(
+        CalloutAnnotation callout, CalloutLayout layout, AnnotationData meta, string? liveText = null)
     {
         var (head, _) = AnnotationStyle.HeadsFrom(meta);
         var stroke = meta.Color is string hex && TryParseColor(hex, out var sc) ? sc : Colors.White;
@@ -494,7 +506,7 @@ public partial class EditorWindow : Window
         // an unchanged buffer leaves a free-drag (raw) layout untouched.
         double buffer = CalloutDescender(meta);
         if (Math.Abs(layout.Descender - buffer) > 0.001) layout = layout.WithDescender(buffer);
-        callout.Apply(layout, meta.Text ?? callout.Text, stroke,
+        callout.Apply(layout, liveText ?? meta.Text ?? callout.Text, stroke,
             AnnotationStyle.FillColorFrom(meta, stroke), meta.Thickness ?? 2, head,
             AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? CalloutLayout.DefaultFontSize,
             meta.FontFamily, CalloutFontColor(meta));
