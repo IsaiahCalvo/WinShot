@@ -17,7 +17,6 @@ public class HistoryIncrementalCollectionTests
         Assert.Equal(200, model.FilteredCount);
         Assert.Equal(200, model.VisibleCount);
         Assert.False(model.HasMore);
-        Assert.All(model.VisibleItems, item => Assert.False(string.IsNullOrWhiteSpace(item.DayGroup)));
     }
 
     [Fact]
@@ -99,7 +98,6 @@ public class HistoryIncrementalCollectionTests
         Assert.Equal(250, model.FilteredCount);
         Assert.Equal(200, model.VisibleCount);
         Assert.All(model.VisibleItems, item => Assert.True(item.IsImage));
-        Assert.All(model.VisibleItems, item => Assert.False(string.IsNullOrWhiteSpace(item.DayGroup)));
 
         HistoryItem removed = model.VisibleItems[20];
         model.Remove(removed);

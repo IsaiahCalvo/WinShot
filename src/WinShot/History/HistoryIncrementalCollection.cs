@@ -1,11 +1,11 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 
 namespace WinShot.History;
 
 /// <summary>
 /// Keeps the full, lightweight history model in memory while exposing only a bounded
-/// page to WPF. The grouped WrapPanel therefore creates at most one page of cards at
-/// startup instead of a card for every retained file.
+/// page to WPF. The card grid therefore creates at most one page of cards at startup
+/// instead of a card for every retained file.
 /// </summary>
 public sealed class HistoryIncrementalCollection
 {

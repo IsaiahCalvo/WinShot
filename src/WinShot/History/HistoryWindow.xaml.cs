@@ -1346,7 +1346,6 @@ public sealed class HistoryItem : INotifyPropertyChanged
         FileSize = TryGetFileSize(filePath);
         Caption = BuildCaption(CapturedAt, FileSize);
         RelativeTime = BuildRelativeTime(CapturedAt);
-        DayGroup = BuildDayGroup(CapturedAt);
         string sizeText = FormatFileSize(FileSize);
         MetadataText = sizeText.Length == 0 ? ExtensionLabel : $"{sizeText} · {ExtensionLabel}";
     }
@@ -1376,23 +1375,6 @@ public sealed class HistoryItem : INotifyPropertyChanged
     /// <summary>CleanShot-style relative-time caption shown under the thumbnail,
     /// e.g. "1 minute ago", "3 minutes ago", "Yesterday".</summary>
     public string RelativeTime { get; }
-
-    /// <summary>Day-header label for grouping: "TODAY", "YESTERDAY", a weekday name,
-    /// or "MMM D" for older captures. Uppercased for the themed header.</summary>
-    public string DayGroup { get; }
-
-    private static string BuildDayGroup(DateTime captured)
-    {
-        DateTime today = DateTime.Today;
-        if (captured.Date == today) return "TODAY";
-        if (captured.Date == today.AddDays(-1)) return "YESTERDAY";
-        // Within the last week, show the weekday name (e.g. "MONDAY").
-        if (captured.Date > today.AddDays(-7))
-            return captured.ToString("dddd",
-                System.Globalization.CultureInfo.CurrentCulture).ToUpperInvariant();
-        return captured.ToString("MMM d",
-            System.Globalization.CultureInfo.CurrentCulture).ToUpperInvariant();
-    }
 
     private static DateTime ParseCapturedAt(string filePath)
     {
