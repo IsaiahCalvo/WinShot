@@ -25,6 +25,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private const int DragThresholdPx = 4;
     private const int HandleHalf = 5;       // handle circle is 2*HandleHalf px
     private const int HandleHitTol = 9;     // grab tolerance around a handle center
+    /// <summary>Peak alpha of the accent wash over a hover-targeted window.</summary>
+    private const int WindowWashAlpha = 40;
     private static readonly SD.Color Accent = ThemePalette.Accent;
 
     private SD.Rectangle _vs = CaptureService.VirtualScreen;
@@ -73,6 +75,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SD.Point _adjustAnchor;        // cursor at the start of a move/resize
     private SD.Rectangle _adjustStartRect; // pending rect at the start of a move/resize
     private WindowInfo? _hoverWindow;
+    /// <summary>Name of the app behind <see cref="_hoverWindow"/>, resolved once per target.</summary>
+    private string _hoverAppName = string.Empty;
+    /// <summary>0..1 ramp on the window-target wash, so retargeting reads as the tint moving
+    /// rather than two rectangles blinking.</summary>
+    private double _hoverWash;
+    private IDisposable? _hoverWashTween;
     private SD.Bitmap? _frozen;            // frozen virtual-desktop snapshot shown under the overlay
     // Per-monitor frozen-slice-with-dim baked once, so each follow-frame is a single opaque
     // blit instead of re-cropping the snapshot AND alpha-blending a full-screen dim every tick
@@ -373,6 +381,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _resizeHandle = -1;
         _movingPending = false;
         _hoverWindow = null;
+        _hoverAppName = string.Empty;
+        BeginHoverWash(arriving: false);
         _paneHover = false;
         _elementGranularity = false;
         _hoverPane = null;
@@ -440,6 +450,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             DisposePanes();
             DisposeFrozen();
+            _hoverWashTween?.Dispose();
+            _hoverWashTween = null;
             _followTimer.Dispose();
             _followMotionClock?.Dispose();
             _followMotionClock = null;
@@ -978,6 +990,26 @@ public sealed class FastRegionSelectorDialog : WF.Form
             using (var pen = new SD.Pen(Accent, 2))
                 g.DrawRectangle(pen, local);
 
+            if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
+            {
+                // A hand-drawn marquee and a whole window looked identical — both a plain
+                // accent border over undimmed pixels. The wash says "this is one object,
+                // and it is the thing that will be captured".
+                int washAlpha = (int)Math.Round(WindowWashAlpha * Math.Clamp(_hoverWash, 0d, 1d));
+                if (washAlpha > 0)
+                {
+                    using var wash = new SD.SolidBrush(SD.Color.FromArgb(washAlpha, Accent));
+                    g.FillRectangle(wash, local);
+                }
+                if (_hoverAppName.Length > 0)
+                {
+                    SD.Size pill = SelectorChrome.MeasureLabel(_hoverAppName);
+                    SelectorChrome.DrawLabel(g, clientSize, _hoverAppName,
+                        local.Left + (local.Width - pill.Width) / 2,
+                        local.Top + (local.Height - pill.Height) / 2);
+                }
+            }
+
             if (showHandles)
                 DrawHandles(g, monitorBounds, bright);
 
@@ -1264,6 +1296,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         WindowInfo? previous = _hoverWindow;
         _hoverWindow = next;
+        _hoverAppName = next is null ? string.Empty : WindowEnumerator.AppNameFor(next.Handle, next.Title);
+        BeginHoverWash(next is not null);
         if (previous is not null && next is not null)
             InvalidateHoverRegion(previous.Bounds, next.Bounds);
         else if (previous is not null)
@@ -1271,6 +1305,33 @@ public sealed class FastRegionSelectorDialog : WF.Form
         else if (next is not null)
             InvalidateScreenRect(Inflated(next.Bounds));
         return true;
+    }
+
+    /// <summary>
+    /// Ramps the window-target wash in (or drops it) over <see cref="Motion.QuickMs"/>. A
+    /// target change cancels the tween in flight so the tint never chases two windows at once.
+    /// </summary>
+    private void BeginHoverWash(bool arriving)
+    {
+        _hoverWashTween?.Dispose();
+        _hoverWashTween = null;
+        if (!arriving)
+        {
+            _hoverWash = 0d;
+            return;
+        }
+
+        _hoverWash = 0d;
+        _hoverWashTween = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutCubic,
+            progress =>
+            {
+                _hoverWash = progress;
+                if (_hoverWindow is WindowInfo w)
+                    InvalidateScreenRect(Inflated(w.Bounds));
+            },
+            () => _hoverWashTween = null);
     }
 
     /// <summary>A highlight's ground plus the border pen width and its antialiasing.</summary>
@@ -1392,6 +1453,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         DialogResult = result;
         StopFollowMotion();
+        BeginHoverWash(arriving: false); // a tween outliving the session holds the 1 ms clock
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -1457,7 +1519,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     internal WF.Cursor CursorForCurrent()
     {
         if (_mode == SelectorMode.Window)
-            return WF.Cursors.Hand;
+            return SelectorCursors.Camera;
 
         if (_pendingScreen is SD.Rectangle p)
         {

@@ -1,3 +1,4 @@
+﻿using System.Diagnostics;
 using WinShot.Capture;
 using WinShot.Core;
 using Xunit;
@@ -12,6 +13,7 @@ namespace WinShot.Tests;
 /// constructed, poked, and completed with Escape so its follow-motion clock is released
 /// (MotionTests asserts absolute holder counts).
 /// </summary>
+[Collection("MotionRefcount")]
 public class SelectorInteractionTests
 {
     private static FastRegionSelectorDialog CreateSelector(SettingsService? settings = null) =>
@@ -45,5 +47,65 @@ public class SelectorInteractionTests
         Assert.False(selector.SetHoverWindow(null));
 
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
+    /// <summary>
+    /// Hovering a window ramps the accent wash in rather than flicking it on, and the tween
+    /// holds the process-wide 1 ms clock while it runs — so ending the session has to drop it
+    /// even when the pointer is still sitting on a window.
+    /// </summary>
+    [Fact]
+    public void HoverWashRampsInAndReleasesTheClockWhenTheSessionEnds()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => true;
+        try
+        {
+            PumpUntil(() => Motion.Holders == 0);
+            using var selector = CreateSelector();
+
+            Assert.True(selector.SetHoverWindow(Window(0, 0, 800, 600)));
+            Assert.True(Motion.Holders > 0, "the wash ramp should hold the high-resolution clock");
+
+            // Escape ends the session with the ramp still in flight.
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            Assert.Equal(0, Motion.Holders);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+            PumpUntil(() => Motion.Holders == 0);
+        }
+    }
+
+    [Fact]
+    public void HoverWashIsSkippedEntirelyWhenAnimationsAreOff()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            PumpUntil(() => Motion.Holders == 0);
+            using var selector = CreateSelector();
+
+            Assert.True(selector.SetHoverWindow(Window(0, 0, 800, 600)));
+            Assert.Equal(0, Motion.Holders);
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+        }
+    }
+
+    private static void PumpUntil(Func<bool> condition, int timeoutMs = 8000)
+    {
+        var clock = Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < timeoutMs)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
     }
 }
