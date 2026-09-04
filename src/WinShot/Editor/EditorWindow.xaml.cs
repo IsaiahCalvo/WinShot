@@ -105,6 +105,12 @@ public partial class EditorWindow : Window
     /// <summary>The committed label a text re-edit replaced, so blanking or cancelling restores it.</summary>
     private FrameworkElement? _reeditSource;
 
+    /// <summary>
+    /// Rotation of the label being re-edited. CommitText rebuilds the label, so the angle has
+    /// to survive the round trip the way Survey's deepClone does (textEditCommit.js:186-212).
+    /// </summary>
+    private double _reeditAngle;
+
     /// <summary>Live box chrome painted behind the chromeless editor with the committed look.</summary>
     private System.Windows.Shapes.Rectangle? _textPreview;
     private int _nextStep = 1;
@@ -1386,8 +1392,6 @@ public partial class EditorWindow : Window
             _textStrike = meta.Strike ?? false;
             if (!string.IsNullOrWhiteSpace(meta.Align)) _textAlign = meta.Align;
             if (!string.IsNullOrWhiteSpace(meta.VerticalAlign)) _textVerticalAlign = meta.VerticalAlign;
-            if (meta.Style is string styleName && Enum.TryParse(styleName, out TextStyle textStyle))
-                _textStyle = textStyle;
             _lineStyle = AnnotationStyle.LineStyleFrom(meta);
             // Survey's Bump field follows the selection like every other style input.
             if (meta.CloudIntensity is double bump)
@@ -1838,7 +1842,7 @@ public partial class EditorWindow : Window
         if (_syncingContext) return;
         if (FontFamilyBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string family) return;
         _textFontFamily = family;
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.FontFamily = family);
         ReturnFocusToEditor();
     }
 
@@ -1847,7 +1851,7 @@ public partial class EditorWindow : Window
         if (_syncingContext || _syncingSizeBox) return;
         if (FontSizeBox?.SelectedItem is not ComboBoxItem item || item.Tag is not double size) return;
         _textFontSize = AnnotationStyle.ClampTextSize(size);
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.FontSize = _textFontSize);
         ReturnFocusToEditor();
     }
 
@@ -1894,7 +1898,7 @@ public partial class EditorWindow : Window
         if (FontColorPopup is not null) FontColorPopup.IsOpen = false;
         SyncPickerSelection(FontColorGrid, color);
         SyncFontColorSwatch();
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.FontColor = ToHex(color));
         ReturnFocusToEditor();
     }
 
@@ -1910,28 +1914,28 @@ public partial class EditorWindow : Window
     {
         _textBold = !_textBold;
         SyncTextFormatChrome();
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.Bold = _textBold);
     }
 
     private void OnTextItalicClick(object sender, RoutedEventArgs e)
     {
         _textItalic = !_textItalic;
         SyncTextFormatChrome();
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.Italic = _textItalic);
     }
 
     private void OnTextUnderlineClick(object sender, RoutedEventArgs e)
     {
         _textUnderline = !_textUnderline;
         SyncTextFormatChrome();
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.Underline = _textUnderline);
     }
 
     private void OnTextStrikeClick(object sender, RoutedEventArgs e)
     {
         _textStrike = !_textStrike;
         SyncTextFormatChrome();
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.Strike = _textStrike);
     }
 
     private void OnTextAlignChanged(object sender, SelectionChangedEventArgs e)
@@ -1939,7 +1943,7 @@ public partial class EditorWindow : Window
         if (_syncingContext) return;
         if (AlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
         _textAlign = align;
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.Align = align);
     }
 
     private void OnVerticalAlignChanged(object sender, SelectionChangedEventArgs e)
@@ -1947,7 +1951,7 @@ public partial class EditorWindow : Window
         if (_syncingContext) return;
         if (VerticalAlignBox?.SelectedItem is not ComboBoxItem item || item.Tag is not string align) return;
         _textVerticalAlign = align;
-        if (IsLoaded) RestyleSelectedTextFormat();
+        if (IsLoaded) RestyleSelectedTextFormat(m => m.VerticalAlign = align);
     }
 
     private void OnMoreChromeClick(object sender, RoutedEventArgs e)
@@ -1972,9 +1976,24 @@ public partial class EditorWindow : Window
         _textVerticalAlign = parts[1];
         if (AlignPopup is not null)
             AlignPopup.IsOpen = false;
-        SelectComboByTag(AlignBox, _textAlign);
-        SelectComboByTag(VerticalAlignBox, _textVerticalAlign);
-        if (IsLoaded) RestyleSelectedTextFormat();
+        // Assigning ComboBox.SelectedItem raises SelectionChanged synchronously, and both
+        // handlers restyle again — one click used to cost three undo entries and three full
+        // text-visual rebuilds. Survey's cell fires exactly two single-key patches
+        // (AppShell.jsx:1970-1978), so update the combos for display only.
+        bool restore = _syncingContext;
+        _syncingContext = true;
+        try
+        {
+            SelectComboByTag(AlignBox, _textAlign);
+            SelectComboByTag(VerticalAlignBox, _textVerticalAlign);
+        }
+        finally { _syncingContext = restore; }
+        if (IsLoaded)
+            RestyleSelectedTextFormat(m =>
+            {
+                m.Align = _textAlign;
+                m.VerticalAlign = _textVerticalAlign;
+            });
     }
 
     private void SyncTextFormatChrome()
@@ -2029,7 +2048,7 @@ public partial class EditorWindow : Window
             btn.Background = (Brush)FindResource(on ? "SurveyGoldTintBrush" : "ChromeControlBrush");
             btn.Foreground = (Brush)FindResource(on ? "SurveyGoldBrush" : "ChromeTextBrush");
         }
-        Paint(BoldBtn, _textBold || _textStyle == TextStyle.Bold);
+        Paint(BoldBtn, _textBold);
         Paint(ItalicBtn, _textItalic);
         Paint(UnderlineBtn, _textUnderline);
         Paint(StrikeBtn, _textStrike);

@@ -26,7 +26,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void RestyleSelected(Color? color, double? thickness, ShapeFillMode? fill, double? opacity = null, Color? fillColor = null)
     {
-        var targets = SelectionList().OfType<FrameworkElement>()
+        var targets = RestyleTargets().OfType<FrameworkElement>()
             .Where(el => el.Tag is AnnotationData)
             .Where(el => CanRestyle(el, color, thickness, fill) ||
                          (opacity is not null && CanSetOpacity(el)) ||
@@ -233,7 +233,11 @@ public partial class EditorWindow : Window
                 }
                 break;
             case AnnotationData.TypeText:
-                ApplyTextColor(element, stroke);
+                // Survey: the stroke swatch patches only `stroke` (the border rect); the
+                // letters are `fill`, written solely by the rich-text font-colour swatch
+                // (PDFViewer.jsx:7445-7467, TextEditOverlay.jsx:302).
+                ApplyTextColor(element, new SolidColorBrush(
+                    AnnotationStyle.TextGlyphColor(snap.Meta, snap.StrokeColor)));
                 if (element is Grid textBox)
                 {
                     foreach (var child in textBox.Children)
@@ -301,7 +305,29 @@ public partial class EditorWindow : Window
 
     private static string ToHex(Color c) => $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
 
-    private void RestyleSelectedTextFormat()
+    /// <summary>
+    /// With a text/callout editor open Survey keeps the object SELECTED, so the top-row
+    /// stroke/width/fill/line-style controls keep patching it (PDFViewer.jsx:7498-7521,
+    /// SVGAnnotationLayer.jsx:1051-1055). WinShot clears the selection to hide the handles,
+    /// so hand the restyle path the edit target explicitly.
+    /// </summary>
+    private UIElement? EditTarget() => _activeText is null
+        ? null
+        : (_activeText.Tag as UIElement) ?? _reeditSource;
+
+    /// <summary>
+    /// What a style control patches. The selection, or — while a text/callout editor is open,
+    /// which is when WinShot alone drops the selection — the object being edited. Only the
+    /// STYLE paths take that fallback; move/delete/group keep reading SelectionList().
+    /// </summary>
+    private IReadOnlyList<UIElement> RestyleTargets()
+    {
+        var selected = SelectionList();
+        if (selected.Count > 0) return selected;
+        return EditTarget() is { } editing ? new[] { editing } : Array.Empty<UIElement>();
+    }
+
+    private void RestyleSelectedTextFormat(Action<AnnotationData> patch)
     {
         // Survey's toolbar mutates the OPEN editor through richTextEditor.api.* — it never
         // commits first (AppShell.jsx:1756-1975). With an editor up, that is the only target.
@@ -317,7 +343,7 @@ public partial class EditorWindow : Window
                 // ApplyCalloutMeta renders meta.Text, which is still the PRE-edit string while
                 // the overlay owns the text — hand it what is actually on screen instead, or a
                 // style click silently reverts everything typed since the editor opened.
-                RestyleOneTextFormat(live, editor.Text ?? string.Empty);
+                RestyleOneTextFormat(live, patch, editor.Text ?? string.Empty);
                 // A bigger font needs more lines: Survey re-measures scrollHeight on the same
                 // click (applyStyle -> rAF(broadcastLiveBounds)) rather than waiting for a
                 // keystroke, so the box grows under the new metrics right away.
@@ -332,8 +358,8 @@ public partial class EditorWindow : Window
             }
             return;
         }
-        foreach (UIElement el in SelectionList().ToArray())
-            RestyleOneTextFormat(el);
+        foreach (UIElement el in RestyleTargets().ToArray())
+            RestyleOneTextFormat(el, patch);
         UpdateSelectionVisual();
     }
 
@@ -344,7 +370,8 @@ public partial class EditorWindow : Window
         // setFontFamily / setFontSize are plain members of the same rich-text api and apply to
         // callouts exactly as to plain text (TextEditOverlay.jsx:297, :301, :76-77).
         tb.FontFamily = new FontFamily(string.IsNullOrWhiteSpace(_textFontFamily)
-            ? (callout ? CalloutLayout.DefaultFontFamily : "Helvetica") : _textFontFamily);
+            ? (callout ? CalloutLayout.DefaultFontFamily : AnnotationFactory.DefaultTextFontFamily)
+            : _textFontFamily);
         tb.FontSize = AnnotationStyle.ClampTextSize(_textFontSize);
         // Survey's callout line height is (lineHeight || 1) * 1.13, plain text's 1.16 * 1.13.
         tb.WithLineHeight(tb.FontSize * (callout ? 1.13 : AnnotationFactory.TextLineHeightFactor));
@@ -359,7 +386,7 @@ public partial class EditorWindow : Window
             // undo entry) belongs to RestyleSelectedTextFormat's callout branch.
             if (tb.Tag is CalloutAnnotation live) live.Label.Foreground = tb.Foreground;
         }
-        tb.FontWeight = _textBold || _textStyle == TextStyle.Bold ? FontWeights.Bold : FontWeights.Normal;
+        tb.FontWeight = _textBold ? FontWeights.Bold : FontWeights.Normal;
         tb.FontStyle = _textItalic ? FontStyles.Italic : FontStyles.Normal;
         tb.TextAlignment = AnnotationFactory.ParseAlign(_textAlign);
         tb.TextDecorations = null;
@@ -380,34 +407,21 @@ public partial class EditorWindow : Window
     /// Text currently in the open editor, when there is one. It is only rendered, never stored:
     /// the commit owns the text, so undo/redo of this style change replay the stored string.
     /// </param>
-    private void RestyleOneTextFormat(UIElement element, string? liveText = null)
+    /// <param name="patch">
+    /// The ONE field this toolbar action owns. Survey's applyStyle spreads a single key onto a
+    /// single object's styleRef and calloutStylePatch maps one action to one field
+    /// (TextEditOverlay.jsx:70-82, :281-291) — stamping every format global onto every
+    /// selected object is what silently shrank a 48pt box on a Bold click.
+    /// </param>
+    private void RestyleOneTextFormat(UIElement element, Action<AnnotationData> patch, string? liveText = null)
     {
         if (element is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
         if (meta.Type is not (AnnotationData.TypeText or AnnotationData.TypeCallout)) return;
         var before = meta.Clone();
         var after = meta.Clone();
-        after.FontFamily = _textFontFamily;
-        after.Bold = _textBold;
-        after.Italic = _textItalic;
-        after.Underline = _textUnderline;
-        after.Strike = _textStrike;
-        after.Align = _textAlign;
-        after.VerticalAlign = _textVerticalAlign;
-        after.FontSize = _textFontSize;
-        after.Style = _textStyle.ToString();
-        // Survey's fontColor is a style field of its own; leaving it null keeps the old
-        // "text follows the border colour" fallback for anything never recoloured.
-        if (_textFontColor is Color fc)
-        {
-            after.FontColor = ToHex(fc);
-            if (meta.Type == AnnotationData.TypeText) after.Color = ToHex(fc);
-        }
+        patch(after);
         if (meta.Type == AnnotationData.TypeText)
         {
-            if (_textStyle == TextStyle.Huge && before.Style != nameof(TextStyle.Huge))
-                after.FontSize = AnnotationStyle.ClampTextSize(_textFontSize * 2.2);
-            else if (_textStyle != TextStyle.Huge && before.Style == nameof(TextStyle.Huge))
-                after.FontSize = AnnotationStyle.ClampTextSize(_textFontSize / 2.2);
             var beforeEl = fe;
             var afterEl = CreateTextVisual(after);
             CopyPlacement(beforeEl, afterEl);
@@ -456,11 +470,12 @@ public partial class EditorWindow : Window
         double? boxW = a.Rect is { Length: >= 4 } rect ? rect[2] : null;
         double? boxH = a.Rect is { Length: >= 4 } box ? box[3] : null;
         var label = AnnotationFactory.CreateStyledTextLabel(
-            a.Text ?? "", new SolidColorBrush(stroke), fontSize, style,
-            a.FontFamily ?? "Segoe UI", a.Bold == true || style == TextStyle.Bold,
+            a.Text ?? "", new SolidColorBrush(AnnotationStyle.TextGlyphColor(a, stroke)), fontSize, style,
+            a.FontFamily ?? AnnotationFactory.DefaultTextFontFamily, a.Bold == true,
             a.Italic == true, a.Underline == true, a.Strike == true,
             AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
-            boxW, boxH, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a));
+            boxW, boxH, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a),
+            new SolidColorBrush(stroke));
         label.Tag = a;
         return label;
     }
@@ -518,7 +533,7 @@ public partial class EditorWindow : Window
         fe.Tag = meta;
         var align = AnnotationFactory.ParseAlign(meta.Align);
         var family = new FontFamily(string.IsNullOrWhiteSpace(meta.FontFamily)
-            ? (fe is CalloutAnnotation ? CalloutLayout.DefaultFontFamily : "Segoe UI")
+            ? (fe is CalloutAnnotation ? CalloutLayout.DefaultFontFamily : AnnotationFactory.DefaultTextFontFamily)
             : meta.FontFamily);
         bool bold = meta.Bold == true;
         bool italic = meta.Italic == true;
@@ -576,7 +591,7 @@ public partial class EditorWindow : Window
             item.Tag is string tag && Enum.TryParse(tag, out TextStyle style))
         {
             _textStyle = style;
-            if (IsLoaded) RestyleSelectedTextFormat();
+            if (IsLoaded) RestyleSelectedTextFormat(m => m.Style = style.ToString());
         }
     }
 
@@ -1035,7 +1050,8 @@ public partial class EditorWindow : Window
 
     private void RestyleSelectedLineStyle(LineBorderStyle style)
     {
-        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
+        if (RestyleTargets().FirstOrDefault() is not FrameworkElement fe ||
+            fe.Tag is not AnnotationData meta) return;
         if (meta.Type is not (AnnotationData.TypeLine or AnnotationData.TypeArrow
             or AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
             or AnnotationData.TypeText or AnnotationData.TypeCallout))

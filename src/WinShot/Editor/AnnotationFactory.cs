@@ -400,7 +400,7 @@ internal static class AnnotationFactory
 
     /// <summary>Transparent background keeps the whole text box clickable for the Select tool without rendering anything.</summary>
     public static TextBlock CreateTextLabel(string text, Brush foreground, double fontSize) =>
-        CreateTextLabel(text, foreground, fontSize, "Segoe UI", bold: false, italic: false,
+        CreateTextLabel(text, foreground, fontSize, DefaultTextFontFamily, bold: false, italic: false,
             underline: false, strike: false, TextAlignment.Left);
 
     public static TextBlock CreateTextLabel(
@@ -411,7 +411,7 @@ internal static class AnnotationFactory
         {
             Text = text,
             FontSize = fontSize,
-            FontFamily = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? "Segoe UI" : fontFamily),
+            FontFamily = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? DefaultTextFontFamily : fontFamily),
             FontWeight = bold ? FontWeights.Bold : FontWeights.Normal,
             FontStyle = italic ? FontStyles.Italic : FontStyles.Normal,
             Foreground = foreground,
@@ -452,7 +452,7 @@ internal static class AnnotationFactory
     /// Huge's enlarged font size is applied by the caller before committing.
     /// </summary>
     public static FrameworkElement CreateStyledTextLabel(string text, Brush foreground, double fontSize, TextStyle style) =>
-        CreateStyledTextLabel(text, foreground, fontSize, style, "Segoe UI",
+        CreateStyledTextLabel(text, foreground, fontSize, style, DefaultTextFontFamily,
             bold: style == TextStyle.Bold, italic: false, underline: false, strike: false, TextAlignment.Left);
 
     public static FrameworkElement CreateStyledTextLabel(
@@ -474,9 +474,11 @@ internal static class AnnotationFactory
         string text, Brush foreground, double fontSize, TextStyle style,
         string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align,
         string? verticalAlign, double? boxWidth, double? boxHeight,
-        Color fill, double strokeThickness, LineBorderStyle lineStyle)
+        Color fill, double strokeThickness, LineBorderStyle lineStyle, Brush? chromeStroke = null)
     {
-        bool useBold = bold || style == TextStyle.Bold;
+        // Survey has no `style` pseudo-property on a Textbox and nothing ORs boldness in from
+        // one: bold is exactly fontWeight === 'bold' (textEditCommit.js:26-62, :91-104).
+        bool useBold = bold;
         FrameworkElement inner = style switch
         {
             TextStyle.Outline => CreateOutlineGlyph(text, foreground, fontSize, fontFamily, useBold, italic),
@@ -509,7 +511,10 @@ internal static class AnnotationFactory
             // Survey's textbox border is a plain <rect> with no rx/ry, stroked in the
             // stored `stroke` — hardcoded '#000000' for user-created text, never the
             // picker colour (svgAnnotationRenderers.jsx:1231-1246, TextEditOverlay.jsx:140-142).
-            Stroke = strokeThickness > 0 ? Brushes.Black : Brushes.Transparent,
+            // Survey's textbox border rect is stroked in the stored `stroke`, a field of its
+            // own — '#000000' for user-created text, repainted only by the top-bar stroke
+            // swatch. The GLYPHS are `fill` (svgAnnotationRenderers.jsx:1236-1246, :1276).
+            Stroke = strokeThickness > 0 ? (chromeStroke ?? Brushes.Black) : Brushes.Transparent,
             StrokeThickness = Math.Max(0, strokeThickness),
         };
         ApplyDash(chrome, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
@@ -627,6 +632,14 @@ internal static class AnnotationFactory
     }
 
     public const double TextPadding = 6;
+
+    /// <summary>
+    /// Survey's one text face: DEFAULT_FONT_FAMILY = 'Helvetica' in the editor and the
+    /// measurement context, and buildNewTextCommitJSON pins the same on commit
+    /// (TextEditOverlay.jsx:47, textEditCommit.js:154). One const so the committed label and
+    /// its editor can never fall back to different faces.
+    /// </summary>
+    public const string DefaultTextFontFamily = "Helvetica";
 
     /// <summary>
     /// Survey's line-height contract: <c>(lineHeight || 1.16) * 1.13</c>

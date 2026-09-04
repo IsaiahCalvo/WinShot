@@ -91,7 +91,6 @@ public partial class EditorWindow : Window
         _textStrike = meta.Strike ?? false;
         _textAlign = string.IsNullOrWhiteSpace(meta.Align) ? "left" : meta.Align;
         _textVerticalAlign = string.IsNullOrWhiteSpace(meta.VerticalAlign) ? "top" : meta.VerticalAlign;
-        _textStyle = Enum.TryParse(meta.Style, out TextStyle st) ? st : TextStyle.Plain;
         // Absent fontColor means "never recoloured", i.e. the stroke-colour fallback.
         _textFontColor = meta.FontColor is string fcHex && TryParseColor(fcHex, out var fc) ? fc : null;
     }
@@ -229,7 +228,7 @@ public partial class EditorWindow : Window
 
     /// <summary>Survey's desktop new-text defaults (TextEditOverlay.jsx:126-137, :47).</summary>
     private const double NewTextFontSize = 16;
-    private const string NewTextFontFamily = "Helvetica";
+    private const string NewTextFontFamily = AnnotationFactory.DefaultTextFontFamily;
 
     /// <summary>New text always commits a 1px solid black border and no fill (textEditCommit.js:127-129, :44).</summary>
     private const double NewTextStrokeWidth = 1;
@@ -244,6 +243,7 @@ public partial class EditorWindow : Window
     private void PlaceTextInBox(Rect box)
     {
         _textStyle = TextStyle.Plain;
+        _reeditAngle = 0;
         _textFontSize = NewTextFontSize;
         _textFontFamily = NewTextFontFamily;
         _textBold = _textItalic = _textUnderline = _textStrike = false;
@@ -284,7 +284,8 @@ public partial class EditorWindow : Window
     /// (SVGAnnotationLayer.jsx:4831-4853, hideText=true). The editor itself is chromeless.
     /// </summary>
     private void ShowTextPreview(
-        double x, double y, double w, double h, Color fill, double strokeThickness, LineBorderStyle lineStyle)
+        double x, double y, double w, double h, Color fill, double strokeThickness, LineBorderStyle lineStyle,
+        Color? stroke = null)
     {
         HideTextPreview();
         var rect = new Rectangle
@@ -292,7 +293,11 @@ public partial class EditorWindow : Window
             Width = Math.Max(1, w),
             Height = Math.Max(1, h),
             Fill = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill),
-            Stroke = strokeThickness > 0 ? Brushes.Black : Brushes.Transparent,
+            // Survey's new text commits stroke '#000000'; a re-edit previews the box's OWN
+            // stored border colour so nothing flips face on entering the editor.
+            Stroke = strokeThickness > 0
+                ? new SolidColorBrush(stroke ?? Colors.Black)
+                : Brushes.Transparent,
             StrokeThickness = Math.Max(0, strokeThickness),
             IsHitTestVisible = false,
         };
@@ -315,9 +320,10 @@ public partial class EditorWindow : Window
         if (visual.Tag is not AnnotationData meta) return;
         Select(null);
         var layout = visual.Layout;
-        Vector off = visual.RenderTransform is TranslateTransform t
-            ? new Vector(t.X, t.Y)
-            : new Vector();
+        // A rotated callout carries a TransformGroup, not a bare TranslateTransform, so an
+        // `is TranslateTransform` read silently dropped the whole drag offset and mounted the
+        // editor away from the visible box.
+        Vector off = AnnotationTransform.OffsetOf(visual);
         // Survey routes creation and double-click re-edit through the same guard: opening the
         // editor leaves the callout tool, so the next page click commits instead of drawing.
         if (_tool == EditorTool.Callout) CheckToolButton(EditorTool.Select);
@@ -386,11 +392,15 @@ public partial class EditorWindow : Window
         SeedTextFormatFromMeta(meta);
         Select(null);
         double x = Canvas.GetLeft(label), y = Canvas.GetTop(label);
-        if (label.RenderTransform is TranslateTransform t)
-        {
-            x += t.X;
-            y += t.Y;
-        }
+        // Survey's existing-text commit deepClones the stored annotation, so angle and every
+        // other geometry field survive the edit (textEditCommit.js:186-212). WinShot rebuilds
+        // the label, so the rotation has to be carried across by hand — and a rotated label
+        // carries a TransformGroup, which the old `is TranslateTransform` read missed, losing
+        // the drag offset too.
+        Vector off = AnnotationTransform.OffsetOf(label);
+        x += off.X;
+        y += off.Y;
+        _reeditAngle = AnnotationTransform.AngleOf(label);
 
         // Removing the old label is its own undoable step; committing the editor
         // pushes the replacement add, so two Ctrl+Z steps restore the original.
@@ -407,8 +417,10 @@ public partial class EditorWindow : Window
 
         var style = Enum.TryParse(meta.Style, out TextStyle s) ? s : TextStyle.Plain;
         double fontSize = meta.FontSize is double fs && fs > 0 ? fs : AnnotationFactory.FontSizeFor(_thickness);
-        var foreground = new SolidColorBrush(
-            meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White);
+        // The editor shows the GLYPHS, so it takes the glyph colour (Survey's `fill`), not the
+        // border stroke the same field used to double as.
+        var foreground = new SolidColorBrush(AnnotationStyle.TextGlyphColor(
+            meta, meta.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White));
 
         var tb = AnnotationFactory.CreateTextEditor(foreground, fontSize);
         tb.Tag = style;
@@ -446,7 +458,8 @@ public partial class EditorWindow : Window
         }
         ShowTextPreview(Canvas.GetLeft(tb), Canvas.GetTop(tb), tb.Width, tb.Height,
             AnnotationStyle.FillColorFrom(meta, Colors.Transparent),
-            meta.Thickness ?? NewTextStrokeWidth, AnnotationStyle.LineStyleFrom(meta));
+            meta.Thickness ?? NewTextStrokeWidth, AnnotationStyle.LineStyleFrom(meta),
+            meta.Color is string bhex && TryParseColor(bhex, out var bcol) ? bcol : Colors.Black);
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         HookTextEditor(tb);
@@ -578,6 +591,8 @@ public partial class EditorWindow : Window
         _activeTextBox = null;
         var reeditSource = _reeditSource;
         _reeditSource = null;
+        double reeditAngle = _reeditAngle;
+        _reeditAngle = 0;
         HideTextPreview();
 
         double x = Canvas.GetLeft(tb), y = Canvas.GetTop(tb);
@@ -627,18 +642,37 @@ public partial class EditorWindow : Window
             lineStyle = LineBorderStyle.Solid;
         }
 
+        // Survey keeps a Textbox's border colour (`stroke`) and its glyph colour (`fill`)
+        // apart: new text commits stroke '#000000' and only the font-colour swatch touches
+        // the letters (textEditCommit.js:151-156, TextEditOverlay.jsx:302).
+        var glyphColor = tb.Foreground is SolidColorBrush fg ? fg.Color : strokeColor;
+        var borderColor = reeditSource?.Tag is AnnotationData priorMeta
+            && priorMeta.Color is string bh && TryParseColor(bh, out var bc)
+            ? bc
+            : Colors.Black;
+        // Survey pins the ROTATED top-left corner when the height changes, because the box
+        // rotates about its own centre (textEditCommit.js:204-212).
+        double dh = boxH - (box?.Height ?? boxH);
+        if (reeditAngle != 0 && dh != 0)
+        {
+            double rad = reeditAngle * Math.PI / 180;
+            topLeft.X -= dh / 2 * Math.Sin(rad);
+            topLeft.Y -= dh / 2 * (1 - Math.Cos(rad));
+        }
         var label = AnnotationFactory.CreateStyledTextLabel(
             text, tb.Foreground, tb.FontSize, style, _textFontFamily,
-            _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike,
+            _textBold, _textItalic, _textUnderline, _textStrike,
             AnnotationFactory.ParseAlign(_textAlign), _textVerticalAlign,
-            boxW, boxH, fillColor, strokeWidth, lineStyle);
+            boxW, boxH, fillColor, strokeWidth, lineStyle, new SolidColorBrush(borderColor));
         Canvas.SetLeft(label, topLeft.X);
         Canvas.SetTop(label, topLeft.Y);
-        label.Tag = AnnotationData.ForText(topLeft, text, style, tb.FontSize,
-            tb.Foreground is SolidColorBrush fg ? fg.Color : strokeColor,
-            _textFontFamily, _textBold || style == TextStyle.Bold, _textItalic, _textUnderline, _textStrike, _textAlign,
+        var textMeta = AnnotationData.ForText(topLeft, text, style, tb.FontSize, borderColor,
+            _textFontFamily, _textBold, _textItalic, _textUnderline, _textStrike, _textAlign,
             _textVerticalAlign, new Rect(topLeft.X, topLeft.Y, boxW, boxH),
             fillColor, strokeWidth, lineStyle);
+        textMeta.FontColor = ToHex(glyphColor);
+        textMeta.Angle = reeditAngle;
+        label.Tag = textMeta;
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(label),
             redo: () =>
@@ -646,6 +680,16 @@ public partial class EditorWindow : Window
                 if (!AnnotationCanvas.Children.Contains(label))
                     AnnotationCanvas.Children.Add(label);
             }));
+        // The rebuilt label is a different element, so the angle has to be re-installed on it.
+        // Measure/arrange it first (the canvas repeats both later) so SetAngle resolves the
+        // same LocalCentre pivot the rotate handle uses — otherwise the next rotate drag would
+        // pop the box to a different centre.
+        if (reeditAngle != 0)
+        {
+            label.Measure(new Size(boxW, boxH));
+            label.Arrange(new Rect(topLeft.X, topLeft.Y, boxW, boxH));
+            AnnotationTransform.SetAngle(label, reeditAngle);
+        }
         // Survey's commit only clears the edit state (setEditingAnnotation(null),
         // PDFViewer.jsx:31936-31942) — no selection chrome appears on the new label.
     }
@@ -658,6 +702,7 @@ public partial class EditorWindow : Window
         _activeTextBox = null;
         var reeditSource = _reeditSource;
         _reeditSource = null;
+        _reeditAngle = 0;
         HideTextPreview();
         AnnotationCanvas.Children.Remove(tb);
         // Escape during a re-edit is a true no-op: put the original label back and drop the

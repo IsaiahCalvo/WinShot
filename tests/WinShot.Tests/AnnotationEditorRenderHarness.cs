@@ -1349,6 +1349,8 @@ public class AnnotationEditorRenderHarness
 
                     // R2-B: does the rich-text FONT COLOUR also repaint the border?
                     Fire(aaBtn); Pump(3);
+                    // Give the box letters again so the render shows both channels at once.
+                    if (Live() is TextBox tSplit) { tSplit.Text = "Colour split"; Pump(3); }
                     typeof(EditorWindow).GetMethod("SetFontColor", BindingFlags.Instance | BindingFlags.NonPublic)!
                         .Invoke(editor, new object?[] { Color.FromRgb(0xFF, 0x00, 0xFF) });
                     Pump(3);
@@ -1357,6 +1359,10 @@ public class AnnotationEditorRenderHarness
                     var chrome1 = (LastText() as Grid)?.Children.OfType<System.Windows.Shapes.Shape>().FirstOrDefault();
                     r2.AppendLine($"[R2-B fontColour->text] meta.Color={fcMeta?.Color} meta.FontColor={fcMeta?.FontColor ?? "null"} " +
                         $"glyph={(TextOf(LastText())?.Foreground as SolidColorBrush)?.Color} border={(chrome1?.Stroke as SolidColorBrush)?.Color}");
+                    // The two channels side by side: magenta letters inside the green border
+                    // the stroke swatch painted in R2-A. Shot now, before R2-C repaints the
+                    // same box's border blue.
+                    Shot("pointer-text-format-colour-split.png");
 
                     // R2-C: is the annotation still SELECTED while its editor is open? Survey's
                     // handleEnterTextEditFromStrip leaves selectedToolbarAnnotation intact, so the
@@ -1402,6 +1408,8 @@ public class AnnotationEditorRenderHarness
                     var mA2 = (afterList.Count > 0 ? afterList[0] as FrameworkElement : null)?.Tag as AnnotationData;
                     var mB2 = (afterList.Count > 1 ? afterList[1] as FrameworkElement : null)?.Tag as AnnotationData;
                     r2.AppendLine($"[R2-D multiSelect] after A.size={mA2?.FontSize} A.bold={mA2?.Bold} B.size={mB2?.FontSize} B.bold={mB2?.Bold} (mA={mA?.FontSize})");
+                    r2.AppendLine($"[R2-D expect] A.size==12 && B.size==48 && both bold -> " +
+                        $"{(mA2?.FontSize == 12 && mB2?.FontSize == 48 && mA2?.Bold == true && mB2?.Bold == true ? "PASS" : "FAIL")}");
 
                     // R2-E: rotated text box → Aa → commit. Survey's existing-text commit clones
                     // the original (angle included) and compensates left/top for the height delta
@@ -1427,6 +1435,8 @@ public class AnnotationEditorRenderHarness
                             $"offset={(rotAfter is null ? default : AnnotationTransform.OffsetOf(rotAfter))} " +
                             $"left={(rotAfter is null ? -1 : Canvas.GetLeft(rotAfter)):F1} top={(rotAfter is null ? -1 : Canvas.GetTop(rotAfter)):F1} " +
                             $"transform={rotAfter?.RenderTransform.GetType().Name}");
+                        r2.AppendLine($"[R2-E expect] angle stays 30 -> " +
+                            $"{(rotAfter is not null && Math.Abs(AnnotationTransform.AngleOf(rotAfter) - 30) < 0.5 ? "PASS" : "FAIL")}");
                     }
 
                     // R2-F: one align-cell click -> how many undo entries? Survey issues two
@@ -1444,7 +1454,8 @@ public class AnnotationEditorRenderHarness
                             .FirstOrDefault(b => (b.Tag as string) == "center|middle");
                         if (cell is not null) Fire(cell);
                         int depth1 = ((System.Collections.ICollection)undoField.GetValue(editor)!).Count;
-                        r2.AppendLine($"[R2-F alignCell] undoDepth {depth0} -> {depth1} (delta={depth1 - depth0})");
+                        r2.AppendLine($"[R2-F alignCell] undoDepth {depth0} -> {depth1} (delta={depth1 - depth0})" +
+                            $" expect delta==1 -> {(depth1 - depth0 == 1 ? "PASS" : "FAIL")}");
                     }
                     File.WriteAllText(Path.Combine(outDir, "text-format-round2.txt"), r2.ToString());
                     Shot("pointer-text-format-round2.png");

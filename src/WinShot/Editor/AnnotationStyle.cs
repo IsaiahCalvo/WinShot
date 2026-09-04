@@ -1,4 +1,4 @@
-using System.Windows.Media;
+﻿using System.Windows.Media;
 
 namespace WinShot.Editor;
 
@@ -280,6 +280,16 @@ internal static class AnnotationStyle
     }
 
     public static LineBorderStyle LineStyleFrom(AnnotationData a) => ParseLineStyle(a.LineStyle);
+
+    /// <summary>
+    /// A textbox's GLYPH colour. Survey keeps three independent colour fields on a Textbox —
+    /// `stroke` (border rect), `backgroundColor` (box fill) and `fill` (the letters) — and
+    /// only the rich-text font-colour swatch writes `fill`
+    /// (svgAnnotationRenderers.jsx:1276, TextEditOverlay.jsx:302). WinShot stores `fill` as
+    /// FontColor; a row that was never recoloured falls back to the border colour.
+    /// </summary>
+    public static Color TextGlyphColor(AnnotationData a, Color stroke) =>
+        a.FontColor is string hex && TryParseHex(hex, out var glyph) ? glyph : stroke;
 
     public static Color FillColorFrom(AnnotationData a, Color stroke)
     {

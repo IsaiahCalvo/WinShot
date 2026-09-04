@@ -196,8 +196,23 @@ internal sealed class AnnotationData
         FontColor = fontColor is Color fcol ? ToHex(fcol) : null,
     };
 
+    /// <summary>
+    /// Drops the vestigial TextStyle marker from a loaded text row, keeping its effect:
+    /// "Bold" becomes the Bold flag. Idempotent.
+    /// </summary>
+    internal static void MigrateLegacyTextStyle(AnnotationData a)
+    {
+        if (string.Equals(a.Style, nameof(TextStyle.Bold), StringComparison.Ordinal))
+        {
+            a.Bold = true;
+            a.Style = nameof(TextStyle.Plain);
+        }
+        else if (string.Equals(a.Style, nameof(TextStyle.Huge), StringComparison.Ordinal))
+            a.Style = nameof(TextStyle.Plain);
+    }
+
     public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) =>
-        ForText(topLeft, text, style, fontSize, color, "Segoe UI",
+        ForText(topLeft, text, style, fontSize, color, AnnotationFactory.DefaultTextFontFamily,
             bold: style == TextStyle.Bold, italic: false, underline: false, strike: false, align: "left");
 
     public static AnnotationData ForText(
@@ -487,6 +502,11 @@ internal static class ProjectSerializer
                     ?? throw new InvalidDataException("Text annotation is missing its text.");
                 if (a.FontSize is not double fontSize || fontSize <= 0)
                     throw new InvalidDataException("Text annotation is missing its font size.");
+                // Legacy rows carry the removed Plain/Bold/Outline/Pill/Huge enum. Survey has
+                // no such field, so fold a stored "Bold" into the real Bold flag once, here,
+                // and nothing downstream ever sees it (a stored "Huge" already carries its
+                // enlarged FontSize, so only the marker has to go).
+                AnnotationData.MigrateLegacyTextStyle(a);
                 Enum.TryParse(a.Style, out TextStyle style); // unknown style → Plain
                 Rect? box = a.Rect is { Length: >= 4 } r
                     ? new Rect(r[0], r[1], r[2], r[3])
@@ -494,11 +514,12 @@ internal static class ProjectSerializer
                 var stroke = RequireColor(a);
                 var fill = AnnotationStyle.FillColorFrom(a, stroke);
                 var label = AnnotationFactory.CreateStyledTextLabel(
-                    text, new SolidColorBrush(stroke), fontSize, style,
-                    a.FontFamily ?? "Segoe UI", a.Bold == true || style == TextStyle.Bold,
+                    text, new SolidColorBrush(AnnotationStyle.TextGlyphColor(a, stroke)), fontSize, style,
+                    a.FontFamily ?? AnnotationFactory.DefaultTextFontFamily, a.Bold == true,
                     a.Italic == true, a.Underline == true, a.Strike == true,
                     AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
-                    box?.Width, box?.Height, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a));
+                    box?.Width, box?.Height, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a),
+                    new SolidColorBrush(stroke));
                 SetPos(label, pts[0]);
                 return label;
             }
