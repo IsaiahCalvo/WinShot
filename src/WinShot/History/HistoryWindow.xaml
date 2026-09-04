@@ -110,11 +110,8 @@
                     <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
                                FontSize="{StaticResource TextBodyLg}" VerticalAlignment="Center" Margin="20,0,16,0"/>
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
-                    <Button x:Name="AllSelectionButton" Style="{StaticResource ToolbarButton}" Click="OnShowAllFromSelection" AutomationProperties.Name="Select or clear all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="All"/></StackPanel>
-                    </Button>
-                    <Button x:Name="SelectAllButton" Style="{StaticResource ToolbarButton}" Click="OnSelectAll" AutomationProperties.Name="Select all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Select all"/></StackPanel>
+                    <Button x:Name="AllSelectionButton" Style="{StaticResource ToolbarButton}" Click="OnToggleSelectAll" AutomationProperties.Name="Select or clear all visible history items">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock x:Name="SelectAllText" Text="Select all"/></StackPanel>
                     </Button>
                     <Button x:Name="CopyToButton" Style="{StaticResource ToolbarButton}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Copy to"/></StackPanel>

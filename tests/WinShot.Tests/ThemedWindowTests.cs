@@ -133,32 +133,44 @@ public class ThemedWindowTests
         window.Show();
         window.UpdateLayout();
 
-        ((Button)window.FindName("SelectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        var applyClick = typeof(HistoryWindow).GetMethod("ApplySelectionClick", NP)!;
-        var list = (ListBox)window.FindName("ItemsList");
+        try
+        {
+            ((Button)window.FindName("SelectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var applyClick = typeof(HistoryWindow).GetMethod("ApplySelectionClick", NP)!;
+            var list = (ListBox)window.FindName("ItemsList");
 
-        applyClick.Invoke(window, new object[] { items[0], ModifierKeys.None });
-        applyClick.Invoke(window, new object[] { items[2], ModifierKeys.None });
-        Assert.Equal(2, list.SelectedItems.Count);
+            applyClick.Invoke(window, new object[] { items[0], ModifierKeys.None });
+            applyClick.Invoke(window, new object[] { items[2], ModifierKeys.None });
+            Assert.Equal(2, list.SelectedItems.Count);
 
-        applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Control });
-        applyClick.Invoke(window, new object[] { items[0], ModifierKeys.Control });
-        Assert.Equal(2, list.SelectedItems.Count);
-        Assert.DoesNotContain(items[0], list.SelectedItems.Cast<HistoryItem>());
+            applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Control });
+            applyClick.Invoke(window, new object[] { items[0], ModifierKeys.Control });
+            Assert.Equal(2, list.SelectedItems.Count);
+            Assert.DoesNotContain(items[0], list.SelectedItems.Cast<HistoryItem>());
 
-        applyClick.Invoke(window, new object[] { items[4], ModifierKeys.Shift });
-        Assert.Equal(5, list.SelectedItems.Count);
-        applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Shift });
-        Assert.Equal(3, list.SelectedItems.Count);
+            applyClick.Invoke(window, new object[] { items[4], ModifierKeys.Shift });
+            Assert.Equal(5, list.SelectedItems.Count);
+            applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Shift });
+            Assert.Equal(3, list.SelectedItems.Count);
 
-        ((Button)window.FindName("AllSelectionButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.Equal(5, list.SelectedItems.Count);
-        ((Button)window.FindName("AllSelectionButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.Empty(list.SelectedItems.Cast<HistoryItem>());
-        ((Button)window.FindName("SelectAllButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.Equal(5, list.SelectedItems.Count);
+            // One button does the whole gesture, and says which half it will do next.
+            var selectAll = (Button)window.FindName("AllSelectionButton");
+            var selectAllText = (TextBlock)window.FindName("SelectAllText");
+            Assert.Equal("Select all", selectAllText.Text);
+            selectAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(5, list.SelectedItems.Count);
+            Assert.Equal("Clear selection", selectAllText.Text);
+            selectAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Empty(list.SelectedItems.Cast<HistoryItem>());
+            Assert.Equal("Select all", selectAllText.Text);
+            selectAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(5, list.SelectedItems.Count);
 
-        window.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     /// <summary>Enter restores a still image to the Quick Access card and leaves History open;
@@ -286,7 +298,11 @@ public class ThemedWindowTests
 
             WaitUntil(() => !panel.IsReflowing);
             Assert.False(panel.IsReflowing);
-            Assert.Equal(holdersBefore, Motion.Holders);
+            // The reflow tween must hand back the high-resolution clock it took. Other windows
+            // in this run may still hold their own, so the check is that the count did not grow.
+            Assert.True(
+                Motion.Holders <= holdersBefore,
+                $"reflow leaked a Motion holder: {holdersBefore} -> {Motion.Holders}");
         }
         finally
         {

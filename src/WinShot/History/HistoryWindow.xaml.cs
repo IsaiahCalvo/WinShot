@@ -890,6 +890,7 @@ public partial class HistoryWindow : Window
             ? ItemsList.SelectedItems.Cast<HistoryItem>().Sum(item => item.FileSize)
             : 0;
         SelectionCountText.Text = $"{count:N0} selected";
+        SelectAllText.Text = EverythingSelected ? "Clear selection" : "Select all";
         SelectionSummaryText.Text = count == 0 ? string.Empty : $"{count:N0} selected    {HistoryItem.FormatFileSize(bytes)}";
         bool hasSelection = count > 0;
         CopyToButton.IsEnabled = hasSelection;
@@ -898,10 +899,12 @@ public partial class HistoryWindow : Window
         PinSelectedButton.IsEnabled = hasSelection && ItemsList.SelectedItems.Cast<HistoryItem>().Any(item => item.CanPin);
     }
 
-    private void OnShowAllFromSelection(object sender, RoutedEventArgs e)
+    /// <summary>One button for the whole gesture. There used to be two next to each other —
+    /// "All" and "Select all" — meaning the same thing; this one says which half it will do.</summary>
+    private void OnToggleSelectAll(object sender, RoutedEventArgs e)
     {
         if (!_selectionMode) return;
-        if (ItemsList.SelectedItems.Count == _items.Count && _items.Count > 0)
+        if (EverythingSelected)
             ItemsList.UnselectAll();
         else
             ItemsList.SelectAll();
@@ -909,13 +912,7 @@ public partial class HistoryWindow : Window
         UpdateSelectionState();
     }
 
-    private void OnSelectAll(object sender, RoutedEventArgs e)
-    {
-        if (!_selectionMode) return;
-        ItemsList.SelectAll();
-        _selectionAnchor = _items.FirstOrDefault();
-        UpdateSelectionState();
-    }
+    private bool EverythingSelected => _items.Count > 0 && ItemsList.SelectedItems.Count == _items.Count;
 
     private IReadOnlyList<HistoryItem> SelectedItems() =>
         ItemsList.SelectedItems.Cast<HistoryItem>().Where(item => File.Exists(item.FilePath)).ToList();
