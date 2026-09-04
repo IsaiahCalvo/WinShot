@@ -12,7 +12,16 @@ namespace WinShot.Tests;
 /// </summary>
 public class FeedbackCopyTests
 {
-    private const int BodyWidthDip = 300 - 42 - 14;
+    /// <summary>
+    /// The body column in device pixels, read off a real toast built the way the app builds
+    /// one. Handing these helpers a DIP number is what made the suite flake: the row count is
+    /// a measurement of the label's own box, and that box is scaled by the anchor monitor.
+    /// </summary>
+    private static int BodyColumn()
+    {
+        using var probe = new ToastWindow("Probe", "x", new SD.Point(10, 10), null);
+        return probe.BodyColumnPx;
+    }
 
     /// <summary>Every line ShowBalloon can send, as the user would read it.</summary>
     private static string[] Messages() => new[]
@@ -40,15 +49,14 @@ public class FeedbackCopyTests
     [Fact]
     public void ToastBodyBoxHoldsEveryMessageTheAppSendsIt()
     {
-        string longest = FriendlyError.For(new UnauthorizedAccessException());
-        using var toast = new ToastWindow(
-            "Save failed", longest, new SD.Point(10, 10), null, ToastSeverity.Error);
-
-        // glyph, title, body — in the order they are added.
-        WF.Label body = toast.Controls.OfType<WF.Label>().Last();
         var tooTall = new List<string>();
         foreach (string m in Messages())
         {
+            using var toast = new ToastWindow(
+                "Save failed", m, new SD.Point(10, 10), null, ToastSeverity.Error);
+
+            // glyph, title, body — in the order they are added.
+            WF.Label body = toast.Controls.OfType<WF.Label>().Last();
             SD.Size wrapped = WF.TextRenderer.MeasureText(
                 m, body.Font, new SD.Size(body.Width, int.MaxValue),
                 WF.TextFormatFlags.WordBreak | WF.TextFormatFlags.NoPrefix);
@@ -72,22 +80,24 @@ public class FeedbackCopyTests
         Assert.True(
             wordy.ClientSize.Height > brief.ClientSize.Height,
             $"wordy {wordy.ClientSize.Height}px vs brief {brief.ClientSize.Height}px");
-        Assert.Equal(1, ToastWindow.LinesNeeded("shot.png", BodyWidthDip));
+        Assert.Equal(1, ToastWindow.LinesNeeded("shot.png", BodyColumn()));
     }
 
     /// <summary>
     /// Nothing the app can send should reach the three-row ceiling — at the ceiling the next
     /// word is gone, and every one of these lines ends on the instruction that makes it useful.
-    /// This is also the DPI canary: measuring the body font at the screen's DPI against a
-    /// DIP-wide column over-counted rows by one on any non-100 % display, which put a plain
-    /// two-line error on the clamp and made this fail whenever an earlier test had already
-    /// made the process DPI-aware.
+    /// This is also the DPI canary: the row count used to measure a pixel-unit probe font
+    /// against a column scaled by GDI+'s screen DpiX, and those two never agree — a plain
+    /// two-line error landed on the clamp and this failed whenever an earlier test had
+    /// already made the process DPI-aware. It now measures the label's own font in the
+    /// label's own pixel column, which cannot disagree with itself.
     /// </summary>
     [Fact]
     public void NoMessageNeedsMoreRowsThanTheToastGivesIt()
     {
+        int column = BodyColumn();
         foreach (string m in Messages())
-            Assert.True(ToastWindow.LinesNeeded(m, BodyWidthDip) < 3, m);
+            Assert.True(ToastWindow.LinesNeeded(m, column) < 3, m);
     }
 
     /// <summary>
@@ -98,8 +108,9 @@ public class FeedbackCopyTests
     [Fact]
     public void TheToastShowsEveryMessageWhole()
     {
+        int column = BodyColumn();
         foreach (string m in Messages())
-            Assert.Equal(m, ToastWindow.Trim(m, BodyWidthDip));
+            Assert.Equal(m, ToastWindow.Trim(m, column));
     }
 
     /// <summary>But a message that genuinely will not fit still gets cut on a word, not
@@ -108,13 +119,45 @@ public class FeedbackCopyTests
     public void AnOversizeMessageIsCutOnAWordBoundary()
     {
         string huge = string.Join(" ", Enumerable.Repeat("overflowing", 40));
-        string cut = ToastWindow.Trim(huge, BodyWidthDip);
+        int column = BodyColumn();
+        string cut = ToastWindow.Trim(huge, column);
 
         Assert.EndsWith("…", cut);
         Assert.True(cut.Length < huge.Length, "an oversize message was not cut at all");
         Assert.StartsWith("overflowing", cut);
         Assert.DoesNotContain("overflowin…", cut);
-        Assert.True(ToastWindow.LinesNeeded(cut, BodyWidthDip) <= 3, cut);
+        Assert.True(ToastWindow.LinesNeeded(cut, column) <= 3, cut);
+    }
+
+    /// <summary>
+    /// The action failed, and what the toast has to say about it is a two-row friendly error
+    /// arriving in a box that was sized for a one-line URL preview. Assigning only the text
+    /// left the rest of it under the label's bottom edge — the same defect the construction
+    /// path already closed.
+    /// </summary>
+    [Fact]
+    public void AFailedToastActionGrowsTheCardToHoldWhatItSays()
+    {
+        using var toast = new ToastWindow(
+            "Text found", "example.com", new SD.Point(400, 400),
+            () => throw new UnauthorizedAccessException(), ToastSeverity.Success);
+
+        WF.Label body = toast.Controls.OfType<WF.Label>().Last();
+        int before = toast.ClientSize.Height;
+
+        toast.Controls.OfType<DarkButton>().Single().PerformClick();
+
+        Assert.Equal(FriendlyError.For(new UnauthorizedAccessException()), body.Text);
+        Assert.True(
+            toast.ClientSize.Height > before,
+            $"the card stayed {toast.ClientSize.Height}px for a message that needs more rows");
+
+        SD.Size wrapped = WF.TextRenderer.MeasureText(
+            body.Text, body.Font, new SD.Size(body.Width, int.MaxValue),
+            WF.TextFormatFlags.WordBreak | WF.TextFormatFlags.NoPrefix);
+        Assert.True(
+            wrapped.Height <= body.Height,
+            $"{wrapped.Width}x{wrapped.Height} in {body.Width}x{body.Height}");
     }
 
     /// <summary>The toast replaced a tray balloon that Narrator announced; it has to name
@@ -199,12 +242,13 @@ public class FeedbackCopyTests
     public void TrimIsBoundedForAMessageNoOneShouldHaveSent()
     {
         string huge = string.Join(" ", Enumerable.Repeat("overflowing", 20_000));
+        int column = BodyColumn();
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        string cut = ToastWindow.Trim(huge, BodyWidthDip);
+        string cut = ToastWindow.Trim(huge, column);
         clock.Stop();
 
         Assert.EndsWith("…", cut);
-        Assert.True(ToastWindow.LinesNeeded(cut, BodyWidthDip) <= 3, cut);
+        Assert.True(ToastWindow.LinesNeeded(cut, column) <= 3, cut);
         Assert.True(clock.ElapsedMilliseconds < 2000, $"Trim took {clock.ElapsedMilliseconds} ms");
     }
 }

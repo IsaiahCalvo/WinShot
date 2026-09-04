@@ -44,8 +44,13 @@ public sealed class ToastWindow : WF.Form
     /// <summary>Well past what three rows can show, and what bounds Trim's walk.</summary>
     private const int MaxChars = 512;
 
+    /// <summary>The card, its glyph gutter and its right pad, in DIP.</summary>
+    private const int CardWidthDip = 300;
+    private const int TextXDip = 42;
+    private const int BodyTopDip = 38;
+
     /// <summary>The body column: the 300-DIP card less the glyph gutter and the right pad.</summary>
-    internal const int BodyWidthDip = 300 - 42 - 14;
+    internal const int BodyWidthDip = CardWidthDip - TextXDip - 14;
 
     private IDisposable? _motion;
     private bool _exiting;
@@ -54,6 +59,17 @@ public sealed class ToastWindow : WF.Form
     private double _entranceAmount;
     private readonly WF.Label _glyphLabel;
     private readonly WF.Label _previewLabel;
+    private readonly DarkButton? _openButton;
+
+    /// <summary>
+    /// The body label's real width in device pixels. Row counting has to measure against
+    /// this and nothing else: it is the box the text actually lands in.
+    /// </summary>
+    private readonly int _bodyColumnPx;
+
+    /// <summary>The column the toast measures against — what tests must pass to
+    /// <see cref="LinesNeeded"/> and <see cref="Trim"/> to ask about this toast's box.</summary>
+    internal int BodyColumnPx => _bodyColumnPx;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
     // the anchor monitor or labels truncate on 125%/150% displays.
@@ -94,9 +110,6 @@ public sealed class ToastWindow : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        const int width = 300;
-        bool hasOpen = onOpen is not null;
-
         // The severity glyph is the only thing that separates "Saved" from "Save failed" at
         // a glance, so it gets its own colour as well as its own shape.
         _glyphLabel = Label(GlyphOf(severity), 14, 14, 22, ThemePalette.TextTitlePt, ColorOf(severity), height: 24);
@@ -105,47 +118,36 @@ public sealed class ToastWindow : WF.Form
         _glyphLabel.AccessibleName = severity.ToString();
         Controls.Add(_glyphLabel);
 
-        const int textX = 42;
-        int textW = width - textX - 14;
-
         // Accent stays reserved for actions; the title reads as text, not a control.
         // 12 pt Segoe UI Bold needs ~22 px of line box; the shared 22 px row left the
         // descenders on the clip edge, so the title gets its own (still clearing y=38).
-        var titleLabel = Label(title, textX, 14, textW, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true, height: 24);
+        var titleLabel = Label(title, TextXDip, 14, BodyWidthDip, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true, height: 24);
         titleLabel.AccessibleName = title;
         titleLabel.AccessibleRole = WF.AccessibleRole.StaticText;
         Controls.Add(titleLabel);
 
         // The friendly-error lines are 45-77 characters, which is two to three of these
-        // 244 px rows. A single ellipsed line cut off exactly the half that says what to do
+        // 244 DIP rows. A single ellipsed line cut off exactly the half that says what to do
         // about it ("Choose a different folder in Settings"), so the body wraps and the
         // window grows to whatever it needs, up to BodyMaxLines — which is also what Trim cuts to.
-        _body = Trim(preview, textW);
-        int bodyLines = LinesNeeded(_body, textW);
-        int bodyH = BodyLineH + ((bodyLines - 1) * BodyLineH);
-        _previewLabel = Label(_body, textX, 38, textW, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary, height: bodyH);
+        _bodyColumnPx = S(BodyWidthDip);
+        _previewLabel = Label(string.Empty, TextXDip, BodyTopDip, BodyWidthDip, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary);
         _previewLabel.AutoEllipsis = true;
         _previewLabel.UseMnemonic = false;
-        _previewLabel.TextAlign = bodyLines > 1 ? SD.ContentAlignment.TopLeft : SD.ContentAlignment.MiddleLeft;
-        _previewLabel.AccessibleName = _body;
         _previewLabel.AccessibleRole = WF.AccessibleRole.StaticText;
         Controls.Add(_previewLabel);
 
-        int bodyBottom = 38 + bodyH;
-        ClientSize = new SD.Size(S(width), S(hasOpen ? bodyBottom + 8 + 26 + 10 : bodyBottom + 10));
-
         if (onOpen is not null)
         {
-            var open = new DarkButton
+            _openButton = new DarkButton
             {
                 Scale = _scale,
                 BackColor = Back,
                 FillColor = ThemePalette.Accent,
-                Location = new SD.Point(S(width - 14 - 96), S(bodyBottom + 8)),
                 Size = new SD.Size(S(96), S(26)),
                 Text = "Open link",
             };
-            open.Click += (_, _) =>
+            _openButton.Click += (_, _) =>
             {
                 try
                 {
@@ -161,67 +163,98 @@ public sealed class ToastWindow : WF.Form
                     ShowActionFailure(FriendlyError.For(ex));
                 }
             };
-            Controls.Add(open);
+            Controls.Add(_openButton);
         }
 
         // FormBorderStyle.None with no Text leaves an unnamed window: Narrator announced the
         // tray balloon this replaced, so the toast has to name itself the same way.
         AccessibleRole = WF.AccessibleRole.Alert;
         AccessibleName = title;
-        AccessibleDescription = _body;
+        _body = string.Empty;
+        SetBody(preview);
 
         // holdLong is for a working state ("Checking for updates…") whose work outlives the
         // confirmation dwell: it must not self-dismiss before its own result arrives.
-        _dismiss.Interval = hasOpen || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
+        _dismiss.Interval = _openButton is not null || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
         _dismiss.Tick += (_, _) => Close();
         MouseEnter += (_, _) => HoldOpen();
         MouseLeave += (_, _) => _dismiss.Start();
+
+        // The toast is ShowWithoutActivation and never takes focus, so the Escape key never
+        // reaches it. A click on the card is the only dismissal a user can actually perform,
+        // and without one a 4.5 s error sits over whatever they were reaching for.
+        Click += (_, _) => Close();
         foreach (WF.Control c in Controls)
         {
             c.MouseEnter += (_, _) => HoldOpen();
             c.MouseLeave += (_, _) => _dismiss.Start();
+            if (c is WF.Label) c.Click += (_, _) => Close();
         }
-        KeyDown += (_, e) => { if (e.KeyCode == WF.Keys.Escape) Close(); };
     }
 
     /// <summary>
-    /// How many body rows <paramref name="text"/> needs inside a <paramref name="availableDip"/>-wide
-    /// column, capped at <see cref="BodyMaxLines"/>. The layout is in DIP and only S() turns it
-    /// into device pixels, so this number has to come out the same on every monitor.
+    /// Puts a message in the body and grows the card to hold it. Both the constructor and
+    /// the action-failure path go through here: the failure line is a friendly error two or
+    /// three rows long arriving in a box that was sized for a one-line URL preview, and
+    /// assigning only the text left the rest of it under the label's bottom edge.
     /// </summary>
-    internal static int LinesNeeded(string text, int availableDip) =>
-        Math.Clamp(RowsFor(text, availableDip), 1, BodyMaxLines);
+    private void SetBody(string message)
+    {
+        _body = Trim(message, _bodyColumnPx);
+        int lines = LinesNeeded(_body, _bodyColumnPx);
+
+        _previewLabel.Text = _body;
+        _previewLabel.AccessibleName = _body;
+        _previewLabel.Height = S(BodyLineH * lines);
+        _previewLabel.TextAlign = lines > 1 ? SD.ContentAlignment.TopLeft : SD.ContentAlignment.MiddleLeft;
+        AccessibleDescription = _body;
+
+        int bodyBottom = BodyTopDip + (BodyLineH * lines);
+        if (_openButton is not null)
+            _openButton.Location = new SD.Point(S(CardWidthDip - 14 - 96), S(bodyBottom + 8));
+
+        ClientSize = new SD.Size(
+            S(CardWidthDip),
+            S(_openButton is not null ? bodyBottom + 8 + 26 + 10 : bodyBottom + 10));
+    }
 
     /// <summary>
-    /// The uncapped row count. A pixel-unit font is not DPI-free: GDI+ still converts it
-    /// through the screen DC, so the probe is 13 px em at 96 DPI and 19.5 px on Isaiah's 150 %
-    /// primary. Measuring a DIP-wide column against that wrapped a row early and parked every
-    /// wrapped toast on the BodyMaxLines clamp — 43 px of dead space under a two-line message,
-    /// and clipping for anything that genuinely needed three. Scaling the column by the same
-    /// DPI the font was scaled by makes the two cancel.
+    /// How many body rows <paramref name="columnPx"/> device pixels of width need for
+    /// <paramref name="text"/>, capped at <see cref="BodyMaxLines"/>. Pass a toast's
+    /// <see cref="BodyColumnPx"/> — the width of the label the text is actually going into.
     /// </summary>
-    private static int RowsFor(string text, int availableDip)
+    internal static int LinesNeeded(string text, int columnPx) =>
+        Math.Clamp(RowsFor(text, columnPx), 1, BodyMaxLines);
+
+    /// <summary>
+    /// The uncapped row count, measured exactly the way the label draws: the same point-size
+    /// <see cref="ThemePalette.UiFont"/>, in the label's own pixel column.
+    ///
+    /// It used to mix three DPIs — a pixel-unit probe font, GDI+'s screen DpiX for the column,
+    /// and whatever system DPI TextRenderer had cached for the HFONT — and those never agree.
+    /// GDI+ answered 96 while the process ran at 144, so a 28 px line box was measured against
+    /// a 244 px column: the "no OCR language pack" line counted four rows, clamped to three,
+    /// and Trim amputated the half that names the Settings page. Whether TextRenderer had
+    /// cached 96 or 144 depended on which class ran first, which is what made the suite flake.
+    /// One font and one column, both the label's own, cannot disagree with themselves.
+    /// </summary>
+    private static int RowsFor(string text, int columnPx)
     {
         if (string.IsNullOrEmpty(text)) return 1;
         try
         {
             using SD.Font ui = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
-            using var dip = new SD.Font(ui.FontFamily, ThemePalette.TextBodyLgPt * 96f / 72f, SD.GraphicsUnit.Pixel);
             const WF.TextFormatFlags flags = WF.TextFormatFlags.WordBreak | WF.TextFormatFlags.NoPrefix;
-
-            float dpi;
-            using (var screen = SD.Graphics.FromHwnd(IntPtr.Zero))
-                dpi = screen.DpiX > 0 ? screen.DpiX : 96f;
-            var column = new SD.Size(Math.Max(1, (int)Math.Round(availableDip * dpi / 96f)), int.MaxValue);
+            var column = new SD.Size(Math.Max(1, columnPx), int.MaxValue);
 
             // MeasureText adds a constant padding to the height on top of n line boxes, so
             // dividing by the font's line height over-counts. Two references give both terms.
-            int one = WF.TextRenderer.MeasureText("Mg", dip, column, flags).Height;
-            int two = WF.TextRenderer.MeasureText("Mg\nMg", dip, column, flags).Height;
+            int one = WF.TextRenderer.MeasureText("Mg", ui, column, flags).Height;
+            int two = WF.TextRenderer.MeasureText("Mg\nMg", ui, column, flags).Height;
             int lineH = Math.Max(1, two - one);
             int padding = one - lineH;
 
-            SD.Size measured = WF.TextRenderer.MeasureText(text, dip, column, flags);
+            SD.Size measured = WF.TextRenderer.MeasureText(text, ui, column, flags);
             int rows = Math.Max(1, (int)Math.Round((measured.Height - padding) / (double)lineH));
 
             // WordBreak cannot break inside a word, so one long space-free token (a saved
@@ -295,14 +328,18 @@ public sealed class ToastWindow : WF.Form
     {
         if (IsDisposed) return;
         _dismiss.Stop();
-        _body = Trim(message);
-        _previewLabel.Text = _body;
-        _previewLabel.AccessibleName = _body;
+        SetBody(message);
         _previewLabel.ForeColor = ThemePalette.TextError;
         _glyphLabel.Text = GlyphOf(ToastSeverity.Error);
         _glyphLabel.ForeColor = ColorOf(ToastSeverity.Error);
         _glyphLabel.AccessibleName = nameof(ToastSeverity.Error);
-        AccessibleDescription = _body;
+        if (IsHandleCreated)
+        {
+            // The card just changed height; a corner toast is bottom-anchored, so leaving it
+            // where it was would push its new rows off the edge of the working area.
+            Position();
+            _restLocation = Location;
+        }
         _dismiss.Interval = LongDwellMs;
         _dismiss.Start();
         Announce();
@@ -437,7 +474,7 @@ public sealed class ToastWindow : WF.Form
     /// that names the Settings page — the only half that message exists for. The box knows its
     /// own capacity, so ask it, and cut on a word so what survives is a whole phrase.
     /// </summary>
-    internal static string Trim(string text, int availableDip = BodyWidthDip)
+    internal static string Trim(string text, int columnPx)
     {
         text = (text ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
         if (text.Length == 0) return text;
@@ -448,11 +485,11 @@ public sealed class ToastWindow : WF.Form
         // first is free for every real message and bounds the walk for anything else.
         bool capped = text.Length > MaxChars;
         if (capped) text = text[..MaxChars];
-        if (!capped && RowsFor(text, availableDip) <= BodyMaxLines)
+        if (!capped && RowsFor(text, columnPx) <= BodyMaxLines)
             return text;
 
         string cut = text;
-        while (cut.Length > 1 && RowsFor(cut + "…", availableDip) > BodyMaxLines)
+        while (cut.Length > 1 && RowsFor(cut + "…", columnPx) > BodyMaxLines)
         {
             int space = cut.LastIndexOf(' ', cut.Length - 2);
             cut = (space > 0 ? cut[..space] : cut[..(cut.Length - 1)]).TrimEnd();

@@ -26,7 +26,7 @@ public partial class App : Application
     private Mutex? _mutex;
     private bool _ownsMutex;
     private WF.NotifyIcon? _tray;
-    private ToastWindow? _cornerToast;
+    private ToastWindow? _toast;
     private HotkeyManager? _hotkeys;
     private CommandServer? _commandServer;
     private readonly SettingsService _settings = new();
@@ -1508,7 +1508,7 @@ public partial class App : Application
     /// The app's one feedback channel. Everything except "update available" goes to the
     /// in-app toast at the tray corner: the shell balloon renders "Save failed" and
     /// "Copied to clipboard" identically, and Focus Assist swallows it whole with no window
-    /// to fall back to. Only one corner toast at a time - a second would land on top of it.
+    /// to fall back to. Only one toast at a time - a second would land on top of the first.
     /// </summary>
     internal void ShowBalloon(
         string title, string message, ToastSeverity severity = ToastSeverity.Info, bool holdLong = false) =>
@@ -1520,23 +1520,18 @@ public partial class App : Application
     {
         try
         {
-            if (anchor is null)
-            {
-                // Disposed, not closed: Dispose skips the exit fade on purpose. Two toasts
-                // share one corner rect, so letting the outgoing one fade while the incoming
-                // one fades in would cross-dissolve two different messages on top of each
-                // other. The replacement's own entrance is what covers the swap.
-                _cornerToast?.Dispose();
-                _cornerToast = null;
-            }
+            // Disposed, not closed: Dispose skips the exit fade on purpose. One channel means
+            // one toast — a second lands on top of the first, exactly, whether they share the
+            // tray corner or the anchor rect (two OCR runs over the same region inside the
+            // 4.5 s error dwell did just that). Letting the outgoing one fade while the
+            // incoming one fades in would cross-dissolve two different messages; the
+            // replacement's own entrance is what covers the swap.
+            _toast?.Dispose();
+            _toast = new ToastWindow(title, message, anchor, onOpen, severity, holdLong);
 
-            var toast = new ToastWindow(title, message, anchor, onOpen, severity, holdLong);
-            if (anchor is null)
-            {
-                _cornerToast = toast;
-                toast.FormClosed += (_, _) => { if (ReferenceEquals(_cornerToast, toast)) _cornerToast = null; };
-            }
-            toast.Show();
+            ToastWindow shown = _toast;
+            shown.FormClosed += (_, _) => { if (ReferenceEquals(_toast, shown)) _toast = null; };
+            shown.Show();
         }
         catch (Exception ex)
         {
