@@ -106,6 +106,7 @@ internal static class SettingsTruthCatalog
             "HistoryLimit",
             "NextCounter",
             "SettingsSchemaVersion",
+            "LastRunVersion",
             // Migration seeds: read once by PostCaptureMigration to fill the after-capture
             // matrix from the settings that preceded it, then never offered as a control.
             "PostCaptureAction",

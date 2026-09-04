@@ -13,6 +13,11 @@ public class Settings
     /// <see cref="ScreenshotCopy"/>; kept so an upgrade preserves the old choice.</summary>
     public bool AutoCopyToClipboard { get; set; } = true;
 
+    /// <summary>The version that last ran. An update replaces the exe underneath a running
+    /// WinShot and relaunches it, so this is the only way the new process can tell it just
+    /// arrived and say "Updated to X" instead of starting in silence.</summary>
+    public string LastRunVersion { get; set; } = "";
+
     /// <summary>Bumped by a migration that reshapes existing settings. 0 = a file written
     /// before the after-capture matrix replaced the single-choice combo.</summary>
     public int SettingsSchemaVersion { get; set; }

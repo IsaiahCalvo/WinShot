@@ -633,6 +633,9 @@ public partial class SettingsWindow : Window
         AboutCheckUpdatesButton.IsEnabled = false;
         string original = (string)AboutCheckUpdatesButton.Content;
         AboutCheckUpdatesButton.Content = "Checking…";
+        // A label that changes and then sits still, through a network round trip, is
+        // indistinguishable from a button that did nothing. Pulse it while we wait.
+        StartWaitingPulse(AboutCheckUpdatesButton);
         try
         {
             var result = await UpdateService.CheckAsync();
@@ -646,9 +649,30 @@ public partial class SettingsWindow : Window
         }
         finally
         {
+            StopWaitingPulse(AboutCheckUpdatesButton);
             AboutCheckUpdatesButton.Content = original;
             AboutCheckUpdatesButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>A slow breath on the control's own opacity: the one thing on screen that
+    /// says work is still happening, without inventing a spinner the app has nowhere else.</summary>
+    private static void StartWaitingPulse(UIElement element)
+    {
+        if (!Motion.AnimationsEnabled())
+            return;
+        element.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.55, new Duration(TimeSpan.FromMilliseconds(650)))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+        });
+    }
+
+    private static void StopWaitingPulse(UIElement element)
+    {
+        element.BeginAnimation(OpacityProperty, null);
+        element.Opacity = 1;
     }
 
     private void OnAboutOpenRepo(object sender, RoutedEventArgs e) => OpenExternal(AppInfo.RepositoryUrl);

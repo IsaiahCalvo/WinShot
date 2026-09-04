@@ -155,6 +155,8 @@ public partial class App : Application
         // whoever presses the Extract text hotkey first.
         OcrService.Warm();
 
+        AnnounceCompletedUpdate();
+
         if (_settings.Current.CheckForUpdatesOnStartup)
             _ = StartupUpdateCheckAsync();
 
@@ -1636,6 +1638,29 @@ public partial class App : Application
 
     // ---- Updates ----------------------------------------------------------
 
+    /// <summary>
+    /// The installer swaps WinShot.exe under the running process and relaunches it, so the
+    /// only thing the user saw was the app vanishing and coming back. Comparing the stored
+    /// version to this build's is what turns that into "Updated to 1.4.0".
+    /// </summary>
+    private void AnnounceCompletedUpdate()
+    {
+        string current = AppInfo.Version;
+        string previous = _settings.Current.LastRunVersion;
+        if (string.Equals(previous, current, StringComparison.Ordinal))
+            return;
+
+        _settings.Current.LastRunVersion = current;
+        try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to record the running version", ex); }
+
+        // A first run has nothing to compare against, and announcing "updated" to someone who
+        // just installed WinShot would be a lie.
+        if (string.IsNullOrEmpty(previous))
+            return;
+
+        ShowBalloon($"Updated to {current}", $"You were on {previous}. See what changed in Settings, About.", ToastSeverity.Success, holdLong: true);
+    }
+
     /// <summary>Silent startup poll: only surfaces UI when a newer release is found.</summary>
     private async Task StartupUpdateCheckAsync()
     {
@@ -1700,7 +1725,23 @@ public partial class App : Application
             // long: without this the working state vanished and the user watched a silent
             // screen until the app exited and the installer took over.
             ShowBalloon("Downloading update…", "WinShot restarts once it is installed.", holdLong: true);
-            await UpdateService.DownloadAndLaunchAsync(update.DownloadUrl, update.LatestVersion ?? "latest");
+            int lastShownPercent = 0;
+            await UpdateService.DownloadAndLaunchAsync(
+                update.DownloadUrl,
+                update.LatestVersion ?? "latest",
+                onProgress: fraction =>
+                {
+                    if (fraction is not double value) return;
+                    int percent = (int)Math.Round(value * 100);
+                    // Re-showing the toast replaces the one on screen; every byte would
+                    // rebuild a window, so only move in visible steps.
+                    if (percent < lastShownPercent + 5 && percent < 100) return;
+                    lastShownPercent = percent;
+                    Dispatcher.InvokeAsync(() => ShowBalloon(
+                        "Downloading update…",
+                        $"{percent}% of WinShot {update.LatestVersion}. It restarts once installed.",
+                        holdLong: true));
+                });
             // Reached only when the installer launched (failures throw). Exit so it can replace our
             // files; the installer relaunches WinShot itself.
             await Dispatcher.InvokeAsync(Shutdown);
