@@ -132,11 +132,27 @@ public static class ThemeResources
 
         // A Freezable in a dictionary is normally already frozen; clone before editing.
         Storyboard editable = board.IsFrozen ? board.Clone() : board;
-        foreach (Timeline child in editable.Children)
-            child.Duration = new Duration(TimeSpan.Zero);
+        ZeroChildren(editable);
 
         cache[board] = editable;
         return editable;
+    }
+
+    /// <summary>
+    /// Zero every timeline under a storyboard, not just its direct children. A staggered
+    /// storyboard is a nested TimelineGroup and a stagger is a BeginTime, so walking one
+    /// level and setting Duration alone would leave the next storyboard someone writes
+    /// still animating — and still delaying — for a user who turned animation off.
+    /// </summary>
+    private static void ZeroChildren(TimelineGroup group)
+    {
+        foreach (Timeline child in group.Children)
+        {
+            child.Duration = new Duration(TimeSpan.Zero);
+            child.BeginTime = TimeSpan.Zero;
+            if (child is TimelineGroup nested)
+                ZeroChildren(nested);
+        }
     }
 
     /// <summary>

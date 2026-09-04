@@ -173,7 +173,17 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
     protected override void OnMouseEnter(EventArgs e) { _hover.To(1); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e) { _hover.To(0); _press.To(0); base.OnMouseLeave(e); }
     protected override void OnMouseDown(WF.MouseEventArgs e) { _press.To(1); base.OnMouseDown(e); }
-    protected override void OnMouseUp(WF.MouseEventArgs e) { _press.To(0); base.OnMouseUp(e); }
+    protected override void OnMouseUp(WF.MouseEventArgs e)
+    {
+        // A 20-30 ms click is the normal case, and releasing from wherever the 140 ms press
+        // ease had reached peaked the wash at about 0.15 — four of the thirty shades it can
+        // subtract, so the commit read as nothing happening. Land the press first, the same
+        // way the keyboard branch does, then ease it off. A press held long enough to finish
+        // is already at 1, so this changes nothing for a deliberate press.
+        _press.Reset(1);
+        _press.To(0);
+        base.OnMouseUp(e);
+    }
 
     protected override void Dispose(bool disposing)
     {
@@ -667,6 +677,9 @@ public sealed class DarkSegmented : WF.Control
         _pillRun = null;
         _pill.Stop();
         _gliding = false;
+        // ResizeRedraw is not set on this control, so a resize that exposes no new area
+        // repaints nothing and the pill stays drawn at the rect it was abandoned mid-glide.
+        Invalidate();
     }
 
     protected override void Dispose(bool disposing)
