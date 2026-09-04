@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using W = System.Windows;
 using WF = System.Windows.Forms;
@@ -164,11 +164,16 @@ internal static class Motion
                 _onFrame(1d);
                 _onDone?.Invoke();
             }
-            catch
+            catch (Exception ex)
             {
-                // A throwing frame must not strand the process-wide timer resolution.
+                // A throwing frame must not strand the process-wide timer resolution — and
+                // it must not be rethrown either: a tween ticks on a WinForms timer, so the
+                // exception leaves through NativeWindow's callback rather than WPF's
+                // dispatcher. That pops a modal ThreadExceptionDialog (invisible, and
+                // unclickable, on the hidden test desktop) and DispatcherUnhandledException
+                // never sees it. Cancel the tween and log instead.
                 Release();
-                throw;
+                Log.Error("Animation frame failed; tween cancelled", ex);
             }
         }
 

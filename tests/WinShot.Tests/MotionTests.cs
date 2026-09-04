@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Threading.Tasks;
 using WinShot.Core;
 using Xunit;
@@ -35,7 +35,10 @@ public class MotionTests
     [Fact]
     public void Acquire_ReferenceCountsAndSurvivesDoubleDispose()
     {
-        Assert.Equal(0, Motion.Holders);
+        // Pumped rather than asserted: xunit does not fix class order, and several
+        // surfaces hold a bare Acquire() for the length of an animation, so an earlier
+        // class can hand this one a non-zero count with no message loop left to drain it.
+        PumpUntil(() => Motion.Holders == 0);
 
         var outer = Motion.Acquire();
         Assert.Equal(1, Motion.Holders);

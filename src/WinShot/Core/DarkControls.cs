@@ -82,6 +82,18 @@ internal sealed class StateAmount : IDisposable
         });
     }
 
+    /// <summary>
+    /// Cancels any tween and puts the amount at <paramref name="value"/> without animating.
+    /// Used when a wash is handed from one cell to another: the outgoing amount picks up
+    /// exactly where the incoming one had reached, so the cross-fade has no seam.
+    /// </summary>
+    public void Reset(double value)
+    {
+        _run?.Dispose();
+        _run = null;
+        Value = _from = _target = Math.Clamp(value, 0d, 1d);
+    }
+
     public void Dispose()
     {
         _run?.Dispose();
@@ -435,8 +447,11 @@ public sealed class DarkNumberBox : WF.Control
         TextAlign = WF.HorizontalAlignment.Center,
     };
 
+    private readonly StateAmount _focus;
+
     public DarkNumberBox()
     {
+        _focus = new StateAmount(this);
         SetStyle(
             WF.ControlStyles.UserPaint |
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -446,8 +461,8 @@ public sealed class DarkNumberBox : WF.Control
         BackColor = DarkControlPalette.Card;
         Controls.Add(_inner);
         _inner.TextChanged += (_, _) => OnTextChanged(EventArgs.Empty);
-        _inner.GotFocus += (_, _) => Invalidate();
-        _inner.LostFocus += (_, _) => Invalidate();
+        _inner.GotFocus += (_, _) => _focus.To(1);
+        _inner.LostFocus += (_, _) => _focus.To(0);
         Resize += (_, _) => LayoutInner();
     }
 
@@ -485,9 +500,20 @@ public sealed class DarkNumberBox : WF.Control
         using var brush = new SD.SolidBrush(DarkControlPalette.Field);
         g.FillPath(brush, path);
         using var pen = new SD.Pen(
-            _inner.Focused ? SD.Color.FromArgb(150, ThemePalette.AccentHover) : DarkControlPalette.Hairline,
+            DarkControlPalette.Mix(
+                DarkControlPalette.Hairline,
+                SD.Color.FromArgb(150, ThemePalette.AccentHover),
+                _focus.Value),
             1f);
         g.DrawPath(pen, path);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        // An in-flight tween holds the process-wide high-resolution clock.
+        if (disposing)
+            _focus.Dispose();
+        base.Dispose(disposing);
     }
 }
 
@@ -502,16 +528,23 @@ public sealed class DarkSegmented : WF.Control
     // which is what makes a segmented control read as one moving thing. RectangleTween
     // owns the geometry and has no clock of its own by design, so Motion.Run pumps it.
     private readonly WinShot.Capture.RectangleTween _pill = new();
+    // Two amounts, not one: the cell being entered fades in while the cell being left
+    // fades out. With a single amount the wash could only be painted where the pointer
+    // currently is, so leaving the control ran a fade-out over nothing (hover in eased,
+    // hover out snapped) and sliding between cells teleported the wash at full strength.
     private readonly StateAmount _hover;
+    private readonly StateAmount _hoverOut;
     private IDisposable? _pillRun;
     private SD.Rectangle _pillRect;
     private bool _gliding;
     private int _selectedIndex;
     private int _hotIndex = -1;
+    private int _coolingIndex = -1;
 
     public DarkSegmented()
     {
         _hover = new StateAmount(this);
+        _hoverOut = new StateAmount(this);
         SetStyle(
             WF.ControlStyles.UserPaint |
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -596,7 +629,8 @@ public sealed class DarkSegmented : WF.Control
             {
                 _pill.Update();
                 _pillRect = _pill.Current;
-                Invalidate();
+                if (!IsDisposed)
+                    Invalidate();
             },
             () =>
             {
@@ -624,6 +658,7 @@ public sealed class DarkSegmented : WF.Control
         {
             _pillRun?.Dispose();
             _hover.Dispose();
+            _hoverOut.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -631,20 +666,33 @@ public sealed class DarkSegmented : WF.Control
     protected override void OnMouseMove(WF.MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        int hit = HitCell(e.X);
-        if (hit != _hotIndex)
-        {
-            _hotIndex = hit;
-            _hover.To(hit >= 0 ? 1 : 0);
-            Invalidate();
-        }
+        SetHotCell(HitCell(e.X));
     }
 
     protected override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
-        _hotIndex = -1;
-        _hover.To(0);
+        SetHotCell(-1);
+    }
+
+    /// <summary>Hands the wash from whichever cell had it to <paramref name="hit"/>, both
+    /// halves eased. -1 means the pointer left the control, which is just a fade to nothing.</summary>
+    private void SetHotCell(int hit)
+    {
+        if (hit == _hotIndex)
+            return;
+
+        if (_hotIndex >= 0 && _hover.Value > 0.001d)
+        {
+            _coolingIndex = _hotIndex;
+            _hoverOut.Reset(_hover.Value);
+            _hoverOut.To(0);
+        }
+
+        _hotIndex = hit;
+        _hover.Reset(0);
+        if (hit >= 0)
+            _hover.To(1);
         Invalidate();
     }
 
@@ -691,13 +739,8 @@ public sealed class DarkSegmented : WF.Control
 
         // Hover wash first, under the pill: hovering the selected cell must not
         // repaint over the accent.
-        if (_hotIndex >= 0 && _hotIndex != _selectedIndex && _hover.Value > 0.001d)
-        {
-            using var path = GdiPaths.RoundedRect(PillFor(_hotIndex), pillRadius);
-            using var brush = new SD.SolidBrush(DarkControlPalette.Mix(
-                DarkControlPalette.Field, DarkControlPalette.FieldHot, _hover.Value));
-            g.FillPath(brush, path);
-        }
+        DrawWash(g, _coolingIndex, _hoverOut.Value, pillRadius);
+        DrawWash(g, _hotIndex, _hover.Value, pillRadius);
 
         SD.Rectangle selected = CurrentPill();
         if (!selected.IsEmpty)
@@ -711,13 +754,34 @@ public sealed class DarkSegmented : WF.Control
         for (int i = 0; i < Options.Length; i++)
         {
             var cell = new SD.Rectangle((int)(i * cellWidth), 0, (int)cellWidth, Height);
+            // Colour follows the pill that is physically over the label rather than the
+            // index that was already committed: mid-glide the outgoing label would
+            // otherwise be muted grey on blue and the incoming one white on bare track.
+            // Measured against the cell's own pill, so a resting selection is exactly 1.
+            SD.Rectangle cellPill = PillFor(i);
+            double covered = cellPill.Width <= 0
+                ? 0d
+                : Math.Clamp((double)SD.Rectangle.Intersect(selected, cellPill).Width / cellPill.Width, 0d, 1d);
             WF.TextRenderer.DrawText(
                 g,
                 Options[i],
                 Font,
                 cell,
-                i == _selectedIndex ? SD.Color.White : DarkControlPalette.TextMuted,
+                DarkControlPalette.Mix(DarkControlPalette.TextMuted, SD.Color.White, covered),
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.HorizontalCenter);
         }
+    }
+
+    private void DrawWash(SD.Graphics g, int index, double amount, int radius)
+    {
+        if (index < 0 || index == _selectedIndex || amount <= 0.001d)
+            return;
+        SD.Rectangle bounds = PillFor(index);
+        if (bounds.IsEmpty)
+            return;
+        using var path = GdiPaths.RoundedRect(bounds, radius);
+        using var brush = new SD.SolidBrush(DarkControlPalette.Mix(
+            DarkControlPalette.Field, DarkControlPalette.FieldHot, amount));
+        g.FillPath(brush, path);
     }
 }
