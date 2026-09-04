@@ -167,6 +167,97 @@ public static class RecordingControlBarPlacement
     public static SD.Point BottomCenter(SD.Rectangle workingArea, SD.Size barSize, int margin = 24) => new(
         workingArea.Left + Math.Max(0, (workingArea.Width - barSize.Width) / 2),
         workingArea.Bottom - barSize.Height - margin);
+
+    /// <summary>
+    /// Centres the bar just below the recorded rectangle, so the controls belong to the take
+    /// instead of to the monitor. Falls back above the region when there is no room below,
+    /// and to the working area's bottom edge when neither side fits (a full-height region).
+    /// Always clamped fully inside <paramref name="workingArea"/>.
+    /// </summary>
+    public static SD.Point UnderRegion(
+        SD.Rectangle recordingRegion,
+        SD.Rectangle workingArea,
+        SD.Size barSize,
+        int margin = 12)
+    {
+        int x = recordingRegion.Left + ((recordingRegion.Width - barSize.Width) / 2);
+        x = Math.Clamp(
+            x,
+            workingArea.Left,
+            Math.Max(workingArea.Left, workingArea.Right - barSize.Width));
+
+        int below = recordingRegion.Bottom + margin;
+        int above = recordingRegion.Top - margin - barSize.Height;
+        int y = below + barSize.Height <= workingArea.Bottom
+            ? below
+            : above >= workingArea.Top
+                ? above
+                : workingArea.Bottom - barSize.Height - margin;
+        y = Math.Clamp(
+            y,
+            workingArea.Top,
+            Math.Max(workingArea.Top, workingArea.Bottom - barSize.Height));
+        return new SD.Point(x, y);
+    }
+}
+
+/// <summary>The cells of the recording control pill, in visual order.</summary>
+public enum RecordingControlBarCell
+{
+    Timer,
+    PauseResume,
+    Restart,
+    Stop,
+    Discard,
+}
+
+/// <summary>
+/// Geometry of the recording control pill: a capsule of equal glyph cells butted against each
+/// other and split by full-height hairlines, optionally preceded by a wider timer cell. Pure so
+/// the cell rects can be pinned at 100/125/150/200 % without a monitor at that DPI.
+/// </summary>
+public static class RecordingControlBarLayout
+{
+    public const int HeightDip = 40;
+    public const int SidePadDip = 9;
+    public const int TimerWidthDip = 68;
+    public const int CellWidthDip = 38;
+
+    public static IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> Build(
+        bool showTimer,
+        double scale)
+    {
+        int height = RecordingMonitorDpi.Px(HeightDip, scale);
+        int pad = RecordingMonitorDpi.Px(SidePadDip, scale);
+        int cell = RecordingMonitorDpi.Px(CellWidthDip, scale);
+        var cells = new List<(RecordingControlBarCell, SD.Rectangle)>(5);
+        int x = pad;
+        if (showTimer)
+        {
+            int timer = RecordingMonitorDpi.Px(TimerWidthDip, scale);
+            cells.Add((RecordingControlBarCell.Timer, new SD.Rectangle(x, 0, timer, height)));
+            x += timer;
+        }
+        foreach (RecordingControlBarCell id in new[]
+        {
+            RecordingControlBarCell.PauseResume,
+            RecordingControlBarCell.Restart,
+            RecordingControlBarCell.Stop,
+            RecordingControlBarCell.Discard,
+        })
+        {
+            cells.Add((id, new SD.Rectangle(x, 0, cell, height)));
+            x += cell;
+        }
+        return cells;
+    }
+
+    public static SD.Size Size(bool showTimer, double scale)
+    {
+        IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> cells = Build(showTimer, scale);
+        int pad = RecordingMonitorDpi.Px(SidePadDip, scale);
+        return new SD.Size(cells[^1].Bounds.Right + pad, RecordingMonitorDpi.Px(HeightDip, scale));
+    }
 }
 
 public static class RecordingMonitorDpi

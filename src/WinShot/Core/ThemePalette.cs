@@ -95,6 +95,18 @@ public static class ThemePalette
     public static SD.Font UiFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
         => new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
 
+    /// <summary>
+    /// The same two faces sized in device pixels. Surfaces that lay themselves out by hand
+    /// (every recording overlay, the selector chrome) have already multiplied every
+    /// coordinate by their monitor's scale; a point-size font would then scale a second
+    /// time on that monitor and overflow the box it was measured into.
+    /// </summary>
+    public static SD.Font IconFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new(HasFluentIcons ? "Segoe Fluent Icons" : "Segoe MDL2 Assets", Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
+
+    public static SD.Font UiFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new("Segoe UI", Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
+
     private static bool IsFontInstalled(string name)
     {
         try

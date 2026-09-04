@@ -6,37 +6,60 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Recording;
 
+/// <summary>
+/// The controls for a running take: an owner-drawn capsule of glyph cells split by full-height
+/// hairlines, anchored just below the recorded rectangle. Capture-excluded and draggable.
+/// </summary>
 public sealed class FastRecordingControlBar : WF.Form
 {
     private static readonly SD.Color Back = ThemePalette.ToolbarBg;
-    private static readonly SD.Color ButtonBack = ThemePalette.SurfaceAlt;
-    private static readonly SD.Color StopBack = ThemePalette.Accent;
+    private static readonly SD.Color Hairline = ThemePalette.BorderStrong;
+    private static readonly SD.Color HoverFill = ThemePalette.HoverFill;
+    private static readonly SD.Color GlyphColor = ThemePalette.TextPrimary;
     private static readonly SD.Color RecordingRed = ThemePalette.Red;
     private static readonly SD.Color PausedAmber = ThemePalette.Warn;
+
+    // Segoe Fluent / MDL2 codepoints, one family and one size across the pill.
+    private const string GlyphPause = "";
+    private const string GlyphResume = "";
+    private const string GlyphRestart = "";
+    private const string GlyphStop = "";
+    private const string GlyphDiscard = "";
+
+    /// <summary>Idle transparency of the pill. The entrance tween ends here.</summary>
+    private const double RestingOpacity = 0.96;
 
     private readonly Stopwatch _elapsed = new();
     // 50ms is fast enough for a smooth breathing pulse without holding the
     // high-resolution clock for the whole recording.
     private readonly WF.Timer _timer = new() { Interval = 50 };
-    private readonly DotControl _dot;
-    private readonly WF.Label _elapsedText;
-    private readonly DarkButton _pause;
-    private readonly DarkButton _restart;
-    private readonly DarkButton _stop;
-    private readonly DarkButton _cancel;
+    private readonly WF.ToolTip _toolTip = new() { InitialDelay = 350, ReshowDelay = 120, OwnerDraw = true };
+    private readonly IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> _cells;
+    private readonly SD.Font _glyphFont;
+    private readonly SD.Font _timerFont;
+    private readonly SD.Font _tipFont;
     private readonly SD.Rectangle? _recordingRegion;
     private readonly bool _showTimer;
+    private readonly string _stopHotkey;
     private readonly double _scale;
+    private IDisposable? _entrance;
+    private string _elapsedText = "00:00";
+    private int _hoverIndex = -1;
     private bool _actionTaken;
     private bool _paused;
+    private int _dotAlpha = 255;
 
-    public FastRecordingControlBar(SD.Rectangle? recordingRegion = null, bool showTimer = true)
+    public FastRecordingControlBar(
+        SD.Rectangle? recordingRegion = null,
+        bool showTimer = true,
+        string? stopHotkey = null)
     {
         _recordingRegion = recordingRegion;
         _showTimer = showTimer;
-        // Point-based fonts render at the monitor's DPI, so the fixed-pixel button
-        // layout must scale with the target monitor or labels truncate on 125%/150%
-        // displays. (AutoScaleMode.Dpi can't: it only reacts to DPI *changes*.)
+        _stopHotkey = string.IsNullOrWhiteSpace(stopHotkey) ? "" : stopHotkey.Trim();
+        // Point-based fonts render at the monitor's DPI, so the fixed-pixel cell layout must
+        // scale with the target monitor or the glyphs overflow their cells on 125%/150%
+        // displays. (AutoScaleMode.Dpi cannot: it only reacts to DPI *changes*.)
         SD.Rectangle targetScreen = recordingRegion is SD.Rectangle r
             ? WF.Screen.FromRectangle(r).Bounds
             : WF.Screen.FromPoint(WF.Cursor.Position).Bounds;
@@ -45,14 +68,21 @@ public sealed class FastRecordingControlBar : WF.Form
         // later, PerMonitorV2 fires WM_DPICHANGED on the move and rescales the window on
         // top of the pre-applied _scale (double-scaled bar on mixed-DPI setups).
         Location = new SD.Point(targetScreen.X, targetScreen.Y);
+
+        _cells = RecordingControlBarLayout.Build(showTimer, _scale);
+        // Pixel-unit faces: every coordinate here is already multiplied by _scale, and a
+        // point-size font would apply the monitor's scale to itself a second time.
+        _glyphFont = ThemePalette.IconFontPx(S(16));
+        _timerFont = new SD.Font("Consolas", S(14), SD.FontStyle.Regular, SD.GraphicsUnit.Pixel);
+        _tipFont = ThemePalette.UiFontPx(S(11));
+
         AutoScaleMode = WF.AutoScaleMode.None;
-        AutoSize = true;
-        AutoSizeMode = WF.AutoSizeMode.GrowAndShrink;
         BackColor = Back;
+        ClientSize = RecordingControlBarLayout.Size(showTimer, _scale);
+        DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
-        Opacity = 0.96;
-        Padding = new WF.Padding(S(14), S(8), S(14), S(8));
+        Opacity = RestingOpacity;
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
@@ -64,77 +94,38 @@ public sealed class FastRecordingControlBar : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var row = new WF.FlowLayoutPanel
+        // The stock tooltip is a light system balloon over an otherwise fully owner-drawn
+        // dark pill, so it is drawn in the palette too (same idiom as the All-in-One bar).
+        _toolTip.Popup += (_, e) => e.ToolTipSize = SD.Size.Add(
+            WF.TextRenderer.MeasureText(_toolTip.GetToolTip(e.AssociatedControl), _tipFont),
+            new SD.Size(12, 8));
+        _toolTip.Draw += (_, e) =>
         {
-            AutoSize = true,
-            AutoSizeMode = WF.AutoSizeMode.GrowAndShrink,
-            BackColor = Back,
-            FlowDirection = WF.FlowDirection.LeftToRight,
-            Margin = WF.Padding.Empty,
-            Padding = WF.Padding.Empty,
-            WrapContents = false,
+            using var bg = new SD.SolidBrush(Back);
+            e.Graphics.FillRectangle(bg, e.Bounds);
+            using var edge = new SD.Pen(Hairline, 1);
+            e.Graphics.DrawRectangle(edge,
+                new SD.Rectangle(e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1));
+            WF.TextRenderer.DrawText(e.Graphics, e.ToolTipText, _tipFont, e.Bounds, GlyphColor,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter);
         };
 
-        _dot = new DotControl
-        {
-            DotColor = RecordingRed,
-            Margin = new WF.Padding(S(2), S(7), S(8), 0),
-            Size = new SD.Size(S(10), S(10)),
-        };
-        _dot.Visible = showTimer;
-        row.Controls.Add(_dot);
-
-        _elapsedText = new WF.Label
-        {
-            AutoSize = false,
-            Font = new SD.Font("Consolas", ThemePalette.TextBodyLgPt, SD.FontStyle.Regular),
-            ForeColor = SD.Color.White,
-            Margin = new WF.Padding(0, S(4), S(12), 0),
-            Size = new SD.Size(S(66), S(22)),
-            Text = "00:00",
-            TextAlign = SD.ContentAlignment.MiddleLeft,
-        };
-        _elapsedText.Visible = showTimer;
-        row.Controls.Add(_elapsedText);
-
-        _pause = Button("Pause", ButtonBack, widthFor: "Resume");
-        _pause.Click += (_, _) => TogglePause();
-        row.Controls.Add(_pause);
-
-        _restart = Button("Restart", ButtonBack);
-        _restart.Click += (_, _) => RaiseOnce(RestartRequested);
-        row.Controls.Add(_restart);
-
-        _stop = Button("Stop", StopBack);
-        _stop.Click += (_, _) => RaiseOnce(StopRequested);
-        row.Controls.Add(_stop);
-
-        _cancel = Button("Cancel", ButtonBack);
-        _cancel.Click += (_, _) => RaiseOnce(CancelRequested);
-        row.Controls.Add(_cancel);
-
-        Controls.Add(row);
-        // A form's Padding feeds AutoSize but does NOT position non-docked children —
-        // without this the row hugs the top-left and all the padding lands bottom-right.
-        row.Location = new SD.Point(S(14), S(8));
-
-        MouseDown += OnDragMouseDown;
-        row.MouseDown += OnDragMouseDown;
-        KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == WF.Keys.Escape)
-                RaiseOnce(CancelRequested);
-        };
+        MouseMove += OnBarMouseMove;
+        MouseLeave += (_, _) => SetHover(-1);
+        MouseDown += OnBarMouseDown;
+        MouseClick += OnBarMouseClick;
+        KeyDown += OnBarKeyDown;
         _timer.Tick += (_, _) =>
         {
-            string elapsed = FormatElapsed(_elapsed.Elapsed);
-            if (_elapsedText.Text != elapsed)
-                _elapsedText.Text = elapsed;
             // Eased breathing instead of a binary blink: alpha rides a 1.6s sine.
             double wave = (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 1600.0)) / 2;
-            _dot.DotColor = _paused
-                ? PausedAmber
-                : SD.Color.FromArgb(120 + (int)Math.Round(135 * wave), RecordingRed);
+            int alpha = _paused ? 255 : 120 + (int)Math.Round(135 * wave);
+            string elapsed = FormatElapsed(_elapsed.Elapsed);
+            if (alpha == _dotAlpha && elapsed == _elapsedText)
+                return;
+            _dotAlpha = alpha;
+            _elapsedText = elapsed;
+            InvalidateCell(RecordingControlBarCell.Timer);
         };
     }
 
@@ -150,8 +141,9 @@ public sealed class FastRecordingControlBar : WF.Form
     {
         base.OnShown(e);
         UpdateWindowRegion();
-        PositionBottomCenter();
+        PositionUnderRegion();
         ExcludeFromCapture();
+        PlayEntrance();
         if (_showTimer)
         {
             _elapsed.Start();
@@ -167,14 +159,28 @@ public sealed class FastRecordingControlBar : WF.Form
 
     protected override void OnPaint(WF.PaintEventArgs e)
     {
+        SD.Graphics g = e.Graphics;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using (var fill = new SD.SolidBrush(Back))
+            g.FillRectangle(fill, ClientRectangle);
+
+        for (int i = 0; i < _cells.Count; i++)
+            PaintCell(g, i);
+
+        PopupChrome.DrawBorder(g, ClientSize, Height / 2);
         base.OnPaint(e);
-        PopupChrome.DrawBorder(e.Graphics, ClientSize, Height / 2);
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        _entrance?.Dispose();
+        _entrance = null;
         _timer.Stop();
         _timer.Dispose();
+        _toolTip.Dispose();
+        _glyphFont.Dispose();
+        _timerFont.Dispose();
+        _tipFont.Dispose();
         base.OnClosed(e);
     }
 
@@ -183,12 +189,210 @@ public sealed class FastRecordingControlBar : WF.Form
             ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
             : $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
 
-    private void PositionBottomCenter()
+    /// <summary>
+    /// Fades in over an 8 px rise, so the pill arrives under the region rather than simply
+    /// appearing there. Honours the system animation setting through Motion.Run.
+    /// </summary>
+    private void PlayEntrance()
     {
-        SD.Rectangle area = _recordingRegion is SD.Rectangle region
-            ? WF.Screen.FromRectangle(region).WorkingArea
-            : WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
-        Location = RecordingControlBarPlacement.BottomCenter(area, Size);
+        int restY = Top;
+        int rise = S(8);
+        Opacity = 0;
+        Top = restY + rise;
+        _entrance?.Dispose();
+        _entrance = Motion.Run(
+            Motion.EnterDurationMs,
+            Motion.EaseOutCubic,
+            amount =>
+            {
+                if (IsDisposed)
+                    return;
+                Opacity = RestingOpacity * amount;
+                Top = restY + (int)Math.Round(rise * (1 - amount));
+            },
+            () => _entrance = null);
+    }
+
+    private void PositionUnderRegion()
+    {
+        SD.Rectangle region = _recordingRegion ?? SD.Rectangle.Empty;
+        if (region.Width <= 0 || region.Height <= 0)
+        {
+            SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+            Location = RecordingControlBarPlacement.BottomCenter(area, Size);
+            return;
+        }
+
+        Location = RecordingControlBarPlacement.UnderRegion(
+            region,
+            WF.Screen.FromRectangle(region).WorkingArea,
+            Size,
+            S(12));
+    }
+
+    // ---------------------------------------------------------------- painting
+
+    private void PaintCell(SD.Graphics g, int index)
+    {
+        (RecordingControlBarCell cell, SD.Rectangle bounds) = _cells[index];
+        bool interactive = cell != RecordingControlBarCell.Timer && !_actionTaken;
+        if (interactive && index == _hoverIndex)
+        {
+            SD.Rectangle plate = SD.Rectangle.Inflate(bounds, -S(3), -S(6));
+            using var path = GdiPaths.RoundedRect(plate, S(7));
+            using var brush = new SD.SolidBrush(HoverFill);
+            g.FillPath(brush, path);
+        }
+
+        // Full-height hairline on the leading edge of every cell but the first.
+        if (index > 0)
+        {
+            using var pen = new SD.Pen(Hairline, 1);
+            g.DrawLine(pen, bounds.Left, bounds.Top + S(9), bounds.Left, bounds.Bottom - S(9));
+        }
+
+        if (cell == RecordingControlBarCell.Timer)
+        {
+            PaintTimer(g, bounds);
+            return;
+        }
+
+        SD.Color color = cell == RecordingControlBarCell.Stop ? RecordingRed : GlyphColor;
+        if (_actionTaken)
+            color = SD.Color.FromArgb(0x60, color);
+        WF.TextRenderer.DrawText(g, GlyphFor(cell), _glyphFont, bounds, color,
+            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+    }
+
+    private void PaintTimer(SD.Graphics g, SD.Rectangle bounds)
+    {
+        int dot = S(9);
+        var dotRect = new SD.Rectangle(
+            bounds.Left + S(3),
+            bounds.Top + ((bounds.Height - dot) / 2),
+            dot,
+            dot);
+        using (var brush = new SD.SolidBrush(
+            _paused ? PausedAmber : SD.Color.FromArgb(_dotAlpha, RecordingRed)))
+        {
+            g.FillEllipse(brush, dotRect);
+        }
+
+        var textRect = new SD.Rectangle(
+            dotRect.Right + S(5),
+            bounds.Top,
+            bounds.Right - dotRect.Right - S(5),
+            bounds.Height);
+        WF.TextRenderer.DrawText(g, _elapsedText, _timerFont, textRect, GlyphColor,
+            WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
+            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+    }
+
+    private string GlyphFor(RecordingControlBarCell cell) => cell switch
+    {
+        RecordingControlBarCell.PauseResume => _paused ? GlyphResume : GlyphPause,
+        RecordingControlBarCell.Restart => GlyphRestart,
+        RecordingControlBarCell.Stop => GlyphStop,
+        _ => GlyphDiscard,
+    };
+
+    /// <summary>Action plus its bound key, so a glyph-only cell still says what it does and
+    /// how to reach it from the keyboard.</summary>
+    internal string TipFor(RecordingControlBarCell cell) => cell switch
+    {
+        RecordingControlBarCell.PauseResume => _paused ? "Resume recording" : "Pause recording",
+        RecordingControlBarCell.Restart => "Restart the take",
+        RecordingControlBarCell.Stop => _stopHotkey.Length > 0
+            ? $"Stop and save (Esc or {_stopHotkey})"
+            : "Stop and save (Esc)",
+        RecordingControlBarCell.Discard => "Discard the take (Shift+Esc)",
+        _ => "",
+    };
+
+    private void InvalidateCell(RecordingControlBarCell cell)
+    {
+        foreach ((RecordingControlBarCell id, SD.Rectangle bounds) in _cells)
+        {
+            if (id == cell)
+            {
+                Invalidate(bounds);
+                return;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- input
+
+    private void OnBarMouseMove(object? sender, WF.MouseEventArgs e) => SetHover(HitTest(e.Location));
+
+    private void SetHover(int index)
+    {
+        if (_hoverIndex == index)
+            return;
+
+        _hoverIndex = index;
+        bool actionable = index >= 0 && !_actionTaken && _cells[index].Cell != RecordingControlBarCell.Timer;
+        Cursor = actionable ? WF.Cursors.Hand : WF.Cursors.Default;
+        _toolTip.SetToolTip(this, actionable ? TipFor(_cells[index].Cell) : null);
+        Invalidate();
+    }
+
+    private int HitTest(SD.Point p)
+    {
+        for (int i = 0; i < _cells.Count; i++)
+        {
+            if (_cells[i].Bounds.Contains(p))
+                return i;
+        }
+        return -1;
+    }
+
+    private void OnBarMouseDown(object? sender, WF.MouseEventArgs e)
+    {
+        // Anywhere that is not a cell drags the pill; the cells keep their clicks.
+        if (e.Button == WF.MouseButtons.Left && HitTest(e.Location) < 0)
+            Native.ReleaseCaptureAndDrag(Handle);
+    }
+
+    private void OnBarMouseClick(object? sender, WF.MouseEventArgs e)
+    {
+        if (e.Button != WF.MouseButtons.Left || _actionTaken)
+            return;
+
+        int hit = HitTest(e.Location);
+        if (hit < 0)
+            return;
+
+        switch (_cells[hit].Cell)
+        {
+            case RecordingControlBarCell.PauseResume:
+                TogglePause();
+                break;
+            case RecordingControlBarCell.Restart:
+                RaiseOnce(RestartRequested);
+                break;
+            case RecordingControlBarCell.Stop:
+                RaiseOnce(StopRequested);
+                break;
+            case RecordingControlBarCell.Discard:
+                RaiseOnce(CancelRequested);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Escape stops and keeps the take; discarding needs Shift. The bar is
+    /// ShowWithoutActivation and rarely holds focus, which was the only thing making the old
+    /// bare-Escape-throws-the-take-away behaviour survivable.
+    /// </summary>
+    private void OnBarKeyDown(object? sender, WF.KeyEventArgs e)
+    {
+        if (e.KeyCode != WF.Keys.Escape)
+            return;
+
+        e.Handled = true;
+        RaiseOnce(e.Shift ? CancelRequested : StopRequested);
     }
 
     private void TogglePause()
@@ -200,17 +404,15 @@ public sealed class FastRecordingControlBar : WF.Form
         if (_paused)
         {
             _elapsed.Stop();
-            _pause.Text = "Resume";
-            _dot.DotColor = PausedAmber;
             PauseRequested?.Invoke();
         }
         else
         {
             _elapsed.Start();
-            _pause.Text = "Pause";
-            _dot.DotColor = RecordingRed;
             ResumeRequested?.Invoke();
         }
+        _toolTip.SetToolTip(this, null); // the cell's label just changed under the pointer
+        Invalidate();
     }
 
     /// <summary>Realigns the bar with the recorder's ACTUAL pause state. TogglePause flips
@@ -223,15 +425,10 @@ public sealed class FastRecordingControlBar : WF.Form
 
         _paused = paused;
         if (paused)
-        {
             _elapsed.Stop();
-            _pause.Text = "Resume";
-        }
         else
-        {
             _elapsed.Start();
-            _pause.Text = "Pause";
-        }
+        Invalidate();
     }
 
     private void RaiseOnce(Action? action)
@@ -240,17 +437,10 @@ public sealed class FastRecordingControlBar : WF.Form
             return;
 
         _actionTaken = true;
-        _pause.Enabled = false;
-        _restart.Enabled = false;
-        _stop.Enabled = false;
-        _cancel.Enabled = false;
+        _toolTip.SetToolTip(this, null);
+        Cursor = WF.Cursors.Default;
+        Invalidate();
         action?.Invoke();
-    }
-
-    private void OnDragMouseDown(object? sender, WF.MouseEventArgs e)
-    {
-        if (e.Button == WF.MouseButtons.Left)
-            Native.ReleaseCaptureAndDrag(Handle);
     }
 
     private void UpdateWindowRegion()
@@ -274,64 +464,7 @@ public sealed class FastRecordingControlBar : WF.Form
         }
     }
 
-    private int S(int logical) => (int)Math.Round(logical * _scale);
-
-    private DarkButton Button(string text, SD.Color fillColor, string? widthFor = null)
-    {
-        // Width from measured content, not label length, so padding stays uniform
-        // (widthFor sizes for the button's widest state, e.g. Pause -> Resume).
-        // Measure with a pixel-unit font at the TARGET scale: DefaultFont measures at the
-        // primary monitor's DPI, and multiplying that by _scale double-applied the factor
-        // whenever the primary itself is scaled.
-        using var measureFont = new SD.Font("Segoe UI", Math.Max(9, S(12)), SD.FontStyle.Regular, SD.GraphicsUnit.Pixel);
-        SD.Size measured = WF.TextRenderer.MeasureText(widthFor ?? text, measureFont);
-        return new DarkButton
-        {
-            Scale = _scale,
-            BackColor = Back,
-            CornerRadius = 13,
-            FillColor = fillColor,
-            Margin = new WF.Padding(S(3), 0, S(3), 0),
-            Size = new SD.Size(Math.Max(S(54), measured.Width + S(28)), S(26)),
-            // A mouse HUD: nothing should silently hold keyboard focus and wear a ring.
-            TabStop = false,
-            Text = text,
-        };
-    }
-
-    private sealed class DotControl : WF.Control
-    {
-        private SD.Color _dotColor;
-
-        public SD.Color DotColor
-        {
-            get => _dotColor;
-            set
-            {
-                if (_dotColor == value)
-                    return;
-                _dotColor = value;
-                Invalidate();
-            }
-        }
-
-        public DotControl()
-        {
-            SetStyle(
-                WF.ControlStyles.AllPaintingInWmPaint |
-                WF.ControlStyles.OptimizedDoubleBuffer |
-                WF.ControlStyles.ResizeRedraw |
-                WF.ControlStyles.UserPaint,
-                true);
-        }
-
-        protected override void OnPaint(WF.PaintEventArgs e)
-        {
-            using var brush = new SD.SolidBrush(_dotColor);
-            e.Graphics.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-            e.Graphics.FillEllipse(brush, 0, 0, Width - 1, Height - 1);
-        }
-    }
+    private int S(int logical) => RecordingMonitorDpi.Px(logical, _scale);
 
     private static class Native
     {
@@ -344,12 +477,6 @@ public sealed class FastRecordingControlBar : WF.Form
             ReleaseCapture();
             SendMessage(handle, WmNclbuttondown, HtCaption, IntPtr.Zero);
         }
-
-        [DllImport("gdi32.dll")]
-        public static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
-
-        [DllImport("gdi32.dll")]
-        public static extern bool DeleteObject(IntPtr handle);
 
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();

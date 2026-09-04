@@ -395,7 +395,7 @@ public sealed class RecordingController
 
         if (p.ShowControls)
         {
-            _bar = new FastRecordingControlBar(screenRect, p.ShowTimer);
+            _bar = new FastRecordingControlBar(screenRect, p.ShowTimer, _settings.Current.HotkeyRecord);
             _bar.StopRequested += () => StopRecording(discard: false);
             _bar.CancelRequested += () => StopRecording(discard: true);
             _bar.PauseRequested += PauseRecording;
