@@ -41,6 +41,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private WindowInfo? _hoverWindow;
     private SD.Rectangle? _pendingPx;
     private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
+    // Per-monitor frozen-slice-with-dim baked once, so each follow-frame is a single opaque
+    // blit instead of re-cropping the snapshot AND alpha-blending a full-screen dim every
+    // tick. Same fix the region selector already carries; keyed by monitor.
+    private readonly Dictionary<SD.Rectangle, SD.Bitmap> _dimmedCache = new();
     private SD.Bitmap? _capturedRegion;  // region cropped from _frozen at confirm; caller takes ownership
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
@@ -223,6 +227,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _frozen = snapshot;
         if (_frozen is null)
             return;
+
+        // Bake the dimmed slices BEFORE the first frozen paint so no surface is opaque
+        // over a half-swapped state — see FastRegionSelectorDialog.FreezeWhileShownAsync.
+        GetDimmedBackground(_monitorBounds);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed)
+                GetDimmedBackground(pane.MonitorBounds);
+        }
 
         // Paint each surface before going opaque — see
         // FastRegionSelectorDialog.FreezeWhileShownAsync for why this ordering matters.
@@ -413,7 +426,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
     protected override void OnPaint(WF.PaintEventArgs e)
     {
-        e.Graphics.Clear(SD.Color.Black);
+        // No Clear once a frozen slice covers the whole surface: a redundant full-monitor
+        // fill is expensive enough at 4K to show up in the freeze swap.
+        if (!HasFullSurfaceBackground)
+            e.Graphics.Clear(SD.Color.Black);
         PaintSurface(e.Graphics, _monitorBounds);
         base.OnPaint(e);
     }
@@ -702,10 +718,24 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SD.Size clientSize = monitorBounds.Size;
         bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
 
-        // Frozen desktop slice for this monitor, then a uniform dim over it.
-        DrawFrozenSlice(g, monitorBounds);
-        using (var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0)))
+        // Frozen desktop slice + uniform dim, baked once and blitted as one opaque copy.
+        var dimmed = GetDimmedBackground(monitorBounds);
+        if (dimmed is not null)
+        {
+            var dest = new SD.Rectangle(0, 0, clientSize.Width, clientSize.Height);
+            // SourceCopy: the background covers the whole surface, so there is nothing to
+            // blend with and a straight copy is a lot cheaper at full-monitor size.
+            var previousCompositing = g.CompositingMode;
+            g.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
+            g.DrawImage(dimmed, dest, 0, 0, dimmed.Width, dimmed.Height, SD.GraphicsUnit.Pixel);
+            g.CompositingMode = previousCompositing;
+        }
+        else
+        {
+            // No frozen snapshot yet (or the capture failed): select over a plain dim.
+            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
             g.FillRectangle(dim, 0, 0, clientSize.Width, clientSize.Height);
+        }
 
         // The active selection (or hovered window) shows the frozen pixels at full brightness.
         SD.Rectangle? brightScreen = null;
@@ -745,6 +775,38 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         }
     }
 
+    /// <summary>
+    /// True when PaintSurface's own background covers every pixel, so the surface does not
+    /// need clearing first. Without a frozen snapshot it paints a SEMI-transparent dim that
+    /// relies on the black underneath, so the Clear is still required there.
+    /// </summary>
+    internal bool HasFullSurfaceBackground => _frozen is not null;
+
+    /// <summary>
+    /// This monitor's frozen slice with the selection dim baked in, built and cached on
+    /// first use. Lets the hot follow-paint be one opaque blit instead of a per-frame
+    /// snapshot crop plus a full-screen software alpha fill.
+    /// </summary>
+    private SD.Bitmap? GetDimmedBackground(SD.Rectangle monitorBounds)
+    {
+        if (_frozen is null) return null;
+        if (_dimmedCache.TryGetValue(monitorBounds, out var cached))
+            return cached;
+
+        // Format32bppRgb, not PArgb: the result is opaque, and an alpha channel would force
+        // GDI+ to blend this full-monitor bitmap per pixel on every single paint.
+        var bmp = new SD.Bitmap(monitorBounds.Width, monitorBounds.Height, SD.Imaging.PixelFormat.Format32bppRgb);
+        using (var g = SD.Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+            DrawFrozenSlice(g, monitorBounds);
+            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
+            g.FillRectangle(dim, 0, 0, monitorBounds.Width, monitorBounds.Height);
+        }
+        _dimmedCache[monitorBounds] = bmp;
+        return bmp;
+    }
+
     /// <summary>Paints this monitor's slice of the frozen snapshot at 1:1 (pure offset).</summary>
     private void DrawFrozenSlice(SD.Graphics g, SD.Rectangle monitorBounds)
     {
@@ -770,6 +832,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         _frozen?.Dispose();
         _frozen = null;
+        foreach (var bmp in _dimmedCache.Values)
+            bmp.Dispose();
+        _dimmedCache.Clear();
     }
 
     private SD.Bitmap? CropFrozen(SD.Rectangle virtualRect)
@@ -1025,7 +1090,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         protected override void OnPaint(WF.PaintEventArgs e)
         {
-            e.Graphics.Clear(SD.Color.Black);
+            if (!_owner.HasFullSurfaceBackground)
+                e.Graphics.Clear(SD.Color.Black);
             _owner.PaintSurface(e.Graphics, _bounds);
             base.OnPaint(e);
         }
