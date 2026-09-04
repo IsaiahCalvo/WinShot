@@ -270,6 +270,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _dragging = false;
         _dragMoved = false;
         _dragRatio = null;
+        _selectedMode = ModeRegion;
         _resizeHandle = -1;
         _movingPending = false;
         _handleTween?.Dispose();
@@ -296,7 +297,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (!_toolbar.IsDisposed)
         {
             _toolbar.Opacity = 1;
-            _toolbar.UpdateMode(0);
+            _toolbar.ResetMode(0);
             _toolbar.SetSize(1, 1);
             _toolbar.ResetAspectLock(); // pooled instance: a stale lock made new drags snap to the OLD session's ratio
             _toolbar.RefreshPendingState();
@@ -594,7 +595,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         }
         else if (_pendingPx is null)
         {
-            HitTestWindow(_currentScreen);
+            if (_selectedMode != ModeRegion)
+                HitTestWindow(_currentScreen);
             // HitTestWindow repaints only when the hovered WINDOW changes, but the
             // loupe/crosshair/size chrome is anchored to the cursor — without this the
             // chrome froze at the last window-boundary crossing while the cursor moved.
@@ -777,8 +779,21 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     internal void SetMode(int mode, AllInOneAction action)
     {
         SelectedAction = action;
+        _selectedMode = mode;
+        if (mode == ModeRegion && _hoverWindow is not null)
+        {
+            // Region mode means "draw a rectangle". Leaving the window highlight lit made
+            // the Region and Window buttons decorative — either one hovered windows.
+            _hoverWindow = null;
+            InvalidateAllSurfaces();
+        }
         _toolbar.UpdateMode(mode);
     }
+
+    /// <summary>Toolbar mode ids. Fullscreen is not a mode — it confirms immediately.</summary>
+    internal const int ModeRegion = 0;
+
+    private int _selectedMode = ModeRegion;
 
     private void ShowToolbar()
     {
@@ -1324,7 +1339,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _buttons.Add(new BarButton("Fullscreen", "", -1, AllInOneAction.Capture, isMode: false));
             _buttons.Add(new BarButton("Window", "", 1, AllInOneAction.Capture, isMode: true));
             _buttons.Add(new BarButton("Scrolling", "", 2, AllInOneAction.Scroll, isMode: true));
-            _buttons.Add(new BarButton("Timer", "", 3, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Timer", "", 3, AllInOneAction.Timer, isMode: true));
             _buttons.Add(new BarButton("OCR", "Aa", 4, AllInOneAction.Ocr, isMode: true) { IsTextGlyph = true });
             _buttons.Add(new BarButton("Recording", "", 5, AllInOneAction.Record, isMode: true));
 
@@ -1392,9 +1407,66 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         public void UpdateMode(int selectedMode)
         {
+            if (_selectedMode == selectedMode)
+                return;
+
+            // The accent chip slides from the old button to the new one instead of
+            // teleporting; with seven cells in a row the jump was the only thing on the bar
+            // that moved without saying where it came from.
+            SD.Rectangle from = ChipBounds(_selectedMode);
+            _selectedMode = selectedMode;
+            SD.Rectangle to = ChipBounds(_selectedMode);
+            _chipTween?.Dispose();
+            _chipTween = null;
+            if (from.IsEmpty || to.IsEmpty)
+            {
+                _chipGlide.Stop();
+                Invalidate(_mainBar);
+                return;
+            }
+
+            _chipGlide.Retarget(from, to);
+            _chipTween = WinShot.Core.Motion.Run(
+                WinShot.Core.Motion.SwapMs,
+                WinShot.Core.Motion.EaseOutCubic,
+                progress =>
+                {
+                    _chipGlide.Update((float)progress);
+                    Invalidate(_mainBar);
+                },
+                () =>
+                {
+                    _chipTween = null;
+                    _chipGlide.Stop();
+                    Invalidate(_mainBar);
+                });
+        }
+
+        /// <summary>Jumps to a mode with no glide — a pooled reuse is not a mode change the
+        /// user made, and the toolbar is hidden while it happens.</summary>
+        public void ResetMode(int selectedMode)
+        {
+            _chipTween?.Dispose();
+            _chipTween = null;
+            _chipGlide.Stop();
             _selectedMode = selectedMode;
             Invalidate(_mainBar);
         }
+
+        /// <summary>The accent chip's client-space bounds for a mode, or empty when no
+        /// button owns that mode (Fullscreen, and the initial unset state).</summary>
+        private SD.Rectangle ChipBounds(int mode)
+        {
+            foreach (var button in _buttons)
+            {
+                if (button.IsMode && button.Mode == mode)
+                    return SD.Rectangle.Inflate(button.Bounds, -4, -8);
+            }
+            return SD.Rectangle.Empty;
+        }
+
+        private readonly RectangleTween _chipGlide = new();
+        private IDisposable? _chipTween;
 
         /// <summary>Repaints the confirm button when the pending region appears/disappears.</summary>
         public void RefreshPendingState() => Invalidate(_sizeBar);
@@ -1477,6 +1549,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
             PaintBar(g, _mainBar);
             PaintBar(g, _sizeBar);
+            PaintSelectedChip(g);
 
             for (int i = 0; i < _buttons.Count; i++)
                 PaintButton(g, _buttons[i], i == _hoverIndex);
@@ -1494,14 +1567,25 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             g.DrawPath(pen, path);
         }
 
+        /// <summary>Paints the sliding accent chip once, under every button.</summary>
+        private void PaintSelectedChip(SD.Graphics g)
+        {
+            SD.Rectangle chip = _chipGlide.IsActive ? _chipGlide.Current : ChipBounds(_selectedMode);
+            if (chip.IsEmpty)
+                return;
+            using var path = GdiPaths.RoundedRect(chip, 9);
+            using var brush = new SD.SolidBrush(SelectedFill);
+            g.FillPath(brush, path);
+        }
+
         private void PaintButton(SD.Graphics g, BarButton b, bool hot)
         {
             bool selected = b.IsMode && b.Mode == _selectedMode;
             var inner = SD.Rectangle.Inflate(b.Bounds, -4, -8);
-            if (selected || hot)
+            if (hot && !selected)
             {
                 using var path = GdiPaths.RoundedRect(inner, 9);
-                using var brush = new SD.SolidBrush(selected ? SelectedFill : HoverFill);
+                using var brush = new SD.SolidBrush(HoverFill);
                 g.FillPath(brush, path);
             }
 
@@ -1668,6 +1752,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             if (disposing)
             {
+                _chipTween?.Dispose();
+                _chipTween = null;
                 _glyphFont.Dispose();
                 _tipFont.Dispose();
                 _ocrFont.Dispose();

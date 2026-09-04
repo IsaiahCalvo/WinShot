@@ -699,8 +699,14 @@ public partial class App : Application
                 FastAllInOneSelectorDialog.Return(selector);
             }
 
-            if (action is AllInOneAction.Scroll || (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr))
+            // Timer waits too: the whole point is to photograph what the screen looks like
+            // AFTER the delay, so the frozen crop is deliberately not used and the overlay
+            // has to be gone before the countdown starts.
+            if (action is AllInOneAction.Scroll or AllInOneAction.Timer ||
+                (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr))
+            {
                 await WaitForOverlayDismissAsync();
+            }
 
             if (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr)
                 captured = await CaptureSelectedRegionAsync(regionPx, $"all-in-one {action.ToString().ToLowerInvariant()}");
@@ -709,6 +715,10 @@ public partial class App : Application
             {
                 case AllInOneAction.Capture:
                     HandleCapture(captured!);
+                    break;
+                case AllInOneAction.Timer:
+                    await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
+                    HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
                     break;
                 case AllInOneAction.Ocr:
                     using (captured) await RunOcrToClipboard(captured!);

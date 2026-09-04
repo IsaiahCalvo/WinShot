@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using WinShot.Capture;
 using WinShot.Core;
 using Xunit;
@@ -123,4 +123,57 @@ public class AllInOneSelectorInteractionTests
             selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
         });
     }
+
+    [Fact]
+    public void TimerIsItsOwnActionInsteadOfAnotherWayToSayCapture()
+    {
+        RunSta(() =>
+        {
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+
+            // The Timer button used to report AllInOneAction.Capture, so lighting it up was
+            // the whole of its behaviour — no delay was ever run.
+            selector.SetMode(3, AllInOneAction.Timer);
+            Assert.Equal(AllInOneAction.Timer, selector.SelectedAction);
+        });
+    }
+
+    [Fact]
+    public void RegionModeDoesNotHoverWindowsAndWindowModeDoes()
+    {
+        RunSta(() =>
+        {
+            SD.Rectangle vs = CaptureService.VirtualScreen;
+            var window = new WindowInfo(new IntPtr(1), "Notepad",
+                new SD.Rectangle(vs.X + 40, vs.Y + 40, 400, 300));
+
+            using var pointer = new Pointer(vs.X + 200, vs.Y + 150);
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo> { window }), settings: null);
+            SetWindows(selector, window);
+
+            // Region and Window both hovered windows, which is what made the two buttons
+            // decorative: whichever was lit, the behaviour was the same.
+            selector.SetMode(FastAllInOneSelectorDialog.ModeRegion, AllInOneAction.Capture);
+            selector.HandleMouseMove();
+            Assert.Null(HoverWindow(selector));
+
+            selector.SetMode(1, AllInOneAction.Capture);
+            selector.HandleMouseMove();
+            Assert.Same(window, HoverWindow(selector));
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+        });
+    }
+
+    private static void SetWindows(FastAllInOneSelectorDialog selector, params WindowInfo[] windows) =>
+        typeof(FastAllInOneSelectorDialog)
+            .GetField("_windows", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(selector, new List<WindowInfo>(windows));
+
+    private static WindowInfo? HoverWindow(FastAllInOneSelectorDialog selector) =>
+        (WindowInfo?)typeof(FastAllInOneSelectorDialog)
+            .GetField("_hoverWindow", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(selector);
 }
