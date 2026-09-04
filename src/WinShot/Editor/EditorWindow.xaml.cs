@@ -901,6 +901,10 @@ public partial class EditorWindow : Window
 
     private IEnumerable<RadioButton> ToolButtons()
     {
+        // Pan/Select live outside the centred cluster (Survey's `right:100%` block), so they
+        // need their own sweep or CheckToolButton can never restore them by Tag.
+        if (PanSelectPanel is not null)
+            foreach (var rb in PanSelectPanel.Children.OfType<RadioButton>()) yield return rb;
         if (ToolPanel is not null)
             foreach (var rb in ToolPanel.Children.OfType<RadioButton>()) yield return rb;
         if (DrawGroupPanel is not null)
@@ -999,9 +1003,10 @@ public partial class EditorWindow : Window
 
     private void UpdateGroupButtonChrome()
     {
-        string group = _tool is EditorTool.Select or EditorTool.Pan
-            ? EditorShellContract.GroupFor(ChromeTool(), ChromeFilledRectangle())
-            : EditorShellContract.GroupFor(_tool, false);
+        // Every chip's `.btn-active` is gated on `activeTool !== 'pan' && activeTool !== 'select'`
+        // FIRST (AppShell.jsx:1647/1666/1685/1719), so no chip is ever gold while Pan or Select
+        // is armed — whatever is selected. GroupFor already returns "" for both.
+        string group = EditorShellContract.GroupFor(_tool, false);
         // `.btn-active`: transparent box, gold glyph (styles.css:1547-1558).
         void Paint(Button btn, bool on)
         {
@@ -1100,9 +1105,11 @@ public partial class EditorWindow : Window
             SyncEffectStrengthButtons(chrome == EditorTool.Blur ? _blurStrength : _pixelateStrength);
         }
 
-        string group = _tool is EditorTool.Select or EditorTool.Pan
-            ? EditorShellContract.GroupFor(chrome, filled)
-            : EditorShellContract.GroupFor(_tool, false);
+        // Survey's `activeCategoryDropdown` follows the ARMED tool only: it starts null, is
+        // force-cleared whenever activeTool becomes pan/select/text-select (PDFViewer.jsx:4340,
+        // :4558-4568), and no call site anywhere reads the selection. Selecting a committed mark
+        // must therefore never re-open the 34px strip. GroupFor returns "" for Select and Pan.
+        string group = EditorShellContract.GroupFor(_tool, false);
         DrawGroupPanel.Visibility = Show(_groupRowOpen && group == "Draw");
         ShapeGroupPanel.Visibility = Show(_groupRowOpen && group == "Shape");
         TextGroupPanel.Visibility = Show(_groupRowOpen && group == "Text");
@@ -1229,7 +1236,9 @@ public partial class EditorWindow : Window
             : Math.Max(0, ActualWidth - 24);
         double tools = MeasureWidth(ToolPanel);
         // Tools are centred; the props block gets the star column to their right.
-        double right = 64; // divider, panel margins, and the bar's own padding
+        // Pan/Select hang off the cluster's left inside that same star column, so they eat
+        // slack even though they are not part of the centred measure.
+        double right = 64 + MeasureWidth(PanSelectPanel); // divider, panel margins, bar padding
         if (ColorPanel?.Visibility == Visibility.Visible)
             right += MeasureWidth(ColorPanel);
         if (SizeEffectHost?.Visibility == Visibility.Visible)

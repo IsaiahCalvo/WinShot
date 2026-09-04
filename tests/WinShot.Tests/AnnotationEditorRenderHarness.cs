@@ -610,6 +610,244 @@ public class AnnotationEditorRenderHarness
                     RenderToPng(editor, Path.Combine(outDir, $"audit-erase-samplerate-x{sub}.png"), dpi: 192);
                 }
 
+                // ---------- 10. ROUND-2 PROBES ----------
+                var eraseBeforeField = typeof(EditorWindow).GetField("_eraseBefore",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var eraseRemovedField = typeof(EditorWindow).GetField("_eraseRemoved",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+                int EraseBeforeCount() =>
+                    ((System.Collections.ICollection)eraseBeforeField.GetValue(editor)!).Count;
+                int EraseRemovedCount() =>
+                    ((System.Collections.ICollection)eraseRemovedField.GetValue(editor)!).Count;
+                int UndoDepth()
+                {
+                    var f = typeof(EditorWindow).GetField("_undo",
+                        BindingFlags.Instance | BindingFlags.NonPublic);
+                    return f?.GetValue(editor) is System.Collections.ICollection c ? c.Count : -1;
+                }
+                System.Windows.Shapes.Path DrawPen(double w, Point a, Point b, int steps)
+                {
+                    penSizeField.SetValue(editor, w);
+                    Check("FreehandToolBtn");
+                    editor.PointerDown(Pt(a)); Pump(1);
+                    for (int i = 1; i <= steps; i++)
+                        editor.PointerMove(Pt(new Point(a.X + (b.X - a.X) * i / steps, a.Y + (b.Y - a.Y) * i / steps)));
+                    Pump(1);
+                    editor.PointerUp(Pt(b)); Pump(4);
+                    return canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                }
+
+                // 10A. ABORT MID-GESTURE (Survey commits the interrupted erase;
+                //      WinShot's LostMouseCapture -> AbortDrag drops it and keeps state).
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    var s1 = DrawPen(8, new Point(0.10 * W, 0.30 * H), new Point(0.90 * W, 0.30 * H), 60);
+                    var s2 = DrawPen(8, new Point(0.10 * W, 0.60 * H), new Point(0.90 * W, 0.60 * H), 60);
+                    double s1Full = GeomArea(s1.Data!), s2Full = GeomArea(s2.Data!);
+                    eraserSizeField.SetValue(editor, 24.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    int undo0 = UndoDepth();
+                    // Gesture 1 over s1, interrupted (never released).
+                    editor.PointerDown(Pt(new Point(0.50 * W, 0.30 * H - 50))); Pump(1);
+                    for (int i = 1; i <= 40; i++)
+                        editor.PointerMove(Pt(new Point(0.50 * W, 0.30 * H - 50 + 100.0 * i / 40)));
+                    Pump(2);
+                    double s1Mid = GeomArea(s1.Data!);
+                    RenderToPng(editor, Path.Combine(outDir, "r2-abort-mid.png"), dpi: 96);
+                    InvokePrivate(editor, "AbortDrag"); Pump(3);
+                    double s1AfterAbort = GeomArea(s1.Data!);
+                    int undo1 = UndoDepth();
+                    int leakBefore = EraseBeforeCount(), leakRemoved = EraseRemovedCount();
+                    // Gesture 2 over s2 only.
+                    editor.PointerDown(Pt(new Point(0.30 * W, 0.60 * H - 50))); Pump(1);
+                    for (int i = 1; i <= 40; i++)
+                        editor.PointerMove(Pt(new Point(0.30 * W, 0.60 * H - 50 + 100.0 * i / 40)));
+                    Pump(1);
+                    editor.PointerUp(Pt(new Point(0.30 * W, 0.60 * H + 50))); Pump(5);
+                    double s1AfterG2 = GeomArea(s1.Data!), s2AfterG2 = GeomArea(s2.Data!);
+                    RenderToPng(editor, Path.Combine(outDir, "r2-abort-after-next-gesture.png"), dpi: 96);
+                    log.AppendLine($"R2-ABORT s1 full={s1Full:F1} mid={s1Mid:F1} afterAbort={s1AfterAbort:F1} " +
+                        $"afterUnrelatedGesture={s1AfterG2:F1} RESURRECTED={(s1AfterG2 > s1AfterAbort + 1)} " +
+                        $"undoDepth {undo0}->{undo1} (abort pushed {undo1 - undo0}) " +
+                        $"leaked _eraseBefore={leakBefore} _eraseRemoved={leakRemoved} " +
+                        $"s2 {s2Full:F1}->{s2AfterG2:F1}");
+                }
+
+                // 10B. GATE STRESS: does the exact per-segment Intersect ever say "no"
+                //      when the same cut actually removes ink? (Survey's gate is a padded AABB
+                //      superset; WinShot's is an exact boolean whose verdict also decides
+                //      whether the stroke is carved at all on pointer-up.)
+                {
+                    var rng = new Random(20260904);
+                    int gateNoButCuts = 0, gateThrew = 0, gateNull = 0, trials = 0;
+                    foreach (double pw in new[] { 1.0, 2.0, 3.0, 8.0 })
+                    {
+                        var pts = new List<Point>();
+                        for (int i = 0; i <= 60; i++)
+                            pts.Add(new Point(60 + i * 6, 300 + 40 * Math.Sin(i / 60.0 * Math.PI * 4)));
+                        var inkGeo = PaperInk.Outline(pts, pw);
+                        for (int k = 0; k < 220; k++)
+                        {
+                            trials++;
+                            var p0 = pts[rng.Next(pts.Count)];
+                            // Offsets that graze the stroke edge, where a tangent intersection
+                            // is a degenerate sliver.
+                            double d = 12;
+                            var from = new Point(p0.X + (rng.NextDouble() - 0.5) * 4,
+                                                 p0.Y + (rng.NextDouble() * 2 - 1) * (d / 2 + pw / 2));
+                            var to = new Point(from.X + (rng.NextDouble() - 0.5) * 30,
+                                               from.Y + (rng.NextDouble() - 0.5) * 4);
+                            var cut = PaperInk.EraserStroke(new[] { from, to }, d);
+                            bool gate;
+                            try
+                            {
+                                var inter = Geometry.Combine(inkGeo, cut, GeometryCombineMode.Intersect,
+                                    Transform.Identity, PaperInk.Tolerance, ToleranceType.Absolute);
+                                if (inter is null) { gateNull++; gate = false; }
+                                else gate = !inter.IsEmpty();
+                            }
+                            catch { gateThrew++; gate = false; }
+                            var sub = PaperInk.Subtract(inkGeo, cut);
+                            bool cuts = sub is not null &&
+                                inkGeo.GetFlattenedPathGeometry(PaperInk.Tolerance, ToleranceType.Absolute).GetArea()
+                                - sub.GetFlattenedPathGeometry(PaperInk.Tolerance, ToleranceType.Absolute).GetArea() > 1e-6;
+                            if (!gate && cuts) gateNoButCuts++;
+                        }
+                    }
+                    log.AppendLine($"R2-GATE trials={trials} gateSaidNoButCutRemovesInk={gateNoButCuts} " +
+                        $"combineThrew={gateThrew} combineReturnedNull={gateNull}");
+                }
+
+                // 10C. MANY SEPARATE STROKES, ONE FAST GESTURE. Survey carves every annotation
+                //      whose padded bounds meet the gesture; WinShot only carves what the
+                //      per-segment gate happened to flag.
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    var strokes = new List<System.Windows.Shapes.Path>();
+                    for (int i = 0; i < 14; i++)
+                    {
+                        double x = 0.10 * W + 0.055 * W * i;
+                        strokes.Add(DrawPen(1, new Point(x, 0.25 * H), new Point(x, 0.75 * H), 20));
+                    }
+                    var areasBefore = strokes.Select(s => GeomArea(s.Data!)).ToList();
+                    eraserSizeField.SetValue(editor, 18.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    // 3 pointer samples only: a genuinely fast swipe.
+                    editor.PointerDown(Pt(new Point(0.05 * W, 0.50 * H))); Pump(1);
+                    editor.PointerMove(Pt(new Point(0.50 * W, 0.52 * H))); Pump(1);
+                    editor.PointerMove(Pt(new Point(0.95 * W, 0.50 * H))); Pump(1);
+                    editor.PointerUp(Pt(new Point(0.95 * W, 0.50 * H))); Pump(6);
+                    int carved = 0, untouched = 0;
+                    for (int i = 0; i < strokes.Count; i++)
+                    {
+                        bool alive = canvas.Children.Contains(strokes[i]);
+                        double a1 = alive ? GeomArea(strokes[i].Data!) : 0;
+                        if (!alive || a1 < areasBefore[i] - 1e-6) carved++; else untouched++;
+                    }
+                    log.AppendLine($"R2-FASTSWIPE strokes={strokes.Count} carved={carved} untouched={untouched} " +
+                        "(every stroke crosses y=0.5H, so untouched must be 0)");
+                    RenderToPng(editor, Path.Combine(outDir, "r2-fastswipe.png"), dpi: 96);
+                }
+
+                // 10D. HOLLOW SHAPE INTERIOR. Survey's isPointOnRect only hits an unfilled rect
+                //      near its BORDER (geometryHitTest.js:902-925); WinShot's HitsEraser tests
+                //      the solid bounding RectangleGeometry.
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    Check("RectangleToolBtn");
+                    editor.PointerDown(Pt(new Point(0.15 * W, 0.20 * H))); Pump(1);
+                    for (int i = 1; i <= 10; i++)
+                        editor.PointerMove(Pt(new Point(0.15 * W + 0.55 * W * i / 10.0, 0.20 * H + 0.55 * H * i / 10.0)));
+                    editor.PointerUp(Pt(new Point(0.70 * W, 0.75 * H))); Pump(4);
+                    Check("EllipseToolBtn");
+                    editor.PointerDown(Pt(new Point(0.75 * W, 0.20 * H))); Pump(1);
+                    for (int i = 1; i <= 10; i++)
+                        editor.PointerMove(Pt(new Point(0.75 * W + 0.20 * W * i / 10.0, 0.20 * H + 0.55 * H * i / 10.0)));
+                    editor.PointerUp(Pt(new Point(0.95 * W, 0.75 * H))); Pump(4);
+                    InvokePrivate(editor, "Select", null); Pump(2);
+                    int shapesBefore = canvas.Children.OfType<FrameworkElement>()
+                        .Count(f => f.Tag is AnnotationData { Type: AnnotationData.TypeRectangle or AnnotationData.TypeEllipse });
+                    string fills = string.Join(",", canvas.Children.OfType<System.Windows.Shapes.Shape>()
+                        .Where(s => s.Tag is AnnotationData)
+                        .Select(s => (s.Fill as SolidColorBrush)?.Color.ToString() ?? s.Fill?.GetType().Name ?? "null"));
+                    eraserSizeField.SetValue(editor, 10.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    // Straight through the empty middle of the rect; never near a border.
+                    editor.PointerDown(Pt(new Point(0.30 * W, 0.45 * H))); Pump(1);
+                    for (int i = 1; i <= 10; i++)
+                        editor.PointerMove(Pt(new Point(0.30 * W + 0.20 * W * i / 10.0, 0.45 * H)));
+                    editor.PointerUp(Pt(new Point(0.50 * W, 0.45 * H))); Pump(5);
+                    int afterRect = canvas.Children.OfType<FrameworkElement>()
+                        .Count(f => f.Tag is AnnotationData { Type: AnnotationData.TypeRectangle or AnnotationData.TypeEllipse });
+                    // Ellipse: the top-left CORNER of its bbox, outside the ellipse itself.
+                    editor.PointerDown(Pt(new Point(0.757 * W, 0.213 * H))); Pump(1);
+                    editor.PointerMove(Pt(new Point(0.762 * W, 0.218 * H))); Pump(1);
+                    editor.PointerUp(Pt(new Point(0.762 * W, 0.218 * H))); Pump(5);
+                    int afterEllipse = canvas.Children.OfType<FrameworkElement>()
+                        .Count(f => f.Tag is AnnotationData { Type: AnnotationData.TypeRectangle or AnnotationData.TypeEllipse });
+                    log.AppendLine($"R2-HOLLOW fills=[{fills}] shapes={shapesBefore} " +
+                        $"afterInteriorSwipe={afterRect} afterEllipseCornerTap={afterEllipse}");
+                    RenderToPng(editor, Path.Combine(outDir, "r2-hollow.png"), dpi: 96);
+                }
+
+                // 10E. HIGHLIGHTER AT ZOOM. Multiply is per-pixel AFFINE in the backdrop, so a
+                //      correct blend scales local contrast by exactly (1-a+a*Cs) and loses no
+                //      sharpness. Measure glyph-edge contrast at 300% with and without the
+                //      highlighter over the same text, and compare to that factor.
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    penSizeField.SetValue(editor, 12.0);
+                    int textY = 186, bestInk = -1;
+                    for (int y = 140; y < 260; y++)
+                    {
+                        int dark = 0;
+                        for (int x = 100; x <= 320; x++) if (source.GetPixel(x, y).R < 140) dark++;
+                        if (dark > bestInk) { bestInk = dark; textY = y; }
+                    }
+                    Check("HighlighterToolBtn");
+                    var ha = new Point(85, textY); var hb = new Point(340, textY);
+                    editor.PointerDown(Pt(ha)); Pump(1);
+                    for (int i = 1; i <= 40; i++)
+                        editor.PointerMove(Pt(new Point(ha.X + (hb.X - ha.X) * i / 40.0, ha.Y)));
+                    editor.PointerUp(Pt(hb)); Pump(6);
+                    var hl = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                    var host = (FrameworkElement)editor.FindName("CanvasHost")!;
+                    InvokePrivate(editor, "FitToView"); Pump(4);
+                    typeof(EditorWindow).GetMethod("ZoomAt", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object[] { canvas.TranslatePoint(new Point(210, textY), viewport), 3.0 });
+                    Pump(8);
+                    double Contrast(SD.Bitmap bmp, Rect r)
+                    {
+                        double sum = 0; int n3 = 0;
+                        for (int y = (int)r.Top; y < (int)r.Bottom; y++)
+                            for (int x = (int)r.Left; x < (int)r.Right - 1; x++)
+                            { sum += Math.Abs(bmp.GetPixel(x, y).G - bmp.GetPixel(x + 1, y).G); n3++; }
+                        return n3 == 0 ? 0 : sum / n3;
+                    }
+                    // Screen rect of the highlighted band, in VIEWPORT pixels.
+                    var b0 = hl.Data!.Bounds;
+                    Point tl = canvas.TranslatePoint(new Point(b0.Left, b0.Top), viewport);
+                    Point br2 = canvas.TranslatePoint(new Point(b0.Right, b0.Bottom), viewport);
+                    var band = new Rect(
+                        Math.Max(1, tl.X), Math.Max(1, tl.Y + 2),
+                        Math.Max(2, Math.Min(br2.X, viewport.ActualWidth - 2) - Math.Max(1, tl.X)),
+                        Math.Max(2, Math.Min(br2.Y, viewport.ActualHeight - 2) - Math.Max(1, tl.Y + 2)));
+                    using var withHl = BitmapEffects.RenderVisual(viewport,
+                        (int)viewport.ActualWidth, (int)viewport.ActualHeight);
+                    hl.Visibility = Visibility.Hidden; Pump(4);
+                    using var noHl = BitmapEffects.RenderVisual(viewport,
+                        (int)viewport.ActualWidth, (int)viewport.ActualHeight);
+                    hl.Visibility = Visibility.Visible; Pump(3);
+                    var c2 = AnnotationStyle.HighlighterColor;
+                    double factorG = 1 - c2.A / 255.0 + (c2.A / 255.0) * (c2.G / 255.0);
+                    double cWith = Contrast(withHl, band), cWithout = Contrast(noHl, band);
+                    log.AppendLine($"R2-HLZOOM band={band} contrastNoHl={cWithout:F3} contrastWithHl={cWith:F3} " +
+                        $"ratio={(cWithout > 0 ? cWith / cWithout : 0):F4} exactMultiplyFactorG={factorG:F4} " +
+                        $"sharpnessLoss={(cWithout > 0 ? 1 - (cWith / cWithout) / factorG : 0):P1}");
+                    RenderToPng(editor, Path.Combine(outDir, "r2-hl-zoom300.png"), dpi: 96);
+                    InvokePrivate(editor, "FitToView"); Pump(4);
+                }
+
                 File.WriteAllText(Path.Combine(outDir, "ink-eraser-audit.txt"), log.ToString());
                 editor.Close();
                 Pump(3);
@@ -720,7 +958,7 @@ public class AnnotationEditorRenderHarness
                 // and the chip is a TOGGLE (AppShell.jsx:1637-1641). Scan the window's left
                 // edge column for the chrome bands so the three claims are measurable.
                 var groupBar = (FrameworkElement)editor.FindName("EditorGroupBar")!;
-                string ScanColumn()
+                string ScanColumn(int x = 4)
                 {
                     editor.UpdateLayout();
                     var bmp = new RenderTargetBitmap(
@@ -729,7 +967,7 @@ public class AnnotationEditorRenderHarness
                     bmp.Render(editor);
                     int h = bmp.PixelHeight;
                     var px = new byte[h * 4];
-                    bmp.CopyPixels(new Int32Rect(4, 0, 1, h), px, 4, 0);
+                    bmp.CopyPixels(new Int32Rect(x, 0, 1, h), px, 4, 0);
                     var runs = new List<string>();
                     string prev = ""; int start = 0;
                     for (int y = 0; y <= h; y++)
@@ -770,6 +1008,23 @@ public class AnnotationEditorRenderHarness
                     $"viewportH={viewport.ActualHeight:0.##}");
                 layoutLog.AppendLine($"  column: {ScanColumn()}");
                 File.WriteAllText(Path.Combine(outDir, "layout-chrome.txt"), layoutLog.ToString());
+
+                // LAYOUT-04: Survey's rail is ONE 48px #12151c column under the top bar with
+                // exactly one horizontal rule — its own footer's (SurveySpacesRail.jsx:1222-1231,
+                // AppShell.jsx:3011). Scanning the rail column must show a single #2A3140 run,
+                // and the fill must reach the window's last row.
+                var railLog = new System.Text.StringBuilder();
+                railLog.AppendLine($"rail column x=w-20: {ScanColumn((int)editor.ActualWidth - 20)}");
+                railLog.AppendLine($"chip centring: PanSelectPanel right edge vs ToolPanel left edge / window centre");
+                var panSelect = (FrameworkElement)editor.FindName("PanSelectPanel")!;
+                var toolPanel = (FrameworkElement)editor.FindName("ToolPanel")!;
+                editor.UpdateLayout();
+                double psL = panSelect.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+                double tpL = toolPanel.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+                railLog.AppendLine($"  panSelect=[{psL:0.#}..{psL + panSelect.ActualWidth:0.#}] " +
+                    $"chips=[{tpL:0.#}..{tpL + toolPanel.ActualWidth:0.#}] " +
+                    $"chipsCentre={tpL + toolPanel.ActualWidth / 2:0.#} windowCentre={editor.ActualWidth / 2:0.#}");
+                File.WriteAllText(Path.Combine(outDir, "layout-rail.txt"), railLog.ToString());
                 Check("SelectToolBtn");
 
                 // Shapes: rect, ellipse, line, arrow, two counters.
@@ -785,6 +1040,15 @@ public class AnnotationEditorRenderHarness
 
                 Check("SelectToolBtn");
                 Click(0.10, 0.40); Shot("pointer-rect-selected.png");
+                // LAYOUT-01/02: with Select armed, Survey's category strip is force-closed and no
+                // chip is gold, whatever is selected (PDFViewer.jsx:4558-4568, AppShell.jsx:1647).
+                {
+                    var shapeChip = (Button)editor.FindName("ShapeGroupBtn")!;
+                    File.WriteAllText(Path.Combine(outDir, "layout-select-chrome.txt"),
+                        $"select+rect selected: band={groupBar.Visibility} " +
+                        $"shapeChipFg={(shapeChip.Foreground as SolidColorBrush)?.Color} " +
+                        $"goldBrush={((SolidColorBrush)editor.FindResource("SurveyGoldBrush")).Color}");
+                }
                 Click(0.55, 0.735); Shot("pointer-arrow-selected.png");
                 // Survey's curve-bend midpoint carries a <title>Drag to bend</title>
                 // (SVGAnnotationLayer.jsx:5374-5463). WinShot's handle layer is
@@ -1063,6 +1327,127 @@ public class AnnotationEditorRenderHarness
                         RenderElementToPng(fe, Path.Combine(outDir, name));
                     }
                     CloseUp(selCallout?.Label, "textfmt-committed-callout.png");
+
+                    // ---- ROUND 2 PROBES: colour-channel separation + edit-mode selection ----
+                    var r2 = new System.Text.StringBuilder();
+                    // R2-A: does the top-row STROKE swatch recolour a selected text box's GLYPHS?
+                    // Survey patches only `stroke` (the border rect); `fill` (the glyphs) is a
+                    // separate field changed only by the rich-text font-colour swatch.
+                    Check("SelectToolBtn");
+                    var t1 = LastText();
+                    selField.SetValue(editor, t1);
+                    Invoke("UpdateSelectionVisual"); Pump(2);
+                    var beforeText = t1?.Tag as AnnotationData;
+                    var glyph0 = (TextOf(t1)?.Foreground as SolidColorBrush)?.Color;
+                    typeof(EditorWindow).GetMethod("RestyleSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object?[] { Color.FromRgb(0x11, 0xEE, 0x22), null, null, null, null });
+                    Pump(4);
+                    var afterText = LastText()?.Tag as AnnotationData;
+                    var chrome0 = (LastText() as Grid)?.Children.OfType<System.Windows.Shapes.Shape>().FirstOrDefault();
+                    r2.AppendLine($"[R2-A strokeSwatch->text] glyphBefore={glyph0} glyphAfter={(TextOf(LastText())?.Foreground as SolidColorBrush)?.Color} " +
+                        $"borderAfter={(chrome0?.Stroke as SolidColorBrush)?.Color} meta.Color={afterText?.Color} meta.FontColor={afterText?.FontColor ?? "null"}");
+
+                    // R2-B: does the rich-text FONT COLOUR also repaint the border?
+                    Fire(aaBtn); Pump(3);
+                    typeof(EditorWindow).GetMethod("SetFontColor", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object?[] { Color.FromRgb(0xFF, 0x00, 0xFF) });
+                    Pump(3);
+                    Invoke("CommitText"); Pump(4);
+                    var fcMeta = LastText()?.Tag as AnnotationData;
+                    var chrome1 = (LastText() as Grid)?.Children.OfType<System.Windows.Shapes.Shape>().FirstOrDefault();
+                    r2.AppendLine($"[R2-B fontColour->text] meta.Color={fcMeta?.Color} meta.FontColor={fcMeta?.FontColor ?? "null"} " +
+                        $"glyph={(TextOf(LastText())?.Foreground as SolidColorBrush)?.Color} border={(chrome1?.Stroke as SolidColorBrush)?.Color}");
+
+                    // R2-C: is the annotation still SELECTED while its editor is open? Survey's
+                    // handleEnterTextEditFromStrip leaves selectedToolbarAnnotation intact, so the
+                    // top-row swatches keep patching the object during the edit.
+                    var t2 = LastText();
+                    selField.SetValue(editor, t2);
+                    Invoke("UpdateSelectionVisual"); Pump(2);
+                    Fire(aaBtn); Pump(3);
+                    r2.AppendLine($"[R2-C editModeSelection] activeEditor={(Live() is null ? "null" : "open")} selected={Desc(Sel())}");
+                    var midEdit = t2?.Tag as AnnotationData;
+                    typeof(EditorWindow).GetMethod("RestyleSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object?[] { Color.FromRgb(0x00, 0x00, 0xFF), 7.0, null, null, null });
+                    Pump(3);
+                    r2.AppendLine($"[R2-C midEditRestyle] before color={midEdit?.Color} thickness={midEdit?.Thickness} " +
+                        $"after color={(t2?.Tag as AnnotationData)?.Color} thickness={(t2?.Tag as AnnotationData)?.Thickness}");
+                    Invoke("CommitText"); Pump(4);
+
+                    // R2-D: multi-select restyle — two texts with different sizes, then Bold.
+                    // Survey has no multi-object text restyle; WinShot stamps every _text* global
+                    // (seeded from ONE element) onto every selected text.
+                    Check("TextToolBtn");
+                    Click(0.30, 0.72); Pump(3);
+                    if (Live() is TextBox ta) { ta.Text = "AAA"; Pump(3); }
+                    PickSize(12); Invoke("CommitText"); Pump(4);
+                    var multiA = LastText();
+                    Check("TextToolBtn");
+                    Click(0.55, 0.72); Pump(3);
+                    if (Live() is TextBox tbb) { tbb.Text = "BBB"; Pump(3); }
+                    PickSize(48); Invoke("CommitText"); Pump(4);
+                    var multiB = LastText();
+                    Check("SelectToolBtn");
+                    var selListField = typeof(EditorWindow).GetField("_selection", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var selList = (System.Collections.IList)selListField.GetValue(editor)!;
+                    selList.Clear();
+                    if (multiA is not null) selList.Add(multiA);
+                    if (multiB is not null) selList.Add(multiB);
+                    selField.SetValue(editor, multiA);
+                    Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(3);
+                    r2.AppendLine($"[R2-D multiSelect] before A.size={(multiA?.Tag as AnnotationData)?.FontSize} B.size={(multiB?.Tag as AnnotationData)?.FontSize}");
+                    Fire(boldBtn); Pump(4);
+                    var mA = canvas.Children.OfType<FrameworkElement>().FirstOrDefault(f => ReferenceEquals(f, multiA))?.Tag as AnnotationData;
+                    var afterList = (System.Collections.IList)selListField.GetValue(editor)!;
+                    var mA2 = (afterList.Count > 0 ? afterList[0] as FrameworkElement : null)?.Tag as AnnotationData;
+                    var mB2 = (afterList.Count > 1 ? afterList[1] as FrameworkElement : null)?.Tag as AnnotationData;
+                    r2.AppendLine($"[R2-D multiSelect] after A.size={mA2?.FontSize} A.bold={mA2?.Bold} B.size={mB2?.FontSize} B.bold={mB2?.Bold} (mA={mA?.FontSize})");
+
+                    // R2-E: rotated text box → Aa → commit. Survey's existing-text commit clones
+                    // the original (angle included) and compensates left/top for the height delta
+                    // (textEditCommit.js:190-210). WinShot's CommitText builds a NEW label with
+                    // only Canvas.Left/Top, so the angle and the drag offset are dropped.
+                    selList.Clear();
+                    var rot = multiB;
+                    if (rot is not null)
+                    {
+                        selList.Add(rot);
+                        selField.SetValue(editor, rot);
+                        AnnotationTransform.Apply(rot, new Vector(40, 25), 30);
+                        Pump(3);
+                        r2.AppendLine($"[R2-E rotatedReEdit] before angle={AnnotationTransform.AngleOf(rot):F1} " +
+                            $"offset={AnnotationTransform.OffsetOf(rot)} left={Canvas.GetLeft(rot):F1} top={Canvas.GetTop(rot):F1} " +
+                            $"transform={rot.RenderTransform.GetType().Name}");
+                        Fire(aaBtn); Pump(3);
+                        r2.AppendLine($"[R2-E rotatedReEdit] editorOpen={(Live() is null ? "null" : "open")} " +
+                            $"editorLeft={(Live() is null ? -1 : Canvas.GetLeft(Live()!)):F1} editorTop={(Live() is null ? -1 : Canvas.GetTop(Live()!)):F1}");
+                        Invoke("CommitText"); Pump(4);
+                        var rotAfter = LastText();
+                        r2.AppendLine($"[R2-E rotatedReEdit] after angle={(rotAfter is null ? -1 : AnnotationTransform.AngleOf(rotAfter)):F1} " +
+                            $"offset={(rotAfter is null ? default : AnnotationTransform.OffsetOf(rotAfter))} " +
+                            $"left={(rotAfter is null ? -1 : Canvas.GetLeft(rotAfter)):F1} top={(rotAfter is null ? -1 : Canvas.GetTop(rotAfter)):F1} " +
+                            $"transform={rotAfter?.RenderTransform.GetType().Name}");
+                    }
+
+                    // R2-F: one align-cell click -> how many undo entries? Survey issues two
+                    // single-key patches (AppShell.jsx:1974-1975); OnAlignCellClick's two
+                    // SelectComboByTag calls each re-enter RestyleSelectedTextFormat.
+                    var undoField = typeof(EditorWindow).GetField("_undoStack", BindingFlags.Instance | BindingFlags.NonPublic);
+                    var alignTarget = LastText();
+                    if (alignTarget is not null && undoField is not null)
+                    {
+                        selList.Clear(); selList.Add(alignTarget);
+                        selField.SetValue(editor, alignTarget);
+                        Invoke("SyncChromeFromSelection"); Pump(2);
+                        int depth0 = ((System.Collections.ICollection)undoField.GetValue(editor)!).Count;
+                        var cell = (editor.FindName("AlignGrid") as Panel)?.Children.OfType<Button>()
+                            .FirstOrDefault(b => (b.Tag as string) == "center|middle");
+                        if (cell is not null) Fire(cell);
+                        int depth1 = ((System.Collections.ICollection)undoField.GetValue(editor)!).Count;
+                        r2.AppendLine($"[R2-F alignCell] undoDepth {depth0} -> {depth1} (delta={depth1 - depth0})");
+                    }
+                    File.WriteAllText(Path.Combine(outDir, "text-format-round2.txt"), r2.ToString());
+                    Shot("pointer-text-format-round2.png");
                 }
                 // ---- END TEXT FORMAT PARITY PROBE ---------------------------------
                 // --- Effects (WinShot-only; Survey has no equivalent): pixelate and blur. ---

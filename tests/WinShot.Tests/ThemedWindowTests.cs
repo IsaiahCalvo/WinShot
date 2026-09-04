@@ -485,8 +485,13 @@ public class ThemedWindowTests
 
     private static void EditorShellContractSmoke(EditorWindow editor)
     {
+        // Pan/Select now hang off the centred cluster in their own panel (Survey's
+        // `position:absolute; right:100%` block, AppShell.jsx:1468-1477); the primary order
+        // is the two panels read left to right.
+        var panSelect = (StackPanel)editor.FindName("PanSelectPanel")!;
         var primary = (StackPanel)editor.FindName("ToolPanel")!;
-        var primaryOrder = primary.Children.OfType<FrameworkElement>()
+        var primaryOrder = panSelect.Children.OfType<FrameworkElement>()
+            .Concat(primary.Children.OfType<FrameworkElement>())
             .Select(el => el.Tag as string)
             .Where(tag => tag is "Pan" or "Select" or "Draw" or "Shape" or "Text" or "Effects")
             .ToArray();
@@ -773,7 +778,16 @@ public class ThemedWindowTests
         // annotation is merely selected (AppShell.jsx:1756 gates on bottomToolbarApi.richTextEditor).
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
-        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        // The 34px category strip follows the ARMED tool only: `activeCategoryDropdown` starts
+        // null and is force-cleared whenever activeTool becomes pan/select/text-select
+        // (PDFViewer.jsx:4340, :4558-4568) — selecting a committed mark never re-opens it. The
+        // format chrome above still follows the selection (contextTool), hence color stays up.
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((Border)editor.FindName("EditorGroupBar")!).Visibility);
+        // No category chip is gold under Select either (AppShell.jsx:1647/1666/1685/1719).
+        Assert.Equal(
+            ((SolidColorBrush)editor.FindResource("ChromeTextBrush")).Color,
+            ((SolidColorBrush)((Button)editor.FindName("TextGroupBtn")!).Foreground).Color);
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
         Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 1);
