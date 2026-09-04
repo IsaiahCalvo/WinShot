@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+﻿
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -13,14 +13,13 @@ namespace WinShot.Core;
 public sealed class ToastWindow : WF.Form
 {
     private static readonly SD.Color Back = ThemePalette.ToolbarBg;
-    private static readonly SD.Color BorderColor = SD.Color.FromArgb(54, 255, 255, 255);
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
 
-    /// <summary>Entrance/exit: fade plus a short rise. Scale is deliberately not used — the
-    /// toast's children sit at fixed offsets, so resizing the form would crop them rather
-    /// than scale them.</summary>
-    private const int RiseMs = 180;
+    /// <summary>Entrance/exit: fade plus a short rise, on the shared glide step rather than
+    /// a number of its own. Scale is deliberately not used — the toast's children sit at
+    /// fixed offsets, so resizing the form would crop them rather than scale them.</summary>
+    private const int RiseMs = Motion.GlideDurationMs;
     private const double RestOpacity = 0.97;
 
     private IDisposable? _motion;
@@ -38,6 +37,11 @@ public sealed class ToastWindow : WF.Form
         _anchor = anchorScreen;
         _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
             WF.Screen.FromPoint(anchorScreen ?? WF.Cursor.Position).Bounds);
+
+        // Born on the anchor's monitor. Left at the default the form is created on the
+        // primary, so a mixed-DPI move fires WM_DPICHANGED and re-renders the point-sized
+        // fonts at a DPI the manual _scale layout was never computed for.
+        Location = WF.Screen.FromPoint(anchorScreen ?? WF.Cursor.Position).Bounds.Location;
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
@@ -61,7 +65,9 @@ public sealed class ToastWindow : WF.Form
         ClientSize = new SD.Size(S(width), S(height));
 
         // Accent stays reserved for actions; the title reads as text, not a control.
-        var titleLabel = Label(title, 14, 14, width - 28, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true);
+        // 12 pt Segoe UI Bold needs ~22 px of line box; the shared 22 px row left the
+        // descenders on the clip edge, so the title gets its own (still clearing y=38).
+        var titleLabel = Label(title, 14, 14, width - 28, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true, height: 24);
         Controls.Add(titleLabel);
 
         var previewLabel = Label(Trim(preview), 14, 38, width - 28, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary);
@@ -112,7 +118,7 @@ public sealed class ToastWindow : WF.Form
     /// <summary>0 = fully out (transparent, dropped by the rise distance), 1 = at rest.</summary>
     private void ApplyEntrance(double amount)
     {
-        if (IsDisposed) return;
+        if (IsDisposed || !IsHandleCreated) return;
         Opacity = RestOpacity * Math.Clamp(amount, 0d, 1d);
         Location = new SD.Point(_restLocation.X, _restLocation.Y + (int)Math.Round(S(8) * (1d - amount)));
     }
@@ -194,7 +200,7 @@ public sealed class ToastWindow : WF.Form
 
     private void UpdateRegion() => PopupChrome.ApplyRegion(this, S(14));
 
-    private WF.Label Label(string text, int x, int y, int width, float size, SD.Color color, bool bold = false) =>
+    private WF.Label Label(string text, int x, int y, int width, float size, SD.Color color, bool bold = false, int height = 22) =>
         new()
         {
             AutoSize = false,
@@ -202,33 +208,8 @@ public sealed class ToastWindow : WF.Form
             Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color,
             Location = new SD.Point(S(x), S(y)),
-            Size = new SD.Size(S(width), S(22)),
+            Size = new SD.Size(S(width), S(height)),
             Text = text,
             TextAlign = SD.ContentAlignment.MiddleLeft,
         };
-
-    private WF.Button Button(string text, int x, int y, int width, int height, SD.Color back, SD.Color hot)
-    {
-        var button = new WF.Button
-        {
-            AutoSize = false,
-            BackColor = back,
-            Cursor = WF.Cursors.Hand,
-            FlatStyle = WF.FlatStyle.Flat,
-            ForeColor = SD.Color.White,
-            Location = new SD.Point(S(x), S(y)),
-            Size = new SD.Size(S(width), S(height)),
-            Text = text,
-            UseVisualStyleBackColor = false,
-        };
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = hot;
-        return button;
-    }
-
-    [DllImport("gdi32.dll")]
-    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
-
-    [DllImport("gdi32.dll")]
-    private static extern bool DeleteObject(IntPtr handle);
 }

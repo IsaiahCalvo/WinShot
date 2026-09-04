@@ -302,6 +302,30 @@ public class MotionEdgeCaseTests
         seg.DrawToBitmap(bmp, new SD.Rectangle(0, 0, 150, 26));
     }
 
+    /// <summary>
+    /// The toast anchored to a monitor above the laptop (negative Y — Isaiah's layout):
+    /// it has to be born on that monitor rather than on the primary, and closing it
+    /// mid-entrance has to hand the clock back even though the exit tween never finishes.
+    /// </summary>
+    [Fact]
+    public void ToastClosedMidEntranceOnANegativeMonitorReleasesTheClock()
+    {
+        Assert.Equal(0, Motion.Holders);
+        var anchor = new SD.Point(-1200, -600);
+
+        var toast = new ToastWindow("Text copied", "hello world", anchor, null);
+        Assert.Equal(WF.Screen.FromPoint(anchor).Bounds.Location, toast.Location);
+
+        toast.Show();
+        PumpFor(40);
+        toast.Close();
+
+        PumpUntil(() => toast.IsDisposed);
+        PumpFor(200);
+        Assert.True(toast.IsDisposed);
+        Assert.Equal(0, Motion.Holders);
+    }
+
     private const System.Reflection.BindingFlags BindingFlagsNonPublic =
         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
 }
