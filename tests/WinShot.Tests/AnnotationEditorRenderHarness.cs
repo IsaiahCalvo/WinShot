@@ -1246,6 +1246,39 @@ public class AnnotationEditorRenderHarness
                     Shot("resize-rotated-line-after.png");
                     log.AppendLine($"[R2] rotated line endpoint drag: angle 30 -> {AnnotationTransform.AngleOf(rotLine)}");
 
+                    // RESIZE-08: a rotated line in bbox edit mode scales against a PINNED world
+                    // anchor, exactly like the rotated rect in R1 — the corner you pull against
+                    // must stay on the same pixel for the whole drag.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    Check("LineToolBtn");
+                    Drag(new[] { (0.25, 0.35), (0.60, 0.55) });
+                    Check("SelectToolBtn");
+                    Click(0.42, 0.45); Pump(3);
+                    var boxLine = Sel();
+                    var bboxTarget = typeof(EditorWindow)
+                        .GetField("_bboxEditTarget", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    bboxTarget.SetValue(editor, boxLine);   // Survey's double-click bbox edit mode
+                    Rotate(boxLine, 30);
+                    Shot("resize-rotated-line-bbox-before.png");
+                    Point lineBl = WorldCorner(boxLine, r => r.BottomLeft);
+                    Point lineTr = WorldCorner(boxLine, r => r.TopRight);
+                    var blTrack = new List<Point>();
+                    editor.PointerDown(PA(lineTr)); Pump(1);
+                    var linePull = lineTr + new Vector(0.06 * W, -0.05 * H);
+                    for (int i = 1; i <= 10; i++)
+                    {
+                        editor.PointerMove(PA(lineTr + (linePull - lineTr) * (i / 10.0))); Pump(1);
+                        blTrack.Add(WorldCorner(boxLine, r => r.BottomLeft));
+                    }
+                    Shot("resize-rotated-line-bbox-dragging.png");
+                    editor.PointerUp(PA(linePull)); Pump(3);
+                    Shot("resize-rotated-line-bbox-after.png");
+                    log.AppendLine($"[R8] rotated line bbox TR drag: angle 30 -> {AnnotationTransform.AngleOf(boxLine):F2} " +
+                        $"anchorBL before={lineBl:F2} after={WorldCorner(boxLine, r => r.BottomLeft):F2} " +
+                        $"maxDrift={blTrack.Max(p => (p - lineBl).Length):F3}");
+                    bboxTarget.SetValue(editor, null);
+
                     // RESIZE-09/10: rect is border-flush (no dashed frame, padding 0); an
                     // ellipse keeps the frame with the handles centred on it.
                     InvokePrivate(editor, "Select", null);

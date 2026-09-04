@@ -1301,8 +1301,11 @@ public partial class EditorWindow : Window
                 fe.RenderTransform = null;
                 Canvas.SetLeft(fe, snap.Bounds.X);
                 Canvas.SetTop(fe, snap.Bounds.Y);
-                fe.Width = Math.Max(1, snap.Bounds.Width);
-                fe.Height = Math.Max(1, snap.Bounds.Height);
+                // No absolute floor here either (Survey floors the SCALE, :2214-2217): clamping
+                // the restore at 1 px would make undo/redo disagree with the live geometry for
+                // any mark small enough that a legal 0.01 scale lands under a pixel.
+                fe.Width = snap.Bounds.Width;
+                fe.Height = snap.Bounds.Height;
                 if (fe is Path cloud && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
                     cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height),
                         meta.CloudIntensity ?? _cloudIntensity, cloud.StrokeThickness);
