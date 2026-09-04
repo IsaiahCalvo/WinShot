@@ -580,6 +580,132 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    [Fact]
+    public void HoverChromeCrossFadesRatherThanSnappingOn()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = CreateBusyCapture();
+            var settings = new SettingsService();
+            using var overlay = FastQuickActionsWindow.CreateForTheme(bitmap, settings, QuickAccessOverlayTheme.Dark);
+            overlay.CreateControl();
+            InstallPreviews(overlay, bitmap);
+
+            double idle = MeanLuminance(RenderCard(overlay));
+            SetHoverAmount(overlay, 1d);
+            double full = MeanLuminance(RenderCard(overlay));
+            SetHoverAmount(overlay, 0.5d);
+            double half = MeanLuminance(RenderCard(overlay));
+
+            // Not eyeballed: the mid-fade frame has to actually sit between the two ends.
+            Assert.NotEqual(idle, full, 3);
+            double low = Math.Min(idle, full);
+            double high = Math.Max(idle, full);
+            Assert.InRange(half, low + 0.01, high - 0.01);
+        });
+    }
+
+    [Fact]
+    public void AHiddenCardJumpsStraightToTheHoverEndStateAndLeaksNoClock()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var amount = typeof(FastQuickActionsWindow)
+                .GetField("_hoverAmount", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            Invoke(overlay, "SetHovering", true);
+            Assert.Equal(1d, (double)amount.GetValue(overlay)!, 6);
+            Invoke(overlay, "SetHovering", false);
+            Assert.Equal(0d, (double)amount.GetValue(overlay)!, 6);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    [Fact]
+    public void AShownCardRampsItsHoverAndReleasesTheClockWhenItLands()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            overlay.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            var amount = typeof(FastQuickActionsWindow)
+                .GetField("_hoverAmount", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Invoke(overlay, "SetHovering", true);
+
+            // Still on its way, not already there — that is what makes it a cross-fade.
+            Assert.True((double)amount.GetValue(overlay)! < 1d);
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            Assert.Equal(1d, (double)amount.GetValue(overlay)!, 6);
+            Assert.Equal(0, Motion.Holders);
+            overlay.Hide();
+        });
+    }
+
+    private static void SetHoverAmount(FastQuickActionsWindow overlay, double amount)
+        => typeof(FastQuickActionsWindow)
+            .GetField("_hoverAmount", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(overlay, amount);
+
+    private static void InstallPreviews(FastQuickActionsWindow overlay, SD.Bitmap source)
+    {
+        var type = typeof(FastQuickActionsWindow);
+        var thumb = (SD.Rectangle)type.GetField("_thumbRect", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+        var preview = (SD.Bitmap)type.GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { source, thumb.Width, thumb.Height })!;
+        var blurred = (SD.Bitmap)type.GetMethod("CreateBlurred", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { preview })!;
+        type.GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, preview);
+        type.GetField("_blurredPreview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, blurred);
+    }
+
+    private static SD.Bitmap RenderCard(FastQuickActionsWindow overlay)
+    {
+        var bitmap = new SD.Bitmap(overlay.ClientSize.Width, overlay.ClientSize.Height);
+        using var graphics = SD.Graphics.FromImage(bitmap);
+        using var args = new WF.PaintEventArgs(graphics, new SD.Rectangle(SD.Point.Empty, bitmap.Size));
+        typeof(FastQuickActionsWindow)
+            .GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(overlay, new object[] { args });
+        return bitmap;
+    }
+
+    private static double MeanLuminance(SD.Bitmap bitmap)
+    {
+        using (bitmap)
+        {
+            double total = 0;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    SD.Color pixel = bitmap.GetPixel(x, y);
+                    total += (0.2126 * pixel.R + 0.7152 * pixel.G + 0.0722 * pixel.B) / 255d;
+                }
+            }
+            return total / (bitmap.Width * bitmap.Height);
+        }
+    }
+
+    private static SD.Bitmap CreateBusyCapture()
+    {
+        var bitmap = new SD.Bitmap(1200, 760);
+        using var g = SD.Graphics.FromImage(bitmap);
+        g.Clear(SD.Color.FromArgb(22, 41, 72));
+        using var pen = new SD.Pen(SD.Color.FromArgb(240, 244, 250), 24);
+        for (int x = -800; x < 1200; x += 90)
+            g.DrawLine(pen, x, 0, x + 800, 760);
+        return bitmap;
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);

@@ -71,6 +71,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private IDisposable? _flashTimerScope;
     private SD.Point _flashCursor;
     private bool _hovering;
+    private double _hoverAmount;
+    private IDisposable? _hoverMotion;
     private int _hoverButton = -1;
     private int _pressedButton = -1;
     private int _focusedButton = -1;
@@ -195,6 +197,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             _closed = true;
             ClosePreviewPipeline();
             StopEnterMotion();
+            StopHoverMotion();
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
             HideActionTooltip();
@@ -349,7 +352,53 @@ public sealed class FastQuickActionsWindow : WF.Form
             SetHover(-1);
             SetPressed(-1);
         }
+        BeginHoverMotion(hovering ? 1d : 0d);
         Invalidate();
+    }
+
+    /// <summary>
+    /// Cross-fades the hover chrome — scrim, blurred thumbnail, buttons — instead of
+    /// snapping it on. Slow enough not to flicker as the pointer transits the card, fast
+    /// enough to feel instant. Nothing moves: only opacity changes, so there is still zero
+    /// layout shift on hover. A card that is not on screen jumps to the end state — nobody
+    /// is watching a transition on a hidden window, and the render harness paints without
+    /// a message pump.
+    /// </summary>
+    private void BeginHoverMotion(double target)
+    {
+        _hoverMotion?.Dispose();
+        _hoverMotion = null;
+
+        if (!Visible || !IsHandleCreated || _closed || IsDisposed)
+        {
+            _hoverAmount = target;
+            return;
+        }
+
+        double start = _hoverAmount;
+        if (Math.Abs(target - start) < 0.001)
+        {
+            _hoverAmount = target;
+            return;
+        }
+
+        _hoverMotion = Motion.Run(
+            Motion.QuickMs,
+            Motion.EaseOutCubic,
+            eased =>
+            {
+                if (_closed || IsDisposed)
+                    return;
+                _hoverAmount = start + (target - start) * eased;
+                Invalidate(_cardRect);
+            },
+            () => _hoverMotion = null);
+    }
+
+    private void StopHoverMotion()
+    {
+        _hoverMotion?.Dispose();
+        _hoverMotion = null;
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)
@@ -364,22 +413,24 @@ public sealed class FastQuickActionsWindow : WF.Form
             g.FillPath(fill, cardPath);
 
         bool flashing = _flashMessage is not null;
-        DrawThumbnail(g, _hovering || flashing);
+        // A message reuses the hover treatment verbatim, at full strength.
+        double hover = flashing ? 1d : Math.Clamp(_hoverAmount, 0d, 1d);
+        DrawThumbnail(g, hover);
         DrawStatusFlash(g);
 
         // The hover chrome stays out of the way while a message is up — the cursor is
         // usually still over the card from the menu click that triggered it.
-        if (_hovering && _flashMessage is null)
+        if (!flashing && hover > 0d)
         {
-            using (var scrim = new SD.SolidBrush(_visuals.HoverTint))
+            using (var scrim = new SD.SolidBrush(Fade(_visuals.HoverTint, hover)))
             using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
                 g.FillPath(scrim, cardPath);
 
             for (int i = 0; i < _buttons.Count; i++)
             {
-                DrawButton(g, _buttons[i], i == _hoverButton, i == _pressedButton);
+                DrawButton(g, _buttons[i], i == _hoverButton, i == _pressedButton, hover);
                 if (i == _focusedButton)
-                    DrawFocus(g, _buttons[i]);
+                    DrawFocus(g, _buttons[i], hover);
             }
         }
 
@@ -425,6 +476,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             _closed = true;
             ClosePreviewPipeline();
             StopEnterMotion();
+            StopHoverMotion();
             StopExitMotionTimer();
             StopStackMotionTimer();
             StopAutoCloseTimer();
@@ -629,6 +681,67 @@ public sealed class FastQuickActionsWindow : WF.Form
         g.DrawString(_flashMessage, font, text, _cardRect, format);
     }
 
+    /// <summary>
+    /// <paramref name="color"/> at <paramref name="amount"/> of its own alpha. Exactly the
+    /// original colour at 1, so a fully faded-in card paints the same bytes it always did.
+    /// </summary>
+    private static SD.Color Fade(SD.Color color, double amount)
+        => amount >= 1d
+            ? color
+            : SD.Color.FromArgb((int)Math.Round(color.A * Math.Clamp(amount, 0d, 1d)), color);
+
+    /// <summary>
+    /// The thumbnail with <paramref name="blurAmount"/> of the frosted version over it. Both
+    /// ends take the plain single-draw path they always did: an identity colour matrix is not
+    /// guaranteed to produce identical bytes, and the idle card is pinned by pixel comparison.
+    /// </summary>
+    private void DrawThumbnail(SD.Graphics g, double blurAmount)
+    {
+        if (blurAmount >= 1d)
+        {
+            DrawThumbnail(g, blurred: true);
+            return;
+        }
+
+        DrawThumbnail(g, blurred: false);
+        if (blurAmount > 0d)
+            DrawBlurredThumbnailOver(g, blurAmount);
+    }
+
+    private void DrawBlurredThumbnailOver(SD.Graphics g, double alpha)
+    {
+        lock (_previewSync)
+        {
+            SD.Bitmap? bmp = _blurredPreview;
+            if (_previewClosed || bmp is null)
+                return;
+
+            using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
+            using var attributes = new ImageAttributes();
+            attributes.SetColorMatrix(new ColorMatrix { Matrix33 = (float)Math.Clamp(alpha, 0d, 1d) });
+            GraphicsState state = g.Save();
+            try
+            {
+                g.SetClip(clip, CombineMode.Intersect);
+                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(
+                    bmp,
+                    _thumbRect,
+                    0,
+                    0,
+                    bmp.Width,
+                    bmp.Height,
+                    SD.GraphicsUnit.Pixel,
+                    attributes);
+            }
+            finally
+            {
+                g.Restore(state);
+            }
+        }
+    }
+
     private void DrawThumbnail(SD.Graphics g, bool blurred)
     {
         lock (_previewSync)
@@ -655,21 +768,22 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private void DrawButton(SD.Graphics g, ActionButton button, bool hot, bool pressed)
+    private void DrawButton(SD.Graphics g, ActionButton button, bool hot, bool pressed, double alpha = 1d)
     {
         SD.Color face = pressed ? _visuals.ControlPressed : hot ? _visuals.ControlHover : _visuals.ControlFace;
+        SD.Color glyph = Fade(_visuals.Glyph, alpha);
 
         var shadowBounds = button.Bounds;
         shadowBounds.Offset(0, Math.Max(1, button.Bounds.Height / 18));
         using (var shadowPath = CreateButtonPath(shadowBounds, button.Shape, button.CornerRadius))
-        using (var shadow = new SD.SolidBrush(_visuals.ControlShadow))
+        using (var shadow = new SD.SolidBrush(Fade(_visuals.ControlShadow, alpha)))
             g.FillPath(shadow, shadowPath);
 
         using (var path = CreateButtonPath(button.Bounds, button.Shape, button.CornerRadius))
         {
-            using var fill = new SD.SolidBrush(face);
+            using var fill = new SD.SolidBrush(Fade(face, alpha));
             g.FillPath(fill, path);
-            using var pen = new SD.Pen(_visuals.ControlBorder, 1);
+            using var pen = new SD.Pen(Fade(_visuals.ControlBorder, alpha), 1);
             g.DrawPath(pen, path);
         }
 
@@ -685,7 +799,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             if (button.Icon is not null)
             {
                 int iconY = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
-                g.DrawImageUnscaled(button.Icon, contentX, iconY);
+                DrawGlyph(g, button.Icon, contentX, iconY, alpha);
             }
 
             var labelBounds = new SD.Rectangle(
@@ -698,7 +812,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 button.Label,
                 button.LabelFont,
                 labelBounds,
-                _visuals.Glyph,
+                glyph,
                 flags | WF.TextFormatFlags.VerticalCenter);
             return;
         }
@@ -707,8 +821,30 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             int x = button.Bounds.Left + (button.Bounds.Width - button.Icon.Width) / 2;
             int y = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
-            g.DrawImageUnscaled(button.Icon, x, y);
+            DrawGlyph(g, button.Icon, x, y, alpha);
         }
+    }
+
+    /// <summary>An icon at <paramref name="alpha"/>; the opaque path is the original draw.</summary>
+    private static void DrawGlyph(SD.Graphics g, SD.Bitmap icon, int x, int y, double alpha)
+    {
+        if (alpha >= 1d)
+        {
+            g.DrawImageUnscaled(icon, x, y);
+            return;
+        }
+
+        using var attributes = new ImageAttributes();
+        attributes.SetColorMatrix(new ColorMatrix { Matrix33 = (float)Math.Clamp(alpha, 0d, 1d) });
+        g.DrawImage(
+            icon,
+            new SD.Rectangle(x, y, icon.Width, icon.Height),
+            0,
+            0,
+            icon.Width,
+            icon.Height,
+            SD.GraphicsUnit.Pixel,
+            attributes);
     }
 
     private static GraphicsPath CreateButtonPath(SD.Rectangle bounds, ActionButtonShape shape, int cornerRadius)
@@ -726,10 +862,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     private static SD.Bitmap? CreateSvgIcon(string assetName, int pixelSize, SD.Color color)
         => SvgIcons.Get(assetName, pixelSize, color);
 
-    private void DrawFocus(SD.Graphics g, ActionButton button)
+    private void DrawFocus(SD.Graphics g, ActionButton button, double alpha = 1d)
     {
         var bounds = SD.Rectangle.Inflate(button.Bounds, -2, -2);
-        using var pen = new SD.Pen(_visuals.FocusRing, 1) { DashStyle = DashStyle.Dot };
+        using var pen = new SD.Pen(Fade(_visuals.FocusRing, alpha), 1) { DashStyle = DashStyle.Dot };
         using var path = CreateButtonPath(bounds, button.Shape, Math.Max(1, button.CornerRadius - 2));
         g.DrawPath(pen, path);
     }
