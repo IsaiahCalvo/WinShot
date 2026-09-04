@@ -308,6 +308,9 @@ public partial class App : Application
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("History…", null, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
+        menu.Items.Add(MenuItem("Pin last screenshot", s.HotkeyPinLast, PinLastFlow));
+        menu.Items.Add(MenuItem("Toggle pins visibility", s.HotkeyPinToggleVisibility, FastPinWindow.ToggleAllVisibility));
+        menu.Items.Add(MenuItem("Close all pins", s.HotkeyPinCloseAll, FastPinWindow.CloseAll));
         menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
         menu.Items.Add(new WF.ToolStripSeparator());
         // Dynamic "Update available" item — hidden until a check finds a newer release.
@@ -357,6 +360,9 @@ public partial class App : Application
         Reg(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"));
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
+        Reg(s.HotkeyPinToggleVisibility, FastPinWindow.ToggleAllVisibility);
+        Reg(s.HotkeyPinCloseAll, FastPinWindow.CloseAll);
+        Reg(s.HotkeyPinLast, PinLastFlow);
 
         if (failed.Count == 0)
         {
@@ -1508,6 +1514,39 @@ public partial class App : Application
         TrackFirstRender(win, "editor window");
         win.Show();
         overlay.Close();
+    }
+
+    /// <summary>
+    /// Pins the newest capture in history. The point is to get a reference back on screen
+    /// without opening History and hunting for it, so an empty history is a prerequisite not
+    /// met rather than a failure -- the same shape as "No previous region yet".
+    /// </summary>
+    private async void PinLastFlow()
+    {
+        string? path;
+        try
+        {
+            path = _history.GetItems().FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not read history for Pin last screenshot", ex);
+            ShowBalloon("Pin", FriendlyError.For(ex), ToastSeverity.Error);
+            return;
+        }
+
+        if (path is null)
+        {
+            ShowBalloon("Pin", "No capture in history to pin.", ToastSeverity.Info, holdLong: true);
+            return;
+        }
+
+        if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
+            return;
+
+        var win = new FastPinWindow(bmp, _settings);
+        PerfLog.TrackFirstShown(win, "pin window");
+        win.Show();
     }
 
     private void PinFromOverlay(FastQuickActionsWindow overlay)

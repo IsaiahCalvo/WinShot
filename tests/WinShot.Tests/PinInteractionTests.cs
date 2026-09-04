@@ -320,6 +320,59 @@ public class PinInteractionTests
         });
     }
 
+    /// <summary>
+    /// Toggle-all is one gesture over the whole set, not a per-pin toggle: with two pins and
+    /// one already hidden, toggling each on its own leaves them alternating forever. Any
+    /// visible pin means "hide"; nothing visible means "bring them back".
+    /// </summary>
+    [Fact]
+    public void TogglingPinVisibility_MovesEveryPinTheSameWay()
+    {
+        RunSta(() =>
+        {
+            FastPinWindow.CloseAll();
+            Assert.False(FastPinWindow.AnyOpen);
+
+            using var first = new FastPinWindow(new SD.Bitmap(200, 120), new SettingsService());
+            using var second = new FastPinWindow(new SD.Bitmap(200, 120), new SettingsService());
+            first.StartPosition = WF.FormStartPosition.Manual;
+            second.StartPosition = WF.FormStartPosition.Manual;
+            first.Location = new SD.Point(-20_000, -20_000);
+            second.Location = new SD.Point(-20_000, -20_000);
+            first.Show();
+            second.Show();
+            Assert.True(FastPinWindow.AnyOpen);
+
+            // One already hidden: the set still moves together.
+            second.Hide();
+            FastPinWindow.ToggleAllVisibility();
+            Assert.False(first.Visible);
+            Assert.False(second.Visible);
+
+            FastPinWindow.ToggleAllVisibility();
+            Assert.True(first.Visible);
+            Assert.True(second.Visible);
+
+            FastPinWindow.CloseAll();
+            Assert.False(FastPinWindow.AnyOpen);
+        });
+    }
+
+    /// <summary>Both statics are safe with no pins on screen -- they are bound to global
+    /// hotkeys, so they are reachable at any moment.</summary>
+    [Fact]
+    public void ThePinCommandsAreSafeWithNothingPinned()
+    {
+        RunSta(() =>
+        {
+            FastPinWindow.CloseAll();
+            FastPinWindow.ToggleAllVisibility();
+            FastPinWindow.CloseAll();
+            FastPinWindow.UnlockAllPins();
+            Assert.False(FastPinWindow.AnyOpen);
+        });
+    }
+
     private static void SetLocked(FastPinWindow pin, bool locked)
         => typeof(FastPinWindow)
             .GetMethod("SetLocked", BindingFlags.Instance | BindingFlags.NonPublic)!

@@ -69,6 +69,15 @@ public partial class SettingsWindow
             Real("capture-text", "Capture Text", "Capture text (OCR)",
                  s => s.HotkeyOcr, (s, v) => s.HotkeyOcr = v),
         ]},
+        new ShortcutSection { Title = "Pinned Screenshots", Items =
+        [
+            Real("pin-toggle-visibility", "Toggle Pins Visibility", "Toggle pins visibility",
+                 s => s.HotkeyPinToggleVisibility, (s, v) => s.HotkeyPinToggleVisibility = v),
+            Real("pin-close-all", "Close All Pins", "Close all pins",
+                 s => s.HotkeyPinCloseAll, (s, v) => s.HotkeyPinCloseAll = v),
+            Real("pin-last", "Pin Last Screenshot", "Pin last screenshot",
+                 s => s.HotkeyPinLast, (s, v) => s.HotkeyPinLast = v),
+        ]},
     ];
 
     private IEnumerable<ShortcutDef> AllShortcutDefs() =>

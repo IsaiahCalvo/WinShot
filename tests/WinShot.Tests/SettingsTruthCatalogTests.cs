@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using WinShot.Core;
 using WinShot.SettingsUi;
 using Xunit;
@@ -34,6 +34,7 @@ public class SettingsTruthCatalogTests
         [
             "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
             "capture-window", "record-screen", "scrolling-capture", "capture-text",
+            "pin-toggle-visibility", "pin-close-all", "pin-last",
         ],
         SettingsTruthCatalog.ExecutableShortcutIds);
     }

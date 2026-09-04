@@ -250,6 +250,9 @@ public sealed class FastPinWindow : WF.Form
             _imageFade?.Dispose();
             _imageFade = null;
             _lockedHoverTimer.Stop();
+            // Closed only fires for a window that was actually closed; a disposed one would
+            // otherwise stay in OpenPins forever and be acted on by the pin commands.
+            OpenPins.Remove(this);
         }
         base.Dispose(disposing);
     }
@@ -265,8 +268,59 @@ public sealed class FastPinWindow : WF.Form
 
     public static void UnlockAllPins()
     {
-        foreach (var pin in OpenPins.ToList())
+        foreach (var pin in LivePins())
             pin.SetLocked(false);
+    }
+
+    /// <summary>
+    /// The pins still alive, pruning any that were disposed without being closed. A form
+    /// disposed rather than closed never raises Closed, so without this the list grows dead
+    /// entries and the commands below act on windows that are gone.
+    /// </summary>
+    private static List<FastPinWindow> LivePins()
+    {
+        OpenPins.RemoveAll(pin => pin.IsDisposed);
+        return OpenPins.ToList();
+    }
+
+    /// <summary>Whether any pin is on screen; the tray rows that act on all of them are
+    /// pointless without one.</summary>
+    public static bool AnyOpen => LivePins().Count > 0;
+
+    /// <summary>
+    /// Hides every pin, or brings them all back. One gesture, because the reason to hide
+    /// pins is that you need the screen for a moment -- and that moment ends.
+    /// </summary>
+    public static void ToggleAllVisibility()
+    {
+        List<FastPinWindow> pins = LivePins();
+        if (pins.Count == 0)
+            return;
+
+        // Any visible pin means "hide"; the alternative -- toggling each pin on its own --
+        // leaves a mixed set alternating forever.
+        bool hide = pins.Any(pin => pin.Visible);
+        foreach (FastPinWindow pin in pins)
+        {
+            try
+            {
+                if (hide) pin.Hide();
+                else pin.Show();
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Could not toggle a pinned window's visibility (non-fatal)", ex);
+            }
+        }
+    }
+
+    public static void CloseAll()
+    {
+        foreach (FastPinWindow pin in LivePins())
+        {
+            try { pin.Close(); pin.Dispose(); }
+            catch (Exception ex) { Log.Error("Could not close a pinned window (non-fatal)", ex); }
+        }
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)

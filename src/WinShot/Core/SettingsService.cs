@@ -43,6 +43,15 @@ public class Settings
     // Unassigned actions are simply absent. Real/global hotkeys keep their own fields above.
     public Dictionary<string, string> ShortcutBindings { get; set; } = new();
 
+    /// <summary>Hide every pin, or bring them all back.</summary>
+    public string HotkeyPinToggleVisibility { get; set; } = "";
+
+    /// <summary>Dismiss every pin at once.</summary>
+    public string HotkeyPinCloseAll { get; set; } = "";
+
+    /// <summary>Pin the most recent capture without going through History.</summary>
+    public string HotkeyPinLast { get; set; } = "";
+
     // Recording extras
     public bool RecordSystemAudio { get; set; } = false;
     public bool ShowClickHighlights { get; set; } = false;

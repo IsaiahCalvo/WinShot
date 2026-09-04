@@ -69,6 +69,9 @@ internal static class SettingsTruthCatalog
             "PinnedRoundedCorners",
             "PinnedShadow",
             "PinnedBorder",
+            "HotkeyPinToggleVisibility",
+            "HotkeyPinCloseAll",
+            "HotkeyPinLast",
             "OcrDetectLinks",
             "OcrLanguage",
         };
@@ -83,6 +86,9 @@ internal static class SettingsTruthCatalog
         "record-screen",
         "scrolling-capture",
         "capture-text",
+        "pin-toggle-visibility",
+        "pin-close-all",
+        "pin-last",
     ];
 
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =
