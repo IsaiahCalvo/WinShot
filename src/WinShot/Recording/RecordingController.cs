@@ -664,7 +664,8 @@ public sealed class RecordingController
             Log.Error("Failed to stop recording", ex);
             string? tempPath = _tempPath;
             CleanupAfterFailure(preserveTemp: true);
-            ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(tempPath, ex.Message));
+            ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(
+                tempPath, Core.FriendlyError.For(ex)));
         }
     }
 

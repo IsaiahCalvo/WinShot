@@ -1223,7 +1223,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         try
         {
             SD.Rectangle card = RectangleToScreen(_cardRect);
-            new Ocr.OcrToastWindow(title, message, new SD.Point(card.Left, card.Top), null).Show();
+            new Core.ToastWindow(title, message, new SD.Point(card.Left, card.Top), null).Show();
         }
         catch (Exception ex)
         {

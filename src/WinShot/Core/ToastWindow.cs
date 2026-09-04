@@ -1,21 +1,31 @@
 ﻿using System.Runtime.InteropServices;
-using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
-namespace WinShot.Ocr;
+namespace WinShot.Core;
 
 /// <summary>
-/// A small themed in-place confirmation HUD shown near the OCR selection after text is
-/// copied — CleanShot-style instant feedback instead of the slow, Focus-Assist-throttled
-/// Windows tray balloon. Auto-dismisses; shows an "Open" action for a decoded URL.
+/// The app's one in-place confirmation HUD: a title, a body line and an optional action,
+/// shown near whatever it is confirming — CleanShot-style instant feedback instead of the
+/// slow, Focus-Assist-throttled Windows tray balloon. Auto-dismisses. Fades and rises in,
+/// and reverses on the way out, so it never pops or vanishes.
 /// </summary>
-public sealed class OcrToastWindow : WF.Form
+public sealed class ToastWindow : WF.Form
 {
     private static readonly SD.Color Back = ThemePalette.ToolbarBg;
     private static readonly SD.Color BorderColor = SD.Color.FromArgb(54, 255, 255, 255);
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
+
+    /// <summary>Entrance/exit: fade plus a short rise. Scale is deliberately not used — the
+    /// toast's children sit at fixed offsets, so resizing the form would crop them rather
+    /// than scale them.</summary>
+    private const int RiseMs = 180;
+    private const double RestOpacity = 0.97;
+
+    private IDisposable? _motion;
+    private bool _exiting;
+    private SD.Point _restLocation;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
     // the anchor monitor or labels truncate on 125%/150% displays.
@@ -23,7 +33,7 @@ public sealed class OcrToastWindow : WF.Form
 
     private int S(int logical) => (int)Math.Round(logical * _scale);
 
-    public OcrToastWindow(string title, string preview, SD.Point? anchorScreen, Action? onOpen)
+    public ToastWindow(string title, string preview, SD.Point? anchorScreen, Action? onOpen)
     {
         _anchor = anchorScreen;
         _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
@@ -33,7 +43,7 @@ public sealed class OcrToastWindow : WF.Form
         BackColor = Back;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
-        Opacity = 0.97;
+        Opacity = 0;            // OnShown fades it up to RestOpacity
         Padding = new WF.Padding(S(14));
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
@@ -51,7 +61,7 @@ public sealed class OcrToastWindow : WF.Form
         ClientSize = new SD.Size(S(width), S(height));
 
         // Accent stays reserved for actions; the title reads as text, not a control.
-        var titleLabel = Label(title, 14, 14, width - 28, 11f, ThemePalette.TextPrimary, bold: true);
+        var titleLabel = Label(title, 14, 14, width - 28, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true);
         Controls.Add(titleLabel);
 
         var previewLabel = Label(Trim(preview), 14, 38, width - 28, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary);
@@ -93,7 +103,35 @@ public sealed class OcrToastWindow : WF.Form
         base.OnShown(e);
         UpdateRegion();
         Position();
+        _restLocation = Location;
+        _motion?.Dispose();
+        _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
         _dismiss.Start();
+    }
+
+    /// <summary>0 = fully out (transparent, dropped by the rise distance), 1 = at rest.</summary>
+    private void ApplyEntrance(double amount)
+    {
+        if (IsDisposed) return;
+        Opacity = RestOpacity * Math.Clamp(amount, 0d, 1d);
+        Location = new SD.Point(_restLocation.X, _restLocation.Y + (int)Math.Round(S(8) * (1d - amount)));
+    }
+
+    protected override void OnFormClosing(WF.FormClosingEventArgs e)
+    {
+        // Entrance and exit are the same move in reverse; without this the toast
+        // disappeared at full opacity the instant the dismiss timer fired.
+        if (!_exiting && IsHandleCreated && !IsDisposed && Motion.AnimationsEnabled())
+        {
+            e.Cancel = true;
+            _exiting = true;
+            _dismiss.Stop();
+            _motion?.Dispose();
+            _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(1d - p), Close);
+            return;
+        }
+
+        base.OnFormClosing(e);
     }
 
     protected override void OnResize(EventArgs e)
@@ -106,6 +144,8 @@ public sealed class OcrToastWindow : WF.Form
     {
         _dismiss.Stop();
         _dismiss.Dispose();
+        _motion?.Dispose();
+        _motion = null;
         base.OnClosed(e);
     }
 

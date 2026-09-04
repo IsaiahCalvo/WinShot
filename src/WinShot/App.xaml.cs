@@ -527,7 +527,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error(failureLog, ex);
-            ShowBalloon(failureBalloon, ex.Message);
+            ShowBalloon(failureBalloon, FriendlyError.For(ex));
         }
         finally
         {
@@ -1026,7 +1026,7 @@ public partial class App : Application
             if (showFailure)
             {
                 Log.Error(failureContext, ex);
-                await Dispatcher.InvokeAsync(() => ShowBalloon("Copy failed", ex.Message));
+                await Dispatcher.InvokeAsync(() => ShowBalloon("Copy failed", FriendlyError.For(ex)));
             }
             else
             {
@@ -1148,7 +1148,8 @@ public partial class App : Application
         catch (Exception ex)
         {
             bmp.Dispose();
-            ShowBalloon("Save failed", ex.Message);
+            Log.Error("Could not choose a save path", ex);
+            ShowBalloon("Save failed", FriendlyError.For(ex));
             return;
         }
 
@@ -1164,7 +1165,7 @@ public partial class App : Application
                 catch (Exception ex)
                 {
                     Log.Error("Silent save failed", ex);
-                    Dispatcher.InvokeAsync(() => ShowBalloon("Save failed", ex.Message));
+                    Dispatcher.InvokeAsync(() => ShowBalloon("Save failed", FriendlyError.For(ex)));
                 }
             }
         });
@@ -1247,6 +1248,9 @@ public partial class App : Application
         }
         catch (InvalidOperationException ex)
         {
+            // OCR's own InvalidOperationException messages are already written for the user
+            // (no language pack installed, and so on) — keep them, log the rest.
+            Log.Info($"OCR unavailable: {ex.Message}");
             ShowBalloon("OCR unavailable", ex.Message);
         }
         catch (COMException ex)
@@ -1273,7 +1277,7 @@ public partial class App : Application
     {
         try
         {
-            var toast = new OcrToastWindow(title, preview, anchor, onOpen);
+            var toast = new ToastWindow(title, preview, anchor, onOpen);
             toast.Show();
         }
         catch (Exception ex)
@@ -1393,7 +1397,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error("OCR from overlay failed", ex);
-            ShowBalloon("OCR failed", ex.Message);
+            ShowBalloon("OCR failed", FriendlyError.For(ex));
         }
     }
 
