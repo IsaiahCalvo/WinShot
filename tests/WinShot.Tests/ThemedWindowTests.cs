@@ -581,6 +581,23 @@ public class ThemedWindowTests
         var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
         Assert.True(toolsHost.MinWidth < 40, "Group tools must size to the visible chips, not a reserved blank slot.");
         Assert.Equal(HorizontalAlignment.Stretch, groupBar.HorizontalAlignment);
+        // Survey's two chrome tokens have fixed roles: #181c24 for every band that SPANS the
+        // viewer width (top bar AppShell.jsx:1343, sub-row PDFViewer.jsx:32021) and #12151c
+        // for the vertical rail/panel surface only (AppShell.jsx:2697/:2847,
+        // SurveySpacesRail.jsx:1229). The bottom band spans the width, so it shares the top
+        // bar's material — that is what makes the chrome read as one system.
+        var bottomBar = (Border)editor.FindName("EditorBottomBar")!;
+        var rail = (Border)editor.FindName("ZoomRail")!;
+        Assert.Equal(topToolbar.Background, bottomBar.Background);
+        Assert.Equal(((Border)groupBar).Background, bottomBar.Background);
+        Assert.NotEqual(rail.Background, bottomBar.Background);
+        // Survey's Pan/Select block (AppShell.jsx:1468-1477/:1631): Select edge -> divider =
+        // gap 6 + divider margin 4 = 10px; divider -> first chip = divider margin 4 +
+        // block paddingRight 8 = 12px.
+        var divider = panSelect.Children.OfType<System.Windows.Shapes.Rectangle>().Last();
+        Assert.Equal(10d, divider.Margin.Left + select.Margin.Right);
+        Assert.Equal(12d, divider.Margin.Right + panSelect.Margin.Right
+            + ((Button)editor.FindName("DrawGroupBtn")!).Margin.Left);
         Assert.True(IsLogicalDescendant(topToolbar, formatBar),
             "Format chrome must sit on the primary row next to color and size, like Survey.");
         Assert.False(IsLogicalDescendant(topToolbar, groupBar),
@@ -631,11 +648,20 @@ public class ThemedWindowTests
         editor.UpdateLayout();
         PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
-        double arrowToolsX = groupTools.TranslatePoint(new Point(0, 0), groupBar).X;
-        double arrowBarW = groupBar.ActualWidth;
+        // Survey's sub-row centres on the WINDOW, not on the canvas column: the strip is
+        // justifyContent:'center' (PDFViewer.jsx:32026) inside a centre column that is
+        // symmetric because BOTH rails are 48px (AppShell.jsx:2692/:2841), so it lands on
+        // the same x as the top bar's centred cluster (AppShell.jsx:1344) and the sub-row
+        // tools sit under the chip that opened them. WinShot has only the right rail, so
+        // the sub-row host carries a 48px left margin to restore that symmetry — which
+        // means the strip is NOT centred in its own bar; it is centred on the chips.
         double arrowToolsW = groupTools.ActualWidth;
-        Assert.True(Math.Abs(arrowToolsX - (arrowBarW - arrowToolsW) / 2) < 4,
-            $"Shape group is not centered in the chrome strip: x={arrowToolsX:0} bar={arrowBarW:0} tools={arrowToolsW:0}");
+        double arrowToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X
+            + arrowToolsW / 2;
+        double chipsCentre = primary.TranslatePoint(new Point(0, 0), editor).X
+            + primary.ActualWidth / 2;
+        Assert.True(Math.Abs(arrowToolsCentre - chipsCentre) < 1,
+            $"Shape sub-row is not under the chips that opened it: sub-row={arrowToolsCentre:0.##} chips={chipsCentre:0.##}");
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Arrow vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
@@ -694,11 +720,11 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
-        Point toolsOrigin = groupTools.TranslatePoint(new Point(0, 0), groupBar);
-        double textBarW = groupBar.ActualWidth;
+        // Same rule as the Shape sub-row above: centred on the top bar's chips, not on the bar.
         double textToolsW = groupTools.ActualWidth;
-        Assert.True(Math.Abs(toolsOrigin.X - (textBarW - textToolsW) / 2) < 4,
-            $"Text group is not centered in the chrome strip: x={toolsOrigin.X:0} bar={textBarW:0} tools={textToolsW:0}");
+        double textToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X + textToolsW / 2;
+        Assert.True(Math.Abs(textToolsCentre - chipsCentre) < 1,
+            $"Text sub-row is not under the chips that opened it: sub-row={textToolsCentre:0.##} chips={chipsCentre:0.##}");
         Assert.True(textToolsW < arrowToolsW - 8,
             $"Text group still occupies the Shapes-width blank slot: text={textToolsW:0} shapes={arrowToolsW:0}");
         var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;

@@ -1078,6 +1078,21 @@ public class AnnotationEditorRenderHarness
                     new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                 Pump(4);
                 Shot("layout-subrow-open.png");
+                // LAYOUT-09: Survey's sub-row centres on the WINDOW because both rails are 48px
+                // (AppShell.jsx:2692/:2841), so the strip's justifyContent:'center'
+                // (PDFViewer.jsx:32026) lands on the same x as the top bar's centred cluster
+                // (AppShell.jsx:1344). WinShot has only the right rail, so the sub-row's host
+                // carries a 48px left margin to restore that symmetry. Both centres must match.
+                {
+                    var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
+                    var chips = (FrameworkElement)editor.FindName("ToolPanel")!;
+                    editor.UpdateLayout();
+                    double subL = toolsHost.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+                    double chipL = chips.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+                    layoutLog.AppendLine($"  subrow centre={subL + toolsHost.ActualWidth / 2:0.##} " +
+                        $"chips centre={chipL + chips.ActualWidth / 2:0.##} " +
+                        $"window centre={editor.ActualWidth / 2:0.##}");
+                }
                 layoutLog.AppendLine($"draw open: band={groupBar.Visibility} barH={groupBar.ActualHeight} " +
                     $"viewportH={viewport.ActualHeight:0.##} (delta={viewport.ActualHeight - viewportHOnOpen:0.##})");
                 layoutLog.AppendLine($"  column: {ScanColumn()}");
@@ -1112,6 +1127,66 @@ public class AnnotationEditorRenderHarness
                     $"chips=[{tpL:0.#}..{tpL + toolPanel.ActualWidth:0.#}] " +
                     $"chipsCentre={tpL + toolPanel.ActualWidth / 2:0.#} windowCentre={editor.ActualWidth / 2:0.#}");
                 File.WriteAllText(Path.Combine(outDir, "layout-rail.txt"), railLog.ToString());
+
+                // LAYOUT-10/11: the Pan/Select divider gaps and the page shadow's alpha ceiling.
+                {
+                    var fixLog = new System.Text.StringBuilder();
+                    editor.UpdateLayout();
+                    var divider = ((StackPanel)panSelect).Children
+                        .OfType<System.Windows.Shapes.Rectangle>().Last();
+                    var selectBtn = (FrameworkElement)editor.FindName("SelectToolBtn")!;
+                    double SelR = selectBtn.TransformToAncestor(editor).Transform(new Point(0, 0)).X
+                                  + selectBtn.ActualWidth;
+                    double divL = divider.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+                    var drawChip = (FrameworkElement)editor.FindName("DrawGroupBtn")!;
+                    double chipL2 = drawChip.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+                    // Survey (AppShell.jsx:1474/:1476/:1631): Select edge -> divider = gap 6 +
+                    // margin 4 = 10px; divider -> first chip = margin 4 + paddingRight 8 = 12px.
+                    fixLog.AppendLine($"divider: select->divider={divL - SelR:0.##} (Survey 10) " +
+                        $"divider->drawChip={chipL2 - (divL + divider.ActualWidth):0.##} (Survey 12)");
+
+                    // Survey's page has one edge treatment, box-shadow 0 2px 14px rgba(0,0,0,.45)
+                    // (PdfjsViewerContainer.jsx:351), so over #181c24 (24,28,36) no pixel around
+                    // the page may go darker than (13,15,19). The opaque WPF shadow caster must
+                    // stay fully hidden under the image.
+                    var bmp = new RenderTargetBitmap(
+                        (int)Math.Ceiling(editor.ActualWidth), (int)Math.Ceiling(editor.ActualHeight),
+                        96, 96, PixelFormats.Pbgra32);
+                    bmp.Render(editor);
+                    var stride = bmp.PixelWidth * 4;
+                    var all = new byte[stride * bmp.PixelHeight];
+                    bmp.CopyPixels(all, stride, 0);
+                    Point pageTL = canvas.TranslatePoint(new Point(0, 0), editor);
+                    Point pageBR = canvas.TranslatePoint(new Point(W, H), editor);
+                    double worstAlpha = 0;
+                    string Darkest(string label, int x0, int x1, int y0, int y1)
+                    {
+                        int best = 999, bx = 0, by = 0;
+                        for (int y = Math.Max(0, y0); y <= Math.Min(bmp.PixelHeight - 1, y1); y++)
+                            for (int x = Math.Max(0, x0); x <= Math.Min(bmp.PixelWidth - 1, x1); x++)
+                            {
+                                int lum = all[y * stride + x * 4 + 2] + all[y * stride + x * 4 + 1]
+                                          + all[y * stride + x * 4];
+                                if (lum < best) { best = lum; bx = x; by = y; }
+                            }
+                        int i = by * stride + bx * 4;
+                        // alpha over #181c24 -> darkest legal is (13,15,19) at 0.45.
+                        double alpha = 1.0 - all[i + 2] / 24.0;
+                        worstAlpha = Math.Max(worstAlpha, alpha);
+                        return $"{label}: darkest=({all[i + 2]},{all[i + 1]},{all[i]}) at ({bx},{by}) alpha={alpha:0.###}";
+                    }
+                    int px0 = (int)Math.Round(pageTL.X), px1 = (int)Math.Round(pageBR.X);
+                    int py0 = (int)Math.Round(pageTL.Y), py1 = (int)Math.Round(pageBR.Y);
+                    fixLog.AppendLine(Darkest("shadow below", px0, px1, py1 + 1, py1 + 8));
+                    fixLog.AppendLine(Darkest("shadow right", px1 + 1, px1 + 8, py0, py1));
+                    fixLog.AppendLine(Darkest("shadow left", px0 - 8, px0 - 1, py0, py1));
+                    fixLog.AppendLine(Darkest("shadow above", px0, px1, py0 - 8, py0 - 1));
+                    File.WriteAllText(Path.Combine(outDir, "layout-fixes.txt"), fixLog.ToString());
+                    // rgba(0,0,0,0.45) is a hard ceiling: anything darker means the opaque
+                    // DropShadowEffect caster is peeking out from under the image.
+                    Assert.True(worstAlpha <= 0.45,
+                        $"Page edge is darker than Survey's box-shadow allows:\n{fixLog}");
+                }
                 Check("SelectToolBtn");
 
                 // Shapes: rect, ellipse, line, arrow, two counters.
@@ -1546,6 +1621,127 @@ public class AnnotationEditorRenderHarness
                     }
                     File.WriteAllText(Path.Combine(outDir, "text-format-round2.txt"), r2.ToString());
                     Shot("pointer-text-format-round2.png");
+
+                    // ---- ROUND 3 PROBES ------------------------------------------------
+                    var r3 = new System.Text.StringBuilder();
+                    // R3-A: with a committed text merely SELECTED (no editor), which of the
+                    // format controls can the user actually reach? Survey's strip is portalled
+                    // only while richTextEditor is live, but Aa must be the way in.
+                    Check("SelectToolBtn");
+                    var probeText = LastText();
+                    selList.Clear(); if (probeText is not null) selList.Add(probeText);
+                    selField.SetValue(editor, probeText);
+                    Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(3);
+                    var alignBtn = (Button)editor.FindName("AlignMenuBtn")!;
+                    var r3Swatch = (Button)editor.FindName("FontColorBtn")!;
+                    r3.AppendLine($"[R3-A selectedText] strip={strip.Visibility} stripIsVisible={strip.IsVisible} " +
+                        $"boldIsVisible={boldBtn.IsVisible} alignIsVisible={alignBtn.IsVisible} " +
+                        $"fontColorIsVisible={r3Swatch.IsVisible} fontFamilyIsVisible={famBox.IsVisible} " +
+                        $"fontSizeBox={sizeBox.Visibility}/{sizeBox.IsVisible} Aa={aaBtn.IsVisible}/{aaBtn.IsEnabled}");
+
+                    // R3-B: same question for a committed CALLOUT.
+                    Click(0.85, 0.88); Pump(3);
+                    r3.AppendLine($"[R3-B selectedCallout] selected={Desc(Sel())} strip={strip.Visibility} " +
+                        $"boldIsVisible={boldBtn.IsVisible} fontSizeBox={sizeBox.Visibility} Aa={aaBtn.IsVisible}/{aaBtn.IsEnabled}");
+
+                    // R3-C: does merely SELECTING a text whose font family differs from the
+                    // window-level _textFontFamily push history / rebuild the visual? The
+                    // FontFamilyBox.SelectedItem write in SyncTextFormatChrome (xaml.cs:2097-2102)
+                    // sits OUTSIDE the _syncingContext guard the FontSizeBox rebuild uses.
+                    if (undoField is not null)
+                    {
+                        // Two texts with different families.
+                        Check("TextToolBtn"); Click(0.30, 0.60); Pump(3);
+                        if (Live() is TextBox fa) { fa.Text = "FAM-A"; Pump(3); }
+                        PickFamily("Courier New"); Invoke("CommitText"); Pump(4);
+                        var famA = LastText();
+                        Check("TextToolBtn"); Click(0.55, 0.60); Pump(3);
+                        if (Live() is TextBox fb) { fb.Text = "FAM-B"; Pump(3); }
+                        PickFamily("Georgia"); Invoke("CommitText"); Pump(4);
+                        var famB = LastText();
+                        Check("SelectToolBtn");
+                        r3.AppendLine($"[R3-C setup] A.family={(famA?.Tag as AnnotationData)?.FontFamily} " +
+                            $"B.family={(famB?.Tag as AnnotationData)?.FontFamily}");
+                        // Select A the way the real app does (SyncChromeFromSelection then
+                        // UpdateContextPanels — Input.cs:1596-1597).
+                        selList.Clear(); if (famA is not null) selList.Add(famA);
+                        selField.SetValue(editor, famA);
+                        int d0 = ((System.Collections.ICollection)undoField.GetValue(editor)!).Count;
+                        object? idBefore = famA;
+                        Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(4);
+                        int d1 = ((System.Collections.ICollection)undoField.GetValue(editor)!).Count;
+                        bool sameElement = ReferenceEquals(selField.GetValue(editor), idBefore);
+                        r3.AppendLine($"[R3-C selectA] undoDepth {d0} -> {d1} (delta={d1 - d0}) " +
+                            $"selectionElementUnchanged={sameElement} expect delta==0 && unchanged -> " +
+                            $"{(d1 - d0 == 0 && sameElement ? "PASS" : "FAIL")}");
+                        // Now select B (different family) — this is the case where the combo's
+                        // SelectedItem actually changes and the handler fires.
+                        selList.Clear(); if (famB is not null) selList.Add(famB);
+                        selField.SetValue(editor, famB);
+                        int d2 = ((System.Collections.ICollection)undoField.GetValue(editor)!).Count;
+                        object? idBefore2 = famB;
+                        Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(4);
+                        int d3 = ((System.Collections.ICollection)undoField.GetValue(editor)!).Count;
+                        bool sameElement2 = ReferenceEquals(selField.GetValue(editor), idBefore2);
+                        r3.AppendLine($"[R3-C selectB] undoDepth {d2} -> {d3} (delta={d3 - d2}) " +
+                            $"selectionElementUnchanged={sameElement2} expect delta==0 && unchanged -> " +
+                            $"{(d3 - d2 == 0 && sameElement2 ? "PASS" : "FAIL")}");
+                        // And selecting a NON-text (a rectangle) while _textFontFamily is stale.
+                    }
+
+                    // R3-D: plain text, editor open via Aa, click Bold. Does the STORED
+                    // annotation change at click time (Survey callout does; Survey plain text
+                    // defers to commit)? Record which, and whether the label under the editor
+                    // still exists to show it.
+                    Check("SelectToolBtn");
+                    var d4t = LastText();
+                    selList.Clear(); if (d4t is not null) selList.Add(d4t);
+                    selField.SetValue(editor, d4t);
+                    Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(3);
+                    var d4Before = d4t?.Tag as AnnotationData;
+                    bool labelInTreeBefore = d4t is not null && canvas.Children.Contains(d4t);
+                    Fire(aaBtn); Pump(3);
+                    bool labelInTreeDuring = d4t is not null && canvas.Children.Contains(d4t);
+                    Fire(boldBtn); Pump(3);
+                    r3.AppendLine($"[R3-D plainTextAaBold] before.bold={d4Before?.Bold} " +
+                        $"storedAfterClick={(d4t?.Tag as AnnotationData)?.Bold} editorWeight={Live()?.FontWeight} " +
+                        $"labelInTree before={labelInTreeBefore} during={labelInTreeDuring}");
+                    Invoke("CommitText"); Pump(4);
+                    r3.AppendLine($"[R3-D afterCommit] bold={(LastText()?.Tag as AnnotationData)?.Bold}");
+
+                    // R3-E: the phantom restyle in R3-C replaces the element DURING Select(),
+                    // so PointerDown's `_movingSelection = _selection.Contains(hit)` (Input.cs:1094)
+                    // compares the pre-replacement `hit` against a list that now holds the
+                    // rebuilt element. Drive a real select-then-drag on a text box.
+                    Check("SelectToolBtn");
+                    Click(0.02, 0.02); Pump(3);            // clear selection
+                    // FAM-A sits at 0.30/0.60 (committed above).
+                    double lx0 = -1, ly0 = -1, lx1 = -1, ly1 = -1;
+                    var famTarget = canvas.Children.OfType<FrameworkElement>()
+                        .FirstOrDefault(f => (f.Tag as AnnotationData)?.Text == "FAM-A");
+                    if (famTarget is not null)
+                    {
+                        lx0 = Canvas.GetLeft(famTarget); ly0 = Canvas.GetTop(famTarget);
+                        var offBefore = AnnotationTransform.OffsetOf(famTarget);
+                        // One gesture: press on it, drag 60px right, release.
+                        editor.PointerDown(P(0.305, 0.605)); Pump(2);
+                        var afterSelect = canvas.Children.OfType<FrameworkElement>()
+                            .FirstOrDefault(f => (f.Tag as AnnotationData)?.Text == "FAM-A");
+                        bool replacedOnSelect = !ReferenceEquals(afterSelect, famTarget);
+                        for (int i = 1; i <= 10; i++) { editor.PointerMove(P(0.305 + 0.06 * i / 10.0, 0.605)); Pump(1); }
+                        editor.PointerUp(P(0.365, 0.605)); Pump(4);
+                        var moved = canvas.Children.OfType<FrameworkElement>()
+                            .FirstOrDefault(f => (f.Tag as AnnotationData)?.Text == "FAM-A");
+                        lx1 = moved is null ? -1 : Canvas.GetLeft(moved); ly1 = moved is null ? -1 : Canvas.GetTop(moved);
+                        var offAfter = moved is null ? default : AnnotationTransform.OffsetOf(moved);
+                        r3.AppendLine($"[R3-E selectThenDrag] replacedOnSelect={replacedOnSelect} " +
+                            $"left {lx0:F1}->{lx1:F1} offset {offBefore}->{offAfter} " +
+                            $"expect the box to move -> {(Math.Abs(offAfter.X - offBefore.X) > 5 ? "PASS" : "FAIL")}");
+                    }
+                    Shot("pointer-text-select-then-drag.png");
+
+                    File.WriteAllText(Path.Combine(outDir, "text-format-round3.txt"), r3.ToString());
+                    Shot("pointer-text-format-round3.png");
                 }
                 // ---- END TEXT FORMAT PARITY PROBE ---------------------------------
                 // --- Effects (WinShot-only; Survey has no equivalent): pixelate and blur. ---
@@ -2622,6 +2818,294 @@ public class AnnotationEditorRenderHarness
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         thread.Join();
+        if (failure is not null) throw new Xunit.Sdk.XunitException(failure.ToString());
+    }
+
+    /// <summary>
+    /// ROUND-3 AUDIT-ONLY probe (WINSHOT_RENDER_INKAUDIT3=1). Covers what the round-2 probe
+    /// does not: pen/highlighter live-vs-commit pop at HIGH ZOOM (where the 0.2 live dedupe
+    /// and the 0.35 commit compaction diverge by a whole screen pixel), the highlighter's own
+    /// release pop (preview = stroked polyline with a whole-page multiply brush, commit =
+    /// filled swept disk with a CROPPED multiply brush), whether ink survives ON the eraser's
+    /// own centreline, and the per-sample cost of the live carve.
+    /// </summary>
+    [Fact]
+    public void RenderInkEraserRound3Audit()
+    {
+        if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_INKAUDIT3") != "1")
+            return;
+
+        string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUTPUT")
+            ?? Path.Combine(Path.GetTempPath(), "winshot-annotation-render");
+        Directory.CreateDirectory(outDir);
+        var log = new System.Text.StringBuilder();
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(
+                    new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+                var app = Application.Current ?? new Application();
+                app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                ThemeResources.EnsureLoaded();
+
+                var settings = new SettingsService();
+                var history = new HistoryService(settings);
+                var source = CreateSanitizedSource();
+                var editor = new EditorWindow(source, settings, history)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -6000,
+                    Top = -6000,
+                    ShowInTaskbar = false,
+                };
+                editor.Show();
+                Pump(45);
+
+                var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+                var viewport = (FrameworkElement)editor.FindName("Viewport")!;
+                var canvasHost = (FrameworkElement)editor.FindName("CanvasHost")!;
+                double W = source.Width, H = source.Height;
+                var penSizeField = typeof(EditorWindow).GetField("_penSize",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var eraserSizeField = typeof(EditorWindow).GetField("_eraserSize",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var zoomField = typeof(EditorWindow).GetField("_zoom",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var zoomAt = typeof(EditorWindow).GetMethod("ZoomAt",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+                EditorWindow.PointerArgs Pt(Point c) =>
+                    new(c, canvas.TranslatePoint(c, viewport), MouseButton.Left, 1);
+                void Check(string name)
+                { ((RadioButton)editor.FindName(name)!).IsChecked = true; Pump(3); }
+                double GeomArea(Geometry g) =>
+                    g is null ? 0 : g.GetFlattenedPathGeometry().GetArea();
+                int Figures(Geometry g) =>
+                    g is null ? 0 : g.GetFlattenedPathGeometry().Figures.Count;
+                void SetZoom(double z)
+                {
+                    if (Math.Abs(z - 1.0) < 1e-9) { InvokePrivate(editor, "FitToView"); Pump(4); return; }
+                    zoomAt.Invoke(editor, new object[]
+                    { canvas.TranslatePoint(new Point(W / 2, H / 2), viewport), z });
+                    Pump(6);
+                }
+                (int px, int worst) Diff(SD.Bitmap a, SD.Bitmap b)
+                {
+                    int n = 0, worst = 0;
+                    for (int y = 0; y < Math.Min(a.Height, b.Height); y++)
+                        for (int x = 0; x < Math.Min(a.Width, b.Width); x++)
+                        {
+                            var p = a.GetPixel(x, y); var q = b.GetPixel(x, y);
+                            int e = Math.Max(Math.Abs(p.R - q.R),
+                                Math.Max(Math.Abs(p.G - q.G), Math.Abs(p.B - q.B)));
+                            if (e > 3) { n++; if (e > worst) worst = e; }
+                        }
+                    return (n, worst);
+                }
+
+                // ---------- A. pen + highlighter live->commit pop, measured in VIEWPORT pixels
+                // at the zoom the user actually draws at. Canvas-space sampling is 1/zoom of a
+                // screen pixel, so the gap between the 0.2 live gate and the 0.35 commit
+                // compaction is 0.35*zoom SCREEN px - invisible at fit, a whole pixel at 300%.
+                foreach (var (tool, btn, size) in new[]
+                { ("pen", "FreehandToolBtn", 3.0), ("highlighter", "HighlighterToolBtn", 3.0) })
+                {
+                    foreach (double z in new[] { 1.0, 2.0, 3.0 })
+                    {
+                        canvas.Children.Clear(); Pump(3);
+                        SetZoom(z);
+                        penSizeField.SetValue(editor, size);
+                        Check(btn);
+                        double step = 1.0 / z;              // one screen pixel of hand travel
+                        var path = new List<Point>();
+                        for (double t = 0; t <= 240; t += step)
+                            path.Add(new Point(0.20 * W + t, 0.45 * H + 18 * Math.Sin(t / 24.0)));
+                        editor.PointerDown(Pt(path[0])); Pump(1);
+                        for (int i = 1; i < path.Count; i++) { editor.PointerMove(Pt(path[i])); Pump(1); }
+                        Pump(3);
+                        var live = canvas.Children.OfType<System.Windows.Shapes.Polyline>().Last();
+                        int livePts = live.Points.Count;
+                        int commitPts = PaperInk.Compact(live.Points).Count;
+                        using var before = BitmapEffects.RenderVisual(
+                            viewport, (int)viewport.ActualWidth, (int)viewport.ActualHeight);
+                        editor.PointerUp(Pt(path[^1])); Pump(6);
+                        using var after = BitmapEffects.RenderVisual(
+                            viewport, (int)viewport.ActualWidth, (int)viewport.ActualHeight);
+                        var (px, worst) = Diff(before, after);
+                        var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                        log.AppendLine($"R3-POP {tool} zoom={z} rawSamples={path.Count} " +
+                            $"livePts(0.2)={livePts} commitPts(0.35)={commitPts} " +
+                            $"droppedOnCommit={livePts - commitPts} " +
+                            $"viewportPopPixels={px} viewportPopWorst={worst} " +
+                            $"liveBrush={live.Stroke.GetType().Name} commitBrush={ink.Fill.GetType().Name} " +
+                            $"liveW={live.StrokeThickness} commitW={((AnnotationData)ink.Tag!).Thickness}");
+                        RenderToPng(editor, Path.Combine(outDir, $"r3-{tool}-z{z}-commit.png"), dpi: 96);
+                    }
+                }
+                InvokePrivate(editor, "FitToView"); Pump(4);
+
+                // ---------- B. does ink survive ON the eraser's own centreline?
+                // The definitive form of "sometimes ink is not cut where the eraser passed":
+                // walk the gesture polyline and ask the SURVIVING geometry whether it still
+                // contains that point. Any hit is ink left standing under the eraser's centre.
+                foreach (double pw in new[] { 1.0, 3.0, 12.0 })
+                {
+                    foreach (var (label, jitter, step) in new[]
+                    { ("smooth", 0.0, 6.0), ("jitter", 3.5, 6.0), ("fast-jitter", 3.5, 45.0) })
+                    {
+                        canvas.Children.Clear(); Pump(3);
+                        penSizeField.SetValue(editor, pw);
+                        Check("FreehandToolBtn");
+                        var a = new Point(0.06 * W, 0.5 * H);
+                        var b = new Point(0.94 * W, 0.5 * H);
+                        editor.PointerDown(Pt(a)); Pump(1);
+                        for (int i = 1; i <= 160; i++)
+                            { editor.PointerMove(Pt(new Point(a.X + (b.X - a.X) * i / 160.0, a.Y))); Pump(1); }
+                        editor.PointerUp(Pt(b)); Pump(4);
+                        var ink = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+                        double areaBefore = GeomArea(ink.Data!);
+
+                        eraserSizeField.SetValue(editor, 16.0);
+                        Check("EraserToolBtn"); Pump(2);
+                        var rnd = new Random(11);
+                        var gesture = new List<Point>();
+                        for (double x = 0.20 * W; x <= 0.80 * W; x += step)
+                            gesture.Add(new Point(x, 0.5 * H + (jitter > 0 ? (rnd.NextDouble() * 2 - 1) * jitter : 0)));
+                        editor.PointerDown(Pt(gesture[0])); Pump(1);
+                        for (int i = 1; i < gesture.Count; i++) { editor.PointerMove(Pt(gesture[i])); Pump(1); }
+                        editor.PointerUp(Pt(gesture[^1])); Pump(5);
+
+                        bool survived = canvas.Children.Contains(ink);
+                        int stillInked = 0, probes = 0;
+                        if (survived)
+                        {
+                            var g = ink.Data!;
+                            for (int i = 1; i < gesture.Count; i++)
+                                for (double t = 0; t <= 1; t += 0.1)
+                                {
+                                    var p = new Point(
+                                        gesture[i - 1].X + (gesture[i].X - gesture[i - 1].X) * t,
+                                        gesture[i - 1].Y + (gesture[i].Y - gesture[i - 1].Y) * t);
+                                    probes++;
+                                    if (g.FillContains(p, PaperInk.Tolerance, ToleranceType.Absolute)) stillInked++;
+                                }
+                        }
+                        log.AppendLine($"R3-CENTRELINE penW={pw} {label} step={step} " +
+                            $"gestureSamples={gesture.Count} survived={survived} " +
+                            $"figures={(survived ? Figures(ink.Data!) : 0)} " +
+                            $"area {areaBefore:F1}->{(survived ? GeomArea(ink.Data!) : 0):F1} " +
+                            $"inkLeftUnderEraserCentre={stillInked}/{probes}");
+                        RenderToPng(editor, Path.Combine(outDir, $"r3-centreline-w{pw}-{label}.png"), dpi: 192);
+                    }
+                }
+
+                // ---------- C. cost of one live eraser sample, with and without a highlighter.
+                // Survey's live preview is an O(1) destination-out punch into a cloned SVG and
+                // its mix-blend-mode is re-evaluated by the compositor for free
+                // (FabricEraserCanvas.jsx:1704-1712). WinShot runs the real boolean carve per
+                // sample and re-bakes every highlighter's ImageBrush from a full-canvas render.
+                foreach (bool withHighlighter in new[] { false, true })
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    if (withHighlighter)
+                    {
+                        penSizeField.SetValue(editor, 12.0);
+                        Check("HighlighterToolBtn");
+                        editor.PointerDown(Pt(new Point(0.10 * W, 0.30 * H))); Pump(1);
+                        for (int i = 1; i <= 40; i++)
+                            { editor.PointerMove(Pt(new Point(0.10 * W + 0.80 * W * i / 40.0, 0.30 * H))); Pump(1); }
+                        editor.PointerUp(Pt(new Point(0.90 * W, 0.30 * H))); Pump(6);
+                    }
+                    penSizeField.SetValue(editor, 6.0);
+                    Check("FreehandToolBtn");
+                    editor.PointerDown(Pt(new Point(0.06 * W, 0.55 * H))); Pump(1);
+                    for (int i = 1; i <= 120; i++)
+                        { editor.PointerMove(Pt(new Point(0.06 * W + 0.88 * W * i / 120.0, 0.55 * H))); Pump(1); }
+                    editor.PointerUp(Pt(new Point(0.94 * W, 0.55 * H))); Pump(4);
+
+                    eraserSizeField.SetValue(editor, 20.0);
+                    Check("EraserToolBtn"); Pump(2);
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    int samples = 90;
+                    editor.PointerDown(Pt(new Point(0.20 * W, 0.55 * H - 40))); Pump(1);
+                    for (int i = 1; i <= samples; i++)
+                        editor.PointerMove(Pt(new Point(0.20 * W + 0.60 * W * i / samples,
+                                                        0.55 * H - 40 + 80.0 * i / samples)));
+                    double moveMs = sw.Elapsed.TotalMilliseconds;
+                    sw.Restart();
+                    editor.PointerUp(Pt(new Point(0.80 * W, 0.55 * H + 40))); Pump(5);
+                    log.AppendLine($"R3-COST highlighterOnCanvas={withHighlighter} " +
+                        $"samples={samples} liveCarveTotalMs={moveMs:F1} perSampleMs={moveMs / samples:F2} " +
+                        $"commitMs={sw.Elapsed.TotalMilliseconds:F1}");
+                }
+
+                // ---------- D. does a MOVED highlighter re-blend against its new backdrop?
+                // Survey's mix-blend-mode is compositor-evaluated, so a dragged highlighter
+                // multiplies whatever it is over RIGHT NOW (svgAnnotationRenderers.jsx:272).
+                // WinShot bakes an ImageBrush cropped at ink.Data.Bounds - element-LOCAL
+                // coordinates - while moves live in a RenderTransform (EditorWindow.Handles.cs:
+                // 1931-1944), so the crop is taken from the pre-move page region.
+                {
+                    canvas.Children.Clear(); Pump(3);
+                    InvokePrivate(editor, "FitToView"); Pump(4);
+                    penSizeField.SetValue(editor, 14.0);
+                    Check("HighlighterToolBtn");
+                    double hy = 0.62 * H;                     // over the plain white lower card
+                    editor.PointerDown(Pt(new Point(0.35 * W, hy))); Pump(1);
+                    for (int i = 1; i <= 30; i++)
+                        { editor.PointerMove(Pt(new Point(0.35 * W + 0.30 * W * i / 30.0, hy))); Pump(1); }
+                    editor.PointerUp(Pt(new Point(0.65 * W, hy))); Pump(6);
+                    var hl = canvas.Children.OfType<System.Windows.Shapes.Path>().Last();
+
+                    Check("SelectToolBtn"); Pump(2);
+                    double dy = -(0.62 - 0.055) * H;          // drag UP onto the dark banner
+                    editor.PointerDown(Pt(new Point(0.50 * W, hy))); Pump(1);
+                    for (int i = 1; i <= 20; i++)
+                        { editor.PointerMove(Pt(new Point(0.50 * W, hy + dy * i / 20.0))); Pump(1); }
+                    editor.PointerUp(Pt(new Point(0.50 * W, hy + dy))); Pump(2);
+                    InvokePrivate(editor, "Select", null); Pump(6);
+
+                    var c = AnnotationStyle.HighlighterColor;
+                    using var shot = BitmapEffects.RenderVisual(canvasHost, source.Width, source.Height);
+                    long errNew = 0, errOld = 0; int n = 0;
+                    int y0 = (int)Math.Round(hy + dy);
+                    for (int y = y0 - 4; y <= y0 + 4; y++)
+                        for (int x = (int)(0.40 * W); x <= (int)(0.60 * W); x++)
+                        {
+                            if (y < 0 || y >= source.Height) continue;
+                            var got = shot.GetPixel(x, y);
+                            var now = source.GetPixel(x, y);
+                            var was = source.GetPixel(x, Math.Clamp((int)Math.Round(y - dy), 0, source.Height - 1));
+                            errNew += Math.Abs(got.R - HighlighterBlend.MultiplyChannel(now.R, c.R, c.A))
+                                    + Math.Abs(got.G - HighlighterBlend.MultiplyChannel(now.G, c.G, c.A))
+                                    + Math.Abs(got.B - HighlighterBlend.MultiplyChannel(now.B, c.B, c.A));
+                            errOld += Math.Abs(got.R - HighlighterBlend.MultiplyChannel(was.R, c.R, c.A))
+                                    + Math.Abs(got.G - HighlighterBlend.MultiplyChannel(was.G, c.G, c.A))
+                                    + Math.Abs(got.B - HighlighterBlend.MultiplyChannel(was.B, c.B, c.A));
+                            n++;
+                        }
+                    log.AppendLine($"R3-HLMOVE dy={dy:F0} dataBounds={hl.Data!.Bounds} " +
+                        $"renderOffset={AnnotationTransform.OffsetOf(hl)} " +
+                        $"meanErrVsNewBackdrop={(double)errNew / n / 3:F2} " +
+                        $"meanErrVsOldBackdrop={(double)errOld / n / 3:F2} " +
+                        $"(low err = that is the backdrop actually baked in)");
+                    RenderToPng(editor, Path.Combine(outDir, "r3-highlighter-moved.png"), dpi: 192);
+                }
+
+                File.WriteAllText(Path.Combine(outDir, "ink-eraser-round3.txt"), log.ToString());
+                editor.Close();
+                Pump(3);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        File.WriteAllText(Path.Combine(outDir, "ink-eraser-round3.txt"),
+            log.ToString() + (failure is null ? "" : "\nFAILURE: " + failure));
         if (failure is not null) throw new Xunit.Sdk.XunitException(failure.ToString());
     }
 

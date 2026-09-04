@@ -142,10 +142,13 @@
                          flex: it hangs off the cluster at `position:absolute; right:100%` with
                          `paddingRight: 8px` (AppShell.jsx:1468-1477), mirroring the properties
                          block at `left:100%` (:1734-1742), so only the category chips are centred.
-                         Right margin 11 = Survey's 18px divider-to-chip gap less the divider's own
-                         4px and the chip's 3px. -->
+                         Survey's two gaps around the divider: Select edge -> divider = block gap 6
+                         + divider margin 4 = 10px; divider -> first chip = divider margin 4 +
+                         block paddingRight 8 = 12px (the block is absolute so it skips the
+                         cluster's own 6px gap, and the chips carry no margin of their own).
+                         Right margin 5 = 12 less the divider's 4px and the chip's 3px. -->
                     <StackPanel x:Name="PanSelectPanel" Grid.Column="0" Orientation="Horizontal"
-                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0">
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,5,0">
                         <RadioButton x:Name="PanToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
                                      Tag="Pan" Checked="OnToolChecked" ToolTip="Pan"
                                      AutomationProperties.Name="Pan"
@@ -156,7 +159,9 @@
                                      ToolTip="Select" AutomationProperties.Name="Select"
                                      AutomationProperties.HelpText="Select annotations, drag a marquee, move, resize, or delete. Shortcut V."
                                      Content="{StaticResource SurveyIcon.Cursor}"/>
-                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                        <!-- Local margin beats the shared ToolbarDivider setter (Theme.xaml:967)
+                             so its other uses keep 4,0: Select's own 3px + 7 = Survey's 10px. -->
+                        <Rectangle Style="{StaticResource ToolbarDivider}" Margin="7,0,4,0"/>
                     </StackPanel>
 
                     <Grid Grid.Column="1">
@@ -878,7 +883,15 @@
                         BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,0,0,1"
                         AutomationProperties.Name="Group tools"
                         AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
-                    <Grid>
+                    <!-- Survey's sub-row centres on the WINDOW, not on the canvas: it is centred
+                         (PDFViewer.jsx:32026 `justifyContent:'center'`) inside the centre column,
+                         and that column is symmetric because BOTH rails are 48px (AppShell.jsx:2692
+                         left, :2841 right). WinShot has only the right rail, so centring inside the
+                         canvas column would land 24px left of the top bar's own centred cluster
+                         (AppShell.jsx:1344). A 48px left margin restores the symmetry:
+                         48 + (W-48-48)/2 = W/2. EditorGroupBar itself stays Stretch so its bottom
+                         hairline still terminates into the rail's left hairline, as Survey's does. -->
+                    <Grid Margin="48,0,0,0">
                     <!-- Survey's category portal suppresses itself while a rich-text editor
                          is live and the formatting strip takes the sub-row instead
                          (AppShell.jsx:1756-1772). -->
@@ -1005,12 +1018,16 @@
         </Grid>
 
         <!-- Survey chrome is FLAT and full-bleed: no radius, no border ring, no shadow,
-             no margin. The only Survey surface hosting these controls is the rail footer
-             (#12151c + a 1px #2a3140 top rule, AppShell.jsx:3011/3093), so the bottom band
-             uses the same fill and rule — and the rail can now land on it (LAYOUT-08). -->
+             no margin. Survey uses two chrome tokens with fixed roles: #181c24 is the
+             material for every band that SPANS the viewer width (top bar AppShell.jsx:1343,
+             sub-row PDFViewer.jsx:32021), and #12151c is reserved for the vertical rail /
+             panel surface and anything hosted inside it (rail hosts AppShell.jsx:2697/2847,
+             SurveySpacesRail.jsx:1229, panel footer AppShell.jsx:3093). This band spans the
+             viewer width, so it is #181c24 with a 1px #2a3140 top rule — the same material
+             as the top bar, which is what makes the chrome read as one system. -->
         <Border x:Name="EditorBottomBar" Grid.Row="2" Grid.Column="0"
                 Margin="0" Padding="12,6" CornerRadius="0"
-                Background="{StaticResource ChromeRailBrush}"
+                Background="{StaticResource ChromeBgBrush}"
                 BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,1,0,0"
                 SnapsToDevicePixels="True">
             <Grid>

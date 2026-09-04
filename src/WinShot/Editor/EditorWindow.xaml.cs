@@ -780,10 +780,17 @@ public partial class EditorWindow : Window
     {
         if (CaptureShadow is null || _sourceWidth < 1 || _sourceHeight < 1) return;
         CaptureShadow.Visibility = Visibility.Visible;
-        CaptureShadow.Width = Math.Max(1, _sourceWidth * _zoom);
-        CaptureShadow.Height = Math.Max(1, _sourceHeight * _zoom);
-        Canvas.SetLeft(CaptureShadow, ViewTranslate.X);
-        Canvas.SetTop(CaptureShadow, ViewTranslate.Y);
+        // Survey's page has ONE edge treatment: box-shadow 0 2px 14px rgba(0,0,0,0.45)
+        // (PdfjsViewerContainer.jsx:351), so 0.45 is a hard ceiling on how dark any pixel
+        // around the page can get. WPF needs an opaque caster for DropShadowEffect to cast
+        // at all, so the caster is inset 1px on every side: rounding between Canvas.SetLeft
+        // (raw ViewTranslate) and the image's own ScaleTransform otherwise lets the black
+        // rectangle peek past the image's antialiased bottom/right edge as a hard line.
+        // The blur shifts inward by 1px, which is imperceptible against a 14px radius.
+        CaptureShadow.Width = Math.Max(1, _sourceWidth * _zoom - 2);
+        CaptureShadow.Height = Math.Max(1, _sourceHeight * _zoom - 2);
+        Canvas.SetLeft(CaptureShadow, ViewTranslate.X + 1);
+        Canvas.SetTop(CaptureShadow, ViewTranslate.Y + 1);
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();
