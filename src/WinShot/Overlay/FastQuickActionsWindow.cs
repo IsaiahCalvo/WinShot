@@ -42,6 +42,9 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly QuickActionsContextMenu _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
     private QuickAccessTooltipWindow? _tooltipWindow;
+    /// <summary>Additive hover flyout for captures too long to review in the card. The card
+    /// itself is untouched by it: this is a separate click-through window beside it.</summary>
+    private TallCapturePreviewWindow? _tallPreview;
     private WF.Timer? _exitMotionTimer;
     private WF.Timer? _stackMotionTimer;
     private IDisposable? _exitMotionClock;
@@ -194,6 +197,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
             HideActionTooltip();
+            HideTallCapturePreview();
             // Restore-last reopens captures as images, so a media file never qualifies.
             if (_historyPath is not null && _mediaFilePath is null)
                 PushRecentlyClosed(_historyPath);
@@ -340,7 +344,51 @@ public sealed class FastQuickActionsWindow : WF.Form
             SetHover(-1);
             SetPressed(-1);
         }
+        UpdateTallCapturePreview(hovering);
         Invalidate();
+    }
+
+    /// <summary>
+    /// Raises (or retires) the tall-capture flyout. A 6,000 px scrolling capture centre-crops
+    /// to a smudge in a 150 px card, so anything at least 3:1 gets a full-length preview
+    /// floating above the card while the pointer is on it. Gated on the aspect ratio rather
+    /// than the capture kind: the card is not told which flow produced its image, and a 3:1
+    /// strip is unreviewable however it was made.
+    /// </summary>
+    private void UpdateTallCapturePreview(bool hovering)
+    {
+        if (!hovering || _closed || IsDisposed)
+        {
+            HideTallCapturePreview();
+            return;
+        }
+
+        if (_tallPreview is not null)
+            return;
+
+        try
+        {
+            TallCapturePreviewWindow? preview =
+                TallCapturePreviewWindow.TryCreate(_image, Bounds, _dpi, _visuals);
+            if (preview is null)
+                return;
+            _tallPreview = preview;
+            preview.Show(this);
+        }
+        catch (Exception ex)
+        {
+            // A preview that cannot be built must never take the hover down with it.
+            Log.Error("Tall-capture preview failed to open (non-fatal)", ex);
+            HideTallCapturePreview();
+        }
+    }
+
+    private void HideTallCapturePreview()
+    {
+        TallCapturePreviewWindow? preview = _tallPreview;
+        _tallPreview = null;
+        try { preview?.FadeOutAndClose(); }
+        catch (Exception ex) { Log.Error("Tall-capture preview failed to close (non-fatal)", ex); }
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)
@@ -423,6 +471,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // raised for the life of the process.
             EndStatusFlash();
             HideActionTooltip();
+            HideTallCapturePreview();
             _tooltipTimer.Dispose();
             _overflowMenu.Dispose();
             foreach (var button in _buttons)
