@@ -102,6 +102,12 @@ public partial class EditorWindow : Window
     private AnnotationData? _redactStrengthBefore;
     private UIElement? _redactStrengthElement;
 
+    // Counter re-numbering run: digits typed against one selected badge, committed as one
+    // undo entry when the selection changes or a non-digit key arrives.
+    private UIElement? _stepRetypeElement;
+    private AnnotationData? _stepRetypeBefore;
+    private int _stepRetypeValue;
+
     // Opacity-slider gesture: a continuous drag previews live but records ONE undo entry.
     // _opacityBefore is the selected element's style captured at gesture start.
     private StyleSnapshot? _opacityBefore;

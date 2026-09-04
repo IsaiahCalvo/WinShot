@@ -822,10 +822,12 @@ public partial class EditorWindow : Window
 
     private void Select(UIElement? element)
     {
-        // Selecting a different element (or deselecting) ends any in-progress opacity drag,
-        // committing it as one undo entry before the selection moves on.
+        // Selecting a different element (or deselecting) ends any in-progress opacity drag
+        // or counter re-numbering, committing each as one undo entry before moving on.
         if (_opacityElement is not null && !ReferenceEquals(_opacityElement, element))
             CommitOpacityGesture();
+        if (_stepRetypeElement is not null && !ReferenceEquals(_stepRetypeElement, element))
+            CommitStepRetype();
         // Picking one mark replaces any marquee group.
         if (element is not null) ClearMultiSelection();
         _selected = element;

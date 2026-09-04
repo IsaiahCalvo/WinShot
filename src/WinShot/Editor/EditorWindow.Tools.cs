@@ -87,8 +87,15 @@ public partial class EditorWindow : Window
         tb.LostKeyboardFocus += (_, _) => CommitText();
         tb.PreviewKeyDown += (_, ev) =>
         {
-            if (ev.Key == Key.Enter) { CommitText(); ev.Handled = true; }
-            else if (ev.Key == Key.Escape) { CancelText(); ev.Handled = true; }
+            if (ev.Key == Key.Escape) { CancelText(); ev.Handled = true; return; }
+            if (ev.Key != Key.Enter) return;
+
+            // Shift+Enter breaks the line; plain Enter and Ctrl+Enter both commit, so the
+            // habit of pressing Enter to finish survives the box becoming multi-line.
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+                return;
+            CommitText();
+            ev.Handled = true;
         };
     }
 

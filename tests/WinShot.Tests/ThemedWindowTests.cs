@@ -86,6 +86,7 @@ public class ThemedWindowTests
                 EditorShellContractSmoke(editor);
                 RedactionObjectSmoke(editor);
                 AnnotationClipboardSmoke(editor);
+                TextAndCounterSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
                 PinSmoke(editor);
@@ -685,6 +686,63 @@ public class ThemedWindowTests
         Assert.Single(canvas.Children);
 
         select.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
+    }
+
+    /// <summary>
+    /// Text is multi-line now, and a committed counter can be re-numbered by typing over it
+    /// — with the rest of the sequence following, because renumbering one badge and leaving
+    /// the counter where it was would just make the next one collide.
+    /// </summary>
+    private static readonly string LineBreak = ((char)10).ToString();
+
+    private static void TextAndCounterSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+
+        // The editor box takes returns and wraps; a caption that runs long used to march
+        // off the edge of the picture.
+        var box = AnnotationFactory.CreateTextEditor(Brushes.White, 20);
+        Assert.True(box.AcceptsReturn);
+        Assert.Equal(TextWrapping.Wrap, box.TextWrapping);
+
+        // One line reads the same centred or left; a paragraph does not.
+        var oneLine = (TextBlock)AnnotationFactory.CreateStyledTextLabel(
+            "Caption", Brushes.White, 20, TextStyle.Plain);
+        Assert.Equal(TextAlignment.Center, oneLine.TextAlignment);
+        var paragraph = (TextBlock)AnnotationFactory.CreateStyledTextLabel(
+            string.Join(LineBreak, "one", "two", "three"), Brushes.White, 20, TextStyle.Plain);
+        Assert.Equal(TextAlignment.Left, paragraph.TextAlignment);
+
+        canvas.Children.Clear();
+        var badge = AnnotationFactory.CreateStepBadge(1, Colors.Red, 4, letters: false);
+        badge.Tag = AnnotationData.ForStep(new Point(5, 5), 1, Colors.Red, 4);
+        canvas.Children.Add(badge);
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { badge });
+
+        var retype = type.GetMethod("TryRetypeStepNumber", NP)!;
+        var nextStep = type.GetField("_nextStep", NP)!;
+        Assert.True((bool)retype.Invoke(editor, new object[] { Key.D1 })!);
+        Assert.True((bool)retype.Invoke(editor, new object[] { Key.D2 })!);
+
+        string caption = badge.Children.OfType<TextBlock>().First().Text;
+        Assert.Equal("12", caption);
+        Assert.Equal(13, (int)nextStep.GetValue(editor)!);
+
+        // The whole run is ONE undo entry, not one per digit.
+        type.GetMethod("CommitStepRetype", NP)!.Invoke(editor, Array.Empty<object>());
+        WaitForTask((Task)type.GetMethod("UndoAsync", NP)!.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal("1", badge.Children.OfType<TextBlock>().First().Text);
+        Assert.Equal(2, (int)nextStep.GetValue(editor)!);
+
+        // A letter is not a digit, so it never reaches the badge.
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { badge });
+        Assert.False((bool)retype.Invoke(editor, new object[] { Key.A })!);
+
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
         canvas.Children.Clear();
     }
 

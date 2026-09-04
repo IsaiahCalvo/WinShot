@@ -303,6 +303,15 @@ public partial class EditorWindow : Window
             return;
         }
 
+        // Typing over a selected counter re-numbers it, before the letter keys get a look
+        // in — a digit is never a tool shortcut, so nothing is shadowed.
+        if (Keyboard.Modifiers == ModifierKeys.None && TryRetypeStepNumber(e.Key))
+        {
+            e.Handled = true;
+            return;
+        }
+        CommitStepRetype(); // any other key ends the run
+
         // Single-letter tool shortcuts (no modifiers). Ignored while a curved arrow is
         // mid-edit so Escape/commit stays the only way out of that transient mode.
         if (Keyboard.Modifiers == ModifierKeys.None && _pendingCurve is null && TrySelectToolByKey(e.Key))

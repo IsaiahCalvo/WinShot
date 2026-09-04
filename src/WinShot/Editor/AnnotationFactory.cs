@@ -312,7 +312,7 @@ internal static class AnnotationFactory
     /// Formats a 1-based step index as a spreadsheet-style letter sequence
     /// (1→A, 26→Z, 27→AA, …). Values &lt; 1 fall back to "A".
     /// </summary>
-    private static string StepLetterLabel(int number)
+    public static string StepLetterLabel(int number)
     {
         if (number < 1) return "A";
         var sb = new System.Text.StringBuilder();
@@ -351,6 +351,12 @@ internal static class AnnotationFactory
         new()
         {
             MinWidth = 48,
+            // A caption that runs long used to march off the edge of the picture with no
+            // way to break it. Enter still commits (that is the muscle memory); Shift+Enter
+            // is the newline, and the box wraps once it reaches its own width.
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 640,
             FontSize = fontSize,
             FontWeight = FontWeights.SemiBold,
             Foreground = foreground,
@@ -370,7 +376,26 @@ internal static class AnnotationFactory
             FontWeight = FontWeights.SemiBold,
             Foreground = foreground,
             Background = Brushes.Transparent,
+            // A one-line caption reads the same centred or left; a paragraph does not, and
+            // ragged-centre body text is the tell that a label became a note.
+            TextAlignment = LineCount(text) >= MultiLineThreshold
+                ? TextAlignment.Left
+                : TextAlignment.Center,
         };
+
+    /// <summary>Lines above which a text annotation stops being a caption and starts being a note.</summary>
+    private const int MultiLineThreshold = 3;
+
+    private const char LineFeed = (char)10;
+    private const char CarriageReturn = (char)13;
+
+    private static int LineCount(string text)
+    {
+        int lines = 1;
+        foreach (char c in text)
+            if (c == LineFeed) lines++;
+        return lines;
+    }
 
     /// <summary>
     /// Builds the committed annotation element for a text style. Plain/Bold/Huge return
@@ -390,7 +415,12 @@ internal static class AnnotationFactory
             case TextStyle.Outline:
                 var typeface = new Typeface(new FontFamily("Segoe UI"),
                     FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
-                var formatted = new FormattedText(text, CultureInfo.CurrentUICulture,
+                // FormattedText draws a carriage return as a glyph rather than a break,
+                // so a multi-line outline label would otherwise come out with boxes in it.
+                var formatted = new FormattedText(
+                    text.Replace(CarriageReturn.ToString() + LineFeed, LineFeed.ToString())
+                        .Replace(CarriageReturn, LineFeed),
+                    CultureInfo.CurrentUICulture,
                     FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
                 return new Path
                 {

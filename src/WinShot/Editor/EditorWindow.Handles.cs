@@ -477,6 +477,28 @@ public partial class EditorWindow : Window
         double newFont = Math.Clamp(baseFont * ratio, 6, 1000);
         SetFontSize(fe, newFont);
         fe.UpdateLayout();
+        // The size field reads the live point size while the corner is dragged, so the
+        // number the user will type next time is the number they are looking at now.
+        ShowLiveTextSize(newFont);
+    }
+
+    /// <summary>
+    /// Pushes a dragged text size into the size field without treating it as a user edit
+    /// (which would restyle the selection back and fight the drag).
+    /// </summary>
+    private void ShowLiveTextSize(double fontSize)
+    {
+        if (SizeBox is null) return;
+        int width = AnnotationSize.Clamp((int)Math.Round((fontSize - 11) / 4));
+        _syncingThicknessButtons = true;
+        try
+        {
+            SizeBox.Text = width.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
+        }
     }
 
     /// <summary>Freehand / highlighter: scale every stored point about the box's top-left so the polyline fits the new box.</summary>
@@ -947,8 +969,90 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Maps a single-letter shortcut to a tool, mirroring the toolbar toggle. Returns false if unmapped.</summary>
+    /// <summary>
+    /// A committed counter can be re-numbered: select it and type. Subsequent counters
+    /// continue from the value you typed, which is the whole point — renumbering one badge
+    /// without moving the sequence would just make the next one collide.
+    ///
+    /// Digits accumulate while the same badge stays selected (so "1","2" is 12, not 2) and
+    /// the whole run commits as ONE undo entry. There is no timer: the run ends when the
+    /// selection changes or a non-digit key arrives, which are the only things that can
+    /// mean "done".
+    /// </summary>
+    private bool TryRetypeStepNumber(Key key)
+    {
+        if (_selected is not Grid badge || badge.Tag is not AnnotationData meta ||
+            meta.Type != AnnotationData.TypeStep)
+            return false;
+
+        int digit = key switch
+        {
+            >= Key.D0 and <= Key.D9 => key - Key.D0,
+            >= Key.NumPad0 and <= Key.NumPad9 => key - Key.NumPad0,
+            _ => -1,
+        };
+        if (digit < 0) return false;
+
+        if (!ReferenceEquals(_stepRetypeElement, _selected))
+        {
+            CommitStepRetype();
+            _stepRetypeElement = _selected;
+            _stepRetypeBefore = meta.Clone();
+            _stepRetypeValue = 0;
+        }
+
+        // 0-99. A third digit starts over rather than silently clamping to 99, which is
+        // what a typo feels like it should do.
+        int next = _stepRetypeValue * 10 + digit;
+        _stepRetypeValue = next > 99 ? digit : next;
+        ApplyStepNumber(badge, _stepRetypeValue);
+        _nextStep = _stepRetypeValue + 1;
+        return true;
+    }
+
+    /// <summary>Writes a number into a live counter badge and its metadata.</summary>
+    private static void ApplyStepNumber(Grid badge, int number)
+    {
+        if (badge.Tag is not AnnotationData meta) return;
+        bool letters = string.Equals(meta.Style, "Letter", StringComparison.Ordinal);
+        foreach (object child in badge.Children)
+            if (child is TextBlock caption)
+                caption.Text = letters
+                    ? AnnotationFactory.StepLetterLabel(number)
+                    : number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        meta.Number = number;
+    }
+
+    /// <summary>Ends a re-numbering run, recording it as one reversible step.</summary>
+    private void CommitStepRetype()
+    {
+        if (_stepRetypeElement is not Grid badge || _stepRetypeBefore is not { } before)
+        {
+            _stepRetypeElement = null;
+            _stepRetypeBefore = null;
+            return;
+        }
+        _stepRetypeElement = null;
+        _stepRetypeBefore = null;
+        if (badge.Tag is not AnnotationData after || before.Number == after.Number) return;
+
+        int beforeNumber = before.Number ?? 1;
+        int afterNumber = after.Number ?? 1;
+        Push(new EditorAction(
+            undo: () => { ApplyStepNumber(badge, beforeNumber); _nextStep = beforeNumber + 1; },
+            redo: () => { ApplyStepNumber(badge, afterNumber); _nextStep = afterNumber + 1; }),
+            apply: false);
+    }
+
+    /// <summary>
+    /// Single-letter keys. Tools arm a tool; B and I run the two image actions, which is
+    /// where B went when the redaction rework took it off Blur.
+    /// </summary>
     private bool TrySelectToolByKey(Key key)
     {
+        if (key == Key.B) { OnAddBackground(this, new RoutedEventArgs()); return true; }
+        if (key == Key.I) { OnAddImage(this, new RoutedEventArgs()); return true; }
+
         EditorTool? tool = key switch
         {
             Key.V => EditorTool.Select,
