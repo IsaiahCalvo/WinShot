@@ -1012,8 +1012,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         else if (_recordingHud && _pendingScreen is null && _hoverPane is SD.Rectangle hudPane)
         {
             // With the HUD up a window click frames the take rather than starting it — the
-            // options still have to be chosen, and the HUD is where they live.
-            SelectedByPaneClick = true;
+            // options still have to be chosen, and the HUD is where they live. No
+            // SelectedByPaneClick: nothing is being confirmed yet, and that flag opts the
+            // result into probe refinement downstream.
             _pendingScreen = hudPane;
             DismissHint();
             InvalidateAllSurfaces();

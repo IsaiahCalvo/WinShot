@@ -302,7 +302,6 @@ public partial class SettingsWindow : Window
             fallbackIndex: 4);
         RememberLastSelectionCheck.IsChecked = s.RememberLastSelection;
         DimScreenCheck.IsChecked = s.DimScreenWhileRecording;
-        ShowCountdownCheck.IsChecked = s.ShowRecordingCountdown;
         CountdownBox.Text = s.RecordingCountdownSeconds.ToString();
         SelectByTag(WebcamCombo, s.WebcamOverlayPosition, fallbackIndex: 0);
         WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(s.WebcamOverlaySizePercent).ToString();

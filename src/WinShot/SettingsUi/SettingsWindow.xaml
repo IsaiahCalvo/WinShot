@@ -748,10 +748,6 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                         <CheckBox x:Name="DimScreenCheck" Content="Dim screen while recording"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="UnavailableShowCountdownRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="ShowCountdownCheck" Content="Show countdown"/>
-                                    </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Countdown"/>
                                         <StackPanel Orientation="Horizontal">
