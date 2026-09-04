@@ -46,6 +46,7 @@ public partial class HistoryWindow : Window
     private HistoryItem? _dragItem;
     private bool _dragging;
     private bool _loadedOnce;
+    private DragPreview? _dragPreview;
     private FileSystemWatcher? _watcher;
     private DispatcherTimer? _watcherDebounce;
 
@@ -86,6 +87,8 @@ public partial class HistoryWindow : Window
             _loadCts?.Cancel();
             StopWatcher();
             _preview?.Close();
+            _dragPreview?.Dispose();
+            _dragPreview = null;
             ClearLoadedItems();
             MemoryCleanup.Request();
         };
@@ -1056,10 +1059,17 @@ public partial class HistoryWindow : Window
         }
 
         _dragging = true;
+        // Windows draws only its generic file-drag cursor, so without this the user cannot see
+        // which capture is in flight. One preview window per History, shown and hidden around
+        // the drag, tracked from GiveFeedback exactly as the editor's drag-out pill does.
+        DragPreview? preview = ShowDragPreview(item);
+        var source = (UIElement)sender;
+        void OnFeedback(object s, GiveFeedbackEventArgs args) => preview?.MoveToCursor();
         try
         {
+            source.GiveFeedback += OnFeedback;
             var data = new DataObject(DataFormats.FileDrop, new[] { item.FilePath });
-            DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Copy);
+            DragDrop.DoDragDrop(source, data, DragDropEffects.Copy);
         }
         catch (Exception ex)
         {
@@ -1067,10 +1077,47 @@ public partial class HistoryWindow : Window
         }
         finally
         {
+            source.GiveFeedback -= OnFeedback;
+            preview?.Hide();
             _dragging = false;
             _dragItem = null;
         }
     }
+
+    private DragPreview? ShowDragPreview(HistoryItem item)
+    {
+        if (DragThumbnail(item.Thumbnail) is not BitmapSource thumbnail)
+            return null;
+
+        try
+        {
+            _dragPreview ??= new DragPreview();
+            _dragPreview.Show(thumbnail, VisualTreeHelper.GetDpi(this).DpiScaleX);
+            return _dragPreview;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not show the history drag preview", ex);
+            return null;
+        }
+    }
+
+    /// <summary>The tile's own thumbnail, scaled down if it is a video frame (those decode at
+    /// up to 640 px, which would follow the cursor as a full-size window).</summary>
+    internal static BitmapSource? DragThumbnail(ImageSource? source)
+    {
+        if (source is not BitmapSource bitmap || bitmap.PixelWidth <= 0)
+            return null;
+        if (bitmap.PixelWidth <= DragPreviewMaxWidth)
+            return bitmap;
+
+        double scale = (double)DragPreviewMaxWidth / bitmap.PixelWidth;
+        var scaled = new TransformedBitmap(bitmap, new ScaleTransform(scale, scale));
+        scaled.Freeze();
+        return scaled;
+    }
+
+    private const int DragPreviewMaxWidth = 200;
 
     private async void OnCopy(object sender, RoutedEventArgs e)
     {
@@ -1475,6 +1522,10 @@ public sealed class HistoryItem : INotifyPropertyChanged
     }
     public Visibility GifBadgeVisibility => IsGif ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SourceAppVisibility => SourceAppIcon is null ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>Tile tooltip. Dragging a tile into another app has always worked and has never
+    /// been advertised anywhere, so the tooltip that already showed the file name says it.</summary>
+    public string DragHint => $"{FileName}\nDrag into another app to copy the file there.";
 
     public string AccessibleName =>
         $"{(IsScrollingCapture ? "Scrolling screenshot" : IsImage ? "Screenshot" : ExtensionLabel)}" +

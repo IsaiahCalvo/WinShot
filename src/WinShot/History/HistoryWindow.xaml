@@ -201,7 +201,8 @@
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Border x:Name="Card" Width="260" Background="Transparent" MouseLeftButtonDown="OnTileMouseDown" MouseMove="OnTileMouseMove" MouseEnter="OnTileMouseEnter">
+                        <Border x:Name="Card" Width="260" Background="Transparent" Cursor="Hand"
+                                MouseLeftButtonDown="OnTileMouseDown" MouseMove="OnTileMouseMove" MouseEnter="OnTileMouseEnter">
                             <Border.ContextMenu>
                                 <ContextMenu Style="{StaticResource DarkContextMenu}">
                                     <MenuItem Header="Restore to Quick Access" Click="OnRestore" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
@@ -308,7 +309,7 @@
                                         </Border>
                                     </Grid>
                                 </Border>
-                                <StackPanel Grid.Row="1" Margin="7,7,7,10" ToolTip="{Binding FileName}">
+                                <StackPanel Grid.Row="1" Margin="7,7,7,10" ToolTip="{Binding DragHint}">
                                     <TextBlock Text="{Binding RelativeTime}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextBody}" TextTrimming="CharacterEllipsis"/>
                                     <TextBlock Text="{Binding MetadataText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}" Margin="0,3,0,0"/>
                                 </StackPanel>

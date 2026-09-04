@@ -222,6 +222,27 @@ public class HistoryAcceptanceTests
         }
     }
 
+    [Theory]
+    [InlineData(180, 120, 180, 120)]  // a still's own 180px thumbnail is already the right size
+    [InlineData(640, 360, 200, 113)]  // a video frame decodes far larger and is scaled down
+    public void DragGhost_ReusesTheTileThumbnailWithoutOversizingIt(
+        int width, int height, int expectedWidth, int expectedHeight)
+    {
+        var source = new System.Windows.Media.Imaging.WriteableBitmap(
+            width, height, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+
+        var ghost = HistoryWindow.DragThumbnail(source);
+
+        Assert.NotNull(ghost);
+        Assert.Equal(expectedWidth, ghost!.PixelWidth);
+        Assert.Equal(expectedHeight, ghost.PixelHeight);
+        Assert.True(ghost.IsFrozen || ReferenceEquals(ghost, source));
+    }
+
+    [Fact]
+    public void DragGhost_IsSkippedWhenTheTileHasNoThumbnailYet() =>
+        Assert.Null(HistoryWindow.DragThumbnail(null));
+
     [Fact]
     public void ThumbnailDecode_RunsSeveralAtOnceWithoutTakingTheWholePool() =>
         Assert.InRange(HistoryWindow.ThumbnailDecodeParallelism, 2, 6);
