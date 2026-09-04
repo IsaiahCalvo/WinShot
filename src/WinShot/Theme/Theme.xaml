@@ -26,13 +26,16 @@
     <Color x:Key="SurfaceColor">#FF2E2E30</Color>       <!-- raised control surface (secondary pill, combo, slider track-fill region) -->
     <Color x:Key="SurfaceAltColor">#FF38383B</Color>    <!-- inputs / combo toggle / track -->
     <Color x:Key="ElevatedColor">#FF323236</Color>      <!-- popups / flyouts / context menus -->
-    <!-- Active-tool chip. Neutral on purpose (the accent is reserved for modes), but it
-         has to WIN against a plain hover: at #3A3A40 the chip sat at 1.34:1 over the
-         toolbar while the 12% white hover wash composited to 1.46:1, so whichever tool
-         the pointer happened to be over looked more selected than the one that was.
-         This value clears 3:1 over the toolbar ground (WCAG 1.4.11 for a state
-         indicator) and stays roughly 2:1 brighter than the hover wash. -->
-    <Color x:Key="ToolChipColor">#FF70707A</Color>
+    <!-- Active-tool chip: dark fill + bright ring. Neutral on purpose (the accent is
+         reserved for modes). One filled neutral cannot do this job on its own — clearing
+         3:1 over the toolbar (WCAG 1.4.11 for a state indicator) needs a luminance of at
+         least 0.159, and carrying TextPrimary at 4.5:1 needs at most 0.159, and the hover
+         and press washes stack on top of whatever we pick. So the FILL stays dark enough
+         for the glyph (10.1:1, and still 8:1 under both washes) and the RING carries the
+         state signal at 3.07:1 against the toolbar ground — brighter than anything a plain
+         hover composites to, so the selected tool still outranks a merely hovered one. -->
+    <Color x:Key="ToolChipColor">#FF3A3A40</Color>
+    <Color x:Key="ToolChipRingColor">#FF70707A</Color>
 
     <!-- Translucent floating-surface base (one recipe for ALL overlays) -->
     <Color x:Key="FloatingBgColor">#F5262628</Color>    <!-- ~96% opaque toolbar charcoal -->
@@ -55,9 +58,15 @@
     <Color x:Key="TextSecondaryColor">#B3FFFFFF</Color>  <!-- ~70% white, labels/values -->
     <Color x:Key="TextDisabledColor">#66FFFFFF</Color>   <!-- ~40% white -->
 
-    <!-- Interaction fills (white-alpha; one ladder) -->
+    <!-- Interaction fills. Hover lightens, press DARKENS — the same ladder
+         DarkControlPalette.HoverPressLighten uses on the WinForms side (+18 hovering,
+         -12 pressed). The templates that own both keep them as separate layers, so a
+         press necessarily lands on top of a hover; a second lightening wash made every
+         pressed surface the brightest thing on screen and drove the glyph on a checked
+         tool button down to 2.56:1. Dipping on press reads as pressed and keeps the
+         worst stack (chip + hover + press) at 8.8:1 for text. -->
     <Color x:Key="HoverFillColor">#1FFFFFFF</Color>      <!-- ~12% white circular/row hover -->
-    <Color x:Key="PressedFillColor">#2EFFFFFF</Color>    <!-- ~18% white pressed -->
+    <Color x:Key="PressedFillColor">#2E000000</Color>    <!-- ~18% black pressed -->
 
     <!-- Hairlines / borders (one token for structure, one for emphasis) -->
     <Color x:Key="BorderColor">#1FFFFFFF</Color>         <!-- ~12% white: dividers, toolbar/panel edge, separators -->
@@ -71,6 +80,7 @@
     <SolidColorBrush x:Key="SurfaceAltBrush"   Color="{StaticResource SurfaceAltColor}"/>
     <SolidColorBrush x:Key="ElevatedBrush"     Color="{StaticResource ElevatedColor}"/>
     <SolidColorBrush x:Key="ToolChipBrush"     Color="{StaticResource ToolChipColor}"/>
+    <SolidColorBrush x:Key="ToolChipRingBrush" Color="{StaticResource ToolChipRingColor}"/>
     <SolidColorBrush x:Key="FloatingBgBrush"   Color="{StaticResource FloatingBgColor}"/>
 
     <SolidColorBrush x:Key="AccentBrush"        Color="{StaticResource AccentColor}"/>
@@ -248,6 +258,7 @@
          ==================================================================== -->
     <Style x:Key="ToolButton" TargetType="ToggleButton">
         <Setter Property="Background" Value="{StaticResource ToolChipBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ToolChipRingBrush}"/>
         <Setter Property="Width"  Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Height" Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Margin" Value="3,0"/>
@@ -266,7 +277,8 @@
                              the same way an unchecked one does and no combination
                              of states needs spelling out in a MultiTrigger. -->
                         <Border x:Name="Chip"  Opacity="0" CornerRadius="{StaticResource RadiusChip}"
-                                Background="{TemplateBinding Background}"/>
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"/>
                         <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
                                 Background="{StaticResource HoverFillBrush}"/>
                         <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
@@ -311,6 +323,9 @@
          ==================================================================== -->
     <Style x:Key="ModeToolButton" TargetType="ToggleButton" BasedOn="{StaticResource ToolButton}">
         <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+        <!-- No ring: accent already clears 3:1 over the toolbar on its own, and a grey
+             ring around a blue chip would only dull the one mode signal in the app. -->
+        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
         <Style.Triggers>
             <!-- The one glyph in the app that sits on accent. White clears 3.65:1 there;
                  TextPrimary only manages 3.26:1. Scoped to this style so the neutral

@@ -1,7 +1,9 @@
 ﻿using System.Linq;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using WinShot.Core;
 using Xunit;
 using SD = System.Drawing;
@@ -192,17 +194,47 @@ public class DarkControlPaletteTests
     public void ToolButton_CheckedChipOutranksAPlainHover() => OnTheme(theme =>
     {
         Color ground = ((SolidColorBrush)theme["ToolbarBgBrush"]).Color;
-        Color chip = ((SolidColorBrush)theme["ToolChipBrush"]).Color;
+        Color ring = ((SolidColorBrush)theme["ToolChipRingBrush"]).Color;
         Color hovered = Over(((SolidColorBrush)theme["HoverFillBrush"]).Color, ground);
 
         Assert.True(
-            Luminance(chip) > Luminance(hovered),
-            $"checked chip {chip} is not brighter than a hovered sibling {hovered}");
+            Luminance(ring) > Luminance(hovered),
+            $"checked chip's ring {ring} is not brighter than a hovered sibling {hovered}");
 
         // WCAG 1.4.11: a non-text state indicator needs 3:1 against what it sits on.
         Assert.True(
-            Contrast(chip, ground) >= 3d,
-            $"checked chip {chip} is only {Contrast(chip, ground):0.00}:1 over {ground}");
+            Contrast(ring, ground) >= 3d,
+            $"checked chip's ring {ring} is only {Contrast(ring, ground):0.00}:1 over {ground}");
+    });
+
+    /// <summary>
+    /// Five ToolButtons render real text ("S"/"M"/"L", "1"/"A") at 13 DIP, so no large-text
+    /// exemption applies: the glyph has to clear 4.5:1 on the chip — and on the chip with
+    /// the hover and press washes stacked over it, which the template deliberately allows.
+    /// The first attempt at "the chip must beat a hover" brightened the fill until the glyph
+    /// on it read 4.38:1 at rest and 2.56:1 checked+hovered+pressed; nothing computed the
+    /// foreground pair, so nothing caught it.
+    /// </summary>
+    [Fact]
+    public void ToolButton_GlyphStaysReadableOnTheChipUnderEveryWash() => OnTheme(theme =>
+    {
+        Color text = ((SolidColorBrush)theme["TextPrimaryBrush"]).Color;
+        Color chip = ((SolidColorBrush)theme["ToolChipBrush"]).Color;
+        Color hover = ((SolidColorBrush)theme["HoverFillBrush"]).Color;
+        Color press = ((SolidColorBrush)theme["PressedFillBrush"]).Color;
+
+        foreach ((string state, Color fill) in new[]
+        {
+            ("checked", chip),
+            ("checked + hovered", Over(hover, chip)),
+            ("checked + pressed", Over(press, chip)),
+            ("checked + hovered + pressed", Over(press, Over(hover, chip))),
+        })
+        {
+            Assert.True(
+                Contrast(text, fill) >= 4.5d,
+                $"a {state} ToolButton renders its label at {Contrast(text, fill):0.00}:1 on {fill}");
+        }
     });
 
     /// <summary>
@@ -237,6 +269,11 @@ public class DarkControlPaletteTests
     /// "Animation effects: off" has to mean the same thing on both stacks. Motion.Run
     /// already applies the end state inline; the WPF templates' cross-fades did not, so
     /// a user with animation off got a fading pill button beside a snapping WinForms one.
+    ///
+    /// The assertion that matters is the SECOND one: the first version of this test only
+    /// re-read the dictionary entries the method had just overwritten, so it passed while
+    /// every control template went on running the 140 ms original it had captured at parse
+    /// time. A storyboard is only off if the BeginStoryboard holding it says so.
     /// </summary>
     [Fact]
     public void Theme_StoryboardsAreInstantWhenTheUserTurnedAnimationOff()
@@ -251,13 +288,28 @@ public class DarkControlPaletteTests
 
                 var boards = theme.Keys.Cast<object>()
                     .Select(k => theme[k])
-                    .OfType<System.Windows.Media.Animation.Storyboard>()
+                    .OfType<Storyboard>()
                     .ToArray();
 
                 Assert.NotEmpty(boards);
-                foreach (var board in boards)
-                    foreach (System.Windows.Media.Animation.Timeline child in board.Children)
-                        Assert.Equal(new Duration(TimeSpan.Zero), child.Duration);
+                foreach (Storyboard board in boards)
+                    AssertInstant(board, "dictionary entry");
+
+                int templateBoards = 0;
+                foreach (object key in theme.Keys)
+                {
+                    foreach (TriggerBase trigger in TriggersOf(theme[key]))
+                    {
+                        foreach (Storyboard board in StoryboardsOf(trigger))
+                        {
+                            templateBoards++;
+                            AssertInstant(board, $"'{key}'");
+                        }
+                    }
+                }
+
+                // ToolButton alone carries six (hover/press/chip, in and out).
+                Assert.True(templateBoards >= 6, $"only found {templateBoards} storyboards inside templates");
             });
         }
         finally
@@ -265,6 +317,60 @@ public class DarkControlPaletteTests
             Motion.AnimationsEnabled = previous;
         }
     }
+
+    private static void AssertInstant(Storyboard board, string where)
+    {
+        foreach (Timeline child in board.Children)
+            Assert.True(
+                child.Duration == new Duration(TimeSpan.Zero),
+                $"{where} still animates over {child.Duration} with animations turned off");
+    }
+
+    /// <summary>Every trigger a theme value can carry: its own, and its template's.</summary>
+    private static IEnumerable<TriggerBase> TriggersOf(object? value)
+    {
+        switch (value)
+        {
+            case Style style:
+                foreach (TriggerBase t in style.Triggers) yield return t;
+                foreach (SetterBase setterBase in style.Setters)
+                    if (setterBase is Setter { Value: ControlTemplate styleTemplate })
+                        foreach (TriggerBase t in styleTemplate.Triggers) yield return t;
+                break;
+            case ControlTemplate template:
+                foreach (TriggerBase t in template.Triggers) yield return t;
+                break;
+        }
+    }
+
+    private static IEnumerable<Storyboard> StoryboardsOf(TriggerBase trigger)
+    {
+        IEnumerable<TriggerAction> actions = trigger switch
+        {
+            Trigger t => t.EnterActions.Cast<TriggerAction>().Concat(t.ExitActions.Cast<TriggerAction>()),
+            MultiTrigger mt => mt.EnterActions.Cast<TriggerAction>().Concat(mt.ExitActions.Cast<TriggerAction>()),
+            DataTrigger dt => dt.EnterActions.Cast<TriggerAction>().Concat(dt.ExitActions.Cast<TriggerAction>()),
+            EventTrigger et => et.Actions.Cast<TriggerAction>(),
+            _ => Array.Empty<TriggerAction>(),
+        };
+
+        foreach (TriggerAction action in actions)
+            if (action is BeginStoryboard { Storyboard: { } board })
+                yield return board;
+    }
+
+    /// <summary>
+    /// Theme.xaml's Durations and Core/Motion.cs's constants are two copies of one motion
+    /// vocabulary. Colour drifted exactly this way once already (ThemePalette against the
+    /// dictionary it claims to mirror); this pins the timings before they can.
+    /// </summary>
+    [Fact]
+    public void Theme_MotionDurationsMatchTheMotionConstants() => OnTheme(theme =>
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(Motion.QuickMs), ((Duration)theme["MotionQuick"]).TimeSpan);
+        Assert.Equal(TimeSpan.FromMilliseconds(Motion.SwapMs), ((Duration)theme["MotionSwap"]).TimeSpan);
+        Assert.Equal(TimeSpan.FromMilliseconds(Motion.EnterDurationMs), ((Duration)theme["MotionEnter"]).TimeSpan);
+    });
 
     /// <summary>0..1 relative luminance, WCAG 2.x.</summary>
     private static double Luminance(Color c)

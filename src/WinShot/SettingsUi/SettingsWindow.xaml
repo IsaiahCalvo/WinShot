@@ -450,7 +450,7 @@
                                             AutomationProperties.Name="Browse for export location"
                                             AutomationProperties.HelpText="Choose the folder where WinShot saves captures."
                                             Style="{StaticResource PillButtonSecondary}" Click="OnBrowse"/>
-                                    <TextBox x:Name="SaveFolderBox" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="SaveFolderBox" Margin="{StaticResource ChipGutterMargin}"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Desktop icons"/>
