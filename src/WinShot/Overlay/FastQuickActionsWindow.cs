@@ -2226,12 +2226,22 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void OnOverlayMouseUp(object? sender, WF.MouseEventArgs e)
     {
         if (e.Button != WF.MouseButtons.Left) return;
+        // Still armed means the pointer never travelled far enough to start a drag.
+        bool onTheBody = _dragArmed;
         _dragArmed = false;
         SetPressed(-1);
 
         int buttonIndex = _hovering ? HitTestButton(e.Location) : -1;
         if (buttonIndex >= 0)
+        {
             _buttons[buttonIndex].Action();
+            return;
+        }
+
+        // The thumbnail is the biggest target on the card and did nothing at all. Double
+        // rather than single click, so the drag gesture stays unambiguous.
+        if (onTheBody && e.Clicks == 2 && _cardRect.Contains(e.Location))
+            EditRequested?.Invoke(this);
     }
 
     private int HitTestButton(SD.Point point)

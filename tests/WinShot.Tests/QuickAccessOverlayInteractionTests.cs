@@ -906,6 +906,52 @@ public class QuickAccessOverlayInteractionTests
         Assert.Equal("WinShot 2026-09-04 at 11.02.14.png", body);
     }
 
+    [Fact]
+    public void DoubleClickingTheThumbnailOpensTheEditorAndASingleClickDoesNot()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            int edits = 0;
+            overlay.EditRequested += _ => edits++;
+            var body = new SD.Point(overlay.ClientSize.Width / 2, overlay.ClientSize.Height / 4);
+
+            Click(overlay, body, clicks: 1);
+            Assert.Equal(0, edits);
+
+            Click(overlay, body, clicks: 2);
+            Assert.Equal(1, edits);
+        });
+    }
+
+    [Fact]
+    public void ADoubleClickThatStartedAsADragDoesNotOpenTheEditor()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            int edits = 0;
+            overlay.EditRequested += _ => edits++;
+            var body = new SD.Point(overlay.ClientSize.Width / 2, overlay.ClientSize.Height / 4);
+
+            // A release with nothing armed is what a finished drag looks like.
+            Invoke(overlay, "OnOverlayMouseUp", overlay, MouseArgs(body, clicks: 2));
+
+            Assert.Equal(0, edits);
+        });
+    }
+
+    private static void Click(FastQuickActionsWindow overlay, SD.Point at, int clicks)
+    {
+        Invoke(overlay, "OnOverlayMouseDown", overlay, MouseArgs(at, 1));
+        Invoke(overlay, "OnOverlayMouseUp", overlay, MouseArgs(at, clicks));
+    }
+
+    private static WF.MouseEventArgs MouseArgs(SD.Point at, int clicks)
+        => new(WF.MouseButtons.Left, clicks, at.X, at.Y, 0);
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
