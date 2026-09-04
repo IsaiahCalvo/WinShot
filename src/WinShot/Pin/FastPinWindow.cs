@@ -79,6 +79,11 @@ public sealed class FastPinWindow : WF.Form
     private int _focusButton = -1;
     private string? _readoutText;
     private SD.Point _readoutPoint;
+    /// <summary>How far the hover chrome has come up: 0 = gone, 1 = fully drawn. The chips
+    /// used to appear at full alpha on the next paint after MouseEnter, which is the one
+    /// state change on this window and the only thing that tells you it is interactive.</summary>
+    private double _chromeAlpha;
+    private IDisposable? _chromeFade;
 
     public FastPinWindow(SD.Bitmap image, SettingsService? settings = null)
     {
@@ -155,8 +160,8 @@ public sealed class FastPinWindow : WF.Form
             CascadeOffsetLogical,
             DeviceDpi);
 
-        MouseEnter += (_, _) => { _mouseInside = true; Invalidate(); };
-        MouseLeave += (_, _) => { _mouseInside = false; SetHoverButton(-1); SetPressed(-1); Invalidate(); };
+        MouseEnter += (_, _) => { _mouseInside = true; UpdateChromeAlpha(); Invalidate(); };
+        MouseLeave += (_, _) => { _mouseInside = false; SetHoverButton(-1); SetPressed(-1); UpdateChromeAlpha(); Invalidate(); };
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
         MouseUp += OnMouseUp;
@@ -167,8 +172,8 @@ public sealed class FastPinWindow : WF.Form
         };
         MouseWheel += OnPinMouseWheel;
         KeyDown += OnPinKeyDown;
-        GotFocus += (_, _) => Invalidate(ToolbarBounds());
-        LostFocus += (_, _) => Invalidate(ToolbarBounds());
+        GotFocus += (_, _) => { UpdateChromeAlpha(); Invalidate(ToolbarBounds()); };
+        LostFocus += (_, _) => { UpdateChromeAlpha(); Invalidate(ToolbarBounds()); };
         _readoutTimer.Tick += (_, _) =>
         {
             _readoutTimer.Stop();
@@ -178,6 +183,10 @@ public sealed class FastPinWindow : WF.Form
         _tooltipTimer.Tick += (_, _) => ShowActionTooltip();
         Closed += (_, _) =>
         {
+            // An in-flight tween holds the process-wide high-resolution clock; a pin closed
+            // mid-fade must not leave it raised.
+            _chromeFade?.Dispose();
+            _chromeFade = null;
             _readoutTimer.Dispose();
             HideActionTooltip();
             _tooltipTimer.Dispose();
@@ -234,7 +243,7 @@ public sealed class FastPinWindow : WF.Form
 
         // No accent outline on hover: the appearing toolbar itself is the hover signal,
         // matching the Quick Access card's restrained hover language.
-        if (ToolbarVisible)
+        if (_chromeAlpha > 0.004d)
             DrawToolbar(e.Graphics);
 
         if (_locked)
@@ -248,7 +257,44 @@ public sealed class FastPinWindow : WF.Form
 
     // ----- Hover toolbar -----------------------------------------------------
 
+    /// <summary>Whether the chrome should be up. The drawn amount follows it through
+    /// <see cref="_chromeAlpha"/>, so leaving fades instead of cutting.</summary>
     private bool ToolbarVisible => !_locked && (_mouseInside || (_focusButton >= 0 && ContainsFocus));
+
+    /// <summary>
+    /// Runs the hover chrome toward whatever <see cref="ToolbarVisible"/> now says, over
+    /// QuickMs. Only the toolbar's own rect is invalidated per frame: the pin underneath can
+    /// be a 6,000 px capture and repainting all of it 15 times would stutter the fade.
+    /// </summary>
+    private void UpdateChromeAlpha()
+    {
+        double target = ToolbarVisible ? 1d : 0d;
+        if (Math.Abs(_chromeAlpha - target) < 0.001d)
+            return;
+
+        double from = _chromeAlpha;
+        _chromeFade?.Dispose();
+        _chromeFade = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic,
+            p =>
+            {
+                if (IsDisposed) return;
+                _chromeAlpha = from + ((target - from) * p);
+                Invalidate(ChromeInvalidationBounds());
+            },
+            () => { _chromeFade?.Dispose(); _chromeFade = null; });
+    }
+
+    /// <summary>The toolbar rect plus the lock badge's corner, which fades with it.</summary>
+    private SD.Rectangle ChromeInvalidationBounds()
+    {
+        SD.Rectangle bar = ToolbarBounds();
+        var badge = new SD.Rectangle(0, 0, Ui(34), Ui(34));
+        return SD.Rectangle.Union(SD.Rectangle.Inflate(bar, Ui(4), Ui(4)), badge);
+    }
+
+    /// <summary>Scales a chrome colour by the current fade amount.</summary>
+    private SD.Color Fade(SD.Color color) =>
+        SD.Color.FromArgb((int)Math.Clamp(Math.Round(color.A * _chromeAlpha), 0d, 255d), color);
 
     private int Ui(int logicalPixels) => PinInteraction.ScaleLogical(logicalPixels, DeviceDpi);
 
@@ -282,8 +328,8 @@ public sealed class FastPinWindow : WF.Form
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         SD.Rectangle bar = ToolbarBounds();
 
-        using (var bg = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.ToolbarBg)))
-        using (var border = new SD.Pen(ThemePalette.Border))
+        using (var bg = new SD.SolidBrush(Fade(SD.Color.FromArgb(235, ThemePalette.ToolbarBg))))
+        using (var border = new SD.Pen(Fade(ThemePalette.Border)))
         {
             FillRoundedRect(g, bg, bar, Ui(8));
             DrawRoundedRect(g, border, bar, Ui(8));
@@ -314,12 +360,12 @@ public sealed class FastPinWindow : WF.Form
         // the chips press the same direction as every other control.
         if (hot || pressed)
         {
-            using var hover = new SD.SolidBrush(ThemePalette.HoverFill);
+            using var hover = new SD.SolidBrush(Fade(ThemePalette.HoverFill));
             g.FillEllipse(hover, bounds);
         }
         if (pressed)
         {
-            using var press = new SD.SolidBrush(PressedFill);
+            using var press = new SD.SolidBrush(Fade(PressedFill));
             g.FillEllipse(press, bounds);
         }
 
@@ -327,16 +373,18 @@ public sealed class FastPinWindow : WF.Form
         SD.Bitmap? icon = SvgIcons.Get(iconAsset, Ui(ToolbarIconSizeLogical), glyphColor);
         if (icon is not null)
         {
-            g.DrawImageUnscaled(
-                icon,
+            var at = new SD.Rectangle(
                 bounds.Left + (bounds.Width - icon.Width) / 2,
-                bounds.Top + (bounds.Height - icon.Height) / 2);
+                bounds.Top + (bounds.Height - icon.Height) / 2,
+                icon.Width,
+                icon.Height);
+            DrawFaded(g, icon, at);
         }
 
         if (focused)
         {
             // Dotted ring following the circular button, like the card's DrawFocus.
-            using var pen = new SD.Pen(ThemePalette.TextPrimary, 1)
+            using var pen = new SD.Pen(Fade(ThemePalette.TextPrimary), 1)
             {
                 DashStyle = SD.Drawing2D.DashStyle.Dot,
             };
@@ -361,6 +409,22 @@ public sealed class FastPinWindow : WF.Form
                 badge.Left + (badge.Width - icon.Width) / 2,
                 badge.Top + (badge.Height - icon.Height) / 2);
         }
+    }
+
+    /// <summary>Draws a glyph at the chrome's current fade amount. TextureBrush and
+    /// DrawImageUnscaled have no alpha knob, so the multiply goes through a colour matrix.</summary>
+    private void DrawFaded(SD.Graphics g, SD.Bitmap icon, SD.Rectangle at)
+    {
+        if (_chromeAlpha >= 0.999d)
+        {
+            g.DrawImageUnscaled(icon, at.Left, at.Top);
+            return;
+        }
+
+        var matrix = new SD.Imaging.ColorMatrix { Matrix33 = (float)Math.Clamp(_chromeAlpha, 0d, 1d) };
+        using var attributes = new SD.Imaging.ImageAttributes();
+        attributes.SetColorMatrix(matrix);
+        g.DrawImage(icon, at, 0, 0, icon.Width, icon.Height, SD.GraphicsUnit.Pixel, attributes);
     }
 
     private void DrawReadout(SD.Graphics g, string text, SD.Point near)
@@ -633,6 +697,7 @@ public sealed class FastPinWindow : WF.Form
         _focusButton = index;
         Focus();
         AccessibilityNotifyClients(WF.AccessibleEvents.Focus, index + 1);
+        UpdateChromeAlpha();
         Invalidate(ToolbarBounds());
     }
 
@@ -669,6 +734,7 @@ public sealed class FastPinWindow : WF.Form
 
         _locked = locked;
         _lockItem.Text = locked ? "Unlock (Ctrl+L)" : "Lock (Ctrl+L)";
+        UpdateChromeAlpha();
         Invalidate();
     }
 

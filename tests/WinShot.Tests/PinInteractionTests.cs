@@ -151,6 +151,100 @@ public class PinInteractionTests
         });
     }
 
+    /// <summary>
+    /// The hover chrome ramps instead of appearing at full alpha on the next paint. It is the
+    /// only state change this window has, so it is the whole of the pin's hover language.
+    /// Asserts the ramp finishes in both directions and releases the timer-resolution hold.
+    /// </summary>
+    [Fact]
+    public void HoverChromeFadesInAndOut_AndLeavesNoClockHolder()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                Assert.Equal(0, Motion.Holders);
+                using var bitmap = new SD.Bitmap(320, 180);
+                using var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+
+                Assert.Equal(0d, ChromeAlpha(pin));
+
+                SetField(pin, "_mouseInside", true);
+                UpdateChrome(pin);
+                Assert.True(Motion.Holders > 0, "the fade should be running");
+                PumpUntil(() => Motion.Holders == 0);
+                Assert.Equal(1d, ChromeAlpha(pin), 3);
+
+                SetField(pin, "_mouseInside", false);
+                UpdateChrome(pin);
+                PumpUntil(() => Motion.Holders == 0);
+                Assert.Equal(0d, ChromeAlpha(pin), 3);
+                Assert.Equal(0, Motion.Holders);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+            }
+        });
+    }
+
+    /// <summary>Closing a pin mid-fade must not strand the process-wide clock.</summary>
+    [Fact]
+    public void ClosingAPinMidFade_ReleasesTheClockHolder()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                Assert.Equal(0, Motion.Holders);
+                using var bitmap = new SD.Bitmap(320, 180);
+                var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+                SetField(pin, "_mouseInside", true);
+                UpdateChrome(pin);
+
+                pin.Close();
+                pin.Dispose();
+                PumpUntil(() => Motion.Holders == 0);
+                Assert.Equal(0, Motion.Holders);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+            }
+        });
+    }
+
+    private static double ChromeAlpha(FastPinWindow pin)
+        => (double)typeof(FastPinWindow)
+            .GetField("_chromeAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(pin)!;
+
+    private static void UpdateChrome(FastPinWindow pin)
+        => typeof(FastPinWindow)
+            .GetMethod("UpdateChromeAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, null);
+
+    private static void SetField(FastPinWindow pin, string name, object value)
+        => typeof(FastPinWindow)
+            .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(pin, value);
+
+    private static void PumpUntil(Func<bool> condition, int ms = 5000)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < ms)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
+    }
+
     private static void SetScale(FastPinWindow pin, double scale)
     {
         typeof(FastPinWindow)
