@@ -56,6 +56,7 @@ public class ThemedWindowTests
                 ShowAndClose(new FastQuickPreviewWindow(previewFile.Path));
                 ShowAndClose(new HistoryWindow(history, settings));
                 HistorySelectionInteractionSmoke(history, settings);
+                HistoryActivationSmoke(history, settings);
                 ShowAndClose(new SettingsWindow(settings));
                 SettingsWindowShowCloseSmoke(settings);
                 HistoryWindowShowCloseSmoke(history, settings);
@@ -154,6 +155,43 @@ public class ThemedWindowTests
         Assert.Empty(list.SelectedItems.Cast<HistoryItem>());
         ((Button)window.FindName("SelectAllButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.Equal(5, list.SelectedItems.Count);
+
+        window.Close();
+    }
+
+    /// <summary>Enter restores a still image to the Quick Access card and leaves History open;
+    /// an MP4 has no card, so Enter must not raise the restore handoff.</summary>
+    private static void HistoryActivationSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        var items = new List<HistoryItem>
+        {
+            new(@"C:\sanitized-history\20260803-120000-000.png"),
+            new(@"C:\sanitized-history\20260803-120001-000.mp4"),
+        };
+        paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        var restored = new List<string>();
+        window.RestoreRequested += restored.Add;
+        var list = (ListBox)window.FindName("ItemsList");
+
+        list.SelectedItem = items[0];
+        Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+        Assert.Equal(new[] { items[0].FilePath }, restored);
+        Assert.True(window.IsVisible);
+
+        // Enter on the same image again stacks a second card rather than closing History.
+        Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+        Assert.Equal(2, restored.Count);
+
+        list.SelectedItem = items[1];
+        Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+        Assert.Equal(2, restored.Count);
 
         window.Close();
     }

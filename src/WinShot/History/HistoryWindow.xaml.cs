@@ -206,32 +206,44 @@ public partial class HistoryWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        switch (e.Key)
+        if (HandleKey(e.Key, Keyboard.Modifiers))
+        {
+            e.Handled = true;
+            return;
+        }
+        base.OnKeyDown(e);
+    }
+
+    /// <summary>The grid's key map, split from <see cref="OnKeyDown"/> so it can be driven
+    /// with explicit modifiers instead of the machine's real keyboard state.</summary>
+    internal bool HandleKey(Key key, ModifierKeys modifiers)
+    {
+        switch (key)
         {
             case Key.Escape:
                 Close();
-                return;
+                return true;
             case Key.Enter:
-                if (SelectedItem() is { } toOpen)
+                if (SelectedItem() is { } toActivate)
                 {
-                    OpenItem(toOpen);
-                    e.Handled = true;
+                    ActivateItem(toActivate);
+                    return true;
                 }
-                return;
+                return false;
             case Key.Delete:
                 if (_selectionMode && ItemsList.SelectedItems.Count > 0)
                 {
                     _ = DeleteSelectedItems();
-                    e.Handled = true;
+                    return true;
                 }
-                else if (SelectedItem() is { } toDelete)
+                if (SelectedItem() is { } toDelete)
                 {
                     DeleteItem(toDelete);
-                    e.Handled = true;
+                    return true;
                 }
-                return;
+                return false;
         }
-        base.OnKeyDown(e);
+        return false;
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -879,7 +891,7 @@ public partial class HistoryWindow : Window
         if (e.ClickCount == 2)
         {
             _dragItem = null;
-            OpenItem(item);
+            ActivateItem(item);
             return;
         }
         // Arm a potential drag-out; the actual drag begins once the mouse moves
@@ -1050,8 +1062,24 @@ public partial class HistoryWindow : Window
         }
     }
 
+    /// <summary>
+    /// Enter and double-click: a still image goes back to the Quick Access card rather than
+    /// out to the Windows Photos app. History stays open and the card restacks, so activating
+    /// several in a row builds the stack — the multi-restore gesture. Video and GIF have no
+    /// card, so they still hand off to the shell; "Open" in the context menu always does.
+    /// </summary>
+    private void ActivateItem(HistoryItem item)
+    {
+        if (item.IsImage)
+            RestoreRequested?.Invoke(item.FilePath);
+        else
+            OpenItem(item);
+    }
+
     private static void OpenItem(HistoryItem item)
     {
+        if (!File.Exists(item.FilePath))
+            return;
         try
         {
             Process.Start(new ProcessStartInfo(item.FilePath) { UseShellExecute = true });
