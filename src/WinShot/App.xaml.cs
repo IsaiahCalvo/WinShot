@@ -26,6 +26,7 @@ public partial class App : Application
     private Mutex? _mutex;
     private bool _ownsMutex;
     private WF.NotifyIcon? _tray;
+    private ToastWindow? _cornerToast;
     private HotkeyManager? _hotkeys;
     private CommandServer? _commandServer;
     private readonly SettingsService _settings = new();
@@ -76,7 +77,7 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Error("Unhandled UI exception", args.Exception);
-            ShowBalloon("WinShot error", FriendlyError.For(args.Exception));
+            ShowBalloon("WinShot error", FriendlyError.For(args.Exception), ToastSeverity.Error);
             args.Handled = true;
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
@@ -186,7 +187,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error("Recording startup recovery check failed; temp files were not changed", ex);
-            ShowBalloon("Recording recovery", "Couldn't check unfinished recordings. Temp files were not changed.");
+            ShowBalloon("Recording recovery", "Couldn't check unfinished recordings. Temp files were not changed.", ToastSeverity.Error);
             return;
         }
 
@@ -211,11 +212,11 @@ public partial class App : Application
             catch (Exception ex)
             {
                 Log.Error("Failed to show recording recovery toast", ex);
-                ShowBalloon("Recording recovered", Path.GetFileName(latest));
+                ShowBalloon("Recording recovered", Path.GetFileName(latest), ToastSeverity.Success);
             }
 
             if (result.RecoveredPaths.Count > 1)
-                ShowBalloon("Recordings recovered", $"Recovered {result.RecoveredPaths.Count} recordings.");
+                ShowBalloon("Recordings recovered", $"Recovered {result.RecoveredPaths.Count} recordings.", ToastSeverity.Success);
         }
 
         foreach (RecordingRecoveryFailure failure in result.Failures)
@@ -361,7 +362,7 @@ public partial class App : Application
         }
 
         _hotkeyRetryTimer?.Stop();
-        ShowBalloon("Some hotkeys unavailable", string.Join(", ", failed));
+        ShowBalloon("Some hotkeys unavailable", string.Join(", ", failed), ToastSeverity.Error);
     }
 
     private System.Windows.Threading.DispatcherTimer CreateHotkeyRetryTimer()
@@ -461,7 +462,7 @@ public partial class App : Application
                 !int.TryParse(parts[0], out int x) || !int.TryParse(parts[1], out int y) ||
                 !int.TryParse(parts[2], out int w) || !int.TryParse(parts[3], out int h))
             {
-                ShowBalloon("Scrolling capture", "Bad scroll-region command (need x,y,w,h).");
+                ShowBalloon("Scrolling capture", "Bad scroll-region command (need x,y,w,h).", ToastSeverity.Error);
                 return;
             }
             bool auto = parts.Contains("auto", StringComparer.OrdinalIgnoreCase);
@@ -493,7 +494,7 @@ public partial class App : Application
             if (stitched is not null)
                 HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling);
             else
-                ShowBalloon("Scrolling capture", "Nothing captured.");
+                ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
 
     private void FinishCaptureFlow()
@@ -524,7 +525,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error(failureLog, ex);
-            ShowBalloon(failureBalloon, FriendlyError.For(ex));
+            ShowBalloon(failureBalloon, FriendlyError.For(ex), ToastSeverity.Error);
         }
         finally
         {
@@ -644,7 +645,7 @@ public partial class App : Application
                 HandleCapture(capture);
             }
             else
-                ShowBalloon("Capture previous region", "No previous region yet — capture a region first.");
+                ShowBalloon("Capture previous region", "No previous region yet — capture a region first.", ToastSeverity.Error);
         });
 
     private void AllInOneFlow() => RunCaptureFlow(
@@ -698,7 +699,7 @@ public partial class App : Application
                     if (stitched is not null)
                         HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
                     else
-                        ShowBalloon("Scrolling capture", "Nothing captured.");
+                        ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
                     break;
             }
         });
@@ -1016,14 +1017,14 @@ public partial class App : Application
         {
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
             if (showSuccess)
-                await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Copied to clipboard."));
+                await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Copied to clipboard.", ToastSeverity.Success));
         }
         catch (Exception ex)
         {
             if (showFailure)
             {
                 Log.Error(failureContext, ex);
-                await Dispatcher.InvokeAsync(() => ShowBalloon("Copy failed", FriendlyError.For(ex)));
+                await Dispatcher.InvokeAsync(() => ShowBalloon("Copy failed", FriendlyError.For(ex), ToastSeverity.Error));
             }
             else
             {
@@ -1146,7 +1147,7 @@ public partial class App : Application
         {
             bmp.Dispose();
             Log.Error("Could not choose a save path", ex);
-            ShowBalloon("Save failed", FriendlyError.For(ex));
+            ShowBalloon("Save failed", FriendlyError.For(ex), ToastSeverity.Error);
             return;
         }
 
@@ -1157,12 +1158,12 @@ public partial class App : Application
                 try
                 {
                     ImageSaver.Save(bmp, path);
-                    Dispatcher.InvokeAsync(() => ShowBalloon("Saved", Path.GetFileName(path)));
+                    Dispatcher.InvokeAsync(() => ShowBalloon("Saved", Path.GetFileName(path), ToastSeverity.Success));
                 }
                 catch (Exception ex)
                 {
                     Log.Error("Silent save failed", ex);
-                    Dispatcher.InvokeAsync(() => ShowBalloon("Save failed", FriendlyError.For(ex)));
+                    Dispatcher.InvokeAsync(() => ShowBalloon("Save failed", FriendlyError.For(ex), ToastSeverity.Error));
                 }
             }
         });
@@ -1248,12 +1249,12 @@ public partial class App : Application
             // OCR's own InvalidOperationException messages are already written for the user
             // (no language pack installed, and so on) — keep them, log the rest.
             Log.Info($"OCR unavailable: {ex.Message}");
-            ShowBalloon("OCR unavailable", ex.Message);
+            ShowBalloon("OCR unavailable", ex.Message, ToastSeverity.Error);
         }
         catch (COMException ex)
         {
             Log.Info($"OCR clipboard copy skipped: {ex.Message}");
-            ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.");
+            ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.", ToastSeverity.Error);
         }
     }
 
@@ -1270,19 +1271,8 @@ public partial class App : Application
         return null;
     }
 
-    private void ShowOcrToast(string title, string preview, SD.Point? anchor, Action? onOpen)
-    {
-        try
-        {
-            var toast = new ToastWindow(title, preview, anchor, onOpen);
-            toast.Show();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("OCR toast failed; falling back to balloon", ex);
-            ShowBalloon(title, preview);
-        }
-    }
+    private void ShowOcrToast(string title, string preview, SD.Point? anchor, Action? onOpen) =>
+        ShowToast(title, preview, anchor, onOpen, ToastSeverity.Success);
 
     private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
@@ -1327,7 +1317,7 @@ public partial class App : Application
             if (stitched is not null)
                 HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
             else
-                ShowBalloon("Scrolling capture", "Nothing captured.");
+                ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
 
     private async void RestoreLastFlow()
@@ -1335,7 +1325,7 @@ public partial class App : Application
         string? path = FastQuickActionsWindow.PopRecentlyClosed();
         if (path is null)
         {
-            ShowBalloon("Restore", "No recently closed capture to restore.");
+            ShowBalloon("Restore", "No recently closed capture to restore.", ToastSeverity.Error);
             return;
         }
         if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
@@ -1394,7 +1384,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error("OCR from overlay failed", ex);
-            ShowBalloon("OCR failed", FriendlyError.For(ex));
+            ShowBalloon("OCR failed", FriendlyError.For(ex), ToastSeverity.Error);
         }
     }
 
@@ -1470,7 +1460,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error($"Failed to load image {path}", ex);
-            ShowBalloon("WinShot", "Could not open that file as an image.");
+            ShowBalloon("WinShot", "Could not open that file as an image.", ToastSeverity.Error);
             return null;
         }
     }
@@ -1480,7 +1470,45 @@ public partial class App : Application
         get { try { return GetDpiForSystem() / 96.0; } catch { return 1.0; } }
     }
 
-    internal void ShowBalloon(string title, string message) =>
+    /// <summary>
+    /// The app's one feedback channel. Everything except "update available" goes to the
+    /// in-app toast at the tray corner: the shell balloon renders "Save failed" and
+    /// "Copied to clipboard" identically, and Focus Assist swallows it whole with no window
+    /// to fall back to. Only one corner toast at a time - a second would land on top of it.
+    /// </summary>
+    internal void ShowBalloon(string title, string message, ToastSeverity severity = ToastSeverity.Info) =>
+        ShowToast(title, message, anchor: null, onOpen: null, severity);
+
+    private void ShowToast(string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity)
+    {
+        try
+        {
+            if (anchor is null)
+            {
+                _cornerToast?.Dispose();
+                _cornerToast = null;
+            }
+
+            var toast = new ToastWindow(title, message, anchor, onOpen, severity);
+            if (anchor is null)
+            {
+                _cornerToast = toast;
+                toast.FormClosed += (_, _) => { if (ReferenceEquals(_cornerToast, toast)) _cornerToast = null; };
+            }
+            toast.Show();
+        }
+        catch (Exception ex)
+        {
+            // The toast is a window and a window can fail to create; the balloon is the one
+            // piece of feedback that never needs one.
+            Log.Error("Toast failed; falling back to the tray balloon", ex);
+            ShowShellBalloon(title, message);
+        }
+    }
+
+    /// <summary>The Windows tray balloon, kept for the one message that is clickable from
+    /// the shell itself: an available update, which installs on click.</summary>
+    private void ShowShellBalloon(string title, string message) =>
         _tray?.ShowBalloonTip(3000, title, message, WF.ToolTipIcon.Info);
 
     // ---- Updates ----------------------------------------------------------
@@ -1506,11 +1534,11 @@ public partial class App : Application
                     OnUpdateAvailable(result);
                     break;
                 case UpdateState.UpToDate:
-                    ShowBalloon("WinShot", "You're on the latest version.");
+                    ShowBalloon("WinShot", "You're on the latest version.", ToastSeverity.Success);
                     break;
                 default:
                     Log.Error($"Update check failed: {result.Message}");
-                    ShowBalloon("WinShot", "Couldn't check for updates.");
+                    ShowBalloon("WinShot", "Couldn't check for updates.", ToastSeverity.Error);
                     break;
             }
         });
@@ -1524,7 +1552,7 @@ public partial class App : Application
             _updateMenuItem.Text = $"Install update ({result.LatestVersion})";
             _updateMenuItem.Visible = true;
         }
-        ShowBalloon("Update available", $"WinShot {result.LatestVersion} is ready — click to install.");
+        ShowShellBalloon("Update available", $"WinShot {result.LatestVersion} is ready — click to install.");
     }
 
     private async Task InstallPendingUpdateAsync()
@@ -1544,13 +1572,13 @@ public partial class App : Application
         {
             Log.Error("Update verification failed", ex);
             _updateInProgress = false;
-            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update failed: download verification failed."));
+            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update failed: download verification failed.", ToastSeverity.Error));
         }
         catch (Exception ex)
         {
             Log.Error("Update install failed", ex);
             _updateInProgress = false;
-            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update install failed. Log saved."));
+            await Dispatcher.InvokeAsync(() => ShowBalloon("WinShot", "Update install failed. Log saved.", ToastSeverity.Error));
         }
     }
 

@@ -326,6 +326,55 @@ public class MotionEdgeCaseTests
         Assert.Equal(0, Motion.Holders);
     }
 
+    /// <summary>
+    /// A caller that disposes the toast instead of closing it never runs OnClosed, so the
+    /// entrance tween was orphaned and kept the process-wide high-resolution clock raised
+    /// until it finished on its own. Not reachable from any producer today; it is the trap
+    /// the next one would fall into.
+    /// </summary>
+    [Fact]
+    public void ToastDisposedWithoutClosingReleasesTheClockImmediately()
+    {
+        Assert.Equal(0, Motion.Holders);
+
+        var toast = new ToastWindow("Saved", "shot.png", new SD.Point(80, 80), null);
+        toast.Show();
+        PumpFor(40);
+        toast.Dispose();
+
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>
+    /// A failure and a confirmation have to be told apart at a glance, and an error has to
+    /// hold the screen long enough to read: the shortest dwell in the app used to go to the
+    /// message the user most needs.
+    /// </summary>
+    [Fact]
+    public void ToastSeverityChangesTheGlyphAndGivesAnErrorTimeToRead()
+    {
+        string Glyph(ToastSeverity severity)
+        {
+            using var toast = new ToastWindow("t", "b", new SD.Point(10, 10), null, severity);
+            return toast.Controls.OfType<WF.Label>().First().Text;
+        }
+
+        Assert.Equal(3, new[]
+        {
+            Glyph(ToastSeverity.Info), Glyph(ToastSeverity.Success), Glyph(ToastSeverity.Error),
+        }.Distinct().Count());
+
+        int Dwell(ToastSeverity severity)
+        {
+            using var toast = new ToastWindow("t", "b", new SD.Point(10, 10), null, severity);
+            var timer = (WF.Timer)typeof(ToastWindow)
+                .GetField("_dismiss", BindingFlagsNonPublic)!.GetValue(toast)!;
+            return timer.Interval;
+        }
+
+        Assert.True(Dwell(ToastSeverity.Error) > Dwell(ToastSeverity.Success));
+    }
+
     private const System.Reflection.BindingFlags BindingFlagsNonPublic =
         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
 }

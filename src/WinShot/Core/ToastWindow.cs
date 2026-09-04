@@ -1,14 +1,22 @@
-﻿
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
 namespace WinShot.Core;
 
+/// <summary>What happened, so the toast can say it in one glyph instead of making
+/// "Saved" and "Save failed" look identical.</summary>
+public enum ToastSeverity
+{
+    Info,
+    Success,
+    Error,
+}
+
 /// <summary>
-/// The app's one in-place confirmation HUD: a title, a body line and an optional action,
-/// shown near whatever it is confirming — CleanShot-style instant feedback instead of the
-/// slow, Focus-Assist-throttled Windows tray balloon. Auto-dismisses. Fades and rises in,
-/// and reverses on the way out, so it never pops or vanishes.
+/// The app's one in-place confirmation HUD: a severity glyph, a title, a body line and an
+/// optional action, shown near whatever it is confirming — CleanShot-style instant feedback
+/// instead of the slow, Focus-Assist-throttled Windows tray balloon. Auto-dismisses. Fades
+/// and rises in, and reverses on the way out, so it never pops or vanishes.
 /// </summary>
 public sealed class ToastWindow : WF.Form
 {
@@ -16,11 +24,17 @@ public sealed class ToastWindow : WF.Form
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
 
-    /// <summary>Entrance/exit: fade plus a short rise, on the shared glide step rather than
-    /// a number of its own. Scale is deliberately not used — the toast's children sit at
-    /// fixed offsets, so resizing the form would crop them rather than scale them.</summary>
-    private const int RiseMs = Motion.GlideDurationMs;
+    /// <summary>Entrance/exit: fade plus a short rise. A toast is a surface arriving on
+    /// screen, which is what EnterDurationMs names; scale is deliberately not used — the
+    /// toast's children sit at fixed offsets, so resizing the form would crop them rather
+    /// than scale them.</summary>
+    private const int RiseMs = Motion.EnterDurationMs;
     private const double RestOpacity = 0.97;
+
+    /// <summary>An error is the message the user most needs to finish reading, so it holds
+    /// the screen as long as an action toast does instead of the 1.7 s a confirmation gets.</summary>
+    private const int DwellMs = 1700;
+    private const int LongDwellMs = 4500;
 
     private IDisposable? _motion;
     private bool _exiting;
@@ -30,9 +44,14 @@ public sealed class ToastWindow : WF.Form
     // the anchor monitor or labels truncate on 125%/150% displays.
     private readonly double _scale;
 
-    private int S(int logical) => (int)Math.Round(logical * _scale);
+    private int S(int logical) => WinShot.Recording.RecordingMonitorDpi.Px(logical, _scale);
 
-    public ToastWindow(string title, string preview, SD.Point? anchorScreen, Action? onOpen)
+    public ToastWindow(
+        string title,
+        string preview,
+        SD.Point? anchorScreen,
+        Action? onOpen,
+        ToastSeverity severity = ToastSeverity.Info)
     {
         _anchor = anchorScreen;
         _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(
@@ -64,13 +83,22 @@ public sealed class ToastWindow : WF.Form
         int height = hasOpen ? 104 : 70;
         ClientSize = new SD.Size(S(width), S(height));
 
+        // The severity glyph is the only thing that separates "Saved" from "Save failed" at
+        // a glance, so it gets its own colour as well as its own shape.
+        var glyphLabel = Label(GlyphOf(severity), 14, 14, 22, ThemePalette.TextTitlePt, ColorOf(severity), height: 24);
+        glyphLabel.Font = ThemePalette.IconFont(ThemePalette.TextTitlePt);
+        Controls.Add(glyphLabel);
+
+        const int textX = 42;
+        int textW = width - textX - 14;
+
         // Accent stays reserved for actions; the title reads as text, not a control.
         // 12 pt Segoe UI Bold needs ~22 px of line box; the shared 22 px row left the
         // descenders on the clip edge, so the title gets its own (still clearing y=38).
-        var titleLabel = Label(title, 14, 14, width - 28, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true, height: 24);
+        var titleLabel = Label(title, textX, 14, textW, ThemePalette.TextTitlePt, ThemePalette.TextPrimary, bold: true, height: 24);
         Controls.Add(titleLabel);
 
-        var previewLabel = Label(Trim(preview), 14, 38, width - 28, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary);
+        var previewLabel = Label(Trim(preview), textX, 38, textW, ThemePalette.TextBodyLgPt, ThemePalette.TextSecondary);
         previewLabel.AutoEllipsis = true;
         previewLabel.UseMnemonic = false;
         Controls.Add(previewLabel);
@@ -86,21 +114,36 @@ public sealed class ToastWindow : WF.Form
                 Size = new SD.Size(S(96), S(26)),
                 Text = "Open link",
             };
-            open.Click += (_, _) => { try { onOpen(); } catch (Exception ex) { Log.Error("OCR toast open failed", ex); } Close(); };
+            open.Click += (_, _) => { try { onOpen(); } catch (Exception ex) { Log.Error("Toast action failed", ex); } Close(); };
             Controls.Add(open);
         }
 
-        _dismiss.Interval = hasOpen ? 4500 : 1700;
+        _dismiss.Interval = hasOpen || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
         _dismiss.Tick += (_, _) => Close();
-        MouseEnter += (_, _) => _dismiss.Stop();
+        MouseEnter += (_, _) => HoldOpen();
         MouseLeave += (_, _) => _dismiss.Start();
         foreach (WF.Control c in Controls)
         {
-            c.MouseEnter += (_, _) => _dismiss.Stop();
+            c.MouseEnter += (_, _) => HoldOpen();
             c.MouseLeave += (_, _) => _dismiss.Start();
         }
         KeyDown += (_, e) => { if (e.KeyCode == WF.Keys.Escape) Close(); };
     }
+
+    /// <summary>Segoe MDL2 / Fluent codepoints that exist in both fonts.</summary>
+    private static string GlyphOf(ToastSeverity severity) => severity switch
+    {
+        ToastSeverity.Success => "",   // CheckMark
+        ToastSeverity.Error => "",     // Error
+        _ => "",                       // Info
+    };
+
+    private static SD.Color ColorOf(ToastSeverity severity) => severity switch
+    {
+        ToastSeverity.Success => ThemePalette.Accent,
+        ToastSeverity.Error => ThemePalette.Red,
+        _ => ThemePalette.TextSecondary,
+    };
 
     protected override bool ShowWithoutActivation => true;
 
@@ -113,6 +156,21 @@ public sealed class ToastWindow : WF.Form
         _motion?.Dispose();
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
         _dismiss.Start();
+    }
+
+    /// <summary>
+    /// Hovering holds the toast open — including after the dismiss timer already fired.
+    /// Without the second half the user reaching for "Open link" watches the button slide
+    /// away from under the cursor while it is still hit-testable.
+    /// </summary>
+    private void HoldOpen()
+    {
+        _dismiss.Stop();
+        if (!_exiting) return;
+
+        _exiting = false;
+        _motion?.Dispose();
+        _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
     }
 
     /// <summary>0 = fully out (transparent, dropped by the rise distance), 1 = at rest.</summary>
@@ -133,11 +191,18 @@ public sealed class ToastWindow : WF.Form
             _exiting = true;
             _dismiss.Stop();
             _motion?.Dispose();
-            _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(1d - p), Close);
+            _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(1d - p), CloseIfStillExiting);
             return;
         }
 
         base.OnFormClosing(e);
+    }
+
+    /// <summary>The exit tween's onDone. A hover during the fade-out cancels the exit and
+    /// runs the entrance forward again, so the close must not land afterwards.</summary>
+    private void CloseIfStillExiting()
+    {
+        if (_exiting) Close();
     }
 
     protected override void OnResize(EventArgs e)
@@ -146,13 +211,21 @@ public sealed class ToastWindow : WF.Form
         UpdateRegion();
     }
 
-    protected override void OnClosed(EventArgs e)
+    /// <summary>
+    /// Disposal, not just Close(), releases the tween — a caller that disposes the toast
+    /// mid-entrance never runs OnClosed, and the orphaned tween would hold the process-wide
+    /// high-resolution clock until it finished on its own.
+    /// </summary>
+    protected override void Dispose(bool disposing)
     {
-        _dismiss.Stop();
-        _dismiss.Dispose();
-        _motion?.Dispose();
-        _motion = null;
-        base.OnClosed(e);
+        if (disposing)
+        {
+            _dismiss.Stop();
+            _dismiss.Dispose();
+            _motion?.Dispose();
+            _motion = null;
+        }
+        base.Dispose(disposing);
     }
 
     protected override WF.CreateParams CreateParams
@@ -186,6 +259,7 @@ public sealed class ToastWindow : WF.Form
         }
         else
         {
+            // Nothing better to anchor to: the tray corner, where the balloon used to appear.
             x = area.Right - Width - 16;
             y = area.Bottom - Height - 16;
         }

@@ -133,6 +133,7 @@ internal static class Motion
         private readonly double _durationMs;
         private WF.Timer? _timer;
         private IDisposable? _hold;
+        private bool _cancelled;
 
         public Tween(int durationMs, Func<double, double> ease, Action<double> onFrame, Action? onDone)
         {
@@ -162,7 +163,11 @@ internal static class Motion
 
                 Release();
                 _onFrame(1d);
-                _onDone?.Invoke();
+                // A caller that cancels (or retargets) from inside the final frame has
+                // replaced this tween; firing its onDone afterwards would apply the dead
+                // tween's end state over the new one.
+                if (!_cancelled)
+                    _onDone?.Invoke();
             }
             catch (Exception ex)
             {
@@ -177,7 +182,11 @@ internal static class Motion
             }
         }
 
-        public void Dispose() => Release();
+        public void Dispose()
+        {
+            _cancelled = true;
+            Release();
+        }
 
         private void Release()
         {
