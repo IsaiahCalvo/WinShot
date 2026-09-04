@@ -141,6 +141,49 @@ public class ScrollCaptureChromeTests
         Assert.Equal(0, Motion.Holders);
     }
 
+    /// <summary>
+    /// All three scroll surfaces are layered windows, and each one ramps its alpha on show
+    /// and on hide. The ramp must always finish -- an in-flight tween holds the process-wide
+    /// high-resolution timer -- and the fade-out task must complete even for a window that
+    /// was never shown, or the teardown in ScrollingStatusWindow would hang on it.
+    /// </summary>
+    [Fact]
+    public void EveryScrollSurface_FadesInAndOutAndReleasesTheMotionHold()
+    {
+        Assert.Equal(0, Motion.Holders);
+        var region = new SD.Rectangle(300, 300, 700, 500);
+
+        using (var overlay = new ScrollDimOverlay(region))
+        using (var preview = new ScrollPreviewPanel(region))
+        using (var controls = new ScrollControlsBar(region))
+        {
+            // Never shown: the fade-out still completes rather than waiting on a tween
+            // that will never tick.
+            Assert.True(Task.WhenAll(controls.FadeOutAsync(), preview.FadeOutAsync(), overlay.FadeOutAsync())
+                .Wait(TimeSpan.FromSeconds(2)));
+        }
+
+        Assert.Equal(0, Motion.Holders);
+
+        using (var preview = new ScrollPreviewPanel(region))
+        {
+            preview.StartPosition = WF.FormStartPosition.Manual;
+            preview.Location = new SD.Point(-20_000, -20_000);
+            preview.Show();
+            preview.Location = new SD.Point(-20_000, -20_000);
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(0, Motion.Holders);
+
+            Task fadeOut = preview.FadeOutAsync();
+            PumpUntil(() => fadeOut.IsCompleted);
+            Assert.True(fadeOut.IsCompleted);
+            preview.Hide();
+        }
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
     private static void PumpUntil(Func<bool> condition, int ms = 5000)
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();

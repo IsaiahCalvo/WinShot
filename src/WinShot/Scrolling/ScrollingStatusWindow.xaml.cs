@@ -107,6 +107,18 @@ public static class ScrollingStatusWindow
         }
         finally
         {
+            // Fade all three out together before tearing them down, mirroring the ramp they
+            // arrived on. A failed fade must never leave the chrome on screen, so the close
+            // runs whatever happens.
+            try
+            {
+                await Task.WhenAll(controls.FadeOutAsync(), preview.FadeOutAsync(), overlay.FadeOutAsync());
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Scroll chrome fade-out failed (non-fatal)", ex);
+            }
+
             try { controls.Close(); controls.Dispose(); } catch { /* best effort */ }
             try { preview.Close(); preview.Dispose(); } catch { /* best effort */ }
             try { overlay.Close(); overlay.Dispose(); } catch { /* best effort */ }

@@ -57,6 +57,32 @@ internal static class CaptureExclusion
 }
 
 /// <summary>
+/// The scrolling chrome's show/hide ramp. All three surfaces are layered windows, so their
+/// alpha is set directly rather than through Form.Opacity -- which recreates the handle, and
+/// on a full-monitor TopMost surface costs more than the ramp is worth. The exit runs the
+/// mirror ease so leaving reads as arriving played backwards.
+/// </summary>
+internal static class ScrollChromeFade
+{
+    public const int DurationMs = 120;
+
+    public static IDisposable In(Action<byte> apply)
+    {
+        apply(0);
+        return Motion.Run(DurationMs, Motion.EaseOutCubic, p => apply(Alpha(p)));
+    }
+
+    public static Task Out(Action<byte> apply)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Motion.Run(DurationMs, Motion.EaseInCubic, p => apply(Alpha(1d - p)), () => done.TrySetResult());
+        return done.Task;
+    }
+
+    private static byte Alpha(double amount) => (byte)Math.Clamp(Math.Round(amount * 255d), 0d, 255d);
+}
+
+/// <summary>
 /// Full-monitor dim with the capture region punched out as a bright, accent-framed hole,
 /// so during a scrolling capture the user sees exactly what's being captured while still
 /// scrolling the live content underneath. Click-through (WS_EX_TRANSPARENT) so all input
@@ -74,6 +100,8 @@ public sealed class ScrollDimOverlay : WF.Form
 
     private readonly SD.Rectangle _monitor;
     private readonly SD.Rectangle _holeLocal;
+    private SD.Bitmap? _surface;
+    private IDisposable? _fade;
 
     public ScrollDimOverlay(SD.Rectangle regionScreen)
     {
@@ -109,14 +137,42 @@ public sealed class ScrollDimOverlay : WF.Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        try { RenderLayered(); }
+        try
+        {
+            RenderLayered();
+            _fade = ScrollChromeFade.In(SetAlpha);
+        }
         catch (Exception ex) { Log.Error("Scroll dim overlay render failed (non-fatal)", ex); }
+    }
+
+    /// <summary>Fades the dim out and completes once it is gone; the caller then closes.</summary>
+    public Task FadeOutAsync()
+    {
+        if (IsDisposed || _surface is null) return Task.CompletedTask;
+        _fade?.Dispose();
+        _fade = null;
+        return ScrollChromeFade.Out(SetAlpha);
+    }
+
+    private void SetAlpha(byte alpha)
+    {
+        if (IsDisposed || _surface is null || !IsHandleCreated) return;
+        PushLayered(_surface, alpha);
+    }
+
+    protected override void OnFormClosed(WF.FormClosedEventArgs e)
+    {
+        _fade?.Dispose();
+        _fade = null;
+        _surface?.Dispose();
+        _surface = null;
+        base.OnFormClosed(e);
     }
 
     private void RenderLayered()
     {
         int w = Math.Max(1, _monitor.Width), h = Math.Max(1, _monitor.Height);
-        using var bmp = new SD.Bitmap(w, h, SD.Imaging.PixelFormat.Format32bppPArgb);
+        var bmp = new SD.Bitmap(w, h, SD.Imaging.PixelFormat.Format32bppPArgb);
         using (var g = SD.Graphics.FromImage(bmp))
         {
             g.SmoothingMode = SmoothingMode.None;
@@ -134,10 +190,12 @@ public sealed class ScrollDimOverlay : WF.Form
                 g.DrawRectangle(pen, _holeLocal.X - 2, _holeLocal.Y - 2, _holeLocal.Width + 3, _holeLocal.Height + 3);
             }
         }
-        PushLayered(bmp);
+        _surface?.Dispose();
+        _surface = bmp;
+        PushLayered(bmp, 0);
     }
 
-    private void PushLayered(SD.Bitmap bmp)
+    private void PushLayered(SD.Bitmap bmp, byte constantAlpha)
     {
         IntPtr screenDc = GetDC(IntPtr.Zero);
         IntPtr memDc = CreateCompatibleDC(screenDc);
@@ -152,7 +210,7 @@ public sealed class ScrollDimOverlay : WF.Form
             {
                 BlendOp = AC_SRC_OVER,
                 BlendFlags = 0,
-                SourceConstantAlpha = 255,
+                SourceConstantAlpha = constantAlpha,
                 AlphaFormat = AC_SRC_ALPHA,
             };
             UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, ULW_ALPHA);
@@ -206,6 +264,7 @@ public sealed class ScrollControlsBar : WF.Form
     private bool _autoOn;
     private readonly WinShot.Capture.RectangleTween _reveal = new();
     private IDisposable? _revealTween;
+    private IDisposable? _fade;
     private ScrollHint _hint = ScrollHint.None; // a persistent hint overrides live status text
 
     // Point-based fonts render at the monitor's DPI, so the fixed-pixel layout has to be
@@ -330,6 +389,28 @@ public sealed class ScrollControlsBar : WF.Form
     {
         base.OnHandleCreated(e);
         CaptureExclusion.ApplyLayeredOpaque(Handle);
+        CaptureExclusion.SetLayeredAlpha(Handle, 0); // the fade in OnShown brings it up
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _fade = ScrollChromeFade.In(SetChromeAlpha);
+    }
+
+    /// <summary>Fades the bar out and completes once it is gone; the caller then closes.</summary>
+    public Task FadeOutAsync()
+    {
+        if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
+        _fade?.Dispose();
+        _fade = null;
+        return ScrollChromeFade.Out(SetChromeAlpha);
+    }
+
+    private void SetChromeAlpha(byte alpha)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        CaptureExclusion.SetLayeredAlpha(Handle, alpha);
     }
 
     private void Start()
@@ -487,6 +568,8 @@ public sealed class ScrollControlsBar : WF.Form
     {
         _revealTween?.Dispose();
         _revealTween = null;
+        _fade?.Dispose();
+        _fade = null;
         _reveal.Stop();
         base.OnFormClosed(e);
     }
@@ -560,6 +643,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     private readonly WF.PictureBox _pic;
     private readonly WF.Label _caption;
     private bool _hintShowing;
+    private IDisposable? _fade;
 
     // Amber warning — matches the controls bar's nudge color.
     private static readonly SD.Color WarnColor = ThemePalette.Warn;
@@ -630,6 +714,28 @@ public sealed class ScrollPreviewPanel : WF.Form
     {
         base.OnHandleCreated(e);
         CaptureExclusion.ApplyLayeredOpaque(Handle);
+        CaptureExclusion.SetLayeredAlpha(Handle, 0); // the fade in OnShown brings it up
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _fade = ScrollChromeFade.In(SetChromeAlpha);
+    }
+
+    /// <summary>Fades the preview out and completes once it is gone; the caller then closes.</summary>
+    public Task FadeOutAsync()
+    {
+        if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
+        _fade?.Dispose();
+        _fade = null;
+        return ScrollChromeFade.Out(SetChromeAlpha);
+    }
+
+    private void SetChromeAlpha(byte alpha)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        CaptureExclusion.SetLayeredAlpha(Handle, alpha);
     }
 
     /// <summary>Takes ownership of <paramref name="image"/> (disposes the previous one).</summary>
@@ -668,6 +774,8 @@ public sealed class ScrollPreviewPanel : WF.Form
 
     protected override void OnFormClosed(WF.FormClosedEventArgs e)
     {
+        _fade?.Dispose();
+        _fade = null;
         _pic.Image?.Dispose();
         _pic.Image = null;
         base.OnFormClosed(e);
