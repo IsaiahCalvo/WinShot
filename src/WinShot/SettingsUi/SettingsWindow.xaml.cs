@@ -328,6 +328,7 @@ public partial class SettingsWindow : Window
         SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 0);
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
+        AdjustSelectionCheck.IsChecked = s.AdjustSelectionBeforeCapturing;
 
         // Annotate
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
@@ -602,6 +603,7 @@ public partial class SettingsWindow : Window
             s.CrosshairMode = SelectedTag(CrosshairModeCombo, "always");
             s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
+            s.AdjustSelectionBeforeCapturing = AdjustSelectionCheck.IsChecked == true;
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
@@ -675,6 +677,8 @@ public partial class SettingsWindow : Window
         Accessible(SelfTimerCombo, "Self timer interval", "Choose how long the self timer waits before capture.");
         Accessible(FreezeScreenCheck, "Freeze screen during selection", "Use a still desktop image while choosing a region.");
         Accessible(CrosshairModeCombo, "Crosshair mode", "Choose when selector crosshair guides appear.");
+        Accessible(AdjustSelectionCheck, "Adjust selection before capturing",
+            "Leave the drag as an adjustable selection instead of capturing on release.");
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
@@ -697,7 +701,7 @@ public partial class SettingsWindow : Window
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, SelfTimerCombo,
-            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, AdjustSelectionCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck,
         })

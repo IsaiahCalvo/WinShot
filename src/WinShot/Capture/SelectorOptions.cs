@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using SD = System.Drawing;
 
 namespace WinShot.Capture;
@@ -16,7 +16,8 @@ internal readonly record struct SelectorOptions(
     bool ShowCrosshair,
     bool ShowMagnifier,
     SelectorCrosshairMode CrosshairMode,
-    bool RememberLastRegion)
+    bool RememberLastRegion,
+    bool AdjustBeforeCapture = false)
 {
     public static SelectorOptions ForRegion(Settings? settings) =>
         FromSettings(settings, rememberLastRegion: false);
@@ -41,8 +42,18 @@ internal readonly record struct SelectorOptions(
             settings.ShowCrosshair,
             settings.ShowMagnifier,
             crosshairMode,
-            rememberLastRegion);
+            rememberLastRegion,
+            settings.AdjustSelectionBeforeCapturing);
     }
+
+    /// <summary>
+    /// Whether releasing a drag should leave an adjustable selection instead of taking the
+    /// shot. Ctrl is a per-drag override of the setting, not an extra way to switch it on:
+    /// whichever behaviour is configured, holding Ctrl at release gives you the other one,
+    /// so neither audience is ever more than a modifier away from what they want.
+    /// </summary>
+    public bool ShouldAdjustSelection(bool controlPressed) =>
+        AdjustBeforeCapture != controlPressed;
 
     public bool NeedsCursorFollow =>
         ShowMagnifier || (ShowCrosshair && CrosshairMode != SelectorCrosshairMode.Never);

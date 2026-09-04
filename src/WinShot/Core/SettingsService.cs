@@ -92,6 +92,9 @@ public class Settings
     public bool ShowCrosshair { get; set; } = true;     // crosshair guides during selection
     public string CrosshairMode { get; set; } = "always";  // always | command | never — when crosshair is shown
     public bool ShowMagnifier { get; set; } = true;     // pixel magnifier during selection
+    // Off = releasing the drag takes the shot. On = the release leaves an adjustable
+    // selection you confirm with Enter/Done. Ctrl held at release picks the other one.
+    public bool AdjustSelectionBeforeCapturing { get; set; } = false;
 
     // Quick Access overlay (extends the post-capture overlay block)
     public string OverlayPosition { get; set; } = "bottom-right"; // left | right | top | bottom | bottom-left | bottom-right

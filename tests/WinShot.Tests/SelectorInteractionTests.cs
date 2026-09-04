@@ -139,6 +139,72 @@ public class SelectorInteractionTests
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
     }
 
+    [Fact]
+    public void SpaceIntoWindowModeDropsAMarqueeThatModeCouldNotConfirm()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings(s => s.AdjustSelectionBeforeCapturing = true));
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 300, 250);
+        selector.HandleMouseUp(Left());
+        Assert.NotNull(selector.PendingRegion);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Space));
+        Assert.Null(selector.PendingRegion);
+        Assert.Equal(FastRegionSelectorDialog.SelectorMode.Window, selector.Mode);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
+    [Fact]
+    public void ReleasingTheDragTakesTheShot()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings());
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        selector.HandleMouseUp(Left());
+
+        // No second gesture: the region is chosen and the session is over.
+        Assert.Null(selector.PendingRegion);
+        Assert.NotNull(selector.SelectedRegionPx);
+        Assert.Equal(240, selector.SelectedRegionPx!.Value.Width);
+        Assert.Equal(160, selector.SelectedRegionPx!.Value.Height);
+        Assert.Equal(WF.DialogResult.OK, selector.DialogResult);
+    }
+
+    [Fact]
+    public void AdjustBeforeCapturingLeavesTheSelectionOnScreen()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings(s => s.AdjustSelectionBeforeCapturing = true));
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        selector.HandleMouseUp(Left());
+
+        Assert.NotNull(selector.PendingRegion);
+        Assert.Null(selector.SelectedRegionPx);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter));
+        Assert.NotNull(selector.SelectedRegionPx);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]  // shipped default: release captures
+    [InlineData(false, true, true)]    // Ctrl at release: adjust this once
+    [InlineData(true, false, true)]    // configured to adjust
+    [InlineData(true, true, false)]    // Ctrl at release: capture this once
+    public void ControlAtReleaseAsksForTheOtherBehaviour(bool setting, bool control, bool adjusts)
+    {
+        SelectorOptions options = SelectorOptions.ForRegion(
+            new Settings { AdjustSelectionBeforeCapturing = setting });
+
+        Assert.Equal(adjusts, options.ShouldAdjustSelection(control));
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs = 8000)
     {
         var clock = Stopwatch.StartNew();

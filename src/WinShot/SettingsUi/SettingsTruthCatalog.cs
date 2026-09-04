@@ -1,4 +1,4 @@
-namespace WinShot.SettingsUi;
+﻿namespace WinShot.SettingsUi;
 
 /// <summary>
 /// Durable contract for the controls Settings is allowed to present. Every property in this
@@ -44,6 +44,7 @@ internal static class SettingsTruthCatalog
             "CrosshairMode",
             "ShowCrosshair",
             "ShowMagnifier",
+            "AdjustSelectionBeforeCapturing",
             "AllInOneRememberLast",
             "RecordingShowOverlay",
             "RecordingCopy",

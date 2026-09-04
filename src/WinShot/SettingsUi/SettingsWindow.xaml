@@ -949,6 +949,12 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="ShowMagnifierCheck" Content="Show magnifier"/>
                                 </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Region capture"/>
+                                    <CheckBox x:Name="AdjustSelectionCheck" Content="Adjust selection before capturing"/>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Off, releasing the drag takes the shot. Hold Ctrl as you release to get the other behaviour once."/>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
                             </StackPanel>

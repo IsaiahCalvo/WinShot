@@ -380,6 +380,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _pressedBarButton = -1;
         _resizeHandle = -1;
         _movingPending = false;
+        _handleTween?.Dispose();
+        _handleTween = null;
+        _handleScale = 1d;
         _hoverWindow = null;
         _hoverAppName = string.Empty;
         BeginHoverWash(arriving: false);
@@ -452,6 +455,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             DisposeFrozen();
             _hoverWashTween?.Dispose();
             _hoverWashTween = null;
+            _handleTween?.Dispose();
+            _handleTween = null;
             _followTimer.Dispose();
             _followMotionClock?.Dispose();
             _followMotionClock = null;
@@ -774,6 +779,35 @@ public sealed class FastRegionSelectorDialog : WF.Form
         InvalidateAllSurfaces();
     }
 
+    /// <summary>The adjustable selection, for tests and for the keyboard nudge helper.</summary>
+    internal SD.Rectangle? PendingRegion => _pendingScreen;
+
+    /// <summary>
+    /// Hands the selector an adjustable selection and pops its handles in. Eight dots
+    /// appearing at full size in one frame reads as a glitch; growing them over QuickMs
+    /// reads as the selection becoming grabbable.
+    /// </summary>
+    private void SetPendingRegion(SD.Rectangle rect)
+    {
+        _pendingScreen = rect;
+        _handleTween?.Dispose();
+        _handleScale = 0d;
+        _handleTween = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutBack,
+            progress =>
+            {
+                _handleScale = progress;
+                if (_pendingScreen is SD.Rectangle p)
+                    InvalidateScreenRect(Inflated(p));
+            },
+            () => _handleTween = null);
+    }
+
+    /// <summary>0..1 growth of the pending selection's handles (overshoots past 1).</summary>
+    private double _handleScale = 1d;
+    private IDisposable? _handleTween;
+
     internal void HandleMouseMove()
     {
         _currentScreen = CursorScreen();
@@ -945,12 +979,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _dragging = false;
         if (_dragMoved)
         {
-            // Don't capture yet — present an adjustable selection (move/resize, then Enter or
-            // double-click to confirm), matching CleanShot's behavior.
             var rect = Normalize(_dragStartScreen, SnappedCursor());
             rect.Intersect(_vs);
+            bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+            if (rect.Width > 0 && rect.Height > 0 && !_options.ShouldAdjustSelection(controlPressed))
+            {
+                // Releasing takes the shot. Every region capture used to cost a second
+                // gesture — drag, then aim at Done or reach for Enter — for an adjustment
+                // most captures never wanted; the adjustable path is now the opt-in.
+                Confirm(VirtualFromScreen(rect));
+                return;
+            }
+
             if (rect.Width > 0 && rect.Height > 0)
-                _pendingScreen = rect;
+                SetPendingRegion(rect);
             InvalidateAllSurfaces();
         }
         else if (_paneHover && _pendingScreen is null && _hoverPane is SD.Rectangle pane)
@@ -1180,10 +1222,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
         using var shadow = new SD.SolidBrush(SD.Color.FromArgb(60, 0, 0, 0));
         using var fill = new SD.SolidBrush(SD.Color.White);
         using var pen = new SD.Pen(Accent, 1.5f);
+        int half = Math.Max(1, (int)Math.Round(HandleHalf * Math.Clamp(_handleScale, 0.2d, 1.3d)));
         foreach (SD.Point pt in HandlePoints(screenRect))
         {
             SD.Point l = ToLocal(pt, monitorBounds);
-            var dot = new SD.Rectangle(l.X - HandleHalf, l.Y - HandleHalf, HandleHalf * 2, HandleHalf * 2);
+            var dot = new SD.Rectangle(l.X - half, l.Y - half, half * 2, half * 2);
             var under = dot;
             under.Offset(0, 1);
             g.FillEllipse(shadow, under);
@@ -1496,7 +1539,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         DialogResult = result;
         StopFollowMotion();
-        BeginHoverWash(arriving: false); // a tween outliving the session holds the 1 ms clock
+        // A tween outliving the session holds the process-wide 1 ms clock.
+        BeginHoverWash(arriving: false);
+        _handleTween?.Dispose();
+        _handleTween = null;
+        _handleScale = 1d;
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
