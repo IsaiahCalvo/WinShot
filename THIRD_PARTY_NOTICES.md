@@ -90,15 +90,40 @@ Survey is Isaiah's own repository — the same author as WinShot — so the port
 carry no third-party obligation. Listed here because "ported from" in a shipping
 source header should never be a dead end for whoever audits this next.
 
-### Microsoft PowerToys — https://github.com/microsoft/PowerToys — MIT — **PENDING, not yet used**
+### Microsoft PowerToys — https://github.com/microsoft/PowerToys — MIT
 
-`docs/research/2026-09-02-cleanshot-video-sweep.md` plans a port of PowerToys'
-`MeasureToolCore` edge detection into a future `src/WinShot/Capture/EdgeSnap.cs`.
-Nothing is ported yet. **When that port lands**, MIT requires the copyright notice
-and the full permission notice to travel with all copies: the verbatim MIT licence
-text plus "Copyright (c) Microsoft Corporation" must be added to this file, must
-ship with the binary, and an attribution header must sit in `EdgeSnap.cs` itself.
-Until then this entry is a reminder, not a notice.
+`src/WinShot/Capture/EdgeSnap.cs` **is** a port: the four-ray edge walk from
+`src/modules/MeasureTool/MeasureToolCore/EdgeDetection.cpp` (`FindEdge`,
+`DetectEdgesInternal`) and the two pixel-distance metrics from
+`MeasureToolCore/BGRATextureView.h` (`PixelsClose`), rewritten in C# without the
+SSE2/NEON intrinsics — four bytes at a time, where the memory access dominates
+anyway. The structure, the clamp to `[1, dim-2]`, the compare-against-the-start-pixel
+rule, the last-similar return value and the byte-masked summed-L1 score are all
+theirs. `EdgeSnap.cs` carries the attribution header MIT requires in the source
+file itself; the permission notice it points at is this one:
+
+> Copyright (c) Microsoft Corporation.
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of
+> this software and associated documentation files (the "Software"), to deal in
+> the Software without restriction, including without limitation the rights to
+> use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+> the Software, and to permit persons to whom the Software is furnished to do so,
+> subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+> FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+> COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+> IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+> CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Nothing else in WinShot comes from PowerToys. The px-to-dip conversion the
+measurement pill shows is `px * 96 / dpi`, which is the Windows definition of a
+device-independent pixel, not a borrowed expression.
 
 ## Shipped packages
 
