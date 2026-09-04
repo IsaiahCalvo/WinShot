@@ -410,6 +410,7 @@ public partial class EditorWindow : Window
     private void OnCustomSwatchClick(object sender, RoutedEventArgs e)
     {
         BuildColorPickerPalette();
+        BuildSavedColorRow();
         SyncColorPickerInputs(_customColor);
         ApplyCustomColor(_customColor); // keep current selection consistent with the swatch
         ColorPickerPopup.IsOpen = true;
@@ -466,6 +467,51 @@ public partial class EditorWindow : Window
         }
     }
 
+    /// <summary>
+    /// The user's own colours, newest first, with the unused slots drawn as dashed circles so
+    /// the popup is the same height whether the palette is full or empty. Rebuilt on every
+    /// open rather than once: the whole point is that it changes as you pick.
+    /// </summary>
+    private void BuildSavedColorRow()
+    {
+        SavedColorGrid.Children.Clear();
+        List<string> saved = WinShot.Core.SavedColors.Sanitize(_settings.Current.SavedColors);
+
+        for (int i = 0; i < WinShot.Core.SavedColors.MaxCount; i++)
+        {
+            string? hex = i < saved.Count ? saved[i] : null;
+            var slot = new Button
+            {
+                Width = 22,
+                Height = 22,
+                Margin = new Thickness(2),
+                Cursor = hex is null ? Cursors.Arrow : Cursors.Hand,
+                IsEnabled = hex is not null,
+                BorderBrush = (Brush)FindResource("BorderStrongBrush"),
+                BorderThickness = new Thickness(1),
+            };
+
+            if (hex is not null && TryParseColor(hex, out Color color))
+            {
+                slot.Tag = color;
+                slot.Background = new SolidColorBrush(color);
+                slot.ToolTip = hex;
+                AutomationProperties.SetName(slot, $"Saved color {hex}");
+                AutomationProperties.SetHelpText(slot, $"Use saved annotation color {hex}.");
+                slot.Click += OnColorPickerGridPick;
+            }
+            else
+            {
+                // An empty slot: outline only, so the row reads as ten places rather than as
+                // a short row of colours.
+                slot.Background = Brushes.Transparent;
+                AutomationProperties.SetName(slot, "Empty saved color slot");
+            }
+
+            SavedColorGrid.Children.Add(slot);
+        }
+    }
+
     /// <summary>Hex box: live-preview a valid value as the user types (without closing the popup).</summary>
     private void OnColorPickerHexChanged(object sender, TextChangedEventArgs e)
     {
@@ -517,10 +563,36 @@ public partial class EditorWindow : Window
     private void ApplyCustomColor(Color c)
     {
         _customColor = c;
+        RememberColor(c);
         // The swatch fill becomes the picked color (replacing the rainbow "unset" gradient).
         CustomSwatch.Background = new SolidColorBrush(c);
         CustomSwatch.IsChecked = true; // reflect it as the active swatch
         SetCurrentColor(c);
+    }
+
+    /// <summary>
+    /// Records a picked colour in the user's palette. Held in memory and written once when the
+    /// editor closes: SettingsService.Save writes the file and raises Changed (which
+    /// re-registers every global hotkey), and the eyedropper calls this on every sample.
+    /// </summary>
+    private void RememberColor(Color c)
+    {
+        var picked = System.Drawing.Color.FromArgb(c.R, c.G, c.B);
+        List<string> next = WinShot.Core.SavedColors.With(_settings.Current.SavedColors, picked);
+        if (next.SequenceEqual(WinShot.Core.SavedColors.Sanitize(_settings.Current.SavedColors), StringComparer.OrdinalIgnoreCase))
+            return;
+
+        _settings.Current.SavedColors = next;
+        _savedColorsDirty = true;
+    }
+
+    /// <summary>Writes the palette out, once, when the editor is done with it.</summary>
+    private void PersistSavedColors()
+    {
+        if (!_savedColorsDirty) return;
+        _savedColorsDirty = false;
+        try { _settings.Save(); }
+        catch (Exception ex) { WinShot.Core.Log.Error("Could not save the colour palette (non-fatal)", ex); }
     }
 
     /// <summary>Parses "#RGB", "#RRGGBB", "#AARRGGBB" or bare hex; tolerates a missing leading '#'.</summary>

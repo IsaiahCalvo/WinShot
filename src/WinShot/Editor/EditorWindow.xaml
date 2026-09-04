@@ -203,6 +203,10 @@
                                         Effect="{StaticResource FloatingShadow}">
                                     <StackPanel Width="232">
                                         <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
+                                        <TextBlock Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,8,0,2"/>
+                                        <!-- Ten slots always, unused ones drawn as empty outlines, so
+                                             the popup never changes height as the palette fills. -->
+                                        <UniformGrid x:Name="SavedColorGrid" Columns="10"/>
                                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

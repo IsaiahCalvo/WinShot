@@ -93,6 +93,7 @@ public partial class EditorWindow : Window
     private EditorTool _toolBeforeEyedropper = EditorTool.Select;
     private bool _colorPickerBuilt;
     private Color _customColor = Color.FromRgb(0xFF, 0x3B, 0x30); // last custom / eyedropper color
+    private bool _savedColorsDirty;
     private bool _suppressHexEvents;
 
     /// <summary>Path of the .winshot project this session was opened from / saved to, if any.</summary>
@@ -206,6 +207,7 @@ public partial class EditorWindow : Window
             _spaceDown = false;
             if (!_panning) UpdateCursor();
         };
+        Closed += (_, _) => PersistSavedColors();
         Closed += (_, _) =>
         {
             _closed = true;

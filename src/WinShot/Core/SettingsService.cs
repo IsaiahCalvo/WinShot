@@ -43,6 +43,10 @@ public class Settings
     // Unassigned actions are simply absent. Real/global hotkeys keep their own fields above.
     public Dictionary<string, string> ShortcutBindings { get; set; } = new();
 
+    /// <summary>The user's own palette, newest first, capped at SavedColors.MaxCount. Runtime
+    /// state rather than a settings control: it is written by picking a colour, never typed.</summary>
+    public List<string> SavedColors { get; set; } = new();
+
     /// <summary>Hide every pin, or bring them all back.</summary>
     public string HotkeyPinToggleVisibility { get; set; } = "";
 

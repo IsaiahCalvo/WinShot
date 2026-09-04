@@ -114,5 +114,6 @@ internal static class SettingsTruthCatalog
             "LastCaptureRegion",
             "LastRecordingRegion",
             "ShortcutBindings",
+            "SavedColors",
         };
 }
