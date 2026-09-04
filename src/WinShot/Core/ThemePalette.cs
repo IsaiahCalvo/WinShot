@@ -52,6 +52,15 @@ public static class ThemePalette
     public const float TextDisplayPt = 16.5f;   // 22 DIP
 
     /// <summary>
+    /// The icon on an action button, in points — Theme.xaml's GlyphAction step. Icon-font
+    /// glyphs are pictures, not type: matching one to a text step makes it read as too
+    /// small inside a button box that did not shrink with it. WinForms had no glyph step
+    /// at all, which is how the All-In-One selector's toolbar icons ended up 20% smaller
+    /// than they render on the branch point.
+    /// </summary>
+    public const float GlyphActionPt = 15f;     // 20 DIP
+
+    /// <summary>
     /// Off the scale deliberately: the quick-actions card is pinned, and its menu
     /// was measured to 202x357 by hand at this size. TextCaptionPt reflows it.
     /// </summary>

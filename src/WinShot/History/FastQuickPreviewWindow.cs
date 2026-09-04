@@ -130,7 +130,8 @@ public sealed class FastQuickPreviewWindow : WF.Form
         string fileName = string.IsNullOrWhiteSpace(_filePath) ? "Preview" : Path.GetFileName(_filePath);
         string message = _looksLikeImage ? "Preview unavailable" : "Press Open to play";
         using var titleFont = ThemePalette.UiFont(ThemePalette.TextTitlePt);
-        using var messageFont = ThemePalette.UiFont(ThemePalette.TextTitlePt);
+        // Two steps apart on purpose: the filename is the heading, the status line is not.
+        using var messageFont = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
         var titleRect = new SD.Rectangle(content.X + 20, content.Y + 22, content.Width - 40, 28);
         var messageRect = new SD.Rectangle(content.X + 20, content.Y + 56, content.Width - 40, 24);
         var flags = WF.TextFormatFlags.HorizontalCenter |

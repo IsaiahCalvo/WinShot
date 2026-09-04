@@ -98,7 +98,9 @@ public sealed class FastRecordingCountdownWindow : WF.Form
 
         // Real bold face, not faux-bold synthesized over Semibold.
         using var countFont = new SD.Font("Segoe UI", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
-        using var hintFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
+        // The one instruction on a three-second overlay, under an 84px numeral: it takes the
+        // title step, not the caption step. (It shipped at 11pt; TextCaptionPt is 8.25.)
+        using var hintFont = ThemePalette.UiFont(ThemePalette.TextTitlePt);
         var countText = _remaining.ToString();
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |

@@ -568,9 +568,10 @@ public partial class BackgroundComposerWindow : Window
     /// Gives each of the nine alignment ToggleButtons a distinct directional
     /// indicator: a small dot positioned within an 18x18 frame per the button's
     /// Tag (top-left dot for TL, etc.) so the checked anchor is obvious. The dot
-    /// binds to the button Foreground, which stays the same light gray in every
-    /// state — the checked anchor now reads from ToolButton's neutral chip behind
-    /// the dot rather than from a colour change on the dot itself.
+    /// tracks the button's Foreground at rest and goes white on the checked one,
+    /// so the anchor is readable from the dot as well as from the chip behind it
+    /// — nine identical dots with only a background difference is one signal too
+    /// few for a control whose entire job is "which of these nine".
     /// </summary>
     private void BuildAlignmentGlyphs()
     {
@@ -605,9 +606,20 @@ public partial class BackgroundComposerWindow : Window
                 _ => VerticalAlignment.Center,
             },
         };
-        // Track the host button's Foreground (white when checked, light at rest).
-        dot.SetBinding(System.Windows.Shapes.Shape.FillProperty,
-            new System.Windows.Data.Binding(nameof(Control.Foreground)) { Source = owner });
+        // Light at rest (tracking the button's own Foreground), white when checked.
+        var style = new Style(typeof(System.Windows.Shapes.Ellipse));
+        style.Setters.Add(new Setter(
+            System.Windows.Shapes.Shape.FillProperty,
+            new System.Windows.Data.Binding(nameof(Control.Foreground)) { Source = owner }));
+        var checkedTrigger = new System.Windows.DataTrigger
+        {
+            Binding = new System.Windows.Data.Binding(nameof(ToggleButton.IsChecked)) { Source = owner },
+            Value = true,
+        };
+        checkedTrigger.Setters.Add(new Setter(
+            System.Windows.Shapes.Shape.FillProperty, System.Windows.Media.Brushes.White));
+        style.Triggers.Add(checkedTrigger);
+        dot.Style = style;
         grid.Children.Add(dot);
         return grid;
     }

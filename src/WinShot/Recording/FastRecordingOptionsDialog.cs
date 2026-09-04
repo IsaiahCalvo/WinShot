@@ -93,7 +93,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var title = Label("Record screen", PadX, 250, bold: true, size: 11);
+        var title = Label("Record screen", PadX, 250, bold: true, size: ThemePalette.TextTitlePt);
 
         _format = new DarkSegmented
         {
@@ -136,7 +136,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
         _webcamSizeLabel = Label("Webcam size", PadX, LabelWidth);
         _webcamSizeBox = NumberBox(RecordingOptions.DefaultWebcamSizePercent.ToString());
-        _webcamSizeHint = Label("10–45%", FieldX + 56, 90, color: HintText, size: 8);
+        _webcamSizeHint = Label("10–45%", FieldX + 56, 90, color: HintText, size: ThemePalette.TextCaptionPt);
 
         _cursorCheck = Check("Capture cursor", isChecked: false);
         _clickHighlightCheck = Check("Highlight mouse clicks", isChecked: false);
@@ -144,7 +144,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
 
         var countdownLabel = Label("Countdown (s)", PadX, LabelWidth);
         _countdownBox = NumberBox("0");
-        var countdownHint = Label("0 = off", FieldX + 56, 90, color: HintText, size: 8);
+        var countdownHint = Label("0 = off", FieldX + 56, 90, color: HintText, size: ThemePalette.TextCaptionPt);
 
         var start = ActionButton("Start", Accent);
         start.Click += (_, _) => Complete(WF.DialogResult.OK);
@@ -550,7 +550,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         int x,
         int width,
         bool bold = false,
-        float size = 9,
+        float size = ThemePalette.TextBodyPt,
         SD.Color? color = null) =>
         new()
         {

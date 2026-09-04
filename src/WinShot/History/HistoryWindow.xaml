@@ -11,7 +11,7 @@
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="12,8"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
@@ -42,7 +42,7 @@
 
         <Style x:Key="FilterChip" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Margin" Value="3,0"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -104,33 +104,33 @@
 
                 <StackPanel x:Name="SelectionToolbar" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                     <Button x:Name="DoneButton" Style="{StaticResource AccentToolbarButton}" Click="OnToggleSelectionMode">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Done"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Done"/></StackPanel>
                     </Button>
                     <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
                                FontSize="{StaticResource TextBodyLg}" VerticalAlignment="Center" Margin="20,0,16,0"/>
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
                     <Button x:Name="AllSelectionButton" Style="{StaticResource ToolbarButton}" Click="OnShowAllFromSelection" AutomationProperties.Name="Select or clear all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="All"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="All"/></StackPanel>
                     </Button>
                     <Button x:Name="SelectAllButton" Style="{StaticResource ToolbarButton}" Click="OnSelectAll" AutomationProperties.Name="Select all visible history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Select all"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Select all"/></StackPanel>
                     </Button>
                     <Button x:Name="CopyToButton" Style="{StaticResource ToolbarButton}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Copy to"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Copy to"/></StackPanel>
                     </Button>
                     <Button x:Name="PinSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnPinSelected" IsEnabled="False" AutomationProperties.Name="Pin selected screenshots">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Pin"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Pin"/></StackPanel>
                     </Button>
                     <Button x:Name="ShareButton" Style="{StaticResource ToolbarButton}" Click="OnShareSelected" IsEnabled="False" AutomationProperties.Name="Share selected files">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Share"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphMicro}" Margin="8,1,0,0"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Share"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphMicro}" Margin="8,1,0,0"/></StackPanel>
                     </Button>
                     <Button x:Name="DeleteSelectedButton" Style="{StaticResource ToolbarButton}" Click="OnDeleteSelected" IsEnabled="False" AutomationProperties.Name="Delete selected history items">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" Margin="0,0,8,0"/><TextBlock Text="Delete"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Delete"/></StackPanel>
                     </Button>
                 </StackPanel>
 
                 <StackPanel x:Name="SortControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="{StaticResource ChipGutterMargin}"/>
                     <Button x:Name="SortFieldButton" Style="{StaticResource ToolbarButton}" Click="OnSortFieldMenu" Background="{StaticResource SurfaceBrush}" Padding="12,7">
                         <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphMicro}" Margin="12,2,0,0"/></StackPanel>
                     </Button>
@@ -158,7 +158,7 @@
                 <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Content="Load more" Style="{StaticResource ToolbarButton}"
                         Click="OnLoadMore" Visibility="Collapsed" AutomationProperties.Name="Load more history items"
                         AutomationProperties.HelpText="Shows the next 200 local history items without loading the entire library at once."/>
-                <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Click="OnRefresh" Margin="0,0,8,0" AutomationProperties.Name="Refresh history">
+                <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Click="OnRefresh" Margin="{StaticResource ChipGutterMargin}" AutomationProperties.Name="Refresh history">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource IconFont}" Margin="0,0,7,0"/><TextBlock Text="Refresh"/></StackPanel>
                 </Button>
                 <StackPanel Orientation="Horizontal">

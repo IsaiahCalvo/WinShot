@@ -48,9 +48,9 @@ public sealed class ResizeImageDialog : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        var title = Label("Resize image", PadX, 200, bold: true, size: 11);
+        var title = Label("Resize image", PadX, 200, bold: true, size: ThemePalette.TextTitlePt);
         title.Top = S(16);
-        var original = Label($"{source.Width} × {source.Height} px", PadX, 200, color: ThemePalette.TextSecondary, size: 8);
+        var original = Label($"{source.Width} × {source.Height} px", PadX, 200, color: ThemePalette.TextSecondary, size: ThemePalette.TextCaptionPt);
         original.Top = S(38);
 
         var widthLabel = Label("Width", PadX, 70);
@@ -133,7 +133,7 @@ public sealed class ResizeImageDialog : WF.Form
             PopupChrome.ApplyRegion(this, S(10));
     }
 
-    private WF.Label Label(string text, int x, int width, bool bold = false, float size = 9, SD.Color? color = null) =>
+    private WF.Label Label(string text, int x, int width, bool bold = false, float size = ThemePalette.TextBodyPt, SD.Color? color = null) =>
         new()
         {
             AutoSize = false,

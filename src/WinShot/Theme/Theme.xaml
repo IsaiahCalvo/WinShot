@@ -26,7 +26,13 @@
     <Color x:Key="SurfaceColor">#FF2E2E30</Color>       <!-- raised control surface (secondary pill, combo, slider track-fill region) -->
     <Color x:Key="SurfaceAltColor">#FF38383B</Color>    <!-- inputs / combo toggle / track -->
     <Color x:Key="ElevatedColor">#FF323236</Color>      <!-- popups / flyouts / context menus -->
-    <Color x:Key="ToolChipColor">#FF3A3A40</Color>      <!-- active-tool chip: reads as selected without shouting accent -->
+    <!-- Active-tool chip. Neutral on purpose (the accent is reserved for modes), but it
+         has to WIN against a plain hover: at #3A3A40 the chip sat at 1.34:1 over the
+         toolbar while the 12% white hover wash composited to 1.46:1, so whichever tool
+         the pointer happened to be over looked more selected than the one that was.
+         This value clears 3:1 over the toolbar ground (WCAG 1.4.11 for a state
+         indicator) and stays roughly 2:1 brighter than the hover wash. -->
+    <Color x:Key="ToolChipColor">#FF70707A</Color>
 
     <!-- Translucent floating-surface base (one recipe for ALL overlays) -->
     <Color x:Key="FloatingBgColor">#F5262628</Color>    <!-- ~96% opaque toolbar charcoal -->
@@ -92,6 +98,11 @@
     <CornerRadius x:Key="RadiusInput">8</CornerRadius>
     <CornerRadius x:Key="RadiusPill">999</CornerRadius> <!-- clamped to height/2 by WPF -->
     <CornerRadius x:Key="RadiusChip">6</CornerRadius>   <!-- 36px tool button: hover wash and active chip -->
+    <!-- A wash layer sitting INSIDE a bordered pill: Border does not clip its child, so
+         the overlay needs the parent radius minus the parent border thickness or its
+         square corners poke past the arc. Two thicknesses in play, so two tokens. -->
+    <CornerRadius x:Key="RadiusButtonInner">6</CornerRadius> <!-- RadiusButton 8 - BorderThickness 2 -->
+    <CornerRadius x:Key="RadiusInputInner">7</CornerRadius>  <!-- RadiusInput  8 - BorderThickness 1 -->
 
     <sys:Double x:Key="ToolButtonSize">36</sys:Double>
     <sys:Double x:Key="ToolGlyphSize">17</sys:Double>
@@ -117,6 +128,7 @@
          pictures, and matching them to a text step makes them read as too small. -->
     <sys:Double x:Key="GlyphMicro">9</sys:Double>
     <sys:Double x:Key="GlyphBadge">14</sys:Double>
+    <sys:Double x:Key="GlyphAction">20</sys:Double>   <!-- the icon on an action button or a nav tab -->
     <sys:Double x:Key="GlyphIllustration">34</sys:Double>
     <sys:Double x:Key="GlyphHero">48</sys:Double>
 
@@ -132,6 +144,15 @@
     <sys:Double x:Key="Space4">16</sys:Double>
     <sys:Double x:Key="Space5">24</sys:Double>
 
+    <!-- The repeated gaps, as Thickness. XAML cannot compose a Thickness out of the
+         Doubles above, so the numbers are spelled once here — beside the scale they
+         come from — instead of inline in the windows. The derivation is in the name
+         and in the comment; if a step moves, both halves move together right here. -->
+    <Thickness x:Key="GroupLabelMargin">0,8,0,4</Thickness>   <!-- Space2 above, Space1 below -->
+    <Thickness x:Key="GroupSepMargin">0,8,0,8</Thickness>     <!-- Space2 either side -->
+    <Thickness x:Key="LabelGutterMargin">0,0,12,0</Thickness> <!-- Space3 between label and control -->
+    <Thickness x:Key="ChipGutterMargin">0,0,8,0</Thickness>   <!-- Space2 between chips in a row -->
+
     <!-- Settings' two-column geometry. Everything under a labelled row starts at
          the control column: the label width plus one Space3 gutter. That sum was
          written out as a bare 162 in four places and described in a comment in a
@@ -144,9 +165,12 @@
     <Thickness x:Key="SettingsHintBelowMargin">162,4,0,0</Thickness>
 
     <!-- ============================= MOTION =============================
-         Mirrors Core/Motion.cs, so a WPF window and a WinForms overlay move at
-         the same speed: Quick for hover/press tints, Swap for one pane replacing
-         another in the same slot, Enter for a surface arriving on screen.
+         Mirrors Core/Motion.cs's DURATIONS, so a WPF window and a WinForms overlay
+         move at the same speed: Quick for hover/press tints, Swap for one pane
+         replacing another in the same slot, Enter for a surface arriving on screen.
+         The eases are only approximately the same curve — WPF's BackEase is
+         t^3 - t*a*sin(pi*t) and Motion.EaseOutBack is the standard c1 = 1.70158
+         cubic — so do not pair one with the other in a single composite move.
          ================================================================== -->
     <Duration x:Key="MotionQuick">0:0:0.14</Duration>
     <Duration x:Key="MotionSwap">0:0:0.22</Duration>
@@ -287,6 +311,14 @@
          ==================================================================== -->
     <Style x:Key="ModeToolButton" TargetType="ToggleButton" BasedOn="{StaticResource ToolButton}">
         <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+        <Style.Triggers>
+            <!-- The one glyph in the app that sits on accent. White clears 3.65:1 there;
+                 TextPrimary only manages 3.26:1. Scoped to this style so the neutral
+                 chip on ToolButton keeps its normal glyph colour. -->
+            <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Foreground" Value="White"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <!-- A plain (non-toggle) round icon button variant for one-shot actions
@@ -345,7 +377,7 @@
         <Setter Property="Padding" Value="14,0"/>
         <Setter Property="Margin" Value="4,0"/>
         <Setter Property="Foreground" Value="White"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
         <Setter Property="FontWeight" Value="Medium"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
@@ -356,9 +388,9 @@
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
-                            <Border x:Name="Hover" Opacity="0" CornerRadius="6"
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
                                     Background="{StaticResource AccentHoverBrush}"/>
-                            <Border x:Name="Press" Opacity="0" CornerRadius="6"
+                            <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
                                     Background="{StaticResource AccentPressedBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
@@ -395,7 +427,7 @@
         <Setter Property="Padding" Value="14,0"/>
         <Setter Property="Margin" Value="4,0"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
         <Setter Property="FontWeight" Value="Medium"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
@@ -406,9 +438,9 @@
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
-                            <Border x:Name="Hover" Opacity="0" CornerRadius="7"
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusInputInner}"
                                     Background="{StaticResource SurfaceAltBrush}"/>
-                            <Border x:Name="Press" Opacity="0" CornerRadius="7"
+                            <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusInputInner}"
                                     Background="{StaticResource ElevatedBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
@@ -449,9 +481,9 @@
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
-                            <Border x:Name="Hover" Opacity="0" CornerRadius="6"
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
                                     Background="{StaticResource RedHoverBrush}"/>
-                            <Border x:Name="Press" Opacity="0" CornerRadius="6"
+                            <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
                                     Background="{StaticResource RedPressedBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
@@ -568,18 +600,18 @@
     <!-- ============================ LABELS ============================ -->
     <Style x:Key="FieldLabel" TargetType="TextBlock">
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
     <Style x:Key="SectionHeader" TargetType="TextBlock">
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Margin" Value="0,16,0,8"/>
     </Style>
     <Style x:Key="ValueLabel" TargetType="TextBlock">
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
@@ -593,7 +625,7 @@
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                 CornerRadius="{StaticResource RadiusInput}">
             <Grid>
-                <Border x:Name="Hover" Opacity="0" CornerRadius="7"
+                <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusInputInner}"
                         Background="{StaticResource ElevatedBrush}"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -639,7 +671,7 @@
     <Style x:Key="DarkComboBox" TargetType="ComboBox">
         <Setter Property="Height" Value="30"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="ItemContainerStyle" Value="{StaticResource DarkComboBoxItem}"/>
@@ -751,7 +783,7 @@
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
         <Setter Property="Padding" Value="8,5"/>
         <Setter Property="Height" Value="30"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -789,7 +821,7 @@
         <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
         <Setter Property="Padding" Value="6,0"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
@@ -810,7 +842,7 @@
         <Setter Property="Width" Value="22"/>
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
         <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
-        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontSize" Value="{StaticResource TextMicro}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
@@ -873,7 +905,7 @@
          ==================================================================== -->
     <Style x:Key="DarkCheckBox" TargetType="CheckBox">
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">

@@ -1071,7 +1071,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private int U(int logical) => (int)Math.Round(logical * _u);
 
         private readonly FastAllInOneSelectorDialog _owner;
-        private readonly SD.Font _glyphFont = ThemePalette.IconFont(ThemePalette.TextTitlePt);
+        private readonly SD.Font _glyphFont = ThemePalette.IconFont(ThemePalette.GlyphActionPt);
         private readonly SD.Font _tipFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
         private readonly SD.Font _ocrFont = ThemePalette.UiFont(ThemePalette.TextTitlePt, SD.FontStyle.Bold);
         private readonly SD.Font _labelFont = ThemePalette.UiFont(ThemePalette.TextMicroPt);

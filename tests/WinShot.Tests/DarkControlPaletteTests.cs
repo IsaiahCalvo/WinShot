@@ -1,4 +1,5 @@
-﻿using System.Threading;
+﻿using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Media;
 using WinShot.Core;
@@ -152,6 +153,7 @@ public class DarkControlPaletteTests
     [InlineData("TextBodyLg", ThemePalette.TextBodyLgPt)]
     [InlineData("TextTitle", ThemePalette.TextTitlePt)]
     [InlineData("TextDisplay", ThemePalette.TextDisplayPt)]
+    [InlineData("GlyphAction", ThemePalette.GlyphActionPt)]
     public void TypeScale_MeasuresTheSameInBothUnits(string dipToken, float points)
         => OnTheme(theme => Assert.Equal((double)points * 96d / 72d, (double)theme[dipToken], 6));
 
@@ -180,6 +182,118 @@ public class DarkControlPaletteTests
             (double)theme["SettingsRowIndent"]));
 
     /// <summary>
+    /// A tool that IS selected has to read as more selected than a tool the pointer merely
+    /// happens to be over. It did not: the neutral chip composited to 1.34:1 over the
+    /// toolbar while the hover wash reached 1.46:1, so sweeping the pointer across the row
+    /// lit every unselected tool brighter than the active one. ToolButton_ChecksIntoA-
+    /// NeutralChip only pins that the chip is not the accent — it cannot see this.
+    /// </summary>
+    [Fact]
+    public void ToolButton_CheckedChipOutranksAPlainHover() => OnTheme(theme =>
+    {
+        Color ground = ((SolidColorBrush)theme["ToolbarBgBrush"]).Color;
+        Color chip = ((SolidColorBrush)theme["ToolChipBrush"]).Color;
+        Color hovered = Over(((SolidColorBrush)theme["HoverFillBrush"]).Color, ground);
+
+        Assert.True(
+            Luminance(chip) > Luminance(hovered),
+            $"checked chip {chip} is not brighter than a hovered sibling {hovered}");
+
+        // WCAG 1.4.11: a non-text state indicator needs 3:1 against what it sits on.
+        Assert.True(
+            Contrast(chip, ground) >= 3d,
+            $"checked chip {chip} is only {Contrast(chip, ground):0.00}:1 over {ground}");
+    });
+
+    /// <summary>
+    /// Every FontSize the theme sets is a step on the type scale or the glyph scale.
+    /// The first migration only rewrote the attribute form and left ten Setters behind,
+    /// so the file that DEFINES the scale was the biggest place still inventing numbers.
+    /// </summary>
+    [Fact]
+    public void Theme_SizesTypeOnlyFromTheScales() => OnTheme(theme =>
+    {
+        double[] scale = new[]
+        {
+            "TextMicro", "TextCaption", "TextBody", "TextBodyLg", "TextTitle", "TextDisplay",
+            "GlyphMicro", "GlyphBadge", "GlyphAction", "GlyphIllustration", "GlyphHero",
+            "ToolGlyphSize", "CircleGlyphSize",
+        }.Select(k => (double)theme[k]).ToArray();
+
+        foreach (object key in theme.Keys)
+        {
+            if (theme[key] is not Style style) continue;
+            foreach (SetterBase setterBase in style.Setters)
+            {
+                if (setterBase is not Setter { Property.Name: "FontSize", Value: double size }) continue;
+                Assert.True(
+                    scale.Contains(size),
+                    $"Style '{key}' sizes type at {size}, which is not a step on either scale.");
+            }
+        }
+    });
+
+    /// <summary>
+    /// "Animation effects: off" has to mean the same thing on both stacks. Motion.Run
+    /// already applies the end state inline; the WPF templates' cross-fades did not, so
+    /// a user with animation off got a fading pill button beside a snapping WinForms one.
+    /// </summary>
+    [Fact]
+    public void Theme_StoryboardsAreInstantWhenTheUserTurnedAnimationOff()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            OnTheme(theme =>
+            {
+                ThemeResources.ApplyAnimationPreference(theme);
+
+                var boards = theme.Keys.Cast<object>()
+                    .Select(k => theme[k])
+                    .OfType<System.Windows.Media.Animation.Storyboard>()
+                    .ToArray();
+
+                Assert.NotEmpty(boards);
+                foreach (var board in boards)
+                    foreach (System.Windows.Media.Animation.Timeline child in board.Children)
+                        Assert.Equal(new Duration(TimeSpan.Zero), child.Duration);
+            });
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+        }
+    }
+
+    /// <summary>0..1 relative luminance, WCAG 2.x.</summary>
+    private static double Luminance(Color c)
+    {
+        static double Channel(byte v)
+        {
+            double s = v / 255d;
+            return s <= 0.04045d ? s / 12.92d : Math.Pow((s + 0.055d) / 1.055d, 2.4d);
+        }
+
+        return (0.2126d * Channel(c.R)) + (0.7152d * Channel(c.G)) + (0.0722d * Channel(c.B));
+    }
+
+    private static double Contrast(Color a, Color b)
+    {
+        double la = Luminance(a), lb = Luminance(b);
+        return (Math.Max(la, lb) + 0.05d) / (Math.Min(la, lb) + 0.05d);
+    }
+
+    /// <summary>Source-over composite of a translucent wash on an opaque ground.</summary>
+    private static Color Over(Color wash, Color ground)
+    {
+        double a = wash.A / 255d;
+        static byte Mix(byte top, byte bottom, double alpha)
+            => (byte)Math.Round((top * alpha) + (bottom * (1d - alpha)));
+        return Color.FromRgb(Mix(wash.R, ground.R, a), Mix(wash.G, ground.G, a), Mix(wash.B, ground.B, a));
+    }
+
+    /// <summary>
     /// The chip paints from the style's Background, which is what lets ModeToolButton
     /// be one Setter instead of a second copy of the whole template.
     /// </summary>
@@ -205,6 +319,14 @@ public class DarkControlPaletteTests
     /// </summary>
     private static void OnTheme(Action<ResourceDictionary> assertions)
     {
+        // Touching PackUriHelper registers the "pack" URI scheme. WPF does that when an
+        // Application is created; this assembly deliberately never creates one, so whether
+        // "pack://application:,,,/..." parses at all came down to whether some other test
+        // class happened to run first — renaming a file was enough to break it with
+        // "Invalid URI: Invalid port specified".
+        _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
+        _ = Application.ResourceAssembly;
+
         Exception? failure = null;
         var thread = new Thread(() =>
         {

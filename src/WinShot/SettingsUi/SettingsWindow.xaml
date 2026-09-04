@@ -24,15 +24,15 @@
              card border/dividers start at — with controls forming their own left-aligned
              column to the right, instead of both hugging the center with a dead left gutter. -->
         <Style x:Key="RowLabel" TargetType="TextBlock" BasedOn="{StaticResource FieldLabel}">
-            <Setter Property="Width" Value="150"/>
+            <Setter Property="Width" Value="{StaticResource SettingsRowLabelWidth}"/>
             <Setter Property="TextAlignment" Value="Left"/>
-            <Setter Property="Margin" Value="0,0,12,0"/>
+            <Setter Property="Margin" Value="{StaticResource LabelGutterMargin}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
         <!-- Hint: muted helper text, sits under or beside a control. -->
         <Style x:Key="Hint" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="8,0,0,0"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
@@ -49,7 +49,7 @@
              light and clearly visible on the dark input surface. -->
         <Style x:Key="SettingsTextBox" TargetType="TextBox" BasedOn="{StaticResource DarkTextBox}">
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
             <Setter Property="FontWeight" Value="Medium"/>
             <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}"/>
@@ -115,12 +115,12 @@
             </Setter>
         </Style>
         <Style TargetType="CheckBox" BasedOn="{StaticResource DarkCheckBox}">
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocusVisual}"/>
         </Style>
         <Style TargetType="ComboBox" BasedOn="{StaticResource DarkComboBox}">
             <Setter Property="Height" Value="28"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocusVisual}"/>
             <Style.Triggers>
                 <Trigger Property="IsKeyboardFocusWithin" Value="True">
@@ -152,7 +152,7 @@
         <!-- Category header used on the Shortcuts list (small, muted, all-caps feel). -->
         <Style x:Key="ShortcutCategory" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Margin" Value="2,2,0,6"/>
         </Style>
@@ -161,7 +161,7 @@
         <Style x:Key="GroupSep" TargetType="Rectangle">
             <Setter Property="Height" Value="1"/>
             <Setter Property="Fill" Value="{StaticResource BorderBrush}"/>
-            <Setter Property="Margin" Value="0,8,0,8"/>
+            <Setter Property="Margin" Value="{StaticResource GroupSepMargin}"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
         </Style>
 
@@ -196,12 +196,12 @@
         <!-- A single icon-over-label tab cell. -->
         <Style x:Key="NavTabIcon" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
-            <Setter Property="FontSize" Value="19"/>
+            <Setter Property="FontSize" Value="{StaticResource GlyphAction}"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0,0,0,4"/>
         </Style>
         <Style x:Key="NavTabLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="TextAlignment" Value="Center"/>
         </Style>
@@ -209,7 +209,7 @@
         <!-- Sub-tab pill (Recording: General / Video / GIF). -->
         <Style x:Key="SubTab" TargetType="ListBoxItem">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocusVisual}"/>
             <Setter Property="Template">
@@ -236,7 +236,7 @@
         <!-- Column header for the "After capture" matrix. -->
         <Style x:Key="MatrixColHead" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
@@ -604,7 +604,7 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Active screen is the screen where your cursor is pointing."/>
-                                <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
+                                <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Overlay size"/>
                                     <Slider x:Name="OverlaySizeSlider" HorizontalAlignment="Stretch"
                                             Minimum="0" Maximum="100" Value="50"/>
@@ -643,7 +643,7 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Hold Alt to keep the item on the Overlay after dragging."/>
-                                <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
+                                <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Save button behavior"/>
                                     <ComboBox x:Name="OverlaySaveBehaviorCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Save to &quot;Export location&quot;" Tag="export"/>
@@ -790,7 +790,7 @@
                                     <TextBlock x:Name="MaxResolutionHint" Style="{StaticResource SubHint}"
                                                Text="Set maximum resolution to reduce file size and upload time."/>
 
-                                    <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
+                                    <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Video FPS"/>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBox x:Name="RecordingFpsBox" Width="80"/>
@@ -837,7 +837,7 @@
                                         </StackPanel>
                                     </DockPanel>
 
-                                    <DockPanel x:Name="GifQualityRow" Style="{StaticResource Row}" Margin="0,8,0,4">
+                                    <DockPanel x:Name="GifQualityRow" Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="GIF quality"/>
                                         <StackPanel Orientation="Horizontal">
                                             <StackPanel Width="180">
@@ -853,7 +853,7 @@
                                     <TextBlock x:Name="GifQualityHint" Style="{StaticResource SubHint}"
                                                Text="Setting the quality to maximum can speed up the processing time, but it will increase file size."/>
 
-                                    <DockPanel x:Name="GifSizeRow" Style="{StaticResource Row}" Margin="0,8,0,4">
+                                    <DockPanel x:Name="GifSizeRow" Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="GIF size"/>
                                         <ComboBox x:Name="GifSizeCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="800 x auto (default)" Tag="800"/>
@@ -968,7 +968,7 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Press Alt when drawing to invert the behavior."/>
-                                <DockPanel Style="{StaticResource Row}" Margin="0,8,0,4">
+                                <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Pencil tool"/>
                                     <CheckBox x:Name="SmoothPencilCheck" Content="Smooth drawing"/>
                                 </DockPanel>
@@ -1063,8 +1063,8 @@
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Pinned screenshots"/>
                                     <StackPanel Orientation="Horizontal">
-                                        <CheckBox x:Name="PinnedRoundedCornersCheck" Content="Rounded corners" Margin="0,0,12,0"/>
-                                        <CheckBox x:Name="PinnedShadowCheck" Content="Shadow" Margin="0,0,12,0"/>
+                                        <CheckBox x:Name="PinnedRoundedCornersCheck" Content="Rounded corners" Margin="{StaticResource LabelGutterMargin}"/>
+                                        <CheckBox x:Name="PinnedShadowCheck" Content="Shadow" Margin="{StaticResource LabelGutterMargin}"/>
                                         <CheckBox x:Name="PinnedBorderCheck" Content="Border"/>
                                     </StackPanel>
                                 </DockPanel>
