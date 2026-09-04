@@ -718,11 +718,13 @@ public partial class EditorWindow : Window
         var number = new TextBlock
         {
             Text = preset.ToString(CultureInfo.InvariantCulture),
-            FontSize = 12.5,
             VerticalAlignment = VerticalAlignment.Center,
             MinWidth = 22,
             TextAlignment = TextAlignment.Right,
         };
+        // The last inline FontSize in the app: 12.5 was off both scales, and this is
+        // chrome rather than a display numeral, so it belongs on the type scale.
+        number.SetResourceReference(TextBlock.FontSizeProperty, "TextBodyLg");
         Grid.SetColumn(number, 1);
         grid.Children.Add(number);
 

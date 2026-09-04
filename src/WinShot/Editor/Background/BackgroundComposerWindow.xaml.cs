@@ -606,11 +606,13 @@ public partial class BackgroundComposerWindow : Window
                 _ => VerticalAlignment.Center,
             },
         };
-        // Light at rest (tracking the button's own Foreground), white when checked.
+        // Muted at rest, white when checked. Tracking the button's own Foreground put the
+        // rest dot at TextPrimary #F2F2F4, which is 1.05:1 against white - the trigger below
+        // was invisible and the anchor read only from the chip ring behind it.
         var style = new Style(typeof(System.Windows.Shapes.Ellipse));
         style.Setters.Add(new Setter(
             System.Windows.Shapes.Shape.FillProperty,
-            new System.Windows.Data.Binding(nameof(Control.Foreground)) { Source = owner }));
+            (System.Windows.Media.Brush)owner.FindResource("TextSecondaryBrush")));
         var checkedTrigger = new System.Windows.DataTrigger
         {
             Binding = new System.Windows.Data.Binding(nameof(ToggleButton.IsChecked)) { Source = owner },

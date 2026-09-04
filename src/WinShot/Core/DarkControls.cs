@@ -624,7 +624,7 @@ public sealed class DarkSegmented : WF.Control
         _gliding = true;
         _pillRun = Motion.Run(
             Motion.GlideDurationMs,
-            progress => progress,
+            Motion.EaseOutCubic,
             _ =>
             {
                 _pill.Update();

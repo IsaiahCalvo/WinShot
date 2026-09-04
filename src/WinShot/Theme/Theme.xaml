@@ -66,7 +66,7 @@
          tool button down to 2.56:1. Dipping on press reads as pressed and keeps the
          worst stack (chip + hover + press) at 8.8:1 for text. -->
     <Color x:Key="HoverFillColor">#1FFFFFFF</Color>      <!-- ~12% white circular/row hover -->
-    <Color x:Key="PressedFillColor">#2E000000</Color>    <!-- ~18% black pressed -->
+    <Color x:Key="PressedShadeColor">#2E000000</Color>   <!-- ~18% black pressed -->
 
     <!-- Hairlines / borders (one token for structure, one for emphasis) -->
     <Color x:Key="BorderColor">#1FFFFFFF</Color>         <!-- ~12% white: dividers, toolbar/panel edge, separators -->
@@ -96,7 +96,7 @@
     <SolidColorBrush x:Key="TextDisabledBrush"  Color="{StaticResource TextDisabledColor}"/>
 
     <SolidColorBrush x:Key="HoverFillBrush"     Color="{StaticResource HoverFillColor}"/>
-    <SolidColorBrush x:Key="PressedFillBrush"   Color="{StaticResource PressedFillColor}"/>
+    <SolidColorBrush x:Key="PressedShadeBrush"   Color="{StaticResource PressedShadeColor}"/>
 
     <SolidColorBrush x:Key="BorderBrush"        Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
@@ -282,7 +282,7 @@
                         <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
                                 Background="{StaticResource HoverFillBrush}"/>
                         <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
-                                Background="{StaticResource PressedFillBrush}"/>
+                                Background="{StaticResource PressedShadeBrush}"/>
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
@@ -333,6 +333,12 @@
             <Trigger Property="IsChecked" Value="True">
                 <Setter Property="Foreground" Value="White"/>
             </Trigger>
+            <!-- Last, so it outranks the White above: a Style trigger beats the template
+                 trigger that greys ToolButton, and a checked-and-disabled mode button
+                 would otherwise render at full white. -->
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+            </Trigger>
         </Style.Triggers>
     </Style>
 
@@ -354,7 +360,7 @@
                         <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
                                 Background="{StaticResource HoverFillBrush}"/>
                         <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
-                                Background="{StaticResource PressedFillBrush}"/>
+                                Background="{StaticResource PressedShadeBrush}"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
@@ -876,7 +882,7 @@
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedFillBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedShadeBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -896,18 +902,27 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="Bg" Background="Transparent" CornerRadius="6" Padding="8,0">
-                        <ContentPresenter VerticalAlignment="Center"
+                    <Grid>
+                        <!-- Same layered cross-fade as ToolButton: the selection used to
+                             hard-cut to solid accent, which is the one snap left on the
+                             primary selection signal of the size menu. -->
+                        <Border x:Name="Check" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource AccentBrush}"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <ContentPresenter VerticalAlignment="Center" Margin="8,0"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource CheckIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource CheckOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

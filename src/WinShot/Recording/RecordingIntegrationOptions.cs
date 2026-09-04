@@ -1,4 +1,4 @@
-using WinShot.Capture;
+﻿using WinShot.Capture;
 using WinShot.Core;
 using System.Runtime.InteropServices;
 using SD = System.Drawing;
@@ -167,6 +167,14 @@ public static class RecordingControlBarPlacement
 
 public static class RecordingMonitorDpi
 {
+    /// <summary>
+    /// One logical pixel measurement scaled for a monitor. Every WinForms surface that
+    /// lays itself out by hand (AutoScaleMode.Dpi never fires on the monitor a window is
+    /// born on) rounds the same way; keeping the arithmetic here means a test can pin it
+    /// at 125/150/200% without a monitor at that DPI to render on.
+    /// </summary>
+    public static int Px(int logical, double scale) => (int)Math.Round(logical * scale);
+
     public static double ScaleFor(SD.Rectangle screenRect)
     {
         try

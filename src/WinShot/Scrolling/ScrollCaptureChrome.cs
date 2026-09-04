@@ -213,7 +213,7 @@ public sealed class ScrollControlsBar : WF.Form
     // other WinForms surface in the app (FastRecordingControlBar, the selectors, ...).
     private readonly double _scale;
 
-    private int S(int logical) => (int)Math.Round(logical * _scale);
+    private int S(int logical) => WinShot.Recording.RecordingMonitorDpi.Px(logical, _scale);
 
     // Amber warning — the palette only has red (error); these are nudges, not errors.
     private static readonly SD.Color WarnColor = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
@@ -507,7 +507,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     // caption rendered at the real DPI.
     private readonly double _scale;
 
-    private int S(int logical) => (int)Math.Round(logical * _scale);
+    private int S(int logical) => WinShot.Recording.RecordingMonitorDpi.Px(logical, _scale);
 
     public ScrollPreviewPanel(SD.Rectangle regionScreen)
     {

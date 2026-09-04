@@ -17,7 +17,7 @@ in their headers:
 - `src/WinShot/Capture/RectangleTween.cs` — a hover highlight that glides to a new rectangle
   instead of teleporting, and that re-origins from its current on-screen position when
   retargeted mid-flight. WinShot's implementation is a stopwatch-driven lerp with its own
-  API (`Retarget` / `Tick` / `IsActive`); ShareX's equivalent is a different type with a
+  API (`Retarget` / `Update` / `Stop` / `IsActive`); ShareX's equivalent is a different type with a
   different shape.
 - `src/WinShot/Core/WindowEnumerator.cs` — which on-screen rectangles a window picker should
   offer, and in what order: child controls before their parent, client area before frame,

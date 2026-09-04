@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using WinShot.Core;
@@ -42,10 +42,14 @@ internal static class HotkeyOwnerProbeDialog
             try
             {
                 Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+                dialog.Close();
             }
             catch (Exception ex)
             {
+                // The one action on this card that used to swallow both outcomes: nothing
+                // happened on success (the dialog stayed up) and nothing on failure either.
                 Log.Error($"Failed to open '{target}' after hotkey probe", ex);
+                status.Text = FriendlyError.For(ex);
             }
         });
         open.IsEnabled = false;

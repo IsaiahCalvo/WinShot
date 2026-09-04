@@ -141,7 +141,9 @@ public sealed class ResizeImageDialog : WF.Form
             Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? ThemePalette.TextPrimary,
             Location = new SD.Point(S(x), 0),
-            Size = new SD.Size(S(width), S(22)),
+            // 12 pt Segoe UI Bold needs ~22 px of line box, so the title step gets its own
+            // row height; the 22 px shared row clipped the descender in "Resize image".
+            Size = new SD.Size(S(width), S(size >= ThemePalette.TextTitlePt ? 24 : 22)),
             Text = text,
             TextAlign = SD.ContentAlignment.MiddleLeft,
         };
