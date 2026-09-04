@@ -212,18 +212,30 @@ public class DarkControlPaletteTests
     [Fact]
     public void ToolButton_CheckedChipOutranksAPlainHover() => OnTheme(theme =>
     {
-        Color ground = ((SolidColorBrush)theme["ToolbarBgBrush"]).Color;
         Color ring = ((SolidColorBrush)theme["ToolChipRingBrush"]).Color;
-        Color hovered = Over(((SolidColorBrush)theme["HoverFillBrush"]).Color, ground);
+        Color window = ((SolidColorBrush)theme["WindowBgBrush"]).Color;
+        Color hoverWash = ((SolidColorBrush)theme["HoverFillBrush"]).Color;
 
-        Assert.True(
-            Luminance(ring) > Luminance(hovered),
-            $"checked chip's ring {ring} is not brighter than a hovered sibling {hovered}");
+        // Every ground a ToolButton actually lands on, not just the toolbar. Measuring one
+        // ground missed that PanToolBtn / CurvedArrowToolBtn / BlurToolBtn / EyedropperToolBtn
+        // live in MoreToolsPopup, which is ElevatedBrush — where the ring read 2.61:1 and the
+        // selected tool in that popup was, to the eye, not selected at all. Floating is
+        // translucent, so it is measured composited over the canvas it floats above.
+        foreach (string key in new[] { "ToolbarBgBrush", "ElevatedBrush", "WindowBgBrush", "FloatingBgBrush" })
+        {
+            Color raw = ((SolidColorBrush)theme[key]).Color;
+            Color ground = raw.A == 255 ? raw : Over(raw, window);
+            Color hovered = Over(hoverWash, ground);
 
-        // WCAG 1.4.11: a non-text state indicator needs 3:1 against what it sits on.
-        Assert.True(
-            Contrast(ring, ground) >= 3d,
-            $"checked chip's ring {ring} is only {Contrast(ring, ground):0.00}:1 over {ground}");
+            Assert.True(
+                Luminance(ring) > Luminance(hovered),
+                $"on {key} the checked ring {ring} is not brighter than a hovered sibling {hovered}");
+
+            // WCAG 1.4.11: a non-text state indicator needs 3:1 against what it sits on.
+            Assert.True(
+                Contrast(ring, ground) >= 3d,
+                $"on {key} the checked ring {ring} is only {Contrast(ring, ground):0.00}:1 over {ground}");
+        }
     });
 
     /// <summary>

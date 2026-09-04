@@ -28,14 +28,18 @@
     <Color x:Key="ElevatedColor">#FF323236</Color>      <!-- popups / flyouts / context menus -->
     <!-- Active-tool chip: dark fill + bright ring. Neutral on purpose (the accent is
          reserved for modes). One filled neutral cannot do this job on its own — clearing
-         3:1 over the toolbar (WCAG 1.4.11 for a state indicator) needs a luminance of at
-         least 0.159, and carrying TextPrimary at 4.5:1 needs at most 0.159, and the hover
-         and press washes stack on top of whatever we pick. So the FILL stays dark enough
-         for the glyph (10.1:1, and still 8:1 under both washes) and the RING carries the
-         state signal at 3.07:1 against the toolbar ground — brighter than anything a plain
-         hover composites to, so the selected tool still outranks a merely hovered one. -->
+         3:1 (WCAG 1.4.11 for a state indicator) and carrying TextPrimary at 4.5:1 pull in
+         opposite directions, and the hover and press washes stack on top of whatever we pick.
+         So the FILL stays dark enough for the glyph (10.1:1, and still 8:1 under both washes)
+         and the RING carries the state signal on its own.
+         The ring is measured against EVERY ground a ToolButton lands on, not just the toolbar:
+         four of them live in MoreToolsPopup, which is ElevatedBrush — the lightest ground and
+         therefore the worst case. At #70707A the ring read 2.61:1 there, so the selected tool
+         in that popup was effectively unmarked. #85858F clears 3:1 on all four grounds
+         (Elevated 3.50, Toolbar/Floating 4.14, Window 4.66) and on its own chip fill (3.09),
+         and stays brighter than anything a plain hover composites to. -->
     <Color x:Key="ToolChipColor">#FF3A3A40</Color>
-    <Color x:Key="ToolChipRingColor">#FF70707A</Color>
+    <Color x:Key="ToolChipRingColor">#FF85858F</Color>
 
     <!-- Translucent floating-surface base (one recipe for ALL overlays) -->
     <Color x:Key="FloatingBgColor">#F5262628</Color>    <!-- ~96% opaque toolbar charcoal -->
@@ -108,11 +112,15 @@
     <CornerRadius x:Key="RadiusInput">8</CornerRadius>
     <CornerRadius x:Key="RadiusPill">999</CornerRadius> <!-- clamped to height/2 by WPF -->
     <CornerRadius x:Key="RadiusChip">6</CornerRadius>   <!-- 36px tool button: hover wash and active chip -->
-    <!-- A wash layer sitting INSIDE a bordered pill: Border does not clip its child, so
-         the overlay needs the parent radius minus the parent border thickness or its
-         square corners poke past the arc. Two thicknesses in play, so two tokens. -->
-    <CornerRadius x:Key="RadiusButtonInner">6</CornerRadius> <!-- RadiusButton 8 - BorderThickness 2 -->
-    <CornerRadius x:Key="RadiusInputInner">7</CornerRadius>  <!-- RadiusInput  8 - BorderThickness 1 -->
+    <!-- A layer sitting INSIDE a bordered parent: Border does not clip its child, so the
+         overlay needs the parent radius minus the inset (border thickness, or a Margin) or
+         its square corners poke past the arc. One token per parent+inset pair, named for the
+         parent it belongs to - PillButtonSecondary borrowed RadiusInputInner because the
+         number happened to match, which would have quietly broken the day RadiusButton moved. -->
+    <CornerRadius x:Key="RadiusButtonInner">6</CornerRadius>  <!-- RadiusButton 8 - BorderThickness 2 -->
+    <CornerRadius x:Key="RadiusButtonInner1">7</CornerRadius> <!-- RadiusButton 8 - BorderThickness 1 -->
+    <CornerRadius x:Key="RadiusInputInner">7</CornerRadius>   <!-- RadiusInput  8 - BorderThickness 1 -->
+    <CornerRadius x:Key="RadiusChipInner">5</CornerRadius>    <!-- RadiusChip   6 - Margin 1 (focus ring) -->
 
     <sys:Double x:Key="ToolButtonSize">36</sys:Double>
     <sys:Double x:Key="ToolGlyphSize">17</sys:Double>
@@ -288,7 +296,7 @@
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChip}"
+                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChipInner}"
                                 BorderBrush="Transparent" BorderThickness="2" Margin="1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -365,7 +373,7 @@
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChip}"
+                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChipInner}"
                                 BorderBrush="Transparent" BorderThickness="2" Margin="1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -459,9 +467,9 @@
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
-                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusInputInner}"
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner1}"
                                     Background="{StaticResource SurfaceAltBrush}"/>
-                            <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusInputInner}"
+                            <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner1}"
                                     Background="{StaticResource ElevatedBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
