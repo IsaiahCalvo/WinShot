@@ -797,22 +797,38 @@ public partial class App : Application
 
     /// <summary>Captures the virtual desktop, optionally hiding desktop icons first per settings.</summary>
     private SD.Bitmap CaptureDesktopRespectingSettings() =>
-        DesktopIconCaptureGuard.Run(
-            _settings.Current.HideDesktopIconsDuringCapture,
-            () => DesktopIcons.Visible,
-            DesktopIcons.Hide,
-            DesktopIcons.Show,
-            Thread.Sleep,
-            CaptureService.CaptureVirtualDesktop);
+        WithCursorIfWanted(
+            DesktopIconCaptureGuard.Run(
+                _settings.Current.HideDesktopIconsDuringCapture,
+                () => DesktopIcons.Visible,
+                DesktopIcons.Hide,
+                DesktopIcons.Show,
+                Thread.Sleep,
+                CaptureService.CaptureVirtualDesktop),
+            CaptureService.VirtualScreen);
 
     private SD.Bitmap CaptureScreenRegionRespectingSettings(SD.Rectangle screenRect) =>
-        DesktopIconCaptureGuard.Run(
-            _settings.Current.HideDesktopIconsDuringCapture,
-            () => DesktopIcons.Visible,
-            DesktopIcons.Hide,
-            DesktopIcons.Show,
-            Thread.Sleep,
-            () => CaptureService.CaptureScreenRegion(screenRect));
+        WithCursorIfWanted(
+            DesktopIconCaptureGuard.Run(
+                _settings.Current.HideDesktopIconsDuringCapture,
+                () => DesktopIcons.Visible,
+                DesktopIcons.Hide,
+                DesktopIcons.Show,
+                Thread.Sleep,
+                () => CaptureService.CaptureScreenRegion(screenRect)),
+            screenRect);
+
+    /// <summary>
+    /// Draws the pointer into a live grab when the user asked for it. Only live grabs: the
+    /// selector's frozen snapshot excludes its own overlay and never has a cursor in it, so
+    /// there is nothing to honour on that path.
+    /// </summary>
+    private SD.Bitmap WithCursorIfWanted(SD.Bitmap capture, SD.Rectangle screenRect)
+    {
+        if (_settings.Current.CursorOnScreenshots)
+            CursorOverlay.Draw(capture, screenRect);
+        return capture;
+    }
 
     private async Task<SD.Bitmap> CaptureSelectedRegionAsync(SD.Rectangle virtualRegion, string metricName)
     {

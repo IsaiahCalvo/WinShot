@@ -922,12 +922,12 @@
                                         <ComboBoxItem Content="15 Seconds" Tag="15"/>
                                     </ComboBox>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableScreenshotCursorRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Cursor"/>
                                     <CheckBox x:Name="CursorOnScreenshotsCheck" Content="Show on screenshots"/>
                                 </DockPanel>
-                                <TextBlock x:Name="UnavailableScreenshotCursorHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
-                                           Text="This works in Fullscreen or Self-Timer modes only."/>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Applies to captures taken without the selection overlay: fullscreen, display, self-timer and repeat region."/>
                             </StackPanel>
                         </Border>
 

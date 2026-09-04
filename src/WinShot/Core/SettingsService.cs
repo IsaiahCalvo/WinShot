@@ -93,7 +93,9 @@ public class Settings
     public bool AddPixelBorder { get; set; } = false;   // TODO: wire behavior — add 1px border to screenshots
     public bool ConvertToSrgb { get; set; } = false;    // TODO: wire behavior — convert screenshots to sRGB color profile
     public string ScreenshotBackground { get; set; } = "none"; // TODO: wire behavior — none | wallpaper | gradient | color
-    public bool CursorOnScreenshots { get; set; } = false; // TODO: wire behavior — include cursor in fullscreen/self-timer shots
+    // Draws the live pointer into captures taken without the selection overlay (fullscreen,
+    // display, self-timer, repeat-region). The overlay's own frozen snapshot never has one.
+    public bool CursorOnScreenshots { get; set; } = false;
     public bool FreezeScreen { get; set; } = true;      // freeze the screen while selecting
     public bool ShowCrosshair { get; set; } = true;     // crosshair guides during selection
     public string CrosshairMode { get; set; } = "always";  // always | command | never — when crosshair is shown

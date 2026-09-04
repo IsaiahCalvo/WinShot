@@ -608,6 +608,7 @@ public partial class SettingsWindow : Window
             s.AdjustSelectionBeforeCapturing = AdjustSelectionCheck.IsChecked == true;
             s.WindowCaptureBackground = SelectedTag(WindowBackgroundCombo, "wallpaper");
             s.WindowCapturePadding = SelectedTag(WindowPaddingCombo, "default");
+            s.CursorOnScreenshots = CursorOnScreenshotsCheck.IsChecked == true;
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
@@ -687,6 +688,8 @@ public partial class SettingsWindow : Window
             "Choose whether a window capture is composited onto the wallpaper.");
         Accessible(WindowPaddingCombo, "Window capture padding",
             "How much backdrop shows around a composited window capture.");
+        Accessible(CursorOnScreenshotsCheck, "Show cursor on screenshots",
+            "Draw the mouse pointer into captures taken without the selection overlay.");
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
@@ -709,7 +712,8 @@ public partial class SettingsWindow : Window
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, SelfTimerCombo,
-            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, AdjustSelectionCheck, WindowBackgroundCombo, WindowPaddingCombo, TemplateBox, HistorySlider,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, AdjustSelectionCheck, WindowBackgroundCombo, WindowPaddingCombo,
+            CursorOnScreenshotsCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck,
         })
