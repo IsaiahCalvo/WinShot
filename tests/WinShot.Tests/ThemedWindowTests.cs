@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -69,6 +69,7 @@ public class ThemedWindowTests
                 ShowAndClose(FastKeystrokeOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(new ResizeDialog(80, 50));
                 ShowAndClose(new VideoEditorWindow(previewFile.Path, settings, history));
+                ShowAndClose(new GifEditorWindow(previewFile.Path, settings, history));
                 ShowAndClose(new RecordingRecoveryWindow(new List<RecoverableRecordingTempFile>
                 {
                     new(previewFile.Path, ".mp4", 1024, DateTime.UtcNow),

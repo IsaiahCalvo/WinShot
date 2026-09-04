@@ -10,10 +10,12 @@ public readonly record struct RecordingAfterActions(
     bool CopyFile,
     bool OpenEditor)
 {
+    // GIFs used to be excluded from the editor because there was no GIF editor; there is one
+    // now, so the preference means the same thing for both formats.
     public static RecordingAfterActions FromSettings(Settings settings, bool isGif) => new(
         settings.RecordingShowOverlay,
         settings.RecordingCopy,
-        !isGif && (settings.RecordingOpenEditor || settings.OpenVideoEditorAfterRecording));
+        settings.RecordingOpenEditor || settings.OpenVideoEditorAfterRecording);
 }
 
 public readonly record struct RecordingSessionUiOptions(

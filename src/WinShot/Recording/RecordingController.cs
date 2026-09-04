@@ -843,7 +843,9 @@ public sealed class RecordingController
             string savedPath = finalPath;
             bool isGif = extension.Equals("gif", StringComparison.OrdinalIgnoreCase);
             RecordingAfterActions actions = RecordingAfterActions.FromSettings(_settings.Current, isGif);
-            Action? onEdit = isGif ? null : () => OpenVideoEditor(savedPath);
+            Action onEdit = isGif
+                ? () => OpenGifEditor(savedPath)
+                : () => OpenVideoEditor(savedPath);
 
             if (actions.CopyFile)
             {
@@ -863,8 +865,8 @@ public sealed class RecordingController
 
             if (actions.OpenEditor)
             {
-                try { OpenVideoEditor(savedPath); }
-                catch (Exception ex) { Log.Error("Failed to open the video editor after recording", ex); }
+                try { onEdit(); }
+                catch (Exception ex) { Log.Error("Failed to open the editor after recording", ex); }
             }
 
             Log.Info($"Recording saved to {finalPath}");
@@ -878,6 +880,13 @@ public sealed class RecordingController
                 tempPath,
                 ex));
         }
+    }
+
+    private void OpenGifEditor(string filePath)
+    {
+        var editor = new GifEditorWindow(filePath, _settings, _history);
+        TrackFirstRender(editor, "gif editor window");
+        editor.Show();
     }
 
     private void OpenVideoEditor(string filePath)

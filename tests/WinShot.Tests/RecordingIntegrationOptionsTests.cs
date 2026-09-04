@@ -240,13 +240,15 @@ public class RecordingIntegrationOptionsTests
         Assert.Equal(
             new RecordingAfterActions(false, true, true),
             RecordingAfterActions.FromSettings(settings, isGif: false));
+        // GIFs used to be excluded because there was no GIF editor; there is one now.
         Assert.Equal(
-            new RecordingAfterActions(false, true, false),
+            new RecordingAfterActions(false, true, true),
             RecordingAfterActions.FromSettings(settings, isGif: true));
 
         settings.RecordingOpenEditor = false;
         settings.OpenVideoEditorAfterRecording = true;
         Assert.True(RecordingAfterActions.FromSettings(settings, isGif: false).OpenEditor);
+        Assert.True(RecordingAfterActions.FromSettings(settings, isGif: true).OpenEditor);
     }
 
     [Fact]
