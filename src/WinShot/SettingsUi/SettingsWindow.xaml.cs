@@ -7,6 +7,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -41,7 +42,10 @@ public partial class SettingsWindow : Window
         ApplyHighContrastPalette();
         PopulateAbout();
         WireInlineHotkeyConflictChecks();
-        DarkTitleBar.Apply(this);
+        UpdateTitleForSection(SectionList?.SelectedIndex ?? 0);
+        // Mica: the cards already supply their own opaque surface colour, so contrast is
+        // unchanged and only the gutter between them picks up what is behind the window.
+        DarkTitleBar.ApplyMica(this);
     }
 
     /// <summary>The section panels in tab-bar order; index matches SectionList.SelectedIndex.</summary>
@@ -61,8 +65,8 @@ public partial class SettingsWindow : Window
 
         int index = SectionList.SelectedIndex;
         if (index < 0) index = 0;
-        for (int i = 0; i < sections.Length; i++)
-            sections[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+        CrossFade(sections, index);
+        UpdateTitleForSection(index);
     }
 
     /// <summary>Switches the Recording General/Video/GIF sub-tab.</summary>
@@ -74,9 +78,110 @@ public partial class SettingsWindow : Window
 
         int index = RecordingSubList.SelectedIndex;
         if (index < 0) index = 0;
-        RecordingGeneralPanel.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
-        RecordingVideoPanel.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
-        RecordingGifPanel.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
+        CrossFade([RecordingGeneralPanel, RecordingVideoPanel, RecordingGifPanel], index);
+    }
+
+    // ------------------------------------------------------------------ motion
+
+    /// <summary>True when Windows says animation is off (Ease of Access, or a remote
+    /// session). Every transition below collapses to its end state instead.</summary>
+    private static bool AnimationsOff => !Motion.AnimationsEnabled();
+
+    /// <summary>
+    /// Hard-swapping eight ScrollViewers is the most visible instant change in the app.
+    /// The outgoing pane fades out quick and the incoming one fades in over the swap step,
+    /// so the two briefly double-expose the way CleanShot's panes do. The window height
+    /// stays fixed and each pane scrolls — a deliberate difference, and the reason only
+    /// opacity moves here.
+    /// </summary>
+    private void CrossFade(IReadOnlyList<UIElement> panes, int index)
+    {
+        for (int i = 0; i < panes.Count; i++)
+        {
+            UIElement pane = panes[i];
+            if (i == index)
+            {
+                bool wasHidden = pane.Visibility != Visibility.Visible;
+                pane.Visibility = Visibility.Visible;
+                if (AnimationsOff || !IsVisible)
+                {
+                    pane.BeginAnimation(OpacityProperty, null);
+                    pane.Opacity = 1;
+                    continue;
+                }
+                if (wasHidden)
+                    pane.Opacity = 0;
+                pane.BeginAnimation(OpacityProperty, FadeTo(1, "MotionSwap"));
+            }
+            else if (pane.Visibility == Visibility.Visible)
+            {
+                if (AnimationsOff || !IsVisible)
+                {
+                    pane.BeginAnimation(OpacityProperty, null);
+                    pane.Visibility = Visibility.Collapsed;
+                    pane.Opacity = 1;
+                    continue;
+                }
+                UIElement outgoing = pane;
+                DoubleAnimation fade = FadeTo(0, "MotionQuick");
+                fade.Completed += (_, _) =>
+                {
+                    // A later swap may already have brought this pane back.
+                    if (outgoing.Opacity <= 0.01)
+                    {
+                        outgoing.BeginAnimation(OpacityProperty, null);
+                        outgoing.Visibility = Visibility.Collapsed;
+                        outgoing.Opacity = 1;
+                    }
+                };
+                outgoing.BeginAnimation(OpacityProperty, fade);
+            }
+        }
+    }
+
+    private DoubleAnimation FadeTo(double to, string durationKey) => new(to, (Duration)FindResource(durationKey))
+    {
+        EasingFunction = (IEasingFunction)FindResource("EaseOutCubic"),
+        FillBehavior = FillBehavior.HoldEnd,
+    };
+
+    /// <summary>The window scales up from 92% and fades in — the entrance every other piece
+    /// of arriving chrome in the app now uses. Runs on Show(), not on re-activation.</summary>
+    private void PlayEntrance()
+    {
+        if (ShellRoot is null || ShellScale is null)
+            return;
+        if (AnimationsOff)
+        {
+            ShellRoot.Opacity = 1;
+            ShellScale.ScaleX = ShellScale.ScaleY = 1;
+            return;
+        }
+
+        var duration = (Duration)FindResource("MotionEnter");
+        var ease = (IEasingFunction)FindResource("EaseOutCubic");
+
+        ShellRoot.Opacity = 0;
+        ShellScale.ScaleX = ShellScale.ScaleY = 0.92;
+        ShellRoot.BeginAnimation(OpacityProperty, new DoubleAnimation(1, duration) { EasingFunction = ease });
+        var grow = new DoubleAnimation(1, duration) { EasingFunction = ease };
+        ShellScale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        ShellScale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+    }
+
+    /// <summary>The title names the pane you are on, the way the tab bar already does, so
+    /// Alt-Tab and the taskbar preview carry the same answer the window does.</summary>
+    private void UpdateTitleForSection(int index)
+    {
+        if (SectionList is null || index < 0 || index >= SectionList.Items.Count)
+            return;
+        // Each nav tab is an icon glyph above its label, so the LAST TextBlock is the
+        // readable half — taking the first would put a Segoe private-use codepoint in
+        // the title bar.
+        string? label = SectionList.Items[index] is ListBoxItem item
+            ? LogicalDescendants(item).OfType<TextBlock>().LastOrDefault()?.Text
+            : null;
+        Title = string.IsNullOrWhiteSpace(label) ? "WinShot settings" : $"{label} - WinShot settings";
     }
 
     /// <summary>Enables the overlay auto-close interval field only when auto-close is on.</summary>
@@ -144,6 +249,7 @@ public partial class SettingsWindow : Window
             centerMs = step.ElapsedMilliseconds;
             step.Restart();
             instance.Show();
+            instance.PlayEntrance();
             showMs = step.ElapsedMilliseconds;
         }
         else if (instance.WindowState == WindowState.Minimized)

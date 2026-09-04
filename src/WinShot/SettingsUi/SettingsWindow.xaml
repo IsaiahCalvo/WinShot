@@ -313,7 +313,12 @@
         </Style>
     </Window.Resources>
 
-    <DockPanel Margin="0">
+    <!-- ShellRoot carries the entrance transform: a Window's own RenderTransform never
+         reaches the HWND, so the scale-up has to ride on the root content element. -->
+    <DockPanel x:Name="ShellRoot" Margin="0" RenderTransformOrigin="0.5,0.5">
+        <DockPanel.RenderTransform>
+            <ScaleTransform x:Name="ShellScale" ScaleX="1" ScaleY="1"/>
+        </DockPanel.RenderTransform>
 
         <!-- =============================== TOP TAB BAR =============================== -->
         <Border DockPanel.Dock="Top" Background="{StaticResource WindowBgBrush}"

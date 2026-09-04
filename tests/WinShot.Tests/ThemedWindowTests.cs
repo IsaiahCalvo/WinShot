@@ -183,6 +183,7 @@ public class ThemedWindowTests
         // The after-capture matrix is a set: Save on, Quick Access off, independently.
         Assert.True(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotSaveCheck")).IsChecked);
         Assert.False(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotShowOverlayCheck")).IsChecked);
+        SettingsSectionMotionSmoke(window);
         typeof(SettingsWindow).GetMethod(
             "SaveShortcutBoxes",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -695,6 +696,54 @@ public class ThemedWindowTests
 
         Assert.True(task.IsCompleted);
         task.GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Switching tabs cross-fades instead of hard-cutting, and the title follows the tab.
+    /// The assertion that matters after the animation is that exactly one pane is left
+    /// visible at full opacity — a fade that forgets to collapse its outgoing pane leaves
+    /// two stacked ScrollViewers and a window that scrolls the wrong content.
+    /// </summary>
+    private static void SettingsSectionMotionSmoke(SettingsWindow window)
+    {
+        var list = (System.Windows.Controls.ListBox)window.FindName("SectionList")!;
+        string[] paneNames =
+        [
+            "SectionGeneral", "SectionShortcuts", "SectionQuickAccess", "SectionRecording",
+            "SectionScreenshots", "SectionAnnotate", "SectionAdvanced", "SectionAbout",
+        ];
+
+        Assert.Contains("General", window.Title);
+
+        list.SelectedIndex = 4;
+        PumpDispatcherOnce();
+        Assert.Contains("Screenshots", window.Title);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            PumpDispatcherOnce();
+            var visible = paneNames
+                .Select(n => (ScrollViewer)window.FindName(n)!)
+                .Where(v => v.Visibility == Visibility.Visible)
+                .ToArray();
+            if (visible.Length == 1 && visible[0].Opacity >= 0.999)
+                break;
+            Thread.Sleep(15);
+        }
+
+        var live = paneNames
+            .Select(n => (name: n, pane: (ScrollViewer)window.FindName(n)!))
+            .Where(x => x.pane.Visibility == Visibility.Visible)
+            .ToArray();
+        Assert.Single(live);
+        Assert.Equal("SectionScreenshots", live[0].name);
+        Assert.Equal(1d, live[0].pane.Opacity, 3);
+
+        // Back to General so the rest of the smoke sees the window it expects.
+        list.SelectedIndex = 0;
+        PumpDispatcherOnce();
+        Assert.Contains("General", window.Title);
     }
 
     private static void PumpDispatcherOnce()

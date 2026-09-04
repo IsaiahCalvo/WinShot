@@ -16,27 +16,58 @@ public static class DarkTitleBar
     private const int DwmwaUseImmersiveDarkMode = 20; // Win10 1809+
     private const int DwmwaCaptionColor = 35;         // Win11 22H2+
     private const int DwmwaBorderColor = 34;          // Win11 22H2+
+    private const int DwmwaSystemBackdropType = 38;   // Win11 22H2+
+    private const int DwmsbtMainWindow = 2;           // Mica
 
     // DWM COLORREF is 0x00BBGGRR. WindowBg #1C1C1E -> R=1C G=1C B=1E -> 0x001E1C1C.
     private const int CaptionColorRef = 0x001E1C1C;
     private const int BorderColorRef = 0x002B2B2B;
 
-    public static void Apply(Window window)
+    /// <param name="micaBackdrop">Ask DWM for the Mica material behind the window. The
+    /// caller must also make the WPF window background transparent — see <see cref="ApplyMica"/> —
+    /// or WPF paints an opaque layer over it and nothing shows through.</param>
+    public static void Apply(Window window, bool micaBackdrop = false)
     {
         if (window is null) return;
 
         var helper = new WindowInteropHelper(window);
         if (helper.Handle != IntPtr.Zero)
         {
-            ApplyToHandle(helper.Handle);
+            ApplyToHandle(helper.Handle, micaBackdrop);
             return;
         }
 
         // Handle isn't created yet; apply once the HWND exists.
-        window.SourceInitialized += (_, _) => ApplyToHandle(new WindowInteropHelper(window).Handle);
+        window.SourceInitialized += (_, _) =>
+            ApplyToHandle(new WindowInteropHelper(window).Handle, micaBackdrop);
     }
 
-    private static void ApplyToHandle(IntPtr hwnd)
+    /// <summary>
+    /// Turns on Mica for a window: the DWM backdrop plus the two things WPF needs so the
+    /// material is actually visible — a transparent window Background, and a null
+    /// HwndTarget.BackgroundColor. Without the second one WPF composites an opaque black
+    /// layer over the material and the window just looks flat again.
+    /// </summary>
+    public static void ApplyMica(Window window)
+    {
+        if (window is null) return;
+        window.Background = System.Windows.Media.Brushes.Transparent;
+        window.SourceInitialized += (_, _) =>
+        {
+            try
+            {
+                if (PresentationSource.FromVisual(window) is HwndSource source)
+                    source.CompositionTarget.BackgroundColor = System.Windows.Media.Colors.Transparent;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Could not clear the WPF composition background for Mica", ex);
+            }
+        };
+        Apply(window, micaBackdrop: true);
+    }
+
+    private static void ApplyToHandle(IntPtr hwnd, bool micaBackdrop = false)
     {
         if (hwnd == IntPtr.Zero) return;
 
@@ -50,6 +81,15 @@ public static class DarkTitleBar
 
             int border = BorderColorRef;
             DwmSetWindowAttribute(hwnd, DwmwaBorderColor, ref border, sizeof(int));
+
+            if (micaBackdrop)
+            {
+                // No version gate: on pre-22H2 the call returns an error we ignore, exactly
+                // like the caption and border attributes above, and the window keeps the
+                // opaque card fills it already draws.
+                int backdrop = DwmsbtMainWindow;
+                DwmSetWindowAttribute(hwnd, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
+            }
         }
         catch
         {
