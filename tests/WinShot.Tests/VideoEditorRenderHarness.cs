@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Windows;
@@ -91,8 +91,6 @@ public class VideoEditorRenderHarness
         SetField(window, "_trimInitialized", true);
         SetField(window, "_trimStartSec", 5d);
         SetField(window, "_trimEndSec", 58d);
-        ((Slider)window.FindName("PositionSlider")!).Maximum = 65;
-        ((Slider)window.FindName("PositionSlider")!).Value = 18;
         Invoke(window, "UpdateTrimUi");
         if (exporting)
         {

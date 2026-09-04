@@ -29,7 +29,7 @@ public partial class VideoEditorWindow : Window
     private double _durationSec;
     private bool _trimInitialized; // trim range is set up once, not on preview reopen
     private bool _playing;
-    private bool _syncingPosition; // true while the timer drives the position slider
+    private bool _scrubbing;       // dragging the filmstrip to move the playhead
     private bool _exporting;
     private bool _closed;
     private bool _exportCancellationRequested;
@@ -86,7 +86,7 @@ public partial class VideoEditorWindow : Window
         Media.Play();
         Media.Pause();
         _playing = false;
-        BtnPlay.Content = "_Play";
+        BtnPlay.Content = "Play";
         _positionTimer.Stop();
     }
 
@@ -110,7 +110,6 @@ public partial class VideoEditorWindow : Window
         if (Media.NaturalDuration.HasTimeSpan)
             _durationSec = Media.NaturalDuration.TimeSpan.TotalSeconds;
         StatusText.Text = "";
-        PositionSlider.Maximum = Math.Max(0.1, _durationSec);
         if (!_trimInitialized)
         {
             _trimInitialized = true;
@@ -126,7 +125,7 @@ public partial class VideoEditorWindow : Window
     private void OnMediaEnded(object sender, RoutedEventArgs e)
     {
         _playing = false;
-        BtnPlay.Content = "_Play";
+        BtnPlay.Content = "Play";
         _positionTimer.Stop();
         UpdateTimeLabel();
     }
@@ -144,7 +143,7 @@ public partial class VideoEditorWindow : Window
         {
             Media.Pause();
             _playing = false;
-            BtnPlay.Content = "_Play";
+            BtnPlay.Content = "Play";
             _positionTimer.Stop();
         }
         else
@@ -153,7 +152,7 @@ public partial class VideoEditorWindow : Window
                 Media.Position = TimeSpan.Zero;
             Media.Play();
             _playing = true;
-            BtnPlay.Content = "_Pause";
+            BtnPlay.Content = "Pause";
             _positionTimer.Start();
         }
     }
@@ -188,17 +187,6 @@ public partial class VideoEditorWindow : Window
 
     private void OnPositionTimer(object? sender, EventArgs e)
     {
-        _syncingPosition = true;
-        PositionSlider.Value = Media.Position.TotalSeconds;
-        _syncingPosition = false;
-        UpdatePlayhead();
-        UpdateTimeLabel();
-    }
-
-    private void OnPositionSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_syncingPosition || _exporting) return;
-        Media.Position = TimeSpan.FromSeconds(PositionSlider.Value);
         UpdatePlayhead();
         UpdateTimeLabel();
     }
@@ -242,12 +230,32 @@ public partial class VideoEditorWindow : Window
         if (e.OriginalSource is FrameworkElement fe &&
             (ReferenceEquals(fe, TrimStartThumb) || ReferenceEquals(fe, TrimEndThumb)))
             return;
-        double x = e.GetPosition(TimelineCanvas).X;
-        double seconds = XToSeconds(x);
-        Media.Position = TimeSpan.FromSeconds(seconds);
-        _syncingPosition = true;
-        PositionSlider.Value = seconds;
-        _syncingPosition = false;
+
+        // The filmstrip IS the scrub control now, so the press starts a drag rather than
+        // making a single jump — the separate position slider above it said the same thing
+        // twice and neither one showed where the trim range was.
+        _scrubbing = true;
+        TimelineTrack.CaptureMouse();
+        SeekTo(XToSeconds(e.GetPosition(TimelineCanvas).X));
+    }
+
+    private void OnTimelineDragScrub(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_scrubbing || _exporting || _durationSec <= 0) return;
+        SeekTo(XToSeconds(e.GetPosition(TimelineCanvas).X));
+    }
+
+    private void OnTimelineScrubReleased(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_scrubbing) return;
+        _scrubbing = false;
+        if (TimelineTrack.IsMouseCaptured)
+            TimelineTrack.ReleaseMouseCapture();
+    }
+
+    private void SeekTo(double seconds)
+    {
+        Media.Position = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, Math.Max(0, _durationSec)));
         UpdatePlayhead();
         UpdateTimeLabel();
     }
@@ -358,9 +366,6 @@ public partial class VideoEditorWindow : Window
         _trimStartSec = range.StartSeconds;
         _trimEndSec = range.EndSeconds;
         Media.Position = TimeSpan.FromSeconds(previewSeconds);
-        _syncingPosition = true;
-        PositionSlider.Value = previewSeconds;
-        _syncingPosition = false;
         UpdateTrimUi();
         UpdateTimeLabel();
     }
@@ -582,7 +587,7 @@ public partial class VideoEditorWindow : Window
         {
             Media.Pause();
             _playing = false;
-            BtnPlay.Content = "_Play";
+            BtnPlay.Content = "Play";
             _positionTimer.Stop();
         }
         // Release the preview's handle on the source while the render reads it.
@@ -762,7 +767,6 @@ public partial class VideoEditorWindow : Window
         ExportProgress.Visibility = exporting ? Visibility.Visible : Visibility.Collapsed;
 
         BtnPlay.IsEnabled = !exporting;
-        PositionSlider.IsEnabled = !exporting;
         TimelineTrack.IsEnabled = !exporting;
         ResolutionCombo.IsEnabled = !exporting;
         QualityCombo.IsEnabled = !exporting;
