@@ -157,6 +157,13 @@ public partial class App : Application
 
         AnnounceCompletedUpdate();
 
+        // After the tray icon exists (it is what the bubble points at) and after any startup
+        // command has had its turn, so onboarding never lands on top of a capture.
+        if (!_settings.Current.HasCompletedFirstRun && incomingCommand is null)
+        {
+            Dispatcher.BeginInvoke(ShowFirstRunWelcome, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
+
         if (_settings.Current.CheckForUpdatesOnStartup)
             _ = StartupUpdateCheckAsync();
 
@@ -1929,6 +1936,87 @@ public partial class App : Application
         });
 
     // ---- Updates ----------------------------------------------------------
+
+    private FirstRunWelcomeWindow? _welcome;
+
+    /// <summary>
+    /// The first launch, once. Three rows that RUN the commands rather than describing them,
+    /// so the user's first capture happens inside onboarding — which is the only part of a
+    /// tour anyone remembers.
+    /// </summary>
+    private void ShowFirstRunWelcome()
+    {
+        if (_welcome is not null || _settings.Current.HasCompletedFirstRun)
+            return;
+
+        // Written before the window opens: if anything below throws, or the process dies
+        // mid-onboarding, the user is not taught the same lesson again on every launch.
+        _settings.Current.HasCompletedFirstRun = true;
+        try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to record first run", ex); }
+
+        try
+        {
+            var s = _settings.Current;
+            var actions = new List<FirstRunWelcomeWindow.WelcomeAction>
+            {
+                new("\uE7C5", "Capture a region", HintFor(s.HotkeyCaptureRegion), () => QueueCaptureCommand("capture-area")),
+                new("\uE714", "Record the screen", HintFor(s.HotkeyRecord), RecordFlow),
+                new("\uE8D2", "Extract text", HintFor(s.HotkeyOcr), () => QueueCaptureCommand("ocr")),
+            };
+
+            _welcome = new FirstRunWelcomeWindow(TrayAnchorPoint(), actions, () => _welcome = null);
+            _welcome.Show();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("First-run welcome could not be shown", ex);
+            _welcome = null;
+        }
+    }
+
+    private static string HintFor(string? gesture) =>
+        string.IsNullOrWhiteSpace(gesture) ? "No shortcut set" : gesture;
+
+    /// <summary>
+    /// A point on the notification area, for the welcome bubble's tail. The tray icon has no
+    /// public rectangle, so this uses the notification area's own window — and falls back to
+    /// the taskbar corner, which is where it is even when Shell_TrayWnd cannot be found.
+    /// </summary>
+    private static SD.Point? TrayAnchorPoint()
+    {
+        try
+        {
+            IntPtr tray = FindWindow("Shell_TrayWnd", null);
+            if (tray != IntPtr.Zero)
+            {
+                IntPtr notify = FindWindowEx(tray, IntPtr.Zero, "TrayNotifyWnd", null);
+                if (notify != IntPtr.Zero && GetWindowRect(notify, out NativeRect r))
+                    return new SD.Point((r.Left + r.Right) / 2, r.Top);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not locate the notification area for the welcome bubble", ex);
+        }
+
+        SD.Rectangle area = WF.Screen.PrimaryScreen?.WorkingArea ?? SD.Rectangle.Empty;
+        return area.IsEmpty ? null : new SD.Point(area.Right - 60, area.Bottom);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string? className, string? windowName);
+
+    [DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? className, string? windowName);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
 
     /// <summary>
     /// The installer swaps WinShot.exe under the running process and relaunches it, so the

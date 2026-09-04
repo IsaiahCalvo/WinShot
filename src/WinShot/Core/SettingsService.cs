@@ -13,6 +13,10 @@ public class Settings
     /// <see cref="ScreenshotCopy"/>; kept so an upgrade preserves the old choice.</summary>
     public bool AutoCopyToClipboard { get; set; } = true;
 
+    /// <summary>False until the first-run welcome bubble has been shown once. Set the moment
+    /// it appears, so a crash mid-onboarding does not re-teach the user on every launch.</summary>
+    public bool HasCompletedFirstRun { get; set; }
+
     /// <summary>The version that last ran. An update replaces the exe underneath a running
     /// WinShot and relaunches it, so this is the only way the new process can tell it just
     /// arrived and say "Updated to X" instead of starting in silence.</summary>

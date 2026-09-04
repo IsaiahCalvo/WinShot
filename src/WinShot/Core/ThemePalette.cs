@@ -23,6 +23,9 @@ public static class ThemePalette
     // Single accent identity (macOS dark-mode system blue).
     public static readonly SD.Color Accent = SD.Color.FromArgb(0x0A, 0x84, 0xFF);
     public static readonly SD.Color AccentHover = SD.Color.FromArgb(0x40, 0x9C, 0xFF);
+    /// <summary>Theme.xaml's AccentDeepColor: the same accent, deepened only where WHITE text
+    /// sits on it (white on Accent is 3.65:1). Fills only — never a border or a glyph.</summary>
+    public static readonly SD.Color AccentDeep = SD.Color.FromArgb(0x0A, 0x73, 0xE0);
 
     // Status colors, paired with the system-blue identity (macOS system red/orange).
     // Red doubles as the recording dot and destructive actions; Warn as paused/warning.
