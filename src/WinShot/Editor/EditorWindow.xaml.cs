@@ -119,6 +119,26 @@ public partial class EditorWindow : Window
     private Color _customColor = Color.FromRgb(0xFF, 0x3B, 0x30); // last custom / eyedropper color
     private bool _suppressHexEvents;
 
+    // Colour picker state. Hue is kept separately from the colour so dragging into the
+    // white corner does not lose which hue the user was on.
+    private double _pickerHue;
+    private double _pickerSaturation = 1;
+    private double _pickerValue = 1;
+    private byte _pickerAlpha = 255;
+    private bool _pickerFillTarget;
+    private bool _draggingSv;
+    private bool _suppressPickerEvents;
+
+    /// <summary>Set by the picker's own eyedropper, so a sample returns to the picker.</summary>
+    private bool _reopenPickerAfterSample;
+
+    /// <summary>
+    /// The fill colour for shapes, or null for "derive it from the stroke" — which is what
+    /// every shape drawn before the Fill tab existed did, so nothing already on a canvas
+    /// changes colour.
+    /// </summary>
+    private Color? _fillColor;
+
     /// <summary>Path of the .winshot project this session was opened from / saved to, if any.</summary>
     private string? _projectPath;
 
@@ -704,7 +724,7 @@ public partial class EditorWindow : Window
             if (tool == EditorTool.Eyedropper && _tool != EditorTool.Eyedropper)
                 _toolBeforeEyedropper = _tool; // so a sample can return to the prior tool
             if (tool != EditorTool.Eyedropper)
-                EyedropSwatch.Visibility = Visibility.Collapsed;
+                HideEyedropperChrome();
         }
         _tool = tool;
         if (ReferenceEquals(rb, RectangleToolBtn))

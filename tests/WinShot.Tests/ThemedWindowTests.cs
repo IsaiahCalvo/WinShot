@@ -402,6 +402,7 @@ public class ThemedWindowTests
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
+            "BorderTabBtn", "FillTabBtn", "SaveColorBtn", "PickerEyedropperBtn", "HueSlider", "AlphaSlider",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
         };
@@ -422,6 +423,7 @@ public class ThemedWindowTests
             "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn",
             "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
+            "SaveColorBtn", "PickerEyedropperBtn",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "StepNumberBtn", "StepLetterBtn",
             "BtnPin", "BtnCopy", "BtnCenter",

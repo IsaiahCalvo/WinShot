@@ -257,7 +257,7 @@ public partial class EditorWindow : Window
                         : new Rect(bx, by, shape.Width, shape.Height);
                     shape.Tag = AnnotationData.ForShape(
                         _tool == EditorTool.Rectangle ? AnnotationData.TypeRectangle : AnnotationData.TypeEllipse,
-                        bounds, StrokeColorOf(shape), shape.StrokeThickness, _fillMode);
+                        bounds, StrokeColorOf(shape), shape.StrokeThickness, _fillMode, _fillColor);
                     PushAddElement(shape);
                 }
                 return;
@@ -392,7 +392,7 @@ public partial class EditorWindow : Window
                     Stroke = brush,
                     StrokeThickness = _thickness,
                     RadiusX = 2, RadiusY = 2,
-                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity)),
+                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity), _fillColor),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -402,7 +402,7 @@ public partial class EditorWindow : Window
                 {
                     Stroke = brush,
                     StrokeThickness = _thickness,
-                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity)),
+                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity), _fillColor),
                 };
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
@@ -599,10 +599,132 @@ public partial class EditorWindow : Window
         // A sampled color rarely matches a preset swatch, so it lands in the persistent
         // custom swatch (and current-color indicator) instead of clearing the selection.
         var sampled = EyedropperSampler.SampleClamped(_source, pos);
-        ApplyCustomColor(sampled);
-        if (_colorPickerBuilt) SyncColorPickerInputs(sampled);
-        EyedropSwatch.Visibility = Visibility.Collapsed;
+        bool reopenPicker = _reopenPickerAfterSample;
+        _reopenPickerAfterSample = false;
+
+        if (reopenPicker)
+        {
+            // Armed from inside the picker: the sample IS the picker's colour, and the
+            // picker comes back so choosing a colour off the image is part of choosing one
+            // rather than a detour that loses the popup.
+            BuildColorPickerPalette();
+            SyncColorPickerInputs(sampled);
+            CommitPickerColor();
+        }
+        else
+        {
+            ApplyCustomColor(sampled);
+            if (_colorPickerBuilt) SyncColorPickerInputs(sampled);
+        }
+
+        HideEyedropperChrome();
         CheckToolButton(_toolBeforeEyedropper);
+        if (reopenPicker) ColorPickerPopup.IsOpen = true;
+    }
+
+    private void HideEyedropperChrome()
+    {
+        EyedropSwatch.Visibility = Visibility.Collapsed;
+        EyedropLoupe.Visibility = Visibility.Collapsed;
+    }
+
+    // The loupe window, in source pixels, and how big it is drawn on screen. Odd, so there
+    // is a true centre cell for the pixel actually under the cursor.
+    private const int LoupePixels = 15;
+    private const double LoupeScreenSize = 132;
+
+    /// <summary>
+    /// The magnified pixel grid, pointed at the source bitmap instead of the screen. The
+    /// eyedropper without it is a one-pixel guess: at fit-to-view zoom a single source pixel
+    /// is a fraction of a screen pixel, so the swatch alone could not say WHICH pixel.
+    /// </summary>
+    private void UpdateEyedropperLoupe(Point pos)
+    {
+        int cx = (int)Math.Floor(pos.X), cy = (int)Math.Floor(pos.Y);
+        if (cx < 0 || cy < 0 || cx >= _source.Width || cy >= _source.Height)
+        {
+            EyedropLoupe.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        int side = Math.Min(LoupePixels, Math.Min(_source.Width, _source.Height));
+        int half = side / 2;
+        // Near an edge the window slides rather than padding, so the grid is always full.
+        int ox = Math.Clamp(cx - half, 0, _source.Width - side);
+        int oy = Math.Clamp(cy - half, 0, _source.Height - side);
+
+        BitmapSource tile;
+        try
+        {
+            using SD.Bitmap crop = CaptureService.Crop(_source, new SD.Rectangle(ox, oy, side, side));
+            tile = CaptureService.ToBitmapSource(crop);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Eyedropper loupe crop failed", ex);
+            EyedropLoupe.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // Everything inside the loupe is sized in SCREEN pixels, so the whole thing is
+        // scaled by 1/zoom and stays the same size however far the canvas is zoomed.
+        double scale = 1 / _zoom;
+        double cell = LoupeScreenSize / side;
+
+        if (EyedropLoupe.Children.Count == 0)
+            BuildEyedropperLoupe();
+
+        var image = (Image)EyedropLoupe.Children[0];
+        var target = (System.Windows.Shapes.Rectangle)EyedropLoupe.Children[1];
+        image.Source = tile;
+        image.Width = LoupeScreenSize;
+        image.Height = LoupeScreenSize;
+        target.Width = cell;
+        target.Height = cell;
+        target.StrokeThickness = 1.5;
+        Canvas.SetLeft(target, (cx - ox) * cell);
+        Canvas.SetTop(target, (cy - oy) * cell);
+
+        // Above-right of the cursor by default, flipping when that would run off the image.
+        double gap = 14 * scale;
+        double sizeContent = LoupeScreenSize * scale;
+        double left = pos.X + gap;
+        double top = pos.Y - gap - sizeContent;
+        if (left + sizeContent > _source.Width) left = pos.X - gap - sizeContent;
+        if (top < 0) top = pos.Y + gap;
+
+        EyedropLoupe.RenderTransform = new ScaleTransform(scale, scale);
+        EyedropLoupe.RenderTransformOrigin = new Point(0, 0);
+        Canvas.SetLeft(EyedropLoupe, left);
+        Canvas.SetTop(EyedropLoupe, top);
+        EyedropLoupe.Visibility = Visibility.Visible;
+    }
+
+    private void BuildEyedropperLoupe()
+    {
+        var image = new Image { Stretch = Stretch.Fill };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
+        RenderOptions.SetEdgeMode(image, EdgeMode.Aliased);
+        EyedropLoupe.Children.Add(image);
+
+        EyedropLoupe.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Stroke = (Brush)FindResource("InfoBrush"),
+            StrokeThickness = 1.5,
+            Fill = null,
+        });
+
+        EyedropLoupe.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Width = LoupeScreenSize,
+            Height = LoupeScreenSize,
+            RadiusX = 6,
+            RadiusY = 6,
+            Stroke = Brushes.White,
+            StrokeThickness = 2,
+            Fill = null,
+            IsHitTestVisible = false,
+        });
     }
 
     /// <summary>Hover preview: a small swatch + hex readout near the cursor while the eyedropper is active.</summary>
@@ -611,9 +733,10 @@ public partial class EditorWindow : Window
         EyedropperPreview preview = EyedropperSampler.Preview(_source, pos, _zoom);
         if (!preview.Visible)
         {
-            EyedropSwatch.Visibility = Visibility.Collapsed;
+            HideEyedropperChrome();
             return;
         }
+        UpdateEyedropperLoupe(pos);
 
         EyedropColorRect.Fill = new SolidColorBrush(preview.Color);
         EyedropHexText.Text = preview.Hex;

@@ -108,18 +108,77 @@
                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                             <Border Style="{StaticResource PopoverSurface}">
                                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
-                                <StackPanel Width="240">
+                                <StackPanel Width="252">
+                                    <!-- Border and Fill are two colours on the same shape, so they
+                                         are two tabs on one picker rather than two pickers. -->
+                                    <StackPanel x:Name="ColorTargetTabs" Orientation="Horizontal" Margin="0,0,0,8">
+                                        <RadioButton x:Name="BorderTabBtn" Style="{StaticResource SizePresetRow}" GroupName="ColorTarget"
+                                                     Width="118" Content="Border" IsChecked="True" Click="OnColorTargetChanged"
+                                                     AutomationProperties.Name="Border colour"
+                                                     AutomationProperties.HelpText="Pick the outline colour."/>
+                                        <RadioButton x:Name="FillTabBtn" Style="{StaticResource SizePresetRow}" GroupName="ColorTarget"
+                                                     Width="118" Content="Fill" Click="OnColorTargetChanged"
+                                                     AutomationProperties.Name="Fill colour"
+                                                     AutomationProperties.HelpText="Pick the fill colour. Only shapes that can be filled use it."/>
+                                    </StackPanel>
+
                                     <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
-                                    <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+
+                                    <TextBlock x:Name="SavedColorsHeading" Text="My colours" Style="{StaticResource FieldLabel}" Margin="2,10,2,4"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <UniformGrid x:Name="SavedColorsGrid" Columns="8" Width="216"/>
+                                        <Button x:Name="SaveColorBtn" Style="{StaticResource ToolIconButton}" Width="26" Height="26"
+                                                FontSize="{StaticResource GlyphBadge}" Content="&#xE710;" Click="OnSaveColor"
+                                                ToolTip="Save this colour" AutomationProperties.Name="Save colour"
+                                                AutomationProperties.HelpText="Keep the current colour in My colours."/>
+                                    </StackPanel>
+
+                                    <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10"/>
+
+                                    <!-- Saturation across, value up, with hue and alpha under it. -->
+                                    <Border x:Name="SvSquareBorder" Height="104" CornerRadius="{StaticResource RadiusChip}"
+                                            BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                                            MouseLeftButtonDown="OnSvSquareDown" MouseMove="OnSvSquareMove"
+                                            MouseLeftButtonUp="OnSvSquareUp" Cursor="Cross">
+                                        <Grid ClipToBounds="True">
+                                            <Rectangle x:Name="SvHueLayer"/>
+                                            <Rectangle>
+                                                <Rectangle.Fill>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                        <GradientStop Color="#00000000" Offset="0"/>
+                                                        <GradientStop Color="#FF000000" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Rectangle.Fill>
+                                            </Rectangle>
+                                            <Canvas x:Name="SvThumbLayer" IsHitTestVisible="False">
+                                                <Ellipse x:Name="SvThumb" Width="12" Height="12" Stroke="White" StrokeThickness="2"/>
+                                            </Canvas>
+                                        </Grid>
+                                    </Border>
+
+                                    <Slider x:Name="HueSlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="360"
+                                            Margin="0,10,0,0" ValueChanged="OnHueChanged"
+                                            ToolTip="Hue" AutomationProperties.Name="Hue"
+                                            AutomationProperties.HelpText="Rotate the colour around the wheel."/>
+                                    <Slider x:Name="AlphaSlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="100" Value="100"
+                                            Margin="0,6,0,0" ValueChanged="OnAlphaChanged"
+                                            ToolTip="Opacity" AutomationProperties.Name="Colour opacity"
+                                            AutomationProperties.HelpText="How see-through the colour is."/>
+
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
                                                    Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
                                         <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
                                                  Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
-                                                 ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
-                                        <Button x:Name="ColorPickerApply" Grid.Column="2" Style="{StaticResource PillButtonPrimary}"
-                                                Content="Use" Click="OnColorPickerApply" AutomationProperties.Name="Use color"/>
+                                                 ToolTip="Type a hex colour" AutomationProperties.Name="Hex colour"/>
+                                        <Button x:Name="PickerEyedropperBtn" Grid.Column="2" Style="{StaticResource ToolIconButton}"
+                                                Width="30" Height="30" FontSize="{StaticResource GlyphBadge}" Content="&#xEF3C;"
+                                                Click="OnPickerEyedropper" ToolTip="Pick a colour from the image"
+                                                AutomationProperties.Name="Eyedropper"
+                                                AutomationProperties.HelpText="Sample a colour from the image, then come back here."/>
+                                        <Button x:Name="ColorPickerApply" Grid.Column="3" Style="{StaticResource PillButtonPrimary}"
+                                                Content="Use" Click="OnColorPickerApply" AutomationProperties.Name="Use colour"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>

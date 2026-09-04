@@ -57,6 +57,34 @@ public partial class EditorWindow : Window
         UpdateSelectionVisual();
     }
 
+    /// <summary>
+    /// The Fill tab: gives the selected shape its own fill colour, as one undoable step.
+    /// No-op for anything without a fill channel.
+    /// </summary>
+    private void RestyleSelectedFillColor(Color fillColor)
+    {
+        if (_selected is not Shape shape || shape.Tag is not AnnotationData meta ||
+            meta.Type is not (AnnotationData.TypeRectangle or AnnotationData.TypeEllipse))
+            return;
+
+        var before = meta.Clone();
+        var after = meta.Clone();
+        after.FillColor = ToHex(fillColor);
+        if (before.FillColor == after.FillColor) return;
+
+        void Apply(AnnotationData data)
+        {
+            shape.Tag = data;
+            Color strokeColor = data.Color is string hex && TryParseColor(hex, out var c) ? c : Colors.White;
+            ShapeFillMode mode = Enum.TryParse(data.Fill, out ShapeFillMode m) ? m : ShapeFillMode.None;
+            shape.Fill = ShapeFillBrush.Create(mode, strokeColor,
+                ProjectSerializer.ParseOptionalColor(data.FillColor));
+        }
+
+        Apply(after);
+        Push(new EditorAction(undo: () => Apply(before), redo: () => Apply(after)), apply: false);
+    }
+
     private static bool CanRestyle(UIElement element, Color? color, double? thickness, ShapeFillMode? fill)
     {
         if (element is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
@@ -166,7 +194,8 @@ public partial class EditorWindow : Window
                 {
                     boxLike.Stroke = stroke;
                     boxLike.StrokeThickness = snap.Thickness;
-                    boxLike.Fill = ShapeFillBrush.Create(snap.Fill, snap.StrokeColor);
+                    boxLike.Fill = ShapeFillBrush.Create(snap.Fill, snap.StrokeColor,
+                        ProjectSerializer.ParseOptionalColor(snap.Meta.FillColor));
                 }
                 break;
             case AnnotationData.TypeText:
@@ -689,7 +718,7 @@ public partial class EditorWindow : Window
         }
     }
 
-    // ----------------------------------------------------- custom color picker (Gap)
+    // ------------------------------------------------------------ colour picker
 
     /// <summary>
     /// The colour well opens the picker. Nine inline radio swatches used to live in the
@@ -699,11 +728,36 @@ public partial class EditorWindow : Window
     private void OnColorWellClick(object sender, RoutedEventArgs e)
     {
         BuildColorPickerPalette();
-        SyncColorPickerInputs(_color);
+        // Shapes are the only marks with two colours, so the Fill tab only offers itself
+        // where it means something.
+        bool canFill = ToolPreferences.SupportsFill(_tool);
+        FillTabBtn.IsEnabled = canFill;
+        if (!canFill && _pickerFillTarget)
+        {
+            _pickerFillTarget = false;
+            BorderTabBtn.IsChecked = true;
+        }
+        SyncColorPickerInputs(CurrentTargetColor());
+        RebuildSavedColorsRow();
         ColorPickerPopup.IsOpen = !ColorPickerPopup.IsOpen;
     }
 
-    /// <summary>Builds the extended color grid once. A 5x8 palette of useful hues/shades.</summary>
+    /// <summary>Whichever colour the open tab is editing.</summary>
+    private Color CurrentTargetColor() =>
+        _pickerFillTarget ? _fillColor ?? _color : _color;
+
+    private void OnColorTargetChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _pickerFillTarget = FillTabBtn.IsChecked == true;
+        SyncColorPickerInputs(CurrentTargetColor());
+    }
+
+    /// <summary>
+    /// Sixteen swatches, two rows of eight: WinShot's annotation colours plus the greys and
+    /// tints people actually reach for. The old grid was forty, which is a palette to browse
+    /// rather than a palette to pick from.
+    /// </summary>
     private void BuildColorPickerPalette()
     {
         if (_colorPickerBuilt) return;
@@ -711,38 +765,63 @@ public partial class EditorWindow : Window
 
         string[] swatches =
         {
-            // row 1 — greys
-            "#000000", "#3A3A3C", "#636366", "#8E8E93", "#AEAEB2", "#C7C7CC", "#E5E5EA", "#FFFFFF",
-            // row 2 — reds / oranges
-            "#FF3B30", "#FF6B5E", "#FF9500", "#FFB340", "#FFCC00", "#FFE066", "#D70015", "#A2231D",
-            // row 3 — greens / teals
-            "#34C759", "#30D158", "#00C7BE", "#63E6BE", "#5AC8FA", "#64D2FF", "#248A3D", "#0E6E4E",
-            // row 4 — blues / purples
-            "#007AFF", "#0A84FF", "#5856D6", "#5E5CE6", "#AF52DE", "#BF5AF2", "#0040DD", "#3634A3",
-            // row 5 — pinks / browns
-            "#FF2D55", "#FF375F", "#FF6482", "#A2845E", "#AC8E68", "#8B5A2B", "#D2691E", "#7D2E2E",
+            "#FF453A", "#FF9500", "#FFCC00", "#34C759", "#0A84FF", "#5856D6", "#AF52DE", "#FF2D55",
+            "#000000", "#3A3A3C", "#8E8E93", "#C7C7CC", "#FFFFFF", "#00C7BE", "#A2845E", "#D70015",
         };
 
         foreach (string hex in swatches)
         {
             if (!TryParseColor(hex, out var c)) continue;
-            var btn = new Button
-            {
-                Width = 22,
-                Height = 22,
-                Margin = new Thickness(2),
-                Cursor = Cursors.Hand,
-                ToolTip = hex,
-                Tag = c,
-                Background = new SolidColorBrush(c),
-                BorderBrush = (Brush)FindResource("BorderStrongBrush"),
-                BorderThickness = new Thickness(1),
-            };
-            AutomationProperties.SetName(btn, $"Color {hex}");
-            AutomationProperties.SetHelpText(btn, $"Use local annotation color {hex}.");
-            btn.Click += OnColorPickerGridPick;
-            ColorPickerGrid.Children.Add(btn);
+            ColorPickerGrid.Children.Add(BuildSwatchButton(c, hex, saved: false));
         }
+    }
+
+    private Button BuildSwatchButton(Color c, string label, bool saved)
+    {
+        var btn = new Button
+        {
+            Width = 22,
+            Height = 22,
+            Margin = new Thickness(2),
+            Cursor = Cursors.Hand,
+            ToolTip = label,
+            Tag = c,
+            Background = new SolidColorBrush(c),
+            BorderBrush = (Brush)FindResource("BorderStrongBrush"),
+            BorderThickness = new Thickness(1),
+        };
+        AutomationProperties.SetName(btn, $"Colour {label}");
+        AutomationProperties.SetHelpText(btn, saved
+            ? $"Use saved colour {label}. Right-click to forget it."
+            : $"Use annotation colour {label}.");
+        btn.Click += OnColorPickerGridPick;
+        if (saved)
+        {
+            btn.MouseRightButtonUp += (_, _) =>
+            {
+                SavedColors.Remove(c);
+                RebuildSavedColorsRow();
+            };
+        }
+        return btn;
+    }
+
+    /// <summary>The "My colours" row. Empty until something is saved, so it never shows a gap.</summary>
+    private void RebuildSavedColorsRow()
+    {
+        SavedColorsGrid.Children.Clear();
+        foreach (Color c in SavedColors.All)
+            SavedColorsGrid.Children.Add(BuildSwatchButton(c, ColorPickerMath.ToHex(c), saved: true));
+
+        Visibility show = SavedColors.All.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        SavedColorsHeading.Visibility = show;
+        SavedColorsGrid.Visibility = show;
+    }
+
+    private void OnSaveColor(object sender, RoutedEventArgs e)
+    {
+        SavedColors.Add(PickerColor());
+        RebuildSavedColorsRow();
     }
 
     private void OnColorPickerGridPick(object sender, RoutedEventArgs e)
@@ -750,8 +829,104 @@ public partial class EditorWindow : Window
         if (sender is Button b && b.Tag is Color c)
         {
             SyncColorPickerInputs(c);
-            ApplyCustomColor(c);
+            CommitPickerColor();
         }
+    }
+
+    // ---- saturation / value square
+
+    private Size SvSize() => new(
+        Math.Max(1, SvSquareBorder.ActualWidth - 2),
+        Math.Max(1, SvSquareBorder.ActualHeight - 2));
+
+    private void OnSvSquareDown(object sender, MouseButtonEventArgs e)
+    {
+        _draggingSv = true;
+        SvSquareBorder.CaptureMouse();
+        UpdateSvFromPointer(e.GetPosition(SvSquareBorder));
+    }
+
+    private void OnSvSquareMove(object sender, MouseEventArgs e)
+    {
+        if (_draggingSv) UpdateSvFromPointer(e.GetPosition(SvSquareBorder));
+    }
+
+    private void OnSvSquareUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_draggingSv) return;
+        _draggingSv = false;
+        SvSquareBorder.ReleaseMouseCapture();
+        CommitPickerColor();
+    }
+
+    private void UpdateSvFromPointer(Point p)
+    {
+        (_pickerSaturation, _pickerValue) = ColorPickerMath.FromPosition(p, SvSize());
+        RefreshPickerVisual();
+    }
+
+    private void OnHueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressPickerEvents || !IsLoaded) return;
+        _pickerHue = e.NewValue;
+        RefreshPickerVisual();
+        CommitPickerColor();
+    }
+
+    private void OnAlphaChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressPickerEvents || !IsLoaded) return;
+        _pickerAlpha = (byte)Math.Clamp(Math.Round(e.NewValue * 2.55), 0, 255);
+        RefreshPickerVisual();
+        CommitPickerColor();
+    }
+
+    private Color PickerColor() =>
+        ColorPickerMath.FromHsv(_pickerHue, _pickerSaturation, _pickerValue, _pickerAlpha);
+
+    /// <summary>Repaints the square's hue wash, the thumb, the preview and the hex box.</summary>
+    private void RefreshPickerVisual()
+    {
+        Color pure = ColorPickerMath.FromHsv(_pickerHue, 1, 1);
+        SvHueLayer.Fill = new LinearGradientBrush(Colors.White, pure, 0);
+
+        Point thumb = ColorPickerMath.PositionFor(_pickerSaturation, _pickerValue, SvSize());
+        Canvas.SetLeft(SvThumb, thumb.X - SvThumb.Width / 2);
+        Canvas.SetTop(SvThumb, thumb.Y - SvThumb.Height / 2);
+
+        Color colour = PickerColor();
+        SvThumb.Fill = new SolidColorBrush(colour);
+        ColorPickerPreview.Fill = new SolidColorBrush(colour);
+
+        _suppressHexEvents = true;
+        try { ColorPickerHex.Text = ColorPickerMath.ToHex(colour); }
+        finally { _suppressHexEvents = false; }
+    }
+
+    /// <summary>
+    /// Points every control in the picker at one colour without treating it as an edit.
+    /// A fully desaturated colour has no meaningful hue, so the slider is left where it is
+    /// rather than snapping to red the moment the user drags into the white corner.
+    /// </summary>
+    private void SyncColorPickerInputs(Color c)
+    {
+        (double hue, double saturation, double value) = ColorPickerMath.ToHsv(c);
+        if (saturation > 0.001) _pickerHue = hue;
+        _pickerSaturation = saturation;
+        _pickerValue = value;
+        _pickerAlpha = c.A;
+
+        _suppressPickerEvents = true;
+        try
+        {
+            HueSlider.Value = _pickerHue;
+            AlphaSlider.Value = Math.Round(_pickerAlpha / 2.55);
+        }
+        finally
+        {
+            _suppressPickerEvents = false;
+        }
+        RefreshPickerVisual();
     }
 
     /// <summary>Hex box: live-preview a valid value as the user types (without closing the popup).</summary>
@@ -777,35 +952,63 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void OnColorPickerApply(object sender, RoutedEventArgs e) => CommitHexColor();
+    private void OnColorPickerApply(object sender, RoutedEventArgs e)
+    {
+        CommitPickerColor();
+        ColorPickerPopup.IsOpen = false;
+    }
 
     private void CommitHexColor()
     {
         if (ColorPickerHex.Text is string s && TryParseHexLoose(s, out var c))
         {
-            ApplyCustomColor(c);
+            SyncColorPickerInputs(c);
+            CommitPickerColor();
             ColorPickerPopup.IsOpen = false;
         }
     }
 
-    /// <summary>Refreshes the popup's preview + hex box to a color without re-triggering the live preview handler.</summary>
-    private void SyncColorPickerInputs(Color c)
+    /// <summary>
+    /// The eyedropper inside the picker: arms the sampling tool, closes the popup, and
+    /// reopens it on the sampled colour — so picking a colour off the image is part of
+    /// choosing one rather than a detour that loses the picker.
+    /// </summary>
+    private void OnPickerEyedropper(object sender, RoutedEventArgs e)
     {
-        _suppressHexEvents = true;
-        ColorPickerPreview.Fill = new SolidColorBrush(c);
-        ColorPickerHex.Text = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
-        _suppressHexEvents = false;
+        ColorPickerPopup.IsOpen = false;
+        _reopenPickerAfterSample = true;
+        CheckToolButton(EditorTool.Eyedropper);
+    }
+
+    /// <summary>Applies the picker's colour to whichever tab is open.</summary>
+    private void CommitPickerColor()
+    {
+        Color c = PickerColor();
+        if (_pickerFillTarget) ApplyFillColor(c);
+        else ApplyCustomColor(c);
     }
 
     /// <summary>
-    /// Persists a custom color into the trailing swatch + current-color indicator, makes it the
-    /// active stroke color, and (when an annotation is selected) restyles it via the normal path.
-    /// Also used by the eyedropper so a sampled color lands in the same persistent swatch.
+    /// Persists a custom color into the current-color indicator, makes it the active stroke
+    /// color, and (when an annotation is selected) restyles it via the normal path. Also
+    /// used by the eyedropper so a sampled color lands in the same place.
     /// </summary>
     private void ApplyCustomColor(Color c)
     {
         _customColor = c;
         SetCurrentColor(c); // the well repaints from here
+    }
+
+    /// <summary>
+    /// The fill colour for shapes. Null until the Fill tab is used, and null means "derive
+    /// the fill from the stroke" — which is what every shape drawn before this existed did,
+    /// so nothing already on a canvas changes colour.
+    /// </summary>
+    private void ApplyFillColor(Color c)
+    {
+        _fillColor = c;
+        _toolPrefs.Update(_tool, s => s.WithFillColor(c));
+        if (IsLoaded) RestyleSelectedFillColor(c);
     }
 
     /// <summary>Parses "#RGB", "#RRGGBB", "#AARRGGBB" or bare hex; tolerates a missing leading '#'.</summary>

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -65,6 +65,12 @@ internal sealed class AnnotationData
     /// <summary><see cref="ShapeFillMode"/> name for rectangles/ellipses (None | Quarter | Solid).</summary>
     public string? Fill { get; set; }
 
+    /// <summary>
+    /// The shape's own fill colour, "#AARRGGBB". Absent means "derive it from the stroke",
+    /// which is how every shape drawn before the picker grew a Fill tab was saved.
+    /// </summary>
+    public string? FillColor { get; set; }
+
     public string? Text { get; set; }
 
     /// <summary><see cref="TextStyle"/> name for text annotations (Plain | Bold | Outline | Pill | Huge).</summary>
@@ -114,13 +120,16 @@ internal sealed class AnnotationData
         Thickness = thickness,
     };
 
-    public static AnnotationData ForShape(string type, Rect bounds, Color color, double thickness, ShapeFillMode fill) => new()
+    public static AnnotationData ForShape(
+        string type, Rect bounds, Color color, double thickness, ShapeFillMode fill,
+        Color? fillColor = null) => new()
     {
         Type = type,
         Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
         Color = ToHex(color),
         Thickness = thickness,
         Fill = fill.ToString(),
+        FillColor = fillColor is Color fc ? ToHex(fc) : null,
     };
 
     public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) => new()
@@ -365,7 +374,7 @@ internal static class ProjectSerializer
                     : new Shapes.Ellipse();
                 shape.Stroke = new SolidColorBrush(color);
                 shape.StrokeThickness = RequireThickness(a);
-                shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
+                shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color, ParseOptionalColor(a.FillColor));
                 shape.Width = bounds.Width;
                 shape.Height = bounds.Height;
                 SetPos(shape, bounds.TopLeft);
@@ -527,6 +536,14 @@ internal static class ProjectSerializer
         return ColorConverter.ConvertFromString(hex) is Color c
             ? c
             : throw new InvalidDataException($"Annotation '{a.Type}' has an invalid color '{hex}'.");
+    }
+
+    /// <summary>A colour that is allowed to be absent; a malformed one is treated as absent.</summary>
+    internal static Color? ParseOptionalColor(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return null;
+        try { return ColorConverter.ConvertFromString(hex) as Color?; }
+        catch { return null; }
     }
 
     private static double RequireThickness(AnnotationData a) =>
