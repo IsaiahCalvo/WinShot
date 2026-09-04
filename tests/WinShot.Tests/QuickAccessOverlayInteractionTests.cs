@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.IO;
 using WinShot.Core;
 using WinShot.Overlay;
@@ -506,6 +506,31 @@ public class QuickAccessOverlayInteractionTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void TheCardHasItsThumbnailBeforeItIsEverShown()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using (var pen = new SD.Pen(SD.Color.Orange, 40))
+            using (var g = SD.Graphics.FromImage(bitmap))
+            {
+                g.Clear(SD.Color.MidnightBlue);
+                g.DrawLine(pen, 0, 0, 1200, 760);
+            }
+
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var preview = (SD.Bitmap?)typeof(FastQuickActionsWindow)
+                .GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay);
+
+            // Not merely present: the real capture's pixels, at the thumbnail's own size.
+            Assert.NotNull(preview);
+            Assert.Equal(overlay.ClientSize, preview!.Size);
+            Assert.NotEqual(SD.Color.Empty.ToArgb(), preview.GetPixel(preview.Width / 2, preview.Height / 2).ToArgb());
+        });
     }
 
     private static void InvokeKey(FastQuickActionsWindow overlay, WF.Keys keys)

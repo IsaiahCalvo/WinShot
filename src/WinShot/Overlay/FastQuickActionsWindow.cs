@@ -168,6 +168,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             true);
 
         BuildLayout(image, _dpi);
+        RenderFirstPreview();
         PositionFromSettings();
         BuildOverflowMenu();
         _tooltipTimer.Tick += (_, _) => ShowActionTooltip();
@@ -253,6 +254,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             _dpi = handleDpi;
             BuildLayout(_image, _dpi);
+            RenderFirstPreview();
             PositionFromSettings();
         }
         QueueRegionUpdate();
@@ -1525,6 +1527,47 @@ public sealed class FastQuickActionsWindow : WF.Form
         preview?.Dispose();
         if (!ReferenceEquals(blurred, preview))
             blurred?.Dispose();
+    }
+
+    /// <summary>
+    /// The sharp preview, rendered inline before the card is ever on screen. The async
+    /// pipeline still produces the blurred pair and every re-render after a pixel edit —
+    /// but its two thread hops land on exactly the frames the eye is following after a
+    /// capture, so without this the card is a flat dark rectangle for a beat and then the
+    /// picture pops in. One downscale of a bitmap already in memory; ~1 ms at 192x120.
+    /// </summary>
+    private void RenderFirstPreview()
+    {
+        if (!_loadPreview || _closed || IsDisposed)
+            return;
+
+        SD.Bitmap? preview = null;
+        try
+        {
+            preview = CreatePreviewBitmap(_image, _thumbRect.Width, _thumbRect.Height);
+            SD.Bitmap? old;
+            lock (_previewSync)
+            {
+                if (_previewClosed)
+                    return;
+                old = _preview;
+                _preview = preview;
+                preview = null;
+                // The blurred bitmap can be the same instance when the pipeline never ran;
+                // dropping it here would leave a disposed bitmap installed as the blur.
+                if (ReferenceEquals(old, _blurredPreview))
+                    old = null;
+            }
+            old?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to render the first overlay thumbnail", ex);
+        }
+        finally
+        {
+            preview?.Dispose();
+        }
     }
 
     private async Task LoadPreviewAsync()
