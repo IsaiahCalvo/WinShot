@@ -477,6 +477,17 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             e.Handled = true;
             Confirm(pending);
         }
+        else if (_pendingPx is SD.Rectangle nudged && SelectionNudge.Handles(e.KeyCode))
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            SD.Rectangle screen = ScreenFromVirtual(nudged);
+            if (SelectionNudge.Apply(screen, e.KeyCode, e.Shift, e.Control, _vs) is SD.Rectangle moved &&
+                moved != screen)
+            {
+                SetPending(VirtualFromScreen(moved));
+            }
+        }
         else if (e.KeyCode == WF.Keys.Menu)
         {
             if (!_altLatched)

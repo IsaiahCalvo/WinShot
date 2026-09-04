@@ -675,6 +675,17 @@ public sealed class FastRegionSelectorDialog : WF.Form
             e.Handled = true;
             Confirm(VirtualFromScreen(pending));
         }
+        else if (_pendingScreen is SD.Rectangle nudged && SelectionNudge.Handles(e.KeyCode))
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            if (SelectionNudge.Apply(nudged, e.KeyCode, e.Shift, e.Control, _vs) is SD.Rectangle moved &&
+                moved != nudged)
+            {
+                _pendingScreen = moved;
+                InvalidateAllSurfaces();
+            }
+        }
         else if (e.KeyCode == WF.Keys.C)
         {
             e.Handled = true;
