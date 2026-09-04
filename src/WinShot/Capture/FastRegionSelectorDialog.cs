@@ -691,6 +691,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 InvalidateAllSurfaces();
             }
         }
+        else if (e.KeyCode == WF.Keys.A && _pendingScreen is SD.Rectangle toSnap)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            SD.Rectangle snapped = MarqueeEdge.SnapAll(toSnap, _snapEdgesX, _snapEdgesY);
+            if (snapped != toSnap)
+                GlideSelectionTo(snapped);
+            else
+                FlashMessage("Nothing to snap to near this selection.");
+        }
         else if (e.KeyCode == WF.Keys.C)
         {
             e.Handled = true;
@@ -796,6 +806,26 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return; // window mode confirms on mouse-up
 
         // Area mode.
+        // Ctrl+click retargets to the detected element even when a selection is already
+        // framed. Without it the only way back to element pick was to cancel and re-open:
+        // a bare click takes the element, but only while nothing is pending.
+        if (_paneHover &&
+            (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control &&
+            SnapRectAt(screen) is SD.Rectangle element)
+        {
+            if (_pendingScreen is null)
+            {
+                SetPendingRegion(element);
+                SelectedByPaneClick = true;
+                InvalidateAllSurfaces();
+            }
+            else
+            {
+                GlideSelectionTo(element);
+            }
+            return;
+        }
+
         if (_pendingScreen is SD.Rectangle pending)
         {
             // Cancel / Done bar wins over move/resize. The press only arms the button —

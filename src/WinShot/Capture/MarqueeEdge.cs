@@ -1,4 +1,4 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 
 namespace WinShot.Capture;
 
@@ -95,6 +95,19 @@ public static class MarqueeEdge
         return snapped.Width < 1 || snapped.Height < 1 ? rect : snapped;
     }
 
+    /// <summary>
+    /// Snaps all four edges onto the nearest real boundaries — the "line this up with what is
+    /// actually on screen" pass for a rectangle that was drawn by hand. Each edge is decided
+    /// independently, and an edge with nothing in reach simply stays put.
+    /// </summary>
+    public static SD.Rectangle SnapAll(SD.Rectangle rect, int[] edgesX, int[] edgesY, int reach = ReachPx)
+    {
+        SD.Rectangle snapped = rect;
+        foreach (MarqueeSide side in new[] { MarqueeSide.Left, MarqueeSide.Right, MarqueeSide.Top, MarqueeSide.Bottom })
+            snapped = SnapEdge(snapped, side, edgesX, edgesY, reach);
+        return snapped;
+    }
+
     /// <summary>Grows the selection on every side, clipped to the desktop.</summary>
     public static SD.Rectangle Pad(SD.Rectangle rect, int padding, SD.Rectangle bounds)
     {
@@ -109,8 +122,10 @@ public static class MarqueeEdge
         int bestGap = reach + 1;
         foreach (int edge in sorted)
         {
+            // A zero gap counts: an edge already sitting on a boundary is aligned, and
+            // skipping it would send it to the NEXT boundary instead of leaving it alone.
             int gap = Math.Abs(edge - value);
-            if (gap > 0 && gap < bestGap)
+            if (gap < bestGap)
             {
                 bestGap = gap;
                 best = edge;

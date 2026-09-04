@@ -1,4 +1,4 @@
-using WinShot.Capture;
+﻿using WinShot.Capture;
 using Xunit;
 using SD = System.Drawing;
 
@@ -95,5 +95,36 @@ public class MarqueeEdgeTests
         Assert.Equal(-1920, padded.Left);
         Assert.Equal(-1080, padded.Top);
         Assert.True(padded.Width >= 100);
+    }
+
+    [Fact]
+    public void SnapAllLinesUpEveryEdgeThatHasSomethingInReach()
+    {
+        SD.Rectangle snapped = MarqueeEdge.SnapAll(Region, EdgesX, EdgesY);
+
+        Assert.Equal(96, snapped.Left);
+        Assert.Equal(520, snapped.Right);
+        Assert.Equal(205, snapped.Top);
+        Assert.Equal(496, snapped.Bottom);
+    }
+
+    [Fact]
+    public void SnapAllLeavesEdgesWithNothingNearThemExactlyWhereTheyWere()
+    {
+        // Only the left edge has a boundary within reach; the other three are untouched.
+        SD.Rectangle snapped = MarqueeEdge.SnapAll(Region, [96], []);
+
+        Assert.Equal(96, snapped.Left);
+        Assert.Equal(500, snapped.Right);
+        Assert.Equal(200, snapped.Top);
+        Assert.Equal(500, snapped.Bottom);
+    }
+
+    [Fact]
+    public void SnapAllOfAnAlreadyAlignedSelectionChangesNothing()
+    {
+        var aligned = new SD.Rectangle(96, 205, 424, 291); // left 96, right 520, top 205, bottom 496
+
+        Assert.Equal(aligned, MarqueeEdge.SnapAll(aligned, EdgesX, EdgesY));
     }
 }

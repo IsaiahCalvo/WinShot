@@ -280,6 +280,24 @@ public class SelectorInteractionTests
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
     }
 
+    [Fact]
+    public void ARealignsAHandDrawnSelectionToWhatIsActuallyOnScreen()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings(s => s.AdjustSelectionBeforeCapturing = true));
+        SetSnapEdges(selector, [96, 344], [104, 256]);
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        selector.HandleMouseUp(Left());
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.A));
+
+        Assert.Equal(new SD.Rectangle(96, 104, 248, 152), selector.PendingRegion);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
     private static void SetSnapEdges(FastRegionSelectorDialog selector, int[] x, int[] y)
     {
         var type = typeof(FastRegionSelectorDialog);
