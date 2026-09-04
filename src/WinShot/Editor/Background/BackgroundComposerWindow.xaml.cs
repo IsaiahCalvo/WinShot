@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -568,8 +568,9 @@ public partial class BackgroundComposerWindow : Window
     /// Gives each of the nine alignment ToggleButtons a distinct directional
     /// indicator: a small dot positioned within an 18x18 frame per the button's
     /// Tag (top-left dot for TL, etc.) so the checked anchor is obvious. The dot
-    /// binds to the button Foreground, which the ToolButton style flips to white
-    /// when checked (over the solid blue fill) and a light gray at rest.
+    /// binds to the button Foreground, which stays the same light gray in every
+    /// state — the checked anchor now reads from ToolButton's neutral chip behind
+    /// the dot rather than from a colour change on the dot itself.
     /// </summary>
     private void BuildAlignmentGlyphs()
     {

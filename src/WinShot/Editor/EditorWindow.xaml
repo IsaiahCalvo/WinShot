@@ -29,7 +29,7 @@
                     </StackPanel>
 
                     <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                        <RadioButton x:Name="CropUtilityBtn" Style="{StaticResource ToolButton}" GroupName="Tool"
+                        <RadioButton x:Name="CropUtilityBtn" Style="{StaticResource ModeToolButton}" GroupName="Tool"
                                      Tag="Crop" Content="&#xE7A8;" Checked="OnToolChecked"
                                      ToolTip="Crop &amp; resize (C)"
                                      AutomationProperties.Name="Crop and resize"

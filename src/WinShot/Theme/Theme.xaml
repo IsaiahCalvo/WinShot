@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
 
@@ -26,6 +26,7 @@
     <Color x:Key="SurfaceColor">#FF2E2E30</Color>       <!-- raised control surface (secondary pill, combo, slider track-fill region) -->
     <Color x:Key="SurfaceAltColor">#FF38383B</Color>    <!-- inputs / combo toggle / track -->
     <Color x:Key="ElevatedColor">#FF323236</Color>      <!-- popups / flyouts / context menus -->
+    <Color x:Key="ToolChipColor">#FF3A3A40</Color>      <!-- active-tool chip: reads as selected without shouting accent -->
 
     <!-- Translucent floating-surface base (one recipe for ALL overlays) -->
     <Color x:Key="FloatingBgColor">#F5262628</Color>    <!-- ~96% opaque toolbar charcoal -->
@@ -63,6 +64,7 @@
     <SolidColorBrush x:Key="SurfaceBrush"      Color="{StaticResource SurfaceColor}"/>
     <SolidColorBrush x:Key="SurfaceAltBrush"   Color="{StaticResource SurfaceAltColor}"/>
     <SolidColorBrush x:Key="ElevatedBrush"     Color="{StaticResource ElevatedColor}"/>
+    <SolidColorBrush x:Key="ToolChipBrush"     Color="{StaticResource ToolChipColor}"/>
     <SolidColorBrush x:Key="FloatingBgBrush"   Color="{StaticResource FloatingBgColor}"/>
 
     <SolidColorBrush x:Key="AccentBrush"        Color="{StaticResource AccentColor}"/>
@@ -89,12 +91,73 @@
     <CornerRadius x:Key="RadiusCard">14</CornerRadius>
     <CornerRadius x:Key="RadiusInput">8</CornerRadius>
     <CornerRadius x:Key="RadiusPill">999</CornerRadius> <!-- clamped to height/2 by WPF -->
+    <CornerRadius x:Key="RadiusChip">6</CornerRadius>   <!-- 36px tool button: hover wash and active chip -->
 
     <sys:Double x:Key="ToolButtonSize">36</sys:Double>
     <sys:Double x:Key="ToolGlyphSize">17</sys:Double>
     <sys:Double x:Key="CircleActionSize">34</sys:Double>
     <sys:Double x:Key="CircleGlyphSize">17</sys:Double>
     <sys:Double x:Key="PillHeight">30</sys:Double>
+
+    <!-- ============================= MOTION =============================
+         Mirrors Core/Motion.cs, so a WPF window and a WinForms overlay move at
+         the same speed: Quick for hover/press tints, Swap for one pane replacing
+         another in the same slot, Enter for a surface arriving on screen.
+         ================================================================== -->
+    <Duration x:Key="MotionQuick">0:0:0.14</Duration>
+    <Duration x:Key="MotionSwap">0:0:0.22</Duration>
+    <Duration x:Key="MotionEnter">0:0:0.28</Duration>
+
+    <CubicEase x:Key="EaseOutCubic" EasingMode="EaseOut"/>
+    <BackEase  x:Key="EaseOutBack"  EasingMode="EaseOut" Amplitude="0.4"/>
+
+    <!-- The cross-fade every control template below shares. A template stacks a
+         layer named Hover / Press / Chip / Check over its rest fill at Opacity 0
+         and these fade it in and out, so no state change snaps. Triggers carry
+         only these actions and no Setter, so the visual is animation-only and
+         nothing fights over the same property. BeginStoryboard's default
+         SnapshotAndReplace means a fast in-out picks up from wherever the last
+         fade reached instead of jumping back to the start. -->
+    <Storyboard x:Key="HoverIn">
+        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity"
+                         To="1" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+    <Storyboard x:Key="HoverOut">
+        <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity"
+                         To="0" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+    <Storyboard x:Key="PressIn">
+        <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="Opacity"
+                         To="1" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+    <Storyboard x:Key="PressOut">
+        <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="Opacity"
+                         To="0" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+    <Storyboard x:Key="ChipIn">
+        <DoubleAnimation Storyboard.TargetName="Chip" Storyboard.TargetProperty="Opacity"
+                         To="1" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+    <Storyboard x:Key="ChipOut">
+        <DoubleAnimation Storyboard.TargetName="Chip" Storyboard.TargetProperty="Opacity"
+                         To="0" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+    <Storyboard x:Key="CheckIn">
+        <DoubleAnimation Storyboard.TargetName="Check" Storyboard.TargetProperty="Opacity"
+                         To="1" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
+    <Storyboard x:Key="CheckOut">
+        <DoubleAnimation Storyboard.TargetName="Check" Storyboard.TargetProperty="Opacity"
+                         To="0" Duration="{StaticResource MotionQuick}"
+                         EasingFunction="{StaticResource EaseOutCubic}"/>
+    </Storyboard>
 
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
@@ -107,10 +170,16 @@
          TOOL BUTTON  — round 36px icon button.
          Usable on ToggleButton AND RadioButton (RadioButton derives from
          ToggleButton, so a ToggleButton-targeted Style applies to both).
-         Rest: transparent. Hover: subtle white fill. Checked: SOLID BLUE.
+         Rest: transparent. Hover: subtle white wash. Checked: a NEUTRAL chip.
+         The active tool used to go solid accent blue, which put the loudest
+         colour in the app on whichever pen happened to be selected and left no
+         colour for the states that are genuinely modal. Selection now reads as a
+         raised chip; the chip paints with Background, so ModeToolButton below is
+         a one-setter override rather than a second copy of this template.
          Set Content to a glyph; FontFamily is forced to the icon font.
          ==================================================================== -->
     <Style x:Key="ToolButton" TargetType="ToggleButton">
+        <Setter Property="Background" Value="{StaticResource ToolChipBrush}"/>
         <Setter Property="Width"  Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Height" Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Margin" Value="3,0"/>
@@ -124,37 +193,40 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Grid>
-                        <Ellipse x:Name="Bg" Fill="Transparent"/>
+                        <!-- Chip underneath, hover/press wash over it: the washes
+                             are translucent white, so a checked button lights up
+                             the same way an unchecked one does and no combination
+                             of states needs spelling out in a MultiTrigger. -->
+                        <Border x:Name="Chip"  Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{TemplateBinding Background}"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource PressedFillBrush}"/>
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        <Ellipse x:Name="FocusRing" Fill="Transparent" Stroke="Transparent"
-                                 StrokeThickness="2" Margin="1"/>
+                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChip}"
+                                BorderBrush="Transparent" BorderThickness="2" Margin="1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource HoverFillBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource PressedFillBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
                         </Trigger>
-                        <!-- ACTIVE / SELECTED TOOL = solid accent-blue circle, white glyph -->
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource AccentBrush}"/>
-                            <Setter Property="Foreground" Value="White"/>
-                        </Trigger>
-                        <MultiTrigger>
-                            <MultiTrigger.Conditions>
-                                <Condition Property="IsChecked" Value="True"/>
-                                <Condition Property="IsMouseOver" Value="True"/>
-                            </MultiTrigger.Conditions>
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource AccentHoverBrush}"/>
-                        </MultiTrigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
                         </Trigger>
@@ -162,6 +234,15 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         MODE TOOL BUTTON — a ToolButton whose checked state IS worth the accent,
+         because it puts the editor into a mode rather than picking a pen: crop,
+         add image, add background. Everything else about it is ToolButton.
+         ==================================================================== -->
+    <Style x:Key="ModeToolButton" TargetType="ToggleButton" BasedOn="{StaticResource ToolButton}">
+        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
     </Style>
 
     <!-- A plain (non-toggle) round icon button variant for one-shot actions
@@ -179,23 +260,28 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Ellipse x:Name="Bg" Fill="Transparent"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource PressedFillBrush}"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
                                           TextElement.FontSize="{TemplateBinding FontSize}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        <Ellipse x:Name="FocusRing" Fill="Transparent" Stroke="Transparent"
-                                 StrokeThickness="2" Margin="1"/>
+                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChip}"
+                                BorderBrush="Transparent" BorderThickness="2" Margin="1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource HoverFillBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource PressedFillBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
@@ -225,16 +311,24 @@
                     <Border x:Name="Bg" Background="{StaticResource AccentBrush}"
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          RecognizesAccessKey="True"
-                                          Margin="{TemplateBinding Padding}"/>
+                        <Grid>
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="6"
+                                    Background="{StaticResource AccentHoverBrush}"/>
+                            <Border x:Name="Press" Opacity="0" CornerRadius="6"
+                                    Background="{StaticResource AccentPressedBrush}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentHoverBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentPressedBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Bg" Property="BorderBrush" Value="White"/>
@@ -267,16 +361,24 @@
                     <Border x:Name="Bg" Background="{StaticResource SurfaceBrush}"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             CornerRadius="{StaticResource RadiusButton}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          RecognizesAccessKey="True"
-                                          Margin="{TemplateBinding Padding}"/>
+                        <Grid>
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="7"
+                                    Background="{StaticResource SurfaceAltBrush}"/>
+                            <Border x:Name="Press" Opacity="0" CornerRadius="7"
+                                    Background="{StaticResource ElevatedBrush}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource ElevatedBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
@@ -302,16 +404,24 @@
                     <Border x:Name="Bg" Background="{StaticResource AnnotationRedBrush}"
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          RecognizesAccessKey="True"
-                                          Margin="{TemplateBinding Padding}"/>
+                        <Grid>
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="6"
+                                    Background="{StaticResource RedHoverBrush}"/>
+                            <Border x:Name="Press" Opacity="0" CornerRadius="6"
+                                    Background="{StaticResource RedPressedBrush}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource RedHoverBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource RedPressedBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Bg" Property="BorderBrush" Value="White"/>
@@ -343,6 +453,8 @@
                 <ControlTemplate TargetType="Button">
                     <Grid>
                         <Ellipse x:Name="Bg" Fill="{StaticResource SurfaceBrush}"/>
+                        <Ellipse x:Name="Hover" Opacity="0" Fill="{StaticResource SurfaceAltBrush}"/>
+                        <Ellipse x:Name="Press" Opacity="0" Fill="{StaticResource ElevatedBrush}"/>
                         <Ellipse x:Name="FocusRing" Stroke="{StaticResource BorderBrush}" StrokeThickness="1"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
@@ -351,10 +463,12 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource SurfaceAltBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Fill" Value="{StaticResource ElevatedBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
@@ -435,17 +549,22 @@
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                 CornerRadius="{StaticResource RadiusInput}">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="22"/>
-                </Grid.ColumnDefinitions>
-                <Path Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
-                      Data="M0,0 L8,0 L4,5 Z" Fill="{StaticResource TextSecondaryBrush}"/>
+                <Border x:Name="Hover" Opacity="0" CornerRadius="7"
+                        Background="{StaticResource ElevatedBrush}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="22"/>
+                    </Grid.ColumnDefinitions>
+                    <Path Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Data="M0,0 L8,0 L4,5 Z" Fill="{StaticResource TextSecondaryBrush}"/>
+                </Grid>
             </Grid>
         </Border>
         <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bg" Property="Background" Value="{StaticResource ElevatedBrush}"/>
+                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
             </Trigger>
         </ControlTemplate.Triggers>
     </ControlTemplate>
@@ -721,7 +840,10 @@
                             <Border x:Name="Box" CornerRadius="5"
                                     Background="{StaticResource SurfaceAltBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
-                            <Path x:Name="Check" Visibility="Collapsed"
+                            <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource AccentBrush}"
+                                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
+                            <Path x:Name="Check" Opacity="0"
                                   Stroke="White" StrokeThickness="1.8"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   StrokeLineJoin="Round"
@@ -732,9 +854,14 @@
                     </StackPanel>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentBrush}"/>
-                            <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                            <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard Storyboard="{StaticResource ChipIn}"/>
+                                <BeginStoryboard Storyboard="{StaticResource CheckIn}"/>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard Storyboard="{StaticResource ChipOut}"/>
+                                <BeginStoryboard Storyboard="{StaticResource CheckOut}"/>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>

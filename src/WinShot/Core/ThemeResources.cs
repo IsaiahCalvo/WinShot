@@ -1,10 +1,11 @@
-using System.Windows;
+﻿using System.Windows;
 
 namespace WinShot.Core;
 
 public static class ThemeResources
 {
-    private const string ThemePath = "pack://application:,,,/WinShot;component/Theme/Theme.xaml";
+    /// <summary>Where the one shared dictionary lives; tests load it standalone from here.</summary>
+    public const string ThemePath = "pack://application:,,,/WinShot;component/Theme/Theme.xaml";
     private static bool _loaded;
 
     public static void EnsureLoaded()
