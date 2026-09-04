@@ -328,4 +328,20 @@ public class ScrollMatcherTests
                 Assert.True(float.IsFinite(sig.StripEnergy[s][y]), $"strip {s} row {y} energy is not finite");
             }
     }
+
+    /// <summary>
+    /// The cause behind the theory above, asserted at every width rather than the six sampled
+    /// there. SideMargin is now the single owner of the inset (ScrollMatcher, ImageStitcher and
+    /// ScrollingCaptureService all call it), so a future retune has to keep leaving at least one
+    /// column between the two margins — a zero-or-negative span is what produced the NaN.
+    /// </summary>
+    [Fact]
+    public void SideMargin_AlwaysLeavesAtLeastOneColumnBetweenTheMargins()
+    {
+        for (int width = 1; width <= 4096; width++)
+        {
+            int margin = FrameSignature.SideMargin(width);
+            Assert.True(width - 2 * margin > 0, $"width {width} margin {margin} collapses the span");
+        }
+    }
 }
