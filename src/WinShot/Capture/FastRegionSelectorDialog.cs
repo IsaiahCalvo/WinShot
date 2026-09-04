@@ -990,7 +990,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_pendingScreen is SD.Rectangle pending)
             return pending;
         if (_dragging && _dragMoved)
-            return Normalize(_dragStartScreen, SnappedCursor());
+            return DragRect();
         if (_mode == SelectorMode.Window && _hoverWindow is not null)
             return _hoverWindow.Bounds;
         if (_paneHover && _hoverPane is SD.Rectangle pane)
@@ -1239,7 +1239,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _dragging = false;
         if (_dragMoved)
         {
-            var rect = Normalize(_dragStartScreen, SnappedCursor());
+            var rect = DragRect();
             rect.Intersect(_vs);
             bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
             if (rect.Width > 0 && rect.Height > 0 && !_options.ShouldAdjustSelection(controlPressed))
@@ -1309,7 +1309,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         bool showHandles = false;
         if (_dragging && _dragMoved)
         {
-            brightScreen = Normalize(_dragStartScreen, SnappedCursor());
+            brightScreen = DragRect();
         }
         else if (_pendingScreen is SD.Rectangle pending)
         {
@@ -1419,7 +1419,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             // carries it on its own when the magnifier is off — either way the selector
             // always answers "where am I".
             SD.Size dragSize = _dragging && _dragMoved
-                ? Normalize(_dragStartScreen, SnappedCursor()).Size
+                ? DragRect().Size
                 : SD.Size.Empty;
             if (_magnifierOn)
             {
@@ -1950,6 +1950,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
         var rect = new SD.Rectangle(screenRect.X - _vs.X, screenRect.Y - _vs.Y, screenRect.Width, screenRect.Height);
         rect.Intersect(new SD.Rectangle(0, 0, _vs.Width, _vs.Height));
         return rect;
+    }
+
+    /// <summary>
+    /// The rectangle the in-progress drag currently describes. Shift constrains it to a
+    /// square — the ratio math already lives in AllInOneDragLayout and is tested there, so
+    /// a square is just the 1:1 case of it. Edge snapping still runs first; where the two
+    /// disagree the square wins, because that is what the modifier asked for.
+    /// </summary>
+    private SD.Rectangle DragRect()
+    {
+        bool square = (WF.Control.ModifierKeys & WF.Keys.Shift) == WF.Keys.Shift;
+        return square
+            ? AllInOneDragLayout.CreatePixelRectangle(_dragStartScreen, SnappedCursor(), 1d)
+            : Normalize(_dragStartScreen, SnappedCursor());
     }
 
     private static SD.Rectangle Normalize(SD.Point a, SD.Point b)
