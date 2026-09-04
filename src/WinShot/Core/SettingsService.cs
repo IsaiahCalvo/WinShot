@@ -37,6 +37,12 @@ public class Settings
     public bool HideDesktopIconsDuringCapture { get; set; } = false;
     public string HotkeyCapturePrevious { get; set; } = "Ctrl+Shift+6";
     public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
+    public string HotkeyMeasure { get; set; } = "Ctrl+Shift+9";
+
+    /// <summary>How far a pixel may drift from the one under the cursor and still count as
+    /// the same object, 0-255. PowerToys' tuned default for the summed-L1 metric; the mouse
+    /// wheel moves it live in Measure mode, and this is where that lands.</summary>
+    public int MeasureTolerance { get; set; } = 30;
 
     // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet
     // wired to behavior. Keyed by the catalog's stable action id -> gesture (e.g. "Ctrl+Alt+P").

@@ -32,7 +32,7 @@ public class SettingsTruthCatalogTests
     {
         Assert.Equal(
         [
-            "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
+            "all-in-one", "measure", "capture-area", "capture-previous", "capture-fullscreen",
             "capture-window", "record-screen", "scrolling-capture", "capture-text",
         ],
         SettingsTruthCatalog.ExecutableShortcutIds);

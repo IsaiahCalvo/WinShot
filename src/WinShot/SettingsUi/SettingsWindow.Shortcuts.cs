@@ -42,6 +42,8 @@ public partial class SettingsWindow
         [
             Real("all-in-one", "All-In-One", "All-in-one capture",
                  s => s.HotkeyAllInOne, (s, v) => s.HotkeyAllInOne = v),
+            Real("measure", "Measure on screen", "Measure on screen",
+                 s => s.HotkeyMeasure, (s, v) => s.HotkeyMeasure = v),
         ]},
         new ShortcutSection { Title = "Screenshots", Items =
         [

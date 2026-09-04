@@ -328,6 +328,9 @@ public partial class SettingsWindow : Window
         SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 1);
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
+        // The wheel can leave tolerance anywhere in 0-255, so the nearest of the three
+        // presets is shown rather than a wrong one or none at all.
+        SelectByTag(MeasureToleranceCombo, NearestTolerancePreset(s.MeasureTolerance), fallbackIndex: 1);
 
         // Annotate
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
@@ -602,6 +605,9 @@ public partial class SettingsWindow : Window
             s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
             s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
+            s.MeasureTolerance = int.TryParse(SelectedTag(MeasureToleranceCombo, "30"), out int tolerance)
+                ? Math.Clamp(tolerance, 0, 255)
+                : 30;
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
@@ -676,6 +682,7 @@ public partial class SettingsWindow : Window
         Accessible(FreezeScreenCheck, "Freeze screen during selection", "Use a still desktop image while choosing a region.");
         Accessible(CrosshairModeCombo, "Crosshair mode", "Choose when selector crosshair guides appear.");
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
+        Accessible(MeasureToleranceCombo, "Measure tolerance", "Choose how far a pixel may drift and still count as the same object.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
         Accessible(HistorySlider, "Capture history retention", "Choose how long local capture history is kept.");
@@ -697,7 +704,8 @@ public partial class SettingsWindow : Window
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, SelfTimerCombo,
-            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, MeasureToleranceCombo,
+            TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck,
         })
@@ -963,6 +971,21 @@ public partial class SettingsWindow : Window
 
     private static string SelectedTag(ComboBox combo, string fallback) =>
         (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? fallback;
+
+    /// <summary>The Low/Medium/High tag nearest a stored tolerance. The measure overlay's
+    /// wheel writes any value in 0-255, and a combo that showed nothing for 45 would read
+    /// as broken.</summary>
+    internal static string NearestTolerancePreset(int tolerance)
+    {
+        int[] presets = [15, 30, 60];
+        int best = presets[0];
+        foreach (int preset in presets)
+        {
+            if (Math.Abs(preset - tolerance) < Math.Abs(best - tolerance))
+                best = preset;
+        }
+        return best.ToString();
+    }
 
     // Delegates to the shared helper so Settings and the boot-time self-heal write the
     // identical Run-key value (see WinShot.Core.StartupRegistration).

@@ -949,6 +949,16 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="ShowMagnifierCheck" Content="Show magnifier"/>
                                 </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Measure tolerance"/>
+                                    <ComboBox x:Name="MeasureToleranceCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="Low - stops at faint edges" Tag="15"/>
+                                        <ComboBoxItem Content="Medium - recommended" Tag="30"/>
+                                        <ComboBoxItem Content="High - ignores gradients and shadows" Tag="60"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="How far a pixel may drift and still count as the same object. The mouse wheel changes it live while measuring."/>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
                             </StackPanel>

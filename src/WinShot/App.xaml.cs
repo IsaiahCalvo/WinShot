@@ -293,6 +293,7 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
         menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
         menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
+        menu.Items.Add(MenuItem("Measure on screen", s.HotkeyMeasure, () => QueueCaptureCommand("measure")));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow));
         menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow));
@@ -351,6 +352,7 @@ public partial class App : Application
         Reg(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"));
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
+        Reg(s.HotkeyMeasure, () => QueueCaptureCommand("measure"));
 
         if (failed.Count == 0)
         {
@@ -435,7 +437,7 @@ public partial class App : Application
     private static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
-        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
+        "all-in-one" or "ocr" or "measure" or "scrolling" or "scroll-horizontal" or "self-timer"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
     private void QueueCaptureCommand(string cmd)
@@ -461,6 +463,7 @@ public partial class App : Application
             case "capture-window-background": CaptureRegionFlow(PostCaptureAction.Background, FastRegionSelectorDialog.SelectorMode.Window); break;
             case "all-in-one": AllInOneFlow(); break;
             case "ocr": OcrFlow(); break;
+            case "measure": MeasureFlow(); break;
             case "scrolling": ScrollingFlow(); break;
             case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
@@ -622,6 +625,36 @@ public partial class App : Application
             }
         });
 
+    /// <summary>
+    /// PixelSnap-style measurement over a frozen screen. It ends like any other capture flow
+    /// because it can: clicking a measurement pill captures the object that was measured, so
+    /// the mode is both a ruler and a way to frame a shot.
+    /// </summary>
+    private void MeasureFlow() => RunCaptureFlow(
+        "Measure mode failed", "Measure failed", async () =>
+        {
+            var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+            PerfLog.TrackFirstShown(selector, "measure selector");
+            try
+            {
+                if (await selector.ShowAsync(FastRegionSelectorDialog.SelectorMode.Measure) == WF.DialogResult.OK &&
+                    selector.SelectedRegionPx is SD.Rectangle region)
+                {
+                    SD.Bitmap? frozenCrop = selector.TakeCapturedRegion();
+                    if (frozenCrop is null)
+                    {
+                        await WaitForOverlayDismissAsync();
+                        frozenCrop = await CaptureSelectedRegionAsync(region, "measure");
+                    }
+                    HandleCapture(frozenCrop);
+                }
+            }
+            finally
+            {
+                FastRegionSelectorDialog.Return(selector);
+            }
+        });
+
     private void CaptureFullscreenFlow() => RunCaptureFlow(
         "Fullscreen capture failed", "Capture failed", async () =>
         {
@@ -678,12 +711,21 @@ public partial class App : Application
             AllInOneAction action;
             SD.Rectangle regionPx;
             SD.Bitmap? captured = null;
+            bool measureRequested = false;
 
             var selector = FastAllInOneSelectorDialog.Rent(CreateWindowListTask, _settings);
             try
             {
                 PerfLog.TrackFirstShown(selector, "all-in-one selector");
-                if (await selector.ShowAsync() != WF.DialogResult.OK || selector.SelectedRegionPx is not SD.Rectangle rp)
+                WF.DialogResult result = await selector.ShowAsync();
+                // Measure leaves All-In-One rather than acting on a region, so it is decided
+                // before the region is: there is no rectangle to hand on.
+                if (selector.SelectedAction == AllInOneAction.Measure)
+                {
+                    measureRequested = true;
+                    return;
+                }
+                if (result != WF.DialogResult.OK || selector.SelectedRegionPx is not SD.Rectangle rp)
                     return;
 
                 action = selector.SelectedAction;
@@ -697,6 +739,12 @@ public partial class App : Application
             finally
             {
                 FastAllInOneSelectorDialog.Return(selector);
+                if (measureRequested)
+                {
+                    // Queue rather than call: this flow still has to unwind and clear
+                    // _captureInProgress before another selector may open.
+                    Dispatcher.BeginInvoke(() => QueueCaptureCommand("measure"));
+                }
             }
 
             if (action is AllInOneAction.Scroll || (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr))

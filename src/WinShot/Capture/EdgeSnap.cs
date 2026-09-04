@@ -22,9 +22,10 @@ namespace WinShot.Capture;
 /// contiguous-run walk rather than a gradient detector — and it is why hovering an empty gap
 /// measures the gap for free, the same as hovering an object measures the object.
 ///
-/// The bitmap is locked once for the life of the instance (a selector session) and read
-/// stride-indexed, because a row's pitch is not width * 4 and <c>Bitmap.GetPixel</c> would
-/// re-enter GDI+ per pixel.
+/// The bitmap is locked for the life of the instance and read stride-indexed, because a
+/// row's pitch is not width * 4 and <c>Bitmap.GetPixel</c> would re-enter GDI+ per pixel.
+/// Keep that life short: GDI+ refuses to DRAW a bitmap whose bits are locked, and the
+/// selector blits the frozen snapshot on every frame. One lock per read pass, not per session.
 /// </summary>
 public sealed class EdgeSnap : IDisposable
 {
@@ -41,13 +42,26 @@ public sealed class EdgeSnap : IDisposable
         _bitmap = bitmap;
         Width = bitmap.Width;
         Height = bitmap.Height;
+        // Ask for the format the bitmap already is where that is a 32-bit one: a mismatch
+        // makes LockBits convert the WHOLE bitmap into a scratch buffer, which on a
+        // virtual-desktop snapshot is tens of megabytes per read pass. The three 32-bit
+        // layouts differ only in what the top byte means, and the metric below reads all
+        // four bytes as a distance, so a constant alpha contributes a constant zero.
         _data = bitmap.LockBits(
             new SD.Rectangle(0, 0, Width, Height),
             SDI.ImageLockMode.ReadOnly,
-            SDI.PixelFormat.Format32bppArgb);
+            LockFormat(bitmap));
         _scan0 = _data.Scan0;
         _stride = _data.Stride;
     }
+
+    private static SDI.PixelFormat LockFormat(SD.Bitmap bitmap) => bitmap.PixelFormat switch
+    {
+        SDI.PixelFormat.Format32bppArgb or
+        SDI.PixelFormat.Format32bppRgb or
+        SDI.PixelFormat.Format32bppPArgb => bitmap.PixelFormat,
+        _ => SDI.PixelFormat.Format32bppArgb,
+    };
 
     public int Width { get; }
 

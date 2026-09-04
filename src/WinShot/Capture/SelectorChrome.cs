@@ -7,8 +7,9 @@ namespace WinShot.Capture;
 /// <summary>
 /// Shared visual chrome for the capture selectors (<see cref="FastRegionSelectorDialog"/>
 /// and <see cref="FastAllInOneSelectorDialog"/>): the crosshair guide lines, the
-/// size/coordinate label pill, and the common overlay-surface setup. Kept in one place so
-/// both selectors draw identical chrome and a styling change happens once.
+/// size/coordinate label pill, the measurement vocabulary, and the common overlay-surface
+/// setup. Kept in one place so both selectors draw identical chrome and a styling change
+/// happens once.
 /// </summary>
 internal static class SelectorChrome
 {
@@ -45,15 +46,17 @@ internal static class SelectorChrome
         form.Opacity = freezeScreen ? 1.0 : LiveDesktopOpacity;
     }
 
-    /// <summary>Draws the crosshair guide lines (shadow + white) with a gap around the cursor.</summary>
-    public static void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor)
+    /// <summary>Draws the crosshair guide lines (shadow + line) with a gap around the cursor.
+    /// <paramref name="color"/> overrides the default white: Measure mode draws its reticle in
+    /// measurement crimson, because there the reticle IS the tool.</summary>
+    public static void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor, SD.Color? color = null)
     {
         var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, CrosshairGapPx);
         if (!guides.IsVisible)
             return;
 
         using var shadow = new SD.Pen(SD.Color.FromArgb(120, 0, 0, 0), 3);
-        using var pen = new SD.Pen(SD.Color.FromArgb(210, 255, 255, 255), 1);
+        using var pen = new SD.Pen(color ?? SD.Color.FromArgb(210, 255, 255, 255), 1);
         DrawGuideLines(g, shadow, guides);
         DrawGuideLines(g, pen, guides);
     }
@@ -66,34 +69,145 @@ internal static class SelectorChrome
         g.DrawLine(pen, guides.BottomStart, guides.BottomEnd);
     }
 
+    /// <summary>Half-length of the T-serif at each end of a dimension line (PowerToys'
+    /// FEET_HALF_LENGTH). The serifs are the whole reason the line reads as a measurement
+    /// rather than as a guide.</summary>
+    private const int SerifHalf = 2;
+
+    /// <summary>Perpendicular gap between a dimension line and its pill.</summary>
+    private const int DimensionPillGap = 6;
+
+    /// <summary>
+    /// A measured distance: an aliased 1 px hairline between two INCLUSIVE endpoints, a
+    /// T-serif at each end, and its number in a fully-rounded pill on the segment's own
+    /// midpoint — you read the value exactly where the gap is.
+    ///
+    /// The hairlines are filled rectangles rather than DrawLine calls. GDI+ decides for
+    /// itself which endpoint of a line is covered, and that is precisely the off-by-one
+    /// that separates a polished ruler from a sloppy one; a rectangle from a to b is
+    /// b - a + 1 px long by construction, which is the same inclusive +1 EdgeSnap returns.
+    /// </summary>
+    public static void DrawDimension(
+        SD.Graphics g, SD.Size clientSize, SD.Point a, SD.Point b, string? label, SD.Color color)
+    {
+        bool horizontal = a.Y == b.Y;
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+        using (var brush = new SD.SolidBrush(color))
+        {
+            if (horizontal)
+            {
+                int left = Math.Min(a.X, b.X);
+                int right = Math.Max(a.X, b.X);
+                g.FillRectangle(brush, left, a.Y, right - left + 1, 1);
+                g.FillRectangle(brush, left, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
+                g.FillRectangle(brush, right, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
+            }
+            else
+            {
+                int top = Math.Min(a.Y, b.Y);
+                int bottom = Math.Max(a.Y, b.Y);
+                g.FillRectangle(brush, a.X, top, 1, bottom - top + 1);
+                g.FillRectangle(brush, a.X - SerifHalf, top, (SerifHalf * 2) + 1, 1);
+                g.FillRectangle(brush, a.X - SerifHalf, bottom, (SerifHalf * 2) + 1, 1);
+            }
+        }
+        g.SmoothingMode = prev;
+
+        if (string.IsNullOrEmpty(label))
+            return;
+
+        SD.Size pill = MeasureLabel(label);
+        SD.Point at = horizontal
+            ? new SD.Point(((a.X + b.X) / 2) - (pill.Width / 2), a.Y - pill.Height - DimensionPillGap)
+            : new SD.Point(a.X + DimensionPillGap, ((a.Y + b.Y) / 2) - (pill.Height / 2));
+        DrawLabel(g, clientSize, label, at.X, at.Y, fullyRounded: true);
+    }
+
+    /// <summary>A guide the user placed: one full-bleed hairline, no end caps, no pill. The
+    /// ABSENCE of the dimension vocabulary is what says "a guide, not a distance".</summary>
+    public static void DrawGuide(SD.Graphics g, SD.Size clientSize, bool vertical, int at, SD.Color color)
+    {
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+        using (var brush = new SD.SolidBrush(color))
+        {
+            if (vertical)
+                g.FillRectangle(brush, at, 0, 1, clientSize.Height);
+            else
+                g.FillRectangle(brush, 0, at, clientSize.Width, 1);
+        }
+        g.SmoothingMode = prev;
+    }
+
+    private const int LabelPadX = 16;
+    private const int LabelPadY = 8;
+    private const int LabelRadius = 6;
+
+    private const WF.TextFormatFlags LabelText =
+        WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding;
+
     /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
-    /// that place the pill by an edge other than its top-left.</summary>
+    /// that place the pill by an edge other than its top-left. A newline stacks another line —
+    /// the measurement pill carries its dip value and ratio under the pixel figure.</summary>
     public static SD.Size MeasureLabel(string text)
     {
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        return new SD.Size(size.Width + 16, size.Height + 8);
+        SD.Size size = MeasureBlock(text, font);
+        return new SD.Size(size.Width + LabelPadX, size.Height + LabelPadY);
     }
 
-    /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
-    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y)
+    private static SD.Size MeasureBlock(string text, SD.Font font)
+    {
+        if (!text.Contains('\n'))
+            return WF.TextRenderer.MeasureText(text, font);
+
+        int width = 0;
+        int height = 0;
+        foreach (string line in text.Split('\n'))
+        {
+            SD.Size measured = WF.TextRenderer.MeasureText(line.Length == 0 ? " " : line, font);
+            width = Math.Max(width, measured.Width);
+            height += measured.Height;
+        }
+        return new SD.Size(width, height);
+    }
+
+    /// <summary>Draws the size/coordinate label pill, clamped inside the client area.
+    /// <paramref name="fullyRounded"/> gives a capsule (radius = height/2), which is the
+    /// measurement pill's shape; the existing selection readout keeps its radius-6 corners.</summary>
+    public static void DrawLabel(
+        SD.Graphics g, SD.Size clientSize, string text, int x, int y, bool fullyRounded = false)
     {
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + 16;
-        int h = size.Height + 8;
+        SD.Size size = MeasureBlock(text, font);
+        int w = size.Width + LabelPadX;
+        int h = size.Height + LabelPadY;
         int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));
         int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
         var bg = new SD.Rectangle(left, top, w, h);
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bg, 6))
+        using (var path = GdiPaths.RoundedRect(bg, fullyRounded ? Math.Max(2, h / 2) : LabelRadius))
         using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
-        WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
+        if (!text.Contains('\n'))
+        {
+            WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary, LabelText);
+            return;
+        }
+
+        int lineTop = bg.Top + (LabelPadY / 2);
+        foreach (string line in text.Split('\n'))
+        {
+            SD.Size measured = WF.TextRenderer.MeasureText(line.Length == 0 ? " " : line, font);
+            WF.TextRenderer.DrawText(g, line, font,
+                new SD.Rectangle(bg.Left, lineTop, bg.Width, measured.Height),
+                ThemePalette.TextPrimary, LabelText);
+            lineTop += measured.Height;
+        }
     }
 }

@@ -18,9 +18,9 @@ namespace WinShot.Capture;
 /// math is anchored to GetCursorPos (true physical px). Screen-freeze uses a desktop snapshot;
 /// when disabled, native translucent surfaces leave the live desktop visible.
 /// </summary>
-public sealed class FastRegionSelectorDialog : WF.Form
+public sealed partial class FastRegionSelectorDialog : WF.Form
 {
-    public enum SelectorMode { Area, Window }
+    public enum SelectorMode { Area, Window, Measure }
 
     private const int DragThresholdPx = 4;
     private const int HandleHalf = 5;       // handle circle is 2*HandleHalf px
@@ -210,6 +210,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForRegion(_settings?.Current);
+        if (mode == SelectorMode.Measure)
+        {
+            // Measurement reads the frozen bitmap, so freeze is not a preference here; and
+            // the reticle IS the tool in this mode, so it shows regardless of what the
+            // crosshair setting says about ordinary captures.
+            _options = _options with
+            {
+                FreezeScreen = true,
+                ShowCrosshair = true,
+                CrosshairMode = SelectorCrosshairMode.Always,
+            };
+            ResetMeasure();
+            _measure.SetTolerance(MeasureToleranceFromSettings());
+        }
         // Always open translucent over the live desktop so the overlay appears the instant
         // the hotkey fires. The freeze snapshot (WGC setup alone can cost 300-1700 ms under
         // load) is taken in the background — these surfaces are excluded from capture — and
@@ -222,7 +236,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // is then a pure in-memory scan with no per-move syscalls. Synchronous on purpose:
         // it must finish before Show(), and a Task.Run hop under CPU load would delay the
         // open longer than the scan itself.
-        _snapRects = _paneHover
+        // Measure mode wants them too: a placed guide runs through the same SnapCoordinate
+        // the marquee uses, so it clicks onto a real element edge for nothing.
+        _snapRects = _paneHover || mode == SelectorMode.Measure
             ? WindowEnumerator.GetSnapRectangles()
             : new List<SnapRect>();
         _snapEdgesX = _snapRects.SelectMany(r => new[] { r.Bounds.Left, r.Bounds.Right })
@@ -267,8 +283,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _altLatched = false;
         _currentScreen = CursorScreen();
         _lastFollowScreen = _currentScreen;
-        if (_options.NeedsCursorFollow || _paneHover)
+        if (_options.NeedsCursorFollow || _paneHover || mode == SelectorMode.Measure)
             StartFollowMotion();
+        if (mode == SelectorMode.Measure)
+            StartHintEntrance();
         if (_options.FreezeScreen)
             _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
@@ -382,6 +400,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _wheelPinned = null;
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
+        ResetMeasure();
         DisposeFrozen();
         _capturedRegion?.Dispose();
         _capturedRegion = null;
@@ -618,6 +637,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal void HandleKeyDown(WF.KeyEventArgs e)
     {
+        if (_mode == SelectorMode.Measure && HandleMeasureKeyDown(e))
+            return;
+
         if (e.KeyCode == WF.Keys.Escape)
         {
             Complete(WF.DialogResult.Cancel);
@@ -661,6 +683,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         SD.Point screen = CursorScreen();
         _currentScreen = screen;
+
+        if (_mode == SelectorMode.Measure)
+        {
+            HandleMeasureMouseDown(e, screen);
+            return;
+        }
 
         if (e.Button == WF.MouseButtons.Right)
         {
@@ -722,6 +750,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     internal void HandleMouseMove()
     {
         _currentScreen = CursorScreen();
+
+        if (_mode == SelectorMode.Measure)
+        {
+            HandleMeasureMouseMove();
+            return;
+        }
 
         if (_dragging)
         {
@@ -831,6 +865,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// about HOW MUCH; this makes the second half a one-notch correction.</summary>
     internal void HandleMouseWheel(WF.MouseEventArgs e)
     {
+        if (_mode == SelectorMode.Measure)
+        {
+            // The ladder gesture is rebound to the tolerance knob here, and only here.
+            HandleMeasureWheel(e);
+            return;
+        }
+
         if (!_paneHover || _pendingScreen is not null || _dragging || _hoverLadder.Count == 0)
             return;
 
@@ -850,6 +891,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
 
         _currentScreen = CursorScreen();
+
+        if (_mode == SelectorMode.Measure)
+        {
+            _draggingGuide = null;
+            return;
+        }
 
         if (_mode == SelectorMode.Window)
         {
@@ -916,6 +963,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
         SD.Size clientSize = monitorBounds.Size;
         bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
+
+        if (_mode == SelectorMode.Measure)
+        {
+            PaintMeasureSurface(g, monitorBounds, cursorOnThisSurface);
+            return;
+        }
 
         // Advance the glide on the paint clock, not on a timer tick. Update() reads a
         // stopwatch, so calling it once per surface in a multi-monitor frame is harmless.
@@ -1175,7 +1228,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (snap is SD.Rectangle chosen)
         {
-            BuildLadder(point, chosen);
+            // The pixel walk goes in as one more rung. Colour delta fails on Win11 mica
+            // chrome exactly where the HWND rect is exact, and the HWND rect is useless on
+            // a photo or a canvas where the pixel walk is exact - merging them means the
+            // wheel walks both kinds of candidate in one list.
+            BuildLadder(point, chosen, PixelRungAt(point));
             SetHoverPane(chosen);
         }
     }
@@ -1186,7 +1243,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// directions. Rungs closer than the wobble tolerance are merged; stepping onto a rect
     /// eight pixels bigger is not a step a person can see.
     /// </summary>
-    private void BuildLadder(SD.Point point, SD.Rectangle resolved)
+    private void BuildLadder(SD.Point point, SD.Rectangle resolved, SD.Rectangle? pixelRung = null)
     {
         var rungs = new List<SD.Rectangle> { resolved };
         foreach (var candidate in _snapRects)
@@ -1194,6 +1251,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (candidate.Bounds.Contains(point))
                 rungs.Add(candidate.Bounds);
         }
+        if (pixelRung is SD.Rectangle pixels)
+            rungs.Add(pixels);
 
         var ladder = new List<SD.Rectangle>();
         foreach (var rung in rungs.OrderBy(r => (long)r.Width * r.Height))
@@ -1218,7 +1277,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (rect == _hoverPane)
             return;
 
-        if (_hoverPane is SD.Rectangle previous && rect is SD.Rectangle next)
+        if (_mode == SelectorMode.Measure)
+        {
+            // Functional data never animates: an easing measurement reads as imprecise.
+            // The glide is untouched for Area and Window, where it is exactly right.
+            _hoverTween.Stop();
+            InvalidateAllSurfaces();
+        }
+        else if (_hoverPane is SD.Rectangle previous && rect is SD.Rectangle next)
         {
             _hoverTween.Retarget(previous, next);
             InvalidateHoverRegion(previous, next);
@@ -1343,6 +1409,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         DialogResult = result;
         StopFollowMotion();
+        StopHintEntrance();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -1407,6 +1474,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal WF.Cursor CursorForCurrent()
     {
+        if (_mode == SelectorMode.Measure)
+            return MeasureCursor();
+
         if (_mode == SelectorMode.Window)
             return WF.Cursors.Hand;
 
