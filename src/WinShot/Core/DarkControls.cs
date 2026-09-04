@@ -847,3 +847,89 @@ public sealed class DarkSegmented : WF.Control
         g.FillPath(brush, path);
     }
 }
+
+/// <summary>
+/// Owner-drawn dark checkbox: an accent-filled rounded box with a white check, replacing the
+/// stock WinForms flat glyph, which ignores the palette and renders a light box on a dark
+/// surface. Lived inside the recording options dialog until the OCR toast needed one too.
+/// </summary>
+public sealed class DarkCheckBox : WF.CheckBox
+{
+    private bool _hot;
+
+    public DarkCheckBox()
+    {
+        SetStyle(
+            WF.ControlStyles.UserPaint |
+            WF.ControlStyles.AllPaintingInWmPaint |
+            WF.ControlStyles.OptimizedDoubleBuffer |
+            WF.ControlStyles.ResizeRedraw,
+            true);
+        AutoSize = true;
+        BackColor = DarkControlPalette.Card;
+        Cursor = WF.Cursors.Hand;
+        ForeColor = DarkControlPalette.Text;
+        CheckedChanged += (_, _) => Invalidate();
+        GotFocus += (_, _) => Invalidate();
+        LostFocus += (_, _) => Invalidate();
+        MouseEnter += (_, _) => { _hot = true; Invalidate(); };
+        MouseLeave += (_, _) => { _hot = false; Invalidate(); };
+    }
+
+    /// <summary>Manual DPI scale, like every other hand-laid-out surface in the app.</summary>
+    public double Scale { get; init; } = 1.0;
+
+    private int S(int logical) => (int)Math.Round(logical * Scale);
+
+    public override SD.Size GetPreferredSize(SD.Size proposedSize)
+    {
+        SD.Size text = WF.TextRenderer.MeasureText(Text, Font);
+        int box = S(16);
+        return new SD.Size(box + S(8) + text.Width + 2, Math.Max(box + 2, text.Height + 2));
+    }
+
+    protected override void OnPaint(WF.PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        int box = S(16);
+        var rect = new SD.Rectangle(0, (Height - box) / 2, box, box);
+        int cornerRadius = S(4);
+
+        if (Checked)
+        {
+            using var fill = new SD.SolidBrush(ThemePalette.Accent);
+            using (var path = GdiPaths.RoundedRect(rect, cornerRadius))
+                g.FillPath(fill, path);
+            using var pen = new SD.Pen(SD.Color.White, Math.Max(2f, box / 8f))
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round,
+            };
+            g.DrawLines(pen, new[]
+            {
+                new SD.PointF(rect.X + box * 0.26f, rect.Y + box * 0.54f),
+                new SD.PointF(rect.X + box * 0.43f, rect.Y + box * 0.72f),
+                new SD.PointF(rect.X + box * 0.75f, rect.Y + box * 0.31f),
+            });
+        }
+        else
+        {
+            using var fill = new SD.SolidBrush(DarkControlPalette.Field);
+            using var pen = new SD.Pen(SD.Color.FromArgb(_hot ? 120 : 64, 255, 255, 255), 1f);
+            using var path = GdiPaths.RoundedRect(rect, cornerRadius);
+            g.FillPath(fill, path);
+            g.DrawPath(pen, path);
+        }
+
+        int textX = box + S(8);
+        var textRect = new SD.Rectangle(textX, 0, Math.Max(1, Width - textX), Height);
+        WF.TextRenderer.DrawText(g, Text, Font, textRect, ForeColor,
+            WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Left | WF.TextFormatFlags.SingleLine);
+        if (Focused)
+            WF.ControlPaint.DrawFocusRectangle(g, textRect);
+    }
+}

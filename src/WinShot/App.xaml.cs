@@ -1303,7 +1303,8 @@ public partial class App : Application
                 // A decoded link is a decision, not a confirmation: the card's status flash
                 // has nowhere to put an Open button, so the toast comes up over the card.
                 ShowOcrToast(payload.BalloonTitle, payload.Preview,
-                    anchor ?? CardAnchor(card), open);
+                    anchor ?? CardAnchor(card), open,
+                    extras: open is not null ? LinkExtras() : LineBreakExtras(result));
             }
         }
         catch (COMException ex)
@@ -1311,6 +1312,48 @@ public partial class App : Application
             Log.Info($"OCR clipboard copy skipped: {ex.Message}");
             ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.", ToastSeverity.Error);
         }
+    }
+
+    /// <summary>
+    /// Opening a link is a decision, so the toast waits for one: an explicit Don't open
+    /// beside Open link, and a checkbox that stops the offer for good. It used to be a 4.5 s
+    /// window with no way to decline and no way to say "stop asking".
+    /// </summary>
+    private ToastExtras LinkExtras() => new()
+    {
+        Sticky = true,
+        SecondaryText = "Don't open",
+        CheckboxText = "Don't detect links",
+        CheckboxChanged = dontDetect =>
+        {
+            _settings.Current.OcrDetectLinks = !dontDetect;
+            _settings.Save();
+        },
+    };
+
+    /// <summary>
+    /// Line joining is a preference you can only judge after seeing the text, so the toast
+    /// offers the other answer in place and re-copies. The formatter is pure and takes the
+    /// flag as an argument, so this is the same call with it flipped.
+    /// </summary>
+    private ToastExtras? LineBreakExtras(OcrCaptureResult result)
+    {
+        // Nothing to join: one line either way, and a button that does nothing is worse
+        // than no button.
+        if (result.Lines.Count < 2) return null;
+
+        bool joined = _settings.Current.OcrJoinLines;
+        return new ToastExtras
+        {
+            ToggleText = joined ? "Add breaks" : "Cut breaks",
+            Toggle = () =>
+            {
+                joined = !joined;
+                string text = OcrTextFormatter.Format(result.Lines, joined);
+                _ = CaptureService.SetTextToClipboardAsync(text);
+                return joined ? "Add breaks" : "Cut breaks";
+            },
+        };
     }
 
     /// <summary>The centre of the quick-actions card, so a toast raised from the card path
@@ -1335,8 +1378,9 @@ public partial class App : Application
     /// reads as "it worked".</summary>
     private void ShowOcrToast(
         string title, string preview, SD.Point? anchor, Action? onOpen,
-        ToastSeverity severity = ToastSeverity.Success, bool holdLong = false) =>
-        ShowToast(title, preview, anchor, onOpen, severity, holdLong);
+        ToastSeverity severity = ToastSeverity.Success, bool holdLong = false,
+        ToastExtras? extras = null) =>
+        ShowToast(title, preview, anchor, onOpen, severity, holdLong, extras);
 
     private void ScrollingFlow(ScrollDirection? direction = null, bool reverse = false) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
@@ -1567,11 +1611,11 @@ public partial class App : Application
 
     private void ShowToast(
         string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity,
-        bool holdLong = false)
+        bool holdLong = false, ToastExtras? extras = null)
     {
         try
         {
-            var shown = new ToastWindow(title, message, anchor, onOpen, severity, holdLong);
+            var shown = new ToastWindow(title, message, anchor, onOpen, severity, holdLong, extras);
             try
             {
                 // Showing is what replaces whatever toast was already up.

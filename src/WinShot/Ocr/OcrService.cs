@@ -15,7 +15,17 @@ namespace WinShot.Ocr;
 
 /// <summary>Combined result of one recognition pass: OCR text plus any decoded
 /// QR/DataMatrix/Aztec payloads found in the image.</summary>
-public sealed record OcrCaptureResult(string Text, List<string> QrCodes);
+/// <summary>
+/// One OCR run. <paramref name="Lines"/> is the recognizer's raw output before
+/// <see cref="OcrTextFormatter"/> joined or broke it, kept so the result toast can offer the
+/// other answer after the user has seen the text -- joining is a preference you can only
+/// judge once you are looking at it.
+/// </summary>
+public sealed record OcrCaptureResult(string Text, List<string> QrCodes, List<string> Lines)
+{
+    public OcrCaptureResult(string text, List<string> qrCodes)
+        : this(text, qrCodes, new List<string>()) { }
+}
 
 /// <summary>
 /// Extracts text from a bitmap using the built-in Windows OCR engine
@@ -170,6 +180,7 @@ public static class OcrService
             // before recognition; an empty read retries at double the scale
             // until the engine's dimension cap is hit.
             string text = string.Empty;
+            var lines = new List<string>();
             double scale = InitialOcrScale(bmp.Width, bmp.Height);
             while (true)
             {
@@ -186,7 +197,8 @@ public static class OcrService
                     step.Restart();
                     OcrResult result = await engine.RecognizeAsync(softwareBitmap);
                     recognizeMs += step.ElapsedMilliseconds;
-                    text = OcrTextFormatter.Format(result.Lines.Select(l => l.Text), joinLines);
+                    lines = result.Lines.Select(l => l.Text).ToList();
+                    text = OcrTextFormatter.Format(lines, joinLines);
                 }
 
                 if (!string.IsNullOrWhiteSpace(text))
@@ -209,7 +221,7 @@ public static class OcrService
             }
 
             LogOcrBreakdown(snapshot, snapshotMs, softwareBitmapMs, recognizeMs, barcodeMs, deepBarcodeMs, total.ElapsedMilliseconds);
-            return new OcrCaptureResult(text, qrCodes);
+            return new OcrCaptureResult(text, qrCodes, lines);
         }
     }
 

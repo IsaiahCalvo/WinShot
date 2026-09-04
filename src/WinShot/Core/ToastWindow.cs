@@ -13,6 +13,41 @@ public enum ToastSeverity
 }
 
 /// <summary>
+/// The extra affordances a toast can carry under its body, for the results that are a
+/// decision rather than a confirmation. All optional; a plain confirmation passes none.
+/// </summary>
+public sealed class ToastExtras
+{
+    /// <summary>A button that does something and leaves the toast up, relabelling itself
+    /// with whatever the action returns -- "Cut breaks" becoming "Add breaks".</summary>
+    public string? ToggleText { get; init; }
+
+    /// <summary>Runs the toggle and returns the button's new label.</summary>
+    public Func<string>? Toggle { get; init; }
+
+    /// <summary>A secondary button that declines and closes -- the explicit "no" that makes
+    /// the primary button a choice instead of the only thing on offer.</summary>
+    public string? SecondaryText { get; init; }
+
+    public Action? Secondary { get; init; }
+
+    /// <summary>A checkbox under the buttons: the user's standing answer to whatever the
+    /// toast keeps offering. Ticking it is the way to stop being asked.</summary>
+    public string? CheckboxText { get; init; }
+
+    public Action<bool>? CheckboxChanged { get; init; }
+
+    /// <summary>Never self-dismiss. For a toast the user has to answer: a 4.5 s window is
+    /// not an offer, it is a reflex test.</summary>
+    public bool Sticky { get; init; }
+
+    public bool HasAny =>
+        (ToggleText is not null && Toggle is not null) ||
+        SecondaryText is not null ||
+        CheckboxText is not null;
+}
+
+/// <summary>
 /// The app's one in-place confirmation HUD: a severity glyph, a title, a body line and an
 /// optional action, shown near whatever it is confirming — CleanShot-style instant feedback
 /// instead of the slow, Focus-Assist-throttled Windows tray balloon. Auto-dismisses. Fades
@@ -74,6 +109,10 @@ public sealed class ToastWindow : WF.Form
     private readonly WF.Label _glyphLabel;
     private readonly WF.Label _previewLabel;
     private readonly DarkButton? _openButton;
+    private readonly DarkButton? _secondaryButton;
+    private readonly DarkButton? _toggleButton;
+    private readonly DarkCheckBox? _suppressCheck;
+    private readonly bool _sticky;
 
     /// <summary>
     /// The body label's real width in device pixels. Row counting has to measure against
@@ -100,9 +139,11 @@ public sealed class ToastWindow : WF.Form
         SD.Point? anchorScreen,
         Action? onOpen,
         ToastSeverity severity = ToastSeverity.Info,
-        bool holdLong = false)
+        bool holdLong = false,
+        ToastExtras? extras = null)
     {
         _anchor = anchorScreen;
+        _sticky = extras?.Sticky == true;
 
         // One screen read for the life of the toast. With no anchor the fallback is the
         // pointer's monitor, and the pointer can cross to a different-DPI display between
@@ -187,6 +228,57 @@ public sealed class ToastWindow : WF.Form
             Controls.Add(_openButton);
         }
 
+        if (extras?.SecondaryText is string secondaryText)
+        {
+            _secondaryButton = ActionButton(secondaryText, ThemePalette.SurfaceAlt);
+            _secondaryButton.Click += (_, _) =>
+            {
+                try { extras.Secondary?.Invoke(); }
+                catch (Exception ex) { Log.Error("Toast secondary action failed", ex); }
+                Close();
+            };
+            Controls.Add(_secondaryButton);
+        }
+
+        if (extras?.ToggleText is string toggleText && extras.Toggle is Func<string> toggle)
+        {
+            _toggleButton = ActionButton(toggleText, ThemePalette.SurfaceAlt);
+            _toggleButton.Click += (_, _) =>
+            {
+                // Stays open on purpose: the point of the toggle is to look at the result
+                // and change your mind again.
+                try { _toggleButton.Text = toggle(); }
+                catch (Exception ex)
+                {
+                    Log.Error("Toast toggle failed", ex);
+                    ShowActionFailure(FriendlyError.For(ex));
+                    return;
+                }
+                HoldOpen();
+                Announce();
+            };
+            Controls.Add(_toggleButton);
+        }
+
+        if (extras?.CheckboxText is string checkboxText)
+        {
+            _suppressCheck = new DarkCheckBox
+            {
+                Scale = _scale,
+                BackColor = Back,
+                Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
+                ForeColor = ThemePalette.TextSecondary,
+                Text = checkboxText,
+                AccessibleName = checkboxText,
+            };
+            _suppressCheck.CheckedChanged += (_, _) =>
+            {
+                try { extras.CheckboxChanged?.Invoke(_suppressCheck.Checked); }
+                catch (Exception ex) { Log.Error("Toast preference change failed", ex); }
+            };
+            Controls.Add(_suppressCheck);
+        }
+
         // FormBorderStyle.None with no Text leaves an unnamed window: Narrator announced the
         // tray balloon this replaced, so the toast has to name itself the same way.
         AccessibleRole = WF.AccessibleRole.Alert;
@@ -199,7 +291,7 @@ public sealed class ToastWindow : WF.Form
         _dismiss.Interval = _openButton is not null || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
         _dismiss.Tick += (_, _) => Close();
         MouseEnter += (_, _) => HoldOpen();
-        MouseLeave += (_, _) => _dismiss.Start();
+        MouseLeave += (_, _) => RestartDismiss();
 
         // The toast is ShowWithoutActivation and never takes focus, so the Escape key never
         // reaches it. A click on the card is the only dismissal a user can actually perform,
@@ -208,7 +300,7 @@ public sealed class ToastWindow : WF.Form
         foreach (WF.Control c in Controls)
         {
             c.MouseEnter += (_, _) => HoldOpen();
-            c.MouseLeave += (_, _) => _dismiss.Start();
+            c.MouseLeave += (_, _) => RestartDismiss();
             if (c is WF.Label) c.Click += (_, _) => Close();
         }
     }
@@ -231,12 +323,28 @@ public sealed class ToastWindow : WF.Form
         AccessibleDescription = _body;
 
         int bodyBottom = BodyTopDip + (BodyLineH * lines);
-        if (_openButton is not null)
-            _openButton.Location = new SD.Point(S(CardWidthDip - 14 - 96), S(bodyBottom + 8));
 
-        ClientSize = new SD.Size(
-            S(CardWidthDip),
-            S(_openButton is not null ? bodyBottom + 8 + 26 + 10 : bodyBottom + 10));
+        // The button row fills from the right: primary last, then whatever declines or
+        // toggles beside it, so the affirmative action is always in the same place.
+        int rowRight = CardWidthDip - 14;
+        bool hasRow = false;
+        foreach (DarkButton? button in new[] { _openButton, _secondaryButton, _toggleButton })
+        {
+            if (button is null) continue;
+            hasRow = true;
+            rowRight -= 96;
+            button.Location = new SD.Point(S(rowRight), S(bodyBottom + 8));
+            rowRight -= 8;
+        }
+
+        int contentBottom = hasRow ? bodyBottom + 8 + 26 : bodyBottom;
+        if (_suppressCheck is not null)
+        {
+            _suppressCheck.Location = new SD.Point(S(TextXDip), S(contentBottom + 10));
+            contentBottom += 10 + 20;
+        }
+
+        ClientSize = new SD.Size(S(CardWidthDip), S(contentBottom + 10));
     }
 
     /// <summary>
@@ -321,7 +429,10 @@ public sealed class ToastWindow : WF.Form
         _restLocation = Location;
         _motion?.Dispose();
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
-        _dismiss.Start();
+        // A sticky toast waits for an answer instead of counting down behind one. It is
+        // still dismissible: the secondary button, and a click anywhere on the card.
+        if (!_sticky)
+            _dismiss.Start();
         Announce();
     }
 
@@ -365,7 +476,7 @@ public sealed class ToastWindow : WF.Form
             _restLocation = Location;
         }
         _dismiss.Interval = LongDwellMs;
-        _dismiss.Start();
+        RestartDismiss();
         Announce();
     }
 
@@ -386,6 +497,13 @@ public sealed class ToastWindow : WF.Form
         // which flashed on exactly the gesture this method exists to serve.
         double from = _entranceAmount;
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(from + ((1d - from) * p)));
+    }
+
+    /// <summary>Resumes the countdown after a hover -- unless the toast is waiting for an
+    /// answer, in which case moving the pointer away is not an answer.</summary>
+    private void RestartDismiss()
+    {
+        if (!_sticky) _dismiss.Start();
     }
 
     /// <summary>0 = fully out (transparent, dropped by the rise distance), 1 = at rest.</summary>
@@ -551,6 +669,15 @@ public sealed class ToastWindow : WF.Form
     }
 
     private void UpdateRegion() => PopupChrome.ApplyRegion(this, S(14));
+
+    private DarkButton ActionButton(string text, SD.Color fill) => new()
+    {
+        Scale = _scale,
+        BackColor = Back,
+        FillColor = fill,
+        Size = new SD.Size(S(96), S(26)),
+        Text = text,
+    };
 
     private WF.Label Label(string text, int x, int y, int width, float size, SD.Color color, bool bold = false, int height = 22) =>
         new()
