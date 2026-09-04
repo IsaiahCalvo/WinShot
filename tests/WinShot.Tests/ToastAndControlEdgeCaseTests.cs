@@ -182,6 +182,34 @@ public class ToastAndControlEdgeCaseTests
         return (double)state.GetType().GetProperty("Value")!.GetValue(state)!;
     }
 
+    /// <summary>
+    /// Handing the control a shorter list mid-life used to leave the selection pointing past
+    /// the end of it, the pill gliding toward a cell that no longer exists, and nothing
+    /// repainted. The setter clamps and abandons the glide instead.
+    /// </summary>
+    [Fact]
+    public void SegmentedShrunkMidGlideClampsItsSelectionAndReleasesTheClock()
+    {
+        using var a = new Anim(true);
+        Assert.Equal(0, Motion.Holders);
+
+        using var form = new WF.Form { StartPosition = WF.FormStartPosition.Manual, Location = new SD.Point(-4000, -4000) };
+        var seg = new DarkSegmented { Size = new SD.Size(180, 26), Options = new[] { "A", "B", "C" } };
+        form.Controls.Add(seg);
+        form.Show();
+
+        seg.SelectedIndex = 2;
+        PumpFor(20);                          // mid-glide
+        seg.Options = new[] { "A" };
+        Assert.Equal(0, seg.SelectedIndex);
+
+        using var bmp = new SD.Bitmap(180, 26);
+        seg.DrawToBitmap(bmp, new SD.Rectangle(0, 0, 180, 26));
+        form.Close();
+        PumpFor(300);
+        Assert.Equal(0, Motion.Holders);
+    }
+
     // ---- segmented control edges ------------------------------------------------------
     [Fact]
     public void SegmentedWithNoOptionsAndRapidSelectionChangesSurvives()
@@ -300,11 +328,18 @@ public class ToastAndControlEdgeCaseTests
     [Fact]
     public void ScrollChromeIsBornOnTheRegionsMonitor()
     {
-        SD.Rectangle target = WF.Screen.AllScreens
+        // Pick the topmost monitor (Isaiah's stack puts two above the laptop, so this is the
+        // negative-Y one) — but take the expectation from Screen.FromRectangle, the same call
+        // the chrome's constructor makes. Screen.AllScreens caches its bounds on first use
+        // while FromRectangle re-reads them, so when something earlier in the suite changes
+        // the process's effective DPI awareness the two answer in different coordinate spaces
+        // and the test failed on its own arithmetic rather than on the chrome's placement.
+        SD.Rectangle picked = WF.Screen.AllScreens
             .Select(s => s.Bounds)
             .OrderBy(b => b.Y)
             .First();
-        var region = new SD.Rectangle(target.X + 40, target.Y + 40, 300, 300);
+        var region = new SD.Rectangle(picked.X + 40, picked.Y + 40, 300, 300);
+        SD.Rectangle target = WF.Screen.FromRectangle(region).Bounds;
 
         using var bar = new WinShot.Scrolling.ScrollControlsBar(region);
         Assert.True(target.Contains(bar.Location), $"bar born at {bar.Location}, not on {target}");
