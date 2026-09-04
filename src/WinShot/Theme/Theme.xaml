@@ -919,11 +919,15 @@
                     <Grid>
                         <!-- Same layered cross-fade as ToolButton: the selection used to
                              hard-cut to solid accent, which is the one snap left on the
-                             primary selection signal of the size menu. -->
-                        <Border x:Name="Check" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
-                                Background="{StaticResource AccentBrush}"/>
+                             primary selection signal of the size menu.
+                             Check paints LAST, unlike ToolButton: its fill is the accent, and
+                             a hover wash on top of it dropped the white label from 3.65:1 to
+                             3.13:1. ToolButton stacks the other way round because its chip is
+                             dark, where the wash only adds contrast. -->
                         <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
                                 Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Check" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource AccentBrush}"/>
                         <ContentPresenter VerticalAlignment="Center" Margin="8,0"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Grid>

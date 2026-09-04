@@ -110,6 +110,16 @@ public static class ThemeResources
                 case ControlTemplate template:
                     ZeroTriggers(template.Triggers, zeroed);
                     break;
+                // MotionQuick/Swap/Enter. The theme's own storyboards resolved these when the
+                // dictionary was parsed, so zeroing the key does nothing for them - that is
+                // what the two passes above are for. It is the storyboards declared inline in
+                // a WINDOW's XAML that this reaches: HistoryWindow's overlay-action fades are
+                // not dictionary keys, so nothing above walks them, and they kept animating
+                // with the setting off. A window is parsed long after OnStartup runs this, so
+                // its {StaticResource MotionQuick} picks up the zeroed value.
+                case Duration:
+                    theme[key] = new Duration(TimeSpan.Zero);
+                    break;
             }
         }
     }

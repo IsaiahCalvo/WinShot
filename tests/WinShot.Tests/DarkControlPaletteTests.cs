@@ -419,6 +419,84 @@ public class DarkControlPaletteTests
         }
     }
 
+    /// <summary>
+    /// The third place animation-off has to reach. The two passes above only walk the
+    /// dictionary's own keys, so a storyboard declared inline in a WINDOW's XAML —
+    /// HistoryWindow's overlay-action fades are the ones that exist — is invisible to them
+    /// and kept animating with the setting off. Zeroing the shared Duration tokens covers
+    /// them, because a window is parsed long after App.OnStartup runs the preference, so its
+    /// {StaticResource MotionQuick} resolves against the zeroed value. That only holds while
+    /// window XAML spends the tokens instead of writing its own literal.
+    /// </summary>
+    [Fact]
+    public void Theme_MotionDurationTokensAreInstantWhenTheUserTurnedAnimationOff()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            OnTheme(theme =>
+            {
+                ThemeResources.ApplyAnimationPreference(theme);
+
+                foreach (string token in new[] { "MotionQuick", "MotionSwap", "MotionEnter" })
+                    Assert.True(
+                        (Duration)theme[token] == new Duration(TimeSpan.Zero),
+                        $"{token} still reads {theme[token]} with animations turned off, so any " +
+                        "window-local storyboard spending it goes on animating");
+            });
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+        }
+    }
+
+    /// <summary>
+    /// Layer order is per-template, not a house rule, and the two directions look identical
+    /// in the XAML. ToolButton's chip is dark (#3A3A40), so the hover wash belongs on top —
+    /// it only adds contrast. SizePresetRow's chip is the accent, and a 12 % white wash over
+    /// it drops the white label from 3.65:1 to 3.13:1, so there the accent has to paint last.
+    /// Pinned because "make these consistent" is the obvious wrong tidy-up.
+    /// </summary>
+    [Theory]
+    [InlineData("ToolButton", "Chip", "Hover")]
+    [InlineData("SizePresetRow", "Hover", "Check")]
+    public void Theme_HoverAndCheckStackInTheOrderTheirGroundNeeds(
+        string styleKey, string first, string second)
+    {
+        OnTheme(theme =>
+        {
+            string[] names = LayerNames(theme, styleKey);
+            int firstAt = Array.IndexOf(names, first);
+            int secondAt = Array.IndexOf(names, second);
+
+            Assert.True(firstAt >= 0, $"{styleKey} has no '{first}' layer; found {string.Join(", ", names)}");
+            Assert.True(secondAt >= 0, $"{styleKey} has no '{second}' layer; found {string.Join(", ", names)}");
+            Assert.True(
+                firstAt < secondAt,
+                $"{styleKey} paints '{second}' under '{first}'; the later one wins the pixels");
+        });
+    }
+
+    /// <summary>The named children of a style's template root, in paint order.</summary>
+    private static string[] LayerNames(ResourceDictionary theme, string styleKey)
+    {
+        var template = (ControlTemplate)((Style)theme[styleKey]).Setters.OfType<Setter>()
+            .Single(x => x.Property == Control.TemplateProperty).Value;
+
+        // Not template.VisualTree: that is only populated for templates built in code. One
+        // parsed from XAML keeps its content as a deferred stream and hands it over only when
+        // it is instantiated, so the order has to be read off a real instance.
+        var root = template.LoadContent() as Panel
+            ?? throw new Xunit.Sdk.XunitException($"{styleKey}'s template root is not a Panel.");
+
+        return root.Children.OfType<FrameworkElement>()
+            .Where(x => !string.IsNullOrEmpty(x.Name))
+            .Select(x => x.Name)
+            .ToArray();
+    }
+
     private static void AssertInstant(Storyboard board, string where)
     {
         foreach (Timeline child in board.Children)

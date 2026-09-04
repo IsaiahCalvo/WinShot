@@ -791,7 +791,11 @@ public sealed class DarkSegmented : WF.Control
 
     private void DrawWash(SD.Graphics g, int index, double amount, int radius)
     {
-        if (index < 0 || index == _selectedIndex || amount <= 0.001d)
+        // The selected cell needs no wash - the pill is already sitting on it. While the pill
+        // is still gliding it is NOT sitting on it yet, and dropping the wash on the frame of
+        // the click left bare track under the pointer for the whole 200 ms: the press read as
+        // "nothing happened" until the pill arrived.
+        if (index < 0 || (index == _selectedIndex && !_gliding) || amount <= 0.001d)
             return;
         SD.Rectangle bounds = PillFor(index);
         if (bounds.IsEmpty)
