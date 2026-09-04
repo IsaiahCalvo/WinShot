@@ -1,5 +1,4 @@
-﻿using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -10,12 +9,19 @@ public sealed class FastRecordingCountdownWindow : WF.Form
 {
     private static readonly SD.Color Back = ThemePalette.ToolbarBg;
     private static readonly SD.Color Ring = ThemePalette.Accent;
+    private static readonly SD.Color RingTrack = ThemePalette.BorderStrong;
     private static readonly SD.Color TextColor = SD.Color.White;
     // Light enough to pass 4.5:1 on the #2B2B2B card (136 gray failed contrast).
     private static readonly SD.Color MutedText = SD.Color.FromArgb(170, 170, 170);
 
+    // The delay itself is a real wait, so it stays on a plain one-second timer and keeps
+    // working with animation turned off system-wide. Only the ring's sweep and the digit's
+    // pop ride Motion, one tween per second, so with animation off they step instead.
     private readonly WF.Timer _timer = new() { Interval = 1000 };
     private readonly SD.Rectangle _regionPx;
+    private readonly int _totalSeconds;
+    private IDisposable? _second;
+    private double _secondFraction;
     private int _remaining;
     private bool _done;
 
@@ -28,6 +34,7 @@ public sealed class FastRecordingCountdownWindow : WF.Form
     public FastRecordingCountdownWindow(int seconds, SD.Rectangle regionScreenPx)
     {
         _remaining = Math.Max(1, seconds);
+        _totalSeconds = _remaining;
         _regionPx = regionScreenPx;
         _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
         // Create on the target monitor so the OnShown move never fires a WM_DPICHANGED
@@ -72,6 +79,7 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         Activate();
         Focus();
         _timer.Start();
+        RunSecond();
     }
 
     protected override void OnResize(EventArgs e)
@@ -82,6 +90,8 @@ public sealed class FastRecordingCountdownWindow : WF.Form
 
     protected override void OnClosed(EventArgs e)
     {
+        _second?.Dispose();
+        _second = null;
         _timer.Stop();
         _timer.Dispose();
         base.OnClosed(e);
@@ -90,38 +100,58 @@ public sealed class FastRecordingCountdownWindow : WF.Form
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.Clear(Back);
-
-        using var ring = new SD.Pen(Ring, Math.Max(3, S(3)));
-        e.Graphics.DrawEllipse(ring, 2, 2, Width - 5, Height - 5);
 
         // Real bold face, not faux-bold synthesized over Semibold.
         using var countFont = new SD.Font("Segoe UI", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        CountdownRing.Draw(
+            e.Graphics,
+            ClientSize,
+            Math.Max(3, S(3)),
+            CountdownRing.Progress(_totalSeconds, _remaining, _secondFraction),
+            _remaining.ToString(),
+            countFont,
+            TextColor,
+            RingTrack,
+            Ring,
+            new SD.Rectangle(0, S(10), Width, S(120)),
+            CountdownRing.DigitScale(_secondFraction));
+
         // The badge is a 170px circle, so the ellipse leaves this row about 130px of width.
         // "Click or Esc to cancel" needs ~165px at the title step and ~150px at the 11pt it
         // shipped at — both clipped flat at each end. The body step is what actually fits,
         // and EndEllipsis makes any future string say so instead of losing its last word.
         using var hintFont = ThemePalette.UiFont(ThemePalette.TextBodyPt);
-        var countText = _remaining.ToString();
-        var flags = WF.TextFormatFlags.HorizontalCenter |
-                    WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine |
-                    WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(
-            e.Graphics,
-            countText,
-            countFont,
-            new SD.Rectangle(0, S(10), Width, S(120)),
-            TextColor,
-            flags);
         WF.TextRenderer.DrawText(
             e.Graphics,
             "Click or Esc to cancel",
             hintFont,
             new SD.Rectangle(0, Height - S(42), Width, S(24)),
             MutedText,
-            flags | WF.TextFormatFlags.EndEllipsis);
+            WF.TextFormatFlags.HorizontalCenter |
+            WF.TextFormatFlags.VerticalCenter |
+            WF.TextFormatFlags.SingleLine |
+            WF.TextFormatFlags.NoPadding |
+            WF.TextFormatFlags.EndEllipsis);
+    }
+
+    /// <summary>One tween per second drives the ring's sweep and the digit's landing. It is
+    /// restarted by the tick, so it can never drift away from the clock that actually owns
+    /// the delay.</summary>
+    private void RunSecond()
+    {
+        _second?.Dispose();
+        _secondFraction = 0;
+        _second = Motion.Run(
+            1000,
+            Motion.Linear,
+            amount =>
+            {
+                _secondFraction = amount;
+                if (!IsDisposed)
+                    Invalidate();
+            },
+            () => _second = null);
     }
 
     private void OnTick(object? sender, EventArgs e)
@@ -130,6 +160,8 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         if (_remaining <= 0)
         {
             _timer.Stop();
+            _second?.Dispose();
+            _second = null;
             if (!_done)
             {
                 _done = true;
@@ -138,6 +170,7 @@ public sealed class FastRecordingCountdownWindow : WF.Form
             return;
         }
 
+        RunSecond();
         Invalidate();
     }
 
@@ -148,6 +181,8 @@ public sealed class FastRecordingCountdownWindow : WF.Form
 
         _done = true;
         _timer.Stop();
+        _second?.Dispose();
+        _second = null;
         DialogResult = WF.DialogResult.Cancel;
     }
 

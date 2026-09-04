@@ -61,6 +61,13 @@ internal static class Motion
     /// </summary>
     public static IDisposable Acquire() => new Hold();
 
+    /// <summary>
+    /// No easing. For motion whose position IS the value it reports — a countdown ring
+    /// depleting, a progress arc — where an ease would make the readout lie about the time
+    /// left.
+    /// </summary>
+    public static double Linear(double progress) => Math.Clamp(progress, 0d, 1d);
+
     /// <summary>Standard ease for motion that starts and stops in place.</summary>
     public static double EaseInOutSine(double progress)
     {
