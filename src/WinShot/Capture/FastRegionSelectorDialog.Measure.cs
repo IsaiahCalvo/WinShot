@@ -208,7 +208,7 @@ public sealed partial class FastRegionSelectorDialog
         // The crosshair, the pill and the contrast readout all move with the cursor, and the
         // run itself can jump anywhere: repaint the union of where it was and where it is,
         // plus the follow bands, rather than the whole (possibly 4K) monitor.
-        InvalidateFollowRegion(_lastFollowScreen, _currentScreen);
+        InvalidateMeasureFollow(_lastFollowScreen, _currentScreen);
         _lastFollowScreen = _currentScreen;
         if (before is SD.Rectangle old)
             InvalidateMeasureRegion(old);
@@ -216,14 +216,46 @@ public sealed partial class FastRegionSelectorDialog
             InvalidateMeasureRegion(now);
     }
 
-    /// <summary>The ground one measurement covers: its own rect plus room above it for the
-    /// pill and the contrast readout.</summary>
+    /// <summary>Room for the tallest pill this mode draws: three lines plus its padding,
+    /// which is what the live cross reads at anything other than 96 dpi.</summary>
+    private const int MeasurePillRoom = 88;
+
+    /// <summary>The ground one measurement covers: its own rect plus room for the pill and
+    /// the contrast readout, either of which can sit above the line OR flip below it.</summary>
     private void InvalidateMeasureRegion(SD.Rectangle screenRect)
     {
         var region = screenRect;
-        region.Inflate(8, 8);
-        region = SD.Rectangle.FromLTRB(region.Left, region.Top - 80, region.Right, region.Bottom + 8);
+        region.Inflate(8, MeasurePillRoom);
         InvalidateScreenRect(region);
+    }
+
+    /// <summary>
+    /// The follow bands, widened only when a guide pair is on screen. A pair's distance pill
+    /// rides the cursor's own row or column but sits far from it along that axis, so the
+    /// ordinary 16 px crosshair band leaves the old pill behind. Widening unconditionally
+    /// would cost 1.3 Mpx a frame at 4K for a pill that is usually not there at all.
+    /// </summary>
+    private void InvalidateMeasureFollow(SD.Point from, SD.Point to)
+    {
+        bool chasing = _measure.GuidesX.Count > 1 || _measure.GuidesY.Count > 1;
+        if (!chasing)
+        {
+            InvalidateFollowRegion(from, to);
+            return;
+        }
+
+        InvalidateWideBandAt(from);
+        if (to != from)
+            InvalidateWideBandAt(to);
+    }
+
+    private void InvalidateWideBandAt(SD.Point pt)
+    {
+        SD.Rectangle monitor = MonitorBoundsAt(pt);
+        InvalidateScreenRect(new SD.Rectangle(
+            pt.X - MeasurePillRoom, monitor.Top, MeasurePillRoom * 2, monitor.Height));
+        InvalidateScreenRect(new SD.Rectangle(
+            monitor.Left, pt.Y - MeasurePillRoom, monitor.Width, MeasurePillRoom * 2));
     }
 
     /// <summary>Returns true when the key was a measurement gesture and the ordinary
