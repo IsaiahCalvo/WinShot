@@ -63,15 +63,48 @@ public class ShapeConstraintTests
     }
 
     [Fact]
-    public void UniformResize_TopEdgePreservesAspectCentered()
+    public void UniformResize_EdgePillAveragesTheMovedAxisWithOne()
     {
+        // Survey writes ONE magnitude to both axes (useSVGInteraction.js:2167-2171). On an
+        // edge pill the untouched axis still carries scale 1, so a drag that halves the
+        // height lands at (0.5 + 1)/2 = 0.75 on BOTH axes: half the drag, not the full one.
         var original = new Rect(0, 0, 20, 10);
-        var unconstrained = new Rect(0, 5, 20, 5); // T dragged down, height 5
+        var unconstrained = new Rect(0, 5, 20, 5); // T dragged down, height 5 → sy 0.5
         var next = ShapeConstraint.UniformResize(original, handle: 4, unconstrained);
-        Assert.Equal(10, next.Width, 3);
-        Assert.Equal(5, next.Height, 3);
-        Assert.Equal(5, next.X, 3);
-        Assert.Equal(5, next.Y, 3);
+        Assert.Equal(15, next.Width, 3);
+        Assert.Equal(7.5, next.Height, 3);
+        Assert.Equal(2.5, next.X, 3);       // centred on the untouched axis
+        Assert.Equal(2.5, next.Y, 3);       // anchored on the ORIGINAL bottom edge (10 - 7.5)
+    }
+
+    [Fact]
+    public void UniformResize_CounterRuleTakesTheMovedAxisWholeWithNoAveraging()
+    {
+        // Survey's counter branch (:2174-2183) is max(|sx|,|sy|) on a corner and the moved
+        // axis alone on an edge — the Shift averaging must not leak into it.
+        var original = new Rect(0, 0, 20, 10);
+        var edge = ShapeConstraint.UniformResize(original, handle: 4, new Rect(0, 5, 20, 5), average: false);
+        Assert.Equal(10, edge.Width, 3);
+        Assert.Equal(5, edge.Height, 3);
+
+        var corner = ShapeConstraint.UniformResize(original, handle: 2, new Rect(0, 0, 40, 10), average: false);
+        Assert.Equal(40, corner.Width, 3);   // max(2, 1) = 2, not the 1.5 average
+        Assert.Equal(20, corner.Height, 3);
+    }
+
+    [Fact]
+    public void UniformResize_MirrorsWhenTheDragCrossedTheAnchor()
+    {
+        // Survey keeps each axis's sign through the Shift lock (:2167-2171), so a corner
+        // dragged past its anchor stays on the far side instead of bouncing back.
+        var original = new Rect(0, 0, 10, 20);
+        // TL handle, anchor BR = (10, 20). NewBoundsForHandle normalises a drag past the
+        // anchor into a rect that STARTS at the anchor and grows away from it.
+        var flipped = ShapeConstraint.UniformResize(original, handle: 0, new Rect(10, 20, 20, 20));
+        Assert.Equal(10, flipped.X, 3);      // still pinned to the anchor
+        Assert.Equal(20, flipped.Y, 3);
+        Assert.Equal(15, flipped.Width, 3);  // sx 2, sy 1 → avg 1.5
+        Assert.Equal(30, flipped.Height, 3);
     }
 
     [Theory]

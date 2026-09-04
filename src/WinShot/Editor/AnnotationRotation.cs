@@ -50,7 +50,11 @@ internal static class AnnotationRotation
         return Math.Abs(a - nearest) <= threshold ? Normalize(nearest) : a;
     }
 
-    /// <summary>Hard snap for Shift-drag: always the nearest increment.</summary>
+    /// <summary>
+    /// Hard snap: always the nearest increment. Survey only ever snaps SOFTLY, so this is
+    /// reserved for the counter's bbox-edit rotation grip, whose Survey twin snaps in the
+    /// <c>mtr</c> branch before the counter special-case (useSVGInteraction.js:2357-2380).
+    /// </summary>
     public static double Quantize(double degrees) =>
         Normalize(Math.Round(Normalize(degrees) / SnapIncrementDegrees) * SnapIncrementDegrees);
 
@@ -91,13 +95,15 @@ internal static class AnnotationRotation
     /// <summary>
     /// Full drag resolution. Survey rotates to the ABSOLUTE bearing from the shape centre to
     /// the pointer with no grab offset (useSVGInteraction.js:2350-2352), so the mark's top
-    /// faces the cursor from the first pointermove. Shift = hard increment steps, otherwise
-    /// the soft snap (WinShot keeps its 15° increment rather than Survey's 45°).
+    /// faces the cursor from the first pointermove. Survey applies
+    /// <c>snapAngleToNearest45(newAngle, 3)</c> ONLY while Shift is held (:2357-2360) and
+    /// leaves an unmodified drag completely free — so a deliberate 14° tilt stays reachable.
+    /// WinShot keeps its 15° increment rather than Survey's 45°.
     /// </summary>
     public static double ResolveDrag(double pointerAngle, bool shift)
     {
         double raw = Normalize(pointerAngle);
-        return shift ? Quantize(raw) : SnapToNearest(raw);
+        return shift ? SnapToNearest(raw) : raw;
     }
 }
 

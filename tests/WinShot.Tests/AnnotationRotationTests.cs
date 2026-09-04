@@ -58,7 +58,7 @@ public class AnnotationRotationTests
     [InlineData(23, 30)]
     [InlineData(-38, -45)]
     [InlineData(100, 105)]
-    public void Quantize_AlwaysStepsForShiftDrag(double input, double expected)
+    public void Quantize_AlwaysStepsToAnIncrement(double input, double expected)
     {
         Assert.Equal(expected, AnnotationRotation.Quantize(input), 6);
     }
@@ -93,23 +93,24 @@ public class AnnotationRotationTests
     }
 
     [Fact]
-    public void ResolveDrag_SoftSnapsNearAnIncrement()
+    public void ResolveDrag_WithoutShiftIsCompletelyFree()
     {
-        double result = AnnotationRotation.ResolveDrag(pointerAngle: 44, shift: false);
-        Assert.Equal(45, result, 6);
-
-        double fine = AnnotationRotation.ResolveDrag(pointerAngle: 16, shift: false);
-        Assert.Equal(15, fine, 6);
+        // Survey only calls snapAngleToNearest45 inside `if (e.shiftKey)`
+        // (useSVGInteraction.js:2357-2360), so an unmodified drag never latches. A deliberate
+        // 14 or 44 degree tilt has to survive being one degree off an increment.
+        Assert.Equal(44, AnnotationRotation.ResolveDrag(pointerAngle: 44, shift: false), 6);
+        Assert.Equal(16, AnnotationRotation.ResolveDrag(pointerAngle: 16, shift: false), 6);
+        Assert.Equal(14, AnnotationRotation.ResolveDrag(pointerAngle: 14, shift: false), 6);
     }
 
     [Fact]
-    public void ResolveDrag_WithShiftAlwaysLandsOnAnIncrement()
+    public void ResolveDrag_WithShiftSoftSnaps()
     {
-        double result = AnnotationRotation.ResolveDrag(pointerAngle: 38, shift: true);
-        Assert.Equal(45, result, 6);
-
-        double back = AnnotationRotation.ResolveDrag(pointerAngle: 7, shift: true);
-        Assert.Equal(0, back, 6);
+        // Survey's Shift snap is SOFT: inside the 3 degree threshold it latches, outside it
+        // the angle passes through untouched (svgTransformMath.js:152-158).
+        Assert.Equal(45, AnnotationRotation.ResolveDrag(pointerAngle: 44, shift: true), 6);
+        Assert.Equal(38, AnnotationRotation.ResolveDrag(pointerAngle: 38, shift: true), 6);
+        Assert.Equal(0, AnnotationRotation.ResolveDrag(pointerAngle: 2, shift: true), 6);
     }
 
     [Theory]

@@ -55,46 +55,50 @@ internal static class ShapeConstraint
     }
 
     /// <summary>
-    /// Survey Shift+resize: corner handles average |sx|/|sy|; edge handles
-    /// preserve the original aspect, driving from the moved axis.
-    /// <paramref name="unconstrained"/> is the rect after the handle moved freely.
+    /// The coordinates <see cref="EditorWindow.NewBoundsForHandle"/> holds fixed while
+    /// <paramref name="handle"/> is dragged — Survey's <c>anchorMap</c> (useSVGInteraction.js:4118-4127).
+    /// A null component means that axis is not driven by this handle, so its anchor is the
+    /// box's own mid-line. Handles: 0=TL 1=TR 2=BR 3=BL 4=T 5=R 6=B 7=L.
     /// </summary>
-    public static Rect UniformResize(Rect original, int handle, Rect unconstrained)
+    public static (double? X, double? Y) AxisAnchors(Rect b, int handle) =>
+    (
+        handle switch { 0 or 3 or 7 => b.Right, 1 or 2 or 5 => b.Left, _ => (double?)null },
+        handle switch { 0 or 1 or 4 => b.Bottom, 2 or 3 or 6 => b.Top, _ => (double?)null }
+    );
+
+    /// <summary>The full anchor POINT for a handle: Survey's <c>anchorX/anchorY</c>.</summary>
+    public static Point AnchorPoint(Rect b, int handle)
+    {
+        var (ax, ay) = AxisAnchors(b, handle);
+        return new Point(ax ?? b.Left + b.Width / 2, ay ?? b.Top + b.Height / 2);
+    }
+
+    /// <summary>
+    /// Survey Shift+resize (useSVGInteraction.js:2167-2171): ONE magnitude is written back to
+    /// both axes. On a corner that is the average of |sx| and |sy|; on an edge pill the
+    /// untouched axis still carries scale 1, so the average is <c>(moved + 1) / 2</c> — the
+    /// shape grows at HALF the drag, not the full drag against the original aspect.
+    /// <paramref name="average"/> false is the counter rule (useSVGInteraction.js:2174-2183):
+    /// <c>max(|sx|,|sy|)</c> on a corner, the moved axis alone on an edge, no averaging.
+    /// </summary>
+    public static Rect UniformResize(Rect original, int handle, Rect unconstrained, bool average = true)
     {
         if (original.Width < 0.5 || original.Height < 0.5)
             return unconstrained;
 
-        double w = Math.Max(1, unconstrained.Width);
-        double h = Math.Max(1, unconstrained.Height);
-        bool corner = handle is >= 0 and <= 3;
-        if (corner)
+        double sx = Math.Abs(unconstrained.Width / original.Width);
+        double sy = Math.Abs(unconstrained.Height / original.Height);
+        double s;
+        if (handle is >= 0 and <= 3)
+            s = average ? (sx + sy) / 2 : Math.Max(sx, sy);
+        else if (handle is 4 or 5 or 6 or 7)
         {
-            double sx = w / original.Width;
-            double sy = h / original.Height;
-            double avg = (Math.Abs(sx) + Math.Abs(sy)) / 2;
-            w = Math.Max(1, original.Width * avg);
-            h = Math.Max(1, original.Height * avg);
-            return AnchorOpposite(original, handle, w, h);
+            double moved = handle is 4 or 6 ? sy : sx;
+            s = average ? (moved + 1) / 2 : moved;
         }
+        else return unconstrained;
 
-        double aspect = original.Width / original.Height;
-        switch (handle)
-        {
-            case 4: // T
-            case 6: // B
-                w = Math.Max(1, h * aspect);
-                return handle == 4
-                    ? new Rect(original.Left + (original.Width - w) / 2, unconstrained.Y, w, h)
-                    : new Rect(original.Left + (original.Width - w) / 2, original.Top, w, h);
-            case 5: // R
-            case 7: // L
-                h = Math.Max(1, w / aspect);
-                return handle == 5
-                    ? new Rect(original.Left, original.Top + (original.Height - h) / 2, w, h)
-                    : new Rect(unconstrained.X, original.Top + (original.Height - h) / 2, w, h);
-            default:
-                return unconstrained;
-        }
+        return Place(original, handle, original.Width * s, original.Height * s, unconstrained);
     }
 
     /// <summary>Survey rotation snap: pull to the nearest 45° when within <paramref name="thresholdDegrees"/>.</summary>
@@ -104,12 +108,21 @@ internal static class ShapeConstraint
         return Math.Abs(degrees - snapped) <= thresholdDegrees ? snapped : degrees;
     }
 
-    private static Rect AnchorOpposite(Rect original, int handle, double w, double h) => handle switch
+    /// <summary>
+    /// Puts a w×h box back on the handle's anchor, on the SIDE of it the free drag is already
+    /// on. Survey keeps the sign of each axis through the Shift lock (useSVGInteraction.js:2167-2171),
+    /// so a Shift+corner drag past the anchor still mirrors instead of bouncing back.
+    /// An axis this handle does not drive stays centred on the original box.
+    /// </summary>
+    private static Rect Place(Rect original, int handle, double w, double h, Rect unconstrained)
     {
-        0 => new Rect(original.Right - w, original.Bottom - h, w, h), // TL, anchor BR
-        1 => new Rect(original.Left, original.Bottom - h, w, h),      // TR, anchor BL
-        2 => new Rect(original.Left, original.Top, w, h),             // BR, anchor TL
-        3 => new Rect(original.Right - w, original.Top, w, h),        // BL, anchor TR
-        _ => new Rect(original.X, original.Y, w, h),
-    };
+        var (ax, ay) = AxisAnchors(original, handle);
+        double x = ax is double axv
+            ? (unconstrained.X >= axv - 1e-6 ? axv : axv - w)
+            : original.Left + (original.Width - w) / 2;
+        double y = ay is double ayv
+            ? (unconstrained.Y >= ayv - 1e-6 ? ayv : ayv - h)
+            : original.Top + (original.Height - h) / 2;
+        return new Rect(x, y, w, h);
+    }
 }

@@ -45,6 +45,13 @@ public partial class EditorWindow : Window
     /// <summary>Survey's 300 ms post-dismissal cooldown on re-entering edit mode (PDFViewer.jsx:31241).</summary>
     private long _editModeLeftAt;
 
+    /// <summary>
+    /// The selection's rotation FROZEN at pointer-down, Survey's <c>originalProps.angle</c>.
+    /// A resize drag must never read the live angle: the element is being rebuilt underneath
+    /// it, so a live read mixes coordinate frames and the mark walks away from the cursor.
+    /// </summary>
+    private double _resizeAngle;
+
     /// <summary>Handle index reserved for the rotation grip (box thumbs are 0..7).</summary>
     private const int RotateHandleIndex = 8;
 
@@ -78,7 +85,25 @@ public partial class EditorWindow : Window
         // chrome IS the box already.
         if (ReferenceEquals(_bboxEditTarget, fe))
         {
-            LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe));
+            // Survey gives a counter in bbox mode a CANONICAL nub-up frame rotated by
+            // (pointerAngle + 90) about the BUBBLE centre, so the grip sits in front of the
+            // tip instead of above an axis-aligned square (SVGAnnotationLayer.jsx:5562-5588).
+            if (meta.Type == AnnotationData.TypeStep)
+            {
+                Rect badgeBox = UnrotatedCanvasBounds(fe);
+                double r = badgeBox.Width / 3;   // the badge Grid is 3r square
+                double tipExt = r * 0.5;
+                var body = new Point(badgeBox.Left + badgeBox.Width / 2, badgeBox.Top + badgeBox.Height / 2);
+                LayoutBoxHandles(
+                    new Rect(body.X - r, body.Y - r - tipExt, 2 * r, 2 * r + tipExt),
+                    AnnotationRotation.Normalize(
+                        (meta.PointerAngle ?? CounterGeometry.DefaultPointerAngle) + 90),
+                    padding: HandlePadding,
+                    rotationCentre: body);
+                return;
+            }
+            // Survey's bbox-edit overlay is never border-flush, whatever the underlying type.
+            LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe), HandlePadding);
             return;
         }
 
@@ -93,13 +118,18 @@ public partial class EditorWindow : Window
                 LayoutCalloutHandles(meta);
                 HideRotateThumb(); // Survey callouts have no rotation handle
                 break;
+            // Survey isBorderFlush (SVGAnnotationLayer.jsx:5469-5470, :5659-5660): rect and
+            // text put their handles ON the shape's own stroke (padding 0); everything else
+            // pushes them 2 units out so they sit centred on the dashed frame.
             case AnnotationData.TypeRectangle:
-            case AnnotationData.TypeEllipse:
             case AnnotationData.TypeText:
+                LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe), 0);
+                break;
+            case AnnotationData.TypeEllipse:
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
             case AnnotationData.TypeImage:
-                LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe));
+                LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe), HandlePadding);
                 break;
             case AnnotationData.TypeStep:
                 // Survey's counter: no scale handles, and rotation means aiming the pin's
@@ -121,11 +151,11 @@ public partial class EditorWindow : Window
     /// the rotation grip. When the annotation is rotated every thumb rides the rotated
     /// frame, so the chrome keeps wrapping the mark instead of boxing it axis-aligned.
     /// </summary>
-    private void LayoutBoxHandles(Rect b, double angle)
+    private void LayoutBoxHandles(Rect b, double angle, double padding = 0, Point? rotationCentre = null)
     {
         _handleKind = HandleKind.Box;
-        var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
-        var pts = BoxHandlePoints(b);
+        var centre = rotationCentre ?? new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
+        var pts = BoxHandlePoints(b, padding);
         var spec = AdaptiveHandleSpec(b.Width, b.Height);
         EnsureThumbs(pts.Length);
         for (int i = 0; i < pts.Length; i++)
@@ -136,14 +166,21 @@ public partial class EditorWindow : Window
             PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle), kind, angle);
         }
 
-        var top = new Point(centre.X, b.Top);
-        var grip = new Point(centre.X, b.Top - spec.RotationOffset);
+        double boxCentreX = b.Left + b.Width / 2;
+        var top = new Point(boxCentreX, b.Top - padding);
+        var grip = new Point(boxCentreX, b.Top - padding - spec.RotationOffset);
         PlaceRotateThumb(
             AnnotationRotation.RotatePoint(grip, centre, angle),
             AnnotationRotation.RotatePoint(top, centre, angle));
 
         HandleLayer.Visibility = Visibility.Visible;
     }
+
+    /// <summary>
+    /// Survey's non-border-flush selection padding: the handles sit 2 page-units outside the
+    /// bbox, exactly on the dashed frame (SVGSelectionOverlay.jsx:83-94).
+    /// </summary>
+    private const double HandlePadding = 2;
 
     /// <summary>Which of the 8 box thumbs fit, and how far out the rotation grip sits.</summary>
     private readonly record struct HandleSpec(bool AllFit, bool CornersFit, double RotationOffset)
@@ -230,15 +267,6 @@ public partial class EditorWindow : Window
         return new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
     }
 
-    /// <summary>Maps a canvas point into the annotation's unrotated frame.</summary>
-    private static Point ToUnrotatedFrame(FrameworkElement fe, Point canvasPoint)
-    {
-        double angle = AnnotationTransform.AngleOf(fe);
-        return angle == 0
-            ? canvasPoint
-            : AnnotationRotation.RotatePoint(canvasPoint, RotationCentre(fe), -angle);
-    }
-
     /// <summary>
     /// The rotation grip. <paramref name="counterDot"/> renders Survey's counter chrome
     /// instead: the bare 11 px handle dot on the pin tip, no icon and no stem.
@@ -252,7 +280,9 @@ public partial class EditorWindow : Window
                 Fill = new SolidColorBrush(Colors.White),
                 Stroke = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE2)),
             };
-            _rotateStem = new Line { Stroke = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE2)) };
+            // Survey draws the grip's tether in neutral grey, not the ring blue
+            // (SVGSelectionOverlay.jsx:239-247).
+            _rotateStem = new Line { Stroke = new SolidColorBrush(Color.FromRgb(0xD1, 0xD1, 0xD1)) };
             _rotateIcon = new ContentControl
             {
                 // Survey's rotate-icon.svg is stroked #000000, not the Fabric fallback grey.
@@ -269,7 +299,10 @@ public partial class EditorWindow : Window
         double s = (counterDot ? HandleScreenPx : RotateHandleScreenPx) * is_;
         _rotateThumb.Width = s;
         _rotateThumb.Height = s;
-        _rotateThumb.StrokeThickness = (counterDot ? 1.5 : 1) * is_;
+        // Survey: the counter tip dot is a non-box handle — strokeWidth 1.5 with
+        // vector-effect non-scaling-stroke (SVGAnnotationLayer.jsx:5142-5143), i.e. a constant
+        // 1.5 SCREEN px. The real rotation grip is box chrome, so it keeps the damped 1*is.
+        _rotateThumb.StrokeThickness = counterDot ? ConstantRingWidth : 1 * is_;
         // Survey: rotation circle drop-shadow(0 2 5 rgba(0,0,0,0.1)); the counter tip
         // handle uses the heavier drop-shadow(0 1 3 rgba(0,0,0,0.25)).
         _rotateThumb.Effect = new DropShadowEffect
@@ -311,7 +344,10 @@ public partial class EditorWindow : Window
         if (_rotateStem is not null) _rotateStem.Visibility = Visibility.Collapsed;
     }
 
-    private static Point[] BoxHandlePoints(Rect b) => new[]
+    private static Point[] BoxHandlePoints(Rect raw, double padding = 0)
+    {
+        Rect b = padding == 0 ? raw : Rect.Inflate(raw, padding, padding);
+        return new[]
     {
         new Point(b.Left, b.Top),                       // 0 TL
         new Point(b.Right, b.Top),                      // 1 TR
@@ -322,6 +358,7 @@ public partial class EditorWindow : Window
         new Point(b.Left + b.Width / 2, b.Bottom),      // 6 B
         new Point(b.Left, b.Top + b.Height / 2),        // 7 L
     };
+    }
 
     /// <summary>Survey callout thumbs: 0=tip, 1=knee, 2=TL, 3=TR, 4=BR, 5=BL.</summary>
     private void LayoutCalloutHandles(AnnotationData meta)
@@ -333,12 +370,14 @@ public partial class EditorWindow : Window
         EnsureThumbs(6);
         // Survey places the two bottom corners on the descender-buffered bottom edge.
         var rbox = layout.RenderBox;
-        PlaceThumb(0, layout.Tip + off);   // Survey: every callout handle is a circle
-        PlaceThumb(1, layout.Knee + off);
-        PlaceThumb(2, rbox.TopLeft + off);
-        PlaceThumb(3, rbox.TopRight + off);
-        PlaceThumb(4, rbox.BottomRight + off);
-        PlaceThumb(5, rbox.BottomLeft + off);
+        // Survey: every callout handle is a circle, and all six are non-box handles, so they
+        // carry the constant 1.5 px ring (SVGAnnotationLayer.jsx:3205-3206, 3218-3219, 3250).
+        PlaceThumb(0, layout.Tip + off, constantRing: true);
+        PlaceThumb(1, layout.Knee + off, constantRing: true);
+        PlaceThumb(2, rbox.TopLeft + off, constantRing: true);
+        PlaceThumb(3, rbox.TopRight + off, constantRing: true);
+        PlaceThumb(4, rbox.BottomRight + off, constantRing: true);
+        PlaceThumb(5, rbox.BottomLeft + off, constantRing: true);
         // Survey per-part cursors: grab on knee/tip, diagonal resize on the corners.
         var cursors = new[]
         {
@@ -374,8 +413,14 @@ public partial class EditorWindow : Window
         _handleKind = HandleKind.Endpoints;
         bool surveyCurve = meta.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow;
         EnsureThumbs(surveyCurve ? 3 : 2);
-        PlaceThumb(0, from);
-        PlaceThumb(1, to);
+        // The stored points are UNROTATED locals; the element turns about its bounds centre,
+        // so a rotated line's handles have to ride the same rotation or they float off the
+        // stroke (and the endpoint drag would then be un-grabbable).
+        double angle = AnnotationTransform.AngleOf(_selected!);
+        Point pivot = RotationCentre((FrameworkElement)_selected!);
+        Point W(Point p) => angle == 0 ? p : AnnotationRotation.RotatePoint(p, pivot, angle);
+        PlaceThumb(0, W(from), constantRing: true);
+        PlaceThumb(1, W(to), constantRing: true);
         if (surveyCurve)
         {
             Point mid = LineCurve.ParseMid(meta.Mid) is Point stored
@@ -383,7 +428,7 @@ public partial class EditorWindow : Window
                 : LineCurve.Midpoint(from, to);
             // Survey HANDLE_RADIUS_SECONDARY: the curve-bend handle is deliberately smaller
             // than the endpoints (SVGAnnotationLayer.jsx:5450-5462).
-            PlaceThumb(2, mid, ThumbKind.Secondary);
+            PlaceThumb(2, W(mid), ThumbKind.Secondary, constantRing: true);
         }
         HandleLayer.Visibility = Visibility.Visible;
     }
@@ -422,7 +467,15 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void PlaceThumb(int index, Point center, ThumbKind kind = ThumbKind.Corner, double angleDeg = 0)
+    /// <summary>
+    /// Survey handleStyle.js:32 HANDLE_RING_WIDTH 1.5 drawn with <c>vector-effect:
+    /// non-scaling-stroke</c> — a constant 1.5 SCREEN px on every shape-owned handle
+    /// (endpoints, bend dot, callout parts, counter tip). Content units, so divide by zoom.
+    /// </summary>
+    private double ConstantRingWidth => 1.5 / _zoom;
+
+    private void PlaceThumb(int index, Point center, ThumbKind kind = ThumbKind.Corner,
+        double angleDeg = 0, bool constantRing = false)
     {
         if (index < 0 || index >= _handleThumbs.Count) return;
         var thumb = _handleThumbs[index];
@@ -446,7 +499,9 @@ public partial class EditorWindow : Window
         };
         thumb.RenderTransformOrigin = new Point(0.5, 0.5);
         thumb.RenderTransform = angleDeg == 0 ? null : new RotateTransform(angleDeg);
-        thumb.StrokeThickness = 1 * is_; // Survey cornerStrokeWidth
+        // Survey: box handles use the zoom-damped cornerStrokeWidth 1*is; every non-box handle
+        // is a flat 1.5 screen px (selectionHandleVisibility.js:30 vs handleStyle.js:32).
+        thumb.StrokeThickness = constantRing ? ConstantRingWidth : 1 * is_;
         if (thumb.Effect is DropShadowEffect shadow)
         {
             // Survey corners drop-shadow(0 1 3 0.15); pills drop-shadow(0 2 4 0.15).
@@ -479,12 +534,19 @@ public partial class EditorWindow : Window
         {
             var thumb = _handleThumbs[i];
             if (thumb.Visibility != Visibility.Visible) continue;
-            double cx = Canvas.GetLeft(thumb) + thumb.Width / 2;
-            double cy = Canvas.GetTop(thumb) + thumb.Height / 2;
-            // Survey 2026-05-18: the grab zone is the visible handle, not a wider disc.
-            double grab = Math.Max(thumb.Width, thumb.Height) / 2;
-            double d = (pos - new Point(cx, cy)).Length;
-            if (d <= grab && d < bestDist) { bestDist = d; best = i; }
+            var c = new Point(Canvas.GetLeft(thumb) + thumb.Width / 2, Canvas.GetTop(thumb) + thumb.Height / 2);
+            // Survey: the grab zone is exactly the drawn SVG shape (pointerEvents 'auto'), so a
+            // 28x8 pill must be hit-tested as a RECTANGLE. A radial test would give it a
+            // 28-unit-DIAMETER disc and let it swallow clicks well outside the frame.
+            // Pills are the only non-square thumbs, and they carry the annotation's rotation.
+            bool pill = Math.Abs(thumb.Width - thumb.Height) > 1e-6;
+            double spin = thumb.RenderTransform is RotateTransform rt ? rt.Angle : 0;
+            Vector v = (spin == 0 ? pos : AnnotationRotation.RotatePoint(pos, c, -spin)) - c;
+            bool hit = pill
+                ? Math.Abs(v.X) <= thumb.Width / 2 && Math.Abs(v.Y) <= thumb.Height / 2
+                : v.Length <= thumb.Width / 2;
+            double d = v.Length;
+            if (hit && d < bestDist) { bestDist = d; best = i; }
         }
 
         // The grip wins ties with the top-edge thumb below it: it is the outer of the two,
@@ -592,6 +654,10 @@ public partial class EditorWindow : Window
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
         {
             _resizeBefore = CaptureResizeSnapshot(_selected, meta);
+            // Survey freezes originalProps.angle at pointer-down and never re-reads it during
+            // the drag (useSVGInteraction.js:4220-4258). Reading it live mixes frames, and the
+            // shape walks away under the cursor.
+            _resizeAngle = AnnotationTransform.AngleOf(fe);
             _calloutDragStart = null;
             _calloutDragInvalid = false;
             if (_handleKind == HandleKind.Callout && _selected is CalloutAnnotation dragged)
@@ -620,27 +686,68 @@ public partial class EditorWindow : Window
         }
 
         Rect oldBounds = _resizeBefore.Bounds;
+        // Every branch works in the FROZEN un-rotated frame: the pivot is the pre-drag bounds
+        // centre and the angle is the pre-drag angle, so the maths never chases a shape that
+        // is changing underneath it (Survey useSVGInteraction.js:4104-4129).
+        double angle = _resizeAngle;
+        var frozenCentre = new Point(oldBounds.Left + oldBounds.Width / 2, oldBounds.Top + oldBounds.Height / 2);
+        Point local = angle == 0 ? pos : AnnotationRotation.RotatePoint(pos, frozenCentre, -angle);
+
         if (_handleKind == HandleKind.Endpoints)
         {
-            // Survey's endpoint drag consults no modifier at all (useSVGInteraction.js:1874-1960).
-            ApplyEndpointResize(fe, meta, pos);
+            // Survey's endpoint drag consults no modifier at all (useSVGInteraction.js:1874-1960)
+            // and it never touches obj.angle — the tilt survives the drag (:3413).
+            ApplyEndpointResize(fe, meta, local);
+            if (angle != 0)
+            {
+                // Survey's (R - I)·Δ compensation (:1940-1952): moving a control point moves
+                // the bbox centre the mark pivots about, so shift the geometry back by the
+                // rotation-induced part of that drift before re-applying the angle.
+                fe.UpdateLayout();
+                Vector d = RotationCentre(fe) - frozenCentre;
+                double rad = angle * Math.PI / 180, cos = Math.Cos(rad), sin = Math.Sin(rad);
+                ApplyEndpointResize(fe, meta, local,
+                    new Vector((cos - 1) * d.X - sin * d.Y, sin * d.X + (cos - 1) * d.Y));
+                fe.UpdateLayout();
+                AnnotationTransform.SetAngle(fe, angle);
+            }
         }
         else if (_handleKind == HandleKind.Callout)
-            ApplyCalloutResize(fe, meta, pos);
+            ApplyCalloutResize(fe, meta, pos);   // callouts never rotate
         else
         {
-            // Resize runs in the annotation's unrotated frame: map the pointer in, do the
-            // ordinary axis-aligned maths, then put the rotation back about the new centre.
-            double angle = AnnotationTransform.AngleOf(fe);
-            Point local = ToUnrotatedFrame(fe, pos);
+            // Survey floors the SCALE RATIO, never the absolute size (:2198-2218): rect /
+            // ellipse / image / line 0.01, text and counter 0.1, and exact-path ink no floor
+            // at all so microscopic geometry survives.
+            local = FloorScale(oldBounds, _activeHandle, local, meta.Type switch
+            {
+                AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter => 0,
+                AnnotationData.TypeText or AnnotationData.TypeStep => 0.1,
+                _ => 0.01,
+            });
             var next = NewBoundsForHandle(oldBounds, _activeHandle, local);
-            // Survey forces a counter resize uniform: scale = max(|sx|,|sy|) for a corner,
-            // the moved axis alone otherwise, floored at 0.1 (useSVGInteraction.js:2174-2183).
+            // Survey forces a counter resize uniform, but with its OWN rule: max(|sx|,|sy|) on
+            // a corner and the moved axis alone on an edge, with no averaging (:2174-2183).
             if (meta.Type == AnnotationData.TypeStep)
-                next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next);
+                next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next, average: false);
             else if (ShapeConstraint.ShiftHeld)
                 next = ShapeConstraint.UniformResize(oldBounds, _activeHandle, next);
-            ApplyBoxResize(fe, meta, next);
+
+            if (angle != 0)
+            {
+                // Survey lands the new centre as worldAnchor + R(offsetFromAnchor) (:2222-2251):
+                // the edge you are pulling AGAINST stays on the same screen pixel at any angle.
+                // Translating `next` by the residual is the same thing in rect terms, because
+                // the element re-rotates about the new box centre.
+                Point worldAnchor = AnnotationRotation.RotatePoint(
+                    ShapeConstraint.AnchorPoint(oldBounds, _activeHandle), frozenCentre, angle);
+                var nextCentre = new Point(next.Left + next.Width / 2, next.Top + next.Height / 2);
+                Vector fix = worldAnchor - AnnotationRotation.RotatePoint(
+                    ShapeConstraint.AnchorPoint(next, _activeHandle), nextCentre, angle);
+                next = new Rect(next.X + fix.X, next.Y + fix.Y, next.Width, next.Height);
+            }
+
+            ApplyBoxResize(fe, meta, next, local);
             if (angle != 0)
             {
                 fe.UpdateLayout();
@@ -659,6 +766,12 @@ public partial class EditorWindow : Window
         if (fe is Grid badge && fe.Tag is AnnotationData step && step.Type == AnnotationData.TypeStep)
         {
             double pointer = AnnotationRotation.PointerAngleFromCursor(RotationCentre(fe), pos);
+            // Survey snaps in the mtr branch BEFORE the counter special-case
+            // (useSVGInteraction.js:2357-2380), so the bbox-edit grip honours Shift while the
+            // standalone tip dot (SVGAnnotationLayer.jsx:5183) never does. There is no soft
+            // snap on this path at all, so it is Shift-only.
+            if (ShapeConstraint.ShiftHeld && ReferenceEquals(_bboxEditTarget, fe))
+                pointer = AnnotationRotation.Quantize(pointer);
             AnnotationFactory.SetStepPointerAngle(badge, pointer);
             step.PointerAngle = pointer;
             return;
@@ -757,10 +870,34 @@ public partial class EditorWindow : Window
         return new Rect(x, y, Math.Abs(right - left), Math.Abs(bottom - top));
     }
 
+    /// <summary>
+    /// Survey clamps the SCALE, not the size (useSVGInteraction.js:2198-2218), so a 400 px
+    /// rectangle stops at 4 px while an 8 px mark keeps shrinking proportionally. Applying the
+    /// floor to the POINTER instead of the resulting rect keeps it per-axis and sign-preserving,
+    /// so a flip still flips. A floor of 0 is Survey's exact-path rule: no visible-size floor.
+    /// </summary>
+    private static Point FloorScale(Rect old, int handle, Point local, double floor)
+    {
+        if (floor <= 0) return local;
+        var (ax, ay) = ShapeConstraint.AxisAnchors(old, handle);
+        double x = local.X, y = local.Y;
+        if (ax is double axv && old.Width > 1e-6)
+        {
+            double min = old.Width * floor, d = x - axv;
+            if (Math.Abs(d) < min) x = axv + (d < 0 ? -min : min);
+        }
+        if (ay is double ayv && old.Height > 1e-6)
+        {
+            double min = old.Height * floor, d = y - ayv;
+            if (Math.Abs(d) < min) y = ayv + (d < 0 ? -min : min);
+        }
+        return new Point(x, y);
+    }
+
     // ---- per-kind apply ----
 
     /// <summary>Resizes a box-style element to <paramref name="b"/> (canvas coords). Text scales font size.</summary>
-    private void ApplyBoxResize(FrameworkElement fe, AnnotationData meta, Rect b)
+    private void ApplyBoxResize(FrameworkElement fe, AnnotationData meta, Rect b, Point local)
     {
         switch (meta.Type)
         {
@@ -774,7 +911,7 @@ public partial class EditorWindow : Window
                 break;
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
-                ResizeInk(fe, meta, b);
+                ResizeInk(fe, meta, b, local);
                 break;
             case AnnotationData.TypeStep:
                 ResizeCounter(fe, meta, b);
@@ -796,8 +933,10 @@ public partial class EditorWindow : Window
     {
         if (fe is not Path stroke || _resizeBefore?.Points is not { Length: >= 2 } basePts) return;
         Rect baseBounds = _resizeBefore.Bounds;
-        double sx = baseBounds.Width > 0.5 ? newBounds.Width / baseBounds.Width : 1;
-        double sy = baseBounds.Height > 0.5 ? newBounds.Height / baseBounds.Height : 1;
+        // Survey's line commit floors at 0.01 and keeps scaling (:3253-3254); the old
+        // "substitute 1" guard silently froze a near-degenerate axis at full size.
+        double sx = baseBounds.Width > 1e-6 ? newBounds.Width / baseBounds.Width : 1;
+        double sy = baseBounds.Height > 1e-6 ? newBounds.Height / baseBounds.Height : 1;
         Point Map(Point p) => new(
             newBounds.X + (p.X - baseBounds.X) * sx,
             newBounds.Y + (p.Y - baseBounds.Y) * sy);
@@ -835,7 +974,9 @@ public partial class EditorWindow : Window
     private void ResizeCounter(FrameworkElement fe, AnnotationData meta, Rect b)
     {
         if (fe is not Grid badge) return;
-        double tipDist = Math.Max(1, Math.Max(b.Width, b.Height)) / 2;
+        // Survey floors the counter's SCALE at 0.1 (done on the pointer, upstream) and only
+        // its committed RADIUS at 4 (:2181, :3301) — never the box's absolute pixel size.
+        double tipDist = Math.Max(b.Width, b.Height) / 2;
         double radius = Math.Max(4, tipDist / 1.5); // CounterGeometry.TipDistance is radius * 1.5
         double size = CounterGeometry.TipDistance(radius) * 2;
         FlattenTransformIntoCanvas(fe);
@@ -859,8 +1000,10 @@ public partial class EditorWindow : Window
         FlattenTransformIntoCanvas(fe);
         Canvas.SetLeft(fe, b.X);
         Canvas.SetTop(fe, b.Y);
-        fe.Width = Math.Max(1, b.Width);
-        fe.Height = Math.Max(1, b.Height);
+        // No absolute floor: Survey clamps the scale RATIO at 0.01, which the caller has
+        // already applied, so a 400 px rect stops at 4 px and an 8 px one keeps shrinking.
+        fe.Width = b.Width;
+        fe.Height = b.Height;
         if (fe is Path path && fe.Tag is AnnotationData meta &&
             AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
             path.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height),
@@ -888,8 +1031,8 @@ public partial class EditorWindow : Window
             FlattenTransformIntoCanvas(fe);
             Canvas.SetLeft(fe, newBounds.X);
             Canvas.SetTop(fe, newBounds.Y);
-            fe.Width = Math.Max(1, newBounds.Width);
-            fe.Height = Math.Max(1, newBounds.Height);
+            fe.Width = newBounds.Width;      // scale floored at 0.1 upstream, Survey :2207-2209
+            fe.Height = newBounds.Height;
             if (fe is Grid g && g.Children.OfType<TextBlock>().FirstOrDefault() is TextBlock tb)
                 tb.Width = Math.Max(1, fe.Width - 2 * AnnotationFactory.TextPadding);
             meta.Rect = new[] { newBounds.X, newBounds.Y, fe.Width, fe.Height };
@@ -909,36 +1052,77 @@ public partial class EditorWindow : Window
         fe.UpdateLayout();
     }
 
-    /// <summary>Freehand / highlighter: scale every stored point about the box's top-left so the polyline fits the new box.</summary>
-    private void ResizeInk(FrameworkElement fe, AnnotationData meta, Rect newBounds)
+    /// <summary>
+    /// Freehand / highlighter. Survey commits an ink resize as a SIGNED <c>scaleX/scaleY</c> on
+    /// the path with <c>vectorEffect: 'none'</c> (inkGeometryTransform.js:474-501,
+    /// svgAnnotationRenderers.jsx:300-318), so the SVG transform scales the stroke WIDTH along
+    /// with the geometry and a mirrored drag really mirrors the stroke. Here that is the same
+    /// affine, applied to the outline built at the pre-drag thickness and baked back into
+    /// <c>Data</c>, plus the equivalent scalar thickness in <c>meta</c> for the rebuild sites.
+    /// </summary>
+    private void ResizeInk(FrameworkElement fe, AnnotationData meta, Rect newBounds, Point local)
     {
         if (fe is not Path ink || _resizeBefore?.Points is not { } basePts || basePts.Length == 0) return;
 
-        // Reconstruct the polyline from the captured (pre-drag) points so successive
-        // moves accumulate from the same baseline, then scale into the new box.
         Rect baseBounds = _resizeBefore.Bounds;
-        double sx = baseBounds.Width > 0.5 ? newBounds.Width / baseBounds.Width : 1;
-        double sy = baseBounds.Height > 0.5 ? newBounds.Height / baseBounds.Height : 1;
+        // Magnitudes come from the (already floored / Shift-locked) box, the SIGN from which
+        // side of the anchor the pointer is on — Survey's supportsFlip path (:2186-2246).
+        var (ax, ay) = ShapeConstraint.AxisAnchors(baseBounds, _activeHandle);
+        double sx = Signed(baseBounds.Width, newBounds.Width, ax, local.X, baseBounds.Left, baseBounds.Right);
+        double sy = Signed(baseBounds.Height, newBounds.Height, ay, local.Y, baseBounds.Top, baseBounds.Bottom);
+        // An axis this handle does not drive is anchored on the box's own mid-line — which is
+        // where Survey's anchorMap puts mt/mb/ml/mr, and where the Shift lock centres it.
+        double anchorX = ax ?? baseBounds.Left + baseBounds.Width / 2;
+        double anchorY = ay ?? baseBounds.Top + baseBounds.Height / 2;
 
-        var scaled = new List<Point>(basePts.Length);
         var raw = new double[basePts.Length][];
         for (int i = 0; i < basePts.Length; i++)
-        {
-            double nx = newBounds.X + (basePts[i].X - baseBounds.X) * sx;
-            double ny = newBounds.Y + (basePts[i].Y - baseBounds.Y) * sy;
-            scaled.Add(new Point(nx, ny));
-            raw[i] = new[] { nx, ny };
-        }
+            raw[i] = new[]
+            {
+                anchorX + (basePts[i].X - anchorX) * sx,
+                anchorY + (basePts[i].Y - anchorY) * sy,
+            };
+
+        double baseThickness = _resizeBefore.Meta.Thickness ?? 4;
+        // Survey's matrix() equivalent: outline ONCE at the pre-drag width, then let the
+        // affine carry the stroke width with the geometry. Re-outlining the scaled points at
+        // a fixed width is what kept a 3x-enlarged stroke at hairline weight.
+        var outline = PaperInk.Outline(basePts, baseThickness);
+        outline.Transform = new MatrixTransform(sx, 0, 0, sy, anchorX - anchorX * sx, anchorY - anchorY * sy);
         ink.RenderTransform = null;
-        ink.Data = PaperInk.Outline(scaled, meta.Thickness ?? 4);
+        ink.Data = outline;
         meta.Points = raw;
+        // ponytail: the other three rebuild sites re-outline from meta.Thickness at ONE width
+        // (undo, restyle, load), so store the equivalent isotropic width. A non-uniform resize
+        // therefore reloads slightly rounder than it drew; upgrade path is persisting sx/sy.
+        meta.Thickness = baseThickness * Math.Sqrt(Math.Abs(sx * sy));
         meta.Tx = 0;
         meta.Ty = 0;
         ink.Tag = meta;
+
+        // Survey's exact-path branch imposes no floor, only a nudge off an exact zero (:2198-2205).
+        static double Signed(double baseExtent, double newExtent, double? anchor, double pointer,
+            double lo, double hi)
+        {
+            if (baseExtent <= 1e-6) return 1;
+            double mag = newExtent / baseExtent;
+            // No anchor on this axis: the handle does not drive it, so it only ever changes
+            // under the Shift uniform lock, which is positive and centred.
+            if (anchor is not double a) return mag == 0 ? double.Epsilon : mag;
+            double moved = Math.Abs(a - lo) < Math.Abs(a - hi) ? hi : lo;  // the edge this handle drags
+            double sign = (pointer - a) * (moved - a) < 0 ? -1 : 1;        // pointer past the anchor mirrors
+            return mag == 0 ? sign * double.Epsilon : sign * mag;
+        }
     }
 
-    /// <summary>Arrow / line / curved arrow: drag one endpoint, rebuilding geometry from the moved endpoints.</summary>
-    private void ApplyEndpointResize(FrameworkElement fe, AnnotationData meta, Point pos)
+    /// <summary>
+    /// Arrow / line / curved arrow: drag one endpoint, rebuilding geometry from the moved
+    /// endpoints. <paramref name="pos"/> is in the FROZEN un-rotated frame, and
+    /// <paramref name="shift"/> is Survey's (R - I)·Δ pivot compensation
+    /// (useSVGInteraction.js:1940-1952) applied to all three control points.
+    /// </summary>
+    private void ApplyEndpointResize(FrameworkElement fe, AnnotationData meta, Point pos,
+        Vector shift = default)
     {
         if (_resizeBefore?.Points is not { Length: >= 2 } basePts) return;
 
@@ -948,7 +1132,9 @@ public partial class EditorWindow : Window
         Point to = curved ? basePts[2] : basePts[^1];
         Point control = curved ? basePts[1] : default;
 
-        Point? surveyMid = LineCurve.ParseMid(meta.Mid);
+        // The PRE-DRAG mid, not the live one: this runs twice per frame for the rotation
+        // compensation, and reading the value the first pass wrote would compound.
+        Point? surveyMid = LineCurve.ParseMid(_resizeBefore.Meta.Mid);
         if (meta.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow)
         {
             if (_activeHandle == 0) from = pos;
@@ -959,6 +1145,14 @@ public partial class EditorWindow : Window
         {
             if (_activeHandle == 0) from = pos;
             else to = pos;
+        }
+
+        if (shift != default)
+        {
+            from += shift;
+            to += shift;
+            control += shift;
+            if (surveyMid is Point pre) surveyMid = pre + shift;
         }
 
         fe.RenderTransform = null; // points are absolute now

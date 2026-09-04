@@ -1104,6 +1104,165 @@ public class AnnotationEditorRenderHarness
                     $"angle={AnnotationTransform.AngleOf(rotatedRect)} grip={grip} assumedCentre={rectCentre} last={last}");
                 Click(0.02, 0.02);
 
+                // --- RESIZE PARITY: a rotated mark must resize against a PINNED world anchor,
+                // ink must thicken with the box, and a rotated line must keep its tilt. ---
+                {
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear();
+                    Pump(4);
+                    var log = new System.Text.StringBuilder();
+                    var selField = typeof(EditorWindow).GetField("_selected", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    FrameworkElement Sel() => (FrameworkElement)selField.GetValue(editor)!;
+                    Rect Unrot(FrameworkElement f) => (Rect)typeof(EditorWindow)
+                        .GetMethod("UnrotatedCanvasBounds", BindingFlags.Static | BindingFlags.NonPublic)!
+                        .Invoke(null, new object[] { f })!;
+                    // The world position of a box corner, i.e. what the eye actually sees.
+                    Point WorldCorner(FrameworkElement f, Func<Rect, Point> pick)
+                    {
+                        Rect b = Unrot(f);
+                        return AnnotationRotation.RotatePoint(pick(b),
+                            new Point(b.Left + b.Width / 2, b.Top + b.Height / 2),
+                            AnnotationTransform.AngleOf(f));
+                    }
+                    void Rotate(FrameworkElement f, double deg)
+                    {
+                        AnnotationTransform.SetAngle(f, deg);
+                        if (f.Tag is AnnotationData m) m.Angle = deg;
+                        InvokePrivate(editor, "UpdateSelectionVisual");
+                        Pump(3);
+                    }
+
+                    // RESIZE-01: rect rotated 30 degrees, TL dragged. BR must not move.
+                    Check("RectangleToolBtn");
+                    Drag(new[] { (0.20, 0.30), (0.50, 0.60) });
+                    Check("SelectToolBtn");
+                    Click(0.20, 0.45);
+                    var rotRect = Sel();
+                    Rotate(rotRect, 30);
+                    Shot("resize-rotated-rect-before.png");
+                    Point brBefore = WorldCorner(rotRect, r => r.BottomRight);
+                    Point tlGrab = WorldCorner(rotRect, r => r.TopLeft);
+                    int tlHandle = (int)typeof(EditorWindow)
+                        .GetMethod("HitTestHandle", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(editor, new object[] { tlGrab })!;
+                    var brTrack = new List<Point>();
+                    editor.PointerDown(PA(tlGrab)); Pump(1);
+                    var pull = tlGrab + new Vector(-0.06 * W, -0.05 * H);
+                    for (int i = 1; i <= 10; i++)
+                    {
+                        editor.PointerMove(PA(tlGrab + (pull - tlGrab) * (i / 10.0))); Pump(1);
+                        brTrack.Add(WorldCorner(rotRect, r => r.BottomRight));
+                    }
+                    Shot("resize-rotated-rect-dragging.png");
+                    editor.PointerUp(PA(pull)); Pump(3);
+                    Shot("resize-rotated-rect-after.png");
+                    double brDrift = brTrack.Max(p => (p - brBefore).Length);
+                    log.AppendLine($"[R1] rotated rect TL drag: handle={tlHandle} angle={AnnotationTransform.AngleOf(rotRect)} " +
+                        $"anchorBR before={brBefore:F2} after={WorldCorner(rotRect, r => r.BottomRight):F2} maxDrift={brDrift:F3}");
+
+                    // RESIZE-03/05: ink thickens with the box, and a drag past the anchor mirrors.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    typeof(EditorWindow).GetField("_penSize", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .SetValue(editor, 6.0);
+                    Check("FreehandToolBtn");
+                    Drag(new[] { (0.20, 0.30), (0.30, 0.24), (0.40, 0.36), (0.50, 0.30) }, steps: 4);
+                    Check("SelectToolBtn");
+                    var inkEl = canvas.Children.OfType<System.Windows.Shapes.Path>()
+                        .Last(q => q.Tag is AnnotationData { Type: AnnotationData.TypeFreehand });
+                    selField.SetValue(editor, inkEl);
+                    InvokePrivate(editor, "UpdateSelectionVisual"); Pump(3);
+                    Rect inkBefore = Unrot(inkEl);
+                    double inkAreaBefore = inkEl.Data!.GetArea();
+                    Shot("resize-ink-before.png");
+                    Point inkBr = new(inkBefore.Right, inkBefore.Bottom);
+                    DragAbs(inkBr, new Point(inkBefore.Left + inkBefore.Width * 3, inkBefore.Top + inkBefore.Height * 3), 12);
+                    Shot("resize-ink-grown-3x.png");
+                    var inkMeta = (AnnotationData)inkEl.Tag!;
+                    log.AppendLine($"[R3] ink 3x: thickness 6 -> {inkMeta.Thickness:F2} " +
+                        $"bounds {inkBefore.Width:F1}x{inkBefore.Height:F1} -> {Unrot(inkEl).Width:F1}x{Unrot(inkEl).Height:F1} " +
+                        $"area {inkAreaBefore:F0} -> {inkEl.Data!.GetArea():F0}");
+                    // Now pull the LEFT edge past the right edge: Survey mirrors the stroke.
+                    Rect grown = Unrot(inkEl);
+                    Point leftMid = new(grown.Left, grown.Top + grown.Height / 2);
+                    DragAbs(leftMid, new Point(grown.Right + grown.Width * 0.5, leftMid.Y), 14);
+                    Shot("resize-ink-mirrored.png");
+                    log.AppendLine($"[R5] ink left handle dragged past the right edge: bounds={Unrot(inkEl)}");
+
+                    // RESIZE-02: a rotated line keeps its tilt while an endpoint is dragged.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    Check("LineToolBtn");
+                    Drag(new[] { (0.25, 0.40), (0.55, 0.40) });
+                    Check("SelectToolBtn");
+                    Click(0.40, 0.40);
+                    var rotLine = Sel();
+                    Rotate(rotLine, 30);
+                    Shot("resize-rotated-line-before.png");
+                    var linePts = ((AnnotationData)rotLine.Tag!).Points!;
+                    Point lineFromLocal = new(linePts[0][0], linePts[0][1]);
+                    Rect lb = Unrot(rotLine);
+                    Point linePivot = new(lb.Left + lb.Width / 2, lb.Top + lb.Height / 2);
+                    Point fromWorld = AnnotationRotation.RotatePoint(lineFromLocal, linePivot, 30);
+                    DragAbs(fromWorld, fromWorld + new Vector(-0.07 * W, 0.05 * H), 12);
+                    Shot("resize-rotated-line-after.png");
+                    log.AppendLine($"[R2] rotated line endpoint drag: angle 30 -> {AnnotationTransform.AngleOf(rotLine)}");
+
+                    // RESIZE-09/10: rect is border-flush (no dashed frame, padding 0); an
+                    // ellipse keeps the frame with the handles centred on it.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    Check("RectangleToolBtn"); Drag(new[] { (0.10, 0.20), (0.40, 0.50) });
+                    Check("EllipseToolBtn"); Drag(new[] { (0.55, 0.20), (0.85, 0.50) });
+                    Check("SelectToolBtn");
+                    var selRect = (FrameworkElement)editor.FindName("SelectionRect")!;
+                    Click(0.10, 0.35); Pump(3);
+                    Shot("resize-chrome-rect-borderflush.png");
+                    log.AppendLine($"[R10] rect selected: dashedFrame={selRect.Visibility}");
+                    Click(0.55, 0.35); Pump(3);
+                    Shot("resize-chrome-ellipse-padded.png");
+                    log.AppendLine($"[R10] ellipse selected: dashedFrame={selRect.Visibility} " +
+                        $"frame={new Rect(Canvas.GetLeft(selRect), Canvas.GetTop(selRect), selRect.Width, selRect.Height)}");
+
+                    // RESIZE-11: the top pill must NOT grab a click a pill-height above itself.
+                    var pills = ((Canvas)editor.FindName("HandleLayer")!).Children
+                        .OfType<System.Windows.Shapes.Rectangle>()
+                        .Where(t => t.Visibility == Visibility.Visible && Math.Abs(t.Width - t.Height) > 1e-6)
+                        .ToList();
+                    if (pills.Count > 0)
+                    {
+                        var pill = pills[0];
+                        var pc = new Point(Canvas.GetLeft(pill) + pill.Width / 2, Canvas.GetTop(pill) + pill.Height / 2);
+                        int onPill = (int)typeof(EditorWindow)
+                            .GetMethod("HitTestHandle", BindingFlags.Instance | BindingFlags.NonPublic)!
+                            .Invoke(editor, new object[] { pc })!;
+                        int wellAbove = (int)typeof(EditorWindow)
+                            .GetMethod("HitTestHandle", BindingFlags.Instance | BindingFlags.NonPublic)!
+                            .Invoke(editor, new object[] { pc - new Vector(0, pill.Width / 2 - 1) })!;
+                        log.AppendLine($"[R11] pill {pill.Width:F1}x{pill.Height:F1}: onCentre={onPill} " +
+                            $"at {pill.Width / 2 - 1:F1}px perpendicular={wellAbove} (must be -1)");
+                    }
+                    // RESIZE-15: a counter in bbox edit mode gets the CANONICAL nub-up frame
+                    // (2r x 2.5r) turned by pointerAngle+90 about the BUBBLE centre, so the
+                    // grip lands in front of the tip instead of above an axis-aligned square.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    counterBtn.IsChecked = true; Pump(3);
+                    Click(0.45, 0.40);
+                    Check("SelectToolBtn");
+                    Click(0.45, 0.40, clicks: 2); Pump(4);   // double-click enters bbox mode
+                    Shot("resize-counter-bbox-frame.png");
+                    var bboxField = typeof(EditorWindow).GetField("_bboxEditTarget", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var counterSel = Sel();
+                    log.AppendLine($"[R15] counter bbox mode: target={(bboxField.GetValue(editor) is null ? "null" : "set")} " +
+                        $"badge={Unrot(counterSel).Width:F1}x{Unrot(counterSel).Height:F1} " +
+                        $"pointerAngle={((AnnotationData)counterSel.Tag!).PointerAngle}");
+
+                    File.WriteAllText(Path.Combine(outDir, "resize-parity.txt"), log.ToString());
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                }
+
                 // --- Marquee: left→right = window (blue), right→left = crossing (green dashed). ---
                 Check("SelectToolBtn"); Click(0.02, 0.02);
                 void MarqueeDrag(double x0, double y0, double x1, double y1, string midShot, string endShot)

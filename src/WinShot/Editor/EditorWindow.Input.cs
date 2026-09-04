@@ -1666,7 +1666,12 @@ public partial class EditorWindow : Window
             HideHandles();
             return;
         }
-        const double pad = 2;
+        // Survey isBorderFlush (SVGAnnotationLayer.jsx:5469-5470, :5659-5660): rect and text
+        // render NO dashed frame — their handles sit on the shape's own stroke — while every
+        // other type keeps the 2-unit padding so the handles land ON the dashes.
+        string? selType = (_selected as FrameworkElement)?.Tag is AnnotationData sd ? sd.Type : null;
+        bool borderFlush = selType is AnnotationData.TypeRectangle or AnnotationData.TypeText;
+        double pad = borderFlush ? 0 : 2;
         b.Inflate(pad, pad);
         Canvas.SetLeft(SelectionRect, b.X);
         Canvas.SetTop(SelectionRect, b.Y);
@@ -1680,10 +1685,10 @@ public partial class EditorWindow : Window
         // A selected counter is the same: one dot on the nubbin tip and nothing else
         // (SVGAnnotationLayer.jsx:5106-5164).
         bool lineLike = !ReferenceEquals(_bboxEditTarget, _selected)
-            && _selected is FrameworkElement { Tag: AnnotationData lm }
-            && lm.Type is AnnotationData.TypeLine or AnnotationData.TypeArrow
+            && selType is AnnotationData.TypeLine or AnnotationData.TypeArrow
                 or AnnotationData.TypeCurvedArrow or AnnotationData.TypeStep;
-        SelectionRect.Visibility = lineLike ? Visibility.Collapsed : Visibility.Visible;
+        // borderFlush carries no edit-mode guard: Survey hides the rect/text box unconditionally.
+        SelectionRect.Visibility = lineLike || borderFlush ? Visibility.Collapsed : Visibility.Visible;
 
         UpdateSelectionHandles();
     }
