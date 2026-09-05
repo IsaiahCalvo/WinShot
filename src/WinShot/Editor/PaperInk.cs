@@ -59,11 +59,28 @@ internal static class PaperInk
     /// </summary>
     public static readonly double Tolerance = 0.5 * (1 - Math.Cos(Math.PI / 18));
 
-    public static PathGeometry Outline(IEnumerable<Point> raw, double width, double? minDistance = null)
+    /// <summary>
+    /// <paramref name="aspect"/> is the pen's height:width ratio (1 = Survey's round disk).
+    /// A non-uniform resize scales an SVG path's stroke with its geometry, so the swept pen
+    /// becomes an ELLIPSE; reproduce that by sweeping a round pen along y-compressed points
+    /// and stretching the result back, which is the same affine WPF's widen cannot take.
+    /// </summary>
+    public static PathGeometry Outline(IEnumerable<Point> raw, double width, double? minDistance = null,
+        double aspect = 1)
     {
         // Survey's radius is Math.max(0.5, width/2) - the same clamp as a diameter floor of 1.
         double w = Math.Max(1, width);
         var pts = Compact(raw, minDistance ?? CompactMinDistance);
+        // Compaction runs in WORLD space first, so a stretched stroke keeps the same samples
+        // it was committed with instead of re-thinning them in the squashed frame.
+        double a = double.IsFinite(aspect) && aspect > 0 ? aspect : 1;
+        if (a != 1)
+        {
+            for (int i = 0; i < pts.Count; i++) pts[i] = new Point(pts[i].X, pts[i].Y / a);
+            var stretched = Outline(pts, w, minDistance: double.Epsilon);
+            stretched.Transform = new ScaleTransform(1, a);
+            return stretched;
+        }
         if (pts.Count == 0)
             return new PathGeometry();
         if (pts.Count == 1)

@@ -92,6 +92,24 @@ public class PaperInkTests
         Assert.False(g.FillContains(new Point(10, 8)));
     }
 
+    /// <summary>
+    /// A non-uniform resize scales an SVG path's stroke with its geometry, so the swept pen
+    /// becomes an ellipse. Stretching a 6px stroke 3x in X must give an 18x6 pen — the same
+    /// outline the drag's own matrix draws — not a round 18 or a round sqrt(18*6)=10.4.
+    /// </summary>
+    [Fact]
+    public void Outline_Aspect_SweepsAnEllipticalPen()
+    {
+        var pts = new[] { new Point(0, 0), new Point(60, 0) };
+        var round = PaperInk.Outline(pts, width: 18);
+        var flat = PaperInk.Outline(pts, width: 18, aspect: 1.0 / 3);
+        Assert.Equal(18, round.Bounds.Height, 1);
+        Assert.Equal(6, flat.Bounds.Height, 1);
+        Assert.Equal(78, flat.Bounds.Width, 1);          // 60 + one full pen width of caps
+        Assert.True(flat.FillContains(new Point(30, 2.5)));
+        Assert.False(flat.FillContains(new Point(30, 4)));
+    }
+
     [Fact]
     public void Outline_IsFilledNotStrokedCenterline()
     {

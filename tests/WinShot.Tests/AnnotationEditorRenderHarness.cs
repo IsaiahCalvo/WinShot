@@ -2332,6 +2332,69 @@ public class AnnotationEditorRenderHarness
                         $"(handle={pastIdx}, Survey expects {expectPast:F2}, and NO mirror); " +
                         $"bubble {body0:F1} -> {body1:F1} -> {body2:F1}");
 
+                    // RESIZE-20: a NON-UNIFORM ink resize scales the PEN with the geometry
+                    // (Survey commits signed scaleX/scaleY on a vectorEffect:'none' path, so a
+                    // 3x-wide drag leaves a 3:1 elliptical stroke). The live drag always did
+                    // that through its matrix; every REBUILD — re-grab, undo/redo, restyle,
+                    // reload — used to re-outline at one isotropic width and snap the stroke
+                    // back round the instant you touched it again.
+                    InvokePrivate(editor, "Select", null);
+                    canvas.Children.Clear(); Pump(4);
+                    typeof(EditorWindow).GetField("_penSize", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .SetValue(editor, 6.0);
+                    Check("FreehandToolBtn");
+                    Drag(new[] { (0.25, 0.40), (0.35, 0.34), (0.45, 0.46), (0.55, 0.38) }, steps: 4);
+                    Check("SelectToolBtn");
+                    var aniso = canvas.Children.OfType<System.Windows.Shapes.Path>()
+                        .Last(q => q.Tag is AnnotationData { Type: AnnotationData.TypeFreehand });
+                    selField.SetValue(editor, aniso);
+                    InvokePrivate(editor, "UpdateSelectionVisual"); Pump(3);
+                    // The pen the stroke is actually drawn with: the ink outline's bounds minus
+                    // the centreline's own extent, per axis. 6x6 round to start.
+                    (double X, double Y) Pen()
+                    {
+                        var pm = (AnnotationData)aniso.Tag!;
+                        var ps = pm.Points!;
+                        Rect g = aniso.Data!.Bounds;
+                        return (g.Width - (ps.Max(p => p[0]) - ps.Min(p => p[0])),
+                                g.Height - (ps.Max(p => p[1]) - ps.Min(p => p[1])));
+                    }
+                    var pen0 = Pen();
+                    Rect ab = Unrot(aniso);
+                    // Right-middle handle to 3x width: x only, so sx=3, sy=1.
+                    Point rMid = new(ab.Right, ab.Top + ab.Height / 2);
+                    DragAbs(rMid, new Point(ab.Left + ab.Width * 3, rMid.Y), 12);
+                    var penCommit = Pen();
+                    Shot("resize-ink-aniso-committed.png");
+                    // Re-grab with a zero-length drag: this runs the SAME rebuild the next real
+                    // drag starts from, so the pen must not move a hair.
+                    Rect ab2 = Unrot(aniso);
+                    Point rMid2 = new(ab2.Right, ab2.Top + ab2.Height / 2);
+                    DragAbs(rMid2, rMid2, 2);
+                    var penRegrab = Pen();
+                    Shot("resize-ink-aniso-regrab.png");
+                    // ... and through the editor's own history, which rebuilds from meta alone.
+                    void HistStep(string name)
+                    {
+                        var m = typeof(EditorWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!;
+                        var t = (Task)m.Invoke(editor, null)!;
+                        for (int i = 0; i < 100 && !t.IsCompleted; i++) Pump(2);
+                        Pump(4);
+                    }
+                    HistStep("UndoAsync");
+                    var penUndone = Pen();
+                    Shot("resize-ink-aniso-undone.png");
+                    HistStep("RedoAsync");
+                    var penRedone = Pen();
+                    Shot("resize-ink-aniso-redone.png");
+                    var anisoMeta = (AnnotationData)aniso.Tag!;
+                    log.AppendLine($"[R20] ink stretched 3x in X only: pen {pen0.X:F2}x{pen0.Y:F2} " +
+                        $"-> commit {penCommit.X:F2}x{penCommit.Y:F2} (Survey: 18.00x6.00) " +
+                        $"-> re-grab {penRegrab.X:F2}x{penRegrab.Y:F2} -> undo {penUndone.X:F2}x{penUndone.Y:F2} " +
+                        $"-> redo {penRedone.X:F2}x{penRedone.Y:F2} " +
+                        $"(all three must MATCH the commit; the old isotropic rebuild gave 10.39 both ways); " +
+                        $"meta thickness={anisoMeta.Thickness:F2} penAspect={anisoMeta.PenAspect:F3}");
+
                     File.WriteAllText(Path.Combine(outDir, "resize-parity.txt"), log.ToString());
                     InvokePrivate(editor, "Select", null);
                     canvas.Children.Clear(); Pump(4);

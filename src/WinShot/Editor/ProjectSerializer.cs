@@ -55,6 +55,17 @@ internal sealed class AnnotationData
 
     public double? Thickness { get; set; }
 
+    /// <summary>
+    /// Freehand / highlighter only: the ink pen's height:width ratio, 1 = round.
+    /// Survey commits an ink resize as a SIGNED scaleX/scaleY on the path with
+    /// <c>vectorEffect:'none'</c> (svgAnnotationRenderers.jsx:300-318), so a non-uniform drag
+    /// makes the stroke genuinely elliptical — wider across than along. WinShot stores the
+    /// SCALED points, so without this the anisotropy lived only in the live drag's transform
+    /// and every rebuild (re-grab, undo/redo, restyle, reload) snapped the stroke back round.
+    /// Null in projects written before it existed, which read as 1.
+    /// </summary>
+    public double? PenAspect { get; set; }
+
     /// <summary><see cref="ShapeFillMode"/> name for rectangles/ellipses (None | Quarter | Solid).</summary>
     public string? Fill { get; set; }
 
@@ -493,7 +504,8 @@ internal static class ProjectSerializer
                 var pts = RequirePoints(a, 1);
                 return AnnotationFactory.CreateInk(
                     pts, RequireColor(a), RequireThickness(a),
-                    highlighter: a.Type == AnnotationData.TypeHighlighter);
+                    highlighter: a.Type == AnnotationData.TypeHighlighter,
+                    penAspect: a.PenAspect ?? 1);
             }
             case AnnotationData.TypeText:
             {

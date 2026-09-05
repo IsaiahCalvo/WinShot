@@ -185,7 +185,7 @@ public partial class EditorWindow : Window
                 if (element is Path ink && snap.Meta.Points is { Length: >= 1 } ip)
                 {
                     var pts = ip.Select(q => new Point(q[0], q[1])).ToList();
-                    ink.Data = PaperInk.Outline(pts, snap.Thickness);
+                    ink.Data = PaperInk.Outline(pts, snap.Thickness, aspect: snap.Meta.PenAspect ?? 1);
                     ink.Stroke = Brushes.Transparent;
                     ink.StrokeThickness = 0;
                     if (meta.Type == AnnotationData.TypeHighlighter)

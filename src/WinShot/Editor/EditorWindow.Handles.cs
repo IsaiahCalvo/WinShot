@@ -1197,20 +1197,27 @@ public partial class EditorWindow : Window
             };
 
         double baseThickness = _resizeBefore.Meta.Thickness ?? 4;
-        // Survey's matrix() equivalent: outline ONCE at the pre-drag width, then let the
-        // affine carry the stroke width with the geometry. Re-outlining the scaled points at
-        // a fixed width is what kept a 3x-enlarged stroke at hairline weight.
-        var outline = PaperInk.Outline(basePts, baseThickness);
-        outline.Transform = new MatrixTransform(sx, 0, 0, sy,
+        double baseAspect = _resizeBefore.Meta.PenAspect ?? 1;
+        // Survey's matrix() equivalent: outline ONCE at the pre-drag pen, then let the affine
+        // carry the stroke width with the geometry. Re-outlining the scaled points at a fixed
+        // width is what kept a 3x-enlarged stroke at hairline weight.
+        var outline = PaperInk.Outline(basePts, baseThickness, aspect: baseAspect);
+        var affine = outline.Transform?.Value ?? Matrix.Identity;   // the pre-drag pen ellipse
+        affine.Append(new Matrix(sx, 0, 0, sy,
             anchorX - anchorX * sx + shift.X,
-            anchorY - anchorY * sy + shift.Y);
+            anchorY - anchorY * sy + shift.Y));
+        outline.Transform = new MatrixTransform(affine);
         ink.RenderTransform = null;
         ink.Data = outline;
         meta.Points = raw;
-        // ponytail: the other three rebuild sites re-outline from meta.Thickness at ONE width
-        // (undo, restyle, load), so store the equivalent isotropic width. A non-uniform resize
-        // therefore reloads slightly rounder than it drew; upgrade path is persisting sx/sy.
-        meta.Thickness = baseThickness * Math.Sqrt(Math.Abs(sx * sy));
+        // The pen scales with the geometry, so a non-uniform drag leaves it ELLIPTICAL - which
+        // is what Survey's signed scaleX/scaleY on a vectorEffect:'none' path does. Persist both
+        // axes so the re-grab, undo/redo, restyle and reload rebuilds draw the same stroke the
+        // drag committed instead of snapping it back round.
+        double penX = baseThickness * Math.Abs(sx);
+        double penY = baseThickness * baseAspect * Math.Abs(sy);
+        meta.Thickness = penX;
+        meta.PenAspect = penX > 1e-6 ? penY / penX : 1;
         meta.Tx = 0;
         meta.Ty = 0;
         ink.Tag = meta;
@@ -1504,7 +1511,7 @@ public partial class EditorWindow : Window
                 if (fe is Path inkPath && snap.Points is { Length: > 0 } pp)
                 {
                     inkPath.RenderTransform = null;
-                    inkPath.Data = PaperInk.Outline(pp, meta.Thickness ?? 4);
+                    inkPath.Data = PaperInk.Outline(pp, meta.Thickness ?? 4, aspect: meta.PenAspect ?? 1);
                     meta.Points = pp.Select(p => new[] { p.X, p.Y }).ToArray();
                     meta.Tx = 0;
                     meta.Ty = 0;

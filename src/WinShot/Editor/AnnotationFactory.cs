@@ -712,13 +712,15 @@ internal static class AnnotationFactory
         return shape;
     }
 
-    public static Path CreateInk(IList<Point> points, Color color, double width, bool highlighter)
+    public static Path CreateInk(IList<Point> points, Color color, double width, bool highlighter,
+        double penAspect = 1)
     {
         var path = new Path
         {
             // Survey has ONE ink geometry for both tools: a constant-width swept disk
-            // (paperAnnotationGeometry.js:1542). No pressure, no taper, either tool.
-            Data = PaperInk.Outline(points, width),
+            // (paperAnnotationGeometry.js:1542). No pressure, no taper, either tool - until a
+            // non-uniform resize stretches the pen with the geometry (AnnotationData.PenAspect).
+            Data = PaperInk.Outline(points, width, aspect: penAspect),
             Fill = new SolidColorBrush(color),
             Stroke = Brushes.Transparent,
             StrokeThickness = 0,
