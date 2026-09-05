@@ -318,7 +318,12 @@ public partial class EditorWindow : Window
     private void BeginCalloutReEdit(CalloutAnnotation visual)
     {
         if (visual.Tag is not AnnotationData meta) return;
-        Select(null);
+        // Survey's handleRequestCalloutEditMode never touches the selection
+        // (PDFViewer.jsx:11207-11290): the callout stays selected all the way through the
+        // edit, so the top-row swatches keep patching it and it is still selected the instant
+        // the editor closes. The handles are hidden by UpdateSelectionVisual's edit gate, the
+        // way Survey's overlay returns null for the object being edited
+        // (SVGAnnotationLayer.jsx:5100-5101).
         var layout = visual.Layout;
         // A rotated callout carries a TransformGroup, not a bare TranslateTransform, so an
         // `is TranslateTransform` read silently dropped the whole drag offset and mounted the
@@ -363,9 +368,12 @@ public partial class EditorWindow : Window
                 _calloutReeditLayoutBefore = null;
                 _calloutReediting = false;
                 ev.Handled = true;
+                UpdateSelectionVisual(); // the editor is gone, so the handles come back
+                UpdateContextPanels();
             }
         };
         SeedTextFormatFromMeta(meta);
+        UpdateSelectionVisual(); // hides the handles while the editor owns the box
         UpdateContextPanels(); // brings up the rich-text row for the now-open editor
         Dispatcher.InvokeAsync(() =>
         {
@@ -390,7 +398,9 @@ public partial class EditorWindow : Window
         // carry THIS object's formatting or the re-edit both loses its own style and stamps
         // the previously formatted annotation's style onto it.
         SeedTextFormatFromMeta(meta);
-        Select(null);
+        // Survey's setEditingAnnotation leaves selectedIds alone (PDFViewer.jsx:11310-11328),
+        // so the box is still selected when the editor closes. UpdateSelectionVisual's edit
+        // gate hides the handles meanwhile (SVGAnnotationLayer.jsx:5100-5101).
         double x = Canvas.GetLeft(label), y = Canvas.GetTop(label);
         // Survey's existing-text commit deepClones the stored annotation, so angle and every
         // other geometry field survive the edit (textEditCommit.js:186-212). WinShot rebuilds
@@ -402,18 +412,19 @@ public partial class EditorWindow : Window
         y += off.Y;
         _reeditAngle = AnnotationTransform.AngleOf(label);
 
-        // Removing the old label is its own undoable step; committing the editor
-        // pushes the replacement add, so two Ctrl+Z steps restore the original.
-        Push(new EditorAction(
-            undo: () =>
-            {
-                if (!AnnotationCanvas.Children.Contains(label))
-                    AnnotationCanvas.Children.Add(label);
-            },
-            redo: () => AnnotationCanvas.Children.Remove(label)));
         // Survey's existing-text commit clones the original and only replaces text/height
         // (textEditCommit.js:190-210) — a blank re-edit keeps the box, it never deletes it.
         _reeditSource = label;
+        // The committed annotation KEEPS RENDERING during the edit: Survey draws it with
+        // `renderText(..., /*hideText*/ true)` (SVGAnnotationLayer.jsx:3896-3906), so the
+        // border, fill, dash and angle never change appearance — only the glyphs step aside
+        // for the chromeless editor. Plain/Bold/Huge are a Grid of [chrome Rectangle, inner
+        // TextBlock] (AnnotationFactory.cs:507-526), so hiding the inner child is exactly that
+        // render. Outline (Path) and Pill (Border) carry no chrome of their own, so they hide
+        // whole and the preview rectangle stands in.
+        _reeditHiddenGlyphs = label is Grid grid && grid.Children.Count > 1 ? grid.Children[1] : label;
+        _reeditHiddenGlyphs.Visibility = Visibility.Collapsed;
+        _reeditBox = ReferenceEquals(_reeditHiddenGlyphs, label) ? null : label;
 
         var style = Enum.TryParse(meta.Style, out TextStyle s) ? s : TextStyle.Plain;
         double fontSize = meta.FontSize is double fs && fs > 0 ? fs : AnnotationFactory.FontSizeFor(_thickness);
@@ -456,13 +467,27 @@ public partial class EditorWindow : Window
             Canvas.SetLeft(tb, x);
             Canvas.SetTop(tb, y);
         }
-        ShowTextPreview(Canvas.GetLeft(tb), Canvas.GetTop(tb), tb.Width, tb.Height,
-            AnnotationStyle.FillColorFrom(meta, Colors.Transparent),
-            meta.Thickness ?? NewTextStrokeWidth, AnnotationStyle.LineStyleFrom(meta),
-            meta.Color is string bhex && TryParseColor(bhex, out var bcol) ? bcol : Colors.Black);
+        // Only the chrome-less styles need a stand-in box; for everything else the committed
+        // annotation is still painting its own border, so a second rectangle would double it.
+        if (_reeditBox is null)
+            ShowTextPreview(Canvas.GetLeft(tb), Canvas.GetTop(tb), tb.Width, tb.Height,
+                AnnotationStyle.FillColorFrom(meta, Colors.Transparent),
+                meta.Thickness ?? NewTextStrokeWidth, AnnotationStyle.LineStyleFrom(meta),
+                meta.Color is string bhex && TryParseColor(bhex, out var bcol) ? bcol : Colors.Black);
+        // Survey's contentEditable overlay is rotated WITH the box
+        // (`transform: rotate(${g.angle}deg)`, transformOrigin 'center center',
+        // TextEditOverlay.jsx:553-566), so the caret sits inside the tilted box instead of in
+        // an axis-aligned ghost at its corner. RenderTransformOrigin keeps the pivot centred
+        // as the editor grows.
+        if (_reeditAngle != 0)
+        {
+            tb.RenderTransformOrigin = new Point(0.5, 0.5);
+            tb.RenderTransform = new RotateTransform(_reeditAngle);
+        }
         AnnotationCanvas.Children.Add(tb);
         _activeText = tb;
         HookTextEditor(tb);
+        UpdateSelectionVisual(); // hides the handles while the editor owns the box
         UpdateContextPanels(); // brings up the rich-text row for the now-open editor
         Dispatcher.InvokeAsync(() =>
         {
@@ -514,8 +539,17 @@ public partial class EditorWindow : Window
             // editor is open, which takes it out of SecondaryToolPanel's tree - so both hosts
             // and the strip itself have to count, or the guard silently stops firing exactly
             // when it matters (Survey's [data-rich-text-toolbar] opt-out, TextEditOverlay.jsx:445).
-            if (ReferenceEquals(node, SecondaryToolPanel) || ReferenceEquals(node, TextStylePanel)
-                || ReferenceEquals(node, EditorRichTextHost) || ReferenceEquals(node, TextEditPanel))
+            // Survey's document-level commit opts out of EXACTLY three markers —
+            // [data-rich-text-toolbar], [data-mini-toolbar], [data-font-color-picker]
+            // (TextEditOverlay.jsx:446-454) — and [data-rich-text-toolbar] is on the portalled
+            // strip ALONE (AppShell.jsx:1770). Every other chrome click, the top-row stroke
+            // swatch, the width input, the line-style and arrowhead dropdowns and the Aa button
+            // included, falls through and commits the edit. Naming SecondaryToolPanel here
+            // covered the whole top row, which also let KeepEditorOpenFor yank focus straight
+            // back out of SizeInput and made the stroke-width field impossible to type into.
+            // FontColorPopup needs no entry of its own: the logical walk reaches TextStylePanel
+            // from inside it (EditorWindow.xaml:567 sits within :550).
+            if (ReferenceEquals(node, TextStylePanel) || ReferenceEquals(node, EditorRichTextHost))
                 return true;
             node = LogicalTreeHelper.GetParent(node)
                 ?? (node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : null);
@@ -549,6 +583,18 @@ public partial class EditorWindow : Window
             if (_activeTextBox is Rect r) _activeTextBox = new Rect(r.X, r.Y, r.Width, grown);
         }
         if (_textPreview is not null) _textPreview.Height = Math.Max(1, tb.Height);
+        // Re-editing keeps the committed box on the canvas, so IT is the chrome that has to
+        // track the live bounds (Survey re-broadcasts liveTextEditBounds into the real
+        // annotation's render, TextEditOverlay.jsx:239-270). The chrome Rectangle stretches
+        // with the Grid; the rotation pivot is re-centred so the live box sits exactly where
+        // CommitText will rebuild it.
+        if (_reeditSource is Grid keep && Math.Abs(keep.Height - tb.Height) >= 0.5)
+        {
+            keep.Height = Math.Max(1, tb.Height);
+            if (_reeditAngle != 0)
+                AnnotationTransform.Apply(keep, AnnotationTransform.OffsetOf(keep), _reeditAngle,
+                    new Point(keep.Width / 2, keep.Height / 2));
+        }
     }
 
     /// <summary>
@@ -556,23 +602,31 @@ public partial class EditorWindow : Window
     /// (max width, TextEditOverlay.jsx:55-68) and <c>el.scrollHeight</c> for the wrapped
     /// content height (TextEditOverlay.jsx:224-232).
     /// </summary>
-    private (double MaxLineWidth, double ContentHeight) MeasureText(TextBox tb, double innerWidth)
+    private (double MaxLineWidth, double ContentHeight) MeasureText(TextBox tb, double innerWidth) =>
+        MeasureText(tb.Text ?? string.Empty,
+            new Typeface(tb.FontFamily, tb.FontStyle, tb.FontWeight, FontStretches.Normal),
+            tb.FontSize, innerWidth);
+
+    /// <summary>
+    /// Same measurement without an editor, for a restyle of a merely SELECTED text
+    /// (see <c>GrowStoredTextRect</c>).
+    /// </summary>
+    private (double MaxLineWidth, double ContentHeight) MeasureText(
+        string text, Typeface typeface, double fontSize, double innerWidth)
     {
-        var typeface = new Typeface(tb.FontFamily, tb.FontStyle, tb.FontWeight, FontStretches.Normal);
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        string text = tb.Text ?? string.Empty;
         double maxLine = 0;
         foreach (string line in text.Split('\n'))
         {
             var one = new FormattedText(line, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-                typeface, tb.FontSize, Brushes.Black, dpi);
+                typeface, fontSize, Brushes.Black, dpi);
             if (one.WidthIncludingTrailingWhitespace > maxLine) maxLine = one.WidthIncludingTrailingWhitespace;
         }
         var wrapped = new FormattedText(text.Length == 0 ? " " : text, CultureInfo.CurrentUICulture,
-            FlowDirection.LeftToRight, typeface, tb.FontSize, Brushes.Black, dpi)
+            FlowDirection.LeftToRight, typeface, fontSize, Brushes.Black, dpi)
         {
             MaxTextWidth = Math.Max(1, innerWidth),
-            LineHeight = tb.FontSize * AnnotationFactory.TextLineHeightFactor,
+            LineHeight = fontSize * AnnotationFactory.TextLineHeightFactor,
         };
         return (maxLine, wrapped.Height);
     }
@@ -591,6 +645,9 @@ public partial class EditorWindow : Window
         _activeTextBox = null;
         var reeditSource = _reeditSource;
         _reeditSource = null;
+        var hiddenGlyphs = _reeditHiddenGlyphs;
+        _reeditHiddenGlyphs = null;
+        _reeditBox = null;
         double reeditAngle = _reeditAngle;
         _reeditAngle = 0;
         HideTextPreview();
@@ -601,7 +658,11 @@ public partial class EditorWindow : Window
         UpdateContextPanels(); // Survey clears the rich-text row at the commit boundary
         // Survey discards only BLANK NEW text (textEditCommit.js:136); a re-edit blanked to
         // nothing still commits, so the box survives as an empty bordered rectangle.
-        if (reeditSource is null && string.IsNullOrWhiteSpace(text)) return;
+        if (reeditSource is null && string.IsNullOrWhiteSpace(text))
+        {
+            if (hiddenGlyphs is not null) hiddenGlyphs.Visibility = Visibility.Visible;
+            return;
+        }
 
         var style = tb.Tag is TextStyle s ? s : TextStyle.Plain;
         Point topLeft = new(x, y);
@@ -673,10 +734,21 @@ public partial class EditorWindow : Window
         textMeta.FontColor = ToHex(glyphColor);
         textMeta.Angle = reeditAngle;
         label.Tag = textMeta;
+        // The committed box stayed on the canvas for the whole edit, so the commit is ONE
+        // step: swap it for the rebuilt label. (It used to be two — a removal pushed at edit
+        // start plus this add — which meant one Ctrl+Z left the text gone and the caret's box
+        // missing.) Survey checkpoints the existing-text commit once (textEditCommit.js:186-212).
+        if (hiddenGlyphs is not null) hiddenGlyphs.Visibility = Visibility.Visible;
         Push(new EditorAction(
-            undo: () => AnnotationCanvas.Children.Remove(label),
+            undo: () =>
+            {
+                AnnotationCanvas.Children.Remove(label);
+                if (reeditSource is not null && !AnnotationCanvas.Children.Contains(reeditSource))
+                    AnnotationCanvas.Children.Add(reeditSource);
+            },
             redo: () =>
             {
+                if (reeditSource is not null) AnnotationCanvas.Children.Remove(reeditSource);
                 if (!AnnotationCanvas.Children.Contains(label))
                     AnnotationCanvas.Children.Add(label);
             }));
@@ -691,7 +763,29 @@ public partial class EditorWindow : Window
             AnnotationTransform.SetAngle(label, reeditAngle);
         }
         // Survey's commit only clears the edit state (setEditingAnnotation(null),
-        // PDFViewer.jsx:31936-31942) — no selection chrome appears on the new label.
+        // PDFViewer.jsx:31936-31942) — selectedIds are left INTACT, so a box that was selected
+        // when the editor opened is still selected the instant it closes and the very next
+        // Bold press restyles it. WinShot rebuilds the element, so the selection has to be
+        // re-pointed at the replacement; a NEW text was never selected and stays unselected.
+        if (reeditSource is not null && ReplaceInSelection(reeditSource, label))
+        {
+            UpdateSelectionVisual();
+            SyncChromeFromSelection();
+            UpdateContextPanels();
+        }
+    }
+
+    /// <summary>
+    /// Re-points the selection at a rebuilt element. Returns false when the old one was not
+    /// selected, so nothing gets selected that was not selected before.
+    /// </summary>
+    private bool ReplaceInSelection(UIElement before, UIElement after)
+    {
+        bool hit = false;
+        for (int i = 0; i < _selection.Count; i++)
+            if (ReferenceEquals(_selection[i], before)) { _selection[i] = after; hit = true; }
+        if (ReferenceEquals(_selected, before)) { _selected = after; hit = true; }
+        return hit;
     }
 
     private void CancelText()
@@ -702,17 +796,27 @@ public partial class EditorWindow : Window
         _activeTextBox = null;
         var reeditSource = _reeditSource;
         _reeditSource = null;
+        var hiddenGlyphs = _reeditHiddenGlyphs;
+        _reeditHiddenGlyphs = null;
+        _reeditBox = null;
+        double cancelAngle = _reeditAngle;
         _reeditAngle = 0;
         HideTextPreview();
         AnnotationCanvas.Children.Remove(tb);
-        // Escape during a re-edit is a true no-op: put the original label back and drop the
-        // removal step BeginTextReEdit pushed (Survey's onEditCancel, TextEditOverlay.jsx:398-403).
-        if (reeditSource is not null)
+        // Escape during a re-edit is a true no-op: the original label never left the canvas,
+        // so all that has to come back is its glyphs — and its mount-time height, in case the
+        // live grow stretched it (Survey's onEditCancel, TextEditOverlay.jsx:398-403).
+        if (hiddenGlyphs is not null) hiddenGlyphs.Visibility = Visibility.Visible;
+        if (reeditSource is Grid cancelled
+            && (reeditSource.Tag as AnnotationData)?.Rect is { Length: >= 4 } r0 && r0[3] >= 8
+            && Math.Abs(cancelled.Height - r0[3]) >= 0.5)
         {
-            if (!AnnotationCanvas.Children.Contains(reeditSource))
-                AnnotationCanvas.Children.Add(reeditSource);
-            DiscardLastAction();
+            cancelled.Height = r0[3];
+            if (cancelAngle != 0)
+                AnnotationTransform.Apply(cancelled, AnnotationTransform.OffsetOf(cancelled), cancelAngle,
+                    new Point(cancelled.Width / 2, cancelled.Height / 2));
         }
+        UpdateSelectionVisual(); // the editor is gone, so the handles come back
         UpdateContextPanels();
     }
 

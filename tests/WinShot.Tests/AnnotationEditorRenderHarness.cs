@@ -1619,6 +1619,44 @@ public class AnnotationEditorRenderHarness
                         r2.AppendLine($"[R2-F alignCell] undoDepth {depth0} -> {depth1} (delta={depth1 - depth0})" +
                             $" expect delta==1 -> {(depth1 - depth0 == 1 ? "PASS" : "FAIL")}");
                     }
+                    // R2-G: a restyle of a merely SELECTED text has to RE-MEASURE. Survey
+                    // re-measures on every style change (applyStyle -> rAF(broadcastLiveBounds),
+                    // TextEditOverlay.jsx:281-291; outerH = max(scrollHeight + 2*padY, floorH)
+                    // at :238-247) and the commit stores that grow-only height
+                    // (textEditCommit.js:202). WinShot rebuilt the label at the STORED rect, so
+                    // the line a bigger font adds spilled straight out of the border.
+                    Check("TextToolBtn");
+                    Click(0.22, 0.30); Pump(3);
+                    if (Live() is TextBox tg)
+                    {
+                        tg.Text = "Regrow gjpq wraps onto several lines";
+                        Pump(4);
+                    }
+                    PickSize(12);
+                    Invoke("CommitText"); Pump(4);
+                    var growEl = LastText();
+                    selList.Clear(); if (growEl is not null) selList.Add(growEl);
+                    selField.SetValue(editor, growEl);
+                    Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(3);
+                    var growBefore = growEl?.Tag as AnnotationData;
+                    double gH0 = growBefore?.Rect?[3] ?? 0;
+                    r2.AppendLine($"[R2-G regrow] before size={growBefore?.FontSize} rectH={gH0:F1} " +
+                        $"gridH={growEl?.Height:F1}");
+                    PickSize(48); Pump(4);
+                    var grownEl = (selList.Count > 0 ? selList[0] as FrameworkElement : null) ?? LastText();
+                    grownEl?.UpdateLayout();
+                    var grownMeta = grownEl?.Tag as AnnotationData;
+                    var grownGlyphs = TextOf(grownEl);
+                    double gH1 = grownMeta?.Rect?[3] ?? 0;
+                    double pad = AnnotationFactory.TextPadding;
+                    double contentRoom = (grownEl?.ActualHeight ?? 0) - 2 * pad
+                        + (grownMeta?.FontSize ?? 0) * AnnotationFactory.TextDescenderRatio;
+                    r2.AppendLine($"[R2-G regrow] after size={grownMeta?.FontSize} rectH={gH1:F1} " +
+                        $"gridH={grownEl?.ActualHeight:F1} glyphsH={grownGlyphs?.ActualHeight:F1} room={contentRoom:F1}");
+                    r2.AppendLine($"[R2-G expect] box grew AND the glyphs fit inside it -> " +
+                        $"{(gH1 > gH0 + 0.5 && grownGlyphs is not null && grownGlyphs.ActualHeight <= contentRoom + 0.5 ? "PASS" : "FAIL")}");
+                    CloseUp(grownEl, "textfmt-selected-restyle-regrow.png");
+
                     File.WriteAllText(Path.Combine(outDir, "text-format-round2.txt"), r2.ToString());
                     Shot("pointer-text-format-round2.png");
 
@@ -1742,6 +1780,118 @@ public class AnnotationEditorRenderHarness
 
                     File.WriteAllText(Path.Combine(outDir, "text-format-round3.txt"), r3.ToString());
                     Shot("pointer-text-format-round3.png");
+
+                    // ---- ROUND 4: the fixes -------------------------------------------
+                    var r4 = new System.Text.StringBuilder();
+                    var previewField = typeof(EditorWindow).GetField("_textPreview", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var isChrome = typeof(EditorWindow).GetMethod("IsFormatChrome", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    bool Chrome(DependencyObject d) => (bool)isChrome.Invoke(editor, new object?[] { d })!;
+
+                    // R4-A (gap 4): Survey opts out of the rich-text strip ALONE
+                    // (TextEditOverlay.jsx:446-454), so the top row commits the edit and the
+                    // stroke-width field can actually take focus.
+                    r4.AppendLine($"[R4-A isFormatChrome] bold={Chrome(boldBtn)} fontFamily={Chrome(famBox)} " +
+                        $"sizeInput={Chrome(sizeInput)} Aa={Chrome(aaBtn)} " +
+                        $"expect bold&&family && !sizeInput && !Aa -> " +
+                        $"{(Chrome(boldBtn) && Chrome(famBox) && !Chrome(sizeInput) && !Chrome(aaBtn) ? "PASS" : "FAIL")}");
+
+                    // R4-B (gap 2): select -> Aa -> format -> commit. Survey leaves selectedIds
+                    // intact through the whole loop (PDFViewer.jsx:11310-11328, :31936-31942),
+                    // so the object is still selected — and still restyleable — after the commit.
+                    Check("SelectToolBtn");
+                    var keepT = LastText();
+                    selList.Clear(); if (keepT is not null) selList.Add(keepT);
+                    selField.SetValue(editor, keepT);
+                    Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(3);
+                    Fire(aaBtn); Pump(3);
+                    bool selDuringEdit = Sel() is not null;
+                    var rectDuring = (FrameworkElement)editor.FindName("SelectionRect")!;
+                    r4.AppendLine($"[R4-B duringEdit] selected={Desc(Sel())} handlesHidden={rectDuring.Visibility != Visibility.Visible} " +
+                        $"Aa={aaBtn.IsEnabled} strip={strip.Visibility}");
+                    Invoke("CommitText"); Pump(4);
+                    var afterCommitSel = Sel();
+                    bool selAfterCommit = afterCommitSel is not null
+                        && canvas.Children.Contains(afterCommitSel);
+                    r4.AppendLine($"[R4-B afterCommit] selected={Desc(afterCommitSel)} inTree={selAfterCommit} Aa={aaBtn.IsEnabled} " +
+                        $"expect selected && enabled -> {(selDuringEdit && selAfterCommit && aaBtn.IsEnabled ? "PASS" : "FAIL")}");
+                    // And the very next Bold press restyles it, which is the user's complaint.
+                    bool boldBefore = (afterCommitSel?.Tag as AnnotationData)?.Bold == true;
+                    Fire(boldBtn); Pump(3);
+                    bool boldAfter = (Sel()?.Tag as AnnotationData)?.Bold == true;
+                    r4.AppendLine($"[R4-B nextBold] bold {boldBefore} -> {boldAfter} " +
+                        $"expect flipped -> {(boldBefore != boldAfter ? "PASS" : "FAIL")}");
+
+                    // R4-C (gap 3): a ROTATED, CLOUD-bordered text box re-edited. Survey keeps
+                    // rendering the real annotation with hideText=true, so nothing changes
+                    // appearance and the chromeless overlay is rotated with the box
+                    // (SVGAnnotationLayer.jsx:3896-3906, TextEditOverlay.jsx:553-566).
+                    Check("TextToolBtn"); Click(0.28, 0.34); Pump(3);
+                    if (Live() is TextBox rt) { rt.Text = "Tilted"; Pump(3); }
+                    Invoke("CommitText"); Pump(4);
+                    var tilt = LastText();
+                    if (tilt is not null)
+                    {
+                        if (tilt.Tag is AnnotationData tm2) { tm2.LineStyle = "cloud"; tilt.Tag = tm2; }
+                        AnnotationTransform.SetAngle(tilt, 30);
+                        Pump(2);
+                        Check("SelectToolBtn");
+                        selList.Clear(); selList.Add(tilt);
+                        selField.SetValue(editor, tilt);
+                        Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(3);
+                        Fire(aaBtn); Pump(3);
+                        bool stillDrawn = canvas.Children.Contains(tilt);
+                        var glyphs = (tilt as Grid)?.Children.OfType<TextBlock>().FirstOrDefault();
+                        var chromeRect = (tilt as Grid)?.Children.OfType<System.Windows.Shapes.Shape>().FirstOrDefault();
+                        double editorAngle = Live() is null ? -1 : AnnotationRotation.Normalize(
+                            (Live()!.RenderTransform as RotateTransform)?.Angle ?? 0);
+                        bool noStandIn = previewField.GetValue(editor) is null;
+                        r4.AppendLine($"[R4-C rotatedCloudReEdit] labelStillDrawn={stillDrawn} " +
+                            $"glyphsHidden={glyphs?.Visibility != Visibility.Visible} " +
+                            $"borderStillPainted={chromeRect?.Visibility == Visibility.Visible} " +
+                            $"standInRect={(noStandIn ? "none" : "present")} editorAngle={editorAngle:F1} " +
+                            $"expect drawn && glyphsHidden && none && angle==30 -> " +
+                            $"{(stillDrawn && glyphs?.Visibility != Visibility.Visible && noStandIn && Math.Abs(editorAngle - 30) < 0.5 ? "PASS" : "FAIL")}");
+                        Shot("pointer-text-reedit-rotated.png");
+                        Invoke("CommitText"); Pump(4);
+                        var tiltAfter = LastText();
+                        r4.AppendLine($"[R4-C afterCommit] oldStillInTree={canvas.Children.Contains(tilt)} " +
+                            $"angle={(tiltAfter is null ? -1 : AnnotationTransform.AngleOf(tiltAfter)):F1} " +
+                            $"selected={Desc(Sel())} " +
+                            $"expect oldGone && angle==30 -> " +
+                            $"{(!canvas.Children.Contains(tilt) && tiltAfter is not null && Math.Abs(AnnotationTransform.AngleOf(tiltAfter) - 30) < 0.5 ? "PASS" : "FAIL")}");
+                        // One Ctrl+Z now restores the original box, not an empty canvas.
+                        int dz0 = ((System.Collections.ICollection)undoField!.GetValue(editor)!).Count;
+                        Hist("UndoAsync");
+                        r4.AppendLine($"[R4-C undoOnce] depth {dz0} -> " +
+                            $"{((System.Collections.ICollection)undoField.GetValue(editor)!).Count} " +
+                            $"originalBack={canvas.Children.Contains(tilt)} " +
+                            $"expect originalBack -> {(canvas.Children.Contains(tilt) ? "PASS" : "FAIL")}");
+                        Hist("RedoAsync");
+                    }
+
+                    // R4-D (gap 5): with two marks selected Survey publishes no annotation, so
+                    // canEnterTextEdit is false and the Aa button renders disabled
+                    // (SVGAnnotationLayer.jsx:1562-1573, AppShell.jsx:2650-2667).
+                    Check("SelectToolBtn");
+                    var twoA = canvas.Children.OfType<FrameworkElement>()
+                        .LastOrDefault(f => (f.Tag as AnnotationData)?.Type == AnnotationData.TypeText);
+                    var twoB = canvas.Children.OfType<CalloutAnnotation>().LastOrDefault();
+                    if (twoA is not null && twoB is not null)
+                    {
+                        selList.Clear(); selList.Add(twoA); selList.Add(twoB);
+                        selField.SetValue(editor, twoB);
+                        Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(3);
+                        bool many = !aaBtn.IsEnabled;
+                        r4.AppendLine($"[R4-D multiSelectAa] count={selList.Count} Aa={aaBtn.IsEnabled} " +
+                            $"expect disabled -> {(many ? "PASS" : "FAIL")}");
+                        Fire(aaBtn); Pump(3);
+                        r4.AppendLine($"[R4-D multiSelectAaClick] editorOpened={(Live() is null ? "no" : "YES")} " +
+                            $"expect no -> {(Live() is null ? "PASS" : "FAIL")}");
+                        selList.Clear(); selField.SetValue(editor, null);
+                        Invoke("SyncChromeFromSelection"); Invoke("UpdateContextPanels"); Pump(2);
+                    }
+                    File.WriteAllText(Path.Combine(outDir, "text-format-round4.txt"), r4.ToString());
+                    Shot("pointer-text-format-round4.png");
                 }
                 // ---- END TEXT FORMAT PARITY PROBE ---------------------------------
                 // --- Effects (WinShot-only; Survey has no equivalent): pixelate and blur. ---

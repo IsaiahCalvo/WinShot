@@ -306,10 +306,10 @@ public partial class EditorWindow : Window
     private static string ToHex(Color c) => $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
 
     /// <summary>
-    /// With a text/callout editor open Survey keeps the object SELECTED, so the top-row
-    /// stroke/width/fill/line-style controls keep patching it (PDFViewer.jsx:7498-7521,
-    /// SVGAnnotationLayer.jsx:1051-1055). WinShot clears the selection to hide the handles,
-    /// so hand the restyle path the edit target explicitly.
+    /// The object a style click patches while an editor is open and NOTHING is selected — i.e.
+    /// during creation of a brand new text or callout, which Survey never selects either. A
+    /// re-edit keeps its selection now (Survey's setEditingAnnotation leaves selectedIds alone,
+    /// PDFViewer.jsx:11310-11328), so that path goes through SelectionList like every other.
     /// </summary>
     private UIElement? EditTarget() => _activeText is null
         ? null
@@ -423,8 +423,12 @@ public partial class EditorWindow : Window
         if (meta.Type == AnnotationData.TypeText)
         {
             var beforeEl = fe;
+            // Survey re-measures on the SAME click as the style change, so the box grows under
+            // the new metrics before anything is drawn (applyStyle -> rAF(broadcastLiveBounds)).
+            double dh = GrowStoredTextRect(after);
             var afterEl = CreateTextVisual(after);
             CopyPlacement(beforeEl, afterEl);
+            if (dh > 0) ReanchorGrownText(beforeEl, afterEl, after, dh);
             ReplaceAnnotation(beforeEl, afterEl);
             Push(new EditorAction(
                 undo: () => ReplaceAnnotation(afterEl, beforeEl),
@@ -459,6 +463,69 @@ public partial class EditorWindow : Window
                 undo: () => ApplyTextFormat(fe, before),
                 redo: () => ApplyTextFormat(fe, after)), apply: false);
         }
+    }
+
+    /// <summary>
+    /// Re-measures a stored text box under the style it is ABOUT to be rebuilt with, and grows
+    /// its height to fit. Survey does this on every style change: applyStyle queues
+    /// <c>rAF(broadcastLiveBounds)</c> (TextEditOverlay.jsx:281-291) and broadcastLiveBounds
+    /// recomputes <c>outerH = max(scrollHeight + 2*padY, floorH)</c> (:238-247), which is the
+    /// height the commit then stores (textEditCommit.js:202). The open-editor path gets that
+    /// from GrowTextEditor; a restyle of a merely SELECTED object has no editor, so without
+    /// this a Bold or bigger-font click added a wrapped line that spilled out of the border.
+    /// Grow-only, and the width is left alone (Survey re-broadcasts the unchanged g.outerW).
+    /// </summary>
+    /// <returns>How much the stored height grew, 0 when nothing changed.</returns>
+    private double GrowStoredTextRect(AnnotationData a)
+    {
+        Enum.TryParse(a.Style, out TextStyle style);
+        // Outline and Pill have no box to grow at all — CreateStyledTextLabel returns the bare
+        // glyph before it builds one (AnnotationFactory.cs:495-496).
+        if (style is TextStyle.Outline or TextStyle.Pill) return 0;
+        if (a.Rect is not { Length: >= 4 } rect || rect[2] <= 1) return 0;
+        double fontSize = a.FontSize is double fs && fs > 0 ? fs : 16;
+        var typeface = new Typeface(
+            new FontFamily(a.FontFamily ?? AnnotationFactory.DefaultTextFontFamily),
+            a.Italic == true ? FontStyles.Italic : FontStyles.Normal,
+            a.Bold == true ? FontWeights.Bold : FontWeights.Normal,
+            FontStretches.Normal);
+        const double pad = AnnotationFactory.TextPadding;
+        double contentH = MeasureText(a.Text ?? string.Empty, typeface, fontSize,
+            Math.Max(1, rect[2] - 2 * pad)).ContentHeight;
+        double grown = Math.Max(contentH + 2 * pad, rect[3]);
+        if (grown - rect[3] < 0.5) return 0;
+        // Clone() is a MemberwiseClone, so `before` and the live meta share this array — the
+        // grown height has to land in a NEW one or undo would replay the new geometry.
+        a.Rect = new[] { rect[0], rect[1], rect[2], grown };
+        return grown - rect[3];
+    }
+
+    /// <summary>
+    /// Survey pins the ROTATED top-left corner when a box's height changes, because the box
+    /// rotates about its own centre (textEditCommit.js:204-212) — the same compensation
+    /// CommitText applies. Also re-centres the pivot on the taller replacement, which would
+    /// otherwise inherit the original's centre through <c>CopyPlacement</c>.
+    /// </summary>
+    private static void ReanchorGrownText(
+        FrameworkElement beforeEl, FrameworkElement afterEl, AnnotationData after, double dh)
+    {
+        double angle = AnnotationTransform.AngleOf(beforeEl);
+        if (angle == 0 || after.Rect is not { Length: >= 4 } rect) return;
+        double rad = angle * Math.PI / 180;
+        double x = Canvas.GetLeft(afterEl) - dh / 2 * Math.Sin(rad);
+        double y = Canvas.GetTop(afterEl) - dh / 2 * (1 - Math.Cos(rad));
+        Canvas.SetLeft(afterEl, x);
+        Canvas.SetTop(afterEl, y);
+        rect[0] = x;
+        rect[1] = y;
+        // Points[0] is what a reload positions the label from; the inner arrays are shared with
+        // `before` by MemberwiseClone, so replace rather than mutate.
+        if (after.Points is { Length: >= 1 } pts)
+            after.Points = pts.Select((p, i) => i == 0 ? new[] { x, y } : p).ToArray();
+        // Measure/arrange first so SetAngle resolves the pivot the rotate handle will use.
+        afterEl.Measure(new Size(rect[2], rect[3]));
+        afterEl.Arrange(new Rect(x, y, rect[2], rect[3]));
+        AnnotationTransform.SetAngle(afterEl, angle);
     }
 
     private FrameworkElement CreateTextVisual(AnnotationData a)
