@@ -1716,14 +1716,15 @@ public partial class App : Application
         try
         {
             var sw = Stopwatch.StartNew();
-            // Only OcrService's own InvalidOperationException messages are written for the
-            // user (no language pack installed, and so on), so only this call is allowed to
-            // put one on screen; anything the rest of the flow throws goes through the
-            // generic handler instead of quoting the framework.
+            // OcrUnavailableException is the one exception in this flow whose message is
+            // written for the user, so it is the one allowed on screen verbatim. Catching
+            // InvalidOperationException instead caught the type and not the message: any
+            // framework InvalidOperationException from the SoftwareBitmap/GDI+ work inside
+            // ExtractAsync reached the user as raw exception text.
             result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
             LogPerf("ocr extract", sw);
         }
-        catch (InvalidOperationException ex)
+        catch (OcrUnavailableException ex)
         {
             Log.Info($"OCR unavailable: {ex.Message}");
             ShowBalloon("OCR unavailable", ex.Message, ToastSeverity.Error);
@@ -1755,7 +1756,10 @@ public partial class App : Application
         catch (COMException ex)
         {
             Log.Info($"OCR clipboard copy skipped: {ex.Message}");
-            ShowBalloon("Clipboard unavailable", "Text was found, but Windows clipboard is busy.", ToastSeverity.Error);
+            // One condition reads one way across surfaces: this used to name the state
+            // ("the clipboard is busy") without saying what to do about it, while every
+            // other copy path said to try again in a moment.
+            ShowBalloon("Copy failed", FriendlyError.For(ex), ToastSeverity.Error);
         }
     }
 

@@ -87,7 +87,7 @@ public sealed class FirstRunWelcomeWindow : WF.Form
         {
             Scale = _scale,
             BackColor = ThemePalette.ToolbarBg,
-            FillColor = ThemePalette.AccentDeep,
+            FillColor = ThemePalette.Accent,
             Size = new SD.Size(S(78), S(26)),
             Text = "Got it",
         };

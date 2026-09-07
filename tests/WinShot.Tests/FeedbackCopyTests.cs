@@ -1,5 +1,6 @@
 ﻿using System.IO;
 using WinShot.Core;
+using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -35,7 +36,9 @@ public class FeedbackCopyTests
         FriendlyError.For(new IOException()),
         FriendlyError.For(new System.Net.Http.HttpRequestException()),
         FriendlyError.For(new Exception()),
-        "Text was found, but Windows clipboard is busy.",
+        // The busy clipboard has one sentence across every surface now, so the OCR-only
+        // wording that named the state without saying what to do about it is gone.
+        FriendlyError.For(new ClipboardBusyException(null)),
         "No previous region yet — capture a region first.",
         "Couldn't check unfinished recordings. Temp files were not changed.",
         "WinShot couldn't reach the internet. Check your connection and try again.",
@@ -234,6 +237,47 @@ public class FeedbackCopyTests
     }
 
     /// <summary>
+    /// A busy clipboard is the one failure with an answer better than "check the log", and none
+    /// of the three shapes the copy paths actually throw used to reach that line. The image copy
+    /// is hand-rolled Win32, so its give-up threw a Win32Exception whose own message was
+    /// "Clipboard is busy." and the user read "Something went wrong"; the file copy threw a bare
+    /// ExternalException and was told to retake a capture that was fine. Only SetText's
+    /// COMException landed. All three are the same condition and now say the same thing.
+    /// </summary>
+    [Fact]
+    public void EveryShapeOfABusyClipboardSaysTheClipboardIsBusy()
+    {
+        const string expected = "Another app is holding the clipboard. Try again in a moment.";
+        const int clipboardCantOpen = unchecked((int)0x800401D0);
+
+        // CaptureService.CopyToClipboard's give-up, wrapping the last Win32 error for the log.
+        var busy = new ClipboardBusyException(
+            new System.ComponentModel.Win32Exception(1418, "OpenClipboard failed"));
+        Assert.Equal(expected, FriendlyError.For(busy));
+        Assert.NotNull(busy.InnerException);
+
+        // Clipboard.SetFileDropList (the card's "copy file", History, a finished recording).
+        Assert.Equal(expected, FriendlyError.For(new System.Runtime.InteropServices.ExternalException(
+            "Requested Clipboard operation did not succeed.", clipboardCantOpen)));
+
+        // Clipboard.SetText (the OCR path).
+        Assert.Equal(expected, FriendlyError.For(new System.Runtime.InteropServices.COMException(
+            "OpenClipboard Failed", clipboardCantOpen)));
+    }
+
+    /// <summary>
+    /// ...and the reason the mapper keys on the HRESULT rather than on the type: a bare
+    /// Win32Exception is a failed Process.Start as often as a clipboard, so it must not be
+    /// read as one just because its native code happens to be ERROR_ACCESS_DENIED.
+    /// </summary>
+    [Fact]
+    public void AFailedProcessStartIsStillNotAClipboardFailure()
+    {
+        string message = FriendlyError.For(new System.ComponentModel.Win32Exception(5, "CreateProcess failed"));
+        Assert.DoesNotContain("clipboard", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Trim walks the message one word at a time and re-measures the whole remainder each
     /// pass, so its cost is quadratic. Nothing produces a huge message today, but Trim is
     /// reachable from any future caller and it runs on the UI thread.
@@ -250,5 +294,40 @@ public class FeedbackCopyTests
         Assert.EndsWith("…", cut);
         Assert.True(ToastWindow.LinesNeeded(cut, column) <= 3, cut);
         Assert.True(clock.ElapsedMilliseconds < 2000, $"Trim took {clock.ElapsedMilliseconds} ms");
+    }
+
+    /// <summary>
+    /// The quick-actions card answers a failed copy on its own status flash rather than
+    /// raising a toast over itself, which means the flash now carries whole sentences and
+    /// not just the two-word OCR statuses it was built for. The flash paints into the card
+    /// rect with EllipsisCharacter trimming, so a line that does not fit loses its tail —
+    /// and the tail is the half that says to try again in a moment. Measured on the
+    /// smallest card the size slider makes, at 100 %, which is the tightest box there is.
+    /// </summary>
+    [Fact]
+    public void TheCardsStatusFlashHoldsEveryFailureLineACopyCanProduce()
+    {
+        var card = QuickAccessOverlayLayout.Calculate(new SD.Size(1920, 1080), sizePercent: 0, dpi: 96).CardBounds;
+        using var font = ThemePalette.UiFont(ThemePalette.PinnedCardLabelPt);
+        using var bmp = new SD.Bitmap(card.Width, card.Height);
+        using var g = SD.Graphics.FromImage(bmp);
+
+        var tooBig = new List<string>();
+        foreach (string m in new[]
+        {
+            FriendlyError.For(new ClipboardBusyException(null)),
+            FriendlyError.For(new OutOfMemoryException()),
+            FriendlyError.For(new IOException()),
+            FriendlyError.For(new Exception()),
+            "No text found",
+            "Text copied",
+        })
+        {
+            SD.SizeF wrapped = g.MeasureString(m, font, card.Width);
+            if (wrapped.Height > card.Height)
+                tooBig.Add($"{wrapped.Width:0}x{wrapped.Height:0} in {card.Width}x{card.Height}: \"{m}\"");
+        }
+
+        Assert.True(tooBig.Count == 0, string.Join(" | ", tooBig));
     }
 }

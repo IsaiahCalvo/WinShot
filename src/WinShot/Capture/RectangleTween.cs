@@ -20,6 +20,10 @@ internal sealed class RectangleTween
 {
     private static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(WinShot.Core.Motion.GlideDurationMs);
 
+    /// <summary>How far past the target an eased amount may carry the rect. Comfortably above
+    /// EaseOutBack's ~1.10 peak and low enough that nonsense stays on screen.</summary>
+    private const float MaxOvershoot = 1.2f;
+
     private readonly Stopwatch _clock = new();
     private SD.RectangleF _from;
     private SD.RectangleF _to;
@@ -50,27 +54,40 @@ internal sealed class RectangleTween
 
     /// <summary>Advances to the current wall-clock position. Returns whether it is still running.</summary>
     public bool Update() =>
-        Update(Duration.Ticks <= 0 ? 1f : (float)_clock.Elapsed.Ticks / Duration.Ticks);
+        // Clamped, because the overload below ends only on an exact 1.0 so that an eased
+        // caller may overshoot past it. This one owns a plain linear clock with no overshoot
+        // in it, and a late frame lands past the duration routinely.
+        Update(Duration.Ticks <= 0 ? 1f : Math.Min(1f, (float)_clock.Elapsed.Ticks / Duration.Ticks));
 
     /// <summary>
     /// Advances to an explicit amount, for callers that already own the clock and the curve
     /// (<see cref="WinShot.Core.Motion.Run"/>). Without this the caller's ease was dead code:
     /// it handed in EaseOutCubic and the rect kept reading its own stopwatch through a plain
     /// lerp, so the pill glided at constant velocity while everything else eased.
+    ///
+    /// The end is the caller's exact 1.0 and nothing else, which is what
+    /// <see cref="WinShot.Core.Motion.Run"/> delivers on its last frame. An eased amount above
+    /// 1 is a deliberate overshoot — EaseOutBack sails past the target and settles back — and
+    /// treating that as the end would snap the rect home partway through the very curve the
+    /// caller reached for.
     /// </summary>
     public bool Update(float amount)
     {
         if (!IsActive)
             return false;
 
-        if (amount >= 1f)
+        if (amount == 1f)
         {
             Current = SD.Rectangle.Round(_to);
             Stop();
             return false;
         }
 
-        amount = Math.Max(0f, amount);
+        // Bounded, not clamped to 1: an ease is allowed past the target and nothing else is.
+        // EaseOutBack peaks near 1.10, so the ceiling leaves the whole curve room while a
+        // garbage amount (infinity, from a divide by a zero duration) still cannot round a
+        // coordinate to int.MinValue.
+        amount = Math.Clamp(float.IsNaN(amount) ? 0f : amount, 0f, MaxOvershoot);
         Current = SD.Rectangle.Round(new SD.RectangleF(
             Lerp(_from.X, _to.X, amount),
             Lerp(_from.Y, _to.Y, amount),

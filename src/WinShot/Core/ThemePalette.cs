@@ -22,10 +22,32 @@ public static class ThemePalette
 
     // Single accent identity (macOS dark-mode system blue).
     public static readonly SD.Color Accent = SD.Color.FromArgb(0x0A, 0x84, 0xFF);
-    public static readonly SD.Color AccentHover = SD.Color.FromArgb(0x40, 0x9C, 0xFF);
-    /// <summary>Theme.xaml's AccentDeepColor: the same accent, deepened only where WHITE text
-    /// sits on it (white on Accent is 3.65:1). Fills only — never a border or a glyph.</summary>
-    public static readonly SD.Color AccentDeep = SD.Color.FromArgb(0x0A, 0x73, 0xE0);
+
+    // Interaction shades for a SATURATED fill, mirroring Theme.xaml's HoverShade/PressedShade.
+    // Layer these over the fill; they are alpha, not colours of their own.
+    public static readonly SD.Color HoverShade = SD.Color.FromArgb(0x1F, 0x00, 0x00, 0x00);
+    public static readonly SD.Color PressedShade = SD.Color.FromArgb(0x2E, 0x00, 0x00, 0x00);
+
+    /// <summary>
+    /// The accent hovered, as one opaque colour for the WinForms fills that cannot layer
+    /// (<c>FlatAppearance.MouseOverBackColor</c> takes a single colour). Lightening the accent
+    /// instead — the old #409CFF — took the white label on top to 2.83:1, below even the 3:1
+    /// floor for graphics, on the affirmative button of every dialog. Dipping keeps it at 4.58:1.
+    /// </summary>
+    public static readonly SD.Color AccentHovered = Over(HoverShade, Accent);
+
+    /// <summary>The accent pressed — Theme.xaml's AccentPressedColor, so both halves press alike.</summary>
+    public static readonly SD.Color AccentPressed = SD.Color.FromArgb(0x00, 0x60, 0xDF);
+
+    /// <summary>
+    /// The keyboard focus RING on a dark field. Never a fill: nothing white may sit on top
+    /// of it — use <see cref="AccentHovered"/> for a hovered accent surface. This is
+    /// Theme.xaml's InfoColor, which is what the WPF half already strokes its focus rings
+    /// with, so both halves ring a focused control the same colour. It is drawn opaque:
+    /// the old #409CFF at 150 alpha composited over the field it rings to 2.37:1, under
+    /// WCAG 1.4.11's 3:1 floor for a control boundary. Opaque, it is 5.21:1.
+    /// </summary>
+    public static readonly SD.Color AccentRing = SD.Color.FromArgb(0x6B, 0xB1, 0xFF);
 
     // Status colors, paired with the system-blue identity (macOS system red/orange).
     // Red doubles as the recording dot and destructive actions; Warn as paused/warning.
@@ -67,6 +89,14 @@ public static class ThemePalette
     public const float GlyphActionPt = 15f;     // 20 DIP
 
     /// <summary>
+    /// A word standing in for an icon — the All-In-One selector's "Aa" cell, sitting in the
+    /// same glyph row as five icon-font glyphs. Two bold letters carry more ink than one
+    /// icon, so this sits a step under <see cref="GlyphActionPt"/>; sizing it off a TEXT step
+    /// instead shrank it to 12 pt and opened a visible gap beside its unchanged neighbours.
+    /// </summary>
+    public const float GlyphTextPt = 13f;       // 17.3 DIP
+
+    /// <summary>
     /// Off the scale deliberately: the quick-actions card is pinned, and its menu
     /// was measured to 202x357 by hand at this size. TextCaptionPt reflows it.
     /// </summary>
@@ -97,6 +127,24 @@ public static class ThemePalette
 
     public static SD.Font UiFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
         => new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
+
+    /// <summary>
+    /// Composites a straight-alpha colour over an opaque one, the way GDI+ paints it.
+    /// Public because <see cref="HoverShade"/> and <see cref="PressedShade"/> are alpha layers:
+    /// a WinForms fill that cannot stack layers has to be handed the composited result.
+    /// </summary>
+    public static SD.Color Over(SD.Color top, SD.Color under)
+    {
+        double a = top.A / 255d;
+        // The composite keeps the UNDER layer's alpha: a shade laid over a translucent fill
+        // leaves it as translucent as it was. Forcing 255 here made StateFill silently
+        // opaque a translucent saturated fill while leaving a translucent neutral one alone.
+        return SD.Color.FromArgb(
+            under.A,
+            (int)Math.Round((top.R * a) + (under.R * (1 - a))),
+            (int)Math.Round((top.G * a) + (under.G * (1 - a))),
+            (int)Math.Round((top.B * a) + (under.B * (1 - a))));
+    }
 
     private static bool IsFontInstalled(string name)
     {
