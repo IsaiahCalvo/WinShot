@@ -87,6 +87,13 @@
     <!-- Hairlines / borders (one token for structure, one for emphasis) -->
     <Color x:Key="BorderColor">#1FFFFFFF</Color>         <!-- ~12% white: dividers, toolbar/panel edge, separators -->
     <Color x:Key="BorderStrongColor">#33FFFFFF</Color>   <!-- ~20% white: input focus / emphasis ring -->
+    <!-- 9% white. The cross-fade idiom stacks a hover layer OVER the rest layer instead of
+         replacing it, which is exact for an opaque fill and wrong for a translucent one: a
+         BorderStrongColor ring drawn over a BorderColor ring composites to ~30% white, half
+         again over its own token. Pre-divided so it lands on BorderStrongColor exactly:
+         1-(1-0.12)(1-0.09) = 0.20. Use this, not BorderStrongBrush, for a ring that fades in
+         on top of the resting BorderBrush ring. -->
+    <Color x:Key="BorderStrongOverBorderColor">#17FFFFFF</Color>
     <Color x:Key="TopHighlightColor">#10FFFFFF</Color>   <!-- ~6% white: raised-glass inner top highlight -->
 
     <!-- ============================ BRUSHES ============================ -->
@@ -123,6 +130,7 @@
 
     <SolidColorBrush x:Key="BorderBrush"        Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
+    <SolidColorBrush x:Key="BorderStrongOverBorderBrush" Color="{StaticResource BorderStrongOverBorderColor}"/>
     <SolidColorBrush x:Key="TopHighlightBrush"  Color="{StaticResource TopHighlightColor}"/>
 
     <!-- ===================== TOKENS (radii / sizes) ==================== -->
@@ -140,6 +148,7 @@
     <CornerRadius x:Key="RadiusButtonInner1">7</CornerRadius> <!-- RadiusButton 8 - BorderThickness 1 -->
     <CornerRadius x:Key="RadiusInputInner">7</CornerRadius>   <!-- RadiusInput  8 - BorderThickness 1 -->
     <CornerRadius x:Key="RadiusChipInner">5</CornerRadius>    <!-- RadiusChip   6 - Margin 1 (focus ring) -->
+    <CornerRadius x:Key="RadiusThumb">4</CornerRadius>        <!-- 8px rail - 2px inset either side -->
 
     <sys:Double x:Key="ToolButtonSize">36</sys:Double>
     <sys:Double x:Key="ToolGlyphSize">17</sys:Double>
@@ -189,6 +198,7 @@
     <Thickness x:Key="GroupSepMargin">0,8,0,8</Thickness>     <!-- Space2 either side -->
     <Thickness x:Key="LabelGutterMargin">0,0,12,0</Thickness> <!-- Space3 between label and control -->
     <Thickness x:Key="ChipGutterMargin">0,0,8,0</Thickness>   <!-- Space2 between chips in a row -->
+    <Thickness x:Key="ThumbInset">2</Thickness>               <!-- scrollbar thumb inside its 8px rail -->
 
     <!-- Settings' two-column geometry. Everything under a labelled row starts at
          the control column: the label width plus one Space3 gutter. That sum was
@@ -987,9 +997,11 @@
                             <Border x:Name="Box" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource SurfaceAltBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
-                            <!-- Before the chip, so a checked box's accent covers it. -->
+                            <!-- Before the chip, so a checked box's accent covers it. The ring
+                                 is the pre-divided brush: it lands ON Box's resting BorderBrush
+                                 ring, same geometry and thickness, so the two composite. -->
                             <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
-                                    BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"/>
+                                    BorderBrush="{StaticResource BorderStrongOverBorderBrush}" BorderThickness="1"/>
                             <Border x:Name="Chip" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource AccentBrush}"
                                     BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
@@ -1156,9 +1168,11 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
                     <Grid>
-                        <Border x:Name="Th" CornerRadius="4" Margin="2"
+                        <!-- The two layers must stay geometrically identical or the hover
+                             fill peeks past the rest fill, so both read the same tokens. -->
+                        <Border x:Name="Th" CornerRadius="{StaticResource RadiusThumb}" Margin="{StaticResource ThumbInset}"
                                 Background="{StaticResource BorderStrongBrush}"/>
-                        <Border x:Name="Hover" Opacity="0" CornerRadius="4" Margin="2"
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusThumb}" Margin="{StaticResource ThumbInset}"
                                 Background="{StaticResource TextSecondaryBrush}"/>
                     </Grid>
                     <ControlTemplate.Triggers>

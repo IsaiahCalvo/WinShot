@@ -600,7 +600,12 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         string message = FriendlyError.For(ex);
         if (!_closed && !IsDisposed)
-            FlashStatus(message, failure: true);
+            // The card has room for one line, and the toast shows title + message. When
+            // FriendlyError falls through to its catch-all the message names nothing at all,
+            // so the card carries the title instead — the same failure should not read as
+            // "Something went wrong" or as "Couldn't save the capture" depending only on
+            // whether the auto-close timer happened to fire first.
+            FlashStatus(message == FriendlyError.Generic ? title : message, failure: true);
         else
             ShowShareToast(title, message, Core.ToastSeverity.Error);
     }
@@ -1060,7 +1065,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
 
             string id = row.Id;
-            var item = new QuickActionMenuItem(id, row.Text, () => RunMenuAction(id));
+            string label = row.Text;
+            var item = new QuickActionMenuItem(id, label, () => RunMenuAction(id, label));
             if (row.Shortcut.Length > 0)
             {
                 item.ShortcutKeyDisplayString = row.Shortcut;
@@ -1110,7 +1116,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private void RunMenuAction(string id)
+    private void RunMenuAction(string id, string label)
     {
         try
         {
@@ -1169,7 +1175,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
         catch (Exception ex)
         {
+            // The sink for Print…, Resize… and every rotate/flip, none of which said anything
+            // when they threw. The row's own label is the title so the toast names what
+            // failed instead of "a menu action".
             Log.Error($"Quick-actions menu action '{id}' failed", ex);
+            ReportActionFailure($"{label.TrimEnd('…')} didn't finish", ex);
         }
     }
 
@@ -1840,7 +1850,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         catch (Exception ex)
         {
             _dragFileTask = null;
+            // The drop target gets nothing and shows nothing, so this surface is the only
+            // place the user can learn the drag did not carry a file.
             Log.Error("Thumbnail drag-out failed", ex);
+            ReportActionFailure("Couldn't drag the capture out", ex);
         }
     }
 
@@ -2056,7 +2069,13 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
         catch (Exception ex)
         {
+            // The action on the card with the highest consequence, and the only one
+            // FriendlyError has exact lines for ("The drive is full.", "That folder no longer
+            // exists."). The Close() above sits inside the try after the await, so a throw
+            // skips it and the card stays exactly as it was — indistinguishable from a click
+            // that missed, with the user believing the capture is on disk.
             Log.Error("Save failed", ex);
+            ReportActionFailure("Couldn't save the capture", ex);
         }
     }
 
@@ -2070,6 +2089,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error($"Failed to open {_mediaFilePath}", ex);
+            ReportActionFailure("Couldn't open the capture", ex);
         }
     }
 

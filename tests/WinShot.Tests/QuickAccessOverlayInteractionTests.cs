@@ -205,7 +205,7 @@ public class QuickAccessOverlayInteractionTests
             var run = type.GetMethod("RunMenuAction", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var versionField = type.GetField("_imageVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-            run.Invoke(overlay, new object[] { "rotate-right" });
+            run.Invoke(overlay, new object[] { "rotate-right", "Rotate right" });
             PumpUntilRenderIdle(overlay);
 
             using var rotated = overlay.CloneImage();
@@ -430,6 +430,48 @@ public class QuickAccessOverlayInteractionTests
             var method = typeof(FastQuickActionsWindow)
                 .GetMethod("ShowShareToast", BindingFlags.Instance | BindingFlags.NonPublic)!;
             method.Invoke(card, new object[] { "Share failed", "The drive is full.", ToastSeverity.Error });
+        });
+    }
+
+    /// <summary>
+    /// Save is the action on this card with the highest consequence and was the last one with
+    /// no failure feedback at all: the Close() sits inside the try after the await, so a throw
+    /// skipped it and the card stayed exactly as it was — a failure indistinguishable from a
+    /// click that missed, with the user believing the capture is on disk. It is also the only
+    /// path FriendlyError's save-specific lines are reachable from.
+    /// </summary>
+    [Fact]
+    public void ASaveThatFailsSaysSoOnTheCard()
+    {
+        RunSta(() =>
+        {
+            // A folder that cannot be created because a FILE sits where a directory would go.
+            // Deterministic on every machine, unlike betting on a missing drive letter.
+            string blocker = Path.Combine(Path.GetTempPath(), $"winshot-save-block-{Guid.NewGuid():N}");
+            File.WriteAllText(blocker, string.Empty);
+            try
+            {
+                using var bitmap = new SD.Bitmap(1200, 760);
+                var settings = new SettingsService();
+                settings.Current.SaveFolder = Path.Combine(blocker, "captures");
+                using var overlay = new FastQuickActionsWindow(bitmap, settings);
+                var type = typeof(FastQuickActionsWindow);
+                var message = type.GetField("_flashMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var isFailure = type.GetField("_flashIsFailure", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+                // Directory.CreateDirectory throws before the first await, so the catch has
+                // already run by the time the call returns.
+                type.GetMethod("SaveCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(overlay, new object[] { false, true });
+
+                Assert.Equal(FriendlyError.For(new IOException()), message.GetValue(overlay));
+                Assert.True((bool)isFailure.GetValue(overlay)!, "a failure flash must not resume the auto-close timer");
+                Assert.False(overlay.IsDisposed, "the card closed as if the save had worked");
+            }
+            finally
+            {
+                File.Delete(blocker);
+            }
         });
     }
 

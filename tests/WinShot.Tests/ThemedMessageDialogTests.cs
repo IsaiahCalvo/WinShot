@@ -53,7 +53,7 @@ public class ThemedMessageDialogTests
     }));
 
     /// <summary>
-    /// With no Application there is no merged theme, so MotionQuick does not resolve and the
+    /// With no Application there is no merged theme, so MotionEnter does not resolve and the
     /// entrance falls back to its literal duration. That fallback never consulted the
     /// preference — the one motion path in the app that inferred the setting from a resource
     /// instead of asking Motion for it — so a user with animation effects off got a dialog

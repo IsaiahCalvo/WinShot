@@ -123,6 +123,12 @@ public static class ThemedMessageDialog
     /// Window: a RenderTransform on the Window shrinks its content inside a frame that does
     /// not move, and the 2% band left at the edges is the same brush either way.
     ///
+    /// MotionEnter, not MotionQuick: the vocabulary names QuickMs for hover/press fills and
+    /// EnterDurationMs for "a surface arriving on screen", which is what a modal appearing
+    /// is. It was MotionQuick, which put the two surfaces the wave built to read as one
+    /// system on screen at half speed from each other (ToastWindow enters on
+    /// Motion.EnterDurationMs).
+    ///
     /// Deliberately asymmetric, and written down here rather than left to be inferred from an
     /// absence: the dialog leaves in one frame. A modal answers a question, and a window that
     /// lingers 140 ms after the click that dismissed it reads as the app being slow to accept
@@ -148,8 +154,8 @@ public static class ThemedMessageDialog
 
         dialog.Loaded += (_, _) =>
         {
-            Duration duration = dialog.TryFindResource("MotionQuick") as Duration?
-                ?? new Duration(TimeSpan.FromMilliseconds(Motion.QuickMs));
+            Duration duration = dialog.TryFindResource("MotionEnter") as Duration?
+                ?? new Duration(TimeSpan.FromMilliseconds(Motion.EnterDurationMs));
             var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
 
             content.BeginAnimation(

@@ -100,9 +100,9 @@ public class QuickAccessOverlayRenderHarness
                     Path.Combine(outDir, "dark-black-capture-idle.png"));
                 RenderStatusFlash(source, settings, "Text copied", Path.Combine(outDir, "card-flash-text-copied.png"));
                 // The other content class this surface draws now that the failure paths write
-                // here: FriendlyError's longest line, which wraps to three rows on a 192px
-                // card. CardStatusFlashStaysInsideTheCardPadding scans it; this is the PNG to
-                // look at when the scan says something moved.
+                // here: FriendlyError's longest line, which wraps to two rows on a 192px card
+                // (both complete, no ellipsis). CardStatusFlashStaysInsideTheCardPadding
+                // scans it; this is the PNG to look at when the scan says something moved.
                 RenderStatusFlash(
                     source,
                     settings,
