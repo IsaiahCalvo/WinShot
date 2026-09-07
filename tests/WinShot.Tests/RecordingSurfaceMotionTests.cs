@@ -99,6 +99,76 @@ public class RecordingSurfaceMotionTests
         overlay.Dispose();
     }
 
+    /// <summary>
+    /// Border-only mode ramps in like the dimmed one. Show() used to bail out before the
+    /// entrance tween whenever there were no dim bands, so the red marker popped on at full
+    /// alpha and then faded out on the way — an entrance and an exit that did not match.
+    /// </summary>
+    [Fact]
+    public void BorderOnlyMarker_RampsInInsteadOfSnapping()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        // Marker strips only exist where they can be laid out against the real desktop, so
+        // this one takes a small region inside it rather than the off-screen rect the holder
+        // tests use.
+        SD.Rectangle desktop = CaptureService.VirtualScreen;
+        var region = new SD.Rectangle(
+            desktop.Left + (desktop.Width / 4), desktop.Top + (desktop.Height / 4),
+            Math.Max(2, desktop.Width / 4), Math.Max(2, desktop.Height / 4));
+
+        var overlay = new FastRecordingDimOverlay(region, dimScreen: false);
+        Assert.NotEmpty(MarkerFades(overlay)); // border-only really did build markers
+        overlay.Show();
+
+        // The frame Show() returns on, the strips are still at (or near) zero.
+        Assert.All(MarkerFades(overlay), fade => Assert.True(fade < 0.5, $"marker started at {fade}"));
+
+        PumpUntil(() => MarkerFades(overlay).All(f => f >= 0.999));
+        Assert.All(MarkerFades(overlay), fade => Assert.Equal(1d, fade, 3));
+
+        overlay.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>The marker pulses on a bare timer for the whole take, so it is the one piece
+    /// of motion that has to check the accessibility setting itself.</summary>
+    [Fact]
+    public void BorderOnlyMarker_DoesNotBreatheWhenAnimationsAreOff()
+    {
+        using var animation = new Anim(false);
+
+        SD.Rectangle desktop = CaptureService.VirtualScreen;
+        var region = new SD.Rectangle(
+            desktop.Left + (desktop.Width / 4), desktop.Top + (desktop.Height / 4),
+            Math.Max(2, desktop.Width / 4), Math.Max(2, desktop.Height / 4));
+
+        var overlay = new FastRecordingDimOverlay(region, dimScreen: false);
+        overlay.Show();
+        WF.Application.DoEvents();
+
+        Assert.NotEmpty(MarkerPulseTimers(overlay));
+        Assert.All(MarkerPulseTimers(overlay), timer => Assert.False(timer.Enabled));
+        overlay.Dispose();
+    }
+
+    private static IReadOnlyList<double> MarkerFades(FastRecordingDimOverlay overlay) =>
+        Markers(overlay).Select(m => (double)PrivateField(m, "_fade")!).ToList();
+
+    private static IReadOnlyList<WF.Timer> MarkerPulseTimers(FastRecordingDimOverlay overlay) =>
+        Markers(overlay).Select(m => (WF.Timer)PrivateField(m, "_pulse")!).ToList();
+
+    private static IEnumerable<object> Markers(FastRecordingDimOverlay overlay) =>
+        ((System.Collections.IEnumerable)PrivateField(overlay, "_markers")!).Cast<object>();
+
+    private static object? PrivateField(object target, string name) =>
+        target.GetType().GetField(
+            name,
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(target);
+
     [Fact]
     public void CountdownWindow_ClosedMidCountdownLeavesNoClockHolder()
     {

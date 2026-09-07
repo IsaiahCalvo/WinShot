@@ -86,7 +86,7 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
         _hookProc = KeyboardHookCallback;
         _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
         // Pixel-unit font so the glyphs scale with the pill box, not the monitor DPI.
-        _font = new SD.Font("Segoe UI", S(30), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        _font = ThemePalette.UiFontPx(S(30), SD.FontStyle.Bold);
 
         _timer.Tick += (_, _) => AdvanceFade();
     }

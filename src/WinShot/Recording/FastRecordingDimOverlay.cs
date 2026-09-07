@@ -146,12 +146,17 @@ public sealed class FastRecordingDimOverlay : IDisposable
             surface.Show();
         }
         foreach (MarkerSurface marker in _markers)
+        {
+            marker.SetFade(0);
             marker.Show();
+        }
 
-        if (_surfaces.Count == 0)
+        if (_surfaces.Count == 0 && _markers.Count == 0)
             return;
 
-        // One tween for every band, so the dim arrives instead of snapping on, and only one
+        // One tween for every band AND every marker strip, so both dim modes arrive instead
+        // of snapping on — the border-only marker used to pop in at full alpha and then fade
+        // out on the way, which is an entrance and an exit that do not match. Only one
         // timer-resolution holder is taken for the whole overlay.
         _entrance?.Dispose();
         _entrance = Motion.Run(
@@ -163,6 +168,11 @@ public sealed class FastRecordingDimOverlay : IDisposable
                 {
                     if (!surface.IsDisposed)
                         surface.Opacity = DimOpacity * amount;
+                }
+                foreach (MarkerSurface marker in _markers)
+                {
+                    if (!marker.IsDisposed)
+                        marker.SetFade(amount);
                 }
             },
             () => _entrance = null);
@@ -233,9 +243,14 @@ public sealed class FastRecordingDimOverlay : IDisposable
 
         private static readonly SD.Color Marker = ThemePalette.Red;
 
+        /// <summary>Period of the breathing sine, matching the control bar's dot exactly.</summary>
+        private const double PulsePeriodMs = 1600.0;
+
         // A binary blink reads as a fault; the same eased 1.6s sine the control bar's dot
         // rides says "live" instead. A plain 50ms timer, not Motion.Run: this never ends, so
-        // it must not hold the process-wide high-resolution clock for the whole take.
+        // it must not hold the process-wide high-resolution clock for the whole take. Not
+        // holding the clock and honouring the accessibility setting are separate decisions,
+        // though — with visual effects off the timer never starts and the line holds steady.
         private readonly WF.Timer _pulse = new() { Interval = 50 };
         private readonly SD.Rectangle _bounds;
         private readonly RecordingRegionMarkerEdge _edge;
@@ -258,7 +273,8 @@ public sealed class FastRecordingDimOverlay : IDisposable
             base.OnShown(e);
             ExcludeFromCapture();
             Render();
-            _pulse.Start();
+            if (Motion.AnimationsEnabled())
+                _pulse.Start();
         }
 
         protected override void OnClosed(EventArgs e)
@@ -281,9 +297,13 @@ public sealed class FastRecordingDimOverlay : IDisposable
 
         private void Render()
         {
-            double wave = (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 2000.0)) / 2;
+            if (IsDisposed || !IsHandleCreated)
+                return;
+            double wave = Motion.AnimationsEnabled()
+                ? (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / PulsePeriodMs)) / 2
+                : 1;
             int alpha = (int)Math.Round((150 + (105 * wave)) * _fade);
-            if (alpha == _alpha || IsDisposed)
+            if (alpha == _alpha)
                 return;
             _alpha = alpha;
 

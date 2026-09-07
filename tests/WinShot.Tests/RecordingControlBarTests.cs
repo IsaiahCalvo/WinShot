@@ -336,6 +336,51 @@ public class RecordingControlBarTests
         Assert.Equal("Resume recording", bar.TipFor(RecordingControlBarCell.PauseResume));
     }
 
+    /// <summary>
+    /// The pill is the one surface the user touches during a take, and the rewrite from four
+    /// DarkButtons to owner-drawn cells dropped the eased hover they had. A snap would be at 1
+    /// the instant the hover is set; an ease has to travel there, and the cell being left has
+    /// to fall from wherever it had reached.
+    /// </summary>
+    [Fact]
+    public void Bar_HoverAndPressEaseInsteadOfSnapping()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: false, stopHotkey: null);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        SetHover(bar, 0);
+        Assert.True(Wash(bar, "_hover", 0) < 0.99, "hover arrived at full strength in one frame");
+        PumpUntil(() => Wash(bar, "_hover", 0) >= 0.999);
+        Assert.Equal(1d, Wash(bar, "_hover", 0), 3);
+
+        SetHover(bar, -1);
+        Assert.True(Wash(bar, "_hover", 0) > 0.01, "the cell being left vanished in one frame");
+        PumpUntil(() => Wash(bar, "_hover", 0) <= 0.001);
+
+        bar.Close();
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    private static void SetHover(FastRecordingControlBar bar, int index) =>
+        typeof(FastRecordingControlBar)
+            .GetMethod("SetHover", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(bar, [index]);
+
+    private static double Wash(FastRecordingControlBar bar, string field, int index)
+    {
+        var wash = (HoverWash<int>)typeof(FastRecordingControlBar)
+            .GetField(field, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(bar)!;
+        return wash[index];
+    }
+
     [Fact]
     public void Bar_TipFallsBackToEscapeWhenNoHotkeyIsBound()
     {

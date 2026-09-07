@@ -44,6 +44,11 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly double _scale;
     private IDisposable? _entrance;
     private IDisposable? _exit;
+    // Hover and press ease the same way every DarkButton in the app does; without them this
+    // was the one surface the user touches during a take whose plate snapped on and off.
+    private readonly HoverWash<int> _hover;
+    private readonly HoverWash<int> _press;
+    private readonly StateAmount _dim;
     private string _elapsedText = "00:00";
     private int _hoverIndex = -1;
     private bool _actionTaken;
@@ -73,6 +78,9 @@ public sealed class FastRecordingControlBar : WF.Form
         Location = new SD.Point(targetScreen.X, targetScreen.Y);
 
         _cells = RecordingControlBarLayout.Build(showTimer, _scale);
+        _hover = new HoverWash<int>(InvalidateSafely);
+        _press = new HoverWash<int>(InvalidateSafely);
+        _dim = new StateAmount(InvalidateSafely);
         // Pixel-unit faces: every coordinate here is already multiplied by _scale, and a
         // point-size font would apply the monitor's scale to itself a second time.
         _glyphFont = ThemePalette.IconFontPx(S(16));
@@ -126,8 +134,11 @@ public sealed class FastRecordingControlBar : WF.Form
                 return;
             }
 
-            // Eased breathing instead of a binary blink: alpha rides a 1.6s sine.
-            double wave = (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 1600.0)) / 2;
+            // Eased breathing instead of a binary blink: alpha rides a 1.6s sine — unless the
+            // user has turned visual effects off system-wide, when the dot holds steady.
+            double wave = Motion.AnimationsEnabled()
+                ? (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 1600.0)) / 2
+                : 1;
             int alpha = _paused ? 255 : 120 + (int)Math.Round(135 * wave);
             string elapsed = FormatElapsed(_elapsed.Elapsed);
             if (alpha == _dotAlpha && elapsed == _elapsedText)
@@ -228,6 +239,23 @@ public sealed class FastRecordingControlBar : WF.Form
         base.OnClosed(e);
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // A bar disposed without being closed (the app shutting down mid-take) must not
+            // leave a hover tween holding the process-wide high-resolution clock.
+            _entrance?.Dispose();
+            _entrance = null;
+            _exit?.Dispose();
+            _exit = null;
+            _hover.Dispose();
+            _press.Dispose();
+            _dim.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
     private static string FormatElapsed(TimeSpan t) =>
         t.TotalHours >= 1
             ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
@@ -272,7 +300,14 @@ public sealed class FastRecordingControlBar : WF.Form
         _elapsed.Stop();
         _toolTip.SetToolTip(this, null);
         Cursor = WF.Cursors.Default;
-        _timer.Start(); // runs even when the elapsed clock was never shown
+        _hover.To(null);
+        _press.To(null);
+        // Runs even when the elapsed clock was never shown — but not at all when the user has
+        // turned animation off, because then there is nothing left for it to move.
+        if (Motion.AnimationsEnabled())
+            _timer.Start();
+        else
+            _timer.Stop();
         Invalidate();
     }
 
@@ -351,15 +386,26 @@ public sealed class FastRecordingControlBar : WF.Form
 
     // ---------------------------------------------------------------- painting
 
+    private void InvalidateSafely()
+    {
+        if (!IsDisposed && IsHandleCreated)
+            Invalidate();
+    }
+
     private void PaintCell(SD.Graphics g, int index)
     {
         (RecordingControlBarCell cell, SD.Rectangle bounds) = _cells[index];
-        bool interactive = cell != RecordingControlBarCell.Timer && !_actionTaken;
-        if (interactive && index == _hoverIndex)
+        // Hover rises, press deepens it further — the same direction DarkControlPalette moves
+        // a neutral fill, eased over QuickMs by the two washes rather than flipped.
+        double hover = _hover[index];
+        double press = _press[index];
+        int veil = (int)Math.Round((HoverFill.A * hover) + (0x1A * press));
+        if (cell != RecordingControlBarCell.Timer && veil > 0)
         {
             SD.Rectangle plate = SD.Rectangle.Inflate(bounds, -S(3), -S(6));
             using var path = GdiPaths.RoundedRect(plate, S(7));
-            using var brush = new SD.SolidBrush(HoverFill);
+            using var brush = new SD.SolidBrush(
+                SD.Color.FromArgb(Math.Clamp(veil, 0, 255), 0xFF, 0xFF, 0xFF));
             g.FillPath(brush, path);
         }
 
@@ -376,9 +422,14 @@ public sealed class FastRecordingControlBar : WF.Form
             return;
         }
 
-        SD.Color color = cell == RecordingControlBarCell.Stop ? RecordingRed : GlyphColor;
-        if (_actionTaken)
-            color = SD.Color.FromArgb(0x60, color);
+        // TextError, not Red: this is a glyph drawn through the text path on ToolbarBg, the
+        // exact pair ThemePalette documents as only reading 4.43:1. The dot stays Red.
+        SD.Color color = cell == RecordingControlBarCell.Stop ? ThemePalette.TextError : GlyphColor;
+        // Once an action is taken the cells go quiet. TextRenderer drops the alpha channel, so
+        // the dim has to be composited against the plate rather than handed over as an alpha —
+        // which also lets it ease instead of cutting.
+        color = DarkControlPalette.Mix(
+            color, ThemePalette.Over(SD.Color.FromArgb(0x60, color), Back), _dim.Value);
         WF.TextRenderer.DrawText(g, GlyphFor(cell), _glyphFont, bounds, color,
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
@@ -394,8 +445,11 @@ public sealed class FastRecordingControlBar : WF.Form
             (ClientSize.Height - ring) / 2,
             ring,
             ring);
-        // 1.1 s per revolution — fast enough to read as busy, slow enough not to strobe.
-        float start = (float)(Environment.TickCount64 % 1100 * 360.0 / 1100.0);
+        // 1.1 s per revolution — fast enough to read as busy, slow enough not to strobe. With
+        // visual effects off the arc is parked and the word alone says what is happening.
+        float start = Motion.AnimationsEnabled()
+            ? (float)(Environment.TickCount64 % 1100 * 360.0 / 1100.0)
+            : 270f;
         using (var track = new SD.Pen(Hairline, S(2)))
             g.DrawEllipse(track, arc);
         using (var sweep = new SD.Pen(GlyphColor, S(2)))
@@ -483,6 +537,9 @@ public sealed class FastRecordingControlBar : WF.Form
             _cells[index].Cell != RecordingControlBarCell.Timer;
         Cursor = actionable ? WF.Cursors.Hand : WF.Cursors.Default;
         _toolTip.SetToolTip(this, actionable ? TipFor(_cells[index].Cell) : null);
+        _hover.To(actionable ? index : null);
+        if (!actionable)
+            _press.To(null);
         Invalidate();
     }
 
@@ -498,9 +555,19 @@ public sealed class FastRecordingControlBar : WF.Form
 
     private void OnBarMouseDown(object? sender, WF.MouseEventArgs e)
     {
+        if (e.Button != WF.MouseButtons.Left)
+            return;
+
+        int hit = HitTest(e.Location);
         // Anywhere that is not a cell drags the pill; the cells keep their clicks.
-        if (e.Button == WF.MouseButtons.Left && HitTest(e.Location) < 0)
+        if (hit < 0)
+        {
             Native.ReleaseCaptureAndDrag(Handle);
+            return;
+        }
+
+        if (!_actionTaken && !_saving && _cells[hit].Cell != RecordingControlBarCell.Timer)
+            _press.To(hit);
     }
 
     private void OnBarMouseClick(object? sender, WF.MouseEventArgs e)
@@ -587,6 +654,9 @@ public sealed class FastRecordingControlBar : WF.Form
         _actionTaken = true;
         _toolTip.SetToolTip(this, null);
         Cursor = WF.Cursors.Default;
+        _hover.To(null);
+        _press.To(null);
+        _dim.To(1);
         Invalidate();
         action?.Invoke();
     }
