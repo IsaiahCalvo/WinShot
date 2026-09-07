@@ -589,6 +589,15 @@ public static class ScrollingCaptureService
             // that won't align vertically but aligns horizontally locks horizontal mode.
             if (_direction is null && _stitchedFrames <= 1 && _lastFrame is not null)
             {
+                // The axis we just injected on gets first refusal. Once the ladder has
+                // flipped to the horizontal axis, the frame coming back moved sideways —
+                // but on repetitive content its rows can still score a spurious vertical
+                // offset, and locking Vertical there strands the whole run: the axis
+                // reverts to the one nothing responds to, HorizontalAxis goes false again,
+                // and the auto-heal budget is spent injecting notches the page ignores.
+                if (_autoAxisHorizontal && LockHorizontalIfMatched(frame, out bool locked))
+                    return locked;
+
                 int dv = matchedOffset;
                 if (dv > 0)
                 {
@@ -600,16 +609,8 @@ public static class ScrollingCaptureService
                     FinishVerticalFrame(frame, sig, matchSig);
                     return _stitch.Height < _verticalLimit || EndAtCap();
                 }
-                FixedBands horizontalBands = FixedRegionDetector.DetectHorizontal(_lastFrame, frame);
-                int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame, frame,
-                    horizontalBands.Leading, horizontalBands.Trailing);
-                if (dh > 0)
-                {
-                    _direction = ScrollDirection.Horizontal;
-                    AdoptFirstHorizontalFrame(_lastFrame);
-                    _stitch.Dispose();
-                    return ProcessHorizontal(frame);
-                }
+                if (LockHorizontalIfMatched(frame, out bool horizontal))
+                    return horizontal;
                 FinishVerticalFrame(frame, sig, matchSig);
                 return true; // keep watching; direction still unknown
             }
@@ -660,6 +661,26 @@ public static class ScrollingCaptureService
             FinishVerticalFrame(frame, sig, matchSig);
             if (_stitch.Height >= _verticalLimit)
                 return EndAtCap();
+            return true;
+        }
+
+        /// <summary>
+        /// Does this frame align horizontally against the previous one? If it does, the run
+        /// commits to <see cref="ScrollDirection.Horizontal"/> and <paramref name="keepGoing"/>
+        /// carries the horizontal path's own answer. Callers must own <c>_lastFrame</c>.
+        /// </summary>
+        private bool LockHorizontalIfMatched(SD.Bitmap frame, out bool keepGoing)
+        {
+            keepGoing = true;
+            FixedBands bands = FixedRegionDetector.DetectHorizontal(_lastFrame!, frame);
+            int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame,
+                bands.Leading, bands.Trailing);
+            if (dh <= 0)
+                return false;
+            _direction = ScrollDirection.Horizontal;
+            AdoptFirstHorizontalFrame(_lastFrame!);
+            _stitch.Dispose();
+            keepGoing = ProcessHorizontal(frame);
             return true;
         }
 
