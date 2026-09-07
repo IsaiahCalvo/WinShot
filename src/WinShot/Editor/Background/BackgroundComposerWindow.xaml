@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="WinShot - Background" Background="{StaticResource WindowBgBrush}"
         Width="1060" Height="680" MinWidth="880" MinHeight="540"
-        WindowStartupLocation="CenterScreen" UseLayoutRounding="True">
+        WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
+        AllowDrop="True" DragOver="OnComposerDragOver" Drop="OnComposerDrop">
 
     <DockPanel>
         <!-- Left control panel -->
@@ -27,11 +28,50 @@
 
                 <ScrollViewer x:Name="ComposerControls" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                     <StackPanel Margin="14,12,14,16">
+                        <!-- ============ SAVED PRESETS ============ -->
+                        <!-- A preset is the whole composition — backdrop, padding, inset,
+                             shadow, corners, anchor, ratio — so "Apply previous settings"
+                             is the same mechanism reading the slot written on every close. -->
+                        <DockPanel Margin="0,0,0,8">
+                            <Button x:Name="PresetSaveBtn" DockPanel.Dock="Right"
+                                    Style="{StaticResource ToolIconButton}" Content="&#xE710;"
+                                    Margin="6,0,0,0" Click="OnSavePreset"
+                                    ToolTip="Save these settings as a preset"
+                                    AutomationProperties.Name="Save preset"/>
+                            <Button x:Name="PresetDeleteBtn" DockPanel.Dock="Right"
+                                    Style="{StaticResource ToolIconButton}" Content="&#xE74D;"
+                                    Margin="6,0,0,0" Click="OnDeletePreset"
+                                    Visibility="Collapsed"
+                                    ToolTip="Delete this preset"
+                                    AutomationProperties.Name="Delete preset"/>
+                            <ComboBox x:Name="PresetsBox" Style="{StaticResource DarkComboBox}"
+                                      SelectionChanged="OnPresetSelected"
+                                      ToolTip="Saved compositions"
+                                      AutomationProperties.Name="Presets"/>
+                        </DockPanel>
+                        <Button x:Name="ApplyPreviousBtn" Style="{StaticResource PillButtonSecondary}"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,10"
+                                Content="Apply previous settings" Click="OnApplyPrevious"
+                                Visibility="Collapsed"
+                                ToolTip="Reuse the composition from the last time this was open"/>
+
                         <!-- Current preset name header -->
                         <TextBlock x:Name="PresetNameHeader" Style="{StaticResource SectionHeader}"
                                    Margin="0,0,0,4" Text="None"/>
 
                         <!-- ============ BACKGROUND SECTIONS ============ -->
+                        <!-- "None" is a full-width row above the gradients, not a tile in
+                             them: it is the absence of the whole section, not one more
+                             choice inside it. -->
+                        <RadioButton x:Name="NoneBackdropBtn" GroupName="Bg"
+                                     Style="{StaticResource ToolButton}"
+                                     Width="Auto" Height="30" Margin="0,0,0,8"
+                                     HorizontalAlignment="Stretch"
+                                     FontFamily="Segoe UI"
+                                     FontSize="{StaticResource TextBody}"
+                                     Content="None" Checked="OnNoneBackdropChecked"
+                                     ToolTip="No backdrop — the shot keeps its own edges"/>
+
                         <TextBlock Style="{StaticResource SectionHeader}" Text="Gradients"/>
                         <WrapPanel x:Name="PresetPanel"/>
 
@@ -77,6 +117,28 @@
                         <Slider x:Name="PaddingSlider" Style="{StaticResource DarkSlider}"
                                 Minimum="0" Maximum="200" Value="64"
                                 ValueChanged="OnSliderChanged" Margin="0,2,0,8"/>
+
+                        <!-- Inset is a frame drawn AROUND the shot, inside the backdrop
+                             gutter: the shot sits on a card rather than floating on the
+                             gradient. Padding stays the outer margin. -->
+                        <DockPanel>
+                            <TextBlock x:Name="InsetValueLabel" DockPanel.Dock="Right"
+                                       Style="{StaticResource ValueLabel}"/>
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Inset"/>
+                        </DockPanel>
+                        <Slider x:Name="InsetSlider" Style="{StaticResource DarkSlider}"
+                                Minimum="0" Maximum="64" Value="0"
+                                ValueChanged="OnSliderChanged" Margin="0,2,0,4"
+                                AutomationProperties.Name="Inset"/>
+
+                        <!-- A window capture carries its shadow baked in and off to one
+                             side; centring the bitmap leaves the window visibly off-centre.
+                             Auto-balance measures the shot's own content and evens the four
+                             gutters up. -->
+                        <CheckBox x:Name="AutoBalanceCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Auto-balance margins" Margin="0,0,0,8"
+                                  Checked="OnAutoBalanceToggled" Unchecked="OnAutoBalanceToggled"
+                                  ToolTip="Even the gutters up around what the shot actually shows"/>
 
                         <CheckBox x:Name="ShadowCheck" Style="{StaticResource DarkCheckBox}"
                                   Content="Drop shadow" IsChecked="True"
@@ -174,7 +236,13 @@
             <Viewbox x:Name="PreviewBox" Stretch="Uniform" StretchDirection="DownOnly" Margin="24"
                      Visibility="Collapsed">
                 <Grid x:Name="ComposeRoot">
-                    <Border x:Name="ShotBorder" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <!-- ShotBorder is the inset frame; ShotSurface carries the screenshot
+                         brush. At inset 0 the frame has no padding and the two are the
+                         same rectangle, so nothing changes for a composition that never
+                         touches the slider. -->
+                    <Border x:Name="ShotBorder" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Border x:Name="ShotSurface"/>
+                    </Border>
                 </Grid>
             </Viewbox>
         </Grid>

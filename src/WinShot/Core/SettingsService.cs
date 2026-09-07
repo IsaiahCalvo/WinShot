@@ -127,6 +127,11 @@ public class Settings
     public bool AlwaysOnTop { get; set; } = false;           // annotation editor opens above other windows
     public bool ShowDockIcon { get; set; } = true;           // TODO: wire behavior
 
+    // Background composer: named presets ("name=state;…") and the slot behind
+    // "Apply previous settings", both in BackgroundComposerState's line format.
+    public string BackgroundPresets { get; set; } = "";
+    public string BackgroundLastUsed { get; set; } = "";
+
     // Pinned screenshots (CleanShot "Pin to screen")
     public bool PinnedRoundedCorners { get; set; } = true;
     public bool PinnedShadow { get; set; } = true;

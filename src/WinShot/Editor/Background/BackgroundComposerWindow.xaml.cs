@@ -29,8 +29,7 @@ namespace WinShot.Editor.Background;
 /// </summary>
 public partial class BackgroundComposerWindow : Window
 {
-    private static readonly string[] SolidSwatchHexes =
-        { "#FFFFFF", "#F2F2F7", "#1E1E1E", "#0A84FF", "#34C759", "#AF52DE" };
+    private static readonly IReadOnlyList<string> SolidSwatchHexes = BackgroundPresets.SolidHexes;
 
     private readonly SD.Bitmap _source;
     private readonly SettingsService _settings;
@@ -49,6 +48,19 @@ public partial class BackgroundComposerWindow : Window
     private bool _compositionInitialized;
     private string _anchor = "CC";  // 3x3 alignment of the shot within the canvas
 
+    /// <summary>Which backdrop is selected, as it round-trips in a preset.</summary>
+    private string _backdropKey = BackgroundComposerState.Default.Backdrop;
+
+    /// <summary>Selectable backdrops by preset key, so applying a preset can re-pick one.</summary>
+    private readonly Dictionary<string, RadioButton> _backdropByKey = new(StringComparer.Ordinal);
+
+    private readonly List<(string Name, BackgroundComposerState State)> _presets = new();
+    private bool _suppressPresetSelection;
+
+    /// <summary>Where the shot's real content sits inside the bitmap, for auto-balance.
+    /// Measured once — it cannot change while the composer is open.</summary>
+    private SD.Rectangle? _contentBounds;
+
     public BackgroundComposerWindow(SD.Bitmap source, SettingsService settings, HistoryService history)
     {
         ThemeResources.EnsureLoaded();
@@ -64,6 +76,11 @@ public partial class BackgroundComposerWindow : Window
 
         Closed += (_, _) =>
         {
+            // Cancel before reading the state: a half-finished glide is not the
+            // composition the user chose, and a live tween holds the timer clock.
+            _stateTween?.Dispose();
+            _stateTween = null;
+            RememberLastUsed();
             // The shot-brush / blurred-backdrop conversions may still be queued on the
             // bitmap-source worker; disposing directly here races their Clone ("Parameter
             // is not valid" → blank composer/editor). Dispose behind the queue instead.
@@ -91,6 +108,7 @@ public partial class BackgroundComposerWindow : Window
                         BuildBackgroundPickers();
                         if (_bgSwatches.Count > 0)
                             _bgSwatches[0].IsChecked = true; // applies the first preset
+                        LoadPresets();
                     }
 
                     _ = LoadShotBrushAsync(source);
@@ -110,7 +128,7 @@ public partial class BackgroundComposerWindow : Window
             {
                 var shot = new ImageBrush(image) { Stretch = Stretch.Fill };
                 RenderOptions.SetBitmapScalingMode(shot, BitmapScalingMode.HighQuality);
-                ShotBorder.Background = shot;
+                ShotSurface.Background = shot;
             });
         }
         catch (Exception ex)
@@ -132,29 +150,36 @@ public partial class BackgroundComposerWindow : Window
         if (!_ready) return;
 
         int pad = (int)Math.Round(PaddingSlider.Value);
+        int inset = (int)Math.Round(InsetSlider.Value);
         int radius = (int)Math.Round(RadiusSlider.Value);
         int blurValue = (int)Math.Round(BlurSlider.Value);
         PadValueLabel.Text = $"{pad} px";
+        InsetValueLabel.Text = $"{inset} px";
         RadiusValueLabel.Text = $"{radius} px";
         BlurValueLabel.Text = blurValue.ToString();
         ShadowOpacityValueLabel.Text = $"{(int)Math.Round(ShadowOpacitySlider.Value * 100)}%";
 
-        // Padding is the single margin control; inset is retired (it collapsed
-        // into padding and only duplicated the gutter).
-        var layout = BackgroundLayout.Calculate(new SD.Size(_srcW, _srcH), pad, _aspect);
+        var layout = BackgroundLayout.Calculate(new SD.Size(_srcW, _srcH), pad, _aspect, inset);
         _canvasW = layout.CanvasSize.Width;
         _canvasH = layout.CanvasSize.Height;
 
         ComposeRoot.Width = _canvasW;
         ComposeRoot.Height = _canvasH;
-        ShotBorder.Width = _srcW;
-        ShotBorder.Height = _srcH;
+
+        // The frame is the outer border; the shot itself sits inside it. At inset 0
+        // the padding is zero and the frame is invisible, so nothing changes for a
+        // composition that never touches the slider.
+        ShotBorder.Width = layout.SourceSize.Width;
+        ShotBorder.Height = layout.SourceSize.Height;
+        ShotBorder.Padding = new Thickness(inset);
         ShotBorder.CornerRadius = new CornerRadius(radius);
+        ShotBorder.Background = inset > 0 ? InsetFrameBrush() : null;
+        ShotSurface.CornerRadius = new CornerRadius(Math.Max(0, radius - inset));
 
         // Anchor the shot inside the (possibly oversized) canvas. The minimum
         // gutter is the effective margin; extra space from a fixed ratio is
         // distributed per the alignment picker.
-        ApplyAnchor(layout.Margin);
+        ApplyAnchor(EffectiveMargins(layout.Margin));
 
         if (ShadowCheck.IsChecked == true)
         {
@@ -202,7 +227,7 @@ public partial class BackgroundComposerWindow : Window
     /// gutter on every side; the picker decides where any extra canvas space
     /// (from a fixed ratio) collects.
     /// </summary>
-    private void ApplyAnchor(int margin)
+    private void ApplyAnchor(BackgroundMargins margins)
     {
         char v = _anchor.Length > 0 ? _anchor[0] : 'C';   // T / C / B
         char h = _anchor.Length > 1 ? _anchor[1] : 'C';   // L / C / R
@@ -220,15 +245,69 @@ public partial class BackgroundComposerWindow : Window
             _ => VerticalAlignment.Center,
         };
 
-        // Guarantee the margin gutter on the anchored edges.
-        double left = h == 'L' ? margin : 0;
-        double right = h == 'R' ? margin : 0;
-        double top = v == 'T' ? margin : 0;
-        double bottom = v == 'B' ? margin : 0;
+        // Guarantee the gutter on the anchored edges. A centred shot takes the
+        // DIFFERENCE between its two gutters instead: the layout already leaves the
+        // uniform part, so only the imbalance has to be expressed as margin.
+        double left = h == 'L' ? margins.Left : h == 'C' ? Math.Max(0, margins.Left - margins.Right) : 0;
+        double right = h == 'R' ? margins.Right : h == 'C' ? Math.Max(0, margins.Right - margins.Left) : 0;
+        double top = v == 'T' ? margins.Top : v == 'C' ? Math.Max(0, margins.Top - margins.Bottom) : 0;
+        double bottom = v == 'B' ? margins.Bottom : v == 'C' ? Math.Max(0, margins.Bottom - margins.Top) : 0;
         ShotBorder.Margin = new Thickness(left, top, right, bottom);
     }
 
-    private void SetBackground(Brush brush) => ComposeRoot.Background = brush;
+    /// <summary>
+    /// The four gutters for the current settings: uniform padding normally, and the
+    /// content-balanced set when Auto-balance is on.
+    /// </summary>
+    private BackgroundMargins EffectiveMargins(int margin)
+    {
+        if (AutoBalanceCheck.IsChecked != true)
+            return new BackgroundMargins(margin, margin, margin, margin);
+
+        _contentBounds ??= MeasureContentBounds();
+        return BackgroundLayout.Balance(new SD.Size(_srcW, _srcH), _contentBounds.Value, margin);
+    }
+
+    private SD.Rectangle MeasureContentBounds()
+    {
+        try { return BackgroundLayout.ContentBounds(_source); }
+        catch (Exception ex)
+        {
+            // A shot we cannot measure balances as if it were already even, which is
+            // the same composition the checkbox was turned on from.
+            Log.Error("Background composer content-bounds measurement failed", ex);
+            return new SD.Rectangle(0, 0, _srcW, _srcH);
+        }
+    }
+
+    /// <summary>
+    /// The inset frame's fill. White reads as a card on every backdrop in the set, and it
+    /// is what the shot's own rounded corner is cut out of.
+    /// </summary>
+    private static Brush InsetFrameBrush()
+    {
+        var brush = new SolidColorBrush(Colors.White);
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>
+    /// Applies a backdrop and records which one it was, so the choice survives into a
+    /// preset. <paramref name="key"/> is the preset key; <paramref name="label"/> is what
+    /// the header reads.
+    /// </summary>
+    private void SetBackground(Brush? brush, string key, string label)
+    {
+        ComposeRoot.Background = brush;
+        _backdropKey = key;
+        PresetNameHeader.Text = label;
+    }
+
+    private void OnNoneBackdropChecked(object sender, RoutedEventArgs e)
+    {
+        if (!_ready) return;
+        SetBackground(null, BackgroundComposerState.NoneBackdrop, "None");
+    }
 
     /// <summary>
     /// Builds the rounded-ring thumb used by the Gradients, Blurred and
@@ -302,8 +381,9 @@ public partial class BackgroundComposerWindow : Window
             var (name, brush) = presets[i];
             var rb = MakeGradientThumb(brush, name);
             string label = name;
-            rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
+            rb.Checked += (_, _) => SetBackground(brush, label, label);
             _bgSwatches.Add(rb);
+            _backdropByKey[label] = rb;
             PresetPanel.Children.Add(rb);
         }
 
@@ -352,12 +432,32 @@ public partial class BackgroundComposerWindow : Window
                 _suppressBg = true;
                 HexBox.Text = hexLabel;
                 _suppressBg = false;
-                SetBackground(brush);
-                PresetNameHeader.Text = hexLabel;
+                SetBackground(brush, hexLabel, hexLabel);
             };
             _bgSwatches.Add(rb);
+            _backdropByKey[hexLabel] = rb;
             SolidPanel.Children.Add(rb);
         }
+
+        // Transparent: a checkerboard tile, exported as real alpha rather than as the
+        // checks. It is the last swatch in the row because it is the absence of a colour,
+        // not one of them.
+        var transparentTile = new RadioButton
+        {
+            Style = solidStyle,
+            Background = BackgroundPresets.Checkerboard,
+            GroupName = "Bg",
+            ToolTip = "Transparent",
+        };
+        transparentTile.SetValue(
+            System.Windows.Automation.AutomationProperties.NameProperty, "Transparent");
+        transparentTile.Checked += (_, _) =>
+            SetBackground(BackgroundPresets.Checkerboard, BackgroundComposerState.TransparentBackdrop, "Transparent");
+        _bgSwatches.Add(transparentTile);
+        _backdropByKey[BackgroundComposerState.TransparentBackdrop] = transparentTile;
+        SolidPanel.Children.Add(transparentTile);
+
+        _backdropByKey[BackgroundComposerState.NoneBackdrop] = NoneBackdropBtn;
     }
 
     /// <summary>
@@ -397,8 +497,9 @@ public partial class BackgroundComposerWindow : Window
 
             var rb = MakeGradientThumb(brush, name);
             string label = name;
-            rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
+            rb.Checked += (_, _) => SetBackground(brush, label, label);
             _bgSwatches.Add(rb);
+            _backdropByKey[label] = rb;
             BlurredPanel.Children.Add(rb);
         }
     }
@@ -497,8 +598,9 @@ public partial class BackgroundComposerWindow : Window
 
             const string label = "Desktop wallpaper";
             var rb = MakeGradientThumb(brush, label);
-            rb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = label; };
+            rb.Checked += (_, _) => SetBackground(brush, label, label);
             _bgSwatches.Add(rb);
+            _backdropByKey[label] = rb;
             WallpaperPanel.Children.Add(rb);
         }
         catch (Exception ex)
@@ -563,6 +665,291 @@ public partial class BackgroundComposerWindow : Window
         => UpdateComposition();
 
     private void OnShadowToggled(object sender, RoutedEventArgs e) => UpdateComposition();
+
+    private void OnAutoBalanceToggled(object sender, RoutedEventArgs e) => UpdateComposition();
+
+    // ------------------------------------------------------------------ presets
+
+    /// <summary>
+    /// The composition as it stands, ready to be named and stored — or written to the
+    /// "last used" slot on close, which is all "Apply previous settings" reads.
+    /// </summary>
+    private BackgroundComposerState CaptureState() => new(
+        Backdrop: _backdropKey,
+        Padding: (int)Math.Round(PaddingSlider.Value),
+        Inset: (int)Math.Round(InsetSlider.Value),
+        AutoBalance: AutoBalanceCheck.IsChecked == true,
+        Shadow: ShadowCheck.IsChecked == true,
+        ShadowBlur: (int)Math.Round(BlurSlider.Value),
+        ShadowOpacity: ShadowOpacitySlider.Value,
+        CornerRadius: (int)Math.Round(RadiusSlider.Value),
+        Anchor: _anchor,
+        Ratio: SelectedRatioTag());
+
+    private string SelectedRatioTag() =>
+        RatioBox.SelectedItem is ComboBoxItem item && item.Tag is string tag ? tag : "auto";
+
+    /// <summary>
+    /// Puts a whole stored composition back. Every control is set with the composition
+    /// suppressed and the recompute runs once at the end, so applying a preset is one
+    /// visual change rather than nine.
+    /// </summary>
+    private void ApplyState(BackgroundComposerState state)
+    {
+        // Where the four continuous values are now, so the preview can glide to the
+        // preset's rather than jumping to it. The discrete choices — anchor, ratio,
+        // backdrop, the two checkboxes — have nothing to interpolate and land at once.
+        double fromPad = PaddingSlider.Value;
+        double fromInset = InsetSlider.Value;
+        double fromBlur = BlurSlider.Value;
+        double fromRadius = RadiusSlider.Value;
+        double fromOpacity = ShadowOpacitySlider.Value;
+
+        bool wasReady = _ready;
+        _ready = false;
+        try
+        {
+            AutoBalanceCheck.IsChecked = state.AutoBalance;
+            ShadowCheck.IsChecked = state.Shadow;
+            _anchor = state.Anchor;
+            SyncAnchorButtons();
+            SyncRatioBox(state.Ratio);
+        }
+        finally
+        {
+            _ready = wasReady;
+        }
+
+        // The backdrop applies through its own swatch so the picker's selection ring
+        // agrees with the canvas. A backdrop that is no longer offered (a wallpaper file
+        // that has moved, say) leaves the current one alone rather than blanking it.
+        if (_backdropByKey.TryGetValue(state.Backdrop, out RadioButton? swatch))
+        {
+            if (swatch.IsChecked == true)
+                swatch.IsChecked = false;
+            swatch.IsChecked = true;
+        }
+
+        _stateTween?.Dispose();
+        _glideTarget = state;
+        _stateTween = Motion.Run(Motion.SwapMs, Motion.EaseOutCubic, t =>
+        {
+            bool wasReadyDuringTween = _ready;
+            _ready = false;
+            try
+            {
+                PaddingSlider.Value = Lerp(fromPad, state.Padding, t);
+                InsetSlider.Value = Lerp(fromInset, state.Inset, t);
+                BlurSlider.Value = Lerp(fromBlur, state.ShadowBlur, t);
+                RadiusSlider.Value = Lerp(fromRadius, state.CornerRadius, t);
+                ShadowOpacitySlider.Value = Lerp(fromOpacity, state.ShadowOpacity, t);
+            }
+            finally
+            {
+                _ready = wasReadyDuringTween;
+            }
+            UpdateComposition();
+        },
+        onDone: () => { _stateTween = null; _glideTarget = null; });
+    }
+
+    private static double Lerp(double from, double to, double t) => from + (to - from) * t;
+
+    /// <summary>The in-flight preset glide, so a second preset click cancels the first
+    /// rather than racing it.</summary>
+    private IDisposable? _stateTween;
+
+    /// <summary>Where that glide is heading. A composition cancelled halfway is not what
+    /// the user picked, so anything reading the state mid-glide reads the destination.</summary>
+    private BackgroundComposerState? _glideTarget;
+
+    private void SyncAnchorButtons()
+    {
+        foreach (var tb in new[]
+                 { AlignTL, AlignTC, AlignTR, AlignCL, AlignCC, AlignCR, AlignBL, AlignBC, AlignBR })
+            tb.IsChecked = tb.Tag is string tag && string.Equals(tag, _anchor, StringComparison.Ordinal);
+    }
+
+    private void SyncRatioBox(string tag)
+    {
+        foreach (object o in RatioBox.Items)
+        {
+            if (o is ComboBoxItem item && item.Tag is string t && string.Equals(t, tag, StringComparison.Ordinal))
+            {
+                RatioBox.SelectedItem = item;
+                break;
+            }
+        }
+        _aspect = RatioFor(tag);
+    }
+
+    private static double? RatioFor(string tag) => tag switch
+    {
+        "1:1" => 1.0,
+        "4:3" => 4.0 / 3.0,
+        "16:9" => 16.0 / 9.0,
+        "1.91:1" => 1.91,
+        "9:16" => 9.0 / 16.0,
+        _ => null,
+    };
+
+    private void LoadPresets()
+    {
+        _presets.Clear();
+        _presets.AddRange(BackgroundComposerState.ParseAll(_settings.Current.BackgroundPresets));
+        RebuildPresetsBox();
+
+        // "Apply previous" only offers itself when there is something to apply — an
+        // empty slot means this is the first composition and there is no previous.
+        ApplyPreviousBtn.Visibility = string.IsNullOrWhiteSpace(_settings.Current.BackgroundLastUsed)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void RebuildPresetsBox()
+    {
+        _suppressPresetSelection = true;
+        try
+        {
+            PresetsBox.Items.Clear();
+            PresetsBox.Items.Add(new ComboBoxItem { Content = "Presets…", Tag = null });
+            foreach (var (name, _) in _presets)
+                PresetsBox.Items.Add(new ComboBoxItem { Content = name, Tag = name });
+            PresetsBox.SelectedIndex = 0;
+        }
+        finally
+        {
+            _suppressPresetSelection = false;
+        }
+        PresetDeleteBtn.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnPresetSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressPresetSelection || !_ready) return;
+        if (PresetsBox.SelectedItem is not ComboBoxItem item || item.Tag is not string name)
+        {
+            PresetDeleteBtn.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        int i = _presets.FindIndex(p => string.Equals(p.Name, name, StringComparison.Ordinal));
+        if (i < 0) return;
+        PresetDeleteBtn.Visibility = Visibility.Visible;
+        ApplyState(_presets[i].State);
+        PresetNameHeader.Text = name;
+    }
+
+    private void OnSavePreset(object sender, RoutedEventArgs e)
+    {
+        string name = SuggestPresetName();
+        _presets.Add((name, CaptureState()));
+        PersistPresets();
+        RebuildPresetsBox();
+        SelectPreset(name);
+    }
+
+    /// <summary>
+    /// What a saved preset is called. The backdrop is the thing a user recognises a
+    /// composition by, so it names itself; a second preset on the same backdrop gets a
+    /// number.
+    ///
+    /// ponytail: derived rather than typed. Naming it would mean a modal text prompt the
+    /// app does not own yet, over a panel that is deliberately non-modal — and the delete
+    /// chip already covers a preset saved by mistake. Add a rename when a user asks for one.
+    /// </summary>
+    private string SuggestPresetName()
+    {
+        string stem = string.IsNullOrWhiteSpace(_backdropKey) ? "Background" : _backdropKey;
+        for (int n = 1; ; n++)
+        {
+            string candidate = n == 1 ? stem : $"{stem} {n}";
+            if (!_presets.Any(p => string.Equals(p.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+                return candidate;
+        }
+    }
+
+    private void SelectPreset(string name)
+    {
+        foreach (object o in PresetsBox.Items)
+            if (o is ComboBoxItem item && item.Tag is string t && string.Equals(t, name, StringComparison.Ordinal))
+            {
+                PresetsBox.SelectedItem = item;
+                return;
+            }
+    }
+
+    private void OnDeletePreset(object sender, RoutedEventArgs e)
+    {
+        if (PresetsBox.SelectedItem is not ComboBoxItem item || item.Tag is not string name) return;
+        _presets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.Ordinal));
+        PersistPresets();
+        RebuildPresetsBox();
+    }
+
+    private void PersistPresets()
+    {
+        _settings.Current.BackgroundPresets = BackgroundComposerState.SerializeAll(_presets);
+        _settings.Save();
+    }
+
+    private void OnApplyPrevious(object sender, RoutedEventArgs e)
+    {
+        ApplyState(BackgroundComposerState.Parse(_settings.Current.BackgroundLastUsed));
+        ApplyPreviousBtn.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Writes the "last used" slot behind "Apply previous settings". Best-effort: a
+    /// settings write that fails on close must not surface as an error on a window that
+    /// is already gone.
+    /// </summary>
+    private void RememberLastUsed()
+    {
+        if (!_compositionInitialized) return;
+        try
+        {
+            _settings.Current.BackgroundLastUsed = (_glideTarget ?? CaptureState()).Serialize();
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Background composer could not remember its last settings", ex);
+        }
+    }
+
+    // -------------------------------------------------------------- drop target
+
+    /// <summary>
+    /// An image dropped anywhere on the window becomes the backdrop. Anything else is
+    /// refused with the no-drop cursor rather than silently ignored.
+    /// </summary>
+    private void OnComposerDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = DroppedImagePath(e) is null ? DragDropEffects.None : DragDropEffects.Copy;
+        e.Handled = true;
+    }
+
+    private void OnComposerDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (DroppedImagePath(e) is not string path) return;
+        UseBackgroundImageFile(path);
+    }
+
+    private static string? DroppedImagePath(DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return null;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } files) return null;
+
+        foreach (string f in files)
+        {
+            string ext = Path.GetExtension(f).ToLowerInvariant();
+            if (ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp" or ".gif")
+                return f;
+        }
+        return null;
+    }
 
     /// <summary>
     /// Gives each of the nine alignment ToggleButtons a distinct directional
@@ -650,15 +1037,7 @@ public partial class BackgroundComposerWindow : Window
     private void OnRatioChanged(object sender, SelectionChangedEventArgs e)
     {
         if (RatioBox.SelectedItem is not ComboBoxItem item || item.Tag is not string tag) return;
-        _aspect = tag switch
-        {
-            "1:1" => 1.0,
-            "4:3" => 4.0 / 3.0,
-            "16:9" => 16.0 / 9.0,
-            "1.91:1" => 1.91,
-            "9:16" => 9.0 / 16.0,
-            _ => null,
-        };
+        _aspect = RatioFor(tag);
         UpdateComposition();
     }
 
@@ -696,8 +1075,7 @@ public partial class BackgroundComposerWindow : Window
         UncheckBgSwatches();
         var brush = new SolidColorBrush(color);
         brush.Freeze();
-        SetBackground(brush);
-        PresetNameHeader.Text = text;
+        SetBackground(brush, text, text);
     }
 
     /// <summary>Paints the live preview chip beside the hex box.</summary>
@@ -727,31 +1105,37 @@ public partial class BackgroundComposerWindow : Window
             Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.webp|All files|*.*",
         };
         if (dialog.ShowDialog(this) != true) return;
+        UseBackgroundImageFile(dialog.FileName);
+    }
 
+    /// <summary>
+    /// Makes an image file the backdrop, whether it arrived through the browse tile or was
+    /// dropped on the window. Adds it to the Wallpapers row so it can be picked again.
+    /// </summary>
+    private void UseBackgroundImageFile(string path)
+    {
         try
         {
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
             image.DecodePixelWidth = Math.Max(_canvasW, _canvasH) * 2;
-            image.UriSource = new Uri(dialog.FileName);
+            image.UriSource = new Uri(path);
             image.EndInit();
             image.Freeze();
 
             var brush = new ImageBrush(image) { Stretch = Stretch.UniformToFill };
             RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.HighQuality);
             UncheckBgSwatches();
-            SetBackground(brush);
-
-            string fileName = Path.GetFileName(dialog.FileName);
-            PresetNameHeader.Text = fileName;
+            string fileName = Path.GetFileName(path);
+            SetBackground(brush, fileName, fileName);
 
             // Reflect the chosen wallpaper as a live thumb in the Wallpapers row.
             ShowWallpaperThumb(brush, fileName);
         }
         catch (Exception ex)
         {
-            Log.Error($"Background image load failed: {dialog.FileName}", ex);
+            Log.Error($"Background image load failed: {path}", ex);
             ThemedMessageDialog.Show(this, "Couldn't load that image", FriendlyError.For(ex));
         }
     }
@@ -763,8 +1147,9 @@ public partial class BackgroundComposerWindow : Window
     private void ShowWallpaperThumb(ImageBrush brush, string tooltip)
     {
         var thumb = MakeGradientThumb(brush, tooltip);
-        thumb.Checked += (_, _) => { SetBackground(brush); PresetNameHeader.Text = tooltip; };
+        thumb.Checked += (_, _) => SetBackground(brush, tooltip, tooltip);
         _bgSwatches.Add(thumb);
+        _backdropByKey[tooltip] = thumb;
         WallpaperPanel.Children.Insert(Math.Max(0, WallpaperPanel.Children.Count - 1), thumb);
         _suppressBg = true;
         thumb.IsChecked = true;
@@ -785,6 +1170,13 @@ public partial class BackgroundComposerWindow : Window
         if (ShadowCheck.IsChecked == true)
             ShotBorder.Effect = CreateShadowEffect(RenderingBias.Quality);
 
+        // The checkerboard says "transparent" on screen; it must not be what gets
+        // exported. Drop it for the render and the padding comes out as real alpha.
+        Brush? previousBackdrop = ComposeRoot.Background;
+        bool transparent = string.Equals(
+            _backdropKey, BackgroundComposerState.TransparentBackdrop, StringComparison.Ordinal);
+        if (transparent) ComposeRoot.Background = null;
+
         try
         {
             ComposeRoot.UpdateLayout();
@@ -793,6 +1185,7 @@ public partial class BackgroundComposerWindow : Window
         finally
         {
             ShotBorder.Effect = previousEffect;
+            if (transparent) ComposeRoot.Background = previousBackdrop;
         }
     }
 
