@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -14,8 +14,8 @@ namespace WinShot.History;
 ///
 /// One tween drives every card: the offsets are render transforms, which do not feed back into
 /// layout, so the pass cannot re-enter arrange. Resizing the window re-wraps every row for
-/// reasons that have nothing to do with the content, so a width change is recorded silently
-/// and never animated.
+/// reasons that have nothing to do with the content, so a resize is recorded silently and never
+/// animated — but only a width change with an unchanged child set counts as one.
 /// </summary>
 internal sealed class ReflowWrapPanel : WrapPanel
 {
@@ -40,11 +40,15 @@ internal sealed class ReflowWrapPanel : WrapPanel
     {
         Size result = base.ArrangeOverride(finalSize);
 
-        // Only the WIDTH decides where cards wrap, and only the user resizing the window changes
-        // it. The panel's height follows its content, so comparing the whole size would classify
-        // every add and remove as a resize and animate nothing.
-        bool sameViewport = finalSize.Width.Equals(_lastWidth);
+        // Only the WIDTH decides where cards wrap, and re-wrapping because the user dragged the
+        // window edge should not slide anything. But the width also moves when the vertical
+        // scrollbar arrives or leaves, and that happens precisely BECAUSE cards were filtered or
+        // deleted — the case the slide exists for. So a width change only counts as a resize
+        // when the child set is untouched; otherwise it is a consequence of the content change.
+        bool firstPass = double.IsNaN(_lastWidth);
+        bool widthChanged = !finalSize.Width.Equals(_lastWidth);
         _lastWidth = finalSize.Width;
+        bool animate = !firstPass && (!widthChanged || !SameChildren());
 
         var moves = new List<Move>();
         var entering = new List<UIElement>();
@@ -60,12 +64,20 @@ internal sealed class ReflowWrapPanel : WrapPanel
             if (!_slots.TryGetValue(child, out Rect previous))
             {
                 // A card that was not here last pass has nowhere to slide from, so it fades in.
-                if (sameViewport) entering.Add(child);
+                if (animate) entering.Add(child);
                 continue;
             }
 
             child.Opacity = 1;
-            if (!sameViewport) continue;
+            if (!animate)
+            {
+                // A resize part-way through a slide cancels the tween below, so clear the offset
+                // rather than leaving a card parked half-way to a slot it will never reach.
+                TranslateTransform stale = OffsetOf(child);
+                stale.X = 0;
+                stale.Y = 0;
+                continue;
+            }
 
             TranslateTransform offset = OffsetOf(child);
             // Measure from where the card actually IS, not from where it was laid out: a card
@@ -128,6 +140,22 @@ internal sealed class ReflowWrapPanel : WrapPanel
         _running = finished ? null : handle;
 
         return result;
+    }
+
+    /// <summary>True when this arrange pass sees exactly the children the last one did, which
+    /// is what separates a user resize from content that came or went.</summary>
+    private bool SameChildren()
+    {
+        if (InternalChildren.Count != _slots.Count)
+            return false;
+
+        foreach (UIElement child in InternalChildren)
+        {
+            if (!_slots.ContainsKey(child))
+                return false;
+        }
+
+        return true;
     }
 
     private static TranslateTransform OffsetOf(UIElement child)

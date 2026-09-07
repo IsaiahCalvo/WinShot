@@ -333,6 +333,16 @@ public class ThemedWindowTests
             Assert.True(
                 Motion.Holders <= holdersBefore,
                 $"reflow leaked a Motion holder: {holdersBefore} -> {Motion.Holders}");
+
+            // Dragging the window edge re-wraps every row for reasons that have nothing to do
+            // with the content, so it must stay silent — the same width test that has to let a
+            // filter through when the scrollbar comes or goes with it.
+            Motion.AnimationsEnabled = () => true;
+            window.Width -= 120;
+            window.UpdateLayout();
+
+            Assert.Equal(0, panel.LastReflowCount);
+            Assert.False(panel.IsReflowing, "a resize must not start a slide");
         }
         finally
         {
