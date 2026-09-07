@@ -566,19 +566,154 @@ public class MeasureModeTests
     [InlineData(42)]
     [InlineData(60)]
     [InlineData(96)]
-    public void AClickMeansOneThingBecauseThePillIsNeverUnderThePointer(int cursorY)
+    public void ClickingTheObjectCopiesBecauseThePillIsParkedOffIt(int cursorY)
     {
-        // The pill is placed relative to the cursor's OWN row, so no pointer can ever be
-        // inside it — which is why a left click has one meaning (copy) instead of two, and
-        // why capturing the object is Enter and the menu row the hint strip names.
+        // The pill sits outside the run it labels, so a pointer that is measuring an object
+        // is never inside it. That is what lets one button carry two meanings: on the object
+        // it copies, and only on the pill — the one thing under the pointer that lights up —
+        // does it capture.
         using var selector = Measuring(new Point(80, cursorY), out _);
         Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        Assert.False(pill.IntersectsWith(Card), $"pill {pill} overlaps the object it measures");
         Assert.False(pill.Contains(new Point(80, cursorY)), $"pill {pill} sits under the cursor");
 
-        selector.HandleMouseDown(new WF.MouseEventArgs(WF.MouseButtons.Left, 1, 80, cursorY, 0));
+        selector.MeasureMouseDownForRender(WF.MouseButtons.Left);
 
-        // A click never ends the session here; only Enter and the menu do.
+        // A click on the object never ends the session.
         Assert.Equal(WF.DialogResult.None, selector.DialogResult);
+    }
+
+    [Fact]
+    public void WalkingOntoThePillHoldsTheReadingStillSoThePillCanBeReached()
+    {
+        // A pill placed relative to the pointer keeps its distance from the pointer forever.
+        // This one is parked off the object, and the corridor between the two holds the
+        // reading still — otherwise the step that leaves the object would re-measure the
+        // desktop behind it and the pill would be gone by the time the pointer arrived.
+        using var selector = Measuring(new Point(80, 60), out _);
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        Rectangle reach = Assert.IsType<Rectangle>(selector.LivePillReachForRender);
+        Assert.True(reach.Contains(pill), $"reach {reach} does not contain the pill {pill}");
+        Assert.False(selector.PillIsHotForRender);
+
+        // Which side the pill parked on depends on the monitor's DPI — a 150 % screen makes
+        // the pill tall enough to flip below the card — so the walk is derived, not assumed.
+        int column = pill.Left + (pill.Width / 2);
+        int corridorY = pill.Top >= Card.Bottom ? reach.Top + 1 : reach.Bottom - 1;
+        Assert.False(Card.Contains(new Point(column, corridorY)), "the corridor is off the object");
+        selector.MoveMeasureCursorForRender(new Point(column, corridorY));
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+        Assert.False(selector.PillIsHotForRender, "the corridor is not itself a target");
+
+        selector.MoveMeasureCursorForRender(new Point(column, pill.Top + 2)); // the pill
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+        Assert.Equal(pill, selector.LivePillForRender);
+        Assert.True(selector.PillIsHotForRender);
+
+        selector.MeasureMouseDownForRender(WF.MouseButtons.Left);
+
+        Assert.Equal(WF.DialogResult.OK, selector.DialogResult);
+        Assert.Equal(Card, selector.SelectedRegionPx);
+        Assert.True(selector.SelectedByPaneClick);
+    }
+
+    [Fact]
+    public void SteppingOffThePillStartsMeasuringAgain()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        selector.MoveMeasureCursorForRender(new Point(pill.Left + (pill.Width / 2), pill.Top + 2));
+        Assert.True(selector.PillIsHotForRender);
+
+        // Sideways out of the pill's own column: nothing is holding the reading now.
+        selector.MoveMeasureCursorForRender(new Point(300, 250));
+
+        Assert.False(selector.PillIsHotForRender);
+        Assert.NotEqual(Card, selector.MeasuredScreenRect);
+    }
+
+    // ------------------------------------------------- how sure the rays are of an edge
+
+    private static Color Blend(Color a, Color b, double t) => Color.FromArgb(
+        (int)Math.Round(a.R + ((b.R - a.R) * t)),
+        (int)Math.Round(a.G + ((b.G - a.G) * t)),
+        (int)Math.Round(a.B + ((b.B - a.B) * t)));
+
+    /// <summary>The card, but its last two columns fade into the background the way an
+    /// anti-aliased glyph stem or a rounded corner reaches the pixels behind it.</summary>
+    private static Bitmap DesktopWithASoftEdge()
+    {
+        Bitmap bmp = Desktop();
+        Color bg = Color.FromArgb(0x10, 0x30, 0x80);
+        Color card = Color.FromArgb(0xF0, 0xF0, 0xF0);
+        for (int y = Card.Top; y < Card.Bottom; y++)
+        {
+            bmp.SetPixel(Card.Right - 2, y, Blend(card, bg, 0.34));
+            bmp.SetPixel(Card.Right - 1, y, Blend(card, bg, 0.67));
+        }
+        return bmp;
+    }
+
+    private static FastRegionSelectorDialog MeasuringOver(Bitmap frozen, Point cursor)
+    {
+        var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        selector.EnterMeasureForRender(frozen, Screen, cursor);
+        return selector;
+    }
+
+    [Fact]
+    public void AnAntiAliasedEdgeIsMeasuredWhereTheEyeSeesItNotAtTheFirstFuzzyPixel()
+    {
+        // The two blended columns belong to the card. Stopping at the first of them measures
+        // the object narrower than anyone can see it, which is why a raw colour-delta walk
+        // cannot resolve a letterform stroke and PixelSnap can.
+        using Bitmap frozen = DesktopWithASoftEdge();
+        using var selector = MeasuringOver(frozen, new Point(80, 60));
+
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+    }
+
+    /// <summary>A patch whose colour clears the tolerance but barely: the case where the
+    /// answer is a guess and the user should be reaching for the wheel.</summary>
+    private static readonly Rectangle Faint = new(200, 150, 60, 40);
+
+    private static Bitmap DesktopWithAFaintPatch()
+    {
+        Bitmap bmp = Desktop();
+        using var g = Graphics.FromImage(bmp);
+        using var brush = new SolidBrush(Color.FromArgb(0x1C, 0x3C, 0x8C)); // 36 away from the ground
+        g.FillRectangle(brush, Faint);
+        return bmp;
+    }
+
+    [Fact]
+    public void AnEdgeThatBarelyClearedTheToleranceLosesItsSerif()
+    {
+        // The serif is the claim "the object ends exactly HERE". An edge the rays only just
+        // found does not get to make it — that absence is the cue to turn the wheel.
+        using Bitmap frozen = DesktopWithAFaintPatch();
+        using var selector = MeasuringOver(frozen, new Point(230, 170));
+        Assert.Equal(Faint, selector.MeasuredScreenRect);
+        using Bitmap render = Render(selector);
+
+        // Inside the reticle's 10 px gap, so crimson here is the span and nothing else.
+        Assert.True(IsMeasureCrimson(render.GetPixel(225, 170)), "the span is still drawn");
+        Assert.True(IsMeasureCrimson(render.GetPixel(235, 170)), "the span is still drawn");
+        Assert.False(IsMeasureCrimson(render.GetPixel(Faint.Left, 168)), "no serif on a soft left edge");
+        Assert.False(IsMeasureCrimson(render.GetPixel(Faint.Right - 1, 172)), "no serif on a soft right edge");
+    }
+
+    [Fact]
+    public void AHardEdgeKeepsItsSerifWhileASoftOneDoesNot()
+    {
+        // Both ends of one line, one hard and one faded: the difference is the whole point.
+        using Bitmap frozen = DesktopWithASoftEdge();
+        using var selector = MeasuringOver(frozen, new Point(80, 60));
+        using Bitmap render = Render(selector);
+
+        Assert.True(IsMeasureCrimson(render.GetPixel(Card.Left, 58)), "hard left edge keeps its serif");
+        Assert.True(IsMeasureCrimson(render.GetPixel(Card.Right - 1, 58)), "and so does a crossed transition");
     }
 
     [Fact]
@@ -666,6 +801,85 @@ public class MeasureMotionTests
         selector.StopHintEntrance();
 
         Assert.Equal(0, Motion.Holders);
+    }
+
+    [Fact]
+    public void TheHoverOutlineOnThePillFadesInAndOutAndGivesTheClockBack()
+    {
+        PumpUntil(() => Motion.Holders == 0);
+
+        var screen = new Rectangle(0, 0, 400, 300);
+        var card = new Rectangle(50, 40, 100, 60);
+        using var selector = Selector();
+        using Bitmap frozen = SolidCardOnBlue(screen, card);
+        selector.EnterMeasureForRender(frozen, screen, new Point(80, 60));
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+
+        // Counted over the capsule's two widest points rather than sampled at named pixels:
+        // the outline is a stroke on an anti-aliased rounded path, so which exact pixel
+        // carries it is GDI+'s business. The bands sit at the pill's half-height and off its
+        // centre column, which is where neither arm of the crimson reticle runs.
+        int mid = pill.Top + (pill.Height / 2);
+        // Two pixels either side of the boundary: GDI+ strokes the capsule's widest point
+        // on the path itself, which is the pixel just past the rect's right edge.
+        var leftEdge = new Rectangle(pill.Left - 2, mid - 1, 4, 3);
+        var rightEdge = new Rectangle(pill.Right - 2, mid - 1, 4, 3);
+
+        using (Bitmap cold = Paint(selector, screen))
+        {
+            Assert.Equal(0, CountReddish(cold, leftEdge));
+            Assert.Equal(0, CountReddish(cold, rightEdge));
+        }
+
+        selector.MoveMeasureCursorForRender(new Point(pill.Left + (pill.Width / 2), pill.Top + 2));
+        Assert.True(selector.PillIsHotForRender);
+        PumpUntil(() => selector.PillHoverForRender >= 1.0);
+
+        using (Bitmap hot = Paint(selector, screen))
+        {
+            Assert.True(CountReddish(hot, leftEdge) > 0, "left edge of the outline");
+            Assert.True(CountReddish(hot, rightEdge) > 0, "right edge of the outline");
+        }
+
+        selector.MoveMeasureCursorForRender(new Point(300, 250));
+        PumpUntil(() => selector.PillHoverForRender <= 0.0);
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>Nothing else this mode paints on a pill is red at all — not the neutral
+    /// ground, not the white text, and not the 8 % of the reticle that shows through.</summary>
+    private static int CountReddish(Bitmap bmp, Rectangle where)
+    {
+        int found = 0;
+        for (int y = where.Top; y < where.Bottom; y++)
+        {
+            for (int x = where.Left; x < where.Right; x++)
+            {
+                Color c = bmp.GetPixel(x, y);
+                if (c.R > c.G + 40 && c.R > c.B + 30)
+                    found++;
+            }
+        }
+        return found;
+    }
+
+    private static Bitmap SolidCardOnBlue(Rectangle screen, Rectangle card)
+    {
+        var bmp = new Bitmap(screen.Width, screen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.Clear(Color.FromArgb(0x10, 0x30, 0x80));
+        using var brush = new SolidBrush(Color.FromArgb(0xF0, 0xF0, 0xF0));
+        g.FillRectangle(brush, card);
+        return bmp;
+    }
+
+    private static Bitmap Paint(FastRegionSelectorDialog selector, Rectangle screen)
+    {
+        var canvas = new Bitmap(screen.Width, screen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(canvas);
+        selector.PaintSurface(g, screen);
+        return canvas;
     }
 
     private static void PumpUntil(Func<bool> condition)

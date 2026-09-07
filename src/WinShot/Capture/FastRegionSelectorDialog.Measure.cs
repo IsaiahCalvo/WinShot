@@ -23,6 +23,17 @@ public sealed partial class FastRegionSelectorDialog
     /// read from (no frozen snapshot, or the cursor is off the snapshot).</summary>
     private SD.Rectangle? _measured;
 
+    /// <summary>How sure each of the four rays is of the edge it stopped on. A soft edge
+    /// loses its serif, because the serif is the claim "it ends here".</summary>
+    private EdgeRun _measuredRun;
+
+    /// <summary>The pointer is on the live pill, which is the capture target. Set from the
+    /// same rect the paint uses, so what lights up is what a click acts on.</summary>
+    private bool _pillHot;
+
+    private double _pillHover;
+    private IDisposable? _pillHoverTween;
+
     /// <summary>The two colours the live run is made of, cached against the run it was
     /// sampled for so a stationary cursor does not re-histogram on every follow tick.</summary>
     private (SD.Color Background, SD.Color Foreground)? _contrast;
@@ -145,6 +156,10 @@ public sealed partial class FastRegionSelectorDialog
         CloseMeasureMenu();
         _measure.Reset();
         _measured = null;
+        _measuredRun = default;
+        StopPillHover();
+        _pillHot = false;
+        _pillHover = 0;
         _contrast = null;
         _contrastFor = SD.Rectangle.Empty;
         _draggingGuide = null;
@@ -173,43 +188,58 @@ public sealed partial class FastRegionSelectorDialog
     /// through here so the LockBits is taken once per mouse-move and released immediately —
     /// GDI+ will not draw a bitmap whose bits are locked, and PaintSurface blits this one.
     /// </summary>
-    private (SD.Rectangle? Run, (SD.Color Background, SD.Color Foreground)? Colors) ReadPixels(
+    private (SD.Rectangle? Run, EdgeRun Edges, (SD.Color Background, SD.Color Foreground)? Colors) ReadPixels(
         SD.Point screen, byte tolerance, bool wantColors)
     {
         if (_frozen is null)
-            return (null, null);
+            return (null, default, null);
 
         try
         {
             using var snap = EdgeSnap.Lock(_frozen);
             var inBitmap = new SD.Point(screen.X - _vs.X, screen.Y - _vs.Y);
             if (inBitmap.X < 0 || inBitmap.Y < 0 || inBitmap.X >= snap.Width || inBitmap.Y >= snap.Height)
-                return (null, null);
+                return (null, default, null);
 
-            SD.Rectangle run = snap.DetectEdges(inBitmap, tolerance);
+            EdgeRun edges = snap.DetectRun(inBitmap, tolerance);
+            SD.Rectangle run = edges.Bounds;
             run.Offset(_vs.X, _vs.Y);
             // A ray that reaches the frame edge degrades to the frame, and the frame is the
             // whole virtual desktop: clamp to the monitor the cursor is on, because "3840
             // across three monitors" is not a measurement anyone asked for, and the dip
             // conversion below is a per-monitor question anyway.
-            run.Intersect(MonitorBoundsAt(screen));
-            if (run.Width < 1 || run.Height < 1)
-                return (null, null);
+            SD.Rectangle monitor = MonitorBoundsAt(screen);
+            SD.Rectangle clamped = run;
+            clamped.Intersect(monitor);
+            if (clamped.Width < 1 || clamped.Height < 1)
+                return (null, default, null);
+            // A side the monitor clipped is not an edge the detector found, so it cannot wear
+            // a serif either — the clamp is the same kind of "ran out of frame" the rays
+            // themselves degrade to.
+            edges = edges with
+            {
+                Bounds = clamped,
+                LeftFirm = edges.LeftFirm && clamped.Left == run.Left,
+                TopFirm = edges.TopFirm && clamped.Top == run.Top,
+                RightFirm = edges.RightFirm && clamped.Right == run.Right,
+                BottomFirm = edges.BottomFirm && clamped.Bottom == run.Bottom,
+            };
+            run = clamped;
 
             if (!wantColors)
-                return (run, null);
+                return (run, edges, null);
 
             var inBitmapRun = run;
             inBitmapRun.Offset(-_vs.X, -_vs.Y);
             var colors = ColorMath.DominantPair(snap.ColorAt, inBitmapRun);
-            return (run, colors);
+            return (run, edges, colors);
         }
         catch (Exception ex)
         {
             // A transient GDI+ state error must not take the overlay down mid-session; the
             // next mouse-move tries again.
             Log.Error("Measurement pixel read failed (non-fatal)", ex);
-            return (null, null);
+            return (null, default, null);
         }
     }
 
@@ -223,7 +253,7 @@ public sealed partial class FastRegionSelectorDialog
         if (_frozen is null)
             return null;
 
-        var (run, _) = ReadPixels(screen, EdgeSnap.DefaultTolerance, wantColors: false);
+        var (run, _, _) = ReadPixels(screen, EdgeSnap.DefaultTolerance, wantColors: false);
         if (run is not SD.Rectangle rect || rect.Width < 4 || rect.Height < 4)
             return null;
         return rect == MonitorBoundsAt(screen) ? null : rect;
@@ -259,9 +289,28 @@ public sealed partial class FastRegionSelectorDialog
             return;
         }
 
+        // The pill captures the object it labels, and a target that re-measures as the
+        // pointer approaches can never be reached: every step toward it would re-read the
+        // pixels under the pointer and move the pill again. So inside the pill — and inside
+        // the short corridor between the pill and the edge of the run it labels — the
+        // reading holds still. The corridor is only DimensionPillGap px tall and only as
+        // wide as the pill, so entering it is a deliberate move OUT of the object towards
+        // its number, never an incidental drift across it.
+        if (MeasurePillReach() is SD.Rectangle reach && reach.Contains(_currentScreen))
+        {
+            // Lit only ON the pill, never in the corridor: the outline and the hand cursor
+            // promise a capture, and a click in the corridor still copies.
+            SetPillHot(MeasurePillScreenRect() is SD.Rectangle over && over.Contains(_currentScreen));
+            InvalidateMeasureFollow(_lastFollowScreen, _currentScreen);
+            _lastFollowScreen = _currentScreen;
+            return;
+        }
+        SetPillHot(false);
+
         SD.Rectangle? before = _measured;
-        var (run, colors) = ReadPixels(_currentScreen, _measure.Tolerance, wantColors: true);
+        var (run, edges, colors) = ReadPixels(_currentScreen, _measure.Tolerance, wantColors: true);
         _measured = run;
+        _measuredRun = edges;
         if (run is SD.Rectangle rect)
         {
             _contrast = colors;
@@ -514,11 +563,17 @@ public sealed partial class FastRegionSelectorDialog
             return;
         }
 
-        // One gesture, one meaning: a left click copies the dimensions. Capturing the object
-        // is Enter and the menu's own row, both named where the mode explains itself — the
-        // pill cannot be a second target because it is placed relative to the cursor's OWN
-        // row and so never sits under the pointer, and an unmarked target that also ends the
-        // session is the last thing this click should be.
+        // Two targets, two meanings, and the difference is visible before the click: the
+        // pill is the only thing under the pointer that lights up, and it is the one that
+        // captures. Everywhere else — which is the object itself — copies. The pill is
+        // parked off the object and holds still while the pointer walks to it, so nothing
+        // that ends the session can ever land under a pointer that was only measuring.
+        if (MeasurePillScreenRect() is SD.Rectangle pill && pill.Contains(screen))
+        {
+            CaptureMeasured(run);
+            return;
+        }
+
         CopyMeasurement(run, screen);
     }
 
@@ -528,8 +583,9 @@ public sealed partial class FastRegionSelectorDialog
             return;
 
         PersistTolerance();
-        var (run, colors) = ReadPixels(_currentScreen, _measure.Tolerance, wantColors: true);
+        var (run, edges, colors) = ReadPixels(_currentScreen, _measure.Tolerance, wantColors: true);
         _measured = run;
+        _measuredRun = edges;
         _contrast = run is null ? null : colors;
         if (run is SD.Rectangle rect)
             _contrastFor = rect;
@@ -538,6 +594,8 @@ public sealed partial class FastRegionSelectorDialog
 
     private WF.Cursor MeasureCursor()
     {
+        if (_pillHot)
+            return WF.Cursors.Hand;
         if (_draggingGuide is (bool draggingVertical, _))
             return draggingVertical ? WF.Cursors.SizeWE : WF.Cursors.SizeNS;
         if (_measure.GuideNear(vertical: true, _currentScreen.X, GuideGrabPx) is not null)
@@ -744,8 +802,16 @@ public sealed partial class FastRegionSelectorDialog
 
     /// <summary>
     /// Where the live pill lands, in screen px. Paint and hit-test both come through here —
-    /// clicking the pill means something different from clicking the object, so the two must
-    /// agree on the pixel.
+    /// clicking the pill captures the object and clicking the object copies its dimensions,
+    /// so the two must agree on the pixel.
+    ///
+    /// It is anchored to the RUN's own edge rather than to the cursor's row, which is what
+    /// makes it a target at all: a pill placed relative to the pointer keeps its distance
+    /// from the pointer forever and can never be reached. Parked just outside the object it
+    /// labels, it holds still for as long as the pointer stays on that object.
+    ///
+    /// A run that fills the monitor top to bottom has neither an outside nor anything anyone
+    /// would want to capture, so there the pill falls back to riding the cursor's row.
     /// </summary>
     private SD.Rectangle? MeasurePillScreenRect()
     {
@@ -754,15 +820,79 @@ public sealed partial class FastRegionSelectorDialog
 
         SD.Size pill = SelectorChrome.MeasureLabel(MeasureLiveLabel(run));
         SD.Rectangle monitor = MonitorBoundsAt(_currentScreen);
-        int row = Math.Clamp(_currentScreen.Y, run.Top, run.Bottom - 1);
         int centre = (run.Left + run.Right - 1) / 2;
         int left = Math.Clamp(centre - (pill.Width / 2), monitor.Left, Math.Max(monitor.Left, monitor.Right - pill.Width));
-        // Above the line, flipped below when there is no room — clamping instead would park
-        // the pill on top of the very thing being measured.
-        int above = row - pill.Height - SelectorChrome.DimensionPillGap;
-        int top = above >= monitor.Top ? above : row + SelectorChrome.DimensionPillGap;
+        int gap = SelectorChrome.DimensionPillGap;
+
+        int aboveRun = run.Top - pill.Height - gap;
+        if (aboveRun >= monitor.Top)
+            return new SD.Rectangle(left, aboveRun, pill.Width, pill.Height);
+
+        int belowRun = run.Bottom + gap;
+        if (belowRun + pill.Height <= monitor.Bottom)
+            return new SD.Rectangle(left, belowRun, pill.Width, pill.Height);
+
+        int row = Math.Clamp(_currentScreen.Y, run.Top, run.Bottom - 1);
+        int above = row - pill.Height - gap;
+        int top = above >= monitor.Top ? above : row + gap;
         top = Math.Clamp(top, monitor.Top, Math.Max(monitor.Top, monitor.Bottom - pill.Height));
         return new SD.Rectangle(left, top, pill.Width, pill.Height);
+    }
+
+    /// <summary>
+    /// The pill plus the corridor between it and the edge of the run it labels — the ground
+    /// the pointer crosses on its way to the pill, and the ground on which the reading holds
+    /// still so that crossing arrives somewhere. Pill-wide and one gap tall; when the pill
+    /// had to fall back onto the cursor's row this is just the pill, and unreachable, which
+    /// is the honest answer for a run that fills the screen.
+    /// </summary>
+    private SD.Rectangle? MeasurePillReach()
+    {
+        if (_measured is not SD.Rectangle run || MeasurePillScreenRect() is not SD.Rectangle pill)
+            return null;
+
+        if (pill.Bottom <= run.Top)
+            return SD.Rectangle.FromLTRB(pill.Left, pill.Top, pill.Right, run.Top);
+        if (pill.Top >= run.Bottom)
+            return SD.Rectangle.FromLTRB(pill.Left, run.Bottom, pill.Right, pill.Bottom);
+        return pill;
+    }
+
+    /// <summary>Render seam: the pill's reach, and whether the pointer is on it.</summary>
+    internal SD.Rectangle? LivePillReachForRender => MeasurePillReach();
+
+    internal bool PillIsHotForRender => _pillHot;
+
+    internal double PillHoverForRender => _pillHover;
+
+    /// <summary>The pill is chrome, not a reading, so it may animate: functional data in this
+    /// mode never does. Cross-fades the hover outline over <see cref="Motion.QuickMs"/> from
+    /// wherever it currently sits, so a pointer skimming in and out does not snap.</summary>
+    private void SetPillHot(bool hot)
+    {
+        if (_pillHot == hot)
+            return;
+
+        _pillHot = hot;
+        StopPillHover();
+        double from = _pillHover;
+        double to = hot ? 1 : 0;
+        _pillHoverTween = Motion.Run(
+            Motion.QuickMs,
+            Motion.EaseOutCubic,
+            amount =>
+            {
+                _pillHover = from + ((to - from) * amount);
+                if (_measured is SD.Rectangle hovered)
+                    InvalidateMeasureRegion(hovered);
+            },
+            () => _pillHoverTween = null);
+    }
+
+    internal void StopPillHover()
+    {
+        _pillHoverTween?.Dispose();
+        _pillHoverTween = null;
     }
 
     private void PaintMeasureSurface(SD.Graphics g, SD.Rectangle monitorBounds, bool cursorOnThisSurface)
@@ -812,19 +942,23 @@ public sealed partial class FastRegionSelectorDialog
         bool locked = AxisLocked;
         bool width = LockedToWidth(run);
 
+        // A serif is the claim "the object ends exactly here"; an edge the rays barely found
+        // does not get to make it, which is the cue to reach for the tolerance wheel.
         if (!locked || width)
         {
             SelectorChrome.DrawDimension(g, clientSize,
                 ToLocal(new SD.Point(run.Left, row), monitorBounds),
                 ToLocal(new SD.Point(run.Right - 1, row), monitorBounds),
-                label: null, crimson);
+                label: null, crimson,
+                serifLow: _measuredRun.LeftFirm, serifHigh: _measuredRun.RightFirm);
         }
         if (!locked || !width)
         {
             SelectorChrome.DrawDimension(g, clientSize,
                 ToLocal(new SD.Point(column, run.Top), monitorBounds),
                 ToLocal(new SD.Point(column, run.Bottom - 1), monitorBounds),
-                label: null, crimson);
+                label: null, crimson,
+                serifLow: _measuredRun.TopFirm, serifHigh: _measuredRun.BottomFirm);
         }
 
         // One pill for the live reading: "W x H" for the cross, a bare integer when Shift
@@ -837,8 +971,11 @@ public sealed partial class FastRegionSelectorDialog
         if (MeasurePillScreenRect() is SD.Rectangle pill)
         {
             SD.Point local = ToLocal(pill.Location, monitorBounds);
+            SD.Color? outline = _pillHover > 0.01
+                ? SD.Color.FromArgb((int)Math.Round(255 * Math.Clamp(_pillHover, 0, 1)), crimson)
+                : null;
             SelectorChrome.DrawLabel(g, clientSize, MeasureLiveLabel(run), local.X, local.Y,
-                fullyRounded: true);
+                fullyRounded: true, outline: outline);
         }
     }
 
@@ -974,7 +1111,8 @@ public sealed partial class FastRegionSelectorDialog
 
         string scale = _measure.UseApca ? "APCA" : "WCAG";
         return $"Tolerance {_measure.Tolerance}  ·  H / V hold  ·  Shift+H / Shift+V guide  ·  " +
-            $"Click or Ctrl+C copies  ·  Enter captures  ·  Alt+click for {scale} contrast  ·  " +
+            $"Click or Ctrl+C copies  ·  Click the pill or Enter captures  ·  " +
+            $"Alt+click for {scale} contrast  ·  " +
             "Backspace undo  ·  Right-click for more  ·  Esc clears, Esc again exits";
     }
 

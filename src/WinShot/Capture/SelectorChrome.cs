@@ -88,9 +88,16 @@ internal static class SelectorChrome
     /// itself which endpoint of a line is covered, and that is precisely the off-by-one
     /// that separates a polished ruler from a sloppy one; a rectangle from a to b is
     /// b - a + 1 px long by construction, which is the same inclusive +1 EdgeSnap returns.
+    ///
+    /// <paramref name="serifLow"/> and <paramref name="serifHigh"/> drop the cap at the
+    /// low (left / top) and high (right / bottom) end. That is how a soft edge is drawn:
+    /// the serif is the claim "the object ends HERE", so an edge the detector barely found
+    /// does not get to make it. The line stays an opaque aliased hairline either way —
+    /// this vocabulary has no dashes, no glow and no alpha to fade.
     /// </summary>
     public static void DrawDimension(
-        SD.Graphics g, SD.Size clientSize, SD.Point a, SD.Point b, string? label, SD.Color color)
+        SD.Graphics g, SD.Size clientSize, SD.Point a, SD.Point b, string? label, SD.Color color,
+        bool serifLow = true, bool serifHigh = true)
     {
         bool horizontal = a.Y == b.Y;
         var prev = g.SmoothingMode;
@@ -102,16 +109,20 @@ internal static class SelectorChrome
                 int left = Math.Min(a.X, b.X);
                 int right = Math.Max(a.X, b.X);
                 g.FillRectangle(brush, left, a.Y, right - left + 1, 1);
-                g.FillRectangle(brush, left, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
-                g.FillRectangle(brush, right, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
+                if (serifLow)
+                    g.FillRectangle(brush, left, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
+                if (serifHigh)
+                    g.FillRectangle(brush, right, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
             }
             else
             {
                 int top = Math.Min(a.Y, b.Y);
                 int bottom = Math.Max(a.Y, b.Y);
                 g.FillRectangle(brush, a.X, top, 1, bottom - top + 1);
-                g.FillRectangle(brush, a.X - SerifHalf, top, (SerifHalf * 2) + 1, 1);
-                g.FillRectangle(brush, a.X - SerifHalf, bottom, (SerifHalf * 2) + 1, 1);
+                if (serifLow)
+                    g.FillRectangle(brush, a.X - SerifHalf, top, (SerifHalf * 2) + 1, 1);
+                if (serifHigh)
+                    g.FillRectangle(brush, a.X - SerifHalf, bottom, (SerifHalf * 2) + 1, 1);
             }
         }
         g.SmoothingMode = prev;
@@ -193,10 +204,12 @@ internal static class SelectorChrome
     /// <paramref name="fullyRounded"/> gives a capsule (radius = height/2), which is the
     /// measurement pill's shape; the existing selection readout keeps its radius-6 corners.
     /// <paramref name="amount"/> fades the whole pill in and out — GDI+ has no global alpha
-    /// for a text draw, so the fade is applied to the two colours instead of to a layer.</summary>
+    /// for a text draw, so the fade is applied to the two colours instead of to a layer.
+    /// <paramref name="outline"/> strokes the capsule, which is how the measurement pill says
+    /// it is a click target; pass the colour already carrying the hover fade's alpha.</summary>
     public static void DrawLabel(
         SD.Graphics g, SD.Size clientSize, string text, int x, int y, bool fullyRounded = false,
-        double amount = 1.0)
+        double amount = 1.0, SD.Color? outline = null)
     {
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
         SD.Size size = MeasureBlock(text, font);
@@ -212,9 +225,16 @@ internal static class SelectorChrome
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, fullyRounded ? Math.Max(2, h / 2) : LabelRadius))
-        using (var bgBrush = new SD.SolidBrush(
-            SD.Color.FromArgb((int)Math.Round(LabelGroundAlpha * fade), ThemePalette.WindowBg)))
-            g.FillPath(bgBrush, path);
+        {
+            using (var bgBrush = new SD.SolidBrush(
+                SD.Color.FromArgb((int)Math.Round(LabelGroundAlpha * fade), ThemePalette.WindowBg)))
+                g.FillPath(bgBrush, path);
+            if (outline is SD.Color stroke && stroke.A > 0)
+            {
+                using var pen = new SD.Pen(stroke, 1);
+                g.DrawPath(pen, path);
+            }
+        }
         g.SmoothingMode = prev;
 
         if (!text.Contains('\n'))

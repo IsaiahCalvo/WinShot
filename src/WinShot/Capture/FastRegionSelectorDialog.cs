@@ -473,6 +473,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             DisposePreviousMeasureMenu();
             // Disposing mid-animation must give the high-resolution clock back.
             StopHintEntrance();
+            StopPillHover();
             DisposePanes();
             DisposeFrozen();
             _followTimer.Dispose();
