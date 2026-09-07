@@ -353,8 +353,13 @@ public class BreakerProbes
         }
     }
 
+    /// <summary>
+    /// Sticky means the toast is not counting down behind the user's decision -- not that it
+    /// has no bound at all. It is a TopMost window that a keyboard-only user reaches only
+    /// through its own Escape hook, so an unanswered one still has to leave eventually.
+    /// </summary>
     [Fact]
-    public void Toast_Sticky_NeverStartsItsDismissTimer()
+    public void Toast_Sticky_RunsABackstopRatherThanADwell()
     {
         using var _ = new Anim(false);
         using var t = new ToastWindow("Reading text", "Working on the selection.",
@@ -364,7 +369,9 @@ public class BreakerProbes
         FieldInfo dismiss = typeof(ToastWindow)
             .GetField("_dismiss", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var timer = (WF.Timer)dismiss.GetValue(t)!;
-        Assert.False(timer.Enabled);
+        Assert.True(timer.Enabled, "a sticky toast still needs a bound on its life");
+        Assert.True(timer.Interval >= 10_000,
+            $"the backstop must not read as a dwell (was {timer.Interval} ms)");
     }
 
     [Fact]

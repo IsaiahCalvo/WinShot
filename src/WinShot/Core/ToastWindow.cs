@@ -1,4 +1,5 @@
-﻿using SD = System.Drawing;
+﻿using System.Runtime.InteropServices;
+using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
 namespace WinShot.Core;
@@ -90,6 +91,12 @@ public sealed class ToastWindow : WF.Form
     private const int DwellMs = 1700;
     private const int LongDwellMs = 4500;
 
+    /// <summary>A sticky toast waits for an answer rather than counting one down -- but it is
+    /// a TopMost window over everything the user owns, so "waits" must not mean "forever".
+    /// This is a backstop, not a dwell: long enough that nobody reads it as a countdown,
+    /// short enough that a toast nobody answers cannot become permanent screen furniture.</summary>
+    private const int StickyBackstopMs = 30_000;
+
     /// <summary>One 13-DIP row of body text, and the most rows the toast will grow to.
     /// Trim measures against these rather than guessing a character count.</summary>
     private const int BodyLineH = 22;
@@ -122,6 +129,11 @@ public sealed class ToastWindow : WF.Form
     private readonly DarkButton? _toggleButton;
     private readonly DarkCheckBox? _suppressCheck;
     private readonly bool _sticky;
+    /// <summary>The dwell a non-sticky toast counts down. Held so the sticky backstop can be
+    /// substituted in one place instead of at every Start() site.</summary>
+    private int _dwellMs;
+    private IntPtr _keyHook;
+    private HookProc? _keyHookProc;
 
     /// <summary>
     /// The body label's real width in device pixels. Row counting has to measure against
@@ -310,7 +322,8 @@ public sealed class ToastWindow : WF.Form
         // preview, decide, and hit a button is not an offer. This used to name _openButton
         // alone, because it was the only action a toast could carry when it was written.
         bool hasAction = _openButton is not null || _toggleButton is not null || _secondaryButton is not null;
-        _dismiss.Interval = hasAction || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
+        _dwellMs = hasAction || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
+        _dismiss.Interval = _sticky ? StickyBackstopMs : _dwellMs;
         _dismiss.Tick += (_, _) => Close();
         MouseEnter += (_, _) => HoldOpen();
         MouseLeave += (_, _) => RestartDismiss();
@@ -355,7 +368,10 @@ public sealed class ToastWindow : WF.Form
             if (button is null) continue;
             hasRow = true;
             rowRight -= 96;
-            button.Location = new SD.Point(S(rowRight), S(bodyBottom + 8));
+            // ponytail: two buttons is the whole vocabulary (primary + one of decline/toggle),
+            // and two fit exactly. Clamped rather than wrapped so a third would overlap on the
+            // card instead of being painted off its left edge where nothing can reach it.
+            button.Location = new SD.Point(S(Math.Max(TextXDip, rowRight)), S(bodyBottom + 8));
             rowRight -= 8;
         }
 
@@ -451,10 +467,10 @@ public sealed class ToastWindow : WF.Form
         _restLocation = Location;
         _motion?.Dispose();
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
-        // A sticky toast waits for an answer instead of counting down behind one. It is
-        // still dismissible: the secondary button, and a click anywhere on the card.
-        if (!_sticky)
-            _dismiss.Start();
+        // A sticky toast runs the backstop rather than the dwell; RestartDismiss picks.
+        RestartDismiss();
+        if (_sticky)
+            InstallKeyHook();
         Announce();
     }
 
@@ -497,7 +513,7 @@ public sealed class ToastWindow : WF.Form
             Position();
             _restLocation = Location;
         }
-        _dismiss.Interval = LongDwellMs;
+        _dwellMs = LongDwellMs;
         RestartDismiss();
         Announce();
     }
@@ -521,11 +537,13 @@ public sealed class ToastWindow : WF.Form
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(from + ((1d - from) * p)));
     }
 
-    /// <summary>Resumes the countdown after a hover -- unless the toast is waiting for an
-    /// answer, in which case moving the pointer away is not an answer.</summary>
+    /// <summary>Resumes the countdown after a hover. A sticky toast resumes its backstop
+    /// instead of the dwell: moving the pointer away is not an answer, but it must still not
+    /// leave an unanswerable window on screen for the rest of the session.</summary>
     private void RestartDismiss()
     {
-        if (!_sticky) _dismiss.Start();
+        _dismiss.Interval = _sticky ? StickyBackstopMs : _dwellMs;
+        _dismiss.Start();
     }
 
     /// <summary>0 = fully out (transparent, dropped by the rise distance), 1 = at rest.</summary>
@@ -587,6 +605,7 @@ public sealed class ToastWindow : WF.Form
         if (disposing)
         {
             if (ReferenceEquals(_live, this)) _live = null;
+            RemoveKeyHook();
             _dismiss.Stop();
             _dismiss.Dispose();
             _motion?.Dispose();
@@ -594,6 +613,108 @@ public sealed class ToastWindow : WF.Form
         }
         base.Dispose(disposing);
     }
+
+    // ---------------------------------------------------------------- keyboard
+    // A sticky toast presents a decision, and this window is ShowWithoutActivation: it never
+    // takes focus, so Tab, Enter and Escape all go to whatever the user was already in. That
+    // left a TopMost decision card with no keyboard path to either answer. The fix is the
+    // pattern FastKeystrokeOverlayWindow already uses -- a WH_KEYBOARD_LL hook, armed only
+    // while a sticky toast is on screen -- rather than stealing focus from the user's work.
+
+    private const int WhKeyboardLl = 13;
+    private const int WmKeyDown = 0x0100;
+    private const int WmKeyUp = 0x0101;
+    private const int WmSysKeyDown = 0x0104;
+    private const int WmSysKeyUp = 0x0105;
+    private static readonly IntPtr Swallow = new(1);
+
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    private void InstallKeyHook()
+    {
+        if (_keyHook != IntPtr.Zero) return;
+        _keyHookProc = KeyboardHookCallback; // held: a collected delegate takes the hook down
+        _keyHook = SetWindowsHookExW(WhKeyboardLl, _keyHookProc, GetModuleHandleW(null), 0);
+        if (_keyHook == IntPtr.Zero)
+            Log.Error($"Toast could not install its keyboard hook (error {Marshal.GetLastWin32Error()})");
+    }
+
+    private void RemoveKeyHook()
+    {
+        if (_keyHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_keyHook);
+        _keyHook = IntPtr.Zero;
+        _keyHookProc = null;
+    }
+
+    /// <summary>
+    /// Escape declines, from anywhere: it is the one key that can never do something the
+    /// user did not ask for, and without it a sticky toast has no keyboard exit at all.
+    /// Enter takes the primary, but only while the pointer is over the card -- hover is what
+    /// says the toast is what the user is looking at, and an unconditional Enter would open a
+    /// link out from under someone who had gone back to typing somewhere else.
+    /// </summary>
+    private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && !IsDisposed && !_exiting)
+        {
+            long msg = wParam.ToInt64();
+            bool down = msg is WmKeyDown or WmSysKeyDown;
+            if (down || msg is WmKeyUp or WmSysKeyUp)
+            {
+                var key = (WF.Keys)Marshal.PtrToStructure<KbdllHookStruct>(lParam).vkCode;
+                if (key == WF.Keys.Escape)
+                {
+                    if (down) BeginInvoke(new Action(DeclineFromKeyboard));
+                    return Swallow;
+                }
+                if (key is WF.Keys.Enter or WF.Keys.Return && PointerIsOver())
+                {
+                    if (down && _openButton is not null)
+                        BeginInvoke(new Action(() => _openButton.PerformClick()));
+                    return Swallow;
+                }
+            }
+        }
+        return CallNextHookEx(_keyHook, nCode, wParam, lParam);
+    }
+
+    private bool PointerIsOver()
+    {
+        try { return IsHandleCreated && Bounds.Contains(WF.Cursor.Position); }
+        catch { return false; }
+    }
+
+    /// <summary>Escape is the secondary answer where there is one ("Don't open"), and a plain
+    /// dismissal where there is not.</summary>
+    private void DeclineFromKeyboard()
+    {
+        if (IsDisposed) return;
+        if (_secondaryButton is not null) _secondaryButton.PerformClick();
+        else Close();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KbdllHookStruct
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookExW(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandleW(string? lpModuleName);
 
     protected override WF.CreateParams CreateParams
     {

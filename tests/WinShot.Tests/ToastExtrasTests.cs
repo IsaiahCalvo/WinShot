@@ -90,11 +90,12 @@ public class ToastExtrasTests
     }
 
     /// <summary>
-    /// A sticky toast waits for an answer. This is the whole point of the row: the old
-    /// behaviour closed itself after 4.5 s whether or not the user had decided.
+    /// A sticky toast waits for an answer rather than closing after 4.5 s whether or not the
+    /// user had decided. It still carries a backstop -- it is a TopMost window over the
+    /// user's work, so "waits" must not mean "forever".
     /// </summary>
     [Fact]
-    public void ASickyToastDoesNotDismissItself()
+    public void ASickyToastDoesNotCountDownBehindTheDecision()
     {
         using var a = new Anim(false);
         var toast = new ToastWindow(
@@ -109,7 +110,9 @@ public class ToastExtrasTests
         WF.Timer dismiss = (WF.Timer)typeof(ToastWindow)
             .GetField("_dismiss", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .GetValue(toast)!;
-        Assert.False(dismiss.Enabled, "a sticky toast must not be counting down");
+        Assert.True(dismiss.Enabled, "a sticky toast still needs a bound on its life");
+        Assert.True(dismiss.Interval >= 10_000,
+            $"the sticky backstop must not read as a dwell (was {dismiss.Interval} ms)");
 
         toast.Dispose();
         PumpFor(50);
