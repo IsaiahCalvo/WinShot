@@ -51,6 +51,15 @@ public static class DarkTitleBar
     public static void ApplyMica(Window window)
     {
         if (window is null) return;
+        if (!CanUseMica(SystemParameters.HighContrast, Environment.OSVersion.Version.Build))
+        {
+            // Dark caption and border only, and the window keeps the XAML background it
+            // declared. Clearing that first and hoping DWM paints the ground is what left
+            // the settings window's gutters unpainted everywhere Mica does not exist.
+            Apply(window);
+            return;
+        }
+
         window.Background = System.Windows.Media.Brushes.Transparent;
         window.SourceInitialized += (_, _) =>
         {
@@ -66,6 +75,17 @@ public static class DarkTitleBar
         };
         Apply(window, micaBackdrop: true);
     }
+
+    /// <summary>
+    /// Whether a window may trade its own opaque background for the system backdrop.
+    /// DWMWA_SYSTEMBACKDROP_TYPE arrived in Windows 11 22H2 (build 22621) and WinShot
+    /// supports back to Windows 10 20H1, where the attribute is rejected and a transparent
+    /// window would render its gutters against an uninitialised DWM surface. High Contrast
+    /// is excluded on every build: the palette pass sets a system background, and Mica would
+    /// overwrite it with transparency moments later.
+    /// </summary>
+    internal static bool CanUseMica(bool highContrast, int osBuild) =>
+        !highContrast && osBuild >= 22621;
 
     private static void ApplyToHandle(IntPtr hwnd, bool micaBackdrop = false)
     {

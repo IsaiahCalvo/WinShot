@@ -69,6 +69,10 @@ public partial class SettingsWindow : Window
         if (index < 0) index = 0;
         CrossFade(sections, index);
         UpdateTitleForSection(index);
+        // About has nothing to restore, and a live button whose only outcome is a dead-end
+        // "nothing to restore" prompt says that worse than a disabled one does.
+        if (RestoreDefaultsButton is not null)
+            RestoreDefaultsButton.IsEnabled = index != sections.Length - 1;
         if (index == sections.Length - 1)
             LoadReleaseNotesAsync();
     }
@@ -107,6 +111,9 @@ public partial class SettingsWindow : Window
             {
                 bool wasHidden = pane.Visibility != Visibility.Visible;
                 pane.Visibility = Visibility.Visible;
+                // A pane that was faded out is still hit-testable until it collapses, so the
+                // one coming back has to be re-armed as well as re-shown.
+                pane.IsHitTestVisible = true;
                 if (AnimationsOff || !IsVisible)
                 {
                     pane.BeginAnimation(OpacityProperty, null);
@@ -119,6 +126,11 @@ public partial class SettingsWindow : Window
             }
             else if (pane.Visibility == Visibility.Visible)
             {
+                // WPF hit-tests an element at Opacity 0 exactly as it does at 1, and these
+                // panes are overlapping siblings in declaration order — so without this the
+                // outgoing pane kept swallowing clicks and wheel input for the whole fade
+                // whenever the user switched to a LOWER tab index.
+                pane.IsHitTestVisible = false;
                 if (AnimationsOff || !IsVisible)
                 {
                     pane.BeginAnimation(OpacityProperty, null);
@@ -329,18 +341,7 @@ public partial class SettingsWindow : Window
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
-            // Toggles applied as they were changed; only typed fields can be lost, and
-            // Escape used to lose them silently.
-            if (HasUncommittedFieldEdits() &&
-                !ThemedMessageDialog.Confirm(
-                    this,
-                    "Discard changes?",
-                    "The fields you typed have not been applied yet. Close Settings and lose them?",
-                    confirmLabel: "Discard"))
-            {
-                return;
-            }
-            Close();
+            CloseWithDiscardGuard();
             return;
         }
         base.OnKeyDown(e);
@@ -597,7 +598,7 @@ public partial class SettingsWindow : Window
         if (toggle.IsChecked == true)
             Reveal(panel);
         else
-            panel.Visibility = Visibility.Collapsed;
+            Conceal(panel);
     }
 
     /// <summary>Shows a block with the same fade the tab swap uses, so revealed content
@@ -605,6 +606,7 @@ public partial class SettingsWindow : Window
     private void Reveal(UIElement element)
     {
         element.Visibility = Visibility.Visible;
+        element.IsHitTestVisible = true; // Conceal parks it false while it fades out
         if (AnimationsOff)
         {
             element.BeginAnimation(OpacityProperty, null);
@@ -613,6 +615,37 @@ public partial class SettingsWindow : Window
         }
         element.Opacity = 0;
         element.BeginAnimation(OpacityProperty, FadeTo(1, "MotionSwap"));
+    }
+
+    /// <summary>The mirror of <see cref="Reveal"/>. A block that arrives over MotionSwap and
+    /// then vanishes on the same click that eased the chevron back is half a transition.</summary>
+    private void Conceal(UIElement element)
+    {
+        if (element.Visibility != Visibility.Visible)
+            return;
+
+        if (AnimationsOff || !IsVisible)
+        {
+            element.BeginAnimation(OpacityProperty, null);
+            element.Visibility = Visibility.Collapsed;
+            element.Opacity = 1;
+            return;
+        }
+
+        UIElement outgoing = element;
+        outgoing.IsHitTestVisible = false;
+        DoubleAnimation fade = FadeTo(0, "MotionQuick");
+        fade.Completed += (_, _) =>
+        {
+            // Re-revealed mid-fade: leave it alone, Reveal already owns it.
+            if (outgoing.Opacity > 0.01)
+                return;
+            outgoing.BeginAnimation(OpacityProperty, null);
+            outgoing.Visibility = Visibility.Collapsed;
+            outgoing.Opacity = 1;
+            outgoing.IsHitTestVisible = true;
+        };
+        outgoing.BeginAnimation(OpacityProperty, fade);
     }
 
     private void OnAboutOpenLicenses(object sender, RoutedEventArgs e)
@@ -752,6 +785,11 @@ public partial class SettingsWindow : Window
     {
         if (!revealed)
         {
+            if (animate)
+            {
+                Conceal(row);
+                return;
+            }
             row.BeginAnimation(OpacityProperty, null);
             row.Visibility = Visibility.Collapsed;
             row.Opacity = 1;
@@ -825,8 +863,8 @@ public partial class SettingsWindow : Window
                 valid = false;
             }
 
-            int retentionDays = SliderIndexToRetentionDays(HistorySlider.Value);
-            int selfTimer = int.Parse(SelectedTag(SelfTimerCombo, "3"));
+            // Retention and the self-timer are live-applied by WriteToggleSettings; reading
+            // them here again was left over from the OK-button shape and nothing used it.
             int overlaySeconds = 0;
             if (OverlayAutoCloseCheck.IsChecked == true)
                 overlaySeconds = ReadInt(OverlayCloseBox, 1, 3600, ref valid);
@@ -1053,7 +1091,10 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
+            // With no OK button this save IS the commit, so a locked or read-only settings
+            // file silently loses the preference: the control still looks applied. Say so.
             Log.Error("Live-applying a settings toggle failed", ex);
+            App.Toast("Settings could not be saved", FriendlyError.For(ex), severity: ToastSeverity.Error);
         }
     }
 
@@ -1137,7 +1178,28 @@ public partial class SettingsWindow : Window
     private static bool FieldDiffers(TextBox box, int stored) =>
         !int.TryParse(box.Text.Trim(), out int value) || value != stored;
 
-    private void OnCancel(object sender, RoutedEventArgs e) => Close();
+    /// <summary>
+    /// The footer's left-hand exit, and Escape. It is labelled "Close", not "Cancel": with
+    /// live-apply there is nothing left for a cancel to undo — every checkbox, combo and
+    /// slider is already on disk 250 ms after it changed. Only typed fields still wait for
+    /// Done, so this is the one thing that can lose work and it asks first. Both doors ask
+    /// the same question; the button used to close silently while Escape prompted.
+    /// </summary>
+    private void CloseWithDiscardGuard()
+    {
+        if (HasUncommittedFieldEdits() &&
+            !ThemedMessageDialog.Confirm(
+                this,
+                "Discard changes?",
+                "The fields you typed have not been applied yet. Close Settings and lose them?",
+                confirmLabel: "Discard"))
+        {
+            return;
+        }
+        Close();
+    }
+
+    private void OnCancel(object sender, RoutedEventArgs e) => CloseWithDiscardGuard();
 
     private void ConfigureAccessibility()
     {
@@ -1157,7 +1219,7 @@ public partial class SettingsWindow : Window
         Accessible(ScreenshotSaveCheck, "Save screenshots to the export location", "Write every screenshot to the export folder.");
         Accessible(ScreenshotOpenAnnotateCheck, "Open Annotate after a screenshot", "Open the annotation editor on every screenshot.");
         Accessible(ScreenshotPinCheck, "Pin screenshots to the screen", "Pin every screenshot as a floating window.");
-        Accessible(RecordingOpenEditorCheck, "Open Video Editor after a recording", "Open the local editor when a recording finishes.");
+        Accessible(RecordingOpenEditorCheck, "Open video editor after a recording", "Open the local editor when a recording finishes.");
 
         Accessible(OverlayPositionCombo, "Quick Access position", "Choose where the Quick Access overlay appears.");
         Accessible(OverlayMoveToActiveScreenCheck, "Move Quick Access to active screen", "Show the overlay on the screen containing the pointer.");
@@ -1203,7 +1265,7 @@ public partial class SettingsWindow : Window
             "Cut the shadowed wedges out of the corners of a rounded window capture.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
-        Accessible(AskForNameCheck, "Ask for a name after every capture", "Prompt for a file name before each save, defaulting to the template.");
+        Accessible(AskForNameCheck, "Ask for a name when a capture saves automatically", "Prompt for a file name when the after-capture set writes a file, defaulting to the template. Save on the Quick Access card and in the editor still name the file themselves.");
         Accessible(HistorySlider, "Capture history retention", "Choose how long local capture history is kept.");
         Accessible(PinnedRoundedCornersCheck, "Rounded pinned screenshot corners", "Use rounded corners for pinned screenshots.");
         Accessible(PinnedShadowCheck, "Pinned screenshot shadow", "Show a shadow around pinned screenshots.");

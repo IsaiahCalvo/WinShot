@@ -421,10 +421,12 @@
                             AutomationProperties.HelpText="Reset every setting on the tab you are looking at to its default."
                             Style="{StaticResource PillButtonSecondary}" Click="OnRestoreDefaults"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="CancelButton" Content="Cancel" IsCancel="True"
+                    <!-- "Close", not "Cancel": toggles apply as they change, so there is
+                         nothing here to cancel. Only typed fields wait for Done. -->
+                    <Button x:Name="CancelButton" Content="Close" IsCancel="True"
                             FocusVisualStyle="{StaticResource SettingsFocusVisual}"
-                            AutomationProperties.Name="Cancel settings changes"
-                            AutomationProperties.HelpText="Close Settings without applying changes."
+                            AutomationProperties.Name="Close settings"
+                            AutomationProperties.HelpText="Close Settings. Checkboxes and lists have already applied; typed fields need Done."
                             Style="{StaticResource PillButtonSecondary}" Click="OnCancel"/>
                     <Button x:Name="SaveButton" Content="Done" IsDefault="True"
                             FocusVisualStyle="{StaticResource SettingsFocusVisual}"
@@ -442,7 +444,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="App behaviour"/>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="App behavior"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Startup"/>
                                     <CheckBox x:Name="StartupCheck" Content="Start at login"/>
@@ -522,43 +524,43 @@
                                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource MatrixColHead}" Text="Screenshot"/>
                                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource MatrixColHead}" Text="Recording"/>
                                         <TextBlock Grid.Row="0" Grid.Column="2" Style="{StaticResource MatrixColHead}"
-                                                   HorizontalAlignment="Left" Margin="10,0,0,0" Text="Action"/>
+                                                   HorizontalAlignment="Left" Margin="{StaticResource MatrixCellMargin}" Text="Action"/>
 
                                         <!-- Row: Show Quick Access Overlay -->
                                         <CheckBox Grid.Row="1" Grid.Column="0" x:Name="ScreenshotShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
                                         <CheckBox Grid.Row="1" Grid.Column="1" x:Name="RecordingShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="1" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Show the Quick Access card"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Show the Quick Access card"/>
 
                                         <!-- Row: Copy file to clipboard -->
                                         <CheckBox Grid.Row="2" Grid.Column="0" x:Name="ScreenshotCopyCheck" Style="{StaticResource MatrixCheck}"/>
                                         <CheckBox Grid.Row="2" Grid.Column="1" x:Name="RecordingCopyCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="2" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Copy file to clipboard"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Copy file to clipboard"/>
 
                                         <!-- Row: Save -->
                                         <CheckBox Grid.Row="3" Grid.Column="0" x:Name="ScreenshotSaveCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="3" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Save to export location"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Save to export location"/>
 
                                         <!-- Row: Open Annotate tool (screenshot only) -->
                                         <CheckBox Grid.Row="4" Grid.Column="0" x:Name="ScreenshotOpenAnnotateCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="4" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Open the annotation editor"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Open the annotation editor"/>
 
                                         <!-- Row: Pin to the screen (screenshot only) -->
                                         <CheckBox Grid.Row="5" Grid.Column="0" x:Name="ScreenshotPinCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="5" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Pin to the screen"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Pin to the screen"/>
 
                                         <!-- Row: Open Video Editor (recording only) -->
                                         <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource MatrixNA}"/>
                                         <CheckBox Grid.Row="6" Grid.Column="1" x:Name="RecordingOpenEditorCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="6" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Open the video editor"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Open the video editor"/>
                                     </Grid>
                                 </Border>
                             </StackPanel>
@@ -681,8 +683,14 @@
                             <ListBoxItem Content="GIF" AutomationProperties.Name="GIF recording settings"/>
                         </ListBox>
 
+                        <!-- The three sub-panels overlap in a Grid rather than stacking in
+                             the parent StackPanel: the cross-fade keeps the outgoing panel
+                             visible for its whole fade, and as siblings in a column that
+                             doubled the scroll content and made the incoming panel arrive
+                             below the fold before snapping back. -->
+                        <Grid>
                         <!-- Recording > General -->
-                        <StackPanel x:Name="RecordingGeneralPanel">
+                        <StackPanel x:Name="RecordingGeneralPanel" VerticalAlignment="Top">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeader}" Text="While recording"/>
@@ -765,7 +773,7 @@
                         </StackPanel>
 
                         <!-- Recording > Video -->
-                        <StackPanel x:Name="RecordingVideoPanel" Visibility="Collapsed">
+                        <StackPanel x:Name="RecordingVideoPanel" Visibility="Collapsed" VerticalAlignment="Top">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeader}" Text="Video output"/>
@@ -808,7 +816,7 @@
                         </StackPanel>
 
                         <!-- Recording > GIF -->
-                        <StackPanel x:Name="RecordingGifPanel" Visibility="Collapsed">
+                        <StackPanel x:Name="RecordingGifPanel" Visibility="Collapsed" VerticalAlignment="Top">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeader}" Text="GIF output"/>
@@ -850,6 +858,7 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
+                        </Grid>
                     </StackPanel>
                 </ScrollViewer>
 
@@ -909,12 +918,12 @@
                             <StackPanel>
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="Self-timer"/>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Self-Timer interval"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Self-timer interval"/>
                                     <ComboBox x:Name="SelfTimerCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="3 Seconds" Tag="3"/>
-                                        <ComboBoxItem Content="5 Seconds" Tag="5"/>
-                                        <ComboBoxItem Content="10 Seconds" Tag="10"/>
-                                        <ComboBoxItem Content="15 Seconds" Tag="15"/>
+                                        <ComboBoxItem Content="3 seconds" Tag="3"/>
+                                        <ComboBoxItem Content="5 seconds" Tag="5"/>
+                                        <ComboBoxItem Content="10 seconds" Tag="10"/>
+                                        <ComboBoxItem Content="15 seconds" Tag="15"/>
                                     </ComboBox>
                                 </DockPanel>
                                 <DockPanel x:Name="UnavailableScreenshotCursorRow" Style="{StaticResource Row}" Visibility="Collapsed">
@@ -994,7 +1003,7 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Editor behaviour"/>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Editor behavior"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Accessibility"/>
                                     <CheckBox x:Name="ShowColorNamesCheck" Content="Show color names"/>
@@ -1031,7 +1040,7 @@
                                 </DockPanel>
                                 <DockPanel x:Name="AskForNameRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="AskForNameCheck" Content="Ask for name after every capture"/>
+                                    <CheckBox x:Name="AskForNameCheck" Content="Ask for a name when a capture saves automatically"/>
                                 </DockPanel>
                                 <!-- Every token is a link that inserts itself at the caret. A
                                      legend you have to retype is a legend you read once and
@@ -1127,7 +1136,7 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Capture behaviour"/>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Capture behavior"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="All-In-One"/>
                                     <CheckBox x:Name="AllInOneRememberCheck" Content="Remember last selection"/>

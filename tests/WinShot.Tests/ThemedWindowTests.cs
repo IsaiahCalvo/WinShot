@@ -236,6 +236,14 @@ public class ThemedWindowTests
         var cancel = Named<System.Windows.Controls.Button>("CancelButton");
         Assert.True(done.IsDefault);
         Assert.True(cancel.IsCancel);
+        // "Close", not "Cancel". Checkboxes, combos and sliders live-apply 250 ms after they
+        // change, so a button labelled Cancel promising to "close without applying changes"
+        // was describing the opposite of what it did.
+        Assert.Equal("Close", cancel.Content);
+        Assert.DoesNotContain(
+            "without applying",
+            AutomationProperties.GetHelpText(cancel) ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(done.FocusVisualStyle);
         Assert.NotNull(cancel.FocusVisualStyle);
 
@@ -740,52 +748,73 @@ public class ThemedWindowTests
 
         Assert.Contains("General", window.Title);
 
+        var general = (ScrollViewer)window.FindName("SectionGeneral")!;
+        var screenshots = (ScrollViewer)window.FindName("SectionScreenshots")!;
+
+        // Animated pass. Only what the swap does SYNCHRONOUSLY is asserted here: the
+        // incoming pane is up, and the outgoing one has stopped taking input. Everything
+        // after that is a WPF animation clock running on wall time, and an assertion that
+        // races it fails the moment another test class puts load on the machine.
         list.SelectedIndex = 4;
         PumpDispatcherOnce();
         Assert.Contains("Screenshots", window.Title);
+        Assert.Equal(Visibility.Visible, screenshots.Visibility);
+        Assert.True(screenshots.IsHitTestVisible);
+        // The panes are overlapping siblings and WPF hit-tests at Opacity 0 exactly as it
+        // does at 1, so a fading-out pane that is still hit-testable swallows every click
+        // and wheel event aimed at the tab you just picked.
+        Assert.False(general.IsHitTestVisible, "the outgoing pane still takes input mid-fade");
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (DateTime.UtcNow < deadline)
+        // Deterministic pass. With animation off every transition collapses to its end
+        // state inside one dispatcher turn, so the end state can be asserted exactly.
+        Func<bool> animations = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
         {
+            list.SelectedIndex = 0;
             PumpDispatcherOnce();
-            var visible = paneNames
-                .Select(n => (ScrollViewer)window.FindName(n)!)
-                .Where(v => v.Visibility == Visibility.Visible)
+            list.SelectedIndex = 4;
+            PumpDispatcherOnce();
+
+            var live = paneNames
+                .Select(n => (name: n, pane: (ScrollViewer)window.FindName(n)!))
+                .Where(x => x.pane.Visibility == Visibility.Visible)
                 .ToArray();
-            if (visible.Length == 1 && visible[0].Opacity >= 0.999)
-                break;
-            Thread.Sleep(15);
+            Assert.Single(live);
+            Assert.Equal("SectionScreenshots", live[0].name);
+            Assert.Equal(1d, live[0].pane.Opacity, 3);
+            // General was re-armed on its way in and disarmed again on its way out; the pane
+            // now showing is the one that has to be taking input.
+            Assert.True(screenshots.IsHitTestVisible, "the visible pane must take input");
+            Assert.False(general.IsHitTestVisible);
+
+            // The About pane's disclosures start closed, reveal what they name, and fade
+            // back out rather than snapping — which is why this half needs animations off.
+            var diagnostics = (ToggleButton)window.FindName("AboutDiagnosticsToggle")!;
+            var diagnosticsPanel = (StackPanel)window.FindName("AboutDiagnosticsPanel")!;
+            var notices = (ToggleButton)window.FindName("AboutNoticesToggle")!;
+            var noticesPanel = (StackPanel)window.FindName("AboutNoticesPanel")!;
+            Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
+            Assert.Equal(Visibility.Collapsed, noticesPanel.Visibility);
+            Assert.False(string.IsNullOrWhiteSpace(((TextBlock)window.FindName("AboutNoticesText")!).Text));
+            diagnostics.IsChecked = true;
+            notices.IsChecked = true;
+            PumpDispatcherOnce();
+            Assert.Equal(Visibility.Visible, diagnosticsPanel.Visibility);
+            Assert.Equal(Visibility.Visible, noticesPanel.Visibility);
+            diagnostics.IsChecked = false;
+            notices.IsChecked = false;
+            PumpDispatcherOnce();
+            Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
+
+            // Back to General so the rest of the smoke sees the window it expects.
+            list.SelectedIndex = 0;
+            PumpDispatcherOnce();
         }
-
-        var live = paneNames
-            .Select(n => (name: n, pane: (ScrollViewer)window.FindName(n)!))
-            .Where(x => x.pane.Visibility == Visibility.Visible)
-            .ToArray();
-        Assert.Single(live);
-        Assert.Equal("SectionScreenshots", live[0].name);
-        Assert.Equal(1d, live[0].pane.Opacity, 3);
-
-        // The About pane's disclosures start closed and reveal what they name.
-        var diagnostics = (ToggleButton)window.FindName("AboutDiagnosticsToggle")!;
-        var diagnosticsPanel = (StackPanel)window.FindName("AboutDiagnosticsPanel")!;
-        var notices = (ToggleButton)window.FindName("AboutNoticesToggle")!;
-        var noticesPanel = (StackPanel)window.FindName("AboutNoticesPanel")!;
-        Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
-        Assert.Equal(Visibility.Collapsed, noticesPanel.Visibility);
-        Assert.False(string.IsNullOrWhiteSpace(((TextBlock)window.FindName("AboutNoticesText")!).Text));
-        diagnostics.IsChecked = true;
-        notices.IsChecked = true;
-        PumpDispatcherOnce();
-        Assert.Equal(Visibility.Visible, diagnosticsPanel.Visibility);
-        Assert.Equal(Visibility.Visible, noticesPanel.Visibility);
-        diagnostics.IsChecked = false;
-        notices.IsChecked = false;
-        PumpDispatcherOnce();
-        Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
-
-        // Back to General so the rest of the smoke sees the window it expects.
-        list.SelectedIndex = 0;
-        PumpDispatcherOnce();
+        finally
+        {
+            Motion.AnimationsEnabled = animations;
+        }
         Assert.Contains("General", window.Title);
     }
 

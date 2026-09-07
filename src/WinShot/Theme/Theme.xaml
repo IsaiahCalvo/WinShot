@@ -211,6 +211,7 @@
     <Thickness x:Key="GroupSepMargin">0,8,0,8</Thickness>     <!-- Space2 either side -->
     <Thickness x:Key="LabelGutterMargin">0,0,12,0</Thickness> <!-- Space3 between label and control -->
     <Thickness x:Key="ChipGutterMargin">0,0,8,0</Thickness>   <!-- Space2 between chips in a row -->
+    <Thickness x:Key="MatrixCellMargin">12,0,0,0</Thickness> <!-- Space3 from the after-capture matrix's checkbox column to its label -->
     <Thickness x:Key="ThumbInset">2</Thickness>               <!-- scrollbar thumb inside its 8px rail -->
 
     <!-- Settings' two-column geometry. Everything under a labelled row starts at
