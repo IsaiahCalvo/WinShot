@@ -899,18 +899,27 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bg" Background="Transparent"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
-                                          TextElement.FontSize="{TemplateBinding FontSize}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        <Grid>
+                            <Border x:Name="Hover" Opacity="0" Background="{StaticResource HoverFillBrush}"/>
+                            <Border x:Name="Press" Opacity="0" Background="{StaticResource PressedShadeBrush}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                              TextElement.FontSize="{TemplateBinding FontSize}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                            <!-- The glyph colour still swaps; only the fill has a layer to fade.
+                                 This button shares the annotation size field with ToolButtons that
+                                 cross-fade, so an instant wash beside them was the odd one out. -->
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedShadeBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -978,6 +987,9 @@
                             <Border x:Name="Box" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource SurfaceAltBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                            <!-- Before the chip, so a checked box's accent covers it. -->
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
+                                    BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"/>
                             <Border x:Name="Chip" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource AccentBrush}"
                                     BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
@@ -1002,7 +1014,8 @@
                             </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>
@@ -1090,21 +1103,31 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
+                    <!-- Rings stack rather than swap Stroke on one ellipse, so the hover and
+                         selected states cross-fade the way the swatch's neighbours in the
+                         editor colour row do. Each layer is wider than the one under it, so
+                         whichever is opaque covers the rest: focus, then checked, then hover. -->
                     <Grid>
                         <Ellipse x:Name="Ring" Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1.5"/>
+                        <Ellipse x:Name="Hover" Opacity="0" Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1.5"/>
+                        <Ellipse x:Name="Check" Opacity="0" Stroke="White" StrokeThickness="2"/>
                         <Ellipse Width="14" Height="14" Fill="{TemplateBinding Background}"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource TextSecondaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="White"/>
-                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource CheckIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource CheckOut}"/></Trigger.ExitActions>
                         </Trigger>
+                        <!-- A focus ring appearing the instant focus lands is conventional, and
+                             it has to outrank both fades, so it stays a setter on the base ring
+                             at a thickness neither overlay covers. -->
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource InfoBrush}"/>
-                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2.5"/>
+                            <Setter TargetName="Ring" Property="StrokeThickness" Value="3.5"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -1123,11 +1146,16 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
-                    <Border x:Name="Th" CornerRadius="4" Margin="2"
-                            Background="{StaticResource BorderStrongBrush}"/>
+                    <Grid>
+                        <Border x:Name="Th" CornerRadius="4" Margin="2"
+                                Background="{StaticResource BorderStrongBrush}"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="4" Margin="2"
+                                Background="{StaticResource TextSecondaryBrush}"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Th" Property="Background" Value="{StaticResource TextSecondaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

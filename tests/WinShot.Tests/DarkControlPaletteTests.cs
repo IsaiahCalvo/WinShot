@@ -274,6 +274,14 @@ public class DarkControlPaletteTests
     /// floor for graphics, on the affirmative button of every dialog. Nothing computed the
     /// hovered pair, so nothing caught it. Hover on a saturated fill dips instead, so every
     /// interactive state has to beat the button sitting there doing nothing.
+    ///
+    /// The bar here is RELATIVE on purpose, and the exemption it grants has to be said out
+    /// loud: white on the bare accent is 3.65:1, under the 4.5:1 a text pair owes. That is
+    /// the accent identity itself (#0A84FF is fixed by the hard constraints), not something
+    /// this button chose, and raising the rest fill to clear 4.5:1 would mean a second blue.
+    /// So rest is held to the 3:1 graphics floor and every state has to beat it, which is
+    /// what stops the ramp drifting further down. Closing the gap for good means changing
+    /// the accent or the label, which is a whole-app decision and no track's to take alone.
     /// </summary>
     [Fact]
     public void PillButtonPrimary_EveryStateReadsBetterThanAtRest() => OnTheme(theme =>
@@ -283,6 +291,7 @@ public class DarkControlPaletteTests
         Color hover = ((SolidColorBrush)theme["HoverShadeBrush"]).Color;
         Color press = ((SolidColorBrush)theme["PressedShadeBrush"]).Color;
         double rest = Contrast(white, accent);
+        Assert.True(rest >= 3d, $"White on the bare accent is {rest:0.00}:1, under the 3:1 graphics floor");
 
         foreach ((string state, Color fill) in new[]
         {
@@ -323,6 +332,39 @@ public class DarkControlPaletteTests
                     Contrast(over, ground) >= 4.5d,
                     $"{textKey} on {groundKey} is {Contrast(over, ground):0.00}:1");
             }
+        }
+    });
+
+    /// <summary>
+    /// TextDisabledBrush is the one text brush the test above deliberately leaves out, and
+    /// leaving it out silently would let the suite certify the theme as clear while three
+    /// surfaces read ENABLED copy through it, below the bar:
+    ///
+    ///   SettingsWindow.xaml   Hint / SubHint, and the retention tick labels
+    ///   HistoryWindow.xaml    "Screenshots and recordings you take will show up here."
+    ///
+    /// 4.5:1 is the right bar for those and they miss it (3.80:1 on WindowBg), but the fix is
+    /// a hint colour, which is T7's "hint contrast >= 4.5:1" row and a visible change to every
+    /// settings pane — not something to slip into a foundations sweep. What this pins instead
+    /// is the floor the brush owes AS a disabled brush, so the gap cannot widen unnoticed
+    /// while T7 gets to it, and the exemption is written down where the next reviewer reads it
+    /// rather than inferred from an absence.
+    /// </summary>
+    [Fact]
+    public void Theme_DisabledTextIsStillLegible_AndItsEnabledMisusesAreT7s() => OnTheme(theme =>
+    {
+        Color window = ((SolidColorBrush)theme["WindowBgBrush"]).Color;
+        Color text = ((SolidColorBrush)theme["TextDisabledBrush"]).Color;
+
+        foreach (string groundKey in new[] { "WindowBgBrush", "ToolbarBgBrush", "SurfaceBrush", "ElevatedBrush" })
+        {
+            Color raw = ((SolidColorBrush)theme[groundKey]).Color;
+            Color ground = raw.A == 255 ? raw : Over(raw, window);
+            Color over = text.A == 255 ? text : Over(text, ground);
+
+            Assert.True(
+                Contrast(over, ground) >= 3d,
+                $"TextDisabledBrush on {groundKey} is {Contrast(over, ground):0.00}:1");
         }
     });
 
@@ -534,6 +576,51 @@ public class DarkControlPaletteTests
                 child.Duration == new Duration(TimeSpan.Zero),
                 $"{where} still animates over {child.Duration} with animations turned off");
     }
+
+    /// <summary>
+    /// The wave converted the templates it could name and left five snapping, which put a
+    /// 140 ms cross-fade and an instant swap inside one control cluster — the annotation size
+    /// field's chevron and the colour swatches sit in the same editor bar as the ToolButtons
+    /// that ease. Mixing the two reads worse than the uniform snap it replaced, so the rule is
+    /// checked rather than the list: a state that repaints has to transition into it.
+    ///
+    /// Scoped to what actually repaints. A state trigger that only swaps Foreground or flips a
+    /// glyph's Visibility is exempt — a check mark appearing is a discrete thing, not a fade,
+    /// and ModeToolButton's white glyph is keyed to the accent chip that is itself fading
+    /// under it. So is IsKeyboardFocused: a focus ring that waits 140 ms to confirm the key
+    /// press is worse, not better, and every focus ring in the theme is deliberately a setter.
+    /// IsHighlighted is left out for the same reason — a menu highlight tracks the pointer
+    /// down a list, and a fade on each row would smear behind it.
+    /// </summary>
+    [Fact]
+    public void Theme_NoControlStateRepaintsWithoutATransition() => OnTheme(theme =>
+    {
+        string[] states = { "IsMouseOver", "IsPressed", "IsChecked" };
+        string[] paint = { "Background", "BorderBrush", "Stroke", "Fill", "StrokeThickness", "Opacity" };
+
+        foreach (object key in theme.Keys.Cast<object>().ToList())
+        {
+            foreach (TriggerBase triggerBase in TriggersOf(theme[key]))
+            {
+                if (triggerBase is not Trigger trigger) continue;
+                if (!states.Contains(trigger.Property.Name) || !Equals(trigger.Value, true)) continue;
+
+                string[] repainted = trigger.Setters
+                    .OfType<Setter>()
+                    .Select(setter => setter.Property.Name)
+                    .Where(paint.Contains)
+                    .Distinct()
+                    .ToArray();
+
+                if (repainted.Length == 0) continue;
+
+                Assert.True(
+                    StoryboardsOf(trigger).Any(),
+                    $"{key}'s {trigger.Property.Name} state sets {string.Join(", ", repainted)} " +
+                    "with a bare setter, so it snaps beside templates that cross-fade");
+            }
+        }
+    });
 
     /// <summary>Every trigger a theme value can carry: its own, and its template's.</summary>
     private static IEnumerable<TriggerBase> TriggersOf(object? value)

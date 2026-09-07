@@ -1212,7 +1212,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
         catch (Exception ex)
         {
+            // "Open with…" and "Show in folder" both need a file on disk, and both used to
+            // close or do nothing at all when the save behind them failed — the two cases
+            // FriendlyError has exact lines for (a full disk, a save folder that is gone).
+            // The card is still under the pointer that clicked the row, so it says so itself.
             Log.Error("Quick-actions file action failed", ex);
+            FlashStatus(FriendlyError.For(ex));
         }
     }
 
@@ -1237,7 +1242,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
         catch (Exception ex)
         {
+            // The two switch arms above already say a share failed; a throw out of
+            // EnsureDragFileAsync is the same outcome and was the one arriving silently.
             Log.Error("Blip share failed", ex);
+            ShowShareToast("Blip share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
         }
     }
 
@@ -1269,11 +1277,16 @@ public sealed class FastQuickActionsWindow : WF.Form
             HistoryShareService.ShowWindowsShare(
                 Handle,
                 new[] { path },
-                ex => Log.Error("Windows share failed", ex));
+                ex =>
+                {
+                    Log.Error("Windows share failed", ex);
+                    ShowShareToast("Share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
+                });
         }
         catch (Exception ex)
         {
             Log.Error("Share failed", ex);
+            ShowShareToast("Share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
         }
     }
 
@@ -1293,7 +1306,11 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
             catch (Exception ex)
             {
+                // The card deliberately stays open on a failed delete — the capture is still
+                // there — but staying open silently is indistinguishable from a click that
+                // missed. It says why it is still here.
                 Log.Error($"Failed to recycle {path}", ex);
+                FlashStatus(FriendlyError.For(ex));
                 return;
             }
         }

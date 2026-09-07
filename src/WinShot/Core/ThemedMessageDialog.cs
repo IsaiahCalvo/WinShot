@@ -1,6 +1,7 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace WinShot.Core;
 
@@ -83,6 +84,7 @@ public static class ThemedMessageDialog
 
         var panel = new StackPanel { Margin = new Thickness(20, 16, 20, 16) };
         dialog.Content = panel;
+        Enter(dialog, panel);
 
         var titleText = new TextBlock
         {
@@ -112,5 +114,37 @@ public static class ThemedMessageDialog
         };
         panel.Children.Add(footer);
         return (dialog, panel, footer);
+    }
+
+    /// <summary>
+    /// Fades and grows the card in. ToastWindow — the other surface this wave made the app's
+    /// single feedback channel — eases in and out, so a dialog appearing at full size in one
+    /// frame beside it read as two different systems. The content scales rather than the
+    /// Window: a RenderTransform on the Window shrinks its content inside a frame that does
+    /// not move, and the 2% band left at the edges is the same brush either way.
+    ///
+    /// The duration is the theme's, so Settings &gt; Accessibility &gt; Animation effects
+    /// zeroes this along with every other transition (ThemeResources zeroes the token itself).
+    /// The literal is only reached by a dialog raised before the theme is merged.
+    /// </summary>
+    private static void Enter(Window dialog, UIElement content)
+    {
+        var scale = new ScaleTransform(0.98d, 0.98d);
+        content.RenderTransform = scale;
+        content.RenderTransformOrigin = new Point(0.5d, 0.5d);
+        content.Opacity = 0d;
+
+        dialog.Loaded += (_, _) =>
+        {
+            Duration duration = dialog.TryFindResource("MotionQuick") as Duration?
+                ?? new Duration(TimeSpan.FromMilliseconds(Motion.QuickMs));
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+            content.BeginAnimation(
+                UIElement.OpacityProperty, new DoubleAnimation(1d, duration) { EasingFunction = ease });
+            var grow = new DoubleAnimation(1d, duration) { EasingFunction = ease };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+        };
     }
 }
