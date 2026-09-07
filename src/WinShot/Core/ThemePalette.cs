@@ -112,7 +112,9 @@ public static class ThemePalette
     /// <summary>
     /// Off the scale deliberately: the recording card's duration and size sit in a 17 px
     /// strip inside the pinned card, and anything larger crowds the two ends together on
-    /// the smallest card size.
+    /// the smallest card size. Same value as <see cref="PinnedTooltipPt"/> below and kept
+    /// separate on purpose: the tooltip's width is pinned by test, so consolidating the two
+    /// would tie the strip's face to a number that cannot move.
     /// </summary>
     public const float MediaStripLabelPt = 6.5f;
 

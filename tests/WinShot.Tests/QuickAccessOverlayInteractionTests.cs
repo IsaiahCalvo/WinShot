@@ -772,10 +772,12 @@ public class QuickAccessOverlayInteractionTests
 
         (string title, string body) = FastQuickActionsWindow.BatchSaveConfirmation(4, 0, folder);
         Assert.Equal("Saved 4 captures", title);
-        Assert.Equal("Captures", body);
+        // A sentence, like every other toast body the card raises — not a bare folder name.
+        Assert.Equal("All of them are in Captures.", body);
 
-        (string one, _) = FastQuickActionsWindow.BatchSaveConfirmation(1, 0, folder);
+        (string one, string oneBody) = FastQuickActionsWindow.BatchSaveConfirmation(1, 0, folder);
         Assert.Equal("Saved 1 capture", one);
+        Assert.Equal("It is in Captures.", oneBody);
     }
 
     [Fact]
@@ -1033,6 +1035,95 @@ public class QuickAccessOverlayInteractionTests
             PumpUntil(() => Motion.Holders == 0, 4000);
             Assert.Equal(0, Motion.Holders);
             overlay.Hide();
+        });
+    }
+
+    /// <summary>
+    /// The annotate round-trip when the editor closes inside the 140 ms step-aside fade —
+    /// Escape buffered while it initialises, or an editor that dismisses itself. ComeBack
+    /// used to see a card that was still Visible, treat it as "nothing to do" and return
+    /// before clearing _offScreen or cancelling the fade; the fade then hid the card and
+    /// nothing revived it, because only _temporarilyHidden cards are revived by the next
+    /// capture. The capture vanished from the corner for the life of the process.
+    /// </summary>
+    [Fact]
+    public void AnEditorThatClosesInsideTheStepAsideFadeStillGivesTheCardBack()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            var made = new List<FastQuickActionsWindow>();
+            try
+            {
+                var settings = new SettingsService();
+                settings.Current.OverlayMoveToActiveScreen = false;
+                var card = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+                made.Add(card);
+                card.Show();
+                PumpUntil(() => Motion.Holders == 0, 4000);
+
+                card.StepAside();            // App.AnnotateFromOverlay
+                WF.Application.DoEvents();   // one frame of the fade
+                card.ComeBack();             // the editor's Closed handler
+                PumpUntil(() => Motion.Holders == 0, 4000);
+
+                Assert.True(card.Visible, "the annotated card never came back");
+                Assert.Equal(1d, card.Opacity, 2);
+
+                // And it is back in the stack, so the next capture stacks above it rather
+                // than landing on top of it.
+                var next = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+                made.Add(next);
+                next.Show();
+                PumpUntil(() => Motion.Holders == 0, 4000);
+                Assert.NotEqual(card.Bounds, next.Bounds);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+                foreach (FastQuickActionsWindow card in made)
+                    card.Dispose();
+                WF.Application.DoEvents();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Hover alone must not outrank the window the user is typing in. The corner is a normal
+    /// place to park a pointer and the card does not auto-close by default, so a hovered card
+    /// used to eat Ctrl+S out of a document — silently, for as long as it sat there.
+    /// </summary>
+    [Fact]
+    public void AParkedPointerStopsTheCardTakingKeysOffTheForegroundApp()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            overlay.Show();
+
+            // Never hovered: nothing to claim.
+            Assert.False((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            // The pointer arrives — the card may claim its four chords.
+            Invoke(overlay, "SetHovering", true);
+            Assert.True((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            // Left sitting there, it goes back to being just a pointer.
+            SetPrivate(overlay, "_shortcutArmedAt", Environment.TickCount64 - 10_000);
+            Assert.False((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            // And focus moving while the pointer stays put — the Alt+Tab-then-Ctrl+S case —
+            // disarms it whatever the clock says.
+            Invoke(overlay, "ArmShortcuts");
+            Assert.True((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+            SetPrivate(overlay, "_shortcutForeground", new IntPtr(0x1234));
+            Assert.False((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
         });
     }
 
@@ -1449,6 +1540,16 @@ public class QuickAccessOverlayInteractionTests
 
     private static void InvokeKey(FastQuickActionsWindow overlay, WF.Keys keys)
         => Invoke(overlay, "OnOverlayKeyDown", overlay, new WF.KeyEventArgs(keys));
+
+    private static object? InvokeWithResult(FastQuickActionsWindow overlay, string method, params object[] args)
+        => typeof(FastQuickActionsWindow)
+            .GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(overlay, args);
+
+    private static void SetPrivate(FastQuickActionsWindow overlay, string field, object value)
+        => typeof(FastQuickActionsWindow)
+            .GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(overlay, value);
 
     private static void Invoke(FastQuickActionsWindow overlay, string method, params object[] args)
         => typeof(FastQuickActionsWindow)

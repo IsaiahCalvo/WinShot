@@ -6,6 +6,45 @@ namespace WinShot.Tests;
 
 public class MediaCardStripTests
 {
+    /// <summary>
+    /// VideoThumbnail hands back a null duration for an unreadable file or a GIF with no
+    /// frame-delay property, and the painted strip draws nothing then. The spoken version
+    /// has to be missing too — "0s long" is a wrong fact, not an absent one.
+    /// </summary>
+    [Fact]
+    public void AnUnknownDurationIsLeftOutOfWhatAScreenReaderIsTold()
+    {
+        string known = FastQuickActionsWindow.RecordingDescription(TimeSpan.FromSeconds(53), 7_130_000, canEdit: true);
+        Assert.Contains("53s long", known);
+        Assert.Contains("6.8 MB", known);
+        // The screenshot card advertises double-click; so must the recording card, which
+        // opens the video editor on the same gesture.
+        Assert.Contains("Double-click", known);
+
+        string unknown = FastQuickActionsWindow.RecordingDescription(null, 7_130_000, canEdit: false);
+        Assert.DoesNotContain("0s", unknown);
+        Assert.DoesNotContain("long", unknown);
+        Assert.DoesNotContain("Double-click", unknown);
+        Assert.Contains("6.8 MB", unknown);
+    }
+
+    /// <summary>
+    /// The camcorder box is a scaled value, not a device-pixel constant: pinned at 14 it was
+    /// the same size at 96 and 120 dpi, so it read as 82 % of the strip at 100 % and 67 % at
+    /// 125 %. The proportion has to hold at every scale the app runs at.
+    /// </summary>
+    [Fact]
+    public void TheGlyphKeepsItsShareOfTheStripAtEveryScale()
+    {
+        foreach (int dpi in new[] { 96, 120, 144, 192 })
+        {
+            var card = new SD.Rectangle(0, 0, MediaCardStrip.Scale(192, dpi), MediaCardStrip.Scale(120, dpi));
+            SD.Rectangle strip = MediaCardStrip.Bounds(card, dpi);
+            double share = MediaCardStrip.GlyphBox(strip, dpi) / (double)strip.Height;
+            Assert.InRange(share, 0.75, 0.9);
+        }
+    }
+
     [Theory]
     [InlineData(0, "0s")]
     [InlineData(3, "3s")]

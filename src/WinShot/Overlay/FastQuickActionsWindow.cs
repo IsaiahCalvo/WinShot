@@ -101,6 +101,17 @@ public sealed class FastQuickActionsWindow : WF.Form
     private bool _temporarilyHidden;
     private bool _returningFromStepAside;
     private IDisposable? _stepAsideMotion;
+    /// <summary>The opacity the card sits at when it is simply on screen, captured by StepAside.</summary>
+    private double _fullOpacity = 1d;
+
+    /// <summary>
+    /// How long after the pointer last did something on the card its shortcuts may still be
+    /// taken off the foreground app. Long enough to read a tooltip and act on it, short
+    /// enough that a pointer left in the corner is back to being just a pointer.
+    /// </summary>
+    private const int ShortcutArmMs = 4000;
+    private long _shortcutArmedAt = long.MinValue / 2;
+    private IntPtr _shortcutForeground;
     private bool _allowImmediateClose;
     private bool _regionUpdateQueued;
     private SD.Point _dragStart;
@@ -188,8 +199,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         AccessibleName = mediaFilePath is null ? "Quick Access capture preview" : "Quick Access recording preview";
         AccessibleDescription = mediaFilePath is null
             ? "Captured image actions. Double-click the preview to annotate. Press Tab to move through actions or Shift+F10 for more actions."
-            : $"Screen recording, {MediaCardStrip.FormatDuration(mediaDuration ?? TimeSpan.Zero)} long, "
-              + $"{MediaCardStrip.FormatSize(_mediaSizeBytes)}. Press Tab to move through actions or Shift+F10 for more actions.";
+            : RecordingDescription(mediaDuration, _mediaSizeBytes, mediaCanEdit);
         DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
@@ -270,7 +280,10 @@ public sealed class FastQuickActionsWindow : WF.Form
             WF.CloseReason.WindowsShutDown;
         if (!_allowImmediateClose &&
             !systemClose &&
-            W.SystemParameters.ClientAreaAnimation &&
+            // Motion's own reading of the setting, not SystemParameters directly: one
+            // definition of "animations are off" across the entrance, the hover fade, the
+            // step-aside pair, the restack and this.
+            WinShot.Core.Motion.AnimationsEnabled() &&
             Visible &&
             IsHandleCreated &&
             !IsDisposed)
@@ -414,7 +427,9 @@ public sealed class FastQuickActionsWindow : WF.Form
             ResumeAutoCloseTimer();
         }
         _hovering = hovering;
-        if (!hovering)
+        if (hovering)
+            ArmShortcuts();
+        else
         {
             SetHover(-1);
             SetPressed(-1);
@@ -431,10 +446,9 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// actually on the card, routes exactly those four chords into its handler and swallows
     /// them; every other key goes straight through to whatever the user is working in.
     ///
-    /// Hover is not focus, which is why the hook claims nothing but the Ctrl chords: the
-    /// keys it eats belong to the foreground app, and the pointer parked in the corner is a
-    /// normal resting place. The bare letters, Tab, Enter and Escape still work — through
-    /// the real KeyDown below, once the card has actually been clicked into.
+    /// Hover is not focus, which is why the hook claims nothing but the Ctrl chords AND
+    /// nothing outside the arming window below. The bare letters, Tab, Enter and Escape
+    /// still work — through the real KeyDown, once the card has actually been clicked into.
     /// </summary>
     private void SetShortcutHook(bool wanted)
     {
@@ -462,10 +476,39 @@ public sealed class FastQuickActionsWindow : WF.Form
         _keyHookProc = null;
     }
 
+    /// <summary>
+    /// Records that the pointer is doing something on the card right now, which is the only
+    /// thing that lets the hook swallow a chord out of the foreground app.
+    /// </summary>
+    private void ArmShortcuts()
+    {
+        _shortcutArmedAt = Environment.TickCount64;
+        _shortcutForeground = GetForegroundWindow();
+    }
+
+    /// <summary>
+    /// Hover alone is not enough to outrank the window the user is typing in. The bottom-
+    /// right corner is a normal place to park a pointer, and by default the card never
+    /// auto-closes — so a card sitting there used to eat Ctrl+S out of a document (silently:
+    /// no save, no dirty-state change, no error) for as long as it was open. Two conditions
+    /// on top of hover fix that without costing the feature anything a user would notice:
+    ///
+    /// - the pointer has to have done something on the card in the last few seconds. A
+    ///   parked pointer is not intent; reaching for the card and pressing Ctrl+C is.
+    /// - focus must not have moved since. Alt+Tabbing away while the pointer stays on the
+    ///   card is the exact repro, and the foreground window changing is what says so.
+    ///
+    /// ponytail: a time window rather than real focus, because the card must not steal
+    /// focus. If it ever grows a "keep me armed" affordance, this is where it hangs.
+    /// </summary>
+    private bool ShortcutsAreArmed()
+        => Environment.TickCount64 - _shortcutArmedAt <= ShortcutArmMs
+           && GetForegroundWindow() == _shortcutForeground;
+
     private IntPtr OnShortcutKey(int code, IntPtr wParam, IntPtr lParam)
     {
         IntPtr hook = _keyHook;
-        if (code >= 0 && _hovering && !_closed && !IsDisposed)
+        if (code >= 0 && _hovering && !_closed && !IsDisposed && ShortcutsAreArmed())
         {
             long message = wParam.ToInt64();
             if (message is WmKeyDown or WmSysKeyDown)
@@ -557,17 +600,28 @@ public sealed class FastQuickActionsWindow : WF.Form
         // 1, so there is one value driving the chrome whether hover or a message raised it.
         double hover = Math.Clamp(_hoverAmount, 0d, 1d);
         DrawThumbnail(g, hover);
-        DrawMediaStrip(g);
-        DrawStatusFlash(g);
 
         // The hover chrome stays out of the way while a message is up — the cursor is
         // usually still over the card from the menu click that triggered it.
-        if (!flashing && hover > 0d)
+        bool chrome = !flashing && hover > 0d;
+        if (chrome)
         {
-            using (var scrim = new SD.SolidBrush(Fade(_visuals.HoverTint, hover)))
-            using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
-                g.FillPath(scrim, cardPath);
+            using var scrim = new SD.SolidBrush(Fade(_visuals.HoverTint, hover));
+            using var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
+            g.FillPath(scrim, cardPath);
+        }
 
+        // After the hover scrim, before the buttons. Drawn under it, the strip's own scrim
+        // and its digits took the hover tint on top of them and the duration fell from
+        // 5.2:1 to 2.7:1 — under the floor in the one state TextRun places the text to
+        // survive. The strip is a label over the capture, not part of it, so the hover
+        // scrim belongs underneath it. A status message still covers the strip, as before:
+        // while a message is up the card is the message.
+        DrawMediaStrip(g);
+        DrawStatusFlash(g);
+
+        if (chrome)
+        {
             for (int i = 0; i < _buttons.Count; i++)
             {
                 DrawButton(g, _buttons[i], i == _hoverButton, i == _pressedButton, hover);
@@ -918,6 +972,23 @@ public sealed class FastQuickActionsWindow : WF.Form
             DrawBlurredThumbnailOver(g, blurAmount);
     }
 
+    /// <summary>
+    /// What a screen reader is told about a recording card. The duration is left out
+    /// entirely when it is unknown — <see cref="VideoThumbnail"/> returns null for an
+    /// unreadable file or a GIF with no frame-delay property, and the painted strip draws
+    /// nothing in that case, so speaking "0s long" would be a wrong fact rather than a
+    /// missing one. The double-click line matches the screenshot card's, and only appears
+    /// when double-click actually opens something.
+    /// </summary>
+    internal static string RecordingDescription(TimeSpan? duration, long sizeBytes, bool canEdit)
+    {
+        string length = duration is { } value ? $"{MediaCardStrip.FormatDuration(value)} long, " : string.Empty;
+        string edit = canEdit ? "Double-click the preview to edit. " : string.Empty;
+        return $"Screen recording, {length}{MediaCardStrip.FormatSize(sizeBytes)}. "
+            + edit
+            + "Press Tab to move through actions or Shift+F10 for more actions.";
+    }
+
     private static long MediaFileLength(string? path)
     {
         try
@@ -951,17 +1022,29 @@ public sealed class FastQuickActionsWindow : WF.Form
         try
         {
             g.SetClip(clip, CombineMode.Intersect);
+            // Both fills are axis-aligned bands: antialiasing buys nothing and leaves the
+            // strip's own top row partly covered, which is a seam of its own.
+            g.SmoothingMode = SmoothingMode.None;
             SD.Color scrim = _visuals.MediaStripScrim;
             var lead = new SD.Rectangle(band.Left, band.Top, band.Width, band.Height - strip.Height);
             if (lead.Height > 0)
             {
-                // Inflated brush rect: a gradient laid on exactly its own bounds wraps at the
-                // last pixel row and leaves a bright hairline.
+                // TileFlipXY, not an inflated brush rect, is what kills the wrap hairline a
+                // gradient laid on exactly its own bounds leaves. Inflating vertically to
+                // dodge it cost the ramp its last two rows of alpha, so the ramp ended at
+                // 87 % of the flat scrim and the seam banded by a visible step — the exact
+                // thing the ramp exists to prevent.
+                //
+                // Half a row up, too: a ramp measured on its own bounds is sampled at pixel
+                // CENTRES, so its last row lands at (n-0.5)/n of the terminal alpha and the
+                // step survives at a quarter of its size. Shifted, the last filled row sits
+                // exactly on the flat scrim's value.
                 using var gradient = new LinearGradientBrush(
-                    SD.Rectangle.Inflate(lead, 1, 1),
+                    new SD.RectangleF(lead.X, lead.Y - 0.5f, lead.Width, lead.Height),
                     SD.Color.FromArgb(0, scrim),
                     scrim,
-                    LinearGradientMode.Vertical);
+                    LinearGradientMode.Vertical)
+                { WrapMode = WrapMode.TileFlipXY };
                 g.FillRectangle(gradient, lead);
             }
             // Flat under the strip, not the tail of one long ramp: the text is centred in the
@@ -984,12 +1067,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // an exact fit trims a character it did not have to.
             WF.TextFormatFlags durationFlags = flags | WF.TextFormatFlags.EndEllipsis;
 
-            // The card's own 14 px glyph floor, not 8: at 96 dpi an 11 px box rendered the
-            // 1.85 stroke at 0.69 device px, a visibly lighter weight than every other glyph
-            // on the same surface (they land at ~1.08). The asset's viewBox is cropped to its
-            // drawn content, so the square box maps onto the glyph instead of half of it
-            // being empty.
-            int glyphSize = Math.Max(14, strip.Height - pad);
+            int glyphSize = MediaCardStrip.GlyphBox(strip, _dpi);
             SD.Bitmap? glyph = CreateSvgIcon("quick-access-camcorder.svg", glyphSize, _visuals.Glyph);
             int textLeft = runLeft;
             if (glyph is not null && glyph.Width < runRight - runLeft)
@@ -1236,9 +1314,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
         // Cards that are already flying out are skipped: they are still visible and still
         // intersecting, and counting them left an empty slot in the stack for a capture
-        // taken while an old card was on its way off screen.
+        // taken while an old card was on its way off screen. A card stepping aside is the
+        // same story — Visible only clears when its fade lands 140 ms later — so this
+        // agrees with StackedCards() on what is in the corner.
         int offset = OpenWindows.ToArray()
-            .Where(w => !ReferenceEquals(w, this) && w.Visible && !w._exitMotionStarted && area.IntersectsWith(w.Bounds))
+            .Where(w => !ReferenceEquals(w, this) && w.Visible && !w._exitMotionStarted && !w._offScreen && area.IntersectsWith(w.Bounds))
             .Sum(w => w.Height + gutter);
         Location = QuickAccessOverlayLayout.Place(
             area,
@@ -1414,7 +1494,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         StopStackMotionTimer();
         if (_exitMotionStarted || _closed || IsDisposed || Location == target)
             return;
-        if (!W.SystemParameters.ClientAreaAnimation)
+        if (!WinShot.Core.Motion.AnimationsEnabled())
         {
             Location = target;
             return;
@@ -1800,6 +1880,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // this card is coming back, and a fly-out reads as "gone". ComeBack fades in over
         // the same QuickMs, so the pair is symmetric.
         double from = Opacity;
+        _fullOpacity = from;
         _stepAsideMotion = Motion.Run(
             Motion.QuickMs,
             Motion.EaseOutCubic,
@@ -1825,9 +1906,19 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// </summary>
     internal void ComeBack()
     {
-        if (_closed || IsDisposed || Visible)
+        if (_closed || IsDisposed)
+            return;
+        // Up, not fading, not flagged: it is already here.
+        if (Visible && _stepAsideMotion is null && !_offScreen && !_temporarilyHidden)
             return;
 
+        // The cancel comes BEFORE the Visible check, not after. A card one frame into the
+        // 140 ms step-aside fade is still Visible, so the old guard treated it as "nothing
+        // to do" and returned — leaving _offScreen set and the fade free to finish hiding
+        // it. On the annotate round-trip (StepAside, then the editor closes immediately)
+        // nothing ever revived it: only _temporarilyHidden cards are revived by the next
+        // capture, so the card was invisible for the life of the process, out of the stack,
+        // and still holding its full-size bitmap.
         _temporarilyHidden = false;
         _offScreen = false;
         StopStepAsideMotion();
@@ -1837,25 +1928,31 @@ public sealed class FastQuickActionsWindow : WF.Form
         // still showing the pre-annotation thumbnail.
         RenderFirstPreview();
 
-        double target = Opacity;
-        Opacity = 0.02d;
-        _returningFromStepAside = true;
-        try
+        // The card's real opacity, remembered by StepAside: a fade cancelled halfway leaves
+        // Opacity somewhere in the middle, so reading it here would fade in to that.
+        double target = _fullOpacity;
+        if (!Visible)
         {
-            Visible = true;
-        }
-        finally
-        {
-            _returningFromStepAside = false;
+            Opacity = 0.02d;
+            _returningFromStepAside = true;
+            try
+            {
+                Visible = true;
+            }
+            finally
+            {
+                _returningFromStepAside = false;
+            }
         }
         ResumeAutoCloseTimer();
+        double from = Opacity;
         _stepAsideMotion = Motion.Run(
             Motion.QuickMs,
             Motion.EaseOutCubic,
             eased =>
             {
                 if (!_closed && !IsDisposed)
-                    Opacity = Math.Max(0.02d, target * eased);
+                    Opacity = Math.Max(0.02d, from + (target - from) * eased);
             },
             () =>
             {
@@ -2559,6 +2656,9 @@ public sealed class FastQuickActionsWindow : WF.Form
         DismissStatusFlashOnPointerMove();
         if (!_hovering)
             SetHovering(true);
+        // Every move on the card is fresh evidence the user is attending to it, which is
+        // what keeps its shortcuts able to outrank the foreground app. See ShortcutsAreArmed.
+        ArmShortcuts();
         SetHover(HitTestButton(e.Location));
 
         if (!_dragArmed || e.Button != WF.MouseButtons.Left) return;
@@ -2839,23 +2939,51 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// </summary>
     private async Task SaveEveryCardAsync()
     {
-        string folder;
-        using (var dialog = new WF.FolderBrowserDialog
-        {
-            Description = "Save every open capture into this folder",
-            UseDescriptionForTitle = true,
-            SelectedPath = _settings.Current.SaveFolder,
-        })
-        {
-            if (dialog.ShowDialog(this) != WF.DialogResult.OK)
-                return;
-            folder = dialog.SelectedPath;
-        }
+        // The batch is the cards that were in the corner when the user asked, not the ones
+        // that survived the folder picker. A WF.Timer ticks inside the dialog's own modal
+        // loop, so with auto-close on, cards were closing (and disposing the dialog's owner)
+        // while the user browsed — they dropped out of the batch and the toast reported a
+        // smaller number than was asked for, with nothing saying any had been skipped.
+        FastQuickActionsWindow[] cards = StackedCards();
+        foreach (FastQuickActionsWindow card in cards)
+            card.PauseAutoCloseTimer();
 
+        try
+        {
+            string folder;
+            using (var dialog = new WF.FolderBrowserDialog
+            {
+                Description = "Save every open capture into this folder",
+                UseDescriptionForTitle = true,
+                SelectedPath = _settings.Current.SaveFolder,
+            })
+            {
+                if (dialog.ShowDialog(this) != WF.DialogResult.OK)
+                {
+                    foreach (FastQuickActionsWindow card in cards)
+                        card.ResumeAutoCloseTimer();
+                    return;
+                }
+                folder = dialog.SelectedPath;
+            }
+
+            await SaveCardsIntoAsync(cards, folder);
+        }
+        catch (Exception ex)
+        {
+            // This runs fire-and-forget, so without this the picker throwing meant "Save
+            // all…" did nothing and said nothing.
+            Log.Error("Save all failed", ex);
+            ReportActionFailure("Save all didn't finish", ex);
+        }
+    }
+
+    private async Task SaveCardsIntoAsync(FastQuickActionsWindow[] cards, string folder)
+    {
         SD.Point? anchor = ToastAnchor();
         int written = 0;
         int failed = 0;
-        foreach (FastQuickActionsWindow card in StackedCards())
+        foreach (FastQuickActionsWindow card in cards)
         {
             if (card.IsDisposed || card._closed)
                 continue;
@@ -2880,8 +3008,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         string where = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar));
         if (where.Length == 0)
             where = folder;
+        // A sentence, like every other toast body on this card. A bare folder name read as a
+        // fragment beside "They are still in your capture history." and the failure lines below.
         if (failed == 0)
-            return ($"Saved {written} {(written == 1 ? "capture" : "captures")}", where);
+            return (
+                $"Saved {written} {(written == 1 ? "capture" : "captures")}",
+                written == 1 ? $"It is in {where}." : $"All of them are in {where}.");
         if (written == 0)
             return ("Nothing was saved", $"{failed} {(failed == 1 ? "capture" : "captures")} could not be written to {where}.");
         return ($"Saved {written} of {written + failed} captures",
@@ -3059,6 +3191,9 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandleW(string? name);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();

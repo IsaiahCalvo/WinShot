@@ -44,6 +44,16 @@ public class QuickAccessOverlayThemeTests
             Assert.True(
                 Contrast(visuals.Glyph, behind) >= 4.5,
                 $"{theme} strip text reads at {Contrast(visuals.Glyph, behind):0.00}:1 over {capture.Name}");
+
+            // Hovered too, which is the state the text is placed to survive: TextRun keeps
+            // the duration and the size clear of the action buttons precisely so hovering
+            // does not hide them. The strip used to be painted UNDER the hover scrim, so
+            // the tint landed on the digits and dropped them to 2.7:1 — a failure this test
+            // could not see, because it only ever composited the strip's own scrim.
+            SD.Color hovered = Over(visuals.MediaStripScrim, Over(visuals.HoverTint, capture));
+            Assert.True(
+                Contrast(visuals.Glyph, hovered) >= 4.5,
+                $"{theme} strip text reads at {Contrast(visuals.Glyph, hovered):0.00}:1 over a hovered {capture.Name} card");
         }
     }
 

@@ -183,7 +183,15 @@ public class QuickAccessOverlayRenderHarness
         Render(overlay, path);
     }
 
-    /// <summary>The recording variant: the same card plus its duration / size strip.</summary>
+    /// <summary>
+    /// The recording variant: the same card plus its duration / size strip.
+    ///
+    /// Known limitation, and it is the harness rather than the product: SvgIcons.Get
+    /// rasterises to zero visible pixels on a bare STA test thread, for every asset at
+    /// every size. So these PNGs show the duration and the size but no camcorder, exactly
+    /// as dark-hover.png shows empty circular buttons. The glyph's geometry is asserted by
+    /// MediaCardStripTests instead — do not read a missing glyph here as a bug in the strip.
+    /// </summary>
     private static void RenderRecordingCard(SD.Bitmap source, SettingsService settings, string outDir)
     {
         string directory = Path.Combine(Path.GetTempPath(), $"winshot-render-media-{Guid.NewGuid():N}");

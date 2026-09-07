@@ -55,6 +55,22 @@ internal static class MediaCardStrip
 
     internal static int Padding(int dpi) => Scale(PadLogical, dpi);
 
+    /// <summary>Side of the camcorder's square box — 14 logical px, ~82 % of the strip.</summary>
+    private const int GlyphLogical = 14;
+
+    /// <summary>
+    /// The camcorder's box. 14 logical px rather than "strip height less the padding": at
+    /// 96 dpi that arithmetic gives an 11 px box, which renders the 1.85 stroke at 0.69
+    /// device px — visibly lighter than every other glyph on the same surface (they land at
+    /// ~1.08). The asset's viewBox is cropped to its drawn content, so the square box maps
+    /// onto the glyph instead of half of it being empty.
+    ///
+    /// Scaled, not a device-pixel constant: pinned at 14 the glyph was the same size at 96
+    /// and 120 dpi, so it read as 82 % of the strip at 100 % and 67 % at 125 %.
+    /// </summary>
+    internal static int GlyphBox(SD.Rectangle strip, int dpi)
+        => Math.Min(strip.Height, Scale(GlyphLogical, dpi));
+
     /// <summary>
     /// Where the strip's text may start and end. The hover buttons are painted over the
     /// strip — the bottom action row overlaps its top 8 logical px at every card size — so
