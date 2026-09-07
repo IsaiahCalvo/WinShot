@@ -1738,10 +1738,21 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 int badgeAlpha = (int)Math.Round(255 * Math.Clamp(_badgeFade, 0d, 1d));
                 var badgeRect = new SD.Rectangle(
                     _ratioRect.X, _ratioRect.Bottom - U(13), _ratioRect.Width, U(11));
-                WF.TextRenderer.DrawText(g, preset.Badge, _labelFont, badgeRect,
-                    SD.Color.FromArgb(badgeAlpha, SD.Color.White),
-                    WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+                // GDI+ DrawString, not TextRenderer: GDI drops the alpha byte, so the ramp
+                // this fade exists for was popping the badge in at full strength.
+                using (var badgeBrush = new SD.SolidBrush(SD.Color.FromArgb(badgeAlpha, SD.Color.White)))
+                using (var badgeFormat = new SD.StringFormat(SD.StringFormat.GenericTypographic)
+                {
+                    Alignment = SD.StringAlignment.Center,
+                    LineAlignment = SD.StringAlignment.Center,
+                    FormatFlags = SD.StringFormatFlags.NoWrap,
+                })
+                {
+                    var prevHint = g.TextRenderingHint;
+                    g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+                    g.DrawString(preset.Badge, _labelFont, badgeBrush, badgeRect, badgeFormat);
+                    g.TextRenderingHint = prevHint;
+                }
             }
 
             // Expand to full size (diagonal arrows) — it finally does what it looks like.

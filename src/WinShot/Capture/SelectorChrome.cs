@@ -15,6 +15,36 @@ internal static class SelectorChrome
     private const int CrosshairGapPx = 10;
     private const double LiveDesktopOpacity = 0.45;
 
+    /// <summary>
+    /// Centred text that actually honours the alpha in <paramref name="color"/>.
+    ///
+    /// <c>TextRenderer.DrawText</c> is a GDI (DrawTextW) wrapper and its colour goes through
+    /// ColorTranslator.ToWin32, which is <c>R | G&lt;&lt;8 | B&lt;&lt;16</c> — the alpha byte is
+    /// dropped on the floor. Every fading label drawn that way rendered fully opaque for the
+    /// whole tween and then vanished, and the shutter pill's cross-fade printed both of its
+    /// labels solid on top of each other for the entire 140 ms. GDI+ <c>DrawString</c> does
+    /// honour alpha, which is why the quick-actions card's flash line already uses it.
+    /// </summary>
+    private static void DrawCenteredText(
+        SD.Graphics g, string text, SD.Font font, SD.Rectangle bounds, SD.Color color)
+    {
+        if (color.A <= 0)
+            return;
+        // Typographic metrics: no GDI+ overhang padding, so the string stays inside a pill
+        // whose width came from TextRenderer.MeasureText.
+        using var format = new SD.StringFormat(SD.StringFormat.GenericTypographic)
+        {
+            Alignment = SD.StringAlignment.Center,
+            LineAlignment = SD.StringAlignment.Center,
+            FormatFlags = SD.StringFormatFlags.NoWrap,
+        };
+        var prevHint = g.TextRenderingHint;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+        using (var brush = new SD.SolidBrush(color))
+            g.DrawString(text, font, brush, bounds, format);
+        g.TextRenderingHint = prevHint;
+    }
+
     /// <summary>LiveDesktopOpacity as a layered-window alpha, for SetLayeredAlpha resets
     /// on pooled surfaces whose alpha was flipped to 255 by a previous frozen swap.</summary>
     internal const byte LiveAlpha = (byte)(LiveDesktopOpacity * 255);
@@ -127,32 +157,36 @@ internal static class SelectorChrome
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
-        const WF.TextFormatFlags center = WF.TextFormatFlags.HorizontalCenter |
-            WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding;
-
         if (amount < 1d)
         {
             using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-            WF.TextRenderer.DrawText(g, text, font, bounds,
-                SD.Color.FromArgb((int)Math.Round(255 * (1d - amount)), ThemePalette.TextPrimary), center);
+            DrawCenteredText(g, text, font, bounds,
+                SD.Color.FromArgb((int)Math.Round(255 * (1d - amount)), ThemePalette.TextPrimary));
         }
 
         if (amount > 0d)
         {
             using var glyphFont = ThemePalette.IconFont(ThemePalette.TextBodyPt);
-            WF.TextRenderer.DrawText(g, "", glyphFont, bounds,
-                SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.TextPrimary), center);
+            DrawCenteredText(g, "", glyphFont, bounds,
+                SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.TextPrimary));
         }
     }
 
-    /// <summary>Draws the first-run hint pill centred near the top of a monitor.</summary>
-    public static void DrawHint(SD.Graphics g, SD.Size clientSize, string text, double opacity)
+    /// <summary>Where the hint/message pill sits by default: centred, one eighth down.</summary>
+    public static SD.Rectangle HintPillRect(SD.Size clientSize, string text)
     {
         SD.Size pill = MeasureLabel(text);
-        DrawLabel(g, clientSize, text,
-            (clientSize.Width - pill.Width) / 2,
-            Math.Max(0, clientSize.Height / 8),
-            opacity);
+        return new SD.Rectangle(
+            (clientSize.Width - pill.Width) / 2, Math.Max(0, clientSize.Height / 8),
+            pill.Width, pill.Height);
+    }
+
+    /// <summary>Draws the first-run hint pill centred near the top of a monitor, or at
+    /// <paramref name="top"/> when the caller has to dodge something (the action bar).</summary>
+    public static void DrawHint(SD.Graphics g, SD.Size clientSize, string text, double opacity, int? top = null)
+    {
+        SD.Rectangle at = HintPillRect(clientSize, text);
+        DrawLabel(g, clientSize, text, at.X, top ?? at.Y, opacity);
     }
 
     /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
@@ -192,7 +226,6 @@ internal static class SelectorChrome
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
-        WF.TextRenderer.DrawText(g, text, font, bg, SD.Color.FromArgb(alpha, ThemePalette.TextPrimary),
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
+        DrawCenteredText(g, text, font, bg, SD.Color.FromArgb(alpha, ThemePalette.TextPrimary));
     }
 }
