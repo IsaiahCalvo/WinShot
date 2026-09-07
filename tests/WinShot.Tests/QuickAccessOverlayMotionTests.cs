@@ -6,41 +6,68 @@ namespace WinShot.Tests;
 
 public class QuickAccessOverlayMotionTests
 {
+    private const int Gutter = 12;
+
     [Theory]
     [InlineData("bottom-right")]
     [InlineData("bottom-left")]
     [InlineData("bottom")]
-    public void ACardAnchoredToTheBottomStartsCompletelyBelowTheWorkingArea(string position)
+    public void ACardAnchoredToTheBottomStartsBelowItsSlotAndOutsideTheWorkingArea(string position)
     {
         var workingArea = new SD.Rectangle(-1920, -120, 1920, 1040);
         var bounds = new SD.Rectangle(-220, 780, 192, 120);
 
-        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position);
+        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position, Gutter);
 
         Assert.Equal(bounds.Left, origin.X);
-        Assert.True(origin.Y >= workingArea.Bottom);
+        Assert.True(origin.Y > bounds.Top, "It has to arrive from below its slot.");
+        // Almost entirely past the edge — only the top hairline of the card is on screen.
+        Assert.True(origin.Y + bounds.Height > workingArea.Bottom);
+    }
+
+    [Theory]
+    [InlineData("bottom-right")]
+    [InlineData("top")]
+    public void TravelIsOneCardAndOneGutterHoweverDeepTheCardSitsInTheStack(string position)
+    {
+        var workingArea = new SD.Rectangle(-1920, -120, 1920, 1040);
+        // Fourth slot down (bottom) / fourth slot in (top): far from either edge.
+        var bounds = new SD.Rectangle(-220, 400, 192, 120);
+        int expected = bounds.Height + Gutter;
+
+        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position, Gutter);
+
+        Assert.Equal(expected, Math.Abs(origin.Y - bounds.Top));
+    }
+
+    [Theory]
+    [InlineData("bottom-right", 850)]
+    [InlineData("top", -200)]
+    public void TheCardNearestTheEdgeNeverRunsFurtherThanTheEdge(string position, int slotTop)
+    {
+        var workingArea = new SD.Rectangle(-1920, -120, 1920, 1040);
+        var bounds = new SD.Rectangle(-220, slotTop, 192, 120);
+
+        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position, Gutter);
+
+        Assert.InRange(origin.Y, workingArea.Top - bounds.Height, workingArea.Bottom);
+        Assert.True(Math.Abs(origin.Y - bounds.Top) < bounds.Height + Gutter);
     }
 
     [Theory]
     [InlineData("left", true)]
     [InlineData("right", false)]
-    [InlineData("top", null)]
-    public void ASideOrTopAnchoredCardStartsOffThatSameEdge(string position, bool? offLeft)
+    public void ASideAnchoredCardStartsOffThatSameEdge(string position, bool offLeft)
     {
         var workingArea = new SD.Rectangle(-1920, -120, 1920, 1040);
         var bounds = new SD.Rectangle(-1904, 340, 192, 120);
 
-        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position);
+        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(workingArea, bounds, position, Gutter);
 
-        if (offLeft is null)
-        {
-            Assert.Equal(bounds.Left, origin.X);
-            Assert.True(origin.Y + bounds.Height <= workingArea.Top);
-            return;
-        }
-
+        // Side anchors slide in horizontally while they stack vertically, so their travel
+        // never grew with depth and they keep starting clear of their own edge.
         Assert.Equal(bounds.Top, origin.Y);
-        if (offLeft.Value)
+        if (offLeft)
             Assert.True(origin.X + bounds.Width <= workingArea.Left);
         else
             Assert.True(origin.X >= workingArea.Right);

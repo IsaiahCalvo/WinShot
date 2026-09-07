@@ -29,21 +29,34 @@ internal static class QuickAccessOverlayMotion
     }
 
     /// <summary>
-    /// Where an arriving card starts: completely off the working-area edge it is anchored
-    /// to, so it slides in from outside the screen rather than fading up in place. Mirrors
-    /// <see cref="ExitTarget"/>, which is what makes arrival and dismissal read as the same
-    /// gesture in opposite directions.
+    /// Where an arriving card starts: one card and one gutter past its settled slot, in the
+    /// direction of the edge it is anchored to. A fixed travel, not "off the working-area
+    /// edge" — <see cref="EaseOutBack"/> overshoots by 10 % of the distance covered, so an
+    /// origin pinned to the edge made the third card in a stack overshoot by a third of a
+    /// card and slide over its neighbour before dropping back. Clamped so the travel is never
+    /// LONGER than "just past the working-area edge" either — the card nearest the edge has
+    /// nowhere further to come from, and a longer run there only makes its overshoot bigger.
     /// </summary>
-    public static SD.Point EnterOrigin(SD.Rectangle workingArea, SD.Rectangle windowBounds, string? position)
+    public static SD.Point EnterOrigin(
+        SD.Rectangle workingArea, SD.Rectangle windowBounds, string? position, int stackGutter)
     {
         string normalized = QuickAccessOverlayLayout.NormalizePosition(position);
+        // The left/right anchors slide in horizontally while they stack vertically, so their
+        // travel never grew with depth; they keep starting clear of their own edge.
+        int travel = windowBounds.Height + Math.Max(0, stackGutter);
         return normalized switch
         {
             "left" => new SD.Point(workingArea.Left - windowBounds.Width, windowBounds.Top),
             "right" => new SD.Point(workingArea.Right, windowBounds.Top),
-            "top" => new SD.Point(windowBounds.Left, workingArea.Top - windowBounds.Height),
+            // Max, not Min: "top" travels UP, so the edge is the smaller Y and clamping to
+            // "no further than the edge" is the larger of the two.
+            "top" => new SD.Point(
+                windowBounds.Left,
+                Math.Max(windowBounds.Top - travel, workingArea.Top - windowBounds.Height)),
             // bottom, bottom-left and bottom-right all hug the bottom edge.
-            _ => new SD.Point(windowBounds.Left, workingArea.Bottom),
+            _ => new SD.Point(
+                windowBounds.Left,
+                Math.Min(windowBounds.Top + travel, workingArea.Bottom)),
         };
     }
 
