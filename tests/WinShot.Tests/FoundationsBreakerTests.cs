@@ -245,6 +245,54 @@ public class FoundationsBreakerTests
         Assert.Equal(1, fired);
     }
 
+    /// <summary>
+    /// ...but it must not report -1 to that handler. -1 is the one value a handler cannot use:
+    /// the obvious shape ("persist what is selected now") indexes Options with it and throws,
+    /// out of a plain `seg.Options = …` assignment nobody has a reason to wrap in try/catch.
+    /// Emptying the picker selects nothing, and refilling it lands on cell 0 by the control's
+    /// own default — neither is a choice anyone made, so both stay quiet.
+    /// </summary>
+    [Fact]
+    public void SegmentedNeverHandsAHandlerAnIndexItCannotUse()
+    {
+        using var seg = new DarkSegmented { Options = ["A", "B", "C"], Size = new SD.Size(240, 30) };
+        seg.SelectedIndex = 2;
+
+        var seen = new List<int>();
+        seg.SelectedIndexChanged += (s, e) =>
+        {
+            var d = (DarkSegmented)s!;
+            seen.Add(d.SelectedIndex);
+            string picked = d.Options[d.SelectedIndex];   // threw IndexOutOfRangeException on -1
+            Assert.NotNull(picked);
+        };
+
+        seg.Options = [];
+        Assert.Equal(-1, seg.SelectedIndex);
+        Assert.Empty(seen);
+
+        seg.Options = ["X", "Y"];
+        Assert.Equal(0, seg.SelectedIndex);
+        Assert.Empty(seen);
+    }
+
+    /// <summary>
+    /// The -1 contract has to hold for a picker nobody ever gave cells to, not just for one
+    /// that was emptied: the clamp lives in the Options setter, so a bare `new DarkSegmented()`
+    /// used to report cell 0 while Options was empty.
+    /// </summary>
+    [Fact]
+    public void SegmentedNeverGivenOptionsReportsNoSelection()
+    {
+        using var seg = new DarkSegmented { Size = new SD.Size(120, 26) };
+        Assert.Empty(seg.Options);
+        Assert.Equal(-1, seg.SelectedIndex);
+
+        // And it promotes itself to a real cell the moment there is one.
+        seg.Options = ["A", "B"];
+        Assert.Equal(0, seg.SelectedIndex);
+    }
+
     // ----------------------------------------------------------- DarkButton
 
     [Fact]

@@ -410,7 +410,11 @@ public sealed class ScrollControlsBar : WF.Form
         };
         b.FlatAppearance.BorderSize = 0;
         b.FlatAppearance.MouseOverBackColor = hover;
-        b.FlatAppearance.MouseDownBackColor = hover;
+        // Press was the hover colour, so holding the button down on Start Capture, Done, Cancel
+        // or Auto-Scroll was pixel-identical to merely pointing at it — four commit actions that
+        // acknowledged nothing. The press step comes from the same function DarkButton paints
+        // with, so the bar presses the direction every other WinForms surface does.
+        b.FlatAppearance.MouseDownBackColor = DarkControlPalette.StateFill(back, 1d, 1d);
         return b;
     }
 

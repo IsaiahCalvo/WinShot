@@ -659,6 +659,58 @@ public class DarkControlPaletteTests
         }
     });
 
+    /// <summary>
+    /// And the fill a button actually PAINTS obeys it. The tokens above were right while
+    /// DarkButton went on lightening its fill by +18 a channel regardless, so every accent
+    /// button in the app — the toast's "Open link", the recorder's "Start", Resize, the display
+    /// picker — still washed its label out on hover: the state the pointer is in at the moment
+    /// the user is reading the button. Asserted through StateFill, which is what OnPaint calls.
+    /// </summary>
+    [Theory]
+    [InlineData(0.5d, 0d)]
+    [InlineData(1d, 0d)]
+    [InlineData(1d, 0.5d)]
+    [InlineData(1d, 1d)]
+    public void StateFill_NeverMakesTheAccentLabelHarderToRead(double hover, double press)
+    {
+        static Color Wpf(SD.Color c) => Color.FromArgb(255, c.R, c.G, c.B);
+
+        SD.Color label = ThemePalette.TextPrimary;
+        double rest = Contrast(Wpf(label), Wpf(ThemePalette.Accent));
+        SD.Color fill = DarkControlPalette.StateFill(ThemePalette.Accent, hover, press);
+        double now = Contrast(Wpf(label), Wpf(fill));
+
+        Assert.True(
+            now >= rest,
+            $"an accent fill at hover {hover}/press {press} renders its label at {now:0.00}:1, " +
+            $"against {rest:0.00}:1 at rest — hovering must not make the label harder to read");
+    }
+
+    /// <summary>
+    /// The ends of the saturated ramp are the tokens themselves, so a DarkButton and a
+    /// FlatAppearance button beside it paint the one accent the same hovered and pressed.
+    /// </summary>
+    [Fact]
+    public void StateFill_LandsOnTheAccentTokensAtTheEnds()
+    {
+        Assert.Equal(ThemePalette.Accent, DarkControlPalette.StateFill(ThemePalette.Accent, 0d, 0d));
+        Assert.Equal(ThemePalette.AccentHovered, DarkControlPalette.StateFill(ThemePalette.Accent, 1d, 0d));
+        Assert.Equal(ThemePalette.AccentPressed, DarkControlPalette.StateFill(ThemePalette.Accent, 1d, 1d));
+    }
+
+    /// <summary>
+    /// A dark NEUTRAL fill still lifts — it has nowhere else to go on this ground — and still
+    /// lands on the discrete shades the app shipped before any of this eased.
+    /// </summary>
+    [Fact]
+    public void StateFill_LeavesTheNeutralButtonsLifting()
+    {
+        SD.Color rest = DarkControlPalette.Field;
+        Assert.Equal(rest, DarkControlPalette.StateFill(rest, 0d, 0d));
+        Assert.Equal(DarkControlPalette.Lighten(rest, 18), DarkControlPalette.StateFill(rest, 1d, 0d));
+        Assert.Equal(DarkControlPalette.Lighten(rest, -12), DarkControlPalette.StateFill(rest, 1d, 1d));
+    }
+
     /// <summary>0..1 relative luminance, WCAG 2.x.</summary>
     private static double Luminance(Color c)
     {

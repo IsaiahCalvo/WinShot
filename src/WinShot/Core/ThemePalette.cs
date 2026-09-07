@@ -124,8 +124,12 @@ public static class ThemePalette
     public static SD.Font UiFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
         => new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
 
-    /// <summary>Composites a straight-alpha colour over an opaque one, the way GDI+ paints it.</summary>
-    private static SD.Color Over(SD.Color top, SD.Color under)
+    /// <summary>
+    /// Composites a straight-alpha colour over an opaque one, the way GDI+ paints it.
+    /// Public because <see cref="HoverShade"/> and <see cref="PressedShade"/> are alpha layers:
+    /// a WinForms fill that cannot stack layers has to be handed the composited result.
+    /// </summary>
+    public static SD.Color Over(SD.Color top, SD.Color under)
     {
         double a = top.A / 255d;
         return SD.Color.FromArgb(
