@@ -139,5 +139,66 @@ public class FirstRunWelcomeTests
         window.Close();
     }
 
+    /// <summary>
+    /// The bubble is WinShot's only onboarding surface, and its whole job is to teach the
+    /// product. Painted rectangles with a hit test taught it to nobody without a mouse: no
+    /// tab stop, no accessible children, no keyboard activation, and — because the form
+    /// refused activation — no way to reach the "Got it" button or press Escape either.
+    /// </summary>
+    [Fact]
+    public void EveryRowIsReachableAndRunnableFromTheKeyboard()
+    {
+        using var window = Build(new SD.Point(600, 800), out List<string> ran, out _);
+        window.Show();
+        PumpOnce();
+
+        Assert.False(window.ClientRectangle.IsEmpty);
+
+        // Real, focusable, named children — not paint.
+        var rows = window.Controls.OfType<WF.Control>()
+            .Where(c => c.AccessibleRole == WF.AccessibleRole.PushButton && c.TabStop)
+            .ToList();
+        Assert.Equal(3, rows.Count(r => r.AccessibleName is "Capture a region" or "Record the screen" or "Extract text"));
+        foreach (WF.Control row in rows)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(row.AccessibleName));
+            Assert.False(string.IsNullOrWhiteSpace(row.AccessibleDescription));
+        }
+
+        // Enter runs the row that has focus.
+        WF.Control first = rows.First(r => r.AccessibleName == "Capture a region");
+        Assert.True(first.CanSelect);
+        first.Focus();
+        PumpOnce();
+        typeof(WF.Control)
+            .GetMethod("OnKeyDown", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(first, new object[] { new WF.KeyEventArgs(WF.Keys.Enter) });
+        PumpOnce();
+        Assert.Equal(["capture"], ran);
+    }
+
+    [Fact]
+    public void EscapeDismissesTheBubble()
+    {
+        int closed = 0;
+        var window = new FirstRunWelcomeWindow(
+            null,
+            [new FirstRunWelcomeWindow.WelcomeAction("", "Capture", "Ctrl+Shift+1", () => { })],
+            () => closed++);
+        window.Show();
+        PumpOnce();
+
+        // A topmost surface with no Escape is one a keyboard-only user cannot get rid of.
+        var msg = WF.Message.Create(window.Handle, 0x0100 /* WM_KEYDOWN */, (IntPtr)(int)WF.Keys.Escape, IntPtr.Zero);
+        bool handled = (bool)typeof(WF.Form)
+            .GetMethod("ProcessCmdKey", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(window, new object[] { msg, WF.Keys.Escape })!;
+        PumpOnce();
+
+        Assert.True(handled);
+        Assert.Equal(1, closed);
+        window.Dispose();
+    }
+
     private static void PumpOnce() => WF.Application.DoEvents();
 }

@@ -513,6 +513,11 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// goes through here so the glyph can never disagree with what happened.</summary>
     private void RequestPin()
     {
+        // Once. The card stays open so the fill can be seen landing, which means the button,
+        // P and the menu row are all still live afterwards — and a second press would put a
+        // second copy of the same capture on screen.
+        if (_pinned)
+            return;
         PinRequested?.Invoke(this);
         MarkPinned();
     }

@@ -39,7 +39,9 @@ public class AskForNameTests
     [Theory]
     [InlineData("CON", "CON_")]
     [InlineData("aux", "aux_")]
-    [InlineData("NUL.png", "NUL.png_")]
+    // The STEM is suffixed, not the whole string: "NUL.png_" would come back out of
+    // FileNamer as "NUL.png_.png".
+    [InlineData("NUL.png", "NUL_.png")]
     [InlineData("COM1", "COM1_")]
     [InlineData("LPT9", "LPT9_")]
     // Not reserved: the device names are whole stems, not prefixes.

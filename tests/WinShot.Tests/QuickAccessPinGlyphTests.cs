@@ -51,6 +51,13 @@ public class QuickAccessPinGlyphTests
         });
     }
 
+    /// <summary>
+    /// The card now STAYS UP after a pin — that is what makes the outline-to-solid fade
+    /// visible at all, since every route used to close the card in the same call that
+    /// started the 140 ms swap. Staying up means P is still live, so pinning is guarded to
+    /// once per capture: a second press must not put a second copy of the same shot on
+    /// screen, and must not restart the swap on a glyph that is already solid.
+    /// </summary>
     [Fact]
     public void PinningTwiceDoesNotRestartTheSwap()
     {
@@ -66,8 +73,8 @@ public class QuickAccessPinGlyphTests
             SD.Bitmap? afterFirst = PinIcon(overlay);
 
             InvokeKey(overlay, WF.Keys.P);
-            // Pinning again is still a real pin; the glyph is simply already solid.
-            Assert.Equal(2, requests);
+            // Pinned once. The filled glyph is the confirmation and the card is still there.
+            Assert.Equal(1, requests);
             Assert.Same(afterFirst, PinIcon(overlay));
 
             PumpUntil(() => Motion.Holders == 0);

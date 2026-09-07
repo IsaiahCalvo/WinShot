@@ -484,8 +484,11 @@ public sealed class DarkDropDown : WF.Control
                 return;
 
             using var path = GdiPaths.RoundedRect(bounds, HighlightRadius);
+            // AccentDeep, not Accent: OnRenderItemText puts white on this fill, and white on
+            // the raw accent is 3.65:1 — under the text floor on the one row the user is by
+            // definition looking at. Same hue, so the menu still reads as the one accent.
             using var brush = new SD.SolidBrush(
-                e.Item.Pressed ? ThemePalette.AccentPressed : ThemePalette.Accent);
+                e.Item.Pressed ? ThemePalette.AccentPressed : ThemePalette.AccentDeep);
             g.FillPath(brush, path);
         }
 

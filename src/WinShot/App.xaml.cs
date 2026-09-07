@@ -347,6 +347,10 @@ public partial class App : Application
         // The desktop-icon row's checked state is only true while WinShot is holding them
         // hidden, and a capture guard can change that behind the menu's back.
         menu.Opening += (_, _) => RefreshDesktopIconsMenuItem();
+        // Re-rasterized on every open, not once: the tray menu follows the pointer, and a
+        // 100 % raster opening on the 150 % monitor is the whole defect.
+        ScaleMenuGlyphs(menu);
+        menu.Opening += (_, _) => ScaleMenuGlyphs(menu);
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
         _tray.BalloonTipClicked += (_, _) => { if (_pendingUpdate is not null) _ = InstallPendingUpdateAsync(); };
@@ -375,8 +379,14 @@ public partial class App : Application
                 // not a state, so it must clearly end.
                 double p = Math.Clamp(eased, 0, 1);
                 double scale = p < 0.30 ? p / 0.30 : p > 0.78 ? Math.Max(0, 1 - (p - 0.78) / 0.22) : 1;
-                if (_tray is not null)
-                    _tray.Icon = TrayIconFactory.Create(TrayIconVariant.Confirm, scale);
+                if (_tray is null)
+                    return;
+                // TrayIconFactory quantizes the badge to seven cached steps, so ~78 frames
+                // produce at most 7 icons. Assigning every frame anyway cost a
+                // Shell_NotifyIcon round-trip per frame for no visible difference.
+                SD.Icon icon = TrayIconFactory.Create(TrayIconVariant.Confirm, scale);
+                if (!ReferenceEquals(_tray.Icon, icon))
+                    _tray.Icon = icon;
             },
             () =>
             {
@@ -554,36 +564,68 @@ public partial class App : Application
         var item = new WF.ToolStripMenuItem(text)
         {
             ShortcutKeyDisplayString = shortcut,
-            Image = glyph is null ? null : RenderMenuGlyph(glyph),
+            // The glyph rides on the item so ScaleMenuGlyphs can re-render it at whatever
+            // DPI the menu is opening on; the raster itself is made there, not here.
+            Tag = glyph,
         };
         item.Click += (_, _) => onClick();
         return item;
     }
 
-    private static readonly Dictionary<string, SD.Image> MenuGlyphCache = new(StringComparer.Ordinal);
-
-    /// <summary>16 px monoline glyph for the menu's left gutter, cached for the process.</summary>
-    private static SD.Image? RenderMenuGlyph(string glyph)
+    /// <summary>
+    /// Rasterizes the menu's glyphs for the DPI the strip is on right now. WinForms scales
+    /// the row's font and height for us and does nothing for a bitmap, so a fixed 16 px
+    /// raster sat next to text that had grown to 24 px on Isaiah's 150 % primary — the
+    /// AutoScaleMode.Dpi landmine on a new surface. Both the bitmap and the point size come
+    /// off <see cref="WF.Control.DeviceDpi"/>, and ImageScalingSize is set to match so the
+    /// strip does not bilinearly resample what we just drew at the right size.
+    /// </summary>
+    private static void ScaleMenuGlyphs(WF.ContextMenuStrip menu)
     {
-        if (MenuGlyphCache.TryGetValue(glyph, out SD.Image? cached))
+        int dpi = menu.DeviceDpi <= 0 ? 96 : menu.DeviceDpi;
+        int size = MenuGlyphPixels(dpi);
+        menu.ImageScalingSize = new SD.Size(size, size);
+        foreach (WF.ToolStripItem item in menu.Items)
+        {
+            if (item.Tag is string glyph && glyph.Length > 0)
+                item.Image = RenderMenuGlyph(glyph, dpi);
+        }
+    }
+
+    /// <summary>16 DIP in device pixels. The tray menu is a WinForms surface, so nothing
+    /// scales a bitmap for us — 16 device px sat beside text WinForms had already grown to
+    /// ~24 on a 150 % monitor.</summary>
+    internal static int MenuGlyphPixels(int dpi) => Math.Max(16, (int)Math.Round(16 * dpi / 96.0));
+
+    private static readonly Dictionary<(string Glyph, int Dpi), SD.Image> MenuGlyphCache = new();
+
+    /// <summary>A monoline glyph for the menu's left gutter, 16 DIP at <paramref name="dpi"/>,
+    /// cached for the process per size — a cache keyed by glyph alone hands a 100 % raster to
+    /// a 150 % monitor the moment the menu opens on one.</summary>
+    private static SD.Image? RenderMenuGlyph(string glyph, int dpi)
+    {
+        if (MenuGlyphCache.TryGetValue((glyph, dpi), out SD.Image? cached))
             return cached;
         try
         {
-            var bmp = new SD.Bitmap(16, 16, SD.Imaging.PixelFormat.Format32bppArgb);
+            int size = MenuGlyphPixels(dpi);
+            var bmp = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppArgb);
             using (var g = SD.Graphics.FromImage(bmp))
             {
                 g.Clear(SD.Color.Transparent);
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-                using var font = ThemePalette.IconFont(9f);
+                // A point size renders at the Graphics' DPI, and a bitmap's is always 96 —
+                // so the glyph has to be told to grow, exactly like the box around it.
+                using var font = ThemePalette.IconFont(9f * dpi / 96f);
                 using var brush = new SD.SolidBrush(ThemePalette.TextPrimary);
                 using var format = new SD.StringFormat
                 {
                     Alignment = SD.StringAlignment.Center,
                     LineAlignment = SD.StringAlignment.Center,
                 };
-                g.DrawString(glyph, font, brush, new SD.RectangleF(0, 0, 16, 16), format);
+                g.DrawString(glyph, font, brush, new SD.RectangleF(0, 0, size, size), format);
             }
-            MenuGlyphCache[glyph] = bmp;
+            MenuGlyphCache[(glyph, dpi)] = bmp;
             return bmp;
         }
         catch (Exception ex)
@@ -749,15 +791,22 @@ public partial class App : Application
         "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
+    private bool _delayedCountdownActive;
+
     /// <summary>
     /// Counts the delay down on screen rather than sleeping: <c>?delayed=5</c> means the user
-    /// is arranging something, and a countdown they can watch (and Escape out of) is the
-    /// difference between a timer and an app that has hung. Runs outside the capture guard so
-    /// the command still queues normally when the count reaches zero.
+    /// is arranging something, and a countdown they can watch is the difference between a
+    /// timer and an app that has hung. The ring is click-through and never activates, so it
+    /// cannot be cancelled — Escape goes to whatever is underneath it, which is the point of
+    /// a countdown you can keep working during. Runs outside the capture guard so the command
+    /// still queues normally when the count reaches zero, and takes a guard of its own so two
+    /// links cannot stack two rings — the second capture would be dropped by the capture
+    /// guard anyway, leaving the user watching a countdown that produced nothing.
     /// </summary>
     private async void RunDelayedCaptureCommand(string cmd, CaptureCommandOptions options)
     {
-        if (_captureInProgress || Recording.SelectionUiActive) return;
+        if (_captureInProgress || _delayedCountdownActive || Recording.SelectionUiActive) return;
+        _delayedCountdownActive = true;
         try
         {
             await FastSelfTimerWindow.RunAsync(options.DelaySeconds);
@@ -765,6 +814,10 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error("Delayed capture countdown failed", ex);
+        }
+        finally
+        {
+            _delayedCountdownActive = false;
         }
         QueueCaptureCommand(cmd, options.Then);
     }
@@ -1181,7 +1234,10 @@ public partial class App : Application
         // The standing "frame every shot like this" preference, applied after the downscale
         // so the padding is measured against the pixels that ship. None (the default) does
         // nothing, and a backdrop that fails to compose returns null rather than a capture.
-        if (ScreenshotBackdrop.IsEnabled(_settings.Current.ScreenshotBackground) &&
+        //
+        // AppliesTo, not IsEnabled: the "Capture window with background" override is on its
+        // way to the interactive composer, which frames the shot itself.
+        if (ScreenshotBackdrop.AppliesTo(_settings.Current.ScreenshotBackground, postCaptureActionOverride) &&
             ScreenshotBackdrop.Compose(
                 bmp,
                 _settings.Current.ScreenshotBackground,
@@ -1221,8 +1277,10 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Runs the after-capture <b>set</b>. Order is fixed: disk and clipboard first, then the
-    /// windows that stay open, and the Quick Access card last so it lands on top.
+    /// Runs the after-capture <b>set</b>. Order is fixed: history, then the disk write, then
+    /// the windows that stay open, then the clipboard, and the Quick Access card last so it
+    /// lands on top. Each consumer holds its own clone, so the clipboard write landing after
+    /// two windows opened costs nothing.
     /// </summary>
     /// <remarks>
     /// One consumer owns the original bitmap and the deferred history + auto-copy work that
@@ -1247,9 +1305,16 @@ public partial class App : Application
 
             if (actions.Pin)
             {
-                var pin = new FastPinWindow(CaptureService.CloneBitmap(bmp), _settings);
-                PerfLog.TrackFirstShown(pin, "pin window");
-                pin.Show();
+                // The clone is the pin's the moment it is taken; the outer catch only knows
+                // about the original, so a pin window that fails to construct must free it.
+                SD.Bitmap forPin = CaptureService.CloneBitmap(bmp);
+                try
+                {
+                    var pin = new FastPinWindow(forPin, _settings);
+                    PerfLog.TrackFirstShown(pin, "pin window");
+                    pin.Show();
+                }
+                catch { forPin.Dispose(); throw; }
             }
 
             if (actions.Annotate && !editorOwns)
@@ -1310,6 +1375,9 @@ public partial class App : Application
             : null;
         var handoff = new DirectEditCaptureHandoff(bmp, historyWork, autoCopyWork);
 
+        // This method owns the bitmap it is handed, so the guard lives here: it is the only
+        // one that also covers the CLONE the "annotate alongside the card" branch passes,
+        // which RunPostCaptureSet's own catch knows nothing about.
         try
         {
             var win = EditorWindow.CreateForDirectCapture(bmp, _settings, _history, handoff.RunAsync);
@@ -1881,7 +1949,10 @@ public partial class App : Application
         var win = new FastPinWindow(overlay.CloneImage(), _settings);
         PerfLog.TrackFirstShown(win, "pin window");
         win.Show();
-        overlay.Close();
+        // The card stays. Closing it here meant its 360 ms exit started in the same call that
+        // began the pin glyph's 140 ms outline-to-solid cross-fade, so the confirmation
+        // played on a surface already flying off screen and nobody ever saw it. The filled
+        // pin IS the confirmation now, and the card's other actions stay reachable.
     }
 
     private async void OcrFromOverlay(FastQuickActionsWindow overlay)
@@ -1992,6 +2063,18 @@ public partial class App : Application
     internal void ShowBalloon(
         string title, string message, ToastSeverity severity = ToastSeverity.Info, bool holdLong = false) =>
         ShowToast(title, message, anchor: null, onOpen: null, severity, holdLong);
+
+    /// <summary>
+    /// One message whose body keeps changing — a download percentage — not twenty messages.
+    /// Re-showing a toast builds a new window and disposes the old one outright, so a
+    /// progress readout replayed the 280 ms entrance twenty times and announced itself to a
+    /// screen reader on each one. Updating the live card in place is what progress means.
+    /// </summary>
+    private void ShowProgressToast(string title, string message)
+    {
+        if (!ToastWindow.TryUpdateBody(title, message))
+            ShowBalloon(title, message, holdLong: true);
+    }
 
     /// <summary>
     /// A routine success — text recognised, capture copied, capture saved — confirmed in
@@ -2267,10 +2350,9 @@ public partial class App : Application
                     // rebuild a window, so only move in visible steps.
                     if (percent < lastShownPercent + 5 && percent < 100) return;
                     lastShownPercent = percent;
-                    Dispatcher.InvokeAsync(() => ShowBalloon(
+                    Dispatcher.InvokeAsync(() => ShowProgressToast(
                         "Downloading update…",
-                        $"{percent}% of WinShot {update.LatestVersion}. It restarts once installed.",
-                        holdLong: true));
+                        $"{percent}% of WinShot {update.LatestVersion}. It restarts once installed."));
                 });
             // Reached only when the installer launched (failures throw). Exit so it can replace our
             // files; the installer relaunches WinShot itself.

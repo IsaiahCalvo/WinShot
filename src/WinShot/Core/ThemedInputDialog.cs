@@ -85,7 +85,14 @@ public static class ThemedInputDialog
         if (result.Trim('-', ' ', '.').Length == 0)
             return fallback;
 
-        return IsReservedDeviceName(result) ? result + "_" : result;
+        if (!IsReservedDeviceName(result))
+            return result;
+
+        // Suffix the STEM, not the whole string: "con.png" suffixed whole becomes
+        // "con.png_", which FileNamer then extends to "con.png_.png". "con_.png" is the name
+        // the user asked for, as closely as the filesystem allows.
+        int dot = result.IndexOf('.');
+        return dot < 0 ? result + "_" : result[..dot] + "_" + result[dot..];
     }
 
     /// <summary>

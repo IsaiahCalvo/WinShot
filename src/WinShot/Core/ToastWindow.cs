@@ -171,7 +171,8 @@ public sealed class ToastWindow : WF.Form
             {
                 Scale = _scale,
                 BackColor = Back,
-                FillColor = ThemePalette.Accent,
+                // AccentDeep carries the white label at 4.6:1; the raw accent is 3.65:1.
+                FillColor = ThemePalette.AccentDeep,
                 Size = new SD.Size(S(96), S(26)),
                 Text = "Open link",
             };
@@ -349,6 +350,33 @@ public sealed class ToastWindow : WF.Form
         {
             // UI Automation is optional; the visible toast remains the fallback.
         }
+    }
+
+    /// <summary>
+    /// Rewrites the live toast's body when it is still saying the same thing, and returns
+    /// false when there is nothing on screen to rewrite so the caller can show a fresh one.
+    /// This is the contract a progress readout needs: <see cref="OnShown"/> disposes the
+    /// outgoing toast outright — deliberately, so two different messages never cross-dissolve
+    /// — which turns "50 %" arriving after "45 %" into a strobe rather than a count.
+    /// Deliberately does NOT <see cref="Announce"/>: re-announcing every step is the same
+    /// strobe in audio, and the title a screen reader already heard has not changed.
+    /// </summary>
+    public static bool TryUpdateBody(string title, string body)
+    {
+        ToastWindow? live = _live;
+        if (live is null || live.IsDisposed || live._exiting || !live.IsHandleCreated)
+            return false;
+        if (!string.Equals(live.AccessibleName, title, StringComparison.Ordinal))
+            return false;
+
+        live.SetBody(body);
+        // The card may have changed height and a corner toast is bottom-anchored.
+        live.Position();
+        live._restLocation = live.Location;
+        // Each step is fresh evidence the download is alive, so the dwell restarts with it.
+        live._dismiss.Stop();
+        live._dismiss.Start();
+        return true;
     }
 
     /// <summary>

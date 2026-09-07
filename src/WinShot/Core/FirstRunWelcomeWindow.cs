@@ -34,15 +34,13 @@ public sealed class FirstRunWelcomeWindow : WF.Form
     private readonly double _scale;
     private readonly WF.Screen _screen;
     private readonly SD.Point? _anchor;
-    private readonly List<RowHit> _rows = [];
+    private readonly List<WelcomeRow> _rows = [];
     private readonly Action _onDismissed;
-    private int _hoverRow = -1;
+    private readonly SD.Font _titleFont;
+    private readonly SD.Font _subtitleFont;
     private IDisposable? _entrance;
-    private double _entranceAmount;
     private SD.Point _restLocation;
     private bool _tailOnTop;
-
-    private sealed record RowHit(SD.Rectangle Bounds, WelcomeAction Action);
 
     private int S(int logical) => Recording.RecordingMonitorDpi.Px(logical, _scale);
 
@@ -83,31 +81,72 @@ public sealed class FirstRunWelcomeWindow : WF.Form
             S(CardWidthDip),
             S(HeaderHeightDip + RowHeightDip * actions.Count + FooterHeightDip) + S(TailHeightDip));
 
+        _titleFont = ThemePalette.UiFont(ThemePalette.TextTitlePt, SD.FontStyle.Bold);
+        _subtitleFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
+
+        // Real controls, not painted rectangles with a hit test. The rows are the whole point
+        // of WinShot's one onboarding surface, and as paint they had no tab stop, no
+        // accessible children and no way to be run without a mouse.
+        foreach (WelcomeAction action in actions)
+        {
+            var row = new WelcomeRow(action, _scale, Run);
+            _rows.Add(row);
+            Controls.Add(row);
+        }
+
         var dismiss = new DarkButton
         {
             Scale = _scale,
             BackColor = ThemePalette.ToolbarBg,
-            FillColor = ThemePalette.Accent,
+            // AccentDeep: DarkButton puts a white label on a saturated fill, and white on
+            // the raw accent is 3.65:1 — under the text floor, on the app's first screen.
+            FillColor = ThemePalette.AccentDeep,
             Size = new SD.Size(S(78), S(26)),
             Text = "Got it",
+            TabStop = true,
         };
+        dismiss.AccessibleName = "Got it";
+        dismiss.AccessibleDescription = "Close this and get on with it.";
         dismiss.Click += (_, _) => Close();
         Controls.Add(dismiss);
         _dismissButton = dismiss;
-
-        MouseMove += OnBubbleMouseMove;
-        MouseLeave += (_, _) => SetHoverRow(-1);
-        MouseClick += OnBubbleMouseClick;
     }
 
     private readonly DarkButton _dismissButton;
+
+    /// <summary>Runs a row's command. Closing FIRST is deliberate, and is also why there is
+    /// no exit tween: the command opens a capture overlay in this same call, and a bubble
+    /// that spent 280 ms fading would spend it on top of the overlay it just launched.
+    /// </summary>
+    private void Run(WelcomeAction action)
+    {
+        Close();
+        try { action.Run(); }
+        catch (Exception ex) { Log.Error($"First-run action '{action.Title}' failed", ex); }
+    }
 
     public IReadOnlyList<WelcomeAction> Actions { get; }
 
     /// <summary>Rows as laid out, so a test can assert the hit areas without a screen.</summary>
     internal IReadOnlyList<SD.Rectangle> RowBoundsForTest => _rows.Select(r => r.Bounds).ToList();
 
-    protected override bool ShowWithoutActivation => true;
+    /// <summary>
+    /// The bubble takes focus. It used to refuse activation, which meant its rows and its
+    /// "Got it" button could never be reached from the keyboard and Escape went to whatever
+    /// was underneath - a topmost onboarding surface a keyboard-only user could neither run
+    /// nor close. There is nothing worth protecting from focus theft on a first launch.
+    /// </summary>
+    protected override bool ShowWithoutActivation => false;
+
+    protected override bool ProcessCmdKey(ref WF.Message msg, WF.Keys keyData)
+    {
+        if (keyData == WF.Keys.Escape)
+        {
+            Close();
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
 
     protected override WF.CreateParams CreateParams
     {
@@ -133,10 +172,14 @@ public sealed class FirstRunWelcomeWindow : WF.Form
 
     private void ApplyEntrance(double amount)
     {
-        _entranceAmount = amount;
+        // Opacity is the one property that HAS to be clamped - Form.Opacity throws outside
+        // 0..1. The rise is not: EaseOutBack passes 1.0 about halfway through, and letting
+        // the offset go negative is what makes the bubble overshoot the anchor and settle
+        // back. Clamping both meant the tween reached its rest pose at 140 ms and then sat
+        // still for the other 140, which is the overshoot paid for and thrown away.
         Opacity = Math.Clamp(amount, 0, 1) * 0.98;
         int rise = S(10);
-        int offset = (int)Math.Round((1 - Math.Clamp(amount, 0, 1)) * rise);
+        int offset = (int)Math.Round((1 - amount) * rise);
         Location = new SD.Point(_restLocation.X, _restLocation.Y + (_tailOnTop ? -offset : offset));
     }
 
@@ -180,53 +223,16 @@ public sealed class FirstRunWelcomeWindow : WF.Form
 
     private void LayoutRows()
     {
-        _rows.Clear();
         SD.Rectangle body = BodyBounds;
         int y = body.Top + S(HeaderHeightDip);
-        foreach (WelcomeAction action in Actions)
+        foreach (WelcomeRow row in _rows)
         {
-            var bounds = new SD.Rectangle(S(PadDip / 2), y, body.Width - S(PadDip), S(RowHeightDip));
-            _rows.Add(new RowHit(bounds, action));
+            row.Bounds = new SD.Rectangle(S(PadDip / 2), y, body.Width - S(PadDip), S(RowHeightDip));
             y += S(RowHeightDip);
         }
         _dismissButton.Location = new SD.Point(
             body.Right - S(PadDip) - _dismissButton.Width,
             body.Bottom - S(FooterHeightDip) + S(8));
-    }
-
-    private void OnBubbleMouseMove(object? sender, WF.MouseEventArgs e)
-    {
-        for (int i = 0; i < _rows.Count; i++)
-        {
-            if (_rows[i].Bounds.Contains(e.Location))
-            {
-                SetHoverRow(i);
-                return;
-            }
-        }
-        SetHoverRow(-1);
-    }
-
-    private void SetHoverRow(int index)
-    {
-        if (_hoverRow == index) return;
-        _hoverRow = index;
-        Cursor = index >= 0 ? WF.Cursors.Hand : WF.Cursors.Default;
-        Invalidate();
-    }
-
-    private void OnBubbleMouseClick(object? sender, WF.MouseEventArgs e)
-    {
-        foreach (RowHit row in _rows)
-        {
-            if (!row.Bounds.Contains(e.Location)) continue;
-            // The row runs the command. Closing first means the capture overlay does not open
-            // underneath a topmost bubble.
-            Close();
-            try { row.Action.Run(); }
-            catch (Exception ex) { Log.Error($"First-run action '{row.Action.Title}' failed", ex); }
-            return;
-        }
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)
@@ -237,45 +243,15 @@ public sealed class FirstRunWelcomeWindow : WF.Form
 
         SD.Rectangle body = BodyBounds;
 
-        // Rows first, so the border and the tail draw over their edges.
-        for (int i = 0; i < _rows.Count; i++)
-        {
-            RowHit row = _rows[i];
-            if (i == _hoverRow)
-            {
-                using var hover = new SD.SolidBrush(ThemePalette.HoverFill);
-                using var path = GdiPaths.RoundedRect(row.Bounds, S(8));
-                g.FillPath(hover, path);
-            }
-
-            using var glyphFont = ThemePalette.IconFont(ThemePalette.TextTitlePt);
-            using var glyphBrush = new SD.SolidBrush(ThemePalette.Accent);
-            g.DrawString(
-                row.Action.Glyph, glyphFont, glyphBrush,
-                new SD.RectangleF(row.Bounds.X + S(10), row.Bounds.Y + S(12), S(24), S(24)));
-
-            WF.TextRenderer.DrawText(
-                g, row.Action.Title, ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
-                new SD.Rectangle(row.Bounds.X + S(42), row.Bounds.Y + S(6), row.Bounds.Width - S(52), S(20)),
-                ThemePalette.TextPrimary,
-                WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis);
-
-            WF.TextRenderer.DrawText(
-                g, row.Action.Hint, ThemePalette.UiFont(ThemePalette.TextCaptionPt),
-                new SD.Rectangle(row.Bounds.X + S(42), row.Bounds.Y + S(24), row.Bounds.Width - S(52), S(18)),
-                ThemePalette.TextSecondary,
-                WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis);
-        }
-
         WF.TextRenderer.DrawText(
-            g, "WinShot is ready", ThemePalette.UiFont(ThemePalette.TextTitlePt, SD.FontStyle.Bold),
+            g, "WinShot is ready", _titleFont,
             new SD.Rectangle(S(PadDip), body.Top + S(12), body.Width - S(PadDip * 2), S(24)),
             ThemePalette.TextPrimary,
             WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter);
 
         WF.TextRenderer.DrawText(
             g, "Try one now, or find everything in the tray icon.",
-            ThemePalette.UiFont(ThemePalette.TextCaptionPt),
+            _subtitleFont,
             new SD.Rectangle(S(PadDip), body.Top + S(34), body.Width - S(PadDip * 2), S(18)),
             ThemePalette.TextSecondary,
             WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter);
@@ -333,7 +309,134 @@ public sealed class FirstRunWelcomeWindow : WF.Form
         {
             _entrance?.Dispose();
             _entrance = null;
+            // ThemePalette.UiFont hands back a NEW font every call, so these used to be
+            // allocated per paint - four of them on every hover change - and never freed.
+            _titleFont.Dispose();
+            _subtitleFont.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// One onboarding row, as a real control: it takes a tab stop, it takes focus, Windows
+    /// gives it an <see cref="WF.AccessibleObject"/> a screen reader can find, and Enter or
+    /// Space runs it. Its wash cross-fades on <see cref="Motion.QuickMs"/> like every other
+    /// hover in the app instead of snapping on an Invalidate.
+    /// </summary>
+    private sealed class WelcomeRow : WF.Control
+    {
+        private readonly WelcomeAction _action;
+        private readonly double _scale;
+        private readonly Action<WelcomeAction> _invoke;
+        private readonly StateAmount _wash;
+        private readonly SD.Font _glyphFont;
+        private readonly SD.Font _titleFont;
+        private readonly SD.Font _hintFont;
+
+        private int S(int logical) => Recording.RecordingMonitorDpi.Px(logical, _scale);
+
+        public WelcomeRow(WelcomeAction action, double scale, Action<WelcomeAction> invoke)
+        {
+            _action = action;
+            _scale = scale;
+            _invoke = invoke;
+            _wash = new StateAmount(this);
+            _glyphFont = ThemePalette.IconFont(ThemePalette.TextTitlePt);
+            _titleFont = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold);
+            _hintFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
+
+            SetStyle(
+                WF.ControlStyles.AllPaintingInWmPaint |
+                WF.ControlStyles.OptimizedDoubleBuffer |
+                WF.ControlStyles.ResizeRedraw |
+                WF.ControlStyles.UserPaint |
+                WF.ControlStyles.Selectable,
+                true);
+            BackColor = ThemePalette.ToolbarBg;
+            Cursor = WF.Cursors.Hand;
+            TabStop = true;
+            AccessibleRole = WF.AccessibleRole.PushButton;
+            AccessibleName = action.Title;
+            AccessibleDescription = action.Hint;
+
+            MouseEnter += (_, _) => _wash.To(1);
+            MouseLeave += (_, _) => _wash.To(Focused ? 1 : 0);
+            GotFocus += (_, _) => _wash.To(1);
+            LostFocus += (_, _) => _wash.To(0);
+            Click += (_, _) => _invoke(_action);
+        }
+
+        // Enter and Space are what a row IS; without this the form's default button eats them.
+        protected override bool IsInputKey(WF.Keys keyData) =>
+            keyData is WF.Keys.Enter or WF.Keys.Space || base.IsInputKey(keyData);
+
+        protected override void OnKeyDown(WF.KeyEventArgs e)
+        {
+            if (e.KeyCode is WF.Keys.Enter or WF.Keys.Space)
+            {
+                e.Handled = true;
+                _invoke(_action);
+                return;
+            }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnMouseDown(WF.MouseEventArgs e)
+        {
+            Focus();
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnPaint(WF.PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(ThemePalette.ToolbarBg);
+
+            var box = new SD.Rectangle(0, 0, Width, Height);
+            if (_wash.Value > 0.001)
+            {
+                SD.Color fill = ThemePalette.HoverFill;
+                using var hover = new SD.SolidBrush(
+                    SD.Color.FromArgb((int)Math.Round(fill.A * _wash.Value), fill));
+                using var path = GdiPaths.RoundedRect(box, S(8));
+                g.FillPath(hover, path);
+            }
+
+            if (Focused && ShowFocusCues)
+            {
+                using var ring = new SD.Pen(ThemePalette.AccentRing, 1f);
+                using var path = GdiPaths.RoundedRect(
+                    new SD.Rectangle(0, 0, Width - 1, Height - 1), S(8));
+                g.DrawPath(ring, path);
+            }
+
+            using (var glyphBrush = new SD.SolidBrush(ThemePalette.Accent))
+                g.DrawString(_action.Glyph, _glyphFont, glyphBrush, new SD.RectangleF(S(10), S(12), S(24), S(24)));
+
+            WF.TextRenderer.DrawText(
+                g, _action.Title, _titleFont,
+                new SD.Rectangle(S(42), S(6), Width - S(52), S(20)),
+                ThemePalette.TextPrimary,
+                WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis);
+
+            WF.TextRenderer.DrawText(
+                g, _action.Hint, _hintFont,
+                new SD.Rectangle(S(42), S(24), Width - S(52), S(18)),
+                ThemePalette.TextSecondary,
+                WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _wash.Dispose();
+                _glyphFont.Dispose();
+                _titleFont.Dispose();
+                _hintFont.Dispose();
+            }
+            base.Dispose(disposing);
+        }
     }
 }

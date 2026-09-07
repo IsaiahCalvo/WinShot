@@ -22,11 +22,13 @@ public static class ScreenshotBackdrop
     public const string Gradient = "gradient";
     public const string Solid = "color";
 
-    /// <summary>Padding around the shot, as a share of its long edge. Enough to read as a
+    /// <summary>Padding around the shot, as a share of its SHORT edge. Enough to read as a
     /// deliberate frame at any capture size; the floor keeps small crops from getting a
-    /// hairline instead of a margin.</summary>
+    /// hairline instead of a margin, and the ceiling keeps a 1200x12000 stitched scrolling
+    /// capture from picking up 660 px of gradient on all four sides.</summary>
     private const double PaddingShare = 0.055;
     private const int MinPadding = 24;
+    private const int MaxPadding = 96;
 
     public static string Normalize(string? mode) => mode?.Trim().ToLowerInvariant() switch
     {
@@ -38,6 +40,16 @@ public static class ScreenshotBackdrop
 
     public static bool IsEnabled(string? mode) => Normalize(mode) != None;
 
+    /// <summary>
+    /// Whether the standing "frame every shot like this" preference applies to THIS capture.
+    /// It does not when the capture is on its way to the interactive background composer:
+    /// that surface frames the shot itself, so composing first handed it an already-padded,
+    /// already-shadowed bitmap to pad and shadow again — nested margins, a shadow inside a
+    /// shadow, and a saved file that is visibly wrong with no error anywhere.
+    /// </summary>
+    public static bool AppliesTo(string? mode, string? postCaptureActionOverride) =>
+        IsEnabled(mode) && postCaptureActionOverride != PostCaptureAction.Background;
+
     /// <summary>The padded canvas size for a shot — the geometry, separated so it can be
     /// asserted without painting anything.</summary>
     public static SD.Size CanvasFor(SD.Size shot)
@@ -46,8 +58,8 @@ public static class ScreenshotBackdrop
         return new SD.Size(shot.Width + pad * 2, shot.Height + pad * 2);
     }
 
-    public static int Padding(SD.Size shot) =>
-        Math.Max(MinPadding, (int)Math.Round(Math.Max(shot.Width, shot.Height) * PaddingShare));
+    public static int Padding(SD.Size shot) => Math.Clamp(
+        (int)Math.Round(Math.Min(shot.Width, shot.Height) * PaddingShare), MinPadding, MaxPadding);
 
     /// <summary>
     /// A new bitmap with <paramref name="shot"/> centred on the chosen backdrop, or null when
@@ -121,7 +133,7 @@ public static class ScreenshotBackdrop
         // Gradient, and the fallback when the wallpaper cannot be read: the app's own accent
         // ramp, so a framed screenshot still looks like WinShot rather than a stock template.
         using var gradient = new SDD.LinearGradientBrush(
-            bounds, ThemePalette.Accent, SD.Color.FromArgb(255, 109, 213, 237), 45f);
+            bounds, ThemePalette.Accent, ThemePalette.AccentGradientEnd, 45f);
         g.FillRectangle(gradient, bounds);
     }
 

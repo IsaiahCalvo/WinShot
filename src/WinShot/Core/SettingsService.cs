@@ -198,7 +198,14 @@ public class SettingsService
     public void Load()
     {
         _loaded = true;
+        // Read BEFORE the load: a file that predates the matrix schema is an install that
+        // already exists, and an existing install has met WinShot. Without this every
+        // upgrading user would get the first-run onboarding bubble once, because
+        // HasCompletedFirstRun is a new bool and new bools start false.
+        bool upgradingInstall = File.Exists(FilePath) || File.Exists(FilePath + ".bak");
         LoadCore();
+        if (upgradingInstall && Current.SettingsSchemaVersion < PostCaptureMigration.MatrixSchemaVersion)
+            Current.HasCompletedFirstRun = true;
         // Reshape anything an older file predates (currently: the single-choice
         // "After screenshot" combo becoming the after-capture matrix). Runs before any
         // caller reads Current, so Settings and the capture flow never see the old shape.

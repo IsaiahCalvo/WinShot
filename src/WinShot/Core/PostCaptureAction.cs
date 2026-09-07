@@ -116,7 +116,13 @@ public static class PostCaptureMigration
     /// <summary>Schema version this migration produces.</summary>
     public const int MatrixSchemaVersion = 1;
 
-    /// <summary>Returns true when it changed something (so the caller can persist).</summary>
+    /// <summary>
+    /// Returns true when it changed something — which <see cref="SettingsService.Load"/> only
+    /// logs. Nothing persists the bumped schema version on its own: the first ordinary Save()
+    /// carries it, and until one happens the migration simply re-derives the same matrix from
+    /// the same seeds on the next launch. Idempotent by construction, so a session that never
+    /// saves costs nothing.
+    /// </summary>
     public static bool Apply(Settings s)
     {
         if (s.SettingsSchemaVersion >= MatrixSchemaVersion)

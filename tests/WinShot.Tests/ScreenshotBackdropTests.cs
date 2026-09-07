@@ -130,8 +130,20 @@ public class ScreenshotBackdropTests
     public void PaddingHasAFloorSoSmallCropsStillGetAMargin()
     {
         Assert.Equal(24, ScreenshotBackdrop.Padding(new SD.Size(10, 10)));
-        // And scales with the long edge for big ones.
-        Assert.True(ScreenshotBackdrop.Padding(new SD.Size(3840, 2160)) > 100);
+        // And scales for big ones, up to a ceiling.
+        Assert.True(ScreenshotBackdrop.Padding(new SD.Size(3840, 2160)) > 96 - 1);
+    }
+
+    [Fact]
+    public void ATallStitchIsNotMostlyGradient()
+    {
+        // A share of the LONG edge gave a 1200x12000 scrolling stitch 660px of padding on
+        // every side — a 2520x13320 canvas that is mostly backdrop. The short edge, capped,
+        // frames it instead of burying it.
+        int pad = ScreenshotBackdrop.Padding(new SD.Size(1200, 12000));
+        Assert.True(pad <= 96, $"a tall stitch took {pad}px of padding");
+        SD.Size canvas = ScreenshotBackdrop.CanvasFor(new SD.Size(1200, 12000));
+        Assert.True(canvas.Width < 1200 * 1.35, $"canvas grew to {canvas.Width}px wide");
     }
 
     [Fact]

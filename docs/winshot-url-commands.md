@@ -41,7 +41,7 @@ capture from a hotkey or the tray behaves exactly as Settings says.
 | Parameter | Effect |
 |---|---|
 | `then=` | Replaces the after-capture set for this capture. Comma-separated: `copy`, `save`, `edit` (alias `annotate`), `pin`, `thumbnail` (alias `overlay`, the Quick Access card). Unknown words are ignored; a list with nothing usable in it leaves your settings in charge. |
-| `delayed=` | Whole seconds to count down before capturing, 1–60. The on-screen countdown is the same one the self-timer uses, so it can be watched and cancelled. |
+| `delayed=` | Whole seconds to count down before capturing, 1–60. The on-screen countdown is the same one the self-timer uses: it is click-through, so you can keep working while it runs, and it cannot be cancelled once started. |
 
 ```
 winshot://capture-area?then=copy,save

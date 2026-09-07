@@ -38,6 +38,46 @@ public class ToastAndControlEdgeCaseTests
     private const System.Reflection.BindingFlags NonPub =
         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
 
+    /// <summary>
+    /// A progress readout is ONE message whose body keeps changing, not twenty messages.
+    /// Showing a new toast per step disposes the live one outright — deliberately, so two
+    /// different messages never cross-dissolve — which turned the update download into a
+    /// strobe that replayed its 280 ms entrance and re-announced itself twenty times.
+    /// </summary>
+    [Fact]
+    public void AProgressToastRewritesTheLiveCardInsteadOfReplacingIt()
+    {
+        using var _ = new Anim(false);
+
+        // Nothing on screen: the caller has to show one first.
+        Assert.False(ToastWindow.TryUpdateBody("Downloading update…", "5%"));
+
+        var toast = new ToastWindow("Downloading update…", "5% of WinShot 2.0.", null, null, holdLong: true);
+        try
+        {
+            toast.Show();
+            // OnShown — where the toast becomes the live one — arrives on a posted message,
+            // so the pump has to reach it before anything can be asked of it.
+            PumpUntil(() => ToastWindow.TryUpdateBody("Downloading update…", "10% of WinShot 2.0."));
+
+            Assert.True(ToastWindow.TryUpdateBody("Downloading update…", "45% of WinShot 2.0."));
+            // Same window, new text — no second form, so no second entrance.
+            Assert.False(toast.IsDisposed);
+            Assert.Contains(
+                toast.Controls.OfType<WF.Label>(),
+                l => l.Text.StartsWith("45%", StringComparison.Ordinal));
+
+            // A DIFFERENT message is not this message: it must still replace the card, or
+            // "Save failed" would quietly overwrite the body of "Copied".
+            Assert.False(ToastWindow.TryUpdateBody("Save failed", "Nope."));
+        }
+        finally
+        {
+            toast.Dispose();
+            PumpUntil(() => Motion.Holders == 0);
+        }
+    }
+
     // ---- toast churn: App.ShowToast disposes and replaces the live toast --------------
     [Fact]
     public void ToastChurnLeavesNoClockHolder()
