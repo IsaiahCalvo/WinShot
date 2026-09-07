@@ -624,7 +624,12 @@ public partial class App : Application
                             await FastSelfTimerWindow.RunAsync(delaySeconds);
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
                     }
-                    if (mode == FastRegionSelectorDialog.SelectorMode.Window &&
+                    // selector.Mode, not the mode we ASKED for: Space flips Area<->Window
+                    // mid-session, so a capture-window run that ended as a hand-drawn
+                    // rectangle used to come back floating on the wallpaper with 48 px of
+                    // window padding and a mockup shadow — and with the wallpaper backdrop
+                    // the default, that fired with no opt-in at all.
+                    if (selector.Mode == FastRegionSelectorDialog.SelectorMode.Window &&
                         postCaptureActionOverride is null &&
                         !selector.BareBackgroundRequested &&
                         WindowBackdrop.IsEnabled(_settings.Current.WindowCaptureBackground))
