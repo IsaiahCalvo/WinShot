@@ -1,4 +1,4 @@
-namespace WinShot.Capture;
+﻿namespace WinShot.Capture;
 
 /// <summary>
 /// The one line of instruction the selector shows a new user. Alt toggles the magnifier, the
@@ -23,7 +23,10 @@ public static class SelectorHint
     /// <summary>The counter to persist after opening a session, saturating at the cap so it
     /// cannot run away over the life of an install.</summary>
     public static int NextSessionCount(int sessionsSoFar) =>
-        sessionsSoFar < 0 ? 1 : Math.Min(sessionsSoFar + 1, SessionsShown);
+        // Clamp BEFORE the add. Clamping after it meant int.MaxValue wrapped to int.MinValue
+        // and Math.Min happily returned that, which ShouldShow reads as "none seen" — the
+        // saturation guard handing back an infinite supply of hints instead of stopping them.
+        sessionsSoFar < 0 ? 1 : Math.Min(sessionsSoFar, SessionsShown - 1) + 1;
 
     /// <summary>The sentence for the mode the selector is currently in.</summary>
     public static string Text(bool windowMode) => windowMode
