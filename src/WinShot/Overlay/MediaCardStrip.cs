@@ -32,15 +32,54 @@ internal static class MediaCardStrip
         return new SD.Rectangle(card.Left, card.Bottom - height, card.Width, height);
     }
 
-    /// <summary>The band the dark gradient occupies, which starts above the strip.</summary>
+    /// <summary>The band the whole scrim occupies: the lead-in gradient plus the strip.</summary>
     internal static SD.Rectangle GradientBounds(SD.Rectangle card, int dpi)
     {
         SD.Rectangle strip = Bounds(card, dpi);
-        int extra = Math.Min(card.Height - strip.Height, Scale(GradientLogical, dpi));
-        return new SD.Rectangle(strip.Left, strip.Top - extra, strip.Width, strip.Height + extra);
+        return new SD.Rectangle(
+            strip.Left,
+            strip.Top - LeadHeight(card, dpi),
+            strip.Width,
+            strip.Height + LeadHeight(card, dpi));
     }
 
+    /// <summary>
+    /// The ramp above the strip, so the darkening fades in rather than banding. It stops at
+    /// the strip's top edge: the text lives in the UPPER half of the strip, so running one
+    /// ramp all the way through the strip left the digits sitting at roughly 60 % of the
+    /// terminal alpha — 3.1:1 over a white capture, where WCAG AA wants 4.5:1. The strip
+    /// itself takes a flat scrim instead, which reaches the floor everywhere the text is.
+    /// </summary>
+    internal static int LeadHeight(SD.Rectangle card, int dpi)
+        => Math.Min(card.Height - Bounds(card, dpi).Height, Scale(GradientLogical, dpi));
+
     internal static int Padding(int dpi) => Scale(PadLogical, dpi);
+
+    /// <summary>
+    /// Where the strip's text may start and end. The hover buttons are painted over the
+    /// strip — the bottom action row overlaps its top 8 logical px at every card size — so
+    /// the duration and the file size have to sit clear of the columns those buttons
+    /// occupy, or hovering hides both. Returns an empty run when nothing fits.
+    /// </summary>
+    internal static (int Left, int Right) TextRun(
+        SD.Rectangle strip,
+        IEnumerable<SD.Rectangle> obstacles,
+        int padding)
+    {
+        int left = strip.Left + padding;
+        int right = strip.Right - padding;
+        int middle = strip.Left + strip.Width / 2;
+        foreach (SD.Rectangle obstacle in obstacles)
+        {
+            if (!obstacle.IntersectsWith(strip))
+                continue;
+            if (obstacle.Left + obstacle.Width / 2 < middle)
+                left = Math.Max(left, obstacle.Right + padding);
+            else
+                right = Math.Min(right, obstacle.Left - padding);
+        }
+        return right > left ? (left, right) : (0, 0);
+    }
 
     /// <summary>
     /// "3s" and "53s" under a minute, "1:23" over it, "1:02:03" over an hour. Short enough
@@ -50,11 +89,14 @@ internal static class MediaCardStrip
     {
         if (duration < TimeSpan.Zero)
             duration = TimeSpan.Zero;
-        if (duration.TotalSeconds < 60)
-            return $"{(int)Math.Round(duration.TotalSeconds)}s";
-        if (duration.TotalHours < 1)
-            return $"{duration.Minutes}:{duration.Seconds:00}";
-        return $"{(int)duration.TotalHours}:{duration.Minutes:00}:{duration.Seconds:00}";
+        // Round to whole seconds FIRST: picking the branch on the unrounded value and then
+        // rounding printed "60s" for anything from 59.5 s up instead of rolling over to 1:00.
+        var whole = TimeSpan.FromSeconds(Math.Round(duration.TotalSeconds));
+        if (whole.TotalSeconds < 60)
+            return $"{(int)whole.TotalSeconds}s";
+        if (whole.TotalHours < 1)
+            return $"{whole.Minutes}:{whole.Seconds:00}";
+        return $"{(int)whole.TotalHours}:{whole.Minutes:00}:{whole.Seconds:00}";
     }
 
     /// <summary>

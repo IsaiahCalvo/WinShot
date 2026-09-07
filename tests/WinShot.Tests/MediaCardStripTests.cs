@@ -71,4 +71,56 @@ public class MediaCardStripTests
         Assert.True(band.Top >= card.Top);
         Assert.Equal(card.Bottom, band.Bottom);
     }
+
+    [Fact]
+    public void JustUnderAMinuteRollsOverInsteadOfPrintingSixtySeconds()
+    {
+        // The branch used to be picked on the unrounded value and the number rounded after,
+        // so anything from 59.5 s up printed "60s".
+        Assert.Equal("1:00", MediaCardStrip.FormatDuration(TimeSpan.FromSeconds(59.6)));
+        Assert.Equal("59s", MediaCardStrip.FormatDuration(TimeSpan.FromSeconds(59.4)));
+        Assert.Equal("1:00:00", MediaCardStrip.FormatDuration(TimeSpan.FromSeconds(3599.7)));
+    }
+
+    [Fact]
+    public void TheTextRunStopsShortOfTheHoverButtonsThatOverlapTheStrip()
+    {
+        var card = new SD.Rectangle(0, 0, 192, 120);
+        SD.Rectangle strip = MediaCardStrip.Bounds(card, 96);
+        int pad = MediaCardStrip.Padding(96);
+        // The bottom action row overlaps the strip's top edge at every card size.
+        var left = new SD.Rectangle(6, strip.Top - 8, 22, 22);
+        var right = new SD.Rectangle(card.Right - 28, strip.Top - 8, 22, 22);
+
+        (int runLeft, int runRight) = MediaCardStrip.TextRun(strip, new[] { left, right }, pad);
+
+        Assert.True(runLeft >= left.Right + pad);
+        Assert.True(runRight <= right.Left - pad);
+    }
+
+    [Fact]
+    public void AButtonThatMissesTheStripDoesNotNarrowTheTextRun()
+    {
+        var card = new SD.Rectangle(0, 0, 192, 120);
+        SD.Rectangle strip = MediaCardStrip.Bounds(card, 96);
+        int pad = MediaCardStrip.Padding(96);
+        var high = new SD.Rectangle(6, card.Top + 6, 22, 22);
+
+        (int runLeft, int runRight) = MediaCardStrip.TextRun(strip, new[] { high }, pad);
+
+        Assert.Equal(strip.Left + pad, runLeft);
+        Assert.Equal(strip.Right - pad, runRight);
+    }
+
+    [Fact]
+    public void AStripSweptCleanByItsButtonsReportsNoRunRatherThanANegativeOne()
+    {
+        var card = new SD.Rectangle(0, 0, 192, 120);
+        SD.Rectangle strip = MediaCardStrip.Bounds(card, 96);
+        var wide = new SD.Rectangle(strip.Left, strip.Top, strip.Width, strip.Height);
+
+        (int runLeft, int runRight) = MediaCardStrip.TextRun(strip, new[] { wide }, MediaCardStrip.Padding(96));
+
+        Assert.True(runRight <= runLeft, "a run with no room must read as empty, not as a negative width");
+    }
 }
