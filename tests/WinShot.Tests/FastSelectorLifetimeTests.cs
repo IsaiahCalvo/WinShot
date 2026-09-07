@@ -6,6 +6,10 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Tests;
 
+// Constructs the selectors, which read the same static CursorProvider the Pointer helpers
+// in SelectorInteractionTests set and clear. xunit runs collections in parallel, so a class
+// touching a selector outside this collection is a cross-collection flake waiting to happen.
+[Collection("MotionRefcount")]
 public class FastSelectorLifetimeTests
 {
     [Fact]

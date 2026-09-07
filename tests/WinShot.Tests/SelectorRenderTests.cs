@@ -165,6 +165,64 @@ public class SelectorRenderTests
             "a handle at the start of its pop-in should be smaller than a settled one");
     }
 
+    /// <summary>
+    /// The bar's three cells all come from one palette token through one StateFill. The pad
+    /// cell used to mix its own #3A3A3C idle and #303032 pressed — greys that exist nowhere in
+    /// ThemePalette — so one bar carried five neutral surface shades. Scanned rather than read,
+    /// because the fills are composed at paint time from a 0..1 hover/press amount.
+    /// </summary>
+    [Fact]
+    public void TheActionBarsPadAndCancelCellsShareOneRestingFill()
+    {
+        var pending = new SD.Rectangle(100, 60, 160, 100);
+        var (_, pad, cancel, _) = ActionBarRects(pending);
+
+        using var selector = Seed(FlatDesktop(), new SD.Point(390, 290));
+        Set(selector, "_pendingScreen", pending);
+        using SD.Bitmap painted = Paint(selector);
+
+        SD.Color padFill = painted.GetPixel(pad.Left + (pad.Width / 2), pad.Top + 3);
+        SD.Color cancelFill = painted.GetPixel(cancel.Left + (cancel.Width / 2), cancel.Top + 3);
+
+        Assert.Equal(cancelFill.ToArgb(), padFill.ToArgb());
+        Assert.Equal(ThemePalette.SurfaceAlt.ToArgb(), padFill.ToArgb());
+    }
+
+    /// <summary>
+    /// Hovering the pad cell lifts it the way hovering Cancel lifts Cancel, and the lift is a
+    /// composed state rather than a second hard-coded colour.
+    /// </summary>
+    [Fact]
+    public void HoveringThePadCellLiftsItTheSameWayCancelLifts()
+    {
+        var pending = new SD.Rectangle(100, 60, 160, 100);
+        var (_, pad, _, _) = ActionBarRects(pending);
+
+        SD.Color FillAt(double hover)
+        {
+            using var selector = Seed(FlatDesktop(), new SD.Point(390, 290));
+            Set(selector, "_pendingScreen", pending);
+            ((double[])typeof(FastRegionSelectorDialog)
+                .GetField("_barHover", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(selector)!)[2] = hover;
+            using SD.Bitmap painted = Paint(selector);
+            return painted.GetPixel(pad.Left + (pad.Width / 2), pad.Top + 3);
+        }
+
+        SD.Color rest = FillAt(0d);
+        SD.Color hovered = FillAt(1d);
+        Assert.True(hovered.R > rest.R, $"hover should lift the neutral fill: {rest} -> {hovered}");
+        Assert.Equal(
+            DarkControlPalette.StateFill(ThemePalette.SurfaceAlt, 1d, 0d).ToArgb(),
+            hovered.ToArgb());
+    }
+
+    private static (SD.Rectangle bar, SD.Rectangle pad, SD.Rectangle cancel, SD.Rectangle done)
+        ActionBarRects(SD.Rectangle pending) =>
+        ((SD.Rectangle, SD.Rectangle, SD.Rectangle, SD.Rectangle))typeof(FastRegionSelectorDialog)
+            .GetMethod("ActionBarRects", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, [pending])!;
+
     [Fact]
     public void TheHintPillIsPaintedNearTheTopAndFadesWithItsOpacity()
     {

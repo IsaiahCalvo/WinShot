@@ -89,41 +89,60 @@ internal static class SelectorChrome
 
     /// <summary>
     /// Where the size pill for a detected element sits, in the same space as the rectangle it
-    /// labels. Paint and hit-test both call this, so the pill you can click is exactly the
-    /// pill you can see.
+    /// labels, CLAMPED inside <paramref name="bounds"/> the way <see cref="DrawLabel"/> clamps
+    /// it inside the client area. Paint and hit-test both call this, so the pill you can click
+    /// is exactly the pill you can see — with the clamp only on the paint side, an element
+    /// flush with the right or bottom edge of a monitor painted its pill pulled inward while
+    /// the hit rect stayed off screen, so the shutter was dead in exactly that corner.
     /// </summary>
-    public static SD.Rectangle SizePillRect(SD.Rectangle labelled, SD.Size pill) =>
-        new(labelled.Right + 8, labelled.Bottom + 8, pill.Width, pill.Height);
+    public static SD.Rectangle SizePillRect(SD.Rectangle labelled, SD.Size pill, SD.Rectangle bounds)
+    {
+        int left = Math.Clamp(labelled.Right + 8, bounds.Left, Math.Max(bounds.Left, bounds.Right - pill.Width));
+        int top = Math.Clamp(labelled.Bottom + 8, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - pill.Height));
+        return new SD.Rectangle(left, top, pill.Width, pill.Height);
+    }
 
     /// <summary>
     /// The size pill cross-fading into a camera glyph as the pointer moves onto it. Same
     /// geometry throughout — the pill is not a new control, it is the existing readout
     /// admitting that clicking it takes the shot.
+    ///
+    /// The pill ground is painted ONCE at full alpha and only the two foregrounds cross-fade.
+    /// Fading a whole label out under a whole label fading in composed two 235-alpha grounds
+    /// down to about 180 at the midpoint, so the chrome visibly thinned over whatever was
+    /// behind it for the ~70 ms it was changing — the one moment it is being looked at.
     /// </summary>
     public static void DrawShutterPill(SD.Graphics g, SD.Size clientSize, string text, SD.Point at, double swap)
     {
         double amount = Math.Clamp(swap, 0d, 1d);
-        DrawLabel(g, clientSize, text, at.X, at.Y, 1d - amount);
-        if (amount <= 0d)
-            return;
-
         SD.Size pill = MeasureLabel(text);
         int left = Math.Clamp(at.X, 0, Math.Max(0, clientSize.Width - pill.Width));
         int top = Math.Clamp(at.Y, 0, Math.Max(0, clientSize.Height - pill.Height));
         var bounds = new SD.Rectangle(left, top, pill.Width, pill.Height);
 
-        int alpha = (int)Math.Round(255 * amount);
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bounds, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, ThemePalette.WindowBg)))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
-        using var glyphFont = ThemePalette.IconFont(ThemePalette.TextBodyPt);
-        WF.TextRenderer.DrawText(g, "", glyphFont, bounds,
-            SD.Color.FromArgb(alpha, ThemePalette.TextPrimary),
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
+        const WF.TextFormatFlags center = WF.TextFormatFlags.HorizontalCenter |
+            WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding;
+
+        if (amount < 1d)
+        {
+            using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
+            WF.TextRenderer.DrawText(g, text, font, bounds,
+                SD.Color.FromArgb((int)Math.Round(255 * (1d - amount)), ThemePalette.TextPrimary), center);
+        }
+
+        if (amount > 0d)
+        {
+            using var glyphFont = ThemePalette.IconFont(ThemePalette.TextBodyPt);
+            WF.TextRenderer.DrawText(g, "", glyphFont, bounds,
+                SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.TextPrimary), center);
+        }
     }
 
     /// <summary>Draws the first-run hint pill centred near the top of a monitor.</summary>

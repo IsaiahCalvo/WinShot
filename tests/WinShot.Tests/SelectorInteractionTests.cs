@@ -208,15 +208,23 @@ public class SelectorInteractionTests
     [Fact]
     public void TheSizePillSitsJustOffTheElementItLabels()
     {
+        var monitor = new SD.Rectangle(0, 0, 1920, 1080);
         var element = new SD.Rectangle(100, 200, 400, 300);
         var pill = new SD.Size(64, 24);
 
-        SD.Rectangle rect = SelectorChrome.SizePillRect(element, pill);
+        SD.Rectangle rect = SelectorChrome.SizePillRect(element, pill, monitor);
 
         // Paint and hit-test call this same function, so the pill you can click is exactly
         // the pill you can see — the shutter affordance was the only missing half.
         Assert.Equal(new SD.Rectangle(508, 508, 64, 24), rect);
         Assert.False(rect.IntersectsWith(element));
+
+        // An element flush with the bottom-right corner: the painted pill is clamped inside
+        // the monitor, so the clickable one has to be clamped with it or the shutter is dead
+        // on exactly the elements most likely to sit against an edge.
+        SD.Rectangle corner = SelectorChrome.SizePillRect(
+            new SD.Rectangle(1500, 900, 420, 180), pill, monitor);
+        Assert.True(monitor.Contains(corner), corner.ToString());
     }
 
     [Fact]
@@ -297,6 +305,180 @@ public class SelectorInteractionTests
 
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
     }
+
+    /// <summary>
+    /// Turning Windows' animations off must take the message's RAMP, never the message. The
+    /// hold used to be a tween, and a tween with animations off applies its end state inline —
+    /// so the pill faded in, held and faded out inside one keystroke and no paint ever saw it.
+    /// Four actions have this pill as their ONLY feedback channel, including the two that
+    /// explain why a key did nothing.
+    /// </summary>
+    [Fact]
+    public void AMessageIsStillOnScreenWhenAnimationsAreOff()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            using var pointer = new Pointer(50, 50);
+            using var selector = CreateSelector(Settings());
+
+            // No frozen snapshot in a test, so C takes the "turn on Freeze screen" branch —
+            // a FlashMessage like every other, and the only thing telling the user why.
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.C));
+
+            Assert.Equal(
+                "Color needs the frozen screen; turn on Freeze screen in Settings.",
+                HintText(selector));
+            Assert.True(HintOpacity(selector) > 0d, "the pill is at zero opacity: never painted");
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            Assert.Equal(0, Motion.Holders);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+            PumpUntil(() => Motion.Holders == 0);
+        }
+    }
+
+    /// <summary>
+    /// A dwell is not a transition, so it must not run on the frame clock: 1.2 s of tween held
+    /// the process-wide 1 ms timer resolution and fired ~150 empty callbacks per confirmation,
+    /// on the most paint-sensitive surface in the app.
+    /// </summary>
+    [Fact]
+    public void HoldingAMessageOnScreenDoesNotHoldTheFrameClock()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            PumpUntil(() => Motion.Holders == 0);
+            using var pointer = new Pointer(50, 50);
+            using var selector = CreateSelector(Settings());
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.C));
+            Assert.Equal(0, Motion.Holders);
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previous;
+            PumpUntil(() => Motion.Holders == 0);
+        }
+    }
+
+    /// <summary>
+    /// Mouse-up confirm took away the step that used to catch a slip, so a press that
+    /// travelled the 4 px drag threshold and let go wrote, copied and carded a 4x4 image.
+    /// Below the floor the release leaves an adjustable selection instead.
+    /// </summary>
+    [Fact]
+    public void AFourPixelSlipLeavesASelectionRatherThanCapturing()
+    {
+        using var pointer = new Pointer(200, 200);
+        using var selector = CreateSelector(Settings());
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 205, 204);
+        selector.HandleMouseUp(Left());
+
+        Assert.Null(selector.SelectedRegionPx);
+        Assert.NotNull(selector.PendingRegion);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
+    /// <summary>
+    /// A rect the user moved with the keyboard is a hand-drawn rect. ScrollingFlow re-refines
+    /// a detector-owned one back onto the pane it found, which silently threw the nudge away.
+    /// </summary>
+    [Fact]
+    public void NudgingASelectionDropsTheDetectorProvenance()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings(s => s.AdjustSelectionBeforeCapturing = true));
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        selector.HandleMouseUp(Left());
+        SetPaneProvenance(selector); // what the Ctrl+click retarget leaves behind
+
+        SD.Rectangle before = selector.PendingRegion!.Value;
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Right));
+
+        Assert.NotEqual(before, selector.PendingRegion!.Value);
+        Assert.False(selector.SelectedByPaneClick);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
+    /// <summary>
+    /// Padding and edge snapping move the rect without a press, so neither goes through the
+    /// provenance reset a fresh press does — same silent re-refinement as the nudge.
+    /// </summary>
+    [Fact]
+    public void PaddingASelectionDropsTheDetectorProvenance()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings(s => s.AdjustSelectionBeforeCapturing = true));
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        selector.HandleMouseUp(Left());
+        SetPaneProvenance(selector);
+
+        typeof(FastRegionSelectorDialog)
+            .GetMethod("GlideSelectionTo", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(selector, [new SD.Rectangle(92, 92, 256, 176)]);
+
+        Assert.False(selector.SelectedByPaneClick);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
+    /// <summary>
+    /// Space changes the mode the session actually RUNS in, so the caller cannot key the
+    /// window-backdrop composite off the mode it asked for — a capture-window run that flipped
+    /// to Area came back as a hand-drawn rectangle floating on the wallpaper.
+    /// </summary>
+    [Fact]
+    public void TheSelectorReportsTheModeItActuallyRanIn()
+    {
+        using var pointer = new Pointer(100, 100);
+        using var selector = CreateSelector(Settings());
+
+        typeof(FastRegionSelectorDialog)
+            .GetField("_mode", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(selector, FastRegionSelectorDialog.SelectorMode.Window);
+        Assert.Equal(FastRegionSelectorDialog.SelectorMode.Window, selector.Mode);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Space));
+
+        selector.HandleMouseDown(Left());
+        pointer.MoveTo(selector, 340, 260);
+        selector.HandleMouseUp(Left());
+
+        Assert.Equal(new SD.Rectangle(100, 100, 240, 160), selector.SelectedRegionPx);
+        Assert.Equal(FastRegionSelectorDialog.SelectorMode.Area, selector.Mode);
+    }
+
+    private static void SetPaneProvenance(FastRegionSelectorDialog selector) =>
+        typeof(FastRegionSelectorDialog)
+            .GetProperty("SelectedByPaneClick")!
+            .SetValue(selector, true);
+
+    private static double HintOpacity(FastRegionSelectorDialog selector) =>
+        (double)typeof(FastRegionSelectorDialog)
+            .GetField("_hintOpacity", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(selector)!;
+
+    private static string HintText(FastRegionSelectorDialog selector) =>
+        (string)typeof(FastRegionSelectorDialog)
+            .GetField("_hintText", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(selector)!;
 
     private static void SetSnapEdges(FastRegionSelectorDialog selector, int[] x, int[] y)
     {
