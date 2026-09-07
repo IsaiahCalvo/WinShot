@@ -39,6 +39,28 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// <summary>True while the left button is held on the detected element's shutter pill.</summary>
     private bool _pressedShutter;
 
+    /// <summary>Set by <c>Complete</c> and cleared by <c>ResetForUse</c>. A pooled selector is
+    /// parked, not destroyed, and keeps keyboard focus, so keys keep arriving after the
+    /// session is over.</summary>
+    private bool _sessionEnded;
+
+    /// <summary>True for the sessions the first-run hint is shown in.</summary>
+    private bool _hintEnabled;
+
+    /// <summary>
+    /// The edge of the pending selection the pointer is on, and the 0..1 amount its accent
+    /// thickening is eased to. Clicking an edge snaps it up to <see cref="MarqueeEdge.ReachPx"/>
+    /// away and the selector has no undo, so the edge has to say it is a target BEFORE the
+    /// press: it thickens under the pointer and the cursor becomes a sizing arrow.
+    /// </summary>
+    private MarqueeSide _hoverEdge = MarqueeSide.None;
+    private double _edgeGlow;
+    private IDisposable? _edgeTween;
+
+    /// <summary>The edge the left button went down on; the snap fires at release over the
+    /// same edge, exactly as Cancel / Done / Pad do.</summary>
+    private MarqueeSide _pressedEdge = MarqueeSide.None;
+
     /// <summary>True when the pointer has moved far enough from the press to be a drag.</summary>
     private bool HasTravelled(SD.Point at) =>
         Math.Abs(at.X - _pressScreen.X) >= DragThresholdPx ||
@@ -306,6 +328,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             _settings.Current.SelectorHintSessions =
                 SelectorHint.NextSessionCount(_settings.Current.SelectorHintSessions);
+            _hintEnabled = true;
             _hintText = SelectorHint.Text(_mode == SelectorMode.Window);
             _hintIsMessage = false;
             FadeHint(arriving: true);
@@ -417,6 +440,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _pressedShutter = false;
         _resizeHandle = -1;
         _movingPending = false;
+        _pressedEdge = MarqueeSide.None;
+        _hoverEdge = MarqueeSide.None;
+        _edgeTween?.Dispose();
+        _edgeTween = null;
+        _edgeGlow = 0d;
+        _sessionEnded = false;
+        _hintEnabled = false;
         _handleTween?.Dispose();
         _handleTween = null;
         _handleScale = 1d;
@@ -526,6 +556,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _pillTween = null;
             _pendingGlideTween?.Dispose();
             _pendingGlideTween = null;
+            _edgeTween?.Dispose();
+            _edgeTween = null;
             _followTimer.Dispose();
             _followMotionClock?.Dispose();
             _followMotionClock = null;
@@ -712,6 +744,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal void HandleKeyDown(WF.KeyEventArgs e)
     {
+        // The selector is pooled: after Complete() it is parked but alive and still holding
+        // keyboard focus, so a key arriving in that window (Escape auto-repeat is the usual
+        // way) started tweens and a message dwell on a hidden form, holding the 1 ms clock.
+        if (_sessionEnded)
+            return;
+
         if (e.KeyCode == WF.Keys.Escape)
         {
             Complete(WF.DialogResult.Cancel);
@@ -813,6 +851,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _pressedShutter = false;
             _resizeHandle = -1;
             _movingPending = false;
+            _pressedEdge = MarqueeSide.None;
+            _hoverEdge = MarqueeSide.None;
+            _edgeTween?.Dispose();
+            _edgeTween = null;
+            _edgeGlow = 0d;
             SetHoverPane(null);
             SetHoverWindow(ResolveWindow(_currentScreen));
             StartFollowMotion(); // window mode tracks the cursor even with both chrome toggles off
@@ -860,6 +903,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_mode == SelectorMode.Window)
             return; // window mode confirms on mouse-up
+
+        // A press ends any glide in flight. The rect is painted at the eased position but
+        // every hit-test reads the destination, so for the 140 ms of a pad / snap / retarget
+        // the handles you can see are not the handles you can grab.
+        SettlePendingGlide();
 
         // Area mode. A fresh press is a fresh provenance: the flag below says the rect came
         // from the detector, and downstream probe refinement is only correct for those.
@@ -909,16 +957,22 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
             // Handles win the corners; a press on an edge with no drag behind it snaps that
             // ONE edge onto the nearest real boundary, which is the tedious half of drawing a
-            // rectangle by hand.
-            MarqueeSide side = MarqueeEdge.HitTest(pending, screen);
+            // rectangle by hand. The press only ARMS it — the snap fires on mouse-up over the
+            // same edge, like every other button here. Firing on the press teleported an edge
+            // up to ReachPx away, under a cursor that had been promising a move, with no undo;
+            // and returning here made a drag from the border impossible. A press that travels
+            // is still a move, so the move state is armed alongside it.
+            MarqueeSide side = MarqueeEdge.HitTest(pending, screen, EdgeToleranceAt(screen));
             if (side != MarqueeSide.None)
             {
-                SD.Rectangle snapped = MarqueeEdge.SnapEdge(pending, side, _snapEdgesX, _snapEdgesY);
-                if (snapped != pending)
+                _pressedEdge = side;
+                if (pending.Contains(screen))
                 {
-                    GlideSelectionTo(snapped);
-                    return;
+                    _movingPending = true;
+                    _adjustAnchor = screen;
+                    _adjustStartRect = pending;
                 }
+                return;
             }
 
             if (pending.Contains(screen))
@@ -961,6 +1015,52 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private SD.Rectangle? BarAnchor => _pendingScreen is SD.Rectangle pending
         ? (_pendingGlide.IsActive ? _pendingGlide.Current : pending)
         : null;
+
+    /// <summary>
+    /// Ends a selection glide early, leaving the rect at its destination. <see cref="_pendingScreen"/>
+    /// is already the destination, so this only stops paint from lagging behind the hit-tests.
+    /// </summary>
+    private void SettlePendingGlide()
+    {
+        if (_pendingGlideTween is null && !_pendingGlide.IsActive)
+            return;
+        _pendingGlideTween?.Dispose();
+        _pendingGlideTween = null;
+        _pendingGlide.Stop();
+        InvalidateAllSurfaces();
+    }
+
+    /// <summary>
+    /// The edge grab band, in physical px, for the monitor a point is on. Six px is four
+    /// logical px at Isaiah's 150 % primary and three at 200 %, which is a band too thin to
+    /// land on deliberately.
+    /// </summary>
+    private int EdgeToleranceAt(SD.Point screen) => Math.Max(
+        MarqueeEdge.TolerancePx,
+        (int)Math.Round(MarqueeEdge.TolerancePx *
+            WinShot.Recording.RecordingMonitorDpi.ScaleFor(MonitorBoundsAt(screen))));
+
+    /// <summary>
+    /// Eases the hovered edge's accent thickening toward its target. The gesture moves an edge
+    /// by up to <see cref="MarqueeEdge.ReachPx"/> with no undo, so the edge has to announce
+    /// itself before the press rather than after it.
+    /// </summary>
+    private void AnimateEdgeGlow()
+    {
+        double from = _edgeGlow;
+        double to = _hoverEdge == MarqueeSide.None ? 0d : 1d;
+        _edgeTween?.Dispose();
+        _edgeTween = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutCubic,
+            progress =>
+            {
+                _edgeGlow = from + ((to - from) * progress);
+                if (BarAnchor is SD.Rectangle p)
+                    InvalidateScreenRect(Inflated(p));
+            },
+            () => _edgeTween = null);
+    }
 
     private void GlideSelectionTo(SD.Rectangle destination)
     {
@@ -1005,7 +1105,17 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </summary>
     private void SetPendingRegion(SD.Rectangle rect)
     {
+        bool isNew = _pendingScreen is null;
         _pendingScreen = rect;
+        // A framed selection has its own vocabulary — nudge, resize, re-snap — and the hint
+        // used to be suppressed in exactly that state. Only for the sessions the first-run
+        // hint runs at all, and never over a message the user just triggered.
+        if (isNew && _hintEnabled && !_hintIsMessage && _hintHold is null)
+        {
+            _hintText = SelectorHint.PendingText;
+            FadeHint(arriving: true);
+            StartFollowMotion();
+        }
         _handleTween?.Dispose();
         _handleScale = 0d;
         _handleTween = WinShot.Core.Motion.Run(
@@ -1347,6 +1457,24 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 AnimateBarFills();
                 InvalidateScreenRect(barRect);
             }
+
+            // Edge affordance. Nothing else on the selection says which pixels answer the
+            // click-to-snap gesture, so the edge under the pointer thickens and the cursor
+            // becomes a sizing arrow before anything is committed.
+            MarqueeSide edge = barRect.Contains(_currentScreen) ||
+                    SelectionHandles.HitTest(_currentScreen, barPending) >= 0
+                ? MarqueeSide.None
+                : MarqueeEdge.HitTest(barPending, _currentScreen, EdgeToleranceAt(_currentScreen));
+            if (edge != _hoverEdge)
+            {
+                _hoverEdge = edge;
+                AnimateEdgeGlow();
+            }
+        }
+        else if (_hoverEdge != MarqueeSide.None)
+        {
+            _hoverEdge = MarqueeSide.None;
+            AnimateEdgeGlow();
         }
 
         if (_mode == SelectorMode.Window)
@@ -1503,8 +1631,31 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Settings hint promises — could never start over a detected element, which is
         // almost anywhere on screen. A press that travelled is a drag and Ctrl means adjust;
         // a press that stayed put is a click and Ctrl means retarget.
+        if (_pressedEdge != MarqueeSide.None)
+        {
+            MarqueeSide pressed = _pressedEdge;
+            _pressedEdge = MarqueeSide.None;
+            bool moved = _movingPending && HasTravelled(_currentScreen);
+            _movingPending = false;
+            if (!moved && _pendingScreen is SD.Rectangle onEdge &&
+                MarqueeEdge.HitTest(onEdge, _currentScreen, EdgeToleranceAt(_currentScreen)) == pressed)
+            {
+                SD.Rectangle snapped = MarqueeEdge.SnapEdge(onEdge, pressed, _snapEdgesX, _snapEdgesY);
+                if (snapped != onEdge)
+                    GlideSelectionTo(snapped);
+                else
+                    FlashMessage("Nothing on screen to line that edge up with.");
+            }
+            InvalidateAllSurfaces();
+            return;
+        }
+
+        // A Ctrl-held press that grabbed a handle, an edge or the selection body is an
+        // adjustment, not a retarget: releasing it without travelling used to throw the
+        // selection away and replace it with whatever sat under the pointer.
         if (_paneHover &&
             (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control &&
+            _resizeHandle < 0 && !_movingPending &&
             !HasTravelled(_currentScreen) &&
             SnapRectAt(_currentScreen) is SD.Rectangle element)
         {
@@ -1636,6 +1787,29 @@ public sealed class FastRegionSelectorDialog : WF.Form
             using (var pen = new SD.Pen(Accent, 2))
                 g.DrawRectangle(pen, local);
 
+            // The edge under the pointer thickens: the only thing on the selection that says
+            // "clicking here moves this one edge onto the nearest boundary".
+            if (showHandles && _hoverEdge != MarqueeSide.None && _edgeGlow > 0.01d)
+            {
+                float weight = (float)(2d + (4d * Math.Clamp(_edgeGlow, 0d, 1d)));
+                using var edgePen = new SD.Pen(Accent, weight);
+                switch (_hoverEdge)
+                {
+                    case MarqueeSide.Left:
+                        g.DrawLine(edgePen, local.Left, local.Top, local.Left, local.Bottom);
+                        break;
+                    case MarqueeSide.Right:
+                        g.DrawLine(edgePen, local.Right, local.Top, local.Right, local.Bottom);
+                        break;
+                    case MarqueeSide.Top:
+                        g.DrawLine(edgePen, local.Left, local.Top, local.Right, local.Top);
+                        break;
+                    default:
+                        g.DrawLine(edgePen, local.Left, local.Bottom, local.Right, local.Bottom);
+                        break;
+                }
+            }
+
             if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
             {
                 // A hand-drawn marquee and a whole window looked identical — both a plain
@@ -1675,7 +1849,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 SD.Point at = new(labelLocal.Right + 8, labelLocal.Bottom + 8);
                 if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
                 {
-                    at = new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
+                    SD.Point atCursor = ToLocal(_currentScreen, monitorBounds);
+                    at = new SD.Point(
+                        atCursor.X + SelectorChrome.CursorReadoutOffsetX,
+                        atCursor.Y + SelectorChrome.CursorReadoutOffsetY);
                 }
                 else if (_pendingScreen is not null)
                 {
@@ -1709,8 +1886,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 DrawActionBar(g, monitorBounds, bar, padButton, cancel, done);
         }
 
-        if (_hintOpacity > 0d && cursorOnThisSurface &&
-            (_hintIsMessage || (_pendingScreen is null && !_dragging)))
+        if (_hintOpacity > 0d && cursorOnThisSurface && (_hintIsMessage || !_dragging))
         {
             SelectorChrome.DrawHint(g, clientSize, _hintText, _hintOpacity, MessagePillTop(clientSize, monitorBounds));
         }
@@ -2008,6 +2184,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// makes a retarget read as the tint moving rather than one rectangle blinking off while
     /// its neighbour fades up. Only the wash is painted, and only for the window under the
     /// pointer, so leaving has nothing to ramp: the tint goes with the rectangle it was on.
+    ///
+    /// This is the one asymmetric entrance/exit on the selector, and it only holds while the
+    /// accent BORDER is also instant. Give the border a fade and this must get one too, or the
+    /// wash will read as a pop against it.
     /// </summary>
     private void BeginHoverWash(bool arriving, bool wasHovering)
     {
@@ -2176,6 +2356,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _pendingGlideTween?.Dispose();
         _pendingGlideTween = null;
         _pendingGlide.Stop();
+        _edgeTween?.Dispose();
+        _edgeTween = null;
+        _edgeGlow = 0d;
+        _hoverEdge = MarqueeSide.None;
+        _pressedEdge = MarqueeSide.None;
+        _sessionEnded = true;
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -2214,6 +2400,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
             int h = _resizeHandle >= 0 ? _resizeHandle : SelectionHandles.HitTest(_currentScreen, p);
             if (SelectionHandles.CursorFor(h) is WF.Cursor sizing)
                 return sizing;
+            // The edge band is inside the move body, so SizeAll used to promise a move over
+            // pixels that answer the click-to-snap gesture. The cursor names the gesture.
+            if (!_movingPending && _hoverEdge != MarqueeSide.None)
+            {
+                return _hoverEdge is MarqueeSide.Left or MarqueeSide.Right
+                    ? WF.Cursors.SizeWE
+                    : WF.Cursors.SizeNS;
+            }
             if (_movingPending || p.Contains(_currentScreen))
                 return WF.Cursors.SizeAll;
         }

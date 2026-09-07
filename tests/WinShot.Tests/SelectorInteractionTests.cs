@@ -261,6 +261,11 @@ public class SelectorInteractionTests
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
     }
 
+    /// <summary>
+    /// The edge snap arms on the press and fires on the release over the same edge — the
+    /// press alone used to teleport the edge up to 48 px, under a cursor that had been
+    /// showing the four-way move arrow, with nothing to undo it.
+    /// </summary>
     [Fact]
     public void ClickingOneEdgeOfTheSelectionSnapsThatEdgeToARealBoundary()
     {
@@ -277,6 +282,8 @@ public class SelectorInteractionTests
         // grab, which is why the edge gesture answers None at a corner).
         pointer.At = new SD.Point(100, 130);
         selector.HandleMouseDown(Left());
+        Assert.Equal(new SD.Rectangle(100, 100, 240, 160), selector.PendingRegion); // press only arms
+        selector.HandleMouseUp(Left());
 
         SD.Rectangle? snapped = selector.PendingRegion;
         Assert.NotNull(snapped);

@@ -350,10 +350,12 @@ public class SelectorRenderTests
     /// A framed selection used to swallow every confirmation and every failure: the paint gate
     /// refused the pill whenever _pendingScreen was set, which is the ONLY state three of the
     /// four new actions run in — the "nothing to snap to" line was unreachable by construction.
-    /// The first-run hint is still suppressed there; a message is not.
+    /// The hint was suppressed there too, and a framed selection is the only state the arrow
+    /// nudge, [ and ], and A work in, so the six new gestures had nowhere on screen to be
+    /// mentioned. Both now paint.
     /// </summary>
     [Fact]
-    public void AMessageIsPaintedOverAFramedSelectionButTheFirstRunHintIsNot()
+    public void AMessageAndTheHintArePaintedOverAFramedSelection()
     {
         // A framed selection paints its own dark chrome (the Cancel/Done bar), so the pill is
         // measured as the DIFFERENCE from the same scene with no pill at all.
@@ -382,7 +384,7 @@ public class SelectorRenderTests
         int hint = DarkPixels(1d, isMessage: false) - baseline;
 
         Assert.True(message > 200, $"the confirmation should be on screen, found {message} px");
-        Assert.Equal(0, hint);
+        Assert.True(hint > 200, $"the framed-selection hint should be on screen, found {hint} px");
     }
 
     [Fact]

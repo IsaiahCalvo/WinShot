@@ -331,6 +331,10 @@ public partial class SettingsWindow : Window
         AdjustSelectionCheck.IsChecked = s.AdjustSelectionBeforeCapturing;
         SelectByTag(WindowBackgroundCombo, s.WindowCaptureBackground, fallbackIndex: 0);
         SelectByTag(WindowPaddingCombo, s.WindowCapturePadding, fallbackIndex: 1);
+        // Padding does nothing for a bare window — App.CaptureRegionFlow never asks for it —
+        // so the row must not look live in that state.
+        WindowBackgroundCombo.SelectionChanged += (_, _) => SyncWindowPaddingEnabled();
+        SyncWindowPaddingEnabled();
 
         // Annotate
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
@@ -962,6 +966,10 @@ public partial class SettingsWindow : Window
             return false;
         }
     }
+
+    private void SyncWindowPaddingEnabled() =>
+        WindowPaddingCombo.IsEnabled =
+            WinShot.Capture.WindowBackdrop.IsEnabled(SelectedTag(WindowBackgroundCombo, "wallpaper"));
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)
     {

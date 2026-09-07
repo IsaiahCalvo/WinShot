@@ -634,7 +634,21 @@ public partial class App : Application
                         !selector.BareBackgroundRequested &&
                         WindowBackdrop.IsEnabled(_settings.Current.WindowCaptureBackground))
                     {
-                        frozenCrop = ComposeWindowBackdrop(frozenCrop);
+                        // Off the dispatcher, like every other capture step here: decoding
+                        // the wallpaper and compositing the shadow cost ~200 ms, and running
+                        // them inline froze the UI thread between the overlay closing and the
+                        // card appearing — which reads as capture latency and stalls any
+                        // motion in flight.
+                        SD.Bitmap bare = frozenCrop;
+                        (SD.Bitmap image, bool composed) result =
+                            await RunCaptureWorkAsync(() => ComposeWindowBackdrop(bare));
+                        frozenCrop = result.image;
+                        if (!result.composed)
+                        {
+                            ShowBalloon("Window capture",
+                                "Saved the bare window — the backdrop could not be drawn.",
+                                ToastSeverity.Info);
+                        }
                     }
                     HandleCapture(frozenCrop, postCaptureActionOverride);
                 }
@@ -646,23 +660,24 @@ public partial class App : Application
         });
 
     /// <summary>
-    /// Puts a captured window on its backdrop. Failure here must never lose the capture, so a
-    /// broken wallpaper or an out-of-memory canvas returns the bare shot and logs.
+    /// Puts a captured window on its backdrop, off the UI thread. Failure here must never
+    /// lose the capture, so a broken wallpaper or an out-of-memory canvas returns the bare
+    /// shot with <c>composed: false</c>, which the caller turns into one info line — the user
+    /// asked for a composite and would otherwise get a different image with no explanation.
     /// </summary>
-    private SD.Bitmap ComposeWindowBackdrop(SD.Bitmap window)
+    private (SD.Bitmap Image, bool Composed) ComposeWindowBackdrop(SD.Bitmap window)
     {
         try
         {
-            using SD.Image? wallpaper = WindowBackdrop.TryLoadWallpaper();
-            SD.Bitmap composed = WindowBackdrop.Compose(
-                window, wallpaper, WindowBackdrop.PaddingFor(_settings.Current.WindowCapturePadding));
+            SD.Bitmap composed = WindowBackdrop.ComposeOnWallpaper(
+                window, WindowBackdrop.PaddingFor(_settings.Current.WindowCapturePadding));
             window.Dispose();
-            return composed;
+            return (composed, true);
         }
         catch (Exception ex)
         {
             Log.Error("Window backdrop could not be composed; saving the bare window", ex);
-            return window;
+            return (window, false);
         }
     }
 

@@ -71,8 +71,18 @@ public static class SelectionHandles
         }
         var rect = SD.Rectangle.FromLTRB(Math.Min(l, r), Math.Min(t, b), Math.Max(l, r), Math.Max(t, b));
         rect.Intersect(bounds);
+        // A handle dragged onto its opposite corner used to leave a 0x0 rect that Enter and
+        // Done then silently refused to confirm — a dead end with all eight handles stacked
+        // on one point and nothing on screen saying why nothing happened.
+        rect.Width = Math.Max(rect.Width, MinSizePx);
+        rect.Height = Math.Max(rect.Height, MinSizePx);
+        if (rect.Right > bounds.Right) rect.X = bounds.Right - rect.Width;
+        if (rect.Bottom > bounds.Bottom) rect.Y = bounds.Bottom - rect.Height;
         return rect;
     }
+
+    /// <summary>Smallest selection a handle drag can leave behind.</summary>
+    public const int MinSizePx = 8;
 
     /// <summary>The rectangle moved by (dx, dy), pushed back inside <paramref name="bounds"/>
     /// rather than clipped — a move must never also resize.</summary>

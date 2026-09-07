@@ -28,6 +28,14 @@ public static class SelectorHint
         // saturation guard handing back an infinite supply of hints instead of stopping them.
         sessionsSoFar < 0 ? 1 : Math.Min(sessionsSoFar, SessionsShown - 1) + 1;
 
+    /// <summary>
+    /// The sentence for a selection that is already framed. Everything it names only works in
+    /// that state, and the state suppressed the hint — so arrow-nudge, [ and ], and A were
+    /// reachable only by having read the source.
+    /// </summary>
+    public static string PendingText =>
+        "Arrows nudge, [ and ] resize, A lines it up with what's on screen, Enter captures.";
+
     /// <summary>The sentence for the mode the selector is currently in.</summary>
     public static string Text(bool windowMode) => windowMode
         ? "Click a window to capture it. Space goes back to dragging, Esc cancels."

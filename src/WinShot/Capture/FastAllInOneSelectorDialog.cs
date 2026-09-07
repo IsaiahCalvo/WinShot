@@ -47,6 +47,16 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private IDisposable? _handleTween;
     private WindowInfo? _hoverWindow;
     private SD.Rectangle? _pendingPx;
+
+    /// <summary>Display-only ease of <see cref="_pendingPx"/> while a button-driven size
+    /// change is in flight. Same pattern the mode chip's glide already uses.</summary>
+    private readonly RectangleTween _pendingGlide = new();
+    private IDisposable? _pendingGlideTween;
+
+    /// <summary>The pending rect as PAINTED — eased mid-glide, settled otherwise.</summary>
+    private SD.Rectangle? DisplayPx => _pendingPx is SD.Rectangle p
+        ? (_pendingGlide.IsActive ? _pendingGlide.Current : p)
+        : null;
     private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
     // Per-monitor frozen-slice-with-dim baked once, so each follow-frame is a single opaque
     // blit instead of re-cropping the snapshot AND alpha-blending a full-screen dim every
@@ -278,6 +288,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _handleScale = 1d;
         _hoverWindow = null;
         _pendingPx = null;
+        _pendingGlideTween?.Dispose();
+        _pendingGlideTween = null;
+        _pendingGlide.Stop();
         SelectedRegionPx = null;
         SelectedAction = AllInOneAction.Capture;
         DisposeFrozen();
@@ -456,6 +469,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             DisposeFrozen();
             _handleTween?.Dispose();
             _handleTween = null;
+            _pendingGlideTween?.Dispose();
+            _pendingGlideTween = null;
             _followTimer.Dispose();
             _capturedRegion?.Dispose();
             _capturedRegion = null;
@@ -523,6 +538,11 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         if (e.Button != WF.MouseButtons.Left)
             return;
+
+        // A press ends any glide in flight, so the rect that answers the hit-test below is
+        // always the rect on screen.
+        StopPendingGlide();
+        InvalidateAllSurfaces();
 
         if (e.Clicks >= 2 && _pendingPx is SD.Rectangle doubleClicked)
         {
@@ -823,7 +843,16 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// SELECTS the whole desktop rather than capturing it, so the region is still yours to
     /// trim before you confirm.
     /// </summary>
-    internal void SelectWholeScreen() => ApplyExactSize(_vs.Width, _vs.Height);
+    internal void SelectWholeScreen()
+    {
+        // Through the ratio, not around it: expanding straight to the desktop's own shape
+        // left the accent badge under the crop glyph still claiming 16:9 over a selection
+        // that was not 16:9.
+        if (_toolbar.AspectRatio is double ratio && ratio > 0)
+            ApplyRatioAt(_vs.Width, ratio);
+        else
+            ApplyExactSize(_vs.Width, _vs.Height, glide: true);
+    }
 
     /// <summary>
     /// Reshapes the pending region to a newly chosen ratio, keeping its top-left and width.
@@ -839,15 +868,21 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         if (ratio is not double value || value <= 0 || _pendingPx is not SD.Rectangle pending)
             return;
+        ApplyRatioAt(pending.Width, value);
+    }
 
-        int width = Math.Min(pending.Width, _vs.Width);
-        int height = AspectRatioPresets.HeightFor(width, value);
+    /// <summary>The largest rectangle of <paramref name="ratio"/> that fits the desktop and is
+    /// no wider than <paramref name="width"/>.</summary>
+    private void ApplyRatioAt(int width, double ratio)
+    {
+        width = Math.Min(width, _vs.Width);
+        int height = AspectRatioPresets.HeightFor(width, ratio);
         if (height > _vs.Height)
         {
             height = _vs.Height;
-            width = Math.Max(1, (int)Math.Round(height * value));
+            width = Math.Max(1, (int)Math.Round(height * ratio));
         }
-        ApplyExactSize(width, height);
+        ApplyExactSize(width, height, glide: true);
     }
 
     /// <summary>
@@ -859,7 +894,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// tall aspect preset on a low selection come out at some other ratio entirely. The
     /// requested size wins; only a size that genuinely exceeds the desktop is clipped.
     /// </summary>
-    internal void ApplyExactSize(int width, int height)
+    internal void ApplyExactSize(int width, int height) => ApplyExactSize(width, height, glide: false);
+
+    /// <param name="glide">True for the button-driven changes (expand to full size, an aspect
+    /// preset), which move the rect on their own and must be seen to move. The typed width and
+    /// height fields stay instant: a size you are typing should track the keystroke.</param>
+    private void ApplyExactSize(int width, int height, bool glide)
     {
         if (width < 1 || height < 1)
             return;
@@ -877,13 +917,57 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (rect.Width < 1 || rect.Height < 1)
             return;
 
+        SD.Rectangle? from = _pendingPx;
         _pendingPx = rect;
         _hoverWindow = null;
         _toolbar.SetSize(rect.Width, rect.Height);
         _toolbar.RefreshPendingState();
         BeginHandlePop();
+        // "Select the whole screen" and the ratio presets move the selection across the whole
+        // desktop; assigning the rect and repainting teleported it while only the eight
+        // handles animated. The glide is display-only — _pendingPx is the destination from
+        // frame one, so Enter and the confirm button still commit the final rectangle.
+        if (from is SD.Rectangle start && start != rect && glide)
+            GlidePendingTo(start, rect);
+        else
+            StopPendingGlide();
         InvalidateAllSurfaces();
         Focus();
+    }
+
+    /// <summary>
+    /// Display-only ease of the pending rect from one shape to another, in virtual px.
+    /// <see cref="DisplayPx"/> is what paint reads; every hit-test reads the destination, and
+    /// a press settles the glide so the two can never disagree for longer than a frame.
+    /// </summary>
+    private void GlidePendingTo(SD.Rectangle from, SD.Rectangle to)
+    {
+        _pendingGlideTween?.Dispose();
+        _pendingGlide.Retarget(from, to);
+        _pendingGlideTween = WinShot.Core.Motion.Run(
+            WinShot.Core.Motion.QuickMs,
+            WinShot.Core.Motion.EaseOutCubic,
+            progress =>
+            {
+                _pendingGlide.Update((float)progress);
+                InvalidateAllSurfaces();
+            },
+            () =>
+            {
+                _pendingGlideTween = null;
+                _pendingGlide.Stop();
+                InvalidateAllSurfaces();
+            });
+    }
+
+    /// <summary>Ends a glide early, leaving the rect at its destination.</summary>
+    private void StopPendingGlide()
+    {
+        if (_pendingGlideTween is null && !_pendingGlide.IsActive)
+            return;
+        _pendingGlideTween?.Dispose();
+        _pendingGlideTween = null;
+        _pendingGlide.Stop();
     }
 
     internal void Cancel()
@@ -934,7 +1018,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SD.Rectangle? brightScreen = null;
         if (_dragging && _dragMoved)
             brightScreen = MakeDragRect(_currentScreen);
-        else if (_pendingPx is SD.Rectangle pending)
+        else if (DisplayPx is SD.Rectangle pending)
             brightScreen = ScreenFromVirtual(pending);
         else if (_hoverWindow is not null)
             brightScreen = _hoverWindow.Bounds;
@@ -949,12 +1033,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 SelectionHandles.Draw(g, local, _handleScale, _resizeHandle);
             if (cursorOnThisSurface)
             {
+                // The readout labels the SETTLED rect, never the interpolated one: digits
+                // spinning for 140 ms read as a glitch rather than as motion.
                 var px = _hoverWindow is not null && !_dragging && _pendingPx is null
                     ? VirtualFromScreen(_hoverWindow.Bounds)
-                    : VirtualFromScreen(bright);
+                    : _pendingPx is SD.Rectangle settled && !_dragging
+                        ? settled
+                        : VirtualFromScreen(bright);
                 SD.Point at = _dragging || _pendingPx is not null
                     ? new SD.Point(local.Right + 8, local.Bottom + 8)
-                    : new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
+                    : new SD.Point(
+                        ToLocal(_currentScreen, monitorBounds).X + SelectorChrome.CursorReadoutOffsetX,
+                        ToLocal(_currentScreen, monitorBounds).Y + SelectorChrome.CursorReadoutOffsetY);
                 SelectorChrome.DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y);
             }
         }
@@ -1159,6 +1249,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _handleTween?.Dispose();
         _handleTween = null;
         _handleScale = 1d;
+        _pendingGlideTween?.Dispose();
+        _pendingGlideTween = null;
+        _pendingGlide.Stop();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -1331,10 +1424,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private static readonly SD.Color BarFill = ThemePalette.WindowBg;
         private static readonly SD.Color BarBorder = ThemePalette.BorderStrong;
         private static readonly SD.Color HoverFill = ThemePalette.HoverFill;
-        private static readonly SD.Color SelectedFill = ThemePalette.Accent;
-
-        /// <summary>Accent chip that carries small white text (the ratio badge).</summary>
-        private static readonly SD.Color RatioFill = ThemePalette.AccentPressed;
+        /// <summary>
+        /// Every accent chip on this bar that carries small white text — the selected mode
+        /// chip and the ratio badge. White on the bare accent measures 3.65:1, under the
+        /// 4.5:1 floor for text this small; the pressed accent is the same identity a step
+        /// darker and clears it at 5.62:1.
+        /// </summary>
+        private static readonly SD.Color SelectedFill = ThemePalette.AccentPressed;
         private static readonly SD.Color GlyphColor = ThemePalette.TextPrimary;
         private static readonly SD.Color LabelColor = ThemePalette.TextSecondary;
         private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x3A, 0x3A, 0x3A);
@@ -1753,10 +1849,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             if (ratioChosen || _hoverIndex == HoverRatio)
             {
                 using var path = GdiPaths.RoundedRect(_ratioRect, 8);
-                // RatioFill, not SelectedFill: the badge is white TextMicroPt and white on the
-                // bare accent measures 3.65:1, under the 4.5:1 floor for small text. The
-                // pressed accent is the same identity a step darker and clears it at 5.62:1.
-                using var brush = new SD.SolidBrush(ratioChosen ? RatioFill : HoverFill);
+                using var brush = new SD.SolidBrush(ratioChosen ? SelectedFill : HoverFill);
                 g.FillPath(brush, path);
             }
             var ratioGlyphRect = _ratioRect;

@@ -962,6 +962,8 @@
                                         <ComboBoxItem Content="Bare window" Tag="none"/>
                                     </ComboBox>
                                 </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Hold Shift while taking a window shot to get the bare window this once."/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Padding"/>
                                     <ComboBox x:Name="WindowPaddingCombo" HorizontalAlignment="Stretch">
@@ -970,8 +972,6 @@
                                         <ComboBoxItem Content="Max" Tag="max"/>
                                     </ComboBox>
                                 </DockPanel>
-                                <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Hold Shift while taking a window shot to get the bare window this once."/>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
                             </StackPanel>

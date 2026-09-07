@@ -97,6 +97,13 @@ public static class ThemePalette
     public const float GlyphTextPt = 13f;       // 17.3 DIP
 
     /// <summary>
+    /// A glyph inside a pill or a badge — Theme.xaml's GlyphBadge step. The selector's size
+    /// pill cross-fades to a camera at this size; sized off <see cref="TextBodyPt"/> instead,
+    /// the camera read as a text character rather than as the button the pill has become.
+    /// </summary>
+    public const float GlyphBadgePt = 10.5f;    // 14 DIP
+
+    /// <summary>
     /// Off the scale deliberately: the quick-actions card is pinned, and its menu
     /// was measured to 202x357 by hand at this size. TextCaptionPt reflows it.
     /// </summary>

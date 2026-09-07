@@ -114,8 +114,11 @@ internal static class SelectorChrome
         DrawLabel(g, clientSize, text, left, top);
     }
 
-    private const int CursorReadoutOffsetX = 16;
-    private const int CursorReadoutOffsetY = 20;
+    /// <summary>How far down-and-right of the pointer a pill that FOLLOWS the pointer sits.
+    /// One relationship, one pair of numbers: window mode places its size readout with these
+    /// too, and the user switches between the two surfaces with Space.</summary>
+    internal const int CursorReadoutOffsetX = 16;
+    internal const int CursorReadoutOffsetY = 20;
 
     /// <summary>
     /// Where the size pill for a detected element sits, in the same space as the rectangle it
@@ -166,7 +169,7 @@ internal static class SelectorChrome
 
         if (amount > 0d)
         {
-            using var glyphFont = ThemePalette.IconFont(ThemePalette.TextBodyPt);
+            using var glyphFont = ThemePalette.IconFont(ThemePalette.GlyphBadgePt);
             DrawCenteredText(g, "", glyphFont, bounds,
                 SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.TextPrimary));
         }

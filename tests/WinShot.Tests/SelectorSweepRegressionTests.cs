@@ -33,6 +33,14 @@ public class SelectorSweepRegressionTests
         Assert.Null(failure);
     }
 
+    /// <summary>Picks a ratio the way the crop menu does, without opening a menu.</summary>
+    private static void SetToolbarRatioIndex(FastAllInOneSelectorDialog selector, int index)
+    {
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        object toolbar = selector.GetType().GetField("_toolbar", flags)!.GetValue(selector)!;
+        toolbar.GetType().GetField("_ratioIndex", flags)!.SetValue(toolbar, index);
+    }
+
     private static void SetPendingAllInOne(FastAllInOneSelectorDialog selector, SD.Rectangle virtualRect) =>
         typeof(FastAllInOneSelectorDialog)
             .GetField("_pendingPx", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -67,6 +75,56 @@ public class SelectorSweepRegressionTests
             selector.SelectWholeScreen();
 
             Assert.Equal(new SD.Rectangle(0, 0, vs.Width, vs.Height), selector.PendingRegion);
+        });
+    }
+
+    /// <summary>
+    /// Expand-to-full-size bypassed the chosen ratio: pick 16:9, press expand, and the
+    /// selection became the desktop's own shape while the accent badge still said 16:9.
+    /// </summary>
+    [Fact]
+    public void ExpandToFullSizeKeepsTheChosenRatio()
+    {
+        RunSta(() =>
+        {
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+            SD.Rectangle vs = CaptureService.VirtualScreen;
+
+            SetPendingAllInOne(selector, new SD.Rectangle(500, 300, 200, 150));
+            SetToolbarRatioIndex(selector, 7); // 16:9
+            selector.SelectWholeScreen();
+            PumpUntil(() => Motion.Holders == 0);
+
+            SD.Rectangle got = selector.PendingRegion!.Value;
+            Assert.True(Math.Abs((got.Width / (double)got.Height) - (16d / 9d)) < 0.02,
+                $"{got.Width}x{got.Height} is not 16:9");
+            Assert.True(got.Width == vs.Width || got.Height == vs.Height, "it should still fill an axis");
+        });
+    }
+
+    /// <summary>
+    /// Both button-driven size changes moved the selection in one frame -- often across the
+    /// whole desktop -- while only the eight handles animated. The rect now eases there, and
+    /// the pending rect is the DESTINATION from frame one so Enter still commits it.
+    /// </summary>
+    [Fact]
+    public void ExpandAndTheRatioPresetsEaseTheSelectionRatherThanTeleportIt()
+    {
+        RunSta(() =>
+        {
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+            SD.Rectangle vs = CaptureService.VirtualScreen;
+
+            SetPendingAllInOne(selector, new SD.Rectangle(500, 300, 200, 150));
+            selector.ApplyAspectRatio(16d / 9d);
+
+            Assert.True(Motion.Holders > 0, "the selection should be gliding to its new shape");
+            SD.Rectangle destination = selector.PendingRegion!.Value;
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(destination, selector.PendingRegion);
+            Assert.Equal(0, Motion.Holders);
         });
     }
 
@@ -585,6 +643,151 @@ public class SelectorSweepRegressionTests
         (SD.Rectangle?)typeof(FastRegionSelectorDialog)
             .GetProperty("BarAnchor", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(s);
+
+    private static void SetSnapEdges(FastRegionSelectorDialog s, int[] x, int[] y)
+    {
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        typeof(FastRegionSelectorDialog).GetField("_snapEdgesX", flags)!.SetValue(s, x);
+        typeof(FastRegionSelectorDialog).GetField("_snapEdgesY", flags)!.SetValue(s, y);
+    }
+
+    // ------------------------------------------------------------ the edge gesture
+
+    /// <summary>
+    /// Pressing an edge used to snap it on the DOWN event, up to MarqueeEdge.ReachPx away,
+    /// under a cursor that was showing the four-way move arrow, with no undo -- and the early
+    /// return made dragging the selection from its border impossible. The press now only arms
+    /// the gesture: it fires on the release over the same edge, and a press that travels is
+    /// still a move.
+    /// </summary>
+    [Fact]
+    public void AnEdgeSnapsOnReleaseAndAPressThatTravelsMovesInstead()
+    {
+        RunSta(() =>
+        {
+            using var pointer = new Pointer(100, 130);
+            using var selector = new FastRegionSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+
+            var framed = new SD.Rectangle(100, 100, 240, 160);
+            SetPending(selector, framed);
+            SetSnapEdges(selector, [96, 520], [180, 496]);
+
+            // Clear of the corner and mid-edge handles, which win the grab.
+            pointer.MoveTo(selector, 100, 132);
+            selector.HandleMouseDown(Left());
+            Assert.Equal(framed, selector.PendingRegion);
+            selector.HandleMouseUp(Left());
+            Assert.Equal(96, selector.PendingRegion!.Value.Left);
+            PumpUntil(() => Motion.Holders == 0);
+
+            // Same band, but the press travels: that is a move, not a snap.
+            SD.Rectangle before = selector.PendingRegion!.Value;
+            pointer.MoveTo(selector, before.Left, before.Top + 30);
+            selector.HandleMouseDown(Left());
+            pointer.MoveTo(selector, before.Left + 40, before.Top + 30);
+            selector.HandleMouseUp(Left());
+            Assert.Equal(before.Size, selector.PendingRegion!.Value.Size);
+            Assert.Equal(before.Left + 40, selector.PendingRegion!.Value.Left);
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            PumpUntil(() => Motion.Holders == 0);
+        });
+    }
+
+    /// <summary>
+    /// The cursor has to name the gesture the pixels under it answer. The whole 6 px edge band
+    /// sits inside the move body, so SizeAll promised a move over pixels that snap an edge.
+    /// </summary>
+    [Fact]
+    public void TheCursorOverAnEdgeIsASizingArrowNotTheMoveArrow()
+    {
+        RunSta(() =>
+        {
+            using var pointer = new Pointer(300, 300);
+            using var selector = new FastRegionSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+            SetPending(selector, new SD.Rectangle(200, 200, 300, 200));
+
+            pointer.MoveTo(selector, 200, 302);
+            Assert.Equal(WF.Cursors.SizeWE, selector.CursorForCurrent());
+
+            pointer.MoveTo(selector, 350, 200);
+            Assert.Equal(WF.Cursors.SizeNS, selector.CursorForCurrent());
+
+            pointer.MoveTo(selector, 350, 300);
+            Assert.Equal(WF.Cursors.SizeAll, selector.CursorForCurrent());
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            PumpUntil(() => Motion.Holders == 0);
+        });
+    }
+
+    /// <summary>
+    /// A key arriving after Complete() ran on a pooled, parked selector: it still holds focus,
+    /// so Escape auto-repeat started a tween and a 1.2 s message dwell on a hidden window.
+    /// </summary>
+    [Fact]
+    public void AKeyAfterTheSessionEndedStartsNothing()
+    {
+        RunSta(() =>
+        {
+            using var pointer = new Pointer(300, 300);
+            using var selector = new FastRegionSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+            SetPending(selector, new SD.Rectangle(200, 200, 300, 200));
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(0, Motion.Holders);
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.C));
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    /// <summary>
+    /// A handle dragged onto its opposite corner left a 0x0 rect that Enter and Done then
+    /// silently refused, with all eight handles stacked on one point.
+    /// </summary>
+    [Fact]
+    public void AHandleDraggedOntoItsOppositeCornerLeavesSomethingConfirmable()
+    {
+        var bounds = new SD.Rectangle(0, 0, 1920, 1080);
+        SD.Rectangle collapsed = SelectionHandles.Resize(
+            new SD.Rectangle(100, 100, 200, 150), handle: 4, cursor: new SD.Point(100, 100), bounds);
+
+        Assert.True(collapsed.Width >= SelectionHandles.MinSizePx);
+        Assert.True(collapsed.Height >= SelectionHandles.MinSizePx);
+        Assert.True(bounds.Contains(collapsed));
+    }
+
+    // ------------------------------------------------------------ window backdrop
+
+    /// <summary>
+    /// The backdrop used to re-decode the desktop wallpaper (~110-150 ms) and re-composite
+    /// (~80-120 ms) on the UI thread for every single window capture. It now runs off-thread
+    /// against one cached wallpaper, so the composite has to be safe to call concurrently --
+    /// two captures drawing from one GDI+ bitmap at once is a corrupt image or a throw.
+    /// </summary>
+    [Fact]
+    public void ComposingOnTheWallpaperIsSafeToCallFromSeveralThreadsAtOnce()
+    {
+        var results = new SD.Bitmap[4];
+        Parallel.For(0, results.Length, i =>
+        {
+            using var source = new SD.Bitmap(160, 120);
+            results[i] = WindowBackdrop.ComposeOnWallpaper(source, WindowBackdrop.PaddingFor("min"));
+        });
+
+        foreach (SD.Bitmap composed in results)
+        {
+            Assert.Equal(160 + (2 * 24), composed.Width);
+            Assert.Equal(120 + (2 * 24), composed.Height);
+            composed.Dispose();
+        }
+    }
 
     // ------------------------------------------------------------ bare-key shortcuts
 
