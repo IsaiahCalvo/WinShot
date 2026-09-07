@@ -62,18 +62,38 @@ public class IconFamilyTests
         return Math.Max(extent!.Value.Width, extent.Value.Height);
     }
 
+    /// <summary>
+    /// The size the card already shipped: the X drew 10.2px inside a 20px button, and every
+    /// glyph is normalized DOWN to that. Fitting content to the whole button instead is also
+    /// "content-scaled", but it equalizes the family by inflating the X 73% and the lock
+    /// 144% — a restyle of the pinned quick-actions card rather than a tidy-up of it.
+    /// </summary>
+    private const double ShippedEdgeIn20pxBox = 10.2;
+
     [Fact]
     public void GlyphsAreScaledByContent_SoTheyShareAnOpticalSize()
     {
-        // Every icon should fill its 20px box to within a pixel: that is what "content-scaled"
-        // buys. Before, the pin's art occupied ~55% of its 24-grid and rendered small next to
-        // the X's ~75%, or huge, depending on which asset drifted.
+        // Every icon draws the same optical extent: that is what "content-scaled" buys.
+        // Before, the pin's art occupied ~55% of its 24-grid and rendered small next to the
+        // X's ~75%, or huge, depending on which asset drifted.
         foreach (string asset in StrokedAssets)
         {
             double edge = LongEdge(asset);
-            Assert.True(edge >= 17, $"{asset} draws {edge:0.0}px in a 20px box — it is not filling it");
-            Assert.True(edge <= 20, $"{asset} draws {edge:0.0}px and overflows its 20px box");
+            Assert.True(
+                Math.Abs(edge - ShippedEdgeIn20pxBox) <= 0.5,
+                $"{asset} draws {edge:0.0}px in a 20px box; the family sits at {ShippedEdgeIn20pxBox}px");
         }
+    }
+
+    [Fact]
+    public void TheFamilyIsNormalisedDownToTheSizeTheCardShipped()
+    {
+        // The guard on the guard. A content fit that targets the whole button passes the
+        // "they all match" test above just as happily while making every glyph on the pinned
+        // card ~73% wider, which is exactly how that shipped once already.
+        double close = LongEdge("quick-access-close.svg");
+        Assert.True(close < 12, $"close draws {close:0.0}px in a 20px box — the family grew");
+        Assert.True(close > 8, $"close draws {close:0.0}px in a 20px box — the family shrank");
     }
 
     [Fact]
@@ -97,6 +117,9 @@ public class IconFamilyTests
 
         List<XElement> paths = pin.Descendants().Where(e => e.Name.LocalName == "path").ToList();
         Assert.NotEmpty(paths);
-        Assert.True(LongEdge("quick-access-pin.svg") >= 17);
+        // A viewBox fit would leave the pin's art at ~16px where the X sits at ~10 — the
+        // 57% mismatch the swap exists to remove. Matching its sibling is the proof.
+        Assert.True(
+            Math.Abs(LongEdge("quick-access-pin.svg") - LongEdge("quick-access-close.svg")) <= 0.5);
     }
 }

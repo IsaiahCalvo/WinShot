@@ -85,11 +85,22 @@ public static class SvgIcons
     }
 
     /// <summary>
+    /// The share of the button a glyph's ink fills. This is the size the card's own X has
+    /// always drawn — 10.2 px inside a 20 px button — and every glyph is now normalized to
+    /// it. Content fitting on its own normalizes UPWARD, to whatever the button will hold:
+    /// that equalized the family by inflating the X 73 % and the lock 144 %, which restyled
+    /// the pinned quick-actions card rather than tidying it. Normalizing DOWN, to the size
+    /// that shipped, is the same equalization without the restyle.
+    /// </summary>
+    private const double ContentBoxFraction = 0.51;
+
+    /// <summary>
     /// Fit by CONTENT, not by the declared viewBox. Two icons drawn on the same 24-grid
     /// rarely fill the same fraction of it — scaling by the box made the pin render ~75%
     /// larger than the X beside it, which is the "vibe-coded" tell the audit named. The union
     /// of the rendered (stroke-inclusive) bounds is the real optical extent, so fitting that
-    /// gives every glyph the same visual weight.
+    /// to <see cref="ContentBoxFraction"/> of the button gives every glyph the same visual
+    /// weight at the weight the card already had.
     /// </summary>
     private static (W.Rect Content, double Scale) Fit(
         XElement root,
@@ -100,8 +111,7 @@ public static class SvgIcons
         if (content.IsEmpty || content.Width <= 0 || content.Height <= 0)
             content = ParseViewBox(root.Attribute("viewBox")?.Value);
 
-        double inset = Math.Max(1, pixelSize * 0.06);
-        double box = pixelSize - inset * 2;
+        double box = pixelSize * ContentBoxFraction;
         return (content, Math.Min(box / content.Width, box / content.Height));
     }
 
