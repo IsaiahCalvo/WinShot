@@ -228,7 +228,7 @@
                           SelectionChanged="OnDestinationChanged">
                     <ComboBoxItem Content="Beside the original"/>
                     <ComboBoxItem Content="Save folder"/>
-                    <ComboBoxItem Content="Choose folder..."/>
+                    <ComboBoxItem Content="Choose folder…"/>
                 </ComboBox>
             </StackPanel>
         </WrapPanel>

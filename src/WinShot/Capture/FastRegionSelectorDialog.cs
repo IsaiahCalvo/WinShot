@@ -450,12 +450,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _snapEdgesY = Array.Empty<int>();
         _dragging = false;
         _dragMoved = false;
+        // Before nulling the pending rect, not after: StopAspectSnap lands the glide by writing
+        // its target back into _pendingScreen, so the other order handed a pooled selector a
+        // phantom selection the user never drew.
+        StopAspectSnap();
         _pendingScreen = null;
         _hintFade?.Dispose();
         _hintFade = null;
         _hint = "";
         _hintOpacity = 0;
-        StopAspectSnap();
         _recordingHud = false;
         _recordingToggles = default;
         _aspectIndex = RecordingAspectPresets.FreeformIndex;
@@ -1847,6 +1850,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     private void DisposeHudMotion()
     {
+        // The aspect glide is HUD motion too: a selector disposed with the ratio snap in flight
+        // otherwise left its Motion.Run handle alive forever, pinning timeBeginPeriod(1) for the
+        // life of the process.
+        StopAspectSnap();
         _hudMotion?.Dispose();
         _hudMotion = null;
         _menuMotion?.Dispose();
@@ -2044,12 +2051,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         if (_aspectMenuOpen)
         {
+            // The popover owns the screen while it is up, so it swallows every key it does not
+            // act on rather than letting it reach the surface behind it. Falling through used
+            // to hand Enter to the generic confirm branch, which started the take with the
+            // twelve rows still painted on top.
             switch (e.KeyCode)
             {
                 case WF.Keys.Escape:
                     SetAspectMenuOpen(false);
-                    e.Handled = e.SuppressKeyPress = true;
-                    return true;
+                    break;
                 case WF.Keys.Up:
                 case WF.Keys.Down:
                 {
@@ -2059,20 +2069,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     _aspectHover = (((start + step) % count) + count) % count;
                     _menuHoverWash?.To(_aspectHover);
                     InvalidateHud();
-                    e.Handled = e.SuppressKeyPress = true;
-                    return true;
+                    break;
                 }
                 case WF.Keys.Space:
                 case WF.Keys.Enter:
-                    if (_aspectHover >= 0 && _pendingScreen is SD.Rectangle menuRegion)
-                    {
-                        PickAspect(_aspectHover, menuRegion);
-                        e.Handled = e.SuppressKeyPress = true;
-                        return true;
-                    }
+                    // Nothing hovered yet means the highlighted row is the current preset —
+                    // the same row Up/Down steps from, so it is the one Enter commits.
+                    if (_pendingScreen is SD.Rectangle menuRegion)
+                        PickAspect(_aspectHover < 0 ? _aspectIndex : _aspectHover, menuRegion);
                     break;
             }
-            return false;
+            e.Handled = e.SuppressKeyPress = true;
+            return true;
         }
 
         switch (e.KeyCode)
@@ -2089,7 +2097,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 e.Handled = e.SuppressKeyPress = true;
                 return true;
             case WF.Keys.Space:
-                if (_hudFocus < 0)
+            case WF.Keys.Enter:
+                // Both keys work the focused cell, so the focus ring never lies about what the
+                // primary key does — Enter on the ringed "Record GIF" row used to record video.
+                // Alt+Enter stays the global force-GIF shortcut that row advertises, and a
+                // plain Enter with nothing focused still falls through to "record video".
+                if (_hudFocus < 0 || (e.KeyCode == WF.Keys.Enter && e.Alt))
                     return false;
                 HandleHudClick(HudFocusOrder[_hudFocus]);
                 e.Handled = e.SuppressKeyPress = true;

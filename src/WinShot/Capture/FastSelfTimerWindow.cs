@@ -162,7 +162,7 @@ public sealed class FastSelfTimerWindow : WF.Form
 
         // Real bold face — Bold on top of the Semibold family makes GDI synthesize a
         // smeared faux-bold at exactly the size where it shows most.
-        using var font = new SD.Font("Segoe UI", S(72), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        using var font = WinShot.Core.ThemePalette.UiFontPx(S(72), SD.FontStyle.Bold);
         WinShot.Core.CountdownRing.Draw(
             e.Graphics,
             ClientSize,

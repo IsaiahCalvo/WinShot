@@ -384,6 +384,19 @@ public partial class GifEditorWindow : Window
             Close();
     }
 
+    /// <summary>
+    /// The encode is already running and its output is already being written, so the window has
+    /// to stay up to finish the history entry and the completion card. Close and Escape are
+    /// guarded the same way; without this the title-bar X left a trimmed GIF on disk that the
+    /// app never told the user about.
+    /// </summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_saving)
+            e.Cancel = true;
+        base.OnClosing(e);
+    }
+
     private async void OnSave(object sender, RoutedEventArgs e)
     {
         if (_saving || !_info.IsUsable)

@@ -120,7 +120,7 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         e.Graphics.Clear(Back);
 
         // Real bold face, not faux-bold synthesized over Semibold.
-        using var countFont = new SD.Font("Segoe UI", S(84), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
+        using var countFont = WinShot.Core.ThemePalette.UiFontPx(S(84), SD.FontStyle.Bold);
         CountdownRing.Draw(
             e.Graphics,
             ClientSize,

@@ -57,7 +57,7 @@ public partial class VideoEditorWindow : Window
     private IReadOnlyList<VideoResolutionPreset> _resolutions =
         VideoResolutionPresets.For(1920, 1080);
     private long _sourceBytes;
-    private string? _chosenFolder;      // remembered for the session when "Choose folder..." is used
+    private string? _chosenFolder;      // remembered for the session when "Choose folder…" is used
     private int _lastDestinationIndex;  // to restore the picker when a folder choice is cancelled
 
     // Drag handles are 12px wide; the accent bar sits on their inner edge so the
@@ -88,7 +88,7 @@ public partial class VideoEditorWindow : Window
             MemoryCleanup.Request();
         };
 
-        StatusText.Text = "Loading preview...";
+        StatusText.Text = "Loading preview…";
         Dispatcher.BeginInvoke(
             DispatcherPriority.ContextIdle,
             new Action(OpenPreviewSafely));
@@ -118,7 +118,7 @@ public partial class VideoEditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Failed to open media preview", ex);
-            StatusText.Text = "Preview failed - the file can still be exported.";
+            StatusText.Text = "Preview failed — the file can still be exported.";
         }
     }
 
@@ -144,8 +144,11 @@ public partial class VideoEditorWindow : Window
     }
 
     /// <summary>
-    /// Rebuilds the resolution picker against the source's real dimensions. Runs once the
-    /// media reports them, and keeps the user's choice when the list has not changed.
+    /// Rebuilds the resolution picker against the source's real dimensions, keeping whatever the
+    /// user had selected. It always rebuilds: the old "skip when the list matches" guard compared
+    /// the resolved presets against the <c>_resolutions</c> seed rather than against the combo,
+    /// so a 1920x1080 source — the seed's own size — kept the XAML's single "Original"
+    /// placeholder while 75%, 50% and 720p sat in a list nothing could show.
     /// </summary>
     private void PopulateResolutions()
     {
@@ -155,11 +158,6 @@ public partial class VideoEditorWindow : Window
         var resolved = VideoResolutionPresets.For(
             (uint)Math.Max(0, Media.NaturalVideoWidth),
             (uint)Math.Max(0, Media.NaturalVideoHeight));
-        if (resolved.Count == _resolutions.Count &&
-            resolved.Select(p => p.Label).SequenceEqual(_resolutions.Select(p => p.Label)))
-        {
-            return;
-        }
 
         int selected = Math.Max(0, ResolutionCombo.SelectedIndex);
         _resolutions = resolved;

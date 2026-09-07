@@ -292,6 +292,133 @@ public class RecordingHudInteractionTests
         });
     }
 
+    /// <summary>
+    /// The HUD draws a focus ring around whichever row has focus, so the primary key has to
+    /// work that row. Enter used to be hard-coded to "record video" and ignore the ring
+    /// entirely, and the user only found out after the take was made.
+    /// </summary>
+    [Fact]
+    public void EnterWorksTheFocusedRow_AndStillRecordsVideoWithNothingFocused()
+    {
+        var region = new SD.Rectangle(600, 300, 700, 300);
+        var press = new SD.Point(region.Left + 10, region.Top + 10);
+
+        // Nothing focused: Enter is still "record video", exactly as that row advertises.
+        RunSelector(region, press, selector =>
+        {
+            Assert.Equal(-1, Field<int>(selector, "_hudFocus"));
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter));
+            Assert.NotNull(selector.RecordingChoice);
+            Assert.False(selector.RecordingChoice!.Value.IsGif);
+        });
+
+        // Ring on "Record GIF": Enter has to make a GIF, the same as Space does.
+        RunSelector(region, press, selector =>
+        {
+            SetField(selector, "_hudFocus", FocusIndexOf(RecordingHudCell.RecordGif));
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter));
+            Assert.NotNull(selector.RecordingChoice);
+            Assert.True(selector.RecordingChoice!.Value.IsGif);
+        });
+
+        // Ring on a toggle: Enter works the toggle rather than starting a take at all.
+        RunSelector(region, press, selector =>
+        {
+            SetField(selector, "_hudFocus", FocusIndexOf(RecordingHudCell.Microphone));
+            RecordingHudToggles before = Field<RecordingHudToggles>(selector, "_recordingToggles");
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter));
+
+            Assert.NotEqual(
+                before.Microphone,
+                Field<RecordingHudToggles>(selector, "_recordingToggles").Microphone);
+            Assert.Null(selector.RecordingChoice);
+        });
+
+        // Alt+Enter stays the global force-GIF shortcut whatever has the ring.
+        RunSelector(region, press, selector =>
+        {
+            SetField(selector, "_hudFocus", FocusIndexOf(RecordingHudCell.Microphone));
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter | WF.Keys.Alt));
+            Assert.NotNull(selector.RecordingChoice);
+            Assert.True(selector.RecordingChoice!.Value.IsGif);
+        });
+    }
+
+    // ---- the aspect popover owns its keys -------------------------------------------
+
+    /// <summary>
+    /// The popover is drawn on top of both cards and owns the screen while it is up, so every
+    /// key it does not act on stops there. Enter used to fall through to the selector's generic
+    /// confirm branch, which started the take with the twelve rows still painted at full size.
+    /// </summary>
+    [Fact]
+    public void EnterInsideTheAspectPopover_CommitsARowInsteadOfStartingTheTake()
+    {
+        var region = new SD.Rectangle(600, 300, 700, 300);
+        var press = new SD.Point(region.Left + 10, region.Top + 10);
+
+        RunSelector(region, press, selector =>
+        {
+            // Opened by pointer with the pointer still on the aspect cell, so no row is hovered.
+            Invoke(selector, "HandleHudClick", RecordingHudCell.Aspect);
+            Assert.True(Field<bool>(selector, "_aspectMenuOpen"));
+            Assert.Equal(-1, Field<int>(selector, "_aspectHover"));
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter));
+
+            // The popover answered its own key: it closed on the current preset, and nothing
+            // behind it was committed.
+            Assert.False(Field<bool>(selector, "_aspectMenuOpen"));
+            Assert.Null(selector.RecordingChoice);
+            Assert.Equal(WF.DialogResult.None, selector.DialogResult);
+
+            // With a row highlighted, Enter commits that row.
+            Invoke(selector, "HandleHudClick", RecordingHudCell.Aspect);
+            int nineSixteen = IndexOfRatio("9:16");
+            SetField(selector, "_aspectHover", nineSixteen);
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter));
+
+            Assert.Equal(nineSixteen, Field<int>(selector, "_aspectIndex"));
+            Assert.Null(selector.RecordingChoice);
+            Invoke(selector, "StopAspectSnap");
+        });
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>
+    /// A selector disposed with the ratio glide still in flight must not keep the process-wide
+    /// high-resolution clock: the glide is HUD motion, so it is swept with the rest of it.
+    /// Without that, one app shutdown mid-glide pinned timeBeginPeriod(1) for the whole process.
+    /// </summary>
+    [Fact]
+    public void SelectorDisposedMidAspectGlide_ReleasesTheClock()
+    {
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => true;
+        try
+        {
+            var region = new SD.Rectangle(600, 200, 800, 800);
+            var press = new SD.Point(region.Left + 10, region.Top + 10);
+
+            RunSelector(region, press, selector =>
+            {
+                Invoke(selector, "PickAspect", IndexOfRatio("9:16"), region);
+                WF.Application.DoEvents();
+                Assert.True(Motion.Holders > 0, "the glide never took the clock");
+                // RunSelector disposes the selector when this body returns — mid-glide.
+            });
+
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(0, Motion.Holders);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+        }
+    }
+
     [Fact]
     public void EveryHudCellHasALabelToAnnounceAndShow()
     {
@@ -371,6 +498,15 @@ public class RecordingHudInteractionTests
         }
         throw new InvalidOperationException($"No {label} preset");
     }
+
+    /// <summary>Where a cell sits in the HUD's Tab order — the same array the focus ring and
+    /// the Space/Enter handler index into.</summary>
+    private static int FocusIndexOf(RecordingHudCell cell) =>
+        Array.IndexOf(
+            (RecordingHudCell[])typeof(FastRegionSelectorDialog)
+                .GetField("HudFocusOrder", BindingFlags.Static | BindingFlags.NonPublic)!
+                .GetValue(null)!,
+            cell);
 
     private static T Field<T>(object target, string name) =>
         (T)typeof(FastRegionSelectorDialog)

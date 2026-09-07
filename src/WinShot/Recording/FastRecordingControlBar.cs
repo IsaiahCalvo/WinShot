@@ -533,8 +533,7 @@ public sealed class FastRecordingControlBar : WF.Form
             return;
 
         _hoverIndex = index;
-        bool actionable = index >= 0 && !_actionTaken && !_saving &&
-            _cells[index].Cell != RecordingControlBarCell.Timer;
+        bool actionable = Actionable(index);
         Cursor = actionable ? WF.Cursors.Hand : WF.Cursors.Default;
         _toolTip.SetToolTip(this, actionable ? TipFor(_cells[index].Cell) : null);
         _hover.To(actionable ? index : null);
@@ -542,6 +541,12 @@ public sealed class FastRecordingControlBar : WF.Form
             _press.To(null);
         Invalidate();
     }
+
+    /// <summary>A cell the pointer can work: not the read-only timer, and not after the take
+    /// has been stopped or is saving.</summary>
+    private bool Actionable(int index) =>
+        index >= 0 && !_actionTaken && !_saving &&
+        _cells[index].Cell != RecordingControlBarCell.Timer;
 
     private int HitTest(SD.Point p)
     {
@@ -626,7 +631,12 @@ public sealed class FastRecordingControlBar : WF.Form
             _elapsed.Start();
             ResumeRequested?.Invoke();
         }
-        _toolTip.SetToolTip(this, null); // the cell's label just changed under the pointer
+        // The cell's label just changed under the pointer, so re-arm the tip in place rather
+        // than clearing it: SetHover early-returns while the hovered index is unchanged, so a
+        // cleared tip stayed empty until the pointer left the cell and came back.
+        _toolTip.SetToolTip(
+            this,
+            Actionable(_hoverIndex) ? TipFor(_cells[_hoverIndex].Cell) : null);
         Invalidate();
     }
 
