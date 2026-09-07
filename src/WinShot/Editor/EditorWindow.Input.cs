@@ -550,6 +550,7 @@ public partial class EditorWindow : Window
         // A sampled color rarely matches a preset swatch, so it lands in the persistent
         // custom swatch (and current-color indicator) instead of clearing the selection.
         var sampled = EyedropperSampler.SampleClamped(_source, pos);
+        RememberColor(sampled); // a matched colour is exactly what "My colors" is for
         ApplyCustomColor(sampled);
         if (_colorPickerBuilt) SyncColorPickerInputs(sampled);
         EyedropSwatch.Visibility = Visibility.Collapsed;

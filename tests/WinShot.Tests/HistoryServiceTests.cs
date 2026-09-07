@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Drawing;
 using WinShot.Core;
 using Xunit;
@@ -7,6 +7,23 @@ namespace WinShot.Tests;
 
 public class HistoryServiceTests
 {
+    /// <summary>
+    /// Recordings share the history folder with screenshots, so anything that wants "the last
+    /// screenshot" -- Pin last, the card's restore -- has to skip them. Pin last used to take
+    /// the newest file of any kind and report "It is not an image WinShot can read" after
+    /// every recording.
+    /// </summary>
+    [Theory]
+    [InlineData("clip.mp4", true)]
+    [InlineData("clip.MOV", true)]
+    [InlineData("clip.webm", true)]
+    [InlineData("shot.png", false)]
+    [InlineData("shot.gif", false)]   // a GIF is still an image the pin can show
+    [InlineData("shot", false)]
+    [InlineData(null, false)]
+    public void RecordingsAreToldApartFromScreenshots(string? name, bool expected)
+        => Assert.Equal(expected, HistoryService.IsVideo(name));
+
     [Fact]
     public void Add_ScrollingCapture_WritesDurableClassificationTag()
     {

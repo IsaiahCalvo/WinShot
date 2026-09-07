@@ -115,6 +115,10 @@ public partial class App : Application
                 FileNamer.Next(_settings, candidate.Extension)),
             recoveredPath => _history.AddFile(recoveredPath));
         _settings.Changed += RegisterHotkeys;
+        // Every pin in the app gets a pencil chip, including the ones App does not build
+        // itself (the recording completion card raises its own), so the editor handoff is
+        // registered once here rather than at each construction site.
+        FastPinWindow.DefaultEditHandler = OpenEditorFromPin;
         // The recognizer is cached per language, so pushing the choice here is enough:
         // the next capture rebuilds the engine, and a settings save never pays for it.
         _settings.Changed += () => OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
@@ -309,8 +313,8 @@ public partial class App : Application
         menu.Items.Add(MenuItem("History…", null, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
         menu.Items.Add(MenuItem("Pin last screenshot", s.HotkeyPinLast, PinLastFlow));
-        menu.Items.Add(MenuItem("Toggle pins visibility", s.HotkeyPinToggleVisibility, FastPinWindow.ToggleAllVisibility));
-        menu.Items.Add(MenuItem("Close all pins", s.HotkeyPinCloseAll, FastPinWindow.CloseAll));
+        menu.Items.Add(MenuItem("Toggle pins visibility", s.HotkeyPinToggleVisibility, TogglePinsFlow));
+        menu.Items.Add(MenuItem("Close all pins", s.HotkeyPinCloseAll, ClosePinsFlow));
         menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
         menu.Items.Add(new WF.ToolStripSeparator());
         // Dynamic "Update available" item — hidden until a check finds a newer release.
@@ -360,8 +364,8 @@ public partial class App : Application
         Reg(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"));
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
-        Reg(s.HotkeyPinToggleVisibility, FastPinWindow.ToggleAllVisibility);
-        Reg(s.HotkeyPinCloseAll, FastPinWindow.CloseAll);
+        Reg(s.HotkeyPinToggleVisibility, TogglePinsFlow);
+        Reg(s.HotkeyPinCloseAll, ClosePinsFlow);
         Reg(s.HotkeyPinLast, PinLastFlow);
 
         if (failed.Count == 0)
@@ -1277,8 +1281,13 @@ public partial class App : Application
             // inside the delay and says nothing at all.
             if (await Task.WhenAny(extraction, Task.Delay(WorkingIndicatorDelayMs)) != extraction)
             {
+                // Sticky, not holdLong: a read slow enough to have earned an indicator can
+                // outlive 4.5 s (a cold engine on a big crop), and counting down would put
+                // the screen back to saying nothing with the work still in flight. Every
+                // exit below either closes this toast or replaces it with the result.
                 working = ShowOcrToast("Reading text", "Working on the selection.",
-                    anchor ?? CardAnchor(card), onOpen: null, ToastSeverity.Info, holdLong: true);
+                    anchor ?? CardAnchor(card), onOpen: null, ToastSeverity.Info,
+                    extras: new ToastExtras { Sticky = true });
             }
 
             result = await extraction;
@@ -1382,23 +1391,34 @@ public partial class App : Application
         return new ToastExtras
         {
             ToggleText = joined ? "Add breaks" : "Cut breaks",
-            Toggle = () =>
+            Toggle = async () =>
             {
                 joined = !joined;
-                string text = OcrTextFormatter.Format(result.Lines, joined);
-                _ = CaptureService.SetTextToClipboardAsync(text);
+                // Awaited, and through the same Combine the original copy used: a discarded
+                // Task hid a busy clipboard behind a button that relabelled itself anyway,
+                // and reformatting the text alone dropped any decoded code from underneath it.
+                string text = OcrClipboardFormatter.Combine(
+                    OcrTextFormatter.Format(result.Lines, joined), result.QrCodes);
+                await CaptureService.SetTextToClipboardAsync(text);
                 return joined ? "Add breaks" : "Cut breaks";
             },
         };
     }
 
-    /// <summary>The centre of the quick-actions card, so a toast raised from the card path
-    /// lands over the capture it is about instead of in the tray corner.</summary>
+    /// <summary>
+    /// The top edge of the quick-actions card, so a toast raised from the card path lands
+    /// over the capture it is about instead of in the tray corner. The card's midpoint would
+    /// be wrong: ToastWindow places an anchored toast with its *bottom* just above the anchor,
+    /// so anchoring to the centre parks a TopMost window across the card's upper band -- and a
+    /// sticky link toast would sit there until clicked, hiding the thumbnail and swallowing
+    /// the first click aimed at Copy or Edit. That is the overlap
+    /// <see cref="ToastWindow.CornerPlacement"/> exists to prevent.
+    /// </summary>
     private static SD.Point? CardAnchor(FastQuickActionsWindow? card)
     {
         if (card is null || card.IsDisposed) return null;
         SD.Rectangle bounds = card.Bounds;
-        return new SD.Point(bounds.Left + (bounds.Width / 2), bounds.Top + (bounds.Height / 2));
+        return new SD.Point(bounds.Left + (bounds.Width / 2), bounds.Top);
     }
 
     /// <summary>Returns an Open action when the copied text is a single http(s) URL
@@ -1515,6 +1535,28 @@ public partial class App : Application
     }
 
     /// <summary>
+    /// Hides or restores every pin. Both this and <see cref="ClosePinsFlow"/> are bound to a
+    /// global hotkey and a tray row that are always enabled, and both used to return in
+    /// silence with no pin on screen -- indistinguishable from a hotkey that never registered.
+    /// The sibling flow already says "No capture in history to pin."; these say the same kind
+    /// of thing.
+    /// </summary>
+    private void TogglePinsFlow() => PinCommand(FastPinWindow.ToggleAllVisibility);
+
+    private void ClosePinsFlow() => PinCommand(FastPinWindow.CloseAll);
+
+    private void PinCommand(Action command)
+    {
+        if (!FastPinWindow.AnyOpen)
+        {
+            ShowBalloon("Pins", "No pinned screenshots on screen.", ToastSeverity.Info, holdLong: true);
+            return;
+        }
+
+        command();
+    }
+
+    /// <summary>
     /// Pins the newest capture in history. The point is to get a reference back on screen
     /// without opening History and hunting for it, so an empty history is a prerequisite not
     /// met rather than a failure -- the same shape as "No previous region yet".
@@ -1526,7 +1568,11 @@ public partial class App : Application
         {
             // Off the UI thread: GetItems enumerates the history folder, and a five-thousand
             // file history would otherwise stall the hotkey press that asked for it.
-            path = await Task.Run(() => _history.GetItems().FirstOrDefault());
+            // Recordings live in the same folder and sort in with the screenshots, so the
+            // newest entry after a recording is an .mp4 -- which loaded as "It is not an
+            // image WinShot can read" for a command the user invoked as Pin last screenshot.
+            path = await Task.Run(() =>
+                _history.GetItems().FirstOrDefault(p => !HistoryService.IsVideo(p)));
         }
         catch (Exception ex)
         {
@@ -1554,13 +1600,13 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Every pin in the app is created here, so its pencil chip is wired in exactly one
-    /// place. Five call sites had each grown their own two-line copy of this.
+    /// Every pin App raises is created here. The pencil chip itself is wired once at startup
+    /// on <see cref="FastPinWindow.DefaultEditHandler"/>, so a pin built anywhere else -- the
+    /// recording completion card -- gets a working Edit too.
     /// </summary>
     private FastPinWindow ShowPin(SD.Bitmap image, string perfLabel = "pin window")
     {
         var win = new FastPinWindow(image, _settings);
-        win.EditRequested += OpenEditorFromPin;
         PerfLog.TrackFirstShown(win, perfLabel);
         win.Show();
         return win;

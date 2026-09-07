@@ -1131,7 +1131,6 @@ public partial class HistoryWindow : Window
 public sealed class HistoryItem : INotifyPropertyChanged
 {
     private static readonly string[] ImageExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".webp" };
-    private static readonly string[] VideoExtensions = { ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".webm" };
 
     private ImageSource? _thumbnail;
 
@@ -1140,7 +1139,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
         FilePath = filePath;
         string ext = Path.GetExtension(filePath).ToLowerInvariant();
         IsImage = ImageExtensions.Contains(ext);
-        IsVideo = VideoExtensions.Contains(ext);
+        IsVideo = WinShot.Core.HistoryService.IsVideo(filePath);
         IsGif = ext == ".gif";
         IsScrollingCapture = IsImage && Path.GetFileNameWithoutExtension(filePath).EndsWith("-scroll", StringComparison.OrdinalIgnoreCase);
         ExtensionLabel = ext.TrimStart('.').ToUpperInvariant();

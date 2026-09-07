@@ -1,4 +1,4 @@
-using WinShot.Overlay;
+﻿using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
 
@@ -87,5 +87,42 @@ public class TallCapturePreviewLayoutTests
             new SD.Size(400, 6000), WorkingArea, new SD.Rectangle(2380, 0, 160, 120), dpi: 96);
 
         Assert.True(placed.Width >= 1 && placed.Height >= 1);
+    }
+
+    /// <summary>
+    /// The preview scales the card's LIVE bitmap, and the card renders its own thumbnail from
+    /// the same object on a background thread under lock(image). GDI+ locks an Image for the
+    /// duration of an operation, so the preview has to take that same lock or the two
+    /// DrawImage calls collide with "Object is currently in use elsewhere" -- and the loser is
+    /// usually the thumbnail, which then stays empty for the life of the card. Proven by
+    /// holding the lock and checking that TryCreate waits for it.
+    /// </summary>
+    [Fact]
+    public void TheHoverPreview_TakesTheSameLockTheThumbnailRenderTakes()
+    {
+        using var source = new SD.Bitmap(320, 4000, SD.Imaging.PixelFormat.Format32bppPArgb);
+        var visuals = QuickAccessOverlayThemePalette.For(QuickAccessOverlayThemePalette.Current);
+        var held = new ManualResetEventSlim();
+
+        var holder = new Thread(() =>
+        {
+            lock (source)
+            {
+                held.Set();
+                Thread.Sleep(300);
+            }
+        }) { IsBackground = true };
+        holder.Start();
+        held.Wait(5000);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using TallCapturePreviewWindow? preview =
+            TallCapturePreviewWindow.TryCreate(source, Card, dpi: 96, visuals);
+        sw.Stop();
+        holder.Join(5000);
+
+        Assert.NotNull(preview);
+        Assert.True(sw.ElapsedMilliseconds >= 150,
+            $"TryCreate returned in {sw.ElapsedMilliseconds} ms while the source was locked, so it never took the lock.");
     }
 }

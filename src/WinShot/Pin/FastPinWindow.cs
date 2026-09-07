@@ -14,6 +14,15 @@ public sealed class FastPinWindow : WF.Form
     /// same handoff the quick-actions card's Annotate uses.</summary>
     public event Action<SD.Bitmap>? EditRequested;
 
+    /// <summary>
+    /// How a pin opens the editor when nothing subscribed to <see cref="EditRequested"/>.
+    /// The pencil chip and the Edit menu row are added to every pin unconditionally, and not
+    /// every pin is built by App -- the recording completion card raises its own -- so the
+    /// handler lives here once instead of at each call site, where one of them forgot it and
+    /// shipped a chip that did nothing.
+    /// </summary>
+    public static Action<SD.Bitmap>? DefaultEditHandler { get; set; }
+
     private const int WmNclbuttondown = 0x00A1;
     private const int WmNchittest = 0x0084;
     private const int WmSizing = 0x0214;
@@ -78,7 +87,6 @@ public sealed class FastPinWindow : WF.Form
     private QuickAccessTooltipWindow? _tooltipWindow;
     private double _scale;
     private bool _locked;
-    private double _opacityBeforeLock = 1.0;
     private bool _mouseInside;
     private int _hoverButton = -1;
     private int _pressedButton = -1;
@@ -91,8 +99,10 @@ public sealed class FastPinWindow : WF.Form
     private double _chromeAlpha;
     private IDisposable? _chromeFade;
     /// <summary>Alpha the pinned image is painted at. 1 at rest; a locked pin dims toward
-    /// PinInteraction.LockedOpacity while the pointer is over it, so you can see what is
-    /// underneath without unlocking, and it comes straight back when you move away.</summary>
+    /// PinInteraction.LockedOpacity while the pointer is over it, so a locked pin says so
+    /// under the pointer instead of wearing a permanent penalty, and it comes straight back
+    /// when you move away. It darkens the image, not the window: the chips are drawn over the
+    /// top and must stay legible, so this is not see-through.</summary>
     private double _imageAlpha = 1d;
     private IDisposable? _imageFade;
     /// <summary>A locked pin answers HTTRANSPARENT, so it gets no WM_MOUSELEAVE. This runs
@@ -266,6 +276,7 @@ public sealed class FastPinWindow : WF.Form
             _imageFade?.Dispose();
             _imageFade = null;
             _lockedHoverTimer.Stop();
+            _lockedHoverTimer.Dispose();
             // Closed only fires for a window that was actually closed; a disposed one would
             // otherwise stay in OpenPins forever and be acted on by the pin commands.
             OpenPins.Remove(this);
@@ -409,7 +420,9 @@ public sealed class FastPinWindow : WF.Form
             () => { _chromeFade?.Dispose(); _chromeFade = null; });
     }
 
-    /// <summary>The toolbar rect plus the lock badge's corner, which fades with it.</summary>
+    /// <summary>The toolbar rect plus the lock badge's corner. The badge does NOT fade with
+    /// the chrome -- it is drawn at full alpha whenever the pin is locked, because at rest it
+    /// is the only thing saying so -- but it shares this rect so a chrome repaint restores it.</summary>
     private SD.Rectangle ChromeInvalidationBounds()
     {
         SD.Rectangle bar = ToolbarBounds();
@@ -941,19 +954,11 @@ public sealed class FastPinWindow : WF.Form
     private void ResetToNatural()
     {
         Opacity = 1.0;
-        _opacityBeforeLock = 1.0;
         _scale = 1.0;
         ApplyScale();
         Invalidate();
     }
 
-    /// <summary>
-    /// Locking used to be a one-way trip: WS_EX_TRANSPARENT on the whole window meant the pin
-    /// received no mouse messages at all, so its own controls were gone and the tray's
-    /// "Unlock pinned windows" was the only way back. Click-through is now answered per point
-    /// in WM_NCHITTEST instead, which lets the lock and close chips stay hit-testable while
-    /// every other pixel passes clicks through exactly as before.
-    /// </summary>
     /// <summary>
     /// Hands the editor its own copy and leaves the pin where it is. Editing a pinned
     /// reference is a second look at it, not a replacement for it -- and the pin's bitmap is
@@ -961,7 +966,7 @@ public sealed class FastPinWindow : WF.Form
     /// </summary>
     private void RaiseEditRequested()
     {
-        Action<SD.Bitmap>? handler = EditRequested;
+        Action<SD.Bitmap>? handler = EditRequested ?? DefaultEditHandler;
         if (handler is null)
             return;
 
@@ -975,6 +980,14 @@ public sealed class FastPinWindow : WF.Form
         }
     }
 
+    /// <summary>
+    /// Locking used to be a one-way trip: WS_EX_TRANSPARENT on the whole window meant the pin
+    /// received no mouse messages at all, so its own controls were gone and the tray's
+    /// "Unlock pinned windows" was the only way back. Click-through is now answered per point
+    /// in WM_NCHITTEST instead, which lets the lock and close chips stay hit-testable while
+    /// every other pixel passes clicks through exactly as before. The dim is on the image
+    /// (<see cref="UpdateImageAlpha"/>), not on Form.Opacity, so the chips stay legible.
+    /// </summary>
     private void SetLocked(bool locked)
     {
         if (_locked == locked)
@@ -983,7 +996,6 @@ public sealed class FastPinWindow : WF.Form
         _locked = locked;
         if (locked)
         {
-            _opacityBeforeLock = Opacity;
             _focusButton = -1;
             SetHoverButton(-1);
             SetPressed(-1);
@@ -991,7 +1003,6 @@ public sealed class FastPinWindow : WF.Form
         else
         {
             _lockedHoverTimer.Stop();
-            Opacity = _opacityBeforeLock;
         }
 
         _lockItem.Text = locked ? "Unlock (Ctrl+L)" : "Lock (Ctrl+L)";

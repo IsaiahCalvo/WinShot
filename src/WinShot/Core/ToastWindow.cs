@@ -22,8 +22,10 @@ public sealed class ToastExtras
     /// with whatever the action returns -- "Cut breaks" becoming "Add breaks".</summary>
     public string? ToggleText { get; init; }
 
-    /// <summary>Runs the toggle and returns the button's new label.</summary>
-    public Func<string>? Toggle { get; init; }
+    /// <summary>Runs the toggle and returns the button's new label. Async because the work
+    /// behind it is a clipboard write, and a discarded Task faults where nobody is looking --
+    /// the button relabelled itself and announced a re-copy that never happened.</summary>
+    public Func<Task<string>>? Toggle { get; init; }
 
     /// <summary>A secondary button that declines and closes -- the explicit "no" that makes
     /// the primary button a choice instead of the only thing on offer.</summary>
@@ -123,6 +125,11 @@ public sealed class ToastWindow : WF.Form
     /// <summary>The column the toast measures against — what tests must pass to
     /// <see cref="LinesNeeded"/> and <see cref="Trim"/> to ask about this toast's box.</summary>
     internal int BodyColumnPx => _bodyColumnPx;
+
+    /// <summary>How long this toast will dwell before dismissing itself, in ms. Exposed so a
+    /// test can prove that a toast carrying a control gets the long window rather than the
+    /// 1.7 s a plain confirmation gets.</summary>
+    internal int DismissIntervalMs => _dismiss.Interval;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
     // the anchor monitor or labels truncate on 125%/150% displays.
@@ -240,20 +247,24 @@ public sealed class ToastWindow : WF.Form
             Controls.Add(_secondaryButton);
         }
 
-        if (extras?.ToggleText is string toggleText && extras.Toggle is Func<string> toggle)
+        if (extras?.ToggleText is string toggleText && extras.Toggle is Func<Task<string>> toggle)
         {
             _toggleButton = ActionButton(toggleText, ThemePalette.SurfaceAlt);
-            _toggleButton.Click += (_, _) =>
+            _toggleButton.Click += async (_, _) =>
             {
                 // Stays open on purpose: the point of the toggle is to look at the result
-                // and change your mind again.
-                try { _toggleButton.Text = toggle(); }
+                // and change your mind again. Awaited, not discarded: the label must not
+                // claim a re-copy that a busy clipboard refused.
+                string label;
+                try { label = await toggle(); }
                 catch (Exception ex)
                 {
                     Log.Error("Toast toggle failed", ex);
                     ShowActionFailure(FriendlyError.For(ex));
                     return;
                 }
+                if (IsDisposed) return;
+                _toggleButton.Text = label;
                 HoldOpen();
                 Announce();
             };
@@ -288,7 +299,11 @@ public sealed class ToastWindow : WF.Form
 
         // holdLong is for a working state ("Checking for updates…") whose work outlives the
         // confirmation dwell: it must not self-dismiss before its own result arrives.
-        _dismiss.Interval = _openButton is not null || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
+        // Any toast carrying a control is long-dwell by construction: 1.7 s to read a
+        // preview, decide, and hit a button is not an offer. This used to name _openButton
+        // alone, because it was the only action a toast could carry when it was written.
+        bool hasAction = _openButton is not null || _toggleButton is not null || _secondaryButton is not null;
+        _dismiss.Interval = hasAction || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
         _dismiss.Tick += (_, _) => Close();
         MouseEnter += (_, _) => HoldOpen();
         MouseLeave += (_, _) => RestartDismiss();

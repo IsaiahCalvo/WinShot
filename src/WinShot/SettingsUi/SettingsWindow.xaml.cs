@@ -349,7 +349,7 @@ public partial class SettingsWindow : Window
         PinnedBorderCheck.IsChecked = s.PinnedBorder;
         HistorySlider.Value = RetentionDaysToSliderIndex(s.HistoryRetentionDays);
         AllInOneRememberCheck.IsChecked = s.AllInOneRememberLast;
-        LoadOcrLanguages();
+        LoadOcrLanguages(s.OcrLanguage);
         SelectByTag(OcrLanguageCombo, s.OcrLanguage, fallbackIndex: 0);
         OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
         OcrDetectLinksCheck.IsChecked = s.OcrDetectLinks;
@@ -959,7 +959,14 @@ public partial class SettingsWindow : Window
     /// hid the dozens Windows does ship packs for. "Automatically detect" is always first and
     /// is the whole list when no pack is installed, which is the honest answer.
     /// </summary>
-    private void LoadOcrLanguages()
+    /// <summary>
+    /// The installed recognizer packs, plus <paramref name="stored"/> itself when its pack is
+    /// not installed right now. Without that last row the combo fell back to "Automatically
+    /// detect" and the next Save wrote it over the user's choice -- so merely opening Settings
+    /// while a pack was uninstalled destroyed the preference. OcrService's own fallback is
+    /// deliberately non-destructive; the UI should not undo it.
+    /// </summary>
+    private void LoadOcrLanguages(string stored)
     {
         OcrLanguageCombo.Items.Clear();
         OcrLanguageCombo.Items.Add(new ComboBoxItem
@@ -967,8 +974,15 @@ public partial class SettingsWindow : Window
             Content = "Automatically detect",
             Tag = WinShot.Ocr.OcrService.AutoLanguage,
         });
+        bool storedIsInstalled = string.Equals(stored, WinShot.Ocr.OcrService.AutoLanguage, StringComparison.OrdinalIgnoreCase);
         foreach ((string tag, string display) in WinShot.Ocr.OcrService.AvailableLanguages())
+        {
             OcrLanguageCombo.Items.Add(new ComboBoxItem { Content = display, Tag = tag });
+            storedIsInstalled |= string.Equals(tag, stored, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!storedIsInstalled && !string.IsNullOrWhiteSpace(stored))
+            OcrLanguageCombo.Items.Add(new ComboBoxItem { Content = $"{stored} (not installed)", Tag = stored });
     }
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)

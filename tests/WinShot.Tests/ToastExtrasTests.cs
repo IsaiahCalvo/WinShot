@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Linq;
 using WinShot.Core;
 using WinShot.Ocr;
@@ -136,7 +136,7 @@ public class ToastExtrasTests
             {
                 joined = !joined;
                 lastCopied = OcrTextFormatter.Format(lines, joined);
-                return joined ? "Add breaks" : "Cut breaks";
+                return Task.FromResult(joined ? "Add breaks" : "Cut breaks");
             },
         };
 
@@ -154,6 +154,59 @@ public class ToastExtrasTests
         toggle.PerformClick();
         Assert.Equal("Cut breaks", toggle.Text);
         Assert.Equal($"first line{Environment.NewLine}second line", lastCopied);
+    }
+
+    /// <summary>
+    /// The toggle's work is a clipboard write, and a busy clipboard faults the Task. The
+    /// button must not relabel itself off the back of a copy that did not happen -- the
+    /// label flipping was the only evidence the user had that anything was re-copied.
+    /// </summary>
+    [Fact]
+    public void AToggleWhoseWorkFails_DoesNotClaimItWorked()
+    {
+        using var a = new Anim(false);
+        var extras = new ToastExtras
+        {
+            ToggleText = "Cut breaks",
+            Toggle = () => Task.FromException<string>(new InvalidOperationException("clipboard is busy")),
+        };
+
+        using var toast = new ToastWindow("Text copied to clipboard", "first line", null, null,
+            ToastSeverity.Success, holdLong: false, extras: extras);
+
+        DarkButton toggle = toast.Controls.OfType<DarkButton>().Single();
+        toggle.PerformClick();
+        PumpFor(50);
+
+        Assert.Equal("Cut breaks", toggle.Text);
+        Assert.False(toast.IsDisposed);
+    }
+
+    /// <summary>
+    /// A toast with a control on it is a decision, and 1.7 s is not long enough to read a
+    /// preview, decide and hit a 96 DIP button. The dwell rule used to name the Open button
+    /// alone, because it was the only control a toast could carry when it was written.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void AToastCarryingAControl_HoldsTheScreenLongEnoughToUseIt(bool withToggle, bool withSecondary)
+    {
+        using var a = new Anim(false);
+        var extras = new ToastExtras
+        {
+            ToggleText = withToggle ? "Cut breaks" : null,
+            Toggle = withToggle ? () => Task.FromResult("Add breaks") : null,
+            SecondaryText = withSecondary ? "Don't open" : null,
+        };
+
+        using var withControl = new ToastWindow("Text copied to clipboard", "first line", null, null,
+            ToastSeverity.Success, holdLong: false, extras: extras);
+        using var plain = new ToastWindow("Text copied to clipboard", "first line", null, null,
+            ToastSeverity.Success, holdLong: false);
+
+        Assert.True(withControl.DismissIntervalMs > plain.DismissIntervalMs,
+            $"{withControl.DismissIntervalMs} ms is no longer than the {plain.DismissIntervalMs} ms a plain confirmation gets.");
     }
 
     /// <summary>The raw recognizer lines have to survive the run, or there is nothing to

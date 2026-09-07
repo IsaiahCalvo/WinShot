@@ -402,6 +402,36 @@ public class PinInteractionTests
         });
     }
 
+    /// <summary>
+    /// Not every pin is built by App -- the recording completion card raises its own -- and
+    /// the pencil chip and the Edit menu row are added to every pin unconditionally. Without a
+    /// fallback handler those pins shipped a chip that silently did nothing.
+    /// </summary>
+    [Fact]
+    public void APinNobodySubscribedTo_StillOpensTheEditor()
+    {
+        RunSta(() =>
+        {
+            Action<SD.Bitmap>? previous = FastPinWindow.DefaultEditHandler;
+            SD.Bitmap? handed = null;
+            FastPinWindow.DefaultEditHandler = image => handed = image;
+            try
+            {
+                using var bitmap = new SD.Bitmap(120, 80);
+                using var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+                typeof(FastPinWindow)
+                    .GetMethod("RaiseEditRequested", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(pin, null);
+
+                Assert.NotNull(handed);
+                Assert.NotSame(bitmap, handed);
+                handed!.Dispose();
+            }
+            finally { FastPinWindow.DefaultEditHandler = previous; }
+        });
+    }
+
     private static void SetLocked(FastPinWindow pin, bool locked)
         => typeof(FastPinWindow)
             .GetMethod("SetLocked", BindingFlags.Instance | BindingFlags.NonPublic)!

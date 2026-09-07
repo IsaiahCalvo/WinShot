@@ -13,10 +13,9 @@ using SDI = System.Drawing.Imaging;
 
 namespace WinShot.Ocr;
 
-/// <summary>Combined result of one recognition pass: OCR text plus any decoded
-/// QR/DataMatrix/Aztec payloads found in the image.</summary>
 /// <summary>
-/// One OCR run. <paramref name="Lines"/> is the recognizer's raw output before
+/// Combined result of one recognition pass: OCR text plus any decoded QR/DataMatrix/Aztec
+/// payloads found in the image. <paramref name="Lines"/> is the recognizer's raw output before
 /// <see cref="OcrTextFormatter"/> joined or broke it, kept so the result toast can offer the
 /// other answer after the user has seen the text -- joining is a preference you can only
 /// judge once you are looking at it.
@@ -49,7 +48,12 @@ public static class OcrService
     /// <summary>The "let Windows decide" value of <see cref="PreferredLanguage"/>.</summary>
     public const string AutoLanguage = "auto";
 
-    private static string _preferredLanguage = AutoLanguage;
+    // Volatile, not guarded by EngineGate: GetEngine holds that lock across
+    // OcrEngine.TryCreateFromLanguage, and this setter runs on the UI thread from Settings'
+    // Changed event -- pressing Done while a capture built a cold engine stalled the UI for
+    // the length of the build. Publishing the string is all the setter ever needed to do;
+    // GetEngine re-reads it under the lock and rebuilds on the next capture.
+    private static volatile string _preferredLanguage = AutoLanguage;
 
     /// <summary>
     /// BCP-47 tag the recognizer should prefer, or <see cref="AutoLanguage"/> to follow the
@@ -63,12 +67,9 @@ public static class OcrService
         set
         {
             string tag = string.IsNullOrWhiteSpace(value) ? AutoLanguage : value.Trim();
-            lock (EngineGate)
-            {
-                if (string.Equals(_preferredLanguage, tag, StringComparison.OrdinalIgnoreCase))
-                    return;
-                _preferredLanguage = tag;
-            }
+            if (string.Equals(_preferredLanguage, tag, StringComparison.OrdinalIgnoreCase))
+                return;
+            _preferredLanguage = tag;
         }
     }
 

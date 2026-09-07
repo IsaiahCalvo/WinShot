@@ -24,6 +24,20 @@ public class HistoryService
     public static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinShot", "History");
 
+    /// <summary>Extensions history treats as a recording rather than a screenshot.</summary>
+    private static readonly string[] VideoExtensions =
+        { ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".webm" };
+
+    /// <summary>
+    /// Whether a history entry is a recording. Recordings share the folder with screenshots
+    /// and <see cref="GetItems"/> returns both, so anything that wants "the last screenshot"
+    /// has to say so -- History, the card and Pin last each grew their own list of extensions
+    /// and one of them only knew about .mp4.
+    /// </summary>
+    public static bool IsVideo(string? path) =>
+        path is not null &&
+        VideoExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+
     public string Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular)
     {
         lock (_gate)

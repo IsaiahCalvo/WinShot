@@ -469,9 +469,9 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// The user's own colours, newest first, with the unused slots drawn as dashed circles so
-    /// the popup is the same height whether the palette is full or empty. Rebuilt on every
-    /// open rather than once: the whole point is that it changes as you pick.
+    /// The user's own colours, newest first, with the unused slots drawn as empty outlined
+    /// squares so the popup is the same height whether the palette is full or empty. Rebuilt
+    /// on every open rather than once: the whole point is that it changes as you pick.
     /// </summary>
     private void BuildSavedColorRow()
     {
@@ -504,7 +504,7 @@ public partial class EditorWindow : Window
             else
             {
                 // An empty slot: outline only, so the row reads as ten places rather than as
-                // a short row of colours.
+                // a short row of colours. Disabled, so it is not a tab stop either.
                 slot.Background = Brushes.Transparent;
                 AutomationProperties.SetName(slot, "Empty saved color slot");
             }
@@ -542,6 +542,10 @@ public partial class EditorWindow : Window
     {
         if (ColorPickerHex.Text is string s && TryParseHexLoose(s, out var c))
         {
+            // Remembered here and at the eyedropper, not inside ApplyCustomColor: that runs
+            // on every built-in palette click and on merely opening the popup, so "My colors"
+            // filled itself with the default red and with swatches already visible above it.
+            RememberColor(c);
             ApplyCustomColor(c);
             ColorPickerPopup.IsOpen = false;
         }
@@ -579,7 +583,12 @@ public partial class EditorWindow : Window
         ColorPickerPreview.ToolTip = "Right-click to copy this colour in another format";
     }
 
-    private void OnCopyColorAs(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Copies the picked colour in one notation. Awaited and confirmed: the clipboard write
+    /// retries a busy clipboard and then faults, and discarding that Task made "Copy as
+    /// OKLCH" a menu row that said nothing whether it worked or not.
+    /// </summary>
+    private async void OnCopyColorAs(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem item || item.Tag is not WinShot.Core.ColorFormat format)
             return;
@@ -587,7 +596,16 @@ public partial class EditorWindow : Window
         Color c = _customColor;
         string text = WinShot.Core.ColorFormatter.Format(
             System.Drawing.Color.FromArgb(c.A, c.R, c.G, c.B), format);
-        _ = CaptureService.SetTextToClipboardAsync(text);
+        try
+        {
+            await CaptureService.SetTextToClipboardAsync(text);
+            App.Toast("Copied", text);
+        }
+        catch (Exception ex)
+        {
+            WinShot.Core.Log.Error("Could not copy the colour", ex);
+            App.Toast("Copy failed", WinShot.Core.FriendlyError.For(ex), severity: WinShot.Core.ToastSeverity.Error);
+        }
     }
 
     /// <summary>Refreshes the popup's preview + hex box to a color without re-triggering the live preview handler.</summary>
@@ -607,7 +625,6 @@ public partial class EditorWindow : Window
     private void ApplyCustomColor(Color c)
     {
         _customColor = c;
-        RememberColor(c);
         // The swatch fill becomes the picked color (replacing the rainbow "unset" gradient).
         CustomSwatch.Background = new SolidColorBrush(c);
         CustomSwatch.IsChecked = true; // reflect it as the active swatch

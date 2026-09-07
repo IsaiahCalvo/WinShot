@@ -151,8 +151,16 @@ internal sealed class TallCapturePreviewWindow : WF.Form
             // bicubic costs several times as much for no visible difference.
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.DrawImage(image, new SD.Rectangle(0, 0, bounds.Width, bounds.Height),
-                0, 0, image.Width, image.Height, SD.GraphicsUnit.Pixel);
+            // Same lock the card's background thumbnail render takes on this bitmap
+            // (FastQuickActionsWindow.CreatePreviewBitmap). GDI+ locks an Image for the
+            // duration of an operation, so two concurrent DrawImage calls on one source throw
+            // "Object is currently in use elsewhere" -- and the loser is usually the
+            // background render, which then leaves the card with an empty thumbnail for good.
+            lock (image)
+            {
+                g.DrawImage(image, new SD.Rectangle(0, 0, bounds.Width, bounds.Height),
+                    0, 0, image.Width, image.Height, SD.GraphicsUnit.Pixel);
+            }
         }
         catch (Exception ex)
         {
