@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
@@ -76,10 +76,14 @@ public class HistoryService
         if (string.IsNullOrWhiteSpace(app)) return string.Empty;
 
         var invalid = Path.GetInvalidFileNameChars();
-        string cleaned = new(app.Trim()
-            .Where(c => c != '@' && c != '.' && !invalid.Contains(c))
-            .Take(32)
-            .ToArray());
+        // Dots survive: dropping them turned "Microsoft.Photos" into "MicrosoftPhotos", which
+        // never matches the live process again, so those captures could never wear a badge. Only
+        // a trailing one has to go — Windows will not keep a file name that ends with a dot.
+        string cleaned = new string(app.Trim()
+                .Where(c => c != '@' && !invalid.Contains(c))
+                .Take(32)
+                .ToArray())
+            .TrimEnd('.');
         if (cleaned.Length == 0 ||
             cleaned.Equals("Desktop", StringComparison.OrdinalIgnoreCase) ||
             cleaned.Equals("WinShot", StringComparison.OrdinalIgnoreCase))

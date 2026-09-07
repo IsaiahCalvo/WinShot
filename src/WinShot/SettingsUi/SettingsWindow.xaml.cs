@@ -348,6 +348,10 @@ public partial class SettingsWindow : Window
         PinnedShadowCheck.IsChecked = s.PinnedShadow;
         PinnedBorderCheck.IsChecked = s.PinnedBorder;
         HistorySlider.Value = RetentionToSliderIndex(s.HistoryEnabled, s.HistoryRetentionDays);
+        // Opening Settings with history already off leaves the slider on stop 0, which is where
+        // it already was, so ValueChanged never fires and the hint under it would still describe
+        // age cleanup. Write it here rather than relying on the event.
+        UpdateHistoryRetentionHint(SliderIndexToRetentionDays(HistorySlider.Value));
         AllInOneRememberCheck.IsChecked = s.AllInOneRememberLast;
         SelectByTag(OcrLanguageCombo, s.OcrLanguage, fallbackIndex: 0);
         OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
@@ -393,12 +397,19 @@ public partial class SettingsWindow : Window
         if (RetentionDaysBox is null) return;
         int stop = SliderIndexToRetentionDays(e.NewValue);
         RetentionDaysBox.Text = Math.Max(0, stop).ToString();
-        if (HistoryRetentionHint is not null)
-        {
-            HistoryRetentionHint.Text = stop == HistoryOffStop
-                ? "Captures are not written to History at all, so nothing accumulates on disk."
-                : "Age cleanup is separate from the local item limit shown in Capture History.";
-        }
+        UpdateHistoryRetentionHint(stop);
+    }
+
+    private void UpdateHistoryRetentionHint(int stop)
+    {
+        if (HistoryRetentionHint is null) return;
+
+        // "Never" stops new captures being written; it does not reach back and clear what is
+        // already there, and neither prune runs once nothing is being added. Say so, rather than
+        // letting the word imply an erase that never happens.
+        HistoryRetentionHint.Text = stop == HistoryOffStop
+            ? "New captures are not written to History at all. Anything already saved stays until you delete it."
+            : "Age cleanup is separate from the local item limit shown in Capture History.";
     }
 
     /// <summary>

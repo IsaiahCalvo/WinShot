@@ -7,10 +7,6 @@
         AutomationProperties.Name="WinShot history"
         AutomationProperties.HelpText="Browse, sort, select, restore, copy, edit, pin, share, reveal, or delete local captures.">
     <Window.Resources>
-        <!-- The placeholder's sweep period. Deliberately outside the motion vocabulary, which tops
-             out at 280 ms: those are transitions, this is a loop that has to read as unhurried. -->
-        <Duration x:Key="ShimmerSweep">0:0:1.2</Duration>
-
         <Style x:Key="FilterChip" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
@@ -243,7 +239,7 @@
                                                  tile is up, so it fades in rather than popping. -->
                                             <Border x:Name="SourceAppBadge" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                                     Margin="7" Width="26" Height="26" CornerRadius="13" Opacity="0"
-                                                    Background="White" BorderBrush="{StaticResource BadgeScrimBrush}" BorderThickness="1"
+                                                    Background="{StaticResource IconPlateBrush}" BorderBrush="{StaticResource BadgeScrimBrush}" BorderThickness="1"
                                                     Visibility="{Binding SourceAppVisibility}"
                                                     ToolTip="{Binding SourceApp}">
                                                 <Image Source="{Binding SourceAppIcon}" Width="16" Height="16"
@@ -299,11 +295,11 @@
                                     <BeginStoryboard x:Name="ShimmerLoop">
                                         <Storyboard RepeatBehavior="Forever">
                                             <!-- Linear, deliberately: an ease on a Forever sweep hitches at
-                                                 every loop boundary. The period is a loop, not a transition,
-                                                 so it is longer than anything in the motion vocabulary. -->
+                                                 every loop boundary. MotionShimmer is the shared loop
+                                                 period, longer than any transition in the vocabulary. -->
                                             <DoubleAnimation Storyboard.TargetName="Shimmer"
                                                              Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
-                                                             From="-110" To="270" Duration="{StaticResource ShimmerSweep}"/>
+                                                             From="-110" To="270" Duration="{StaticResource MotionShimmer}"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </DataTrigger.EnterActions>
@@ -311,18 +307,19 @@
                                     <StopStoryboard BeginStoryboardName="ShimmerLoop"/>
                                 </DataTrigger.ExitActions>
                             </DataTrigger>
-                            <!-- A decoded thumbnail cross-fades over whatever was standing in for it
-                                 (the placeholder, or a video's "MP4" card) instead of popping. -->
+                            <!-- A decoded thumbnail fades up over the tile's surface instead of popping.
+                                 From is explicit: the Setter above is unapplied the instant the trigger
+                                 goes false, so an animation with only a To would interpolate from the
+                                 base value of 1 and land as a hard cut. The placeholder and the "MP4"
+                                 card are driven by Visibility bindings that collapse them on the same
+                                 assignment, so there is nothing left underneath to animate out. -->
                             <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
                                 <Setter TargetName="ThumbnailImage" Property="Opacity" Value="0"/>
                                 <DataTrigger.ExitActions>
                                     <BeginStoryboard>
                                         <Storyboard>
                                             <DoubleAnimation Storyboard.TargetName="ThumbnailImage" Storyboard.TargetProperty="Opacity"
-                                                             To="1" Duration="{StaticResource MotionSwap}"
-                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
-                                            <DoubleAnimation Storyboard.TargetName="MediaFallback" Storyboard.TargetProperty="Opacity"
-                                                             To="0" Duration="{StaticResource MotionSwap}"
+                                                             From="0" To="1" Duration="{StaticResource MotionSwap}"
                                                              EasingFunction="{StaticResource EaseOutCubic}"/>
                                         </Storyboard>
                                     </BeginStoryboard>

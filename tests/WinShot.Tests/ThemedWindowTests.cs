@@ -59,6 +59,8 @@ public class ThemedWindowTests
                 HistoryActivationSmoke(history, settings);
                 HistoryThumbnailLoadSmoke(settings);
                 HistoryReflowSmoke(history, settings);
+                HistoryReflowCloseSmoke(history, settings);
+                HistoryRotateRefreshSmoke(settings);
                 ShowAndClose(new SettingsWindow(settings));
                 SettingsWindowShowCloseSmoke(settings);
                 HistoryWindowShowCloseSmoke(history, settings);
@@ -318,6 +320,115 @@ public class ThemedWindowTests
         }
     }
 
+    /// <summary>
+    /// A rotate rewrites a history file under its own name. The refresh keeps the HistoryItem
+    /// behind any path that is still there — right for a folder that gained a file, wrong here,
+    /// because the item carries the thumbnail decoded from the pixels the rotate replaced. The
+    /// tile used to stay landscape for the life of the window.
+    /// </summary>
+    private static void HistoryRotateRefreshSmoke(SettingsService settings)
+    {
+        string dir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            string file = System.IO.Path.Combine(dir, "20260803-120000-000.png");
+            using (var bitmap = new SD.Bitmap(200, 60))
+            {
+                using (var graphics = SD.Graphics.FromImage(bitmap))
+                {
+                    graphics.Clear(SD.Color.Teal);
+                    graphics.FillRectangle(SD.Brushes.White, 4, 4, 60, 18);
+                }
+
+                bitmap.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            var scoped = new HistoryService(settings, () => dir);
+            var window = new HistoryWindow(scoped, settings);
+            window.Show();
+            const System.Reflection.BindingFlags NP =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var reload = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(reload);
+            reload.GetAwaiter().GetResult();
+
+            var list = (ListBox)window.FindName("ItemsList");
+            Assert.Single(list.Items);
+            var before = (System.Windows.Media.Imaging.BitmapSource)((HistoryItem)list.Items[0]!).Thumbnail!;
+            Assert.True(before.PixelWidth > before.PixelHeight, "the fixture should start landscape");
+
+            // Exactly what OnRotate does: rotate, stage outside the folder, move over the top.
+            using (var image = HistoryImageLoader.LoadDetachedBitmap(file))
+            {
+                image.RotateFlip(SD.RotateFlipType.Rotate90FlipNone);
+                string staging = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(), $"winshot-test-{Guid.NewGuid():N}.png");
+                ImageSaver.Save(image, staging);
+                System.IO.File.Move(staging, file, overwrite: true);
+            }
+
+            var again = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(again);
+            again.GetAwaiter().GetResult();
+
+            var after = (System.Windows.Media.Imaging.BitmapSource)((HistoryItem)list.Items[0]!).Thumbnail!;
+            Assert.NotSame(before, after);
+            Assert.True(
+                after.PixelHeight > after.PixelWidth,
+                $"the rotated tile should read portrait, was {after.PixelWidth}x{after.PixelHeight}");
+
+            window.Close();
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>Closing History on top of a running slide hands the high-resolution clock back
+    /// straight away, rather than leaving an orphaned tween to finish on its own.</summary>
+    private static void HistoryReflowCloseSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        paging.ReplaceAll(
+            Enumerable.Range(0, 8)
+                .Select(index => new HistoryItem(index % 2 == 0
+                    ? $@"C:\sanitized-history6080{index}-120000-000.png"
+                    : $@"C:\sanitized-history6080{index}-120000-000.mp4"))
+                .ToList(),
+            static _ => true,
+            selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        try
+        {
+            Motion.AnimationsEnabled = () => true;
+            int holdersBefore = Motion.Holders;
+            var panel = FindVisualChild<ReflowWrapPanel>((ListBox)window.FindName("ItemsList"));
+            Assert.NotNull(panel);
+
+            ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipImages")).IsChecked = true;
+            window.UpdateLayout();
+            Assert.True(panel!.IsReflowing, "the slide should still be running when the window closes");
+
+            window.Close();
+
+            Assert.False(panel.IsReflowing);
+            Assert.Equal(holdersBefore, Motion.Holders);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+        }
+    }
+
     /// <summary>Filtering the grid slides the survivors into their new slots instead of
     /// rebuilding the page, and the tween lets go of the high-resolution clock when it ends.</summary>
     private static void HistoryReflowSmoke(HistoryService history, SettingsService settings)
@@ -568,20 +679,30 @@ public class ThemedWindowTests
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         var fadeIn = typeof(HistoryWindow).GetMethod("FadeIn", NP)!;
+        void FadeIn(double from) => fadeIn.Invoke(window, new object[] { from });
         Func<bool> previousAnimations = Motion.AnimationsEnabled;
         try
         {
             Motion.AnimationsEnabled = () => false;
-            fadeIn.Invoke(window, null);
+            FadeIn(0d);
             Assert.Equal(1d, window.Opacity, 3);
 
             Motion.AnimationsEnabled = () => true;
-            fadeIn.Invoke(window, null);
+            FadeIn(0d);
             Assert.Equal(0d, window.Opacity, 3);
 
-            // Escape starts the exit tween, so the window is still there on the next line.
+            // A window caught part-way through the entrance ramps on from where it got to rather
+            // than restarting from black.
+            FadeIn(0.4d);
+            Assert.Equal(0.4d, window.Opacity, 3);
+
+            // Escape starts the exit tween, so the window is still there on the next line — and
+            // it starts from the opacity the entrance had reached, not from fully opaque.
             Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
             Assert.True(window.IsVisible, "Escape should fade the window out, not blink it away");
+            Assert.True(
+                window.Opacity <= 0.4d,
+                $"Escape mid-entrance must not brighten the window first, was {window.Opacity:0.000}");
         }
         finally
         {

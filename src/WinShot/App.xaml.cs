@@ -537,11 +537,7 @@ public partial class App : Application
     {
         _captureInProgress = false;
         MemoryCleanup.Request();
-        // Whoever stepped out of the frame for this capture comes back now — whether the user
-        // took one or pressed Escape.
-        Action? after = _afterCaptureFlow;
-        _afterCaptureFlow = null;
-        after?.Invoke();
+        ResumeAfterCaptureFlow();
         SchedulePendingCaptureDrain();
     }
 
@@ -557,7 +553,15 @@ public partial class App : Application
     {
         // The recording chooser/selector counts as an active capture UI: letting a second
         // full-screen selector open on top made the two overlays z-order-fight at 66 fps.
-        if (_captureInProgress || Recording.SelectionUiActive) return;
+        if (_captureInProgress || Recording.SelectionUiActive)
+        {
+            // FinishCaptureFlow is the only thing that runs the pending restore, and this return
+            // never reaches it. A flow that IS in progress will run it on its own way out; with
+            // nothing in progress, nothing ever would — History would stay hidden with no way
+            // back but the hotkey.
+            if (!_captureInProgress) ResumeAfterCaptureFlow();
+            return;
+        }
         _captureInProgress = true;
         try
         {
@@ -572,6 +576,15 @@ public partial class App : Application
         {
             FinishCaptureFlow();
         }
+    }
+
+    /// <summary>Whoever stepped out of the frame for a capture comes back now — whether the user
+    /// took one, pressed Escape, or the command was dropped before a flow ever started.</summary>
+    private void ResumeAfterCaptureFlow()
+    {
+        Action? after = _afterCaptureFlow;
+        _afterCaptureFlow = null;
+        after?.Invoke();
     }
 
     private void SchedulePendingCaptureDrain()

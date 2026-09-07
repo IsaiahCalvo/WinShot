@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
 using System.Windows;
@@ -95,6 +95,24 @@ public class HistoryRenderHarness
                     Render(window, Path.Combine(outputDir, $"{outputPrefix}-after-load-more.png"));
                 }
 
+                // The states a grid full of cards never shows: a filter that matched nothing, and
+                // a save folder that could not be read. Both are new in this track and neither is
+                // reachable from the idle render, so they get their own frames to scan.
+                ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipGif")).IsChecked = true;
+                Pump();
+                window.UpdateLayout();
+                Render(window, Path.Combine(outputDir, $"{outputPrefix}-empty-filtered.png"));
+
+                typeof(HistoryWindow)
+                    .GetField("_loadError", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .SetValue(window, "WinShot could not reach the folder your captures are saved in.");
+                typeof(HistoryWindow)
+                    .GetMethod("UpdateEmptyState", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(window, null);
+                Pump();
+                window.UpdateLayout();
+                Render(window, Path.Combine(outputDir, $"{outputPrefix}-error.png"));
+
                 window.Close();
             }
             catch (Exception ex)
@@ -111,6 +129,8 @@ public class HistoryRenderHarness
         Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-idle.png")));
         Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-keyboard-focus.png")));
         Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-selection.png")));
+        Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-empty-filtered.png")));
+        Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-error.png")));
         if (fixtureCount > HistoryIncrementalCollection.DefaultPageSize)
             Assert.True(File.Exists(Path.Combine(outputDir, $"{outputPrefix}-after-load-more.png")));
     }

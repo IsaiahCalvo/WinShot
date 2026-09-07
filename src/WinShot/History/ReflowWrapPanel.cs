@@ -36,6 +36,16 @@ internal sealed class ReflowWrapPanel : WrapPanel
 
     internal bool IsReflowing => _running is not null;
 
+    /// <summary>Stops a slide that is still running. The tween holds the process-wide
+    /// high-resolution timer for its duration, so a window closing on top of one has to hand it
+    /// back rather than leave it ticking against transforms nothing will ever draw again. The
+    /// panel's Unloaded is no use for that: WPF queues it, so it lands after Close() returns.</summary>
+    internal void CancelReflow()
+    {
+        _running?.Dispose();
+        _running = null;
+    }
+
     protected override Size ArrangeOverride(Size finalSize)
     {
         Size result = base.ArrangeOverride(finalSize);

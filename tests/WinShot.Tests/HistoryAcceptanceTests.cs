@@ -261,6 +261,26 @@ public class HistoryAcceptanceTests
     public void DragGhost_IsSkippedWhenTheTileHasNoThumbnailYet() =>
         Assert.Null(HistoryWindow.DragThumbnail(null));
 
+    /// <summary>DragPreview divides the ghost's pixel size by the DPI scale to get its logical
+    /// size, so the cap has to be in real pixels: 200 logical px on screen at every scale.</summary>
+    [Theory]
+    [InlineData(1.0, 200)]
+    [InlineData(1.25, 250)]
+    [InlineData(1.5, 300)]
+    [InlineData(2.0, 400)]
+    [InlineData(0, 200)]     // an unreadable scale falls back to 1.0 rather than collapsing
+    public void DragGhost_IsTheSameLogicalSizeAtEveryScale(double dpiScale, int expectedPixels)
+    {
+        Assert.Equal(expectedPixels, HistoryWindow.DragGhostPixelWidth(dpiScale));
+
+        var oversized = new System.Windows.Media.Imaging.WriteableBitmap(
+            1600, 900, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+        var ghost = HistoryWindow.DragThumbnail(oversized, dpiScale);
+
+        Assert.NotNull(ghost);
+        Assert.Equal(expectedPixels, ghost!.PixelWidth);
+    }
+
     [Fact]
     public void ThumbnailDecode_RunsSeveralAtOnceWithoutTakingTheWholePool() =>
         Assert.InRange(HistoryWindow.ThumbnailDecodeParallelism, 2, 6);
@@ -288,7 +308,12 @@ public class HistoryAcceptanceTests
     // A process name cannot reintroduce the separator, a path, or a second extension.
     [InlineData("we@ird", "@weird")]
     [InlineData(@"a\b/c:d", "@abcd")]
-    [InlineData("my.app", "@myapp")]
+    // Dots stay: "Microsoft.Photos" has to round-trip or the badge lookup never finds the
+    // process. Only a trailing one goes, because Windows will not keep such a file name.
+    [InlineData("my.app", "@my.app")]
+    [InlineData("Microsoft.Photos", "@Microsoft.Photos")]
+    [InlineData("trailing.", "@trailing")]
+    [InlineData("...", "")]
     // Nothing worth badging: no owner, or WinShot looking at itself.
     [InlineData("Desktop", "")]
     [InlineData("winshot", "")]

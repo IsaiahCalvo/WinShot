@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 
 namespace WinShot.History;
 
@@ -75,7 +75,15 @@ internal static class HistoryRename
         // A stray '@' TagsOf did not read as a tag (a trailing one, say) would still come back
         // as an error the moment the user pressed Enter. Never offer a name Resolve refuses.
         int at = name.LastIndexOf('@');
-        return at >= 0 ? name[..at] : name;
+        if (at >= 0) name = name[..at];
+        name = name.Trim().TrimEnd('.');
+        if (name.Length > 0) return name;
+
+        // A hand-placed file whose whole stem is a tag ("@chrome.png", "-scroll.png") trims away
+        // to nothing, and an empty default is one Resolve rejects the moment it is accepted.
+        // Fall back to the stem with the characters Resolve bans taken out of it.
+        string fallback = stem.Replace("@", string.Empty).Trim().TrimEnd('.');
+        return fallback.Length > 0 ? fallback : "Capture";
     }
 
     /// <summary>Longest full path Windows accepts without long-path support turned on.</summary>

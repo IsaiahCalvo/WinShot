@@ -109,6 +109,10 @@ public partial class HistoryWindow : Window
             _emptyStateFade = null;
             _dragPreview?.Dispose();
             _dragPreview = null;
+            // A filter or a delete leaves the grid sliding for 200 ms. Closing on top of that has
+            // to stop the tween here — its handle lives on the panel, nowhere else, and Unloaded
+            // is queued rather than raised, so it would arrive long after the clock was needed back.
+            FindDescendant<ReflowWrapPanel>(ItemsList)?.CancelReflow();
             ClearLoadedItems();
             MemoryCleanup.Request();
         };
@@ -142,7 +146,9 @@ public partial class HistoryWindow : Window
             instance._windowFade?.Dispose();
             instance._windowFade = null;
             instance._dismissing = false;
-            instance.Opacity = 1;
+            // Ramp back up from wherever the fade-out had got to. Assigning Opacity = 1 here made
+            // a half-faded window jump to fully opaque in one frame before anything else ran.
+            instance.FadeIn(instance.Opacity);
         }
 
         wasVisible = instance.IsVisible;
@@ -197,15 +203,18 @@ public partial class HistoryWindow : Window
     /// The window arriving on screen. A grid of a hundred thumbnails appearing between two
     /// frames reads as a flash; over a fifth of a second it reads as opening.
     /// </summary>
-    private void FadeIn()
+    /// <param name="from">Opacity to ramp up from: 0 for a window arriving, and the live value
+    /// when recovering one that was part-way through fading out, so it continues rather than
+    /// snapping to full brightness first.</param>
+    private void FadeIn(double from = 0d)
     {
         _windowFade?.Dispose();
-        Opacity = 0;
+        Opacity = from;
         bool finished = false;
         IDisposable handle = Motion.Run(
             Motion.EnterDurationMs,
             Motion.EaseOutCubic,
-            progress => Opacity = progress,
+            progress => Opacity = from + ((1d - from) * progress),
             () =>
             {
                 finished = true;
@@ -215,7 +224,10 @@ public partial class HistoryWindow : Window
     }
 
     /// <summary>
-    /// Escape: fade out, then close, so dismissing is the entrance played backwards.
+    /// Escape: fade out from wherever the window currently is, then close. The exit is
+    /// deliberately quicker than the entrance (SwapMs against EnterDurationMs) — leaving should
+    /// not make the user wait — but it starts where the entrance had reached, so pressing Escape
+    /// on top of the opening fade keeps dimming instead of flashing to opaque first.
     ///
     /// ponytail: only this path fades. Doing it from OnClosing means cancelling the close and
     /// finishing it from a timer, and a Close() whose message loop never runs again would leave
@@ -229,13 +241,14 @@ public partial class HistoryWindow : Window
 
         _dismissing = true;
         _windowFade?.Dispose();
+        double from = Opacity;
         // With animation off system-wide Motion.Run finishes before it returns, so the handle must
         // not be stored onto a window Close() has already torn down — the same guard FadeIn uses.
         bool finished = false;
         IDisposable handle = Motion.Run(
             Motion.SwapMs,
             Motion.EaseInCubic,
-            progress => Opacity = 1d - progress,
+            progress => Opacity = from * (1d - progress),
             () =>
             {
                 finished = true;
@@ -249,6 +262,20 @@ public partial class HistoryWindow : Window
     {
         _instance = new HistoryWindow(history, settings);
         _instance.Closed += (_, _) => _instance = null;
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        if (root is T match) return match;
+
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            if (FindDescendant<T>(VisualTreeHelper.GetChild(root, index)) is { } found)
+                return found;
+        }
+
+        return null;
     }
 
     private void CenterOnWorkArea()
@@ -477,13 +504,19 @@ public partial class HistoryWindow : Window
                 foreach (HistoryItem previous in previousItems)
                     kept[previous.FilePath] = previous;
                 var newItems = new List<HistoryItem>(files.Count);
-                var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var live = new HashSet<HistoryItem>();
                 foreach (string file in files)
                 {
-                    newItems.Add(kept.TryGetValue(file, out HistoryItem? existing)
+                    // ...but only while the bytes behind that path are still the ones it was
+                    // built from. A rotate rewrites the file under its own name, and reusing the
+                    // item there kept its already-decoded thumbnail — so the rotate was invisible
+                    // until the window was closed and reopened.
+                    HistoryItem item = kept.TryGetValue(file, out HistoryItem? existing) &&
+                                       (existing.Thumbnail is null || existing.MatchesFileOnDisk())
                         ? existing
-                        : new HistoryItem(file));
-                    live.Add(file);
+                        : new HistoryItem(file);
+                    newItems.Add(item);
+                    live.Add(item);
                 }
 
                 HistoryItem? restored = _paging.ReplaceAll(
@@ -492,10 +525,11 @@ public partial class HistoryWindow : Window
                     selectedPath,
                     cts.Token,
                     CurrentComparer());
-                // Only the items that really went away release their bitmap.
+                // Only the items that really went away release their bitmap — which now includes
+                // the ones replaced because their file changed underneath them.
                 foreach (HistoryItem previous in previousItems)
                 {
-                    if (!live.Contains(previous.FilePath))
+                    if (!live.Contains(previous))
                         previous.Thumbnail = null;
                 }
 
@@ -635,14 +669,14 @@ public partial class HistoryWindow : Window
     internal static readonly int ThumbnailDecodeParallelism =
         Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
 
-    private static BitmapImage? TryLoadThumbnail(string path)
+    private static BitmapImage? TryLoadThumbnail(string path, int decodePixelWidth = 180)
     {
         try
         {
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.UriSource = new Uri(path);
-            bmp.DecodePixelWidth = 180;
+            bmp.DecodePixelWidth = decodePixelWidth;
             bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
             bmp.EndInit();
@@ -698,7 +732,8 @@ public partial class HistoryWindow : Window
         IEnumerable<HistoryItem> items,
         CancellationToken cancellationToken)
     {
-        foreach (HistoryItem item in items.Where(item => item.IsVideo && item.Thumbnail is null))
+        foreach (HistoryItem item in items.Where(
+                     item => item.IsVideo && item.Thumbnail is null && !item.VideoFrameTried))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!File.Exists(item.FilePath)) continue;
@@ -707,9 +742,11 @@ public partial class HistoryWindow : Window
             cancellationToken.ThrowIfCancellationRequested();
             await Dispatcher.InvokeAsync(() =>
             {
+                item.VideoFrameTried = true;
                 item.Duration = duration;
-                // A frame we could not decode leaves the "MP4" card up rather than blanking
-                // the tile; the bar underneath still carries the size.
+                // VideoThumbnail hands back a grey play-card for a clip it could not open, so in
+                // practice this always assigns; the null branch is the belt for a decoder that
+                // hands back nothing at all, and leaves the "MP4" card up rather than a blank tile.
                 if (frame is not null) item.Thumbnail = frame;
             });
         }
@@ -809,11 +846,15 @@ public partial class HistoryWindow : Window
             // under the first card of the page that just arrived.
             _emptyStateFade?.Dispose();
             _emptyStateKey = null;
+            // The panel keeps its slot for the whole fade, in the middle of the grid, so its
+            // buttons would otherwise eat a click aimed at a card that has just arrived under it.
+            EmptyState.IsHitTestVisible = false;
+            double leaving = EmptyState.Opacity;
             bool hidden = false;
             IDisposable exit = Motion.Run(
                 Motion.SwapMs,
                 Motion.EaseInCubic,
-                progress => EmptyState.Opacity = 1d - progress,
+                progress => EmptyState.Opacity = leaving * (1d - progress),
                 () =>
                 {
                     hidden = true;
@@ -839,6 +880,7 @@ public partial class HistoryWindow : Window
         bool sameReason = visible && _emptyStateKey == key;
         _emptyStateKey = key;
         EmptyState.Visibility = Visibility.Visible;
+        EmptyState.IsHitTestVisible = true;
         if (sameReason) return;
 
         // Arriving on an empty grid: fade the message in rather than dropping it in place the
@@ -1384,13 +1426,20 @@ public partial class HistoryWindow : Window
 
     private DragPreview? ShowDragPreview(HistoryItem item)
     {
-        if (DragThumbnail(item.Thumbnail) is not BitmapSource thumbnail)
+        double dpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // Decode for the ghost instead of reusing the tile's thumbnail: that one is 180 raw
+        // pixels whatever the scale, and DragPreview divides by the DPI to get its logical size,
+        // so the ghost shrank as the scale rose — 180 px at 100 %, 120 at 150 %, 90 at 200 %.
+        BitmapSource? thumbnail =
+            DragThumbnail(TryLoadThumbnail(item.FilePath, DragGhostPixelWidth(dpiScale)), dpiScale)
+            ?? DragThumbnail(item.Thumbnail, dpiScale);
+        if (thumbnail is null)
             return null;
 
         try
         {
             _dragPreview ??= new DragPreview();
-            _dragPreview.Show(thumbnail, VisualTreeHelper.GetDpi(this).DpiScaleX);
+            _dragPreview.Show(thumbnail, dpiScale);
             return _dragPreview;
         }
         catch (Exception ex)
@@ -1400,16 +1449,23 @@ public partial class HistoryWindow : Window
         }
     }
 
-    /// <summary>The tile's own thumbnail, scaled down if it is a video frame (those decode at
-    /// up to 640 px, which would follow the cursor as a full-size window).</summary>
-    internal static BitmapSource? DragThumbnail(ImageSource? source)
+    /// <summary>How wide the drag ghost decodes, in real pixels: a constant 200 logical px on
+    /// screen whatever the monitor's scale, and crisp rather than upscaled at 150 % and 200 %.</summary>
+    internal static int DragGhostPixelWidth(double dpiScale) =>
+        Math.Max(1, (int)Math.Round(DragPreviewMaxWidth * (dpiScale > 0 ? dpiScale : 1d)));
+
+    /// <summary>A thumbnail sized for the ghost, scaled down if it came in larger than the cap
+    /// (a video frame decodes at up to 640 px, which would follow the cursor as a full-size
+    /// window).</summary>
+    internal static BitmapSource? DragThumbnail(ImageSource? source, double dpiScale = 1d)
     {
         if (source is not BitmapSource bitmap || bitmap.PixelWidth <= 0)
             return null;
-        if (bitmap.PixelWidth <= DragPreviewMaxWidth)
+        int max = DragGhostPixelWidth(dpiScale);
+        if (bitmap.PixelWidth <= max)
             return bitmap;
 
-        double scale = (double)DragPreviewMaxWidth / bitmap.PixelWidth;
+        double scale = (double)max / bitmap.PixelWidth;
         var scaled = new TransformedBitmap(bitmap, new ScaleTransform(scale, scale));
         scaled.Freeze();
         return scaled;
@@ -1425,10 +1481,17 @@ public partial class HistoryWindow : Window
 
     private async Task CopyImageAsync(HistoryItem item)
     {
-        // Gone from disk (deleted under us, or a drive that went away): the watcher refresh
-        // will drop the tile, so say nothing rather than blaming the clipboard.
+        // Gone from disk (deleted under us, or a drive that went away). The watcher refresh drops
+        // the tile eventually, but it is debounced and only runs while the window is up, so the
+        // keypress would otherwise land on a tile that is still there and answer with nothing.
         if (!File.Exists(item.FilePath))
+        {
+            App.Toast(
+                "Copy failed",
+                "That capture is no longer in your history folder.",
+                severity: ToastSeverity.Error);
             return;
+        }
         try
         {
             var bmp = await Task.Run(() => HistoryImageLoader.LoadDetachedBitmap(item.FilePath));
@@ -1505,7 +1568,10 @@ public partial class HistoryWindow : Window
             return;
         }
 
-        // The folder watcher picks the rewrite up and re-decodes the thumbnail.
+        // The reload notices the file changed underneath the item and re-decodes it; the toast
+        // is what says so before the new pixels land, and covers a rotate that changes so little
+        // of the tile at 180 px that the user cannot tell it ran.
+        App.Toast("Rotated", $"Saved to {item.FileName}.", severity: ToastSeverity.Success);
         await ReloadAsync();
     }
 
@@ -1610,6 +1676,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to reveal {item.FilePath}", ex);
+            App.Toast("Couldn't open Explorer", FriendlyError.For(ex), severity: ToastSeverity.Error);
         }
     }
 
@@ -1639,6 +1706,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to delete history item {item.FilePath}", ex);
+            ThemedMessageDialog.Show(this, "Delete failed", FriendlyError.For(ex));
             return;
         }
         _paging.Remove(item);
@@ -1756,6 +1824,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
     private ImageSource? _thumbnail;
     private ImageSource? _sourceAppIcon;
     private TimeSpan _duration;
+    private readonly DateTime _writtenUtc;
 
     public HistoryItem(string filePath)
     {
@@ -1775,7 +1844,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
         ExtensionLabel = ext.TrimStart('.').ToUpperInvariant();
         FileName = Path.GetFileName(filePath);
         CapturedAt = ParseCapturedAt(filePath);
-        FileSize = TryGetFileSize(filePath);
+        (FileSize, _writtenUtc) = TryReadStamp(filePath);
         Caption = BuildCaption(CapturedAt, FileSize);
         RelativeTime = BuildRelativeTime(CapturedAt);
         string sizeText = FormatFileSize(FileSize);
@@ -1823,11 +1892,32 @@ public sealed class HistoryItem : INotifyPropertyChanged
         catch { return DateTime.Now; }
     }
 
-    private static long TryGetFileSize(string filePath)
+    private static (long Size, DateTime WrittenUtc) TryReadStamp(string filePath)
     {
-        try { return new FileInfo(filePath).Length; }
-        catch { return 0; }
+        try
+        {
+            var info = new FileInfo(filePath);
+            return (info.Length, info.LastWriteTimeUtc);
+        }
+        catch { return (0, DateTime.MinValue); }
     }
+
+    /// <summary>
+    /// True while the file on disk is still the one this item was built from. Rotate, and the
+    /// quick-actions card's rotate/flip/resize, rewrite a history file in place under its own
+    /// name — a refresh that matched on path alone kept the item, and with it the thumbnail
+    /// decoded from the old pixels, so the grid was byte-for-byte identical after the edit.
+    /// </summary>
+    internal bool MatchesFileOnDisk()
+    {
+        (long size, DateTime writtenUtc) = TryReadStamp(FilePath);
+        return size == FileSize && writtenUtc == _writtenUtc;
+    }
+
+    /// <summary>Set once a video's first frame has been attempted, successfully or not. Without
+    /// it an MP4 no decoder will open sits in the pending set forever and is retried on every
+    /// reload, filter change and delete — ahead of the app-icon pass, which waits behind it.</summary>
+    internal bool VideoFrameTried { get; set; }
 
     private static string BuildCaption(DateTime captured, long bytes)
     {

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using WinShot.History;
 using Xunit;
 
@@ -105,6 +105,23 @@ public class HistoryRenameTests
 
         Assert.Null(result.Error);
         Assert.Equal(path, result.Path);
+    }
+
+    /// <summary>A hand-placed file whose whole stem is a tag trims away to nothing, and the
+    /// prompt must never open on a default it will then refuse.</summary>
+    [Theory]
+    [InlineData("@chrome.png")]
+    [InlineData("-scroll.png")]
+    [InlineData("-scroll@chrome.png")]
+    [InlineData("@.png")]
+    public void TheSuggestedName_IsAcceptedEvenWhenTheWholeStemIsATag(string fileName)
+    {
+        string path = Path.Combine(Dir, fileName);
+
+        string suggested = HistoryRename.SuggestedName(path);
+
+        Assert.NotEqual(string.Empty, suggested);
+        Assert.Null(HistoryRename.Resolve(path, suggested, static _ => false).Error);
     }
 
     [Fact]
