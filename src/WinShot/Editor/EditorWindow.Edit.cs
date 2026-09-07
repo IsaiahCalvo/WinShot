@@ -638,8 +638,10 @@ public partial class EditorWindow : Window
         {
             Log.Error("Editor copy failed", ex);
             // Without this the glyph simply never becomes a checkmark and the user pastes
-            // whatever was on the clipboard before.
-            ThemedMessageDialog.Show(this, "Copy failed", "WinShot could not put this image on the clipboard. Another app may be holding it — try again in a moment.");
+            // whatever was on the clipboard before. The line is FriendlyError's, not a
+            // hand-written one: the fixed clipboard sentence this used to carry blamed
+            // another app for a full disk, an out-of-memory flatten and a GDI+ encode too.
+            ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
         }
     }
 

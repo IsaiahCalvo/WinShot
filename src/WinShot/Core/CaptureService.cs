@@ -710,9 +710,12 @@ public static class CaptureService
                         payload.TransferPngToClipboard(pngFormat);
                     return;
                 }
+                // No `attempt < maxAttempts` here: with it, a transient failure on the LAST
+                // attempt escaped as a raw Win32Exception instead of reaching the give-up
+                // below, so the one run that mattered told the user "Something went wrong".
+                // The give-up check after the loop body is what stops the retrying.
                 catch (Win32Exception ex) when (
                     !payload.AnyHandleTransferred &&
-                    attempt < maxAttempts &&
                     IsTransientClipboardError(ex))
                 {
                     lastError = ex;
@@ -727,8 +730,13 @@ public static class CaptureService
                 lastError = ClipboardWin32Exception("OpenClipboard failed");
             }
 
+            // Not the Win32Exception itself: FriendlyError excludes that type on purpose (a
+            // failed Process.Start is one), so the exception whose message is literally
+            // "Clipboard is busy." reached the user as "Something went wrong". The typed one
+            // carries CLIPBRD_E_CANT_OPEN — what Clipboard.SetText raises for the same
+            // condition — and keeps the real last-error inner for the log.
             if (attempt >= maxAttempts)
-                throw lastError ?? new Win32Exception("Clipboard is busy.");
+                throw new ClipboardBusyException(lastError);
 
             Thread.Sleep(retryDelayMs);
         }

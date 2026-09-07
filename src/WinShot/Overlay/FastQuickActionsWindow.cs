@@ -2590,6 +2590,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Copy to clipboard failed", ex);
+            // The card used to swallow this whole: the label never became "Copied", the
+            // keepOpen=false Close() above was skipped, and the clipboard still held whatever
+            // it held before — with the only trace one line in the log. The status flash is
+            // the card's own channel and it is directly under the pointer that just clicked.
+            FlashStatus(FriendlyError.For(ex));
         }
     }
 
