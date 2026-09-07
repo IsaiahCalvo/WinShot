@@ -304,6 +304,11 @@ public static class WindowEnumerator
     /// selector floats over its target. Resolved for the ONE hovered window on demand, never
     /// for the whole enumeration — opening every process in the list would cost more than the
     /// enumeration itself. Falls back to the window title, then to nothing.
+    ///
+    /// NEVER call this on the UI thread. Like the rest of this class it opens the target
+    /// process and reads its PE version resource off disk, and for a protected or elevated
+    /// process it throws before it fails. Callers on a hover path resolve it in the
+    /// background and cache the answer per window handle.
     /// </summary>
     public static string AppNameFor(IntPtr hwnd, string fallbackTitle)
     {

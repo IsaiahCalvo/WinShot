@@ -128,6 +128,65 @@ internal static class Motion
         return new Tween(durationMs, ease, onFrame, onDone);
     }
 
+    /// <summary>
+    /// A one-shot dwell: <paramref name="onElapsed"/> runs once, <paramref name="delayMs"/>
+    /// from now, on the UI thread. Deliberately NOT <see cref="Run"/>: a dwell is not a
+    /// transition, so turning animations off must take the message's RAMP away, never the
+    /// message itself — a tween would apply its end state inline and the caller would undo
+    /// its own state inside one call stack, before a single paint could run. It also ticks
+    /// once instead of at the frame clock, so a 1.2 s hold no longer costs ~150 empty
+    /// callbacks and 1.2 s of raised system timer resolution.
+    ///
+    /// Disposing the returned handle before it fires cancels it; disposing after is a no-op.
+    /// </summary>
+    public static IDisposable Delay(int delayMs, Action onElapsed)
+    {
+        ArgumentNullException.ThrowIfNull(onElapsed);
+        return new Dwell(Math.Max(1, delayMs), onElapsed);
+    }
+
+    private sealed class Dwell : IDisposable
+    {
+        private readonly Action _onElapsed;
+        private WF.Timer? _timer;
+
+        public Dwell(int delayMs, Action onElapsed)
+        {
+            _onElapsed = onElapsed;
+            _timer = new WF.Timer { Interval = delayMs };
+            _timer.Tick += OnTick;
+            _timer.Start();
+        }
+
+        private void OnTick(object? sender, EventArgs e)
+        {
+            if (_timer is null)
+                return;
+            Dispose();
+            try
+            {
+                _onElapsed();
+            }
+            catch (Exception ex)
+            {
+                // Same reasoning as Tween.OnTick: a WinForms timer callback throws through
+                // NativeWindow, not the dispatcher, so rethrowing pops an invisible modal.
+                Log.Error("Delayed callback failed", ex);
+            }
+        }
+
+        public void Dispose()
+        {
+            WF.Timer? timer = _timer;
+            _timer = null;
+            if (timer is null)
+                return;
+            timer.Tick -= OnTick;
+            timer.Stop();
+            timer.Dispose();
+        }
+    }
+
     /// <summary>A handle for a tween that never started; disposing it is a no-op.</summary>
     private static readonly IDisposable Finished = new NoTween();
 
