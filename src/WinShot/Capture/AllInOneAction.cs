@@ -1,4 +1,4 @@
-﻿namespace WinShot.Capture;
+namespace WinShot.Capture;
 
 /// <summary>What the caller should do with the region picked in all-in-one mode.</summary>
 public enum AllInOneAction

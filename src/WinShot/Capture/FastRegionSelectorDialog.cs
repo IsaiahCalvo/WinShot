@@ -702,6 +702,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
     // marquee or dragging a handle/the pending rect.
     internal bool CapturingPointer => _dragging || _resizeHandle >= 0 || _movingPending;
 
+    /// <summary>
+    /// Whether a letter key arrived on its own. The selector's single-letter shortcuts match
+    /// on KeyCode, so without this Ctrl+A — the near-universal "select all" reflex, on an
+    /// overlay that has a selection on it — silently re-snapped every edge of the user's
+    /// rectangle. Ctrl+C copying the colour is deliberate and is checked separately.
+    /// </summary>
+    private static bool IsBareKey(WF.KeyEventArgs e) => !e.Control && !e.Alt && !e.Shift;
+
     internal void HandleKeyDown(WF.KeyEventArgs e)
     {
         if (e.KeyCode == WF.Keys.Escape)
@@ -729,7 +737,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 InvalidateScreenRect(Inflated(SD.Rectangle.Union(nudged, moved)));
             }
         }
-        else if (e.KeyCode == WF.Keys.A && _pendingScreen is SD.Rectangle toSnap)
+        else if (e.KeyCode == WF.Keys.A && IsBareKey(e) && _pendingScreen is SD.Rectangle toSnap)
         {
             e.Handled = true;
             e.SuppressKeyPress = true;
@@ -751,8 +759,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
             e.SuppressKeyPress = true;
             CopyTextColorUnderCursor();
         }
-        else if (e.KeyCode == WF.Keys.Space)
+        else if (e.KeyCode == WF.Keys.Space && IsBareKey(e) && !CapturingPointer)
         {
+            // Not mid-drag: Space is "pan" in most tools, and throwing away a marquee the
+            // user is still drawing is not what that reflex asks for.
             e.Handled = true;
             e.SuppressKeyPress = true;
             ToggleWindowMode();
@@ -870,7 +880,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             // Cancel / Done bar wins over move/resize. The press only arms the button —
             // the action fires on mouse-up over the same button, standard button feel.
-            var (barRect, padRect, cancelRect, doneRect) = ActionBarRects(pending);
+            var (barRect, padRect, cancelRect, doneRect) = ActionBarRects(BarAnchor ?? pending);
             if (barRect.Contains(screen))
             {
                 _pressedBarButton = doneRect.Contains(screen) ? 1
@@ -938,6 +948,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private readonly RectangleTween _pendingGlide = new();
     private IDisposable? _pendingGlideTween;
 
+    /// <summary>
+    /// The rectangle the Cancel/Done/Pad bar is placed on — the EASED rect while a glide is
+    /// in flight, the settled one otherwise. Paint and every hit-test read this one property.
+    ///
+    /// <see cref="_pendingScreen"/> is the destination from the glide's first frame (so Enter
+    /// and Done always commit the final rectangle), but the bar sits <see cref="BarGap"/> px
+    /// below the region: placing it off the destination while the region was still easing
+    /// drew the bar in one place and answered clicks in another for the whole 140 ms, and a
+    /// pointer move mid-glide painted a second copy of it at the destination.
+    /// </summary>
+    private SD.Rectangle? BarAnchor => _pendingScreen is SD.Rectangle pending
+        ? (_pendingGlide.IsActive ? _pendingGlide.Current : pending)
+        : null;
+
     private void GlideSelectionTo(SD.Rectangle destination)
     {
         if (_pendingScreen is not SD.Rectangle from || destination == from)
@@ -951,13 +975,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _pendingGlideTween?.Dispose();
         _pendingGlide.Retarget(from, destination);
         SD.Rectangle band = SD.Rectangle.Union(from, destination);
+        // The bar rides BELOW the region, outside `band`. Repainting the band alone left it
+        // painted at its old spot for the whole glide, so each frame also repaints where the
+        // bar was and where it now is.
+        SD.Rectangle previousBar = ActionBarRects(from).bar;
         _pendingGlideTween = WinShot.Core.Motion.Run(
             WinShot.Core.Motion.QuickMs,
             WinShot.Core.Motion.EaseOutCubic,
             progress =>
             {
                 _pendingGlide.Update((float)progress);
-                InvalidateScreenRect(Inflated(band));
+                SD.Rectangle nowBar = ActionBarRects(BarAnchor ?? destination).bar;
+                InvalidateScreenRect(Inflated(
+                    SD.Rectangle.Union(band, SD.Rectangle.Union(previousBar, nowBar))));
+                previousBar = nowBar;
             },
             () =>
             {
@@ -1147,6 +1178,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </summary>
     private async void CopyColor(SD.Color color, string? kind = null)
     {
+        // The selector is POOLED: Complete() parks it, it is not disposed, so IsDisposed is
+        // never true and a retrying clipboard write (up to 300 ms) that landed after Escape
+        // started a tween and a 1.2 s hold on a hidden window — and could paint a stale
+        // "Copied #RRGGBB" over the NEXT session. Guard on the session, as the freeze does.
+        TaskCompletionSource<WF.DialogResult>? session = _completion;
         string hex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         try
         {
@@ -1155,14 +1191,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
         catch (Exception ex)
         {
             Log.Error("Copying a sampled colour to the clipboard failed", ex);
-            if (!IsDisposed)
+            if (IsLiveSession(session))
                 FlashMessage(FriendlyError.For(ex));
             return;
         }
 
-        if (!IsDisposed)
+        if (IsLiveSession(session))
             FlashMessage(kind is null ? $"Copied {hex}" : $"Copied {kind} color {hex}");
     }
+
+    /// <summary>Whether the session an async continuation started in is still the open one.</summary>
+    private bool IsLiveSession(TaskCompletionSource<WF.DialogResult>? session) =>
+        !IsDisposed && session is not null && _completion == session && !session.Task.IsCompleted;
 
     /// <summary>A screen rectangle as an offset into the frozen virtual-desktop snapshot.</summary>
     private SD.Rectangle FrozenRect(SD.Rectangle screen) =>
@@ -1184,6 +1224,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         double from = _hintOpacity;
         double to = arriving ? 1d : 0d;
+        // The hint is drawn on the follow frames, so ShowAsync starts the 8 ms tick for it.
+        // Nothing used to stop it, so a user with the crosshair off and the magnifier off —
+        // exactly the configuration NeedsCursorFollow exists to detect — paid a full-session
+        // cursor-follow tick for the first five sessions after install.
+        bool releaseFollowTick = !arriving && !_options.NeedsCursorFollow && !_paneHover &&
+            !_magnifierOn && _mode != SelectorMode.Window;
         _hintTween = WinShot.Core.Motion.Run(
             arriving ? WinShot.Core.Motion.EnterDurationMs : WinShot.Core.Motion.QuickMs,
             arriving ? WinShot.Core.Motion.EaseOutCubic : WinShot.Core.Motion.EaseInCubic,
@@ -1192,7 +1238,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 _hintOpacity = from + ((to - from) * progress);
                 InvalidateHintBand();
             },
-            () => _hintTween = null);
+            () =>
+            {
+                _hintTween = null;
+                if (releaseFollowTick && _hintOpacity <= 0d)
+                    StopFollowMotion();
+            });
     }
 
     /// <summary>
@@ -1205,7 +1256,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_pendingScreen is not SD.Rectangle pending)
             return null;
         SD.Rectangle pill = SelectorChrome.HintPillRect(clientSize, _hintText);
-        var (bar, _, _, _) = ActionBarRects(pending);
+        var (bar, _, _, _) = ActionBarRects(BarAnchor ?? pending);
         SD.Rectangle barLocal = ToLocal(bar, monitorBounds);
         if (!pill.IntersectsWith(barLocal))
             return null;
@@ -1224,7 +1275,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         // A message shown over a framed selection dodges the action bar, so the strip it can
         // land in is around the bar, not one eighth down.
-        if (_pendingScreen is SD.Rectangle pending)
+        if (BarAnchor is SD.Rectangle pending)
         {
             var (bar, _, _, _) = ActionBarRects(pending);
             InvalidateScreenRect(new SD.Rectangle(
@@ -1284,7 +1335,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         }
 
         // Cancel / Done hover feedback (only the bar rect repaints on a state change).
-        if (_pendingScreen is SD.Rectangle barPending)
+        if (BarAnchor is SD.Rectangle barPending)
         {
             var (barRect, padRect, cancelRect, doneRect) = ActionBarRects(barPending);
             int hover = doneRect.Contains(_currentScreen) ? 1
@@ -1413,12 +1464,21 @@ public sealed class FastRegionSelectorDialog : WF.Form
             AnimateBarFills();
             if (_pendingScreen is SD.Rectangle pend)
             {
-                var (bar, padButton, cancel, done) = ActionBarRects(pend);
+                var (bar, padButton, cancel, done) = ActionBarRects(BarAnchor ?? pend);
                 InvalidateScreenRect(bar);
                 if (pressed == 1 && done.Contains(_currentScreen)) Confirm(VirtualFromScreen(pend));
                 else if (pressed == 0 && cancel.Contains(_currentScreen)) Complete(WF.DialogResult.Cancel);
                 else if (pressed == 2 && padButton.Contains(_currentScreen))
-                    GlideSelectionTo(MarqueeEdge.Pad(pend, MarqueeEdge.PaddingStepPx, _vs));
+                {
+                    // Pad returns the rect unchanged when the padded one would leave the
+                    // desktop, and GlideSelectionTo no-ops on that — so a selection already
+                    // flush with an edge swallowed the press after playing its press fill.
+                    SD.Rectangle padded = MarqueeEdge.Pad(pend, MarqueeEdge.PaddingStepPx, _vs);
+                    if (padded != pend)
+                        GlideSelectionTo(padded);
+                    else
+                        FlashMessage("The selection already reaches the edge of the screen.");
+                }
             }
             return;
         }
@@ -1642,7 +1702,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         // Cancel / Done bar on the adjustable selection: below the region, flipped above when it
         // runs to the screen bottom, tucked inside the bottom when the region spans the full height.
-        if (_pendingScreen is SD.Rectangle pendBar)
+        if (BarAnchor is SD.Rectangle pendBar)
         {
             var (bar, padButton, cancel, done) = ActionBarRects(pendBar);
             if (bar.IntersectsWith(monitorBounds))
@@ -2147,7 +2207,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_pendingScreen is SD.Rectangle p)
         {
             // The Cancel/Done bar reads as buttons, not as selection ground.
-            var (bar, _, _, _) = ActionBarRects(p);
+            var (bar, _, _, _) = ActionBarRects(BarAnchor ?? p);
             if (bar.Contains(_currentScreen))
                 return WF.Cursors.Hand;
 
@@ -2163,8 +2223,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private const int BarPad = 8;   // placement inset only; button geometry scales in ActionBarRects
     private const int BarGap = 12;
 
-    /// <summary>What the padding cell says. Its keyboard equivalent is [ and ].</summary>
-    private const string PadButtonLabel = "Pad";
+    /// <summary>What the padding cell says. Its keyboard equivalent is [ and ]. Spelled out
+    /// rather than abbreviated: it sits between "Cancel" and "Done" on an owner-drawn overlay
+    /// that can carry no tooltip, so the label is the only explanation it gets.</summary>
+    private const string PadButtonLabel = "Pad edges";
 
     /// <summary>0..1 hover and press amounts for the bar's three cells (pad, cancel, done),
     /// eased over <see cref="Motion.QuickMs"/> so no fill on the bar snaps.</summary>
@@ -2195,7 +2257,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     _barHover[i] = fromHover[i] + (((hoverTarget == i ? 1d : 0d) - fromHover[i]) * progress);
                     _barPress[i] = fromPress[i] + (((pressTarget == i ? 1d : 0d) - fromPress[i]) * progress);
                 }
-                if (_pendingScreen is SD.Rectangle p)
+                if (BarAnchor is SD.Rectangle p)
                     InvalidateScreenRect(ActionBarRects(p).bar);
             },
             () => _barTween = null);

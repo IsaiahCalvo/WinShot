@@ -42,27 +42,7 @@ internal static class SelectorCursors
     {
         try
         {
-            int size = WinShot.Recording.RecordingMonitorDpi.Px(CameraLogicalPx, scale);
-            int inset = WinShot.Recording.RecordingMonitorDpi.Px(4, scale);
-            using var bmp = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppArgb);
-            using (var g = SD.Graphics.FromImage(bmp))
-            {
-                g.Clear(SD.Color.Transparent);
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-                // The glyph font is in POINTS, which resolve against the bitmap's own 96 DPI
-                // and not the target monitor's, so the point size carries the scale too.
-                using var font = ThemePalette.IconFont((float)(ThemePalette.GlyphActionPt * scale));
-                // The glyph sits down-and-right of the image origin because a cursor built
-                // from GetHicon carries a (0,0) hotspot -- so the pointed-at pixel is the
-                // top-left corner, and the camera trails it the way a drag ghost would.
-                var box = new SD.Rectangle(inset, inset, size - inset, size - inset);
-                WF.TextRenderer.DrawText(g, "", font, box, SD.Color.Black,
-                    WF.TextFormatFlags.NoPadding);
-                WF.TextRenderer.DrawText(g, "", font,
-                    new SD.Rectangle(box.X - 1, box.Y - 1, box.Width, box.Height), SD.Color.White,
-                    WF.TextFormatFlags.NoPadding);
-            }
-
+            using SD.Bitmap bmp = BuildCameraBitmap(scale);
             // One cursor per scale for the process lifetime; the GDI handle is freed at exit.
             return new WF.Cursor(bmp.GetHicon());
         }
@@ -72,4 +52,66 @@ internal static class SelectorCursors
             return WF.Cursors.Hand;
         }
     }
+
+    /// <summary>
+    /// The cursor image before it becomes an HCURSOR, exposed so a test can read its pixels.
+    ///
+    /// The glyph goes through GDI+ <c>DrawString</c>, never <c>TextRenderer.DrawText</c>.
+    /// TextRenderer is a GDI (DrawTextW) wrapper and GDI does not write the alpha byte of a
+    /// 32-bpp DIB, so a glyph drawn that way onto a surface cleared to Transparent stays at
+    /// A=0 — and <c>GetHicon</c> derives the icon's AND mask from alpha, so the cursor came
+    /// out invisible (or, if GDI+ forced A=255 on ReleaseHdc, a black square trailing the
+    /// pointer). <see cref="SelectorChrome"/> documents the same trap for the fading labels.
+    /// </summary>
+    internal static SD.Bitmap BuildCameraBitmap(double scale)
+    {
+        int size = WinShot.Recording.RecordingMonitorDpi.Px(CameraLogicalPx, scale);
+        int inset = WinShot.Recording.RecordingMonitorDpi.Px(4, scale);
+        var bmp = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            using var g = SD.Graphics.FromImage(bmp);
+            g.Clear(SD.Color.Transparent);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+            // The glyph font is in POINTS, which resolve against the bitmap's own 96 DPI
+            // and not the target monitor's, so the point size carries the scale too.
+            using var font = ThemePalette.IconFont((float)(ThemePalette.GlyphActionPt * scale));
+            using var format = new SD.StringFormat(SD.StringFormat.GenericTypographic)
+            {
+                Alignment = SD.StringAlignment.Near,
+                LineAlignment = SD.StringAlignment.Near,
+                FormatFlags = SD.StringFormatFlags.NoWrap,
+            };
+            // The glyph sits down-and-right of the image origin because a cursor built
+            // from GetHicon carries a (0,0) hotspot -- so the pointed-at pixel is the
+            // top-left corner, and the camera trails it the way a drag ghost would.
+            var box = GlyphBox(size, inset);
+            // A symmetric halo, not one offset copy: a single dark pass down-and-right left
+            // the top-left edge of a white camera with no contrast at all over light screen
+            // content, and the cursor has to read on any wallpaper.
+            using (var halo = new SD.SolidBrush(SD.Color.Black))
+            {
+                foreach (var (dx, dy) in Halo)
+                    g.DrawString(CameraGlyph, font, halo, box.X + dx, box.Y + dy, format);
+            }
+            using (var brush = new SD.SolidBrush(SD.Color.White))
+                g.DrawString(CameraGlyph, font, brush, box.X, box.Y, format);
+            return bmp;
+        }
+        catch
+        {
+            bmp.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Where the glyph is drawn inside a <paramref name="size"/>-px cursor bitmap.</summary>
+    internal static SD.Rectangle GlyphBox(int size, int inset) =>
+        new(inset, inset, size - inset, size - inset);
+
+    /// <summary>Segoe Fluent Icons "Camera" (U+E722), the same family every other glyph uses.</summary>
+    private const string CameraGlyph = "";
+
+    private static readonly (int dx, int dy)[] Halo =
+        [(-1, 0), (1, 0), (0, -1), (0, 1)];
 }

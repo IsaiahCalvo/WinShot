@@ -927,7 +927,7 @@
                                     <CheckBox x:Name="CursorOnScreenshotsCheck" Content="Show on screenshots"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Applies to captures taken without the selection overlay: fullscreen, display, self-timer and repeat region."/>
+                                           Text="Applies to every capture the overlay does not draw itself: fullscreen, display, self-timer, repeat region, and an area capture taken with Freeze screen off."/>
                             </StackPanel>
                         </Border>
 
@@ -954,7 +954,7 @@
                                     <CheckBox x:Name="AdjustSelectionCheck" Content="Adjust selection before capturing"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Off, releasing the drag takes the shot. Hold Ctrl as you release to get the other behaviour once."/>
+                                           Text="When off, releasing the drag takes the shot. Hold Ctrl as you release to get the other behavior once."/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Window capture"/>
                                     <ComboBox x:Name="WindowBackgroundCombo" HorizontalAlignment="Stretch">

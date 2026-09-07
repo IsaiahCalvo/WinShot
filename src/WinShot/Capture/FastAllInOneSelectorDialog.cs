@@ -829,24 +829,51 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// Reshapes the pending region to a newly chosen ratio, keeping its top-left and width.
     /// Picking 16:9 and watching the selection you already framed stay 4:3 until you redrew
     /// it would make the menu look broken.
+    ///
+    /// A ratio taller than the desktop scales its WIDTH down instead of losing the height:
+    /// clipping the height would hand back a rectangle that is not the ratio the badge under
+    /// the crop glyph says is in force, which is the same "looks broken" this method exists
+    /// to prevent.
     /// </summary>
     internal void ApplyAspectRatio(double? ratio)
     {
         if (ratio is not double value || value <= 0 || _pendingPx is not SD.Rectangle pending)
             return;
-        ApplyExactSize(pending.Width, AspectRatioPresets.HeightFor(pending.Width, value));
+
+        int width = Math.Min(pending.Width, _vs.Width);
+        int height = AspectRatioPresets.HeightFor(width, value);
+        if (height > _vs.Height)
+        {
+            height = _vs.Height;
+            width = Math.Max(1, (int)Math.Round(height * value));
+        }
+        ApplyExactSize(width, height);
     }
 
+    /// <summary>
+    /// Resizes the pending region to an exact size, keeping its top-left where it can and
+    /// SLIDING it back inside the desktop where it cannot.
+    ///
+    /// Anchoring at the old top-left and then clipping is what made "expand to full size"
+    /// select only the leftover below-and-right of whatever was already framed, and made a
+    /// tall aspect preset on a low selection come out at some other ratio entirely. The
+    /// requested size wins; only a size that genuinely exceeds the desktop is clipped.
+    /// </summary>
     internal void ApplyExactSize(int width, int height)
     {
         if (width < 1 || height < 1)
             return;
 
+        width = Math.Min(width, _vs.Width);
+        height = Math.Min(height, _vs.Height);
         SD.Point anchor = _pendingPx?.Location ?? new SD.Point(
             Math.Max(0, (_vs.Width - width) / 2),
             Math.Max(0, (_vs.Height - height) / 2));
-        var rect = new SD.Rectangle(anchor.X, anchor.Y, width, height);
-        rect.Intersect(new SD.Rectangle(0, 0, _vs.Width, _vs.Height));
+        var rect = new SD.Rectangle(
+            Math.Clamp(anchor.X, 0, Math.Max(0, _vs.Width - width)),
+            Math.Clamp(anchor.Y, 0, Math.Max(0, _vs.Height - height)),
+            width,
+            height);
         if (rect.Width < 1 || rect.Height < 1)
             return;
 
@@ -1305,6 +1332,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private static readonly SD.Color BarBorder = ThemePalette.BorderStrong;
         private static readonly SD.Color HoverFill = ThemePalette.HoverFill;
         private static readonly SD.Color SelectedFill = ThemePalette.Accent;
+
+        /// <summary>Accent chip that carries small white text (the ratio badge).</summary>
+        private static readonly SD.Color RatioFill = ThemePalette.AccentPressed;
         private static readonly SD.Color GlyphColor = ThemePalette.TextPrimary;
         private static readonly SD.Color LabelColor = ThemePalette.TextSecondary;
         private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x3A, 0x3A, 0x3A);
@@ -1723,13 +1753,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             if (ratioChosen || _hoverIndex == HoverRatio)
             {
                 using var path = GdiPaths.RoundedRect(_ratioRect, 8);
-                using var brush = new SD.SolidBrush(ratioChosen ? SelectedFill : HoverFill);
+                // RatioFill, not SelectedFill: the badge is white TextMicroPt and white on the
+                // bare accent measures 3.65:1, under the 4.5:1 floor for small text. The
+                // pressed accent is the same identity a step darker and clears it at 5.62:1.
+                using var brush = new SD.SolidBrush(ratioChosen ? RatioFill : HoverFill);
                 g.FillPath(brush, path);
             }
             var ratioGlyphRect = _ratioRect;
             if (ratioChosen)
                 ratioGlyphRect.Height -= U(11); // make room for the badge under the glyph
-            WF.TextRenderer.DrawText(g, "", _glyphFont, ratioGlyphRect,
+            // U+E7A8, not the crop glyph: with Region selected and a ratio chosen the bar was
+            // showing two identical accent-filled crop icons a few cells apart.
+            WF.TextRenderer.DrawText(g, "", _glyphFont, ratioGlyphRect,
                 ratioChosen ? SD.Color.White : GlyphColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);

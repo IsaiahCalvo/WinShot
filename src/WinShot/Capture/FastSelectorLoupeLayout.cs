@@ -1,4 +1,4 @@
-﻿using SD = System.Drawing;
+using SD = System.Drawing;
 
 namespace WinShot.Capture;
 

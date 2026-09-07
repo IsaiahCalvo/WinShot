@@ -1,4 +1,4 @@
-﻿# WinShot URL and CLI commands
+# WinShot URL and CLI commands
 
 WinShot registers `winshot://` for local automation. If WinShot is already running, the new command is sent to the tray app and the second process exits.
 
