@@ -1,6 +1,8 @@
-﻿using WinShot.Overlay;
+﻿using WinShot.Core;
+using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
+using WF = System.Windows.Forms;
 
 namespace WinShot.Tests;
 
@@ -124,5 +126,65 @@ public class TallCapturePreviewLayoutTests
         Assert.NotNull(preview);
         Assert.True(sw.ElapsedMilliseconds >= 150,
             $"TryCreate returned in {sw.ElapsedMilliseconds} ms while the source was locked, so it never took the lock.");
+    }
+
+    /// <summary>
+    /// The flyout fades in on hover and out again, and it is created and destroyed on every
+    /// pass of the pointer over the card -- so a stranded tween here would raise the process
+    /// timer resolution once per hover and never put it back.
+    /// </summary>
+    [Fact]
+    public void HoveringAndLeaving_LeavesNoTweenHoldingTheTimer()
+    {
+        Assert.Equal(0, Motion.Holders);
+        using var source = new SD.Bitmap(320, 4000, SD.Imaging.PixelFormat.Format32bppPArgb);
+        var visuals = QuickAccessOverlayThemePalette.For(QuickAccessOverlayThemePalette.Current);
+
+        TallCapturePreviewWindow? preview =
+            TallCapturePreviewWindow.TryCreate(source, Card, dpi: 96, visuals);
+        Assert.NotNull(preview);
+
+        preview!.StartPosition = WF.FormStartPosition.Manual;
+        preview.Location = new SD.Point(-20_000, -20_000);
+        preview.Show();
+        WF.Application.DoEvents();
+
+        // Out before in has finished, which is what a pointer crossing the card actually does.
+        preview.FadeOutAndClose();
+        PumpUntil(() => Motion.Holders == 0);
+
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>Closing mid-fade must not strand the hold either.</summary>
+    [Fact]
+    public void ClosingMidFade_ReleasesTheMotionHold()
+    {
+        Assert.Equal(0, Motion.Holders);
+        using var source = new SD.Bitmap(320, 4000, SD.Imaging.PixelFormat.Format32bppPArgb);
+        var visuals = QuickAccessOverlayThemePalette.For(QuickAccessOverlayThemePalette.Current);
+
+        TallCapturePreviewWindow? preview =
+            TallCapturePreviewWindow.TryCreate(source, Card, dpi: 96, visuals);
+        Assert.NotNull(preview);
+
+        preview!.StartPosition = WF.FormStartPosition.Manual;
+        preview.Location = new SD.Point(-20_000, -20_000);
+        preview.Show();
+        WF.Application.DoEvents();
+        preview.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    private static void PumpUntil(Func<bool> condition, int ms = 5000)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < ms)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
     }
 }
