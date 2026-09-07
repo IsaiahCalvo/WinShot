@@ -45,6 +45,8 @@ internal static class SettingsTruthCatalog
             "NotifyStyleOcr",
             "NotifyStyleCopy",
             "NotifyStyleSave",
+            "ScreenshotBackground",
+            "ScreenshotBackgroundColor",
             "FreezeScreen",
             "CrosshairMode",
             "ShowCrosshair",
@@ -115,7 +117,7 @@ internal static class SettingsTruthCatalog
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
+            "AddPixelBorder", "ConvertToSrgb", "CursorOnScreenshots",
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",

@@ -885,17 +885,27 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Frame"/>
                                     <CheckBox x:Name="AddPixelBorderCheck" Content="Add 1px border to all screenshots"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableScreenshotBackgroundRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="ScreenshotBackgroundRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Background"/>
-                                    <ComboBox x:Name="BackgroundCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="BackgroundCombo" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnBackgroundModeChanged">
                                         <ComboBoxItem Content="None" Tag="none"/>
                                         <ComboBoxItem Content="Wallpaper" Tag="wallpaper"/>
                                         <ComboBoxItem Content="Gradient" Tag="gradient"/>
                                         <ComboBoxItem Content="Solid color" Tag="color"/>
                                     </ComboBox>
                                 </DockPanel>
-                                <TextBlock x:Name="UnavailableScreenshotBackgroundHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
-                                           Text="Applies the background composer to every screenshot. Hold Shift while capturing to skip it."/>
+                                <DockPanel x:Name="ScreenshotBackgroundColorRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Color"/>
+                                    <Border x:Name="BackgroundColorSwatch" Width="22" Height="22" CornerRadius="4"
+                                            DockPanel.Dock="Right" Margin="8,0,0,0"
+                                            BorderThickness="1" BorderBrush="{StaticResource BorderBrush}"/>
+                                    <TextBox x:Name="BackgroundColorBox" Style="{StaticResource SettingsTextBox}"
+                                             TextChanged="OnBackgroundColorChanged"/>
+                                </DockPanel>
+                                <TextBlock x:Name="ScreenshotBackgroundHint" Style="{StaticResource SubHint}"
+                                           Visibility="Collapsed"
+                                           Text="Every screenshot is padded and placed on this background as it is taken. The Quick Access card's background button still composes one capture at a time."/>
                             </StackPanel>
                         </Border>
 

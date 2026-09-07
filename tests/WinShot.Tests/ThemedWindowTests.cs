@@ -210,6 +210,8 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("SoundsRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrayIconRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("AskForNameRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ScreenshotBackgroundRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("NotificationsCard").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
@@ -240,7 +242,10 @@ public class ThemedWindowTests
             "HiDpiCheck", "SelfTimerCombo", "FreezeScreenCheck", "CrosshairModeCombo",
             "ShowMagnifierCheck", "TemplateBox", "HistorySlider", "PinnedRoundedCornersCheck",
             "PinnedShadowCheck", "PinnedBorderCheck", "AllInOneRememberCheck",
-            "OcrJoinLinesCheck", "AskForNameCheck", "RestoreDefaultsButton", "CancelButton", "SaveButton",
+            "OcrJoinLinesCheck", "AskForNameCheck",
+            "NotifyOcrCombo", "NotifyCopyCombo", "NotifySaveCombo",
+            "BackgroundCombo", "BackgroundColorBox",
+            "RestoreDefaultsButton", "CancelButton", "SaveButton",
             "AboutCheckUpdatesButton",
             "AboutRepositoryButton", "AboutLogsButton", "AboutDiagnosticsToggle",
             "AboutNoticesToggle", "AboutLicensesButton",

@@ -1178,6 +1178,19 @@ public partial class App : Application
             }
         }
 
+        // The standing "frame every shot like this" preference, applied after the downscale
+        // so the padding is measured against the pixels that ship. None (the default) does
+        // nothing, and a backdrop that fails to compose returns null rather than a capture.
+        if (ScreenshotBackdrop.IsEnabled(_settings.Current.ScreenshotBackground) &&
+            ScreenshotBackdrop.Compose(
+                bmp,
+                _settings.Current.ScreenshotBackground,
+                _settings.Current.ScreenshotBackgroundColor) is SD.Bitmap framed)
+        {
+            bmp.Dispose();
+            bmp = framed;
+        }
+
         // "Add background" has no matrix cell — it only ever arrives as a per-invocation
         // override (the tray's "Capture window with background").
         if (postCaptureActionOverride == PostCaptureAction.Background)
