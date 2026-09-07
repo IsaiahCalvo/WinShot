@@ -330,6 +330,10 @@ public partial class SettingsWindow : Window
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
         // The wheel can leave tolerance anywhere in 0-255, so the nearest of the three
         // presets is shown rather than a wrong one or none at all.
+        // The wheel writes any value in 0-255 and the combo only offers three; remember what
+        // was loaded so a session that never touched this row does not snap a tuned 45 back
+        // to 30 the next time anything else in Settings is saved.
+        _loadedTolerance = s.MeasureTolerance;
         SelectByTag(MeasureToleranceCombo, NearestTolerancePreset(s.MeasureTolerance), fallbackIndex: 1);
 
         // Annotate
@@ -605,9 +609,10 @@ public partial class SettingsWindow : Window
             s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
             s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
-            s.MeasureTolerance = int.TryParse(SelectedTag(MeasureToleranceCombo, "30"), out int tolerance)
-                ? Math.Clamp(tolerance, 0, 255)
-                : 30;
+            string tolerancePreset = SelectedTag(MeasureToleranceCombo, "30");
+            s.MeasureTolerance = tolerancePreset == NearestTolerancePreset(_loadedTolerance)
+                ? _loadedTolerance // untouched: keep whatever the wheel tuned it to
+                : int.TryParse(tolerancePreset, out int tolerance) ? Math.Clamp(tolerance, 0, 255) : 30;
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
@@ -975,6 +980,9 @@ public partial class SettingsWindow : Window
     /// <summary>The Low/Medium/High tag nearest a stored tolerance. The measure overlay's
     /// wheel writes any value in 0-255, and a combo that showed nothing for 45 would read
     /// as broken.</summary>
+    /// <summary>What <see cref="MeasureToleranceCombo"/> was showing when the pane loaded.</summary>
+    private int _loadedTolerance = 30;
+
     internal static string NearestTolerancePreset(int tolerance)
     {
         int[] presets = [15, 30, 60];

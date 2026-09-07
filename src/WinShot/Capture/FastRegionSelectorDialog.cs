@@ -212,15 +212,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _options = SelectorOptions.ForRegion(_settings?.Current);
         if (mode == SelectorMode.Measure)
         {
-            // Measurement reads the frozen bitmap, so freeze is not a preference here; and
-            // the reticle IS the tool in this mode, so it shows regardless of what the
-            // crosshair setting says about ordinary captures.
-            _options = _options with
-            {
-                FreezeScreen = true,
-                ShowCrosshair = true,
-                CrosshairMode = SelectorCrosshairMode.Always,
-            };
+            _options = _options.ForMeasure();
             ResetMeasure();
             _measure.SetTolerance(MeasureToleranceFromSettings());
         }
@@ -326,7 +318,17 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         DisposeFrozen();
         _frozen = snapshot;
         if (_frozen is null)
+        {
+            // Measure mode has nothing to read and no way to get it; say so rather than
+            // leaving a reticle and a hint strip that will never measure anything.
+            if (_mode == SelectorMode.Measure)
+            {
+                App.Toast("Measure", "Could not read the screen, so there is nothing to measure.",
+                    severity: ToastSeverity.Error);
+                InvalidateAllSurfaces();
+            }
             return;
+        }
 
         // Live mode paints solid black behind a 45% layered alpha; frozen mode paints the
         // dimmed snapshot at full alpha. The two look identical on screen (0.553*desktop vs
@@ -345,6 +347,12 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                 GetDimmedBackground(pane.MonitorBounds);
         }
         long prewarmMs = swap.ElapsedMilliseconds;
+
+        // The snapshot IS the measurement's input, and it lands 300-1700 ms after the mode
+        // opens. Nothing else re-reads it: the follow tick returns early while the pointer
+        // has not moved, so without this the mode shows a reticle and no measurement until
+        // the user jiggles the mouse.
+        NoteFrozenSnapshotLanded();
 
         // Per surface: paint the frozen frame FIRST, then go opaque. There is no ordering
         // that is completely invisible — while the live desktop still shows through, the
@@ -457,8 +465,14 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     {
         if (disposing)
         {
-            // Close, do not dispose: see the _measureMenu note.
+            // Close, do not dispose: see the _measureMenu note. By the time the form itself
+            // is being disposed the modal-menu hook is long done with it, so the deferred
+            // dispose can finally happen — otherwise one drop-down leaks per process and
+            // per pool displacement.
             CloseMeasureMenu();
+            DisposePreviousMeasureMenu();
+            // Disposing mid-animation must give the high-resolution clock back.
+            StopHintEntrance();
             DisposePanes();
             DisposeFrozen();
             _followTimer.Dispose();
@@ -963,6 +977,34 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// </summary>
     internal bool HasFullSurfaceBackground => _frozen is not null;
 
+    /// <summary>How far the overlay darkens the desktop behind the selection. One value for
+    /// the baked frozen slice and for the live fallback, so the two can never drift apart.</summary>
+    private const int OverlayDimAlpha = 115;
+
+    /// <summary>
+    /// The surface's ground: the frozen desktop slice dimmed and baked once, blitted as one
+    /// opaque copy — or, when the snapshot never arrived, a plain dim of the same weight.
+    /// Every mode paints its ground through here so a change to the dim reaches all of them.
+    /// </summary>
+    private void PaintFrozenOrDim(SD.Graphics g, SD.Rectangle monitorBounds)
+    {
+        var dimmed = GetDimmedBackground(monitorBounds);
+        if (dimmed is not null)
+        {
+            var dest = new SD.Rectangle(0, 0, monitorBounds.Width, monitorBounds.Height);
+            // SourceCopy: the background covers the whole surface, so there is nothing to
+            // blend with and a straight copy is a lot cheaper at full-monitor size.
+            var previousCompositing = g.CompositingMode;
+            g.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
+            g.DrawImage(dimmed, dest, 0, 0, dimmed.Width, dimmed.Height, SD.GraphicsUnit.Pixel);
+            g.CompositingMode = previousCompositing;
+            return;
+        }
+
+        using var dim = new SD.SolidBrush(SD.Color.FromArgb(OverlayDimAlpha, 0, 0, 0));
+        g.FillRectangle(dim, 0, 0, monitorBounds.Width, monitorBounds.Height);
+    }
+
     internal void PaintSurface(SD.Graphics g, SD.Rectangle monitorBounds)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
@@ -980,24 +1022,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         SD.Rectangle tweenBefore = _hoverTween.Current;
         bool tweening = _hoverTween.IsActive && _hoverTween.Update();
 
-        // Frozen desktop slice + uniform dim, baked once and blitted as one opaque copy.
-        var dimmed = GetDimmedBackground(monitorBounds);
-        if (dimmed is not null)
-        {
-            var dest = new SD.Rectangle(0, 0, clientSize.Width, clientSize.Height);
-            // SourceCopy: the background covers the whole surface, so there is nothing to
-            // blend with and a straight copy is a lot cheaper at full-monitor size.
-            var previousCompositing = g.CompositingMode;
-            g.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
-            g.DrawImage(dimmed, dest, 0, 0, dimmed.Width, dimmed.Height, SD.GraphicsUnit.Pixel);
-            g.CompositingMode = previousCompositing;
-        }
-        else
-        {
-            // No frozen snapshot (capture failed): select over a plain dim.
-            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
-            g.FillRectangle(dim, 0, 0, clientSize.Width, clientSize.Height);
-        }
+        PaintFrozenOrDim(g, monitorBounds);
 
         // The active selection (drawing / adjustable pending / hovered window) shows the
         // frozen pixels at full brightness with an accent border.
@@ -1107,7 +1132,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         {
             g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
             DrawFrozenSlice(g, monitorBounds);
-            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
+            using var dim = new SD.SolidBrush(SD.Color.FromArgb(OverlayDimAlpha, 0, 0, 0));
             g.FillRectangle(dim, 0, 0, monitorBounds.Width, monitorBounds.Height);
         }
         _dimmedCache[monitorBounds] = bmp;

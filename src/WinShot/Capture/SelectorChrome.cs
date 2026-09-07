@@ -74,8 +74,10 @@ internal static class SelectorChrome
     /// rather than as a guide.</summary>
     private const int SerifHalf = 2;
 
-    /// <summary>Perpendicular gap between a dimension line and its pill.</summary>
-    private const int DimensionPillGap = 6;
+    /// <summary>Perpendicular gap between a dimension line and its pill. Internal because
+    /// Measure mode places its own live pill by the same rule, and one constant in two files
+    /// is one constant that drifts.</summary>
+    internal const int DimensionPillGap = 6;
 
     /// <summary>
     /// A measured distance: an aliased 1 px hairline between two INCLUSIVE endpoints, a
@@ -118,9 +120,20 @@ internal static class SelectorChrome
             return;
 
         SD.Size pill = MeasureLabel(label);
-        SD.Point at = horizontal
-            ? new SD.Point(((a.X + b.X) / 2) - (pill.Width / 2), a.Y - pill.Height - DimensionPillGap)
-            : new SD.Point(a.X + DimensionPillGap, ((a.Y + b.Y) / 2) - (pill.Height / 2));
+        SD.Point at;
+        if (horizontal)
+        {
+            // Above the line, flipped below when the line is near the top of the surface —
+            // the same flip the live pill does. Clamping instead would park the pill on top
+            // of the very span it labels.
+            int above = a.Y - pill.Height - DimensionPillGap;
+            at = new SD.Point(((a.X + b.X) / 2) - (pill.Width / 2),
+                above >= 0 ? above : a.Y + DimensionPillGap);
+        }
+        else
+        {
+            at = new SD.Point(a.X + DimensionPillGap, ((a.Y + b.Y) / 2) - (pill.Height / 2));
+        }
         DrawLabel(g, clientSize, label, at.X, at.Y, fullyRounded: true);
     }
 
@@ -173,11 +186,17 @@ internal static class SelectorChrome
         return new SD.Size(width, height);
     }
 
+    /// <summary>The pill's ground opacity when it is fully faded in.</summary>
+    private const int LabelGroundAlpha = 235;
+
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.
     /// <paramref name="fullyRounded"/> gives a capsule (radius = height/2), which is the
-    /// measurement pill's shape; the existing selection readout keeps its radius-6 corners.</summary>
+    /// measurement pill's shape; the existing selection readout keeps its radius-6 corners.
+    /// <paramref name="amount"/> fades the whole pill in and out — GDI+ has no global alpha
+    /// for a text draw, so the fade is applied to the two colours instead of to a layer.</summary>
     public static void DrawLabel(
-        SD.Graphics g, SD.Size clientSize, string text, int x, int y, bool fullyRounded = false)
+        SD.Graphics g, SD.Size clientSize, string text, int x, int y, bool fullyRounded = false,
+        double amount = 1.0)
     {
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
         SD.Size size = MeasureBlock(text, font);
@@ -187,16 +206,20 @@ internal static class SelectorChrome
         int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
         var bg = new SD.Rectangle(left, top, w, h);
 
+        double fade = Math.Clamp(amount, 0, 1);
+        SD.Color text0 = SD.Color.FromArgb((int)Math.Round(255 * fade), ThemePalette.TextPrimary);
+
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, fullyRounded ? Math.Max(2, h / 2) : LabelRadius))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
+        using (var bgBrush = new SD.SolidBrush(
+            SD.Color.FromArgb((int)Math.Round(LabelGroundAlpha * fade), ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
         if (!text.Contains('\n'))
         {
-            WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary, LabelText);
+            WF.TextRenderer.DrawText(g, text, font, bg, text0, LabelText);
             return;
         }
 
@@ -206,7 +229,7 @@ internal static class SelectorChrome
             SD.Size measured = WF.TextRenderer.MeasureText(line.Length == 0 ? " " : line, font);
             WF.TextRenderer.DrawText(g, line, font,
                 new SD.Rectangle(bg.Left, lineTop, bg.Width, measured.Height),
-                ThemePalette.TextPrimary, LabelText);
+                text0, LabelText);
             lineTop += measured.Height;
         }
     }

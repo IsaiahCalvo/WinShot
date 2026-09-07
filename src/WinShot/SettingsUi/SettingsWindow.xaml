@@ -952,9 +952,9 @@
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Measure tolerance"/>
                                     <ComboBox x:Name="MeasureToleranceCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="Low - stops at faint edges" Tag="15"/>
-                                        <ComboBoxItem Content="Medium - recommended" Tag="30"/>
-                                        <ComboBoxItem Content="High - ignores gradients and shadows" Tag="60"/>
+                                        <ComboBoxItem Content="Low" Tag="15"/>
+                                        <ComboBoxItem Content="Medium (default)" Tag="30"/>
+                                        <ComboBoxItem Content="High" Tag="60"/>
                                     </ComboBox>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"

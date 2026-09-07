@@ -170,12 +170,129 @@ public class MeasureModeTests
     [Fact]
     public void AltDoesNotLatchTheMagnifierHereBecauseTheLoupeIsPartOfTheTool()
     {
-        using var selector = Measuring(new Point(80, 60), out _);
-        bool before = selector.MagnifierVisible;
+        // The loupe is ON — that is the point: Alt is the contrast modifier in this mode, so
+        // it must not blink the loupe out from under the hand reaching for Alt+click.
+        using var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        using Bitmap frozen = Desktop();
+        selector.EnterMeasureForRender(frozen, Screen, new Point(80, 60), magnifier: true);
+        Assert.True(selector.MagnifierVisible);
 
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Menu | WF.Keys.Alt));
 
-        Assert.Equal(before, selector.MagnifierVisible);
+        Assert.True(selector.MagnifierVisible);
+    }
+
+    [Fact]
+    public void MeasureModeTurnsTheLoupeOnEvenWhenTheSettingHasItOff()
+    {
+        // Alt is rebound here, so "Show magnifier" off would leave the mode with no loupe and
+        // no gesture left to summon one.
+        var off = new Settings { ShowMagnifier = false, FreezeScreen = false, CrosshairMode = "never" };
+        SelectorOptions measure = SelectorOptions.ForRegion(off).ForMeasure();
+
+        Assert.True(measure.ShowMagnifier);
+        Assert.True(measure.ShowCrosshair);
+        Assert.True(measure.FreezeScreen);
+        Assert.Equal(SelectorCrosshairMode.Always, measure.CrosshairMode);
+    }
+
+    // ----------------------------------------------------------------- the deferred snapshot
+
+    [Fact]
+    public void TheSnapshotLandingMeasuresWithoutWaitingForThePointerToMove()
+    {
+        // The overlay opens instantly and the freeze snapshot lands 300-1700 ms later. A
+        // cursor that has not moved since the hotkey fired still has to get a reading.
+        using var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        using Bitmap frozen = Desktop();
+        selector.EnterMeasureForRender(frozen: null, Screen, new Point(80, 60));
+        Assert.Null(selector.MeasuredScreenRect);
+
+        selector.LandFrozenSnapshotForRender(frozen);
+
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+    }
+
+    [Fact]
+    public void TheHintStripSaysItIsStillPreparingUntilTheSnapshotLands()
+    {
+        using var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        using Bitmap frozen = Desktop();
+        selector.EnterMeasureForRender(frozen: null, Screen, new Point(80, 60));
+
+        Assert.Contains("Preparing", selector.HintStripText());
+        Assert.DoesNotContain("H / V hold", selector.HintStripText());
+        Assert.Contains("preparing", selector.NothingToMeasureMessage);
+
+        selector.LandFrozenSnapshotForRender(frozen);
+
+        Assert.Contains("H / V hold", selector.HintStripText());
+        Assert.Equal("Nothing to measure here.", selector.NothingToMeasureMessage);
+    }
+
+    // ----------------------------------------------------------------- the right-click menu
+
+    /// <summary>
+    /// A drop-down does not stop WM_TIMER, so the 8 ms follow tick keeps re-measuring under
+    /// the open menu as the hand walks down it. Every row therefore has to act on where the
+    /// right-click landed, not on where the pointer ended up.
+    /// </summary>
+    private static FastRegionSelectorDialog MenuOpenedAt(Point rightClick, out Bitmap frozen)
+    {
+        var selector = Measuring(rightClick, out frozen);
+        selector.ShowMeasureMenuForRender(rightClick);
+        return selector;
+    }
+
+    private static void CloseSession(FastRegionSelectorDialog selector)
+    {
+        // A live drop-down left open hands the next test class a modal-menu hook.
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+        WF.Application.DoEvents();
+    }
+
+    private static void ClickRow(FastRegionSelectorDialog selector, string text) =>
+        selector.MeasureMenuForRender!.Items.Cast<WF.ToolStripItem>()
+            .First(i => i.Text == text).PerformClick();
+
+    [Fact]
+    public void AGuideFromTheMenuLandsWhereTheRightClickDidNotWhereTheRowIs()
+    {
+        using var selector = MenuOpenedAt(new Point(80, 60), out _);
+
+        selector.MoveMeasureCursorForRender(new Point(210, 190)); // walking down to the row
+        ClickRow(selector, "Add vertical guide");
+
+        Assert.Equal(new[] { 80 }, selector.MeasureState.GuidesX);
+        CloseSession(selector);
+    }
+
+    [Fact]
+    public void HoldWidthFromTheMenuHoldsTheObjectThatWasRightClicked()
+    {
+        using var selector = MenuOpenedAt(new Point(80, 60), out _);
+
+        selector.MoveMeasureCursorForRender(new Point(300, 250)); // off the card entirely
+        ClickRow(selector, "Hold width");
+
+        Assert.Equal(Card.Width, selector.MeasureState.Holds.Single().Bounds.Width);
+        CloseSession(selector);
+    }
+
+    [Fact]
+    public void CaptureThisObjectCapturesTheObjectThatWasRightClicked()
+    {
+        using var selector = MenuOpenedAt(new Point(80, 60), out _);
+
+        selector.MoveMeasureCursorForRender(new Point(300, 250));
+        ClickRow(selector, "Capture this object");
+
+        Assert.Equal(Card, selector.SelectedRegionPx);
+        WF.Application.DoEvents();
     }
 
     [Fact]
@@ -375,6 +492,93 @@ public class MeasureModeTests
         // must be absent is a measurement, not the crosshair.
         Assert.Null(selector.MeasuredScreenRect);
         Assert.Equal(0, CountCrimson(render, new Rectangle(100, 100, 250, 150)));
+    }
+
+    // ------------------------------------------------------- the two pills, side by side
+
+    /// <summary>A card with a dark mark inside it, so the region has two colours and the
+    /// contrast readout has something to report. The mark sits clear of the rays cast from
+    /// (80, 60), so the run is still exactly the card.</summary>
+    private static Bitmap DesktopWithContrast()
+    {
+        var bmp = new Bitmap(Screen.Width, Screen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.Clear(Color.FromArgb(0x10, 0x30, 0x80));
+        using (var card = new SolidBrush(Color.FromArgb(0xF0, 0xF0, 0xF0)))
+            g.FillRectangle(card, Card);
+        // Clear of every row and column the tests cast a ray along, so the run stays the
+        // whole card while the region still holds two colours to compare.
+        using (var mark = new SolidBrush(Color.FromArgb(0x20, 0x20, 0x20)))
+            g.FillRectangle(mark, new Rectangle(60, 70, 8, 8));
+        return bmp;
+    }
+
+    private static FastRegionSelectorDialog MeasuringWithContrast(Point cursor, out Bitmap frozen)
+    {
+        var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        frozen = DesktopWithContrast();
+        selector.EnterMeasureForRender(frozen, Screen, cursor);
+        return selector;
+    }
+
+    [Theory]
+    [InlineData(42)]  // 2 px inside the card's top edge — the worst case
+    [InlineData(60)]
+    [InlineData(96)]  // and 2 px inside the bottom edge
+    public void TheContrastReadoutNeverLandsOnTopOfTheLiveMeasurementPill(int cursorY)
+    {
+        // Both pills are the same ground colour, so an overlap is one blob with two texts
+        // stacked in it — and the live pill is also the click-to-capture target.
+        using var selector = MeasuringWithContrast(new Point(80, cursorY), out _);
+
+        Rectangle live = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        Rectangle contrast = Assert.IsType<Rectangle>(selector.ContrastPillForRender);
+
+        Assert.False(live.IntersectsWith(contrast),
+            $"live {live} and contrast {contrast} overlap at cursor y={cursorY}");
+        Assert.True(Screen.Contains(contrast), $"contrast pill {contrast} is off screen");
+    }
+
+    [Fact]
+    public void BothPillGroundsAreActuallyPaintedOnTheRectsTheyReport()
+    {
+        // Ties the placement above to the paint: a rect nothing draws on proves nothing.
+        using var selector = MeasuringWithContrast(new Point(80, 42), out _);
+        Rectangle live = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        Rectangle contrast = Assert.IsType<Rectangle>(selector.ContrastPillForRender);
+        using Bitmap render = Render(selector);
+
+        // The pill ground is near-black neutral chrome; everything it could be drawn over
+        // here (dimmed blue desktop, dimmed white card) is neither.
+        static bool IsPillGround(Color c) =>
+            c.R < 70 && c.G < 70 && c.B < 70 && Math.Abs(c.R - c.B) < 20;
+
+        Assert.True(IsPillGround(render.GetPixel(live.Left + 6, live.Top + (live.Height / 2))),
+            "live pill ground");
+        Assert.True(IsPillGround(render.GetPixel(contrast.Left + 6, contrast.Top + (contrast.Height / 2))),
+            "contrast pill ground");
+        Assert.False(IsPillGround(render.GetPixel(100, Card.Bottom - 4)),
+            "and the card between them is not covered by either");
+    }
+
+    [Theory]
+    [InlineData(42)]
+    [InlineData(60)]
+    [InlineData(96)]
+    public void AClickMeansOneThingBecauseThePillIsNeverUnderThePointer(int cursorY)
+    {
+        // The pill is placed relative to the cursor's OWN row, so no pointer can ever be
+        // inside it — which is why a left click has one meaning (copy) instead of two, and
+        // why capturing the object is Enter and the menu row the hint strip names.
+        using var selector = Measuring(new Point(80, cursorY), out _);
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        Assert.False(pill.Contains(new Point(80, cursorY)), $"pill {pill} sits under the cursor");
+
+        selector.HandleMouseDown(new WF.MouseEventArgs(WF.MouseButtons.Left, 1, 80, cursorY, 0));
+
+        // A click never ends the session here; only Enter and the menu do.
+        Assert.Equal(WF.DialogResult.None, selector.DialogResult);
     }
 
     [Fact]
