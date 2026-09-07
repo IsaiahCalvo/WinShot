@@ -1535,6 +1535,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 Renderer = new DarkDropDown.DarkMenuRenderer(),
                 ShowImageMargin = false,
+                // WinForms only runs the renderer's check pass when a margin exists, so with
+                // both margins off the Checked flags below were dead code and reopening the
+                // menu could not say which ratio was in force.
+                ShowCheckMargin = true,
             };
             for (int i = 0; i < AspectRatioPresets.All.Count; i++)
             {
@@ -1546,7 +1550,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 item.Click += (_, _) => ChooseRatio(index);
                 menu.Items.Add(item);
             }
-            menu.Closed += (_, _) => menu.Dispose();
+            // Deferred, never inline: WinForms raises Closed from inside
+            // ToolStripDropDown.SetVisibleCore(false) and keeps touching the strip after the
+            // handler returns — SetWindowLong(Handle) on a disposed ContextMenuStrip threw
+            // ObjectDisposedException out of the framework's own click handling, aborting the
+            // hide sequence (mouse capture and the modal menu filter never released) on a
+            // topmost, ShowWithoutActivation toolbar, and App's ThreadException handler only
+            // logged it. Picking a ratio looked like it worked and left the menu machinery
+            // half torn down.
+            menu.Closed += (_, _) => menu.BeginInvoke(new Action(menu.Dispose));
             menu.Show(this, new SD.Point(_ratioRect.Left, _ratioRect.Bottom + U(4)));
         }
 
