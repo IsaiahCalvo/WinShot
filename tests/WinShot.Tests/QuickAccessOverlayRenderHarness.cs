@@ -208,7 +208,9 @@ public class QuickAccessOverlayRenderHarness
             .GetValue(overlay)!;
         var createPreview = type.GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!;
         var createBlurred = type.GetMethod("CreateBlurred", BindingFlags.Static | BindingFlags.NonPublic)!;
-        var preview = (SD.Bitmap)createPreview.Invoke(null, new object[] { source, thumb.Width, thumb.Height })!;
+        // The settled card is the bicubic pass, so the harness renders that one, not the
+        // bilinear first frame RenderFirstPreview puts up while the async render catches up.
+        var preview = (SD.Bitmap)createPreview.Invoke(null, new object[] { source, thumb.Width, thumb.Height, false })!;
         var blurred = (SD.Bitmap)createBlurred.Invoke(null, new object[] { preview })!;
         type.GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, preview);
         type.GetField("_blurredPreview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, blurred);

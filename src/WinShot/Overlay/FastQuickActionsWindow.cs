@@ -2747,11 +2747,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // nothing said the file was never written. The raw exception stays in the log.
             Log.Error("Save failed", ex);
             if (announce)
-                ShowToastAt(
-                    ToastAnchor(),
-                    "Save failed",
-                    "WinShot could not write the file. Check the folder still exists and you have permission to write to it.",
-                    Core.ToastSeverity.Error);
+                ShowToastAt(ToastAnchor(), "Save failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
             return false;
         }
     }
