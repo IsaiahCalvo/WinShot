@@ -16,6 +16,12 @@ namespace WinShot.Tests;
 /// readable, and it is also what lets the absolute `== 0` assertions come back: those are the
 /// leak invariant the plan asks for, and a delta cannot see a leak because the baseline
 /// absorbs it.
+///
+/// That is not a hopeful claim — it was falsified. A throwaway test in an ordinary parallel
+/// collection held Motion.Acquire() for ten seconds across a full run: with the attribute
+/// below both assertions still read 0, and with it commented out both fail (Expected 0,
+/// Actual 1). So the attribute is load-bearing, not decoration. Do not remove it to "tidy up",
+/// and do not add a second class to this collection unless it also needs the counter still.
 /// </summary>
 [CollectionDefinition("MotionRefcount", DisableParallelization = true)]
 public sealed class MotionRefcountCollection
