@@ -266,6 +266,27 @@ public class ToastAndControlEdgeCaseTests
         Assert.InRange(c.X, -1, 200);
     }
 
+    /// <summary>
+    /// The caller-driven overload used to end on any amount at or past 1, which reads fine for
+    /// EaseOutCubic and quietly breaks the entrance ease: EaseOutBack sails past the target
+    /// and settles back, so a rect that treats the first frame over 1.0 as the end snaps home
+    /// partway through the very curve the caller asked for. The end is Motion.Run's exact 1.0.
+    /// </summary>
+    [Fact]
+    public void RectangleTweenRidesAnEasesOvershootInsteadOfEndingOnIt()
+    {
+        var tween = new RectangleTween();
+        tween.Retarget(new SD.Rectangle(0, 0, 10, 10), new SD.Rectangle(100, 0, 10, 10));
+
+        float overshot = (float)Motion.EaseOutBack(0.72d);
+        Assert.True(overshot > 1f, $"EaseOutBack(0.72) is {overshot}, so this test proves nothing");
+        Assert.True(tween.Update(overshot), "the tween ended on an overshoot frame");
+        Assert.True(tween.Current.X > 100, $"the rect stopped at {tween.Current.X} instead of sailing past 100");
+
+        Assert.False(tween.Update(1f));
+        Assert.Equal(100, tween.Current.X);
+    }
+
     // ---- FriendlyError over the failures the breaker list names ----------------------
     /// <summary>COMException derives from ExternalException, so the GDI+ arm caught it too and
     /// told a user whose video stop or history delete failed to "try the capture again".</summary>
