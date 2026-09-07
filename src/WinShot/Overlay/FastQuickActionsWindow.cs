@@ -422,6 +422,9 @@ public sealed class FastQuickActionsWindow : WF.Form
             // also holds the high-resolution clock, leaking it would keep timeBeginPeriod(1)
             // raised for the life of the process.
             EndStatusFlash();
+            // A card closed mid-swap would otherwise hold a Motion refcount for its duration.
+            _pinGlyphTween?.Dispose();
+            _pinGlyphTween = null;
             HideActionTooltip();
             _tooltipTimer.Dispose();
             _overflowMenu.Dispose();
@@ -455,7 +458,20 @@ public sealed class FastQuickActionsWindow : WF.Form
         int top = _cardRect.Top + layout.ControlPadding;
         int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
         // Preserve the user's verified action placement while using the selected HTML design.
-        AddIconButton("quick-access-pin.svg", "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
+        AddIconButton(PinAsset, "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, RequestPin);
+        // Rebuilt on every resize, so an already-pinned capture keeps the solid mark — this
+        // time with no fade, because nothing changed state, the buttons were just remade.
+        _pinButton = _buttons[^1];
+        _pinGlyphFrom = null;
+        _pinGlyphFade = 1;
+        if (_pinned)
+        {
+            _pinGlyphTween?.Dispose();
+            _pinGlyphTween = null;
+            _pinButton.Icon =
+                CreateSvgIcon(PinnedAsset, _pinButton.Icon?.Width ?? layout.IconSize, _visuals.Glyph)
+                ?? _pinButton.Icon;
+        }
         AddIconButton("quick-access-close.svg", "Close (Ctrl+W)", "Close", "Close", right, top, layout.IconSize, Close);
         if (_mediaFilePath is null)
             AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
@@ -468,6 +484,60 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         AddCopyButton("Copy", "Copy (Ctrl+C)", pillX, pillTop, layout.PillWidth, layout.PillHeight, () => CopyAsync(keepOpen: IsAltDown()));
         _focusedButton = Math.Clamp(_focusedButton, -1, _buttons.Count - 1);
+    }
+
+    // The one outline/filled pair in the icon set: the pin is outlined like its thirteen
+    // stroked siblings until this capture is actually pinned, and solid after — the same
+    // "empty until it means something" grammar a bookmark or a favourite uses.
+    private const string PinAsset = "quick-access-pin.svg";
+    private const string PinnedAsset = "quick-access-pin-filled.svg";
+
+    private ActionButton? _pinButton;
+    private bool _pinned;
+    private SD.Bitmap? _pinGlyphFrom;
+    private double _pinGlyphFade = 1;
+    private IDisposable? _pinGlyphTween;
+
+    /// <summary>Every route to pinning — the button, <c>P</c>, and the context menu row —
+    /// goes through here so the glyph can never disagree with what happened.</summary>
+    private void RequestPin()
+    {
+        PinRequested?.Invoke(this);
+        MarkPinned();
+    }
+
+    private void MarkPinned()
+    {
+        if (_pinned || _pinButton is null || IsDisposed)
+            return;
+
+        _pinned = true;
+        SD.Bitmap? outline = _pinButton.Icon;
+        SD.Bitmap? solid = CreateSvgIcon(
+            PinnedAsset, outline?.Width ?? 16, _visuals.Glyph);
+        if (solid is null)
+            return;
+
+        _pinButton.Icon = solid;
+        _pinGlyphFrom = outline;
+        _pinGlyphFade = 0;
+
+        // A cross-fade, not a move: the button stays exactly where the user is aiming.
+        _pinGlyphTween?.Dispose();
+        _pinGlyphTween = Motion.Run(
+            Motion.QuickMs,
+            Motion.EaseOutCubic,
+            eased =>
+            {
+                _pinGlyphFade = eased;
+                if (!IsDisposed)
+                    Invalidate(_pinButton.Bounds);
+            },
+            () =>
+            {
+                _pinGlyphTween = null;
+                _pinGlyphFrom = null;
+            });
     }
 
     private void AddIconButton(
@@ -697,8 +767,31 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             int x = button.Bounds.Left + (button.Bounds.Width - button.Icon.Width) / 2;
             int y = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
+
+            if (ReferenceEquals(button, _pinButton) && _pinGlyphFrom is not null && _pinGlyphFade < 1)
+            {
+                DrawGlyphFaded(g, _pinGlyphFrom, x, y, 1 - _pinGlyphFade);
+                DrawGlyphFaded(g, button.Icon, x, y, _pinGlyphFade);
+                return;
+            }
+
             g.DrawImageUnscaled(button.Icon, x, y);
         }
+    }
+
+    /// <summary>One glyph at a partial opacity — what the outline-to-solid pin swap
+    /// cross-fades through, rather than snapping between two different marks.</summary>
+    private static void DrawGlyphFaded(SD.Graphics g, SD.Bitmap glyph, int x, int y, double alpha)
+    {
+        var matrix = new SD.Imaging.ColorMatrix { Matrix33 = (float)Math.Clamp(alpha, 0, 1) };
+        using var attributes = new SD.Imaging.ImageAttributes();
+        attributes.SetColorMatrix(matrix);
+        g.DrawImage(
+            glyph,
+            new SD.Rectangle(x, y, glyph.Width, glyph.Height),
+            0, 0, glyph.Width, glyph.Height,
+            SD.GraphicsUnit.Pixel,
+            attributes);
     }
 
     private static GraphicsPath CreateButtonPath(SD.Rectangle bounds, ActionButtonShape shape, int cornerRadius)
@@ -1062,7 +1155,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                     EditRequested?.Invoke(this);
                     return;
                 case QuickActionsMenu.Pin:
-                    PinRequested?.Invoke(this);
+                    RequestPin();
                     return;
                 case QuickActionsMenu.ExtractText:
                     OcrRequested?.Invoke(this);
@@ -1672,7 +1765,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 e.Handled = true;
                 break;
             case WF.Keys.P when e.Modifiers == WF.Keys.None:
-                PinRequested?.Invoke(this);
+                RequestPin();
                 e.Handled = true;
                 break;
             case WF.Keys.O when e.Modifiers == WF.Keys.None:
@@ -2028,7 +2121,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         public int CornerRadius { get; } = cornerRadius;
         public string? Label { get; set; }
         public SD.Font? LabelFont { get; init; }
-        public SD.Bitmap? Icon { get; } = icon;
+        public SD.Bitmap? Icon { get; set; } = icon;
 
         public void Dispose()
         {
