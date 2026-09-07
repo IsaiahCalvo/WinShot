@@ -1128,7 +1128,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _buttons.Add(new BarButton("Recording", "", 5, AllInOneAction.Record, isMode: true));
             // Not a mode: measuring is not something you do to a rectangle, so this one
             // leaves All-In-One the way Fullscreen does, and the measure overlay takes over.
-            _buttons.Add(new BarButton("Measure", "↔", -1, AllInOneAction.Measure, isMode: false) { IsTextGlyph = true });
+            _buttons.Add(new BarButton("Measure", "", -1, AllInOneAction.Measure, isMode: false));
 
             _widthBox = SizeBox();
             _heightBox = SizeBox();
