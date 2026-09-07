@@ -79,6 +79,13 @@ public sealed partial class FastRegionSelectorDialog
     /// live cursor, which a test on the hidden desktop cannot place.</summary>
     internal void ShowMeasureMenuForRender(SD.Point at) => ShowMeasureMenu(at);
 
+    /// <summary>Render seam: presses a button at the cursor this harness last placed. The
+    /// real path reads the live cursor, and a test may not move the user's pointer.</summary>
+    internal void MeasureMouseDownForRender(WF.MouseButtons button) =>
+        HandleMeasureMouseDown(new WF.MouseEventArgs(button, 1, 0, 0, 0), _currentScreen);
+
+    internal bool IsDraggingGuideForRender => _draggingGuide is not null;
+
     internal SD.Rectangle? ContrastPillForRender =>
         _measured is SD.Rectangle run ? ContrastPillScreenRect(MonitorBoundsAt(_currentScreen), run) : null;
 
@@ -226,6 +233,14 @@ public sealed partial class FastRegionSelectorDialog
 
     private void HandleMeasureMouseMove()
     {
+        // A drag can outlive the guide it is holding: Escape and the menu's "Clear
+        // measurements" row both empty the list while the button is still down. The drag
+        // branch below returns early, so a drag holding a guide that no longer exists stops
+        // the mode measuring entirely until the button comes back up — and a mouse-up
+        // swallowed by the drop-down may never arrive. Drop the drag with its guide.
+        if (_draggingGuide is (bool goneAxis, int goneAt) && _measure.GuideNear(goneAxis, goneAt, 0) is null)
+            _draggingGuide = null;
+
         if (_draggingGuide is (bool vertical, int at))
         {
             int to = vertical
@@ -457,6 +472,12 @@ public sealed partial class FastRegionSelectorDialog
     {
         if (e.Button == WF.MouseButtons.Right)
         {
+            // A guide grabbed a moment ago is dropped where it stands, because the drop-down
+            // about to open is modal and eats the left mouse-up that would otherwise end the
+            // drag — without this the guide stays glued to the pointer for the rest of the
+            // session, with no button held and no way to put it down.
+            _draggingGuide = null;
+
             // Right-click-cancels stays trained in Area and Window; here it is the menu,
             // because nothing else in this mode is discoverable by looking at it.
             ShowMeasureMenu(screen);

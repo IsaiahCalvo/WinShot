@@ -590,6 +590,44 @@ public class MeasureModeTests
 
         Assert.Null(selector.MeasuredScreenRect);
     }
+
+    // ------------------------------------------------- a drag that outlives its mouse-up
+
+    [Fact]
+    public void RightClickingMidDragPutsTheGuideDownInsteadOfGluingItToThePointer()
+    {
+        using var selector = Measuring(new Point(200, 150), out _);
+        selector.MeasureState.AddGuideX(200);
+        selector.MeasureMouseDownForRender(WF.MouseButtons.Left);
+        selector.MoveMeasureCursorForRender(new Point(210, 150));
+        Assert.Equal(new[] { 210 }, selector.MeasureState.GuidesX);
+
+        // The drop-down is modal and swallows the left mouse-up, so the selector never sees
+        // one — but the 8 ms follow tick keeps running underneath it.
+        selector.MeasureMouseDownForRender(WF.MouseButtons.Right);
+        selector.MoveMeasureCursorForRender(new Point(260, 150));
+
+        Assert.False(selector.IsDraggingGuideForRender);
+        Assert.Equal(new[] { 210 }, selector.MeasureState.GuidesX);
+        CloseSession(selector);
+    }
+
+    [Fact]
+    public void ClearingTheGuidesMidDragLetsTheModeMeasureAgainWithoutWaitingForTheButton()
+    {
+        using var selector = Measuring(new Point(200, 150), out _);
+        selector.MeasureState.AddGuideX(200);
+        selector.MeasureMouseDownForRender(WF.MouseButtons.Left);
+
+        // Escape clears guides and holds while the button is still down. The drag branch
+        // returns before ever reading pixels, so a drag left holding a guide that is gone
+        // would freeze the reading at whatever it was when the button went down.
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+        selector.MoveMeasureCursorForRender(new Point(80, 60));
+
+        Assert.False(selector.IsDraggingGuideForRender);
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+    }
 }
 
 /// <summary>
