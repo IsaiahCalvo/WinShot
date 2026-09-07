@@ -601,6 +601,7 @@ public partial class SettingsWindow : Window
             s.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
             s.AutoExpandCanvas = AutoExpandCanvasCheck.IsChecked == true;
             s.SmoothPencil = SmoothPencilCheck.IsChecked == true;
+            s.InverseArrowDirection = InverseArrowCheck.IsChecked == true;
 
             // Screenshots
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;

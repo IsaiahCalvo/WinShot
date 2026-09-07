@@ -253,6 +253,26 @@ public partial class EditorWindow : Window
             e.Handled = true; // keep Space from clicking a focused toolbar button
             return;
         }
+        // Z arms the zoom gesture for as long as it is held: click a point or drag a
+        // rectangle. It is a held modifier rather than a tool, so it never takes the tool
+        // you were using away from you.
+        if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            if (!_zoomKeyDown)
+            {
+                _zoomKeyDown = true;
+                UpdateCursor();
+            }
+            e.Handled = true;
+            return;
+        }
+        // Q and W: 100 % on the two ends of whatever is selected.
+        if (Keyboard.Modifiers == ModifierKeys.None && e.Key is Key.Q or Key.W)
+        {
+            ZoomToCorner(bottomRight: e.Key == Key.W);
+            e.Handled = true;
+            return;
+        }
         // Z-order on the selected annotation: Ctrl+] / Ctrl+[ move it one step forward/back;
         // add Shift to send it all the way to front/back (the standard + CleanShot convention).
         if (_selected is not null && (Keyboard.Modifiers & ModifierKeys.Control) != 0 &&
@@ -335,7 +355,15 @@ public partial class EditorWindow : Window
         }
         else if (e.Key == Key.Escape)
         {
-            if (_marqueeActive)
+            if (_zoomKeyDown || _zoomDragging)
+            {
+                AbortZoomGesture();
+                _zoomKeyDown = false;
+                _zoomArmedByMenu = false;
+                UpdateCursor();
+                e.Handled = true;
+            }
+            else if (_marqueeActive)
             {
                 AbortMarquee();
                 Viewport.ReleaseMouseCapture();
@@ -380,7 +408,19 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyUp(KeyEventArgs e)
     {
         base.OnPreviewKeyUp(e);
-        if (e.Key != Key.Space || Keyboard.FocusedElement is TextBox) return;
+        if (Keyboard.FocusedElement is TextBox) return;
+
+        if (e.Key == Key.Z && _zoomKeyDown)
+        {
+            _zoomKeyDown = false;
+            // Letting Z go mid-drag abandons the gesture rather than zooming to a
+            // rectangle the user was no longer choosing.
+            AbortZoomGesture();
+            UpdateCursor();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key != Key.Space) return;
         if (_spaceDown)
         {
             _spaceDown = false;
@@ -681,6 +721,10 @@ public partial class EditorWindow : Window
         menu.Items.Add(new Separator());
         Row("Zoom in", "Ctrl++", () => StepZoom(1.2));
         Row("Zoom out", "Ctrl+-", () => StepZoom(1 / 1.2));
+        menu.Items.Add(new Separator());
+        Row("Zoom to top left", "Q", () => ZoomToCorner(bottomRight: false));
+        Row("Zoom to bottom right", "W", () => ZoomToCorner(bottomRight: true));
+        Row("Zoom to a region", "Z + drag", ArmZoomGesture);
 
         menu.IsOpen = true;
     }

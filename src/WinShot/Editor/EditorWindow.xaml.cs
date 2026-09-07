@@ -164,6 +164,18 @@ public partial class EditorWindow : Window
     private Point _panLast; // viewport coords
     private bool _spaceDown;
 
+    /// <summary>Z held: the next click or drag is a zoom, whatever tool is armed.</summary>
+    private bool _zoomKeyDown;
+    private bool _zoomDragging;
+    private Point _zoomDragStart;
+
+    /// <summary>The gesture came from the zoom menu, so it disarms after one use.</summary>
+    private bool _zoomArmedByMenu;
+
+    /// <summary>Whether a dragged mark lines itself up with the others. On by default,
+    /// with Ctrl as the per-drag escape, and switchable from the pointer's own menu.</summary>
+    private bool _objectSnap = true;
+
     // Drawing state.
     private bool _dragging;
     private bool _sourceOperationActive;
@@ -270,6 +282,8 @@ public partial class EditorWindow : Window
             _closed = true;
             _growMotion?.Dispose();
             _growMotion = null;
+            _zoomTween?.Dispose();
+            _zoomTween = null;
             _dragPreview?.Dispose();
             _dragPreview = null;
             Task sourceOperationsDrained = _sourceLifetime.BeginClose();
@@ -583,6 +597,69 @@ public partial class EditorWindow : Window
         ZoomAt(ViewportCentre(), zoom);
     }
 
+    /// <summary>
+    /// Q and W: 100 % on the selection's top-left or bottom-right corner — the two ends of
+    /// whatever you are working on, without a wheel or a pan. The corner goes to the middle
+    /// of the viewport rather than to the matching corner of the screen: it goes where you
+    /// are looking. With nothing selected the whole picture is the target, so the keys
+    /// still mean something.
+    /// </summary>
+    private void ZoomToCorner(bool bottomRight)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+
+        Rect target = _selected is not null
+            ? GetCanvasBounds(_selected)
+            : new Rect(0, 0, _sourceWidth, _sourceHeight);
+        if (target.IsEmpty) return;
+
+        ApplyZoomView(EditorZoom.CentreOnPoint(
+            EditorZoom.Corner(target, bottomRight), ViewportSize(), 1.0, MinZoom, MaxZoom));
+    }
+
+    /// <summary>Z + click: one step in, about the point clicked.</summary>
+    private void ZoomToPoint(Point contentPoint)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+        ApplyZoomView(EditorZoom.CentreOnPoint(
+            contentPoint, ViewportSize(), _zoom * 2, MinZoom, MaxZoom));
+    }
+
+    /// <summary>Z + drag: the dragged rectangle fills the viewport.</summary>
+    private void ZoomToRect(Rect content)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+        ApplyZoomView(EditorZoom.FitRect(content, ViewportSize(), _zoom, MinZoom, MaxZoom));
+    }
+
+    private Size ViewportSize() => new(Viewport.ActualWidth, Viewport.ActualHeight);
+
+    /// <summary>
+    /// Moves the view to a computed target over the shared Enter timing rather than
+    /// teleporting: a targeted zoom that jumps leaves you with no idea which part of the
+    /// picture you are now looking at. A second targeted zoom cancels the first.
+    /// </summary>
+    private void ApplyZoomView(ZoomView target)
+    {
+        _pendingInitialFit = false; // explicit zoom — stop auto-refitting on resize
+
+        double fromZoom = _zoom;
+        double fromX = ViewTranslate.X, fromY = ViewTranslate.Y;
+        _zoomTween?.Dispose();
+        _zoomTween = Motion.Run(Motion.EnterDurationMs, Motion.EaseOutCubic, t =>
+        {
+            _zoom = fromZoom + (target.Zoom - fromZoom) * t;
+            ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
+            ViewTranslate.X = fromX + (target.Translate.X - fromX) * t;
+            ViewTranslate.Y = fromY + (target.Translate.Y - fromY) * t;
+            OnViewChanged();
+        },
+        onDone: () => _zoomTween = null);
+    }
+
+    /// <summary>The in-flight targeted zoom, cancelled on a second one and on close.</summary>
+    private IDisposable? _zoomTween;
+
     /// <summary>Ctrl+plus / Ctrl+minus: one step of the same 1.2 ratio the wheel uses.</summary>
     private void StepZoom(double factor)
     {
@@ -700,6 +777,13 @@ public partial class EditorWindow : Window
         {
             Viewport.Cursor = Cursors.SizeAll;
             EditorSurface.Cursor = Cursors.SizeAll;
+        }
+        else if (_zoomKeyDown)
+        {
+            // The gesture has to announce itself: Z arms a zoom over whatever tool is
+            // showing, and a crosshair that still means "draw here" would be a lie.
+            Viewport.Cursor = Cursors.SizeNWSE;
+            EditorSurface.Cursor = Cursors.SizeNWSE;
         }
         else if (_spaceDown || _tool == EditorTool.Pan)
         {

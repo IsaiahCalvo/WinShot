@@ -116,7 +116,6 @@ internal static class AnnotationFactory
         }
     }
 
-    /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
     /// <summary>
     /// The element for a rectangle or ellipse annotation, in whichever line quality is
     /// asked for. Clean is the plain WPF shape it has always been; Sketchy is a
@@ -176,6 +175,27 @@ internal static class AnnotationFactory
         }
     }
 
+    /// <summary>
+    /// Which end of a drag the head lands on. Two inputs, both of which flip it: the
+    /// "Inverse arrow direction" preference, and the Alt key held for one arrow. Holding
+    /// Alt with the preference already on puts the head back where the drag ended, which
+    /// is the point of a per-drag override.
+    /// </summary>
+    public static (Point Tail, Point Head) ArrowEnds(Point from, Point to, bool inverted, bool altHeld) =>
+        inverted ^ altHeld ? (to, from) : (from, to);
+
+    /// <summary>
+    /// The next style in the double-click cycle. Curved is in it because it is a row in
+    /// the same style menu, and the cycle wraps so repeated double-clicks never dead-end.
+    /// </summary>
+    public static ArrowStyle NextArrowStyle(ArrowStyle current)
+    {
+        var all = Enum.GetValues<ArrowStyle>();
+        int i = Array.IndexOf(all, current);
+        return all[(i < 0 ? 0 : i + 1) % all.Length];
+    }
+
+    /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
     public static ArrowStyle ParseArrowStyle(string? name) =>
         Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;
 

@@ -320,6 +320,30 @@ public partial class EditorWindow : Window
                 SelectModePopup.IsOpen = false;
             };
         }
+
+        // Object snapping lives here rather than on the toolbar: it belongs to the pointer,
+        // it is set once and forgotten, and Shottr — where the behaviour comes from — makes
+        // it an explicit toggle rather than something that just happens to you.
+        SelectModeList.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Height = 1,
+            Margin = new Thickness(8, 6, 8, 6),
+            Fill = (Brush)FindResource("BorderBrush"),
+        });
+        var snap = new CheckBox
+        {
+            Style = (Style)FindResource("DarkCheckBox"),
+            Content = "Snap to objects",
+            IsChecked = _objectSnap,
+            Margin = new Thickness(10, 2, 10, 6),
+            ToolTip = "Line marks up with each other while dragging — hold Ctrl to override",
+        };
+        snap.SetValue(AutomationProperties.NameProperty, "Snap to objects");
+        snap.SetValue(AutomationProperties.HelpTextProperty,
+            "Line a dragged mark's edges and centre up with the other marks. Hold Ctrl while dragging to override.");
+        snap.Checked += (_, _) => _objectSnap = true;
+        snap.Unchecked += (_, _) => _objectSnap = false;
+        SelectModeList.Children.Add(snap);
     }
 
     private void OnArrowStyleClick(object sender, RoutedEventArgs e)
@@ -507,6 +531,42 @@ public partial class EditorWindow : Window
             redo: () => { ApplyArrowStyleData(arrow, after); if (ReferenceEquals(_selected, arrow)) UpdateSelectionVisual(); }),
             apply: false);
         UpdateSelectionVisual();
+    }
+
+    /// <summary>
+    /// Which end of a drag the head lands on. Dragging from the thing you are pointing AT
+    /// toward the label is the other natural gesture, and "Inverse arrow direction" is the
+    /// preference for people who draw that way; Alt flips it for the one arrow that wants
+    /// the other order, without a trip to Settings — which is exactly what that setting's
+    /// own hint has always promised.
+    /// </summary>
+    private (Point Tail, Point Head) ArrowEnds(Point from, Point to) =>
+        AnnotationFactory.ArrowEnds(
+            from, to,
+            _settings.Current.InverseArrowDirection,
+            (Keyboard.Modifiers & ModifierKeys.Alt) != 0);
+
+    /// <summary>
+    /// Double-clicking an arrow steps it to the next style — the gesture for "not that
+    /// one, the next one" without opening the style menu five times. Curved is in the
+    /// cycle because it is a row in the same menu; the conversion is the same one the
+    /// menu performs.
+    /// </summary>
+    private bool CycleSelectedArrowStyle()
+    {
+        if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
+            meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow))
+            return false;
+
+        ArrowStyle current = meta.Type == AnnotationData.TypeCurvedArrow
+            ? ArrowStyle.Curved
+            : AnnotationFactory.ParseArrowStyle(meta.Style);
+        ArrowStyle next = AnnotationFactory.NextArrowStyle(current);
+
+        // Through the same entry point the style menu uses, so the tool arming and the
+        // straight/curved conversion stay in one place.
+        ApplyArrowStyleChoice(next);
+        return true;
     }
 
     /// <summary>Rebuilds an arrow's geometry from its stored points + style and re-stores the metadata.</summary>

@@ -37,6 +37,16 @@ public partial class EditorWindow : Window
         // so every tool works in content (source-pixel) coordinates.
         var pos = e.GetPosition(AnnotationCanvas);
 
+        // Z is held: this click is a zoom, whatever tool is armed.
+        if (_zoomKeyDown)
+        {
+            _zoomDragging = true;
+            _zoomDragStart = pos;
+            Viewport.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
         // A pending curved arrow eats this click: on its handle → start bending,
         // anywhere else → commit it (and fall through, e.g. to start a new curve).
         if (_pendingCurve is not null)
@@ -97,6 +107,13 @@ public partial class EditorWindow : Window
             DragResize(e.GetPosition(AnnotationCanvas));
             return;
         }
+        if (_zoomDragging)
+        {
+            // The same dashed band the crop uses, so "I am choosing a region" looks the
+            // same wherever the editor asks for one.
+            ShowDragRect(new Rect(_zoomDragStart, e.GetPosition(AnnotationCanvas)), dim: false);
+            return;
+        }
         if (_marqueeActive)
         {
             UpdateMarquee(e.GetPosition(AnnotationCanvas));
@@ -134,8 +151,11 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
-                arrow.Data = AnnotationFactory.ArrowGeometry(_dragStart, ConstrainDraw(pos), _thickness, _arrowStyle);
+            {
+                var (tail, head) = ArrowEnds(_dragStart, ConstrainDraw(pos));
+                arrow.Data = AnnotationFactory.ArrowGeometry(tail, head, _thickness, _arrowStyle);
                 break;
+            }
             case EditorTool.CurvedArrow when _activeShape is Path curve:
                 Point curveEnd = ConstrainDraw(pos);
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
@@ -212,6 +232,11 @@ public partial class EditorWindow : Window
             return;
         }
         if (e.ChangedButton != MouseButton.Left) return;
+        if (_zoomDragging)
+        {
+            EndZoomGesture(e.GetPosition(AnnotationCanvas));
+            return;
+        }
         if (_draggingCurveHandle)
         {
             // The handle stays live (and re-draggable) until a click elsewhere commits.
@@ -255,9 +280,14 @@ public partial class EditorWindow : Window
                 {
                     // The tool's weight, not the visual's: a Fancy arrow draws with no
                     // stroke at all, and reading 0 back would make the mark unloadable.
+                    // An arrow points wherever it was previewed pointing; a line has no
+                    // direction to invert, so it keeps the raw drag.
+                    var (tail, head) = _tool == EditorTool.Arrow
+                        ? ArrowEnds(_dragStart, pos)
+                        : (_dragStart, pos);
                     var strokeData = AnnotationData.ForStroke(
                         _tool == EditorTool.Arrow ? AnnotationData.TypeArrow : AnnotationData.TypeLine,
-                        new[] { _dragStart, pos }, StrokeColorOf(shape), _thickness);
+                        new[] { tail, head }, StrokeColorOf(shape), _thickness);
                     // Persist the head style so the resize/endpoint-handle code (and an
                     // in-session re-edit) rebuilds the right geometry.
                     if (_tool == EditorTool.Arrow) strokeData.Style = _arrowStyle.ToString();
@@ -524,10 +554,47 @@ public partial class EditorWindow : Window
         _moveLast = pos;
         Vector want = (Keyboard.Modifiers & ModifierKeys.Shift) != 0
             ? DragConstraints.LockAxis(_moveRaw)
-            : _moveRaw;
+            : _moveRaw + SnapNudge(_moveRaw);
         Vector step = want - _moveTotal;
         _moveTotal = want;
         return step;
+    }
+
+    /// <summary>
+    /// How far the moving mark has to shift to line its edges or its middle up with a
+    /// neighbour's. Zero when snapping is off, when Ctrl is held for the one move that has
+    /// to land a pixel off a guide, or when Shift is already constraining the drag — two
+    /// rules pulling on one drag is a fight the user cannot win.
+    ///
+    /// The snap is computed against the RAW drag rather than the snapped position, so a
+    /// mark that has stuck to a guide can be pulled off it by keeping going, instead of
+    /// being dragged along by its own correction.
+    /// </summary>
+    private Vector SnapNudge(Vector rawMove)
+    {
+        if (!_objectSnap) return default;
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0) return default;
+
+        UIElement? moving = _multiSelected.Count > 1 ? null : _selected;
+        if (moving is null) return default;
+
+        Rect start = GetCanvasBounds(moving);
+        if (start.IsEmpty) return default;
+        // Where the mark would be with the raw drag applied, minus what has already been
+        // applied to it — GetCanvasBounds reports it mid-drag, not where it started.
+        Rect at = Rect.Offset(start, rawMove.X - _moveTotal.X, rawMove.Y - _moveTotal.Y);
+
+        var others = new List<Rect>();
+        foreach (UIElement child in AnnotationCanvas.Children)
+        {
+            if (ReferenceEquals(child, moving)) continue;
+            if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
+            Rect b = GetCanvasBounds(child);
+            if (!b.IsEmpty) others.Add(b);
+        }
+        if (others.Count == 0) return default;
+
+        return ObjectSnap.Adjust(at, others, ObjectSnap.Tolerance / _zoom);
     }
 
     /// <summary>Stroke color of a committed shape — the project metadata's source of truth.</summary>
@@ -836,6 +903,19 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
+        // Double-click an arrow to step it to the next style — "not that one, the next
+        // one" without opening the style menu five times. It has to select first: the
+        // cycle acts on the selection, and a double-click's first press may have landed
+        // on a different mark.
+        if (e.ClickCount == 2 && hit is FrameworkElement arrowHit &&
+            arrowHit.Tag is AnnotationData am &&
+            am.Type is AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow)
+        {
+            Select(hit);
+            CycleSelectedArrowStyle();
+            e.Handled = true;
+            return;
+        }
         // Alt-drag leaves a copy behind and drags the copy — the original stays where it is.
         if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0 && CloneForAltDrag(hit) is UIElement clone)
             hit = clone;
@@ -936,6 +1016,55 @@ public partial class EditorWindow : Window
         if (!_marqueeActive) return;
         _marqueeActive = false;
         MarqueeRect.Visibility = Visibility.Collapsed;
+    }
+
+    // ---------------------------------------------------------- Z zoom gesture
+
+    /// <summary>
+    /// Finishes a Z gesture: a click zooms in about the point, a drag fits the rectangle.
+    /// The threshold is what separates the two, and it is in CONTENT pixels scaled by the
+    /// zoom — at 800 % a three-pixel wobble on screen is a sub-pixel rectangle, and treating
+    /// that as a drag would zoom to nothing.
+    /// </summary>
+    private void EndZoomGesture(Point pos)
+    {
+        _zoomDragging = false;
+        Viewport.ReleaseMouseCapture();
+        DragRect.Visibility = Visibility.Collapsed;
+
+        if (_zoomArmedByMenu)
+        {
+            _zoomArmedByMenu = false;
+            _zoomKeyDown = false;
+            UpdateCursor();
+        }
+
+        var region = new Rect(_zoomDragStart, pos);
+        double screenSpan = Math.Max(region.Width, region.Height) * _zoom;
+        if (screenSpan < 6) ZoomToPoint(pos);
+        else ZoomToRect(region);
+    }
+
+    /// <summary>
+    /// Arms the zoom gesture from the menu, for people who found it there rather than on
+    /// the keyboard. It lasts exactly one gesture — the key version stays armed only while
+    /// Z is held, and a menu row that left the pointer in a mode until it was found again
+    /// would be a trap.
+    /// </summary>
+    private void ArmZoomGesture()
+    {
+        _zoomKeyDown = true;
+        _zoomArmedByMenu = true;
+        UpdateCursor();
+    }
+
+    /// <summary>Drops an in-progress Z drag without zooming — Z released, or capture lost.</summary>
+    private void AbortZoomGesture()
+    {
+        if (!_zoomDragging) return;
+        _zoomDragging = false;
+        Viewport.ReleaseMouseCapture();
+        DragRect.Visibility = Visibility.Collapsed;
     }
 
     private void EndMove()
