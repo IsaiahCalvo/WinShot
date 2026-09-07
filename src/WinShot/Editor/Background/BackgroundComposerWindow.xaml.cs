@@ -808,6 +808,10 @@ public partial class BackgroundComposerWindow : Window
         catch (Exception ex)
         {
             Log.Error("Background composer copy failed", ex);
+            // Success flashes the button; failure used to do nothing at all, so a busy
+            // clipboard read as "Copy" simply not registering the click.
+            if (IsVisible)
+                ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
         }
     }
 
