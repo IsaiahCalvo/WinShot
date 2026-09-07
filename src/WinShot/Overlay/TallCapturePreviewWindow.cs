@@ -32,15 +32,25 @@ internal static class TallCapturePreviewLayout
     /// The preview's screen rect: as large as the working area allows along the capture's
     /// long axis, sitting clear of the card so the card stays clickable underneath.
     /// </summary>
+    /// <summary>Below this the band above the card cannot hold anything worth showing.</summary>
+    private const int MinBand = 120;
+
+    /// <summary>A preview may take at most this much of the working area's width. Without it
+    /// a 3.2:1 window grab flies out across nearly the whole screen on a casual hover.</summary>
+    private const double MaxWidthFraction = 2d / 3d;
+
     public static SD.Rectangle Place(SD.Size image, SD.Rectangle workingArea, SD.Rectangle cardScreen, int dpi)
     {
         double scale = Math.Clamp(dpi, 96, 480) / 96d;
         int gap = Math.Max(1, (int)Math.Round(12 * scale));
 
-        // The band above the card is what a tall strip gets to use; a wide strip is limited
-        // by the working area's width instead.
-        int maxHeight = Math.Max(120, cardScreen.Top - workingArea.Top - (gap * 2));
-        int maxWidth = Math.Max(120, workingArea.Width - (gap * 2));
+        // The band above the card is what the preview gets to use, and it is a hard ceiling:
+        // a floor here let the preview grow back down over the card it is meant to sit above.
+        // Too little room and there is no preview at all.
+        int maxHeight = cardScreen.Top - workingArea.Top - (gap * 2);
+        if (maxHeight < MinBand)
+            return SD.Rectangle.Empty;
+        int maxWidth = Math.Max(120, (int)(workingArea.Width * MaxWidthFraction));
 
         double aspect = (double)image.Width / image.Height;
         int height = maxHeight;
@@ -81,14 +91,16 @@ internal sealed class TallCapturePreviewWindow : WF.Form
     private const int WsExTransparent = 0x00000020;
 
     private readonly SD.Bitmap _scaled;
+    private readonly bool _ownsScaled;
     private readonly int _cornerRadius;
     private readonly QuickAccessOverlayVisuals _visuals;
     private IDisposable? _fade;
 
-    private TallCapturePreviewWindow(SD.Bitmap scaled, SD.Rectangle bounds, int dpi,
+    private TallCapturePreviewWindow(SD.Bitmap scaled, bool ownsScaled, SD.Rectangle bounds, int dpi,
         QuickAccessOverlayVisuals visuals)
     {
         _scaled = scaled;
+        _ownsScaled = ownsScaled;
         _visuals = visuals;
         _cornerRadius = Math.Max(2, (int)Math.Round(8 * (Math.Clamp(dpi, 96, 480) / 96d)));
 
@@ -125,29 +137,36 @@ internal sealed class TallCapturePreviewWindow : WF.Form
     }
 
     /// <summary>
-    /// Builds the preview for a capture whose aspect ratio earns one, or null when a card
-    /// thumbnail is already a fair review of it. Takes a private copy of the pixels: the
-    /// card's bitmap is edited in place by rotate/flip/resize.
+    /// Where a preview of this capture would go, or null when its aspect ratio does not earn
+    /// one or the card leaves no room above it. Cheap -- no pixels are touched -- so the card
+    /// can ask on every hover before deciding whether to pay for a resample.
     /// </summary>
-    public static TallCapturePreviewWindow? TryCreate(SD.Bitmap image, SD.Rectangle cardScreen,
-        int dpi, QuickAccessOverlayVisuals visuals)
+    public static SD.Rectangle? PlaceFor(SD.Bitmap image, SD.Rectangle cardScreen, int dpi)
     {
         if (image is null || !TallCapturePreviewLayout.ShouldOffer(image.Size))
             return null;
 
         SD.Rectangle workingArea = WF.Screen.FromRectangle(cardScreen).WorkingArea;
         SD.Rectangle bounds = TallCapturePreviewLayout.Place(image.Size, workingArea, cardScreen, dpi);
-        if (bounds.Width < 2 || bounds.Height < 2)
+        return bounds.Width < 2 || bounds.Height < 2 ? null : bounds;
+    }
+
+    /// <summary>
+    /// The expensive half: the whole capture resampled down to the preview's size. Safe to
+    /// call off the UI thread, and meant to be -- the gate only fires on the largest images
+    /// the app produces (up to 32,000 px), and paying for that inline on MouseEnter froze the
+    /// card's own hover cross-fade behind it.
+    /// </summary>
+    public static SD.Bitmap? Scale(SD.Bitmap image, SD.Size size)
+    {
+        if (image is null || size.Width < 2 || size.Height < 2)
             return null;
 
-        // Scaled once here rather than per paint: a 32,000 px strip resampled on every
-        // WM_PAINT would stutter the hover it is supposed to make useful.
-        var scaled = new SD.Bitmap(bounds.Width, bounds.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
+        var scaled = new SD.Bitmap(size.Width, size.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
         try
         {
             using var g = SD.Graphics.FromImage(scaled);
-            // Bilinear, not bicubic: this runs on the UI thread the moment the pointer lands
-            // on the card, and at these reduction ratios (a 6,000 px strip into ~900 px)
+            // Bilinear, not bicubic: at these reduction ratios (a 6,000 px strip into ~900 px)
             // bicubic costs several times as much for no visible difference.
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -158,7 +177,7 @@ internal sealed class TallCapturePreviewWindow : WF.Form
             // background render, which then leaves the card with an empty thumbnail for good.
             lock (image)
             {
-                g.DrawImage(image, new SD.Rectangle(0, 0, bounds.Width, bounds.Height),
+                g.DrawImage(image, new SD.Rectangle(0, 0, size.Width, size.Height),
                     0, 0, image.Width, image.Height, SD.GraphicsUnit.Pixel);
             }
         }
@@ -169,7 +188,27 @@ internal sealed class TallCapturePreviewWindow : WF.Form
             return null;
         }
 
-        return new TallCapturePreviewWindow(scaled, bounds, dpi, visuals);
+        return scaled;
+    }
+
+    /// <summary>Wraps an already-scaled bitmap in a window. The caller keeps the bitmap so it
+    /// can be reused across hovers; only <see cref="TryCreate"/> hands over ownership.</summary>
+    public static TallCapturePreviewWindow Create(SD.Bitmap scaled, SD.Rectangle bounds, int dpi,
+        QuickAccessOverlayVisuals visuals)
+        => new(scaled, ownsScaled: false, bounds, dpi, visuals);
+
+    /// <summary>
+    /// Builds the preview inline for a capture whose aspect ratio earns one, or null when a
+    /// card thumbnail is already a fair review of it. The window owns the scaled copy.
+    /// </summary>
+    public static TallCapturePreviewWindow? TryCreate(SD.Bitmap image, SD.Rectangle cardScreen,
+        int dpi, QuickAccessOverlayVisuals visuals)
+    {
+        if (PlaceFor(image, cardScreen, dpi) is not SD.Rectangle bounds)
+            return null;
+
+        SD.Bitmap? scaled = Scale(image, bounds.Size);
+        return scaled is null ? null : new TallCapturePreviewWindow(scaled, true, bounds, dpi, visuals);
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)
@@ -177,12 +216,31 @@ internal sealed class TallCapturePreviewWindow : WF.Form
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.Clear(_visuals.CardFill);
-        var surface = new SD.Rectangle(0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
-        using var path = GdiPaths.RoundedRect(surface, _cornerRadius);
+        // The fill uses the same rect the region does (OnShown), so no raw background shows
+        // through on the right and bottom.
+        using (var path = GdiPaths.RoundedRect(new SD.Rectangle(SD.Point.Empty, ClientSize), _cornerRadius))
         using (var brush = new SD.TextureBrush(_scaled))
             g.FillPath(brush, path);
-        using var edge = new SD.Pen(_visuals.CardEdge, 1);
-        g.DrawPath(edge, path);
+
+        // FastQuickActionsWindow.DrawCardEdge's recipe, verbatim: a hairline laid ON the
+        // fill's own boundary picks up more ink on one side than the other (measured 96 vs 69
+        // on the card before it was fixed). Inset by one with PixelOffsetMode.Half, every side
+        // sits on solid fill and reads the same.
+        GraphicsState state = g.Save();
+        try
+        {
+            g.TranslateTransform(1, 1);
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            PopupChrome.DrawBorder(
+                g,
+                new SD.Size(Math.Max(1, ClientSize.Width - 2), Math.Max(1, ClientSize.Height - 2)),
+                Math.Max(1, _cornerRadius - 1),
+                _visuals.CardEdge);
+        }
+        finally
+        {
+            g.Restore(state);
+        }
     }
 
     protected override void OnShown(EventArgs e)
@@ -193,6 +251,19 @@ internal sealed class TallCapturePreviewWindow : WF.Form
         Region = new SD.Region(path);
         _fade?.Dispose();
         _fade = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic, SetOpacity);
+    }
+
+    /// <summary>
+    /// Brings a preview that is mid fade-out back up. A pointer that leaves the card and
+    /// returns inside the 140 ms exit used to build a second window over the dying one, and
+    /// two identically placed TopMost windows read as a flicker.
+    /// </summary>
+    public void FadeIn()
+    {
+        if (IsDisposed) return;
+        _fade?.Dispose();
+        double from = Opacity;
+        _fade = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic, p => SetOpacity(from + ((1d - from) * p)));
     }
 
     /// <summary>Fades out and closes itself; safe to call more than once.</summary>
@@ -226,7 +297,8 @@ internal sealed class TallCapturePreviewWindow : WF.Form
         {
             _fade?.Dispose();
             _fade = null;
-            _scaled.Dispose();
+            if (_ownsScaled)
+                _scaled.Dispose();
         }
         base.Dispose(disposing);
     }

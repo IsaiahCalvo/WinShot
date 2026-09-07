@@ -80,15 +80,20 @@ public class TallCapturePreviewLayoutTests
         Assert.True(placed.Bottom <= card.Top);
     }
 
-    /// <summary>A working area with no room above the card still yields a drawable rect
-    /// rather than a zero or negative one.</summary>
-    [Fact]
-    public void ACardFlushWithTheTopOfTheScreen_StillYieldsADrawableRect()
+    /// <summary>
+    /// A card with no room above it gets no preview at all. There used to be a 120 px floor on
+    /// the band, which grew the flyout back down over the card it is meant to float above --
+    /// and the card is the thing the preview exists to make reviewable.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]      // flush with the top of the screen
+    [InlineData(100)]    // a band of 76 px after the gaps
+    public void ACardWithNoBandAboveIt_GetsNoPreview(int cardTop)
     {
         SD.Rectangle placed = TallCapturePreviewLayout.Place(
-            new SD.Size(400, 6000), WorkingArea, new SD.Rectangle(2380, 0, 160, 120), dpi: 96);
+            new SD.Size(400, 6000), WorkingArea, new SD.Rectangle(2380, cardTop, 160, 120), dpi: 96);
 
-        Assert.True(placed.Width >= 1 && placed.Height >= 1);
+        Assert.True(placed.IsEmpty, $"{placed} was offered with only {cardTop} px above the card");
     }
 
     /// <summary>
