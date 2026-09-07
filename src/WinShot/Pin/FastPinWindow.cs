@@ -131,7 +131,7 @@ public sealed class FastPinWindow : WF.Form
         StartPosition = WF.FormStartPosition.Manual;
         TopMost = true;
         AccessibleName = "Pinned screenshot";
-        AccessibleDescription = "Pinned screenshot. Drag anywhere to move it. Press Tab to reach Copy, Save, Lock, and Close. Use the arrow keys to move the pin, or middle-click to close it.";
+        AccessibleDescription = "Pinned screenshot. Drag anywhere to move it. Press Tab to reach Edit, Copy, Save, Lock, and Close. Use the arrow keys to move the pin, or middle-click to close it.";
 
         SetStyle(
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -410,7 +410,10 @@ public sealed class FastPinWindow : WF.Form
 
         double from = _chromeAlpha;
         _chromeFade?.Dispose();
-        _chromeFade = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic,
+        // Leaving is the entrance played backwards, so it takes EaseInCubic. Running
+        // EaseOutCubic over 1 -> 0 dumps the opacity in the first third and then holds an
+        // invisible chrome for the rest of the tween.
+        _chromeFade = Motion.Run(Motion.QuickMs, ExitAware(from, target),
             p =>
             {
                 if (IsDisposed) return;
@@ -427,8 +430,18 @@ public sealed class FastPinWindow : WF.Form
     {
         SD.Rectangle bar = ToolbarBounds();
         var badge = new SD.Rectangle(0, 0, Ui(34), Ui(34));
-        return SD.Rectangle.Union(SD.Rectangle.Inflate(bar, Ui(4), Ui(4)), badge);
+        SD.Rectangle rect = SD.Rectangle.Union(SD.Rectangle.Inflate(bar, Ui(4), Ui(4)), badge);
+        // The zoom chip hangs below the bar. It used to sit entirely outside this rect, so
+        // every fade frame drew it into a clipped-away area and it froze at whatever alpha
+        // the one full repaint happened to catch.
+        SD.Rectangle chip = ZoomChipBounds(bar);
+        return chip.IsEmpty ? rect : SD.Rectangle.Union(rect, SD.Rectangle.Inflate(chip, Ui(2), Ui(2)));
     }
+
+    /// <summary>The ease for a ramp between two amounts: EaseOutCubic on the way up,
+    /// its mirror EaseInCubic on the way down, so the two directions are symmetric.</summary>
+    private static Func<double, double> ExitAware(double from, double target) =>
+        target >= from ? Motion.EaseOutCubic : Motion.EaseInCubic;
 
     /// <summary>Scales a chrome colour by the current fade amount.</summary>
     private SD.Color Fade(SD.Color color) =>
@@ -439,8 +452,30 @@ public sealed class FastPinWindow : WF.Form
     /// <summary>
     /// Which toolbar buttons are on offer. A locked pin shows only Lock and Close: everything
     /// else it could do would need the click that lock exists to pass through.
+    ///
+    /// The row is then trimmed to what the pin is actually wide enough to hold. A pin of a
+    /// small UI element can be narrower than five chips (168 logical px, and 252 device px at
+    /// 150 %), and the bar was only ever clamped on its left, so the right-hand chips were
+    /// painted off the form -- unclickable, because HitTestButton reads the same rects. Chips
+    /// are dropped from the left, so Lock and Close, the pin's only ways out, are the last to
+    /// go.
     /// </summary>
-    private int[] VisibleButtons => _locked ? _lockedButtons : _allButtons;
+    private int[] VisibleButtons => FitToWidth(_locked ? _lockedButtons : _allButtons);
+
+    /// <summary>The widest tail of <paramref name="offered"/> whose bar fits the client, never
+    /// fewer than one chip (a 1 px pin has room for nothing and still has to draw something).</summary>
+    private int[] FitToWidth(int[] offered)
+    {
+        int fits = offered.Length;
+        while (fits > 1 && BarWidth(fits) > ClientSize.Width)
+            fits--;
+        return fits == offered.Length ? offered : offered[(offered.Length - fits)..];
+    }
+
+    private int BarWidth(int count) =>
+        count * Ui(ToolbarButtonSizeLogical) +
+        (count - 1) * Ui(ToolbarButtonGapLogical) +
+        Ui(ToolbarPadLogical) * 2;
 
     // Derived from the button list rather than written out, so inserting an action cannot
     // silently turn "Lock and Close" into something else.
@@ -449,14 +484,12 @@ public sealed class FastPinWindow : WF.Form
 
     private SD.Rectangle ToolbarBounds()
     {
-        int count = VisibleButtons.Length;
-        int buttonSize = Ui(ToolbarButtonSizeLogical);
-        int gap = Ui(ToolbarButtonGapLogical);
-        int pad = Ui(ToolbarPadLogical);
-        int rowWidth = count * buttonSize + (count - 1) * gap;
-        int width = rowWidth + pad * 2;
-        int height = buttonSize + pad * 2;
-        int x = Math.Max(1, (ClientSize.Width - width) / 2);
+        int width = BarWidth(VisibleButtons.Length);
+        int height = Ui(ToolbarButtonSizeLogical) + Ui(ToolbarPadLogical) * 2;
+        // Clamped both ways: centred when it fits, and never started so far left that its
+        // right edge leaves the client.
+        int slack = Math.Max(0, ClientSize.Width - width);
+        int x = Math.Clamp((ClientSize.Width - width) / 2, 0, slack);
         int y = Ui(ToolbarTopLogical);
         return new SD.Rectangle(x, y, width, height);
     }
@@ -509,21 +542,13 @@ public sealed class FastPinWindow : WF.Form
     /// </summary>
     private void DrawZoomChip(SD.Graphics g, SD.Rectangle bar)
     {
-        string text = ZoomChipText(_scale);
-        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt, SD.FontStyle.Bold);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + Ui(14);
-        int h = size.Height + Ui(6);
-        var chip = new SD.Rectangle(
-            bar.Left + ((bar.Width - w) / 2),
-            bar.Bottom + Ui(4),
-            w,
-            h);
-
-        // A tiny pin has no room under the bar; the chip is not worth clipping the image for.
-        if (chip.Bottom > ClientSize.Height - Ui(2))
+        SD.Rectangle chip = ZoomChipBounds(bar);
+        if (chip.IsEmpty)
             return;
 
+        string text = ZoomChipText(_scale);
+        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt, SD.FontStyle.Bold);
+        int h = chip.Height;
         using var bg = new SD.SolidBrush(Fade(SD.Color.FromArgb(235, ThemePalette.ToolbarBg)));
         using var border = new SD.Pen(Fade(ThemePalette.Border));
         FillRoundedRect(g, bg, chip, h / 2);
@@ -531,6 +556,24 @@ public sealed class FastPinWindow : WF.Form
         WF.TextRenderer.DrawText(g, text, font, chip, Fade(ThemePalette.TextPrimary),
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+    }
+
+    /// <summary>
+    /// Where the zoom chip goes, or Empty when the pin has no room for it. Shared with
+    /// <see cref="ChromeInvalidationBounds"/> so the fade repaints exactly what it draws.
+    /// </summary>
+    private SD.Rectangle ZoomChipBounds(SD.Rectangle bar)
+    {
+        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt, SD.FontStyle.Bold);
+        SD.Size size = WF.TextRenderer.MeasureText(ZoomChipText(_scale), font);
+        int w = size.Width + Ui(14);
+        int h = size.Height + Ui(6);
+        var chip = new SD.Rectangle(bar.Left + ((bar.Width - w) / 2), bar.Bottom + Ui(4), w, h);
+        // A tiny pin has no room under (or beside) the bar; the chip is not worth clipping
+        // the image for.
+        return chip.Bottom > ClientSize.Height - Ui(2) || chip.Left < 0 || chip.Right > ClientSize.Width
+            ? SD.Rectangle.Empty
+            : chip;
     }
 
     /// <summary>
@@ -645,7 +688,9 @@ public sealed class FastPinWindow : WF.Form
 
         double from = _imageAlpha;
         _imageFade?.Dispose();
-        _imageFade = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic,
+        // Same mirror as the chrome, read on the dim rather than on the alpha: the dim
+        // arriving is alpha falling, so the arguments are the other way round.
+        _imageFade = Motion.Run(Motion.QuickMs, ExitAware(target, from),
             p =>
             {
                 if (IsDisposed) return;
@@ -845,6 +890,9 @@ public sealed class FastPinWindow : WF.Form
         if ((ModifierKeys & WF.Keys.Control) == WF.Keys.Control)
         {
             Opacity = PinInteraction.AdjustOpacity(Opacity, e.Delta);
+            // The transient pill, not the chip: opacity has no resting readout, and the chip
+            // under the bar is the zoom's. Two gestures, but the pill is now only ever the
+            // answer to the one that has nowhere else to report.
             ShowReadout($"Opacity {(int)Math.Round(Opacity * 100)}%", PointToClient(WF.Cursor.Position));
             return;
         }
@@ -946,7 +994,8 @@ public sealed class FastPinWindow : WF.Form
 
         _focusButton = index;
         Focus();
-        AccessibilityNotifyClients(WF.AccessibleEvents.Focus, index + 1);
+        // Child ids are 1-based positions in the accessible tree, which walks VisibleButtons.
+        AccessibilityNotifyClients(WF.AccessibleEvents.Focus, Array.IndexOf(VisibleButtons, index) + 1);
         UpdateChromeAlpha();
         Invalidate(ToolbarBounds());
     }
@@ -968,7 +1017,13 @@ public sealed class FastPinWindow : WF.Form
     {
         Action<SD.Bitmap>? handler = EditRequested ?? DefaultEditHandler;
         if (handler is null)
+        {
+            // Clicking the pencil and getting nothing, with nothing said, is the one failure
+            // mode this chip has; every other new action in the app pairs success with a line.
+            ShowReadout("The editor is not available", PointToClient(WF.Cursor.Position));
+            Log.Error("A pin's Edit chip fired with no editor handler registered");
             return;
+        }
 
         try
         {
@@ -977,6 +1032,7 @@ public sealed class FastPinWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Could not open the pinned screenshot in the editor", ex);
+            ShowReadout("Could not open the editor", PointToClient(WF.Cursor.Position));
         }
     }
 
@@ -1286,21 +1342,30 @@ public sealed class FastPinWindow : WF.Form
         public override string? Description => owner.AccessibleDescription;
         public override WF.AccessibleRole Role => WF.AccessibleRole.Window;
 
-        public override int GetChildCount() => owner._toolbarButtons.Count;
+        // Children are the chips this state actually draws, in drawn order -- the same
+        // VisibleButtons list ToolbarBounds, DrawToolbar, HitTestButton and Tab follow. A
+        // locked pin used to offer a screen reader five buttons where two are painted, and
+        // the three phantoms reported an empty rect.
+        public override int GetChildCount() => owner.VisibleButtons.Length;
 
-        public override WF.AccessibleObject? GetChild(int index) =>
-            index >= 0 && index < owner._toolbarButtons.Count
-                ? new ToolbarButtonAccessibleObject(owner, index, this)
+        public override WF.AccessibleObject? GetChild(int slot)
+        {
+            int[] offered = owner.VisibleButtons;
+            return slot >= 0 && slot < offered.Length
+                ? new ToolbarButtonAccessibleObject(owner, offered[slot], this)
                 : null;
+        }
 
         public override WF.AccessibleObject? GetFocused() =>
-            owner._focusButton >= 0 ? GetChild(owner._focusButton) : base.GetFocused();
+            GetChild(Array.IndexOf(owner.VisibleButtons, owner._focusButton)) ?? base.GetFocused();
 
         public override WF.AccessibleObject? HitTest(int x, int y)
         {
             SD.Point client = owner.PointToClient(new SD.Point(x, y));
             int button = owner.HitTestButton(client);
-            return button >= 0 ? GetChild(button) : base.HitTest(x, y);
+            return button >= 0
+                ? GetChild(Array.IndexOf(owner.VisibleButtons, button))
+                : base.HitTest(x, y);
         }
     }
 
@@ -1330,15 +1395,18 @@ public sealed class FastPinWindow : WF.Form
                                             WF.AccessibleStates.Selectable;
                 if (owner._focusButton == index && owner.ContainsFocus)
                     state |= WF.AccessibleStates.Focused | WF.AccessibleStates.Selected;
-                if (owner._locked)
-                    state |= WF.AccessibleStates.Unavailable;
+                // Not "unavailable while locked" any more: a locked pin keeps Lock and Close
+                // hit-testable, and those two are its only way out. What is genuinely gone is
+                // a chip this state does not offer at all.
+                if (!owner.VisibleButtons.Contains(index))
+                    state |= WF.AccessibleStates.Invisible | WF.AccessibleStates.Unavailable;
                 return state;
             }
         }
 
         public override void DoDefaultAction()
         {
-            if (!owner._locked)
+            if (owner.VisibleButtons.Contains(index))
                 owner._toolbarButtons[index].Action();
         }
 
@@ -1350,13 +1418,21 @@ public sealed class FastPinWindow : WF.Form
 
         public override WF.AccessibleObject? Navigate(WF.AccessibleNavigation navdir) => navdir switch
         {
-            WF.AccessibleNavigation.Next or WF.AccessibleNavigation.Right =>
-                parent.GetChild((index + 1) % owner._toolbarButtons.Count),
-            WF.AccessibleNavigation.Previous or WF.AccessibleNavigation.Left =>
-                parent.GetChild((index - 1 + owner._toolbarButtons.Count) % owner._toolbarButtons.Count),
+            WF.AccessibleNavigation.Next or WF.AccessibleNavigation.Right => Sibling(1),
+            WF.AccessibleNavigation.Previous or WF.AccessibleNavigation.Left => Sibling(-1),
             WF.AccessibleNavigation.Up => parent,
             _ => base.Navigate(navdir),
         };
+
+        /// <summary>The next chip round the offered row, so navigation matches Tab.</summary>
+        private WF.AccessibleObject? Sibling(int direction)
+        {
+            int[] offered = owner.VisibleButtons;
+            int slot = Array.IndexOf(offered, index);
+            return slot < 0 || offered.Length == 0
+                ? null
+                : parent.GetChild((slot + direction + offered.Length) % offered.Length);
+        }
     }
 
     private sealed class ToolbarButton(string iconAsset, string tip, Action action)
@@ -1367,6 +1443,7 @@ public sealed class FastPinWindow : WF.Form
         {
             "Copy" => "Copy the pinned screenshot to the clipboard",
             "Save" => "Save the pinned screenshot to a local file",
+            "Edit" => "Open a copy of the pinned screenshot in the editor",
             "Lock" => "Toggle click-through mode for this pinned screenshot",
             "Close" => "Close this pinned screenshot",
             _ => tip,
