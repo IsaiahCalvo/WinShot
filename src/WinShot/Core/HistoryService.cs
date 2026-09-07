@@ -7,7 +7,8 @@ namespace WinShot.Core;
 
 /// <summary>
 /// Persists every capture to a local history folder and prunes old items
-/// past the configured limit. File names sort chronologically.
+/// past the configured limit. Everything is ordered by capture time, never by name —
+/// a renamed capture has no timestamp prefix left to sort on.
 /// </summary>
 public class HistoryService
 {
@@ -175,7 +176,14 @@ public class HistoryService
     {
         string dir = _directoryProvider();
         if (!Directory.Exists(dir)) return new List<string>();
-        return Directory.GetFiles(dir).OrderByDescending(f => f, StringComparer.Ordinal).ToList();
+        // Newest first by CAPTURE TIME. Ordering by name was the same thing until rename
+        // shipped: a renamed file drops its timestamp prefix, so "1099 tax form.png" sorts
+        // below every "2026…" name and PruneCore would delete it on the very next capture,
+        // however recent it is. Name order is only the tie-break now.
+        return Directory.GetFiles(dir)
+            .OrderByDescending(FileTimestamp)
+            .ThenByDescending(f => f, StringComparer.Ordinal)
+            .ToList();
     }
 
     private void PruneCore()
