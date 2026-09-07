@@ -185,6 +185,11 @@ public sealed class FastRecordingControlBar : WF.Form
         base.OnPaint(e);
     }
 
+    /// <summary>The cells this bar actually built, at the scale of the monitor it was built
+    /// for. A test must scan these rather than recompute them at 100%, or it probes the gaps
+    /// between cells on a scaled display.</summary>
+    internal IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> Cells => _cells;
+
     /// <summary>
     /// Paints the pill into a bitmap through the real OnPaint, so a test can pixel-scan exactly
     /// what ships rather than what DrawToBitmap happens to have cached.

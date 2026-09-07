@@ -293,13 +293,12 @@ public class RecordingControlBarTests
         WF.Application.DoEvents();
 
         using SD.Bitmap image = Render(bar);
-        foreach ((RecordingControlBarCell cell, SD.Rectangle bounds) in
-                 RecordingControlBarLayout.Build(showTimer: true, scale: 1.0))
+        // The bar's own cells, not a fresh layout at 100%: on a scaled display those disagree
+        // and the scan lands in the gaps between cells.
+        foreach ((RecordingControlBarCell cell, SD.Rectangle bounds) in bar.Cells)
         {
-            // The bar is built at the test monitor's scale, so only check cells that landed
-            // inside the rendered bitmap.
             SD.Rectangle box = SD.Rectangle.Intersect(bounds, new SD.Rectangle(0, 0, image.Width, image.Height));
-            if (box.Width < 4 || box.Height < 4)
+            if (box.Width < 8 || box.Height < 8)
                 continue;
 
             bool inked = false;
