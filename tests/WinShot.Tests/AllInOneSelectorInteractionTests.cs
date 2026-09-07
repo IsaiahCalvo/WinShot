@@ -167,6 +167,77 @@ public class AllInOneSelectorInteractionTests
         });
     }
 
+    /// <summary>
+    /// The mode chip glides between cells and the ratio badge fades up; both tweens hold the
+    /// process-wide 1 ms clock. The bar is pooled and only disposed at process teardown, so
+    /// ending the session with one in flight used to leave it repainting a hidden window on a
+    /// 1 ms timer until it ran out.
+    /// </summary>
+    [Fact]
+    public void EndingTheSessionMidGlideReleasesTheClock()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                PumpUntil(() => Motion.Holders == 0);
+                using var selector = new FastAllInOneSelectorDialog(
+                    () => Task.FromResult(new List<WindowInfo>()), settings: null);
+
+                selector.SetMode(1, AllInOneAction.Capture);
+                Assert.True(Motion.Holders > 0, "the chip glide should hold the clock");
+
+                selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+                Assert.Equal(0, Motion.Holders);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+                PumpUntil(() => Motion.Holders == 0);
+            }
+        });
+    }
+
+    /// <summary>The eight handles pop in over QuickMs; the same session-end rule applies.</summary>
+    [Fact]
+    public void EndingTheSessionMidHandlePopReleasesTheClock()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                PumpUntil(() => Motion.Holders == 0);
+                using var selector = new FastAllInOneSelectorDialog(
+                    () => Task.FromResult(new List<WindowInfo>()), settings: null);
+
+                selector.ApplyExactSize(300, 200);
+                Assert.True(Motion.Holders > 0, "the handle pop should hold the clock");
+
+                selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+                Assert.Equal(0, Motion.Holders);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+                PumpUntil(() => Motion.Holders == 0);
+            }
+        });
+    }
+
+    private static void PumpUntil(Func<bool> condition, int timeoutMs = 8000)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < timeoutMs)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
+    }
+
     private static void SetWindows(FastAllInOneSelectorDialog selector, params WindowInfo[] windows) =>
         typeof(FastAllInOneSelectorDialog)
             .GetField("_windows", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!

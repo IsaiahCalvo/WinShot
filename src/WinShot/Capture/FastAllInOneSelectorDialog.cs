@@ -1136,7 +1136,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
         if (!_toolbar.IsDisposed)
+        {
+            _toolbar.StopMotion();
             _toolbar.Hide();
+        }
         _completion?.TrySetResult(result);
         _completion = null;
     }
@@ -1465,6 +1468,22 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                     _chipGlide.Stop();
                     Invalidate(_mainBar);
                 });
+        }
+
+        /// <summary>
+        /// Drops the bar's in-flight tweens when the session ends. Both of them hold the
+        /// process-wide 1 ms clock, and the bar is pooled — so without this, changing the
+        /// mode or the ratio and immediately pressing Escape left a tween repainting a
+        /// hidden window on a 1 ms timer for the rest of its duration.
+        /// </summary>
+        public void StopMotion()
+        {
+            _chipTween?.Dispose();
+            _chipTween = null;
+            _chipGlide.Stop();
+            _badgeTween?.Dispose();
+            _badgeTween = null;
+            _badgeFade = 1d;
         }
 
         /// <summary>Jumps to a mode with no glide — a pooled reuse is not a mode change the
