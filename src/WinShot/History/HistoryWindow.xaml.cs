@@ -54,6 +54,7 @@ public partial class HistoryWindow : Window
     private bool _dismissing;
     private bool _closed;
     private IDisposable? _emptyStateFade;
+    private string? _emptyStateKey;
     private FileSystemWatcher? _watcher;
     private DispatcherTimer? _watcherDebounce;
 
@@ -63,8 +64,9 @@ public partial class HistoryWindow : Window
     public event Action<IReadOnlyList<string>>? MultiPinRequested;
 
     /// <summary>Raised by the empty state's "New capture" button — the answer to a grid with
-    /// nothing in it is usually to take one.</summary>
-    public event Action? NewCaptureRequested;
+    /// nothing in it is usually to take one. The window comes along so the handler can take it
+    /// off screen for the capture.</summary>
+    public event Action<HistoryWindow>? NewCaptureRequested;
 
     public HistoryWindow(HistoryService history, SettingsService settings)
     {
@@ -132,6 +134,17 @@ public partial class HistoryWindow : Window
 
         var instance = _instance ?? throw new InvalidOperationException("History window was not created.");
         bool deferActivate = false;
+        // Escape's fade-out is still running: the window is visible, but on its way to Close().
+        // Without this the press activates a window that closes itself a moment later, and the
+        // user has to press the hotkey a second time.
+        if (instance._dismissing)
+        {
+            instance._windowFade?.Dispose();
+            instance._windowFade = null;
+            instance._dismissing = false;
+            instance.Opacity = 1;
+        }
+
         wasVisible = instance.IsVisible;
 
         if (!instance.IsVisible)
@@ -216,15 +229,20 @@ public partial class HistoryWindow : Window
 
         _dismissing = true;
         _windowFade?.Dispose();
-        _windowFade = Motion.Run(
+        // With animation off system-wide Motion.Run finishes before it returns, so the handle must
+        // not be stored onto a window Close() has already torn down — the same guard FadeIn uses.
+        bool finished = false;
+        IDisposable handle = Motion.Run(
             Motion.SwapMs,
             Motion.EaseInCubic,
             progress => Opacity = 1d - progress,
             () =>
             {
+                finished = true;
                 _windowFade = null;
                 Close();
             });
+        _windowFade = finished ? null : handle;
     }
 
     private static void CreateInstance(HistoryService history, SettingsService settings)
@@ -276,7 +294,10 @@ public partial class HistoryWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (HandleKey(e.Key, Keyboard.Modifiers))
+        // WPF reports F10 as Key.System because it is Windows' menu key; unwrap just that one so
+        // Shift+F10 reaches the key map, without turning every Alt+<key> combo into a bare key.
+        Key key = e.Key == Key.System && e.SystemKey == Key.F10 ? Key.F10 : e.Key;
+        if (HandleKey(key, Keyboard.Modifiers))
         {
             e.Handled = true;
             return;
@@ -293,6 +314,15 @@ public partial class HistoryWindow : Window
             case Key.Escape:
                 Dismiss();
                 return true;
+            // Rotate, Rename, Print and Open-with live only on the tile's context menu, and
+            // that menu hangs off the card INSIDE the item template. ContextMenuService walks
+            // UP from the focused element, and what has focus is the ListBoxItem above the
+            // card, so Windows' own menu gestures found nothing there. (Hoisting the menu onto
+            // the container is not the fix: a Style setter shares one menu instance across
+            // every tile.)
+            case Key.Apps:
+            case Key.F10 when modifiers == ModifierKeys.Shift:
+                return OpenSelectedItemMenu();
             case Key.Enter:
                 if (SelectedItem() is { } toActivate)
                 {
@@ -329,6 +359,36 @@ public partial class HistoryWindow : Window
                 return false;
         }
         return false;
+    }
+
+    /// <summary>Opens the focused tile's context menu from the keyboard, anchored to the tile
+    /// so it appears where a right-click would have put it.</summary>
+    private bool OpenSelectedItemMenu()
+    {
+        if (SelectedItem() is not { } item) return false;
+        if (ItemsList.ItemContainerGenerator.ContainerFromItem(item) is not FrameworkElement container)
+            return false;
+        if (MenuInside(container) is not { } menu) return false;
+
+        menu.PlacementTarget = container;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+        return true;
+    }
+
+    private static ContextMenu? MenuInside(DependencyObject root)
+    {
+        if (root is FrameworkElement element && element.ContextMenu is { } menu)
+            return menu;
+
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            if (MenuInside(VisualTreeHelper.GetChild(root, index)) is { } found)
+                return found;
+        }
+
+        return null;
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -400,24 +460,45 @@ public partial class HistoryWindow : Window
             if (cts.IsCancellationRequested) return;
 
             cts.Token.ThrowIfCancellationRequested();
-            var newItems = files.Select(file => new HistoryItem(file)).ToList();
             IReadOnlyList<HistoryItem> visibleItems = Array.Empty<HistoryItem>();
             await Dispatcher.InvokeAsync(() =>
             {
                 cts.Token.ThrowIfCancellationRequested();
                 _loadError = null;
-                // Remember selection by path so a live refresh doesn't yank it away;
-                // the rebuilt list holds fresh HistoryItem instances.
+                // Remember selection by path so a live refresh doesn't yank it away.
                 string? selectedPath = SelectedItem()?.FilePath;
                 var previousItems = _paging.AllItems.ToList();
+                // Diff by path: a file that is still there keeps the SAME HistoryItem, and so
+                // keeps its decoded thumbnail and its card. Handing ReplaceAll brand-new
+                // instances made every visible tile a removal plus an insertion, so one capture
+                // landing while the window is open blanked the whole grid back to shimmer and
+                // faded all of it in again. Now the new file is the only card that enters.
+                var kept = new Dictionary<string, HistoryItem>(StringComparer.OrdinalIgnoreCase);
+                foreach (HistoryItem previous in previousItems)
+                    kept[previous.FilePath] = previous;
+                var newItems = new List<HistoryItem>(files.Count);
+                var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string file in files)
+                {
+                    newItems.Add(kept.TryGetValue(file, out HistoryItem? existing)
+                        ? existing
+                        : new HistoryItem(file));
+                    live.Add(file);
+                }
+
                 HistoryItem? restored = _paging.ReplaceAll(
                     newItems,
                     MatchesFilter,
                     selectedPath,
                     cts.Token,
                     CurrentComparer());
+                // Only the items that really went away release their bitmap.
                 foreach (HistoryItem previous in previousItems)
-                    previous.Thumbnail = null;
+                {
+                    if (!live.Contains(previous.FilePath))
+                        previous.Thumbnail = null;
+                }
+
                 UpdateCollectionState();
                 if (restored is not null)
                 {
@@ -722,9 +803,24 @@ public partial class HistoryWindow : Window
 
         if (_items.Count > 0 && _loadError is null)
         {
+            if (EmptyState.Visibility != Visibility.Visible) return;
+
+            // Leaving is the entrance played backwards. A bare Collapsed made the message vanish
+            // under the first card of the page that just arrived.
             _emptyStateFade?.Dispose();
-            _emptyStateFade = null;
-            EmptyState.Visibility = Visibility.Collapsed;
+            _emptyStateKey = null;
+            bool hidden = false;
+            IDisposable exit = Motion.Run(
+                Motion.SwapMs,
+                Motion.EaseInCubic,
+                progress => EmptyState.Opacity = 1d - progress,
+                () =>
+                {
+                    hidden = true;
+                    _emptyStateFade = null;
+                    EmptyState.Visibility = Visibility.Collapsed;
+                });
+            _emptyStateFade = hidden ? null : exit;
             return;
         }
 
@@ -735,22 +831,59 @@ public partial class HistoryWindow : Window
         NewCaptureButton.Visibility = state.ShowNewCapture ? Visibility.Visible : Visibility.Collapsed;
         RetryLoadButton.Visibility = state.ShowRetry ? Visibility.Visible : Visibility.Collapsed;
 
-        bool wasVisible = EmptyState.Visibility == Visibility.Visible;
+        // Moving between two empty filters (Videos → GIFs) swaps three lines of copy in place, and
+        // a failed "Try again" rewrites them to the same words. Fading again is what says the app
+        // answered at all; a hard cut in place reads as nothing having happened.
+        string key = state.Title + "\n" + state.Body;
+        bool visible = EmptyState.Visibility == Visibility.Visible;
+        bool sameReason = visible && _emptyStateKey == key;
+        _emptyStateKey = key;
         EmptyState.Visibility = Visibility.Visible;
-        if (wasVisible) return;
+        if (sameReason) return;
 
         // Arriving on an empty grid: fade the message in rather than dropping it in place the
-        // instant the last card disappears.
+        // instant the last card disappears. A panel already up dips rather than starting from
+        // black, so a swapped reason reads as the text changing, not the window blinking.
         _emptyStateFade?.Dispose();
-        EmptyState.Opacity = 0;
-        _emptyStateFade = Motion.Run(
+        double from = visible ? 0.35d : 0d;
+        EmptyState.Opacity = from;
+        bool shown = false;
+        IDisposable entrance = Motion.Run(
             Motion.SwapMs,
             Motion.EaseOutCubic,
-            progress => EmptyState.Opacity = progress,
-            () => _emptyStateFade = null);
+            progress => EmptyState.Opacity = from + ((1d - from) * progress),
+            () =>
+            {
+                shown = true;
+                _emptyStateFade = null;
+            });
+        _emptyStateFade = shown ? null : entrance;
     }
 
-    private void OnNewCapture(object sender, RoutedEventArgs e) => NewCaptureRequested?.Invoke();
+    private void OnNewCapture(object sender, RoutedEventArgs e) => NewCaptureRequested?.Invoke(this);
+
+    /// <summary>
+    /// Steps out of the frame for a capture started from the empty state. The region selector
+    /// freezes the screen as it is, and History is a 1200x760 window in the middle of it, so
+    /// leaving it up means the user drags a region over History's own empty state.
+    /// </summary>
+    public void HideForCapture()
+    {
+        _windowFade?.Dispose();
+        _windowFade = null;
+        Opacity = 1;
+        Hide();
+    }
+
+    /// <summary>The other half of <see cref="HideForCapture"/>: back on the same fade the window
+    /// opens with, so the return is not a snap either.</summary>
+    public void ShowAfterCapture()
+    {
+        if (_closed) return;
+        Show();
+        FadeIn();
+        Activate();
+    }
 
     private bool MatchesFilter(HistoryItem item) => _filter switch
     {
@@ -991,7 +1124,14 @@ public partial class HistoryWindow : Window
         {
             Log.Error("Failed to copy selected history files", ex);
             ThemedMessageDialog.Show(this, "Copy failed", "WinShot could not copy the selected files to the clipboard.");
+            return;
         }
+
+        // Same confirmation the single-item copy raises, worded for files.
+        App.Toast(
+            "Copied",
+            selected.Count == 1 ? "1 file is on the clipboard." : $"{selected.Count} files are on the clipboard.",
+            severity: ToastSeverity.Success);
     }
 
     private void OnPinSelected(object sender, RoutedEventArgs e)
@@ -1075,7 +1215,13 @@ public partial class HistoryWindow : Window
 
     // ---- Tile actions ----
 
-    private async void OnRefresh(object sender, RoutedEventArgs e) => await ReloadAsync();
+    private async void OnRefresh(object sender, RoutedEventArgs e)
+    {
+        // "Try again" on a folder that is still unreachable rewrites the panel with the same
+        // words. Forget the reason so the re-fade runs and the button is visibly not dead.
+        _emptyStateKey = null;
+        await ReloadAsync();
+    }
 
     private async void OnLoadMore(object sender, RoutedEventArgs e)
     {
@@ -1367,7 +1513,10 @@ public partial class HistoryWindow : Window
     {
         if (GetItem(sender) is not { } item) return;
 
-        string suggestion = Path.GetFileNameWithoutExtension(item.FileName);
+        // The tags WinShot appended ("@chrome", "-scroll") are not the user's to retype: offering
+        // the whole stem meant pressing Enter on the default either errored on '@' or stacked a
+        // second "-scroll" on the name.
+        string suggestion = HistoryRename.SuggestedName(item.FilePath);
         while (true)
         {
             string? answer = ThemedMessageDialog.Prompt(
@@ -1395,10 +1544,20 @@ public partial class HistoryWindow : Window
             }
             catch (Exception ex)
             {
+                // A locked file or a name Windows refuses for a reason the resolver cannot see:
+                // keep what the user typed and let them adjust it, the way a validation error does.
                 Log.Error($"Failed to rename history item {item.FilePath}", ex);
                 ThemedMessageDialog.Show(this, "Rename failed", FriendlyError.For(ex));
+                suggestion = answer;
+                continue;
             }
 
+            // Nothing on a tile shows the file name, so without this the rename is
+            // indistinguishable from having cancelled the dialog.
+            App.Toast(
+                "Renamed",
+                $"Saved as {Path.GetFileName(result.Path!)}",
+                severity: ToastSeverity.Success);
             _ = ReloadAsync();
             return;
         }
@@ -1745,7 +1904,6 @@ public sealed class HistoryItem : INotifyPropertyChanged
     public bool IsEditable => IsImage || IsVideo;
 
     public Visibility EditableVisibility => IsEditable ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility MediaOnlyVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
     public Visibility PinVisibility => CanPin ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ThumbnailVisibility => IsImage || IsGif || Thumbnail is not null ? Visibility.Visible : Visibility.Collapsed;
     /// <summary>The "MP4" text card, shown only until the real first frame lands (or for good,
@@ -1776,7 +1934,13 @@ public sealed class HistoryItem : INotifyPropertyChanged
         }
     }
     public Visibility GifBadgeVisibility => IsGif ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility SourceAppVisibility => SourceAppIcon is null ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>The badge sits bottom-right, which is where the video bar runs. Nothing stamps an
+    /// app tag on a recording today, but a hand-placed one would drop the icon on top of the clip
+    /// length, so the bar wins.</summary>
+    public Visibility SourceAppVisibility =>
+        SourceAppIcon is null || MediaBarVisibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
     /// <summary>Tile tooltip. Dragging a tile into another app has always worked and has never
     /// been advertised anywhere, so the tooltip that already showed the file name says it.</summary>

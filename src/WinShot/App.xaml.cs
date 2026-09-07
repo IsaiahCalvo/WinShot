@@ -38,6 +38,10 @@ public partial class App : Application
     /// for. Stamped into the history file name so the tile can show a source-app badge.</summary>
     private string? _captureSourceApp;
     private bool _pendingCaptureDrainActive;
+
+    /// <summary>One-shot, run when the current capture flow ends: the History window that hid
+    /// itself for the shot puts itself back.</summary>
+    private Action? _afterCaptureFlow;
     private long _autoCopySuppressedUntilTick;
     internal DirectEditCaptureTestHooks? DirectEditTestHooks { get; set; }
     internal SettingsService SettingsForTest => _settings;
@@ -442,19 +446,22 @@ public partial class App : Application
         "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
-    private void QueueCaptureCommand(string cmd)
+    /// <summary>Queues a capture command, or returns false when one was already running and this
+    /// press is dropped — callers that moved a window out of the way need to know which.</summary>
+    private bool QueueCaptureCommand(string cmd)
     {
         // A capture flow is already active (selector open, overlay finishing): drop the
         // command instead of parking it in the pending slot. Every caller is user-initiated
         // (hotkey, tray, winshot://), and replaying a press made while the selector was
         // already open reads as a ghost re-trigger right after the user cancels with Esc.
-        if (_captureInProgress || Recording.SelectionUiActive) return;
+        if (_captureInProgress || Recording.SelectionUiActive) return false;
         // Read the owning app now, while the user's window is still foreground — once the
         // selector overlay is up, or the history write runs on the thread pool, the answer
         // is WinShot. History tags the file with it so the card can wear an app badge.
         _captureSourceApp = FileNamer.GetForegroundInfo().App;
         _pendingCaptureCommand = cmd;
         SchedulePendingCaptureDrain();
+        return true;
     }
 
     private void ExecuteCaptureCommand(string cmd)
@@ -530,6 +537,11 @@ public partial class App : Application
     {
         _captureInProgress = false;
         MemoryCleanup.Request();
+        // Whoever stepped out of the frame for this capture comes back now — whether the user
+        // took one or pressed Escape.
+        Action? after = _afterCaptureFlow;
+        _afterCaptureFlow = null;
+        after?.Invoke();
         SchedulePendingCaptureDrain();
     }
 
@@ -1403,9 +1415,22 @@ public partial class App : Application
         win.NewCaptureRequested += NewCaptureFromHistory;
     }
 
-    /// <summary>The empty grid's "New capture" button. History stays open, so the capture
-    /// lands on the card and shows up in the grid behind it.</summary>
-    private void NewCaptureFromHistory() => QueueCaptureCommand("capture-area");
+    /// <summary>
+    /// The empty grid's "New capture" button. The region selector freezes the screen as it is and
+    /// History is a 1200x760 window in the middle of it, so History has to be out of the frame or
+    /// the primary call to action captures the window it lives in. The grid is empty by definition
+    /// while that button is reachable, so there is nothing on screen worth keeping.
+    /// </summary>
+    private async void NewCaptureFromHistory(HistoryWindow win)
+    {
+        win.HideForCapture();
+        // Let the compositor actually take the window off screen before the selector freezes it.
+        await WaitForOverlayDismissAsync();
+        if (QueueCaptureCommand("capture-area"))
+            _afterCaptureFlow = win.ShowAfterCapture;
+        else
+            win.ShowAfterCapture();
+    }
 
     private void OpenSettings()
     {

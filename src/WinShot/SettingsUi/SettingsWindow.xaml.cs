@@ -372,8 +372,9 @@ public partial class SettingsWindow : Window
         return HistoryRetentionDayStops[i];
     }
 
-    /// <summary>The slider stop for a stored (enabled, days) pair. History switched off wins
-    /// over whatever retention was last chosen, so turning it back on restores that stop.</summary>
+    /// <summary>The slider stop for a stored (enabled, days) pair. History switched off wins over
+    /// the day count: "Never" persists as HistoryRetentionDays = 0, so turning history back on
+    /// lands on "No age limit" rather than on whatever stop was chosen before.</summary>
     internal static int RetentionToSliderIndex(bool historyEnabled, int days) =>
         historyEnabled
             // Snap to the nearest real stop; ties keep the lower index. Never is not a

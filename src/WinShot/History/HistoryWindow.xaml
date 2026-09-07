@@ -7,6 +7,10 @@
         AutomationProperties.Name="WinShot history"
         AutomationProperties.HelpText="Browse, sort, select, restore, copy, edit, pin, share, reveal, or delete local captures.">
     <Window.Resources>
+        <!-- The placeholder's sweep period. Deliberately outside the motion vocabulary, which tops
+             out at 280 ms: those are transitions, this is a loop that has to read as unhurried. -->
+        <Duration x:Key="ShimmerSweep">0:0:1.2</Duration>
+
         <Style x:Key="FilterChip" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
@@ -207,7 +211,7 @@
                                                         <Rectangle.Fill>
                                                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                                                 <GradientStop Color="#00FFFFFF" Offset="0"/>
-                                                                <GradientStop Color="#1FFFFFFF" Offset="0.5"/>
+                                                                <GradientStop Color="{StaticResource BorderColor}" Offset="0.5"/>
                                                                 <GradientStop Color="#00FFFFFF" Offset="1"/>
                                                             </LinearGradientBrush>
                                                         </Rectangle.Fill>
@@ -294,10 +298,12 @@
                                 <DataTrigger.EnterActions>
                                     <BeginStoryboard x:Name="ShimmerLoop">
                                         <Storyboard RepeatBehavior="Forever">
+                                            <!-- Linear, deliberately: an ease on a Forever sweep hitches at
+                                                 every loop boundary. The period is a loop, not a transition,
+                                                 so it is longer than anything in the motion vocabulary. -->
                                             <DoubleAnimation Storyboard.TargetName="Shimmer"
                                                              Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
-                                                             From="-110" To="270" Duration="0:0:1.2"
-                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
+                                                             From="-110" To="270" Duration="{StaticResource ShimmerSweep}"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </DataTrigger.EnterActions>
@@ -387,8 +393,8 @@
                  empty grid is usually "take one now". -->
             <StackPanel x:Name="EmptyState" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                 <TextBlock x:Name="EmptyStateGlyph" Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphHero}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
-                <TextBlock x:Name="EmptyStateTitle" Text="No captures yet" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
-                <TextBlock x:Name="EmptyStateBody" Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextBody}" Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock x:Name="EmptyStateTitle" Text="No captures yet" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock x:Name="EmptyStateBody" Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextBody}" Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
                     <Button x:Name="NewCaptureButton" Content="New capture" Style="{StaticResource PillButtonPrimary}"
                             Click="OnNewCapture" Visibility="Collapsed"

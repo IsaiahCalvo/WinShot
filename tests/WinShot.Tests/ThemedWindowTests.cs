@@ -233,6 +233,20 @@ public class ThemedWindowTests
             Assert.False(window.HandleKey(Key.C, ModifierKeys.Control));
             Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
 
+            // Rotate, Rename, Print and Open-with are only on the tile's context menu, and that
+            // menu hangs off the card inside the item template - so the Menu key, which looks up
+            // from the focused CONTAINER, found nothing until the grid opened it explicitly.
+            list.SelectedItem = items[0];
+            list.UpdateLayout();
+            Assert.True(window.HandleKey(Key.Apps, ModifierKeys.None));
+            var opened = (System.Windows.Controls.ContextMenu?)null;
+            if (list.ItemContainerGenerator.ContainerFromItem(items[0]) is FrameworkElement tile)
+                opened = FindVisualNamed<System.Windows.Controls.Border>(tile, "Card")?.ContextMenu;
+            Assert.NotNull(opened);
+            Assert.True(opened!.IsOpen, "the Menu key should open the tile's own context menu");
+            opened.IsOpen = false;
+            Assert.True(window.HandleKey(Key.F10, ModifierKeys.Shift));
+            opened.IsOpen = false;
         }
         finally
         {
@@ -273,6 +287,29 @@ public class ThemedWindowTests
             Assert.Equal(12, list.Items.Count);
             Assert.All(list.Items.Cast<HistoryItem>(), item => Assert.NotNull(item.Thumbnail));
 
+            // A capture lands while the window is open (the folder watcher's refresh, a rotate,
+            // or re-opening the window): the twelve files that are still there must keep the very
+            // same HistoryItem, decoded thumbnail and all. Rebuilding them made every visible tile
+            // a removal plus an insertion, so the whole grid blanked to shimmer and faded back in
+            // for one new file.
+            var before = list.Items.Cast<HistoryItem>().ToDictionary(item => item.FilePath);
+            using (var extra = new SD.Bitmap(40, 30))
+                extra.Save(
+                    System.IO.Path.Combine(dir, "20260803-120099-000.png"),
+                    System.Drawing.Imaging.ImageFormat.Png);
+
+            var again = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(again);
+            again.GetAwaiter().GetResult();
+
+            Assert.Equal(13, list.Items.Count);
+            foreach (HistoryItem item in list.Items.Cast<HistoryItem>())
+            {
+                if (!before.TryGetValue(item.FilePath, out HistoryItem? kept)) continue;
+                Assert.Same(kept, item);
+                Assert.NotNull(item.Thumbnail);
+            }
+
             window.Close();
         }
         finally
@@ -280,9 +317,6 @@ public class ThemedWindowTests
             try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
         }
     }
-
-    /// <summary>Filtering the grid slides the survivors into their new slots instead of
-    /// rebuilding the page, and the tween lets go of the high-resolution clock when it ends.</summary>
 
     /// <summary>Filtering the grid slides the survivors into their new slots instead of
     /// rebuilding the page, and the tween lets go of the high-resolution clock when it ends.</summary>

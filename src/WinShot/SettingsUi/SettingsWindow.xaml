@@ -1079,14 +1079,17 @@
                                             Minimum="0" Maximum="5" TickFrequency="1" IsSnapToTickEnabled="True"
                                             ValueChanged="OnHistorySliderChanged"/>
                                 </DockPanel>
+                                <!-- Half-width end columns: the six labels then centre on i/5 of the
+                                     row, which is where the slider puts stop i. Six equal columns put
+                                     every interior label a twentieth of the track off its own tick. -->
                                 <Grid Margin="{StaticResource SettingsRowIndentMargin}" HorizontalAlignment="Stretch">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="0.5*"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="0.5*"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="Never" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Left"/>
                                     <TextBlock Grid.Column="1" Text="No age limit" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>

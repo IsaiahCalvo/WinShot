@@ -19,9 +19,9 @@ namespace WinShot.History;
 /// </summary>
 internal sealed class ReflowWrapPanel : WrapPanel
 {
-    /// <summary>Long enough to read as one motion across a row, short enough not to sit in
-    /// front of the next click.</summary>
-    internal const int ReflowMs = 200;
+    /// <summary>The shared glide step: long enough to read as one motion across a row, short
+    /// enough not to sit in front of the next click. Not a duration of this panel's own.</summary>
+    internal const int ReflowMs = Motion.GlideDurationMs;
 
     private readonly Dictionary<UIElement, Rect> _slots = new();
     private double _lastWidth = double.NaN;
