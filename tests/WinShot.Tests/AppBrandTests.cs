@@ -87,6 +87,20 @@ public class AppBrandTests
     }
 
     [Fact]
+    public void ConfirmBadge_QuantizesItsFrames_SoTheBeatIsNotSixtyGdiHandles()
+    {
+        // The confirmation runs ~620 ms of frames through Create(Confirm, progress). Nothing
+        // disposes these icons — the tray holds the last one — so a distinct icon per frame
+        // would leak a GDI handle per copy or save, all day.
+        var seen = new HashSet<SD.Icon>();
+        for (int frame = 0; frame <= 60; frame++)
+            seen.Add(TrayIconFactory.Create(TrayIconVariant.Confirm, frame / 60.0));
+
+        Assert.True(seen.Count <= 8, $"{seen.Count} distinct icons for one 60-frame beat");
+        Assert.All(seen, icon => Assert.NotEqual(IntPtr.Zero, icon.Handle));
+    }
+
+    [Fact]
     public void ConfirmBadge_GrowsWithItsAnimationProgress()
     {
         using SD.Bitmap plain = TrayIconFactory.Create().ToBitmap();

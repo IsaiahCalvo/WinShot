@@ -173,7 +173,7 @@ public sealed class CommandServer : IDisposable
             return CaptureCommandOptions.None;
 
         string s = arg.Trim().Trim('"');
-        int queryStart = s.IndexOfAny(['?', '#']);
+        int queryStart = QueryStart(s);
         if (queryStart < 0 || queryStart == s.Length - 1)
             return CaptureCommandOptions.None;
 
@@ -206,9 +206,21 @@ public sealed class CommandServer : IDisposable
             return command;
 
         string s = rawArg.Trim().Trim('"');
-        int queryStart = s.IndexOfAny(['?', '#']);
+        int queryStart = QueryStart(s);
         return queryStart < 0 || queryStart == s.Length - 1 ? command : command + "?" + s[(queryStart + 1)..];
     }
+
+    /// <summary>
+    /// Where a <c>winshot://</c> URL's query begins, or -1 when the argument has none.
+    /// A file path is not a URL: '#' and '?' are legal in a Windows file name, so an
+    /// argument that resolves to an <c>edit:&lt;path&gt;</c> command has no query at all —
+    /// the same guard <see cref="ParseCommand"/> runs before its own URL munging.
+    /// Without it, "Open with" on <c>note#1.png</c> while WinShot was already running was
+    /// forwarded as <c>edit:…note#1.png?1.png</c>, which the running instance could not
+    /// parse back into a path, and the file opened nowhere.
+    /// </summary>
+    private static int QueryStart(string trimmed) =>
+        TryParseEditCommand(trimmed, out _) ? -1 : trimmed.IndexOfAny(['?', '#']);
 
     /// <summary>
     /// A delay is seconds, and a capture nobody is waiting for is a bug rather than a

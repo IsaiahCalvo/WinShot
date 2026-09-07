@@ -96,5 +96,48 @@ public class FirstRunWelcomeTests
         Assert.Equal(before, Motion.Holders);
     }
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(-1920, -1080)]      // a monitor above and left of the laptop
+    [InlineData(400, -2)]           // just above the top edge (top-docked taskbar)
+    [InlineData(999999, 999999)]    // a tray icon on a monitor that has been unplugged
+    [InlineData(-999999, -999999)]
+    public void TheBubbleLandsOnScreenWhateverTheTrayAnchorSays(int x, int y)
+    {
+        using var window = Build(new SD.Point(x, y), out _, out _);
+        window.Show();
+        PumpOnce();
+
+        SD.Rectangle screen = WF.Screen.FromControl(window).WorkingArea;
+        Assert.True(window.Bounds.IntersectsWith(screen), $"bubble at {window.Bounds} missed {screen}");
+        window.Close();
+    }
+
+    [Fact]
+    public void MotionIsReleasedWhenItIsDisposedMidEntrance()
+    {
+        // Quitting the app during its own onboarding tears the bubble down with no Close().
+        int before = Motion.Holders;
+        for (int i = 0; i < 5; i++)
+        {
+            var window = Build(new SD.Point(200, 200), out _, out _);
+            window.Show();
+            PumpOnce();     // OnShown starts the entrance
+            window.Dispose();
+        }
+        for (int i = 0; i < 200 && Motion.Holders != before; i++)
+            PumpOnce();
+        Assert.Equal(before, Motion.Holders);
+    }
+
+    [Fact]
+    public void ABubbleWithNoRowsStillOpensAndCloses()
+    {
+        using var window = new FirstRunWelcomeWindow(null, [], () => { });
+        window.Show();
+        PumpOnce();
+        window.Close();
+    }
+
     private static void PumpOnce() => WF.Application.DoEvents();
 }

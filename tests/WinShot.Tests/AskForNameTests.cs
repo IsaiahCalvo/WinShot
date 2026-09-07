@@ -36,6 +36,31 @@ public class AskForNameTests
         Assert.Equal("WinShot 2026-09-04", ThemedInputDialog.SanitizeFileName(entered, "WinShot 2026-09-04"));
     }
 
+    [Theory]
+    [InlineData("CON", "CON_")]
+    [InlineData("aux", "aux_")]
+    [InlineData("NUL.png", "NUL.png_")]
+    [InlineData("COM1", "COM1_")]
+    [InlineData("LPT9", "LPT9_")]
+    // Not reserved: the device names are whole stems, not prefixes.
+    [InlineData("Console", "Console")]
+    [InlineData("COM10", "COM10")]
+    [InlineData("PRNT", "PRNT")]
+    public void AReservedDeviceNameIsSuffixedRatherThanWrittenToTheDevice(string entered, string expected)
+    {
+        // "CON.png" is the console, not a file — none of its characters are invalid, so the
+        // replacement pass never sees it and the save that follows fails or writes nowhere.
+        Assert.Equal(expected, ThemedInputDialog.SanitizeFileName(entered, "fallback"));
+    }
+
+    [Fact]
+    public void ATypedNameCannotClimbOutOfTheCaptureFolder()
+    {
+        string result = ThemedInputDialog.SanitizeFileName("../../evil", "fallback");
+        Assert.DoesNotContain("/", result);
+        Assert.DoesNotContain("\\", result);
+    }
+
     [Fact]
     public void ATypedNameNeverOverwritesAnExistingCapture()
     {

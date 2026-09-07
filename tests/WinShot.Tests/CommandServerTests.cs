@@ -89,4 +89,53 @@ public class CommandServerTests
             File.Delete(txt);
         }
     }
+
+    [Fact]
+    public void OpenWith_OnAFileNameContainingAHash_StillReachesTheRunningInstance()
+    {
+        // Explorer "Open with" on "note#1.png" while WinShot is already running: the second
+        // process resolves the path, then forwards it with WithQuery. '#' and '?' are legal
+        // in a Windows file name, so the forwarder used to cut the path in half at the '#'
+        // and the running instance opened nothing at all.
+        string dir = Path.Combine(Path.GetTempPath(), "winshot-hash-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string file = Path.Combine(dir, "note#1.png");
+            using (var bmp = new System.Drawing.Bitmap(4, 4))
+                bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+
+            string? resolved = CommandServer.ParseCommand(file);
+            Assert.Equal("edit:" + file, resolved);
+
+            string forwarded = CommandServer.WithQuery(resolved!, file);
+            Assert.Equal("edit:" + file, CommandServer.ParseCommand(forwarded));
+            Assert.Equal(CaptureCommandOptions.None, CommandServer.ParseOptions(file));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Theory]
+    [InlineData("winshot://capture-area?delayed=-5", 0)]
+    [InlineData("winshot://capture-area?delayed=abc", 0)]
+    [InlineData("winshot://capture-area?delayed=99999", 60)]
+    [InlineData("winshot://capture-area?delayed=", 0)]
+    [InlineData("winshot://capture-area?", 0)]
+    [InlineData("winshot://capture-area#", 0)]
+    public void ADelayNobodyCanCancelIsRefused(string url, int expected)
+    {
+        // A script that parks the app in an hour-long countdown is a hang, not a feature.
+        Assert.Equal(expected, CommandServer.ParseOptions(url).DelaySeconds);
+    }
+
+    [Fact]
+    public void AThenListWithNothingUsableInItLeavesTheUsersSettingsInCharge()
+    {
+        Assert.Null(CommandServer.ParseOptions("winshot://capture-area?then=nonsense").Then);
+        Assert.Null(PostCaptureSet.TryParseThen("nonsense,more"));
+        Assert.Null(PostCaptureSet.TryParseThen(""));
+    }
 }

@@ -82,6 +82,32 @@ public static class ThemedInputDialog
         // An answer made only of characters we had to replace ("///" -> "---") is not a name
         // the user chose, so it falls back too rather than saving a file called "---".
         string result = cleaned.ToString().TrimEnd(' ', '.');
-        return result.Trim('-', ' ', '.').Length == 0 ? fallback : result;
+        if (result.Trim('-', ' ', '.').Length == 0)
+            return fallback;
+
+        return IsReservedDeviceName(result) ? result + "_" : result;
     }
+
+    /// <summary>
+    /// Windows still reserves the DOS device names, and it reserves them <i>with</i> an
+    /// extension too — <c>CON.png</c> is the console, not a file, so saving there fails or
+    /// writes nowhere. None of these characters are invalid, so the replacement pass above
+    /// never sees them; the name is suffixed instead of refused, because "CON_" is what the
+    /// user asked for as closely as the filesystem allows.
+    /// </summary>
+    private static bool IsReservedDeviceName(string name)
+    {
+        int dot = name.IndexOf('.');
+        string stem = (dot < 0 ? name : name[..dot]).TrimEnd(' ');
+        return Array.Exists(
+            ReservedDeviceNames,
+            reserved => string.Equals(stem, reserved, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static readonly string[] ReservedDeviceNames =
+    [
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
 }
