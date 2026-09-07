@@ -62,10 +62,6 @@ public sealed class FastPinWindow : WF.Form
     private const int ReadoutDurationMs = 800;
 
     private const int ToolbarIconSizeLogical = 16;
-    // Black, not a brighter white than the hover wash: every other control in the app now
-    // darkens on press (Theme.xaml's PressedShadeColor, DarkControlPalette's -12 press step),
-    // and the lock/close chips were the one surface still pressing the other way.
-    private static readonly SD.Color PressedFill = SD.Color.FromArgb(0x2E, 0x00, 0x00, 0x00);
 
     private static readonly List<FastPinWindow> OpenPins = new();
     private static int _openCount;
@@ -608,7 +604,7 @@ public sealed class FastPinWindow : WF.Form
         }
         if (pressed)
         {
-            using var press = new SD.SolidBrush(Fade(PressedFill));
+            using var press = new SD.SolidBrush(Fade(ThemePalette.PressedShade));
             g.FillEllipse(press, bounds);
         }
 
@@ -1254,6 +1250,14 @@ public sealed class FastPinWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Pin copy failed", ex);
+            // A pin has no button label to flip and no status line of its own, so the toast
+            // is its feedback channel — without it a busy clipboard left the pin looking as
+            // though the copy had worked.
+            App.Toast(
+                "Copy failed",
+                FriendlyError.For(ex),
+                new SD.Point(Left, Top),
+                severity: ToastSeverity.Error);
         }
     }
 

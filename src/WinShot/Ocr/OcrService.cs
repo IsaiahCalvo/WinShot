@@ -121,7 +121,7 @@ public static class OcrService
     /// Runs barcode detection and OCR over <paramref name="bmp"/>.
     /// <paramref name="joinLines"/>=true joins OCR lines with spaces into a
     /// paragraph; false keeps one line per OCR line.
-    /// Throws <see cref="InvalidOperationException"/> when no OCR language pack
+    /// Throws <see cref="OcrUnavailableException"/> when no OCR language pack
     /// is available and the image contains no barcodes either.
     /// </summary>
     public static async Task<OcrCaptureResult> ExtractAsync(SD.Bitmap bmp, bool joinLines)
@@ -172,7 +172,7 @@ public static class OcrService
                 // Goes straight onto the toast, whose body box holds three 244-DIP rows. The
                 // long form ran past that and lost its tail — and the tail is the whole point
                 // of this message, so it says where to go and stops.
-                throw new InvalidOperationException(
+                throw new OcrUnavailableException(
                     "No OCR language pack is installed. Add one in Settings > Time & language.");
             }
 
@@ -520,3 +520,12 @@ public static class OcrService
 
     private sealed record BgraSnapshot(byte[] Pixels, int Width, int Height);
 }
+
+/// <summary>
+/// The one OCR failure whose message is written for the user rather than the log, so the
+/// one the caller is allowed to put on screen verbatim. It is a type and not a message on
+/// <see cref="InvalidOperationException"/> because catching the base type caught every
+/// framework InvalidOperationException the SoftwareBitmap and GDI+ work inside
+/// <see cref="OcrService.ExtractAsync"/> can raise, and quoted those to the user too.
+/// </summary>
+public sealed class OcrUnavailableException(string message) : Exception(message);
