@@ -565,17 +565,104 @@ internal static class AnnotationFactory
                 };
 
             case TextStyle.Pill:
-                return new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(0xD9, 0x1E, 0x1E, 0x1E)),
-                    CornerRadius = new CornerRadius(fontSize * 0.55),
-                    Padding = new Thickness(fontSize * 0.5, fontSize * 0.2, fontSize * 0.5, fontSize * 0.2),
-                    Child = CreateTextLabel(text, foreground, fontSize),
-                };
+                return CreatePillLabel(text, foreground, fontSize);
 
             default: // Plain; Huge is Plain at a size the caller already doubled
                 return CreateTextLabel(text, foreground, fontSize);
         }
+    }
+
+    /// <summary>The pill background's fill — dark enough for white text at any size.</summary>
+    private static readonly Color PillFill = Color.FromArgb(0xD9, 0x1E, 0x1E, 0x1E);
+
+    /// <summary>
+    /// A pill label and its pointer tail. The tail sticks out past the label, so the two
+    /// live in a Grid whose size is the LABEL's — the tail is drawn outside those bounds
+    /// on purpose, which is what keeps the label measuring, resizing and re-editing exactly
+    /// as it did before the tail existed.
+    ///
+    /// The geometry cannot be built here: the pill's size comes from measuring the text, so
+    /// the tail is redrawn on the label's own SizeChanged and whenever the tip moves.
+    /// </summary>
+    public static Grid CreatePillLabel(string text, Brush foreground, double fontSize)
+    {
+        var pill = new Border
+        {
+            Background = new SolidColorBrush(PillFill),
+            CornerRadius = new CornerRadius(fontSize * 0.55),
+            Padding = new Thickness(fontSize * 0.5, fontSize * 0.2, fontSize * 0.5, fontSize * 0.2),
+            Child = CreateTextLabel(text, foreground, fontSize),
+        };
+        var tail = new Path
+        {
+            Name = PillTailName,
+            Fill = new SolidColorBrush(PillFill),
+            IsHitTestVisible = false,
+        };
+        // The tail is drawn OUTSIDE the label's bounds, and a Path asked for its desired
+        // size reports the box its geometry needs — which would grow the pill to make room
+        // for its own tail. A zero-sized Canvas reports nothing, clips nothing, and puts
+        // its child's origin exactly on the label's top-left, which is the coordinate
+        // space the tail geometry is computed in.
+        var well = new Canvas { Width = 0, Height = 0, IsHitTestVisible = false };
+        well.Children.Add(tail);
+
+        var host = new Grid();
+        host.Children.Add(well);   // behind the pill, so the join is never a visible seam
+        host.Children.Add(pill);
+        host.SizeChanged += (_, _) => RefreshPillTail(host);
+        return host;
+    }
+
+    /// <summary>The tail Path inside a pill label, by name — one lookup rule, one place.</summary>
+    public const string PillTailName = "PillTail";
+
+    /// <summary>Where a pill label's tail currently points, in the label's own coordinates.</summary>
+    public static Point? PillTailTip(FrameworkElement label) =>
+        label is Grid host && FindTail(host) is Path { Tag: Point tip } ? tip : null;
+
+    private static Path? FindTail(Grid host) =>
+        host.Children.OfType<Canvas>()
+            .SelectMany(c => c.Children.OfType<Path>())
+            .FirstOrDefault(p => p.Name == PillTailName);
+
+    /// <summary>
+    /// Points a pill label's tail at <paramref name="tip"/> (label coordinates). Passing
+    /// null gives the label a tail in its default place, which is what a new pill gets.
+    /// </summary>
+    public static void SetPillTail(FrameworkElement label, Point? tip)
+    {
+        if (label is not Grid host || FindTail(host) is not Path tail) return;
+        tail.Tag = tip ?? TextTail.DefaultTip(new Size(host.ActualWidth, host.ActualHeight));
+        RefreshPillTail(host);
+    }
+
+    /// <summary>Rebuilds a pill's tail from its current size and tip.</summary>
+    public static void RefreshPillTail(FrameworkElement label)
+    {
+        if (label is not Grid host || FindTail(host) is not Path tail) return;
+
+        var pill = new Size(host.ActualWidth, host.ActualHeight);
+        if (pill.Width < 1 || pill.Height < 1) { tail.Data = null; return; }
+
+        // A label that has never been given a tip gets the default one the moment it has a
+        // size to compute it from — which is this, the first layout pass.
+        if (tail.Tag is not Point tip)
+        {
+            tip = TextTail.DefaultTip(pill);
+            tail.Tag = tip;
+        }
+
+        Point[]? triangle = TextTail.Triangle(pill, tip);
+        if (triangle is null) { tail.Data = null; return; }
+
+        var figure = new PathFigure { StartPoint = triangle[0], IsClosed = true, IsFilled = true };
+        for (int i = 1; i < triangle.Length; i++)
+            figure.Segments.Add(new LineSegment(triangle[i], isStroked: false));
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        geometry.Freeze();
+        tail.Data = geometry;
     }
 
     /// <summary>32px emoji dropped as a text annotation; transparent background keeps it fully clickable.</summary>
