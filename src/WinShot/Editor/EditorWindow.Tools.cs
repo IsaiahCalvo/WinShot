@@ -144,9 +144,16 @@ public partial class EditorWindow : Window
         Canvas.SetLeft(badge, left);
         Canvas.SetTop(badge, top);
         // A counter lands rather than appearing: 0.6 -> 1 with a light overshoot, about its
-        // own centre so the badge does not slide while it grows.
-        badge.RenderTransformOrigin = new Point(0.5, 0.5);
-        badge.RenderTransform = new ScaleTransform(1, 1);
+        // own centre so the badge does not slide while it grows. The centre is the SCALE's
+        // own CenterX/CenterY, not RenderTransformOrigin: AnnotationTransform.Apply builds
+        // its RotateTransform around an explicit element-local pivot on the assumption that
+        // the origin is (0,0), so a badge left at (0.5,0.5) would orbit rather than spin the
+        // day counters become rotatable.
+        badge.RenderTransform = new ScaleTransform(1, 1)
+        {
+            CenterX = badge.Width / 2,
+            CenterY = badge.Height / 2,
+        };
         badge.BeginStoryboard((Storyboard)FindResource("CounterPopIn"));
         var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
         // Record the caption mode so project reload rebuilds the same number/letter badge.

@@ -357,6 +357,14 @@ public partial class EditorWindow : Window
     {
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
+        // A text resize wrote a derived point size into the field without touching the
+        // ACTIVE tool's remembered size. Left there, the next LostFocus would commit that
+        // number as (usually) Select's size. Put the field back to what the tool actually holds.
+        if (_liveTextSizeShown)
+        {
+            _liveTextSizeShown = false;
+            SyncSizeField();
+        }
 
         if (_adjustingCrop)
         {
@@ -488,9 +496,12 @@ public partial class EditorWindow : Window
     /// Pushes a dragged text size into the size field without treating it as a user edit
     /// (which would restyle the selection back and fight the drag).
     /// </summary>
+    private bool _liveTextSizeShown;
+
     private void ShowLiveTextSize(double fontSize)
     {
         if (SizeBox is null) return;
+        _liveTextSizeShown = true;
         int width = AnnotationSize.Clamp((int)Math.Round((fontSize - 11) / 4));
         _syncingThicknessButtons = true;
         try

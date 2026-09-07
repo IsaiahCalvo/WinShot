@@ -227,19 +227,26 @@ public partial class EditorWindow : Window
         }
 
         double t = 1 / _zoom;
-        void Place(Line line, Point from, Point to)
+        static void Set(Line line, Point from, Point to, double thickness)
         {
             line.X1 = from.X; line.Y1 = from.Y;
             line.X2 = to.X; line.Y2 = to.Y;
-            line.StrokeThickness = t;
+            line.StrokeThickness = thickness;
+        }
+        // Each guide is a light hairline over a dark one, offset by one SCREEN pixel, so it
+        // survives a white region of the picture underneath.
+        void Place(Line line, Line shadow, Point from, Point to)
+        {
+            Set(line, from, to, t);
+            Set(shadow, new Point(from.X + t, from.Y + t), new Point(to.X + t, to.Y + t), t);
         }
 
         double x1 = area.Left + area.Width / 3, x2 = area.Left + area.Width * 2 / 3;
         double y1 = area.Top + area.Height / 3, y2 = area.Top + area.Height * 2 / 3;
-        Place(ThirdV1, new Point(x1, area.Top), new Point(x1, area.Bottom));
-        Place(ThirdV2, new Point(x2, area.Top), new Point(x2, area.Bottom));
-        Place(ThirdH1, new Point(area.Left, y1), new Point(area.Right, y1));
-        Place(ThirdH2, new Point(area.Left, y2), new Point(area.Right, y2));
+        Place(ThirdV1, ThirdV1Shadow, new Point(x1, area.Top), new Point(x1, area.Bottom));
+        Place(ThirdV2, ThirdV2Shadow, new Point(x2, area.Top), new Point(x2, area.Bottom));
+        Place(ThirdH1, ThirdH1Shadow, new Point(area.Left, y1), new Point(area.Right, y1));
+        Place(ThirdH2, ThirdH2Shadow, new Point(area.Left, y2), new Point(area.Right, y2));
         CropGuides.Visibility = Visibility.Visible;
     }
 
@@ -805,6 +812,19 @@ public partial class EditorWindow : Window
         UpdateMagnifierFocusVisual();
     }
 
+    /// <summary>
+    /// Drops an in-progress focus drag and puts the ring back where it was aimed before it
+    /// started — capture lost means the gesture never finished, so it must leave nothing
+    /// behind (and above all no undo entry for a move the user never made).
+    /// </summary>
+    private void AbortMagnifierFocusDrag()
+    {
+        if (!_draggingMagnifierFocus) return;
+        _draggingMagnifierFocus = false;
+        Viewport.ReleaseMouseCapture();
+        SetMagnifierFocus(_magnifierFocusBefore);
+    }
+
     /// <summary>Commits the aim as one undo step; a ring put back where it started records nothing.</summary>
     private void EndMagnifierFocusDrag()
     {
@@ -1013,6 +1033,21 @@ public partial class EditorWindow : Window
             Fill = null,
         });
 
+        // A single white ring vanishes over a light region of the picture. Same pairing the
+        // selector's loupe frame uses: a dark outer border with a light hairline inside it,
+        // so the loupe reads against any content.
+        EyedropLoupe.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Width = LoupeScreenSize,
+            Height = LoupeScreenSize,
+            RadiusX = 6,
+            RadiusY = 6,
+            Stroke = (Brush)FindResource("GuideStrokeShadowBrush"),
+            StrokeThickness = 3,
+            Fill = null,
+            IsHitTestVisible = false,
+        });
+
         EyedropLoupe.Children.Add(new System.Windows.Shapes.Rectangle
         {
             Width = LoupeScreenSize,
@@ -1020,7 +1055,7 @@ public partial class EditorWindow : Window
             RadiusX = 6,
             RadiusY = 6,
             Stroke = Brushes.White,
-            StrokeThickness = 2,
+            StrokeThickness = 1.5,
             Fill = null,
             IsHitTestVisible = false,
         });

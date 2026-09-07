@@ -217,10 +217,10 @@ public class DarkControlPaletteTests
         Color hoverWash = ((SolidColorBrush)theme["HoverFillBrush"]).Color;
 
         // Every ground a ToolButton actually lands on, not just the toolbar. Measuring one
-        // ground missed that PanToolBtn / CurvedArrowToolBtn / BlurToolBtn / EyedropperToolBtn
-        // live in MoreToolsPopup, which is ElevatedBrush — where the ring read 2.61:1 and the
-        // selected tool in that popup was, to the eye, not selected at all. Floating is
-        // translucent, so it is measured composited over the canvas it floats above.
+        // ground missed the checkable rows inside the toolbar's popovers, which sit on
+        // ElevatedBrush — where the ring read 2.61:1 and the checked row was, to the eye, not
+        // checked at all. Floating is translucent, so it is measured composited over the
+        // canvas it floats above.
         foreach (string key in new[] { "ToolbarBgBrush", "ElevatedBrush", "WindowBgBrush", "FloatingBgBrush" })
         {
             Color raw = ((SolidColorBrush)theme[key]).Color;

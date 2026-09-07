@@ -615,7 +615,7 @@ public partial class App : Application
                         await WaitForOverlayDismissAsync();
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
                     }
-                    HandleCapture(frozenCrop, postCaptureActionOverride);
+                    HandleCapture(frozenCrop, postCaptureActionOverride, originScreenRect: region);
                 }
             }
             finally
@@ -682,7 +682,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-display screen grab", sw);
-                HandleCapture(capture);
+                HandleCapture(capture, originScreenRect: r);
             }
         });
 
@@ -694,7 +694,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-previous screen grab", sw);
-                HandleCapture(capture);
+                HandleCapture(capture, originScreenRect: r);
             }
             else
                 // Info, not Error: nothing went wrong, a prerequisite is simply not met yet —
@@ -838,7 +838,8 @@ public partial class App : Application
     private void HandleCapture(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
-        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        SD.Rectangle? originScreenRect = null)
     {
         if (_settings.Current.DownscaleHiDpi)
         {
@@ -864,7 +865,7 @@ public partial class App : Application
 
         if (action == PostCaptureAction.Edit)
         {
-            OpenDirectEditCapture(bmp, historyKind);
+            OpenDirectEditCapture(bmp, historyKind, originScreenRect);
             return;
         }
 
@@ -909,7 +910,8 @@ public partial class App : Application
         }
     }
 
-    private void OpenDirectEditCapture(SD.Bitmap bmp, HistoryCaptureKind historyKind)
+    private void OpenDirectEditCapture(
+        SD.Bitmap bmp, HistoryCaptureKind historyKind, SD.Rectangle? originScreenRect = null)
     {
         DirectEditCaptureTestHooks? hooks = DirectEditTestHooks;
         Func<SD.Bitmap, Task> historyWork = hooks?.HistoryWork ?? (source =>
@@ -926,6 +928,10 @@ public partial class App : Application
         try
         {
             var win = EditorWindow.CreateForDirectCapture(bmp, _settings, _history, handoff.RunAsync);
+            // After-capture = Edit has an origin rect just like the quick-actions card does;
+            // without this the editor opened centred on the PRIMARY, so a shot taken on a
+            // second monitor left the display the user was looking at.
+            if (originScreenRect is SD.Rectangle origin) win.GrowFrom(origin);
             hooks?.ConfigureEditor?.Invoke(win);
             TrackFirstRender(win, "editor window");
             win.Show();
@@ -941,8 +947,9 @@ public partial class App : Application
     internal void HandleCaptureForTest(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
-        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular) =>
-        HandleCapture(bmp, postCaptureActionOverride, historyKind);
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        SD.Rectangle? originScreenRect = null) =>
+        HandleCapture(bmp, postCaptureActionOverride, historyKind, originScreenRect);
 
     internal void SetHistoryForTest(HistoryService history) => _history = history;
 

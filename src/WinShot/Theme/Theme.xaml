@@ -33,9 +33,9 @@
          So the FILL stays dark enough for the glyph (10.1:1, and still 8:1 under both washes)
          and the RING carries the state signal on its own.
          The ring is measured against EVERY ground a ToolButton lands on, not just the toolbar:
-         four of them live in MoreToolsPopup, which is ElevatedBrush — the lightest ground and
-         therefore the worst case. At #70707A the ring read 2.61:1 there, so the selected tool
-         in that popup was effectively unmarked. #85858F clears 3:1 on all four grounds
+         the checkable rows inside the toolbar's popovers sit on ElevatedBrush — the lightest
+         ground and therefore the worst case. At #70707A the ring read 2.61:1 there, so a
+         checked row in a popover was effectively unmarked. #85858F clears 3:1 on all four grounds
          (Elevated 3.50, Toolbar/Floating 4.14, Window 4.66) and on its own chip fill (3.09),
          and stays brighter than anything a plain hover composites to. -->
     <Color x:Key="ToolChipColor">#FF3A3A40</Color>
@@ -123,6 +123,13 @@
 
     <SolidColorBrush x:Key="BorderBrush"        Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
+
+    <!-- Helper chrome drawn OVER a screenshot (crop thirds guides and friends), where the
+         ground is arbitrary picture content rather than a theme surface. A single light
+         hairline disappears over a white region, so guides are drawn twice: a dark line
+         under a light one, the same pairing the selector's loupe frame uses. -->
+    <SolidColorBrush x:Key="GuideStrokeBrush"       Color="#8CFFFFFF"/>
+    <SolidColorBrush x:Key="GuideStrokeShadowBrush" Color="#66000000"/>
     <SolidColorBrush x:Key="TopHighlightBrush"  Color="{StaticResource TopHighlightColor}"/>
 
     <!-- ===================== TOKENS (radii / sizes) ==================== -->
@@ -217,6 +224,11 @@
     <Duration x:Key="MotionSwap">0:0:0.22</Duration>
     <Duration x:Key="MotionEnter">0:0:0.28</Duration>
 
+    <!-- How long a transient hint sits on screen before it starts leaving. Not a
+         transition length, so it is not one of the three above — but it is still a
+         motion number and belongs beside them rather than inline in one storyboard. -->
+    <sys:TimeSpan x:Key="MotionHintDwell">0:0:0.9</sys:TimeSpan>
+
     <CubicEase x:Key="EaseOutCubic" EasingMode="EaseOut"/>
     <BackEase  x:Key="EaseOutBack"  EasingMode="EaseOut" Amplitude="0.4"/>
 
@@ -269,14 +281,14 @@
     </Storyboard>
 
     <!-- A popover arriving: it grows the last 2 % into place from the edge it is
-         anchored to, instead of fading in at full size on the spot. Every popup that
+         anchored to, instead of arriving at full size on the spot. Every popup that
          uses PopoverSurface gets this; the surface must carry its own ScaleTransform
          (a Style-set transform would be shared and frozen across every popup, and
-         animating a frozen Freezable throws). -->
+         animating a frozen Freezable throws).
+         The FADE is the Popup's own PopupAnimation="Fade", not a track here: a popup
+         closing tears its child down before a storyboard could run it out, so entrance
+         and exit have to be the same mechanism or the exit is a hard cut. -->
     <Storyboard x:Key="PopoverIn">
-        <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                         From="0" To="1" Duration="{StaticResource MotionQuick}"
-                         EasingFunction="{StaticResource EaseOutCubic}"/>
         <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)"
                          From="0.98" To="1" Duration="{StaticResource MotionQuick}"
                          EasingFunction="{StaticResource EaseOutCubic}"/>
@@ -314,7 +326,7 @@
                          To="0.55" Duration="{StaticResource MotionQuick}"
                          EasingFunction="{StaticResource EaseOutCubic}"/>
         <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                         To="0" BeginTime="0:0:0.9" Duration="{StaticResource MotionSwap}"
+                         To="0" BeginTime="{StaticResource MotionHintDwell}" Duration="{StaticResource MotionSwap}"
                          EasingFunction="{StaticResource EaseOutCubic}"/>
     </Storyboard>
 
@@ -322,10 +334,10 @@
          arrives rather than appearing. -->
     <Storyboard x:Key="CounterPopIn">
         <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)"
-                         From="0.6" To="1" Duration="0:0:0.12"
+                         From="0.6" To="1" Duration="{StaticResource MotionQuick}"
                          EasingFunction="{StaticResource EaseOutBack}"/>
         <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)"
-                         From="0.6" To="1" Duration="0:0:0.12"
+                         From="0.6" To="1" Duration="{StaticResource MotionQuick}"
                          EasingFunction="{StaticResource EaseOutBack}"/>
     </Storyboard>
 
@@ -566,6 +578,51 @@
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="FocusRing" Property="Stroke" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         SWATCH BUTTON — one colour in the picker's grid, or in "My colours".
+         A bare Button falls to the Aero2 template, whose hover trigger paints
+         the border Windows light-blue — which hides the very colour the user
+         is trying to identify. Same overlay recipe as ColorWellButton, so the
+         swatch keeps its colour and takes the shared 140 ms tint instead.
+         ==================================================================== -->
+    <Style x:Key="SwatchButton" TargetType="Button">
+        <Setter Property="Width"  Value="22"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border x:Name="Swatch" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                Background="{StaticResource PressedShadeBrush}"/>
+                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChip}"
+                                BorderBrush="Transparent" BorderThickness="2" Margin="-3"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

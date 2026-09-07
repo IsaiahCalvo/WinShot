@@ -69,6 +69,16 @@ public class AnnotationEditorRenderHarness
                 RenderElementToPng(arrowStyle.Child, Path.Combine(outDir, "editor-after-arrow-style-popover.png"));
                 arrowStyle.IsOpen = false;
 
+                // The colour picker is where the new 16-swatch grid and the My-colours row
+                // live, and a swatch's hover treatment is exactly the class of defect that
+                // is invisible from the code and has to be scanned as pixels.
+                var colorPicker = (System.Windows.Controls.Primitives.Popup)editor.FindName("ColorPickerPopup")!;
+                ((Button)editor.FindName("CurrentColorIndicator")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump(6);
+                RenderElementToPng(colorPicker.Child, Path.Combine(outDir, "editor-after-colour-picker-popover.png"));
+                colorPicker.IsOpen = false;
+                Pump(2);
+
                 UIElement selectedRectangle = AddRepresentativeAnnotations(canvas);
                 Pump(6);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-annotations-overview.png"));
@@ -111,7 +121,7 @@ public class AnnotationEditorRenderHarness
                     "Sanitized WinShot annotation editor after-state\n" +
                     "Generated in-process with RenderTargetBitmap; WinShot.exe was not launched.\n" +
                     "Source content is synthetic and contains no user data.\n" +
-                    "Renders: primary shell, filled rectangle context, More overflow, annotations,\n" +
+                    "Renders: primary shell, filled rectangle context, arrow-style and colour-picker popovers,\n" +
                     "200% DPI, rectangle selection, redaction, text style, crop ratio, and spotlight.\n");
 
                 editor.Close();
@@ -258,6 +268,11 @@ public class AnnotationEditorRenderHarness
         return method.Invoke(editor, new[] { argument });
     }
 
+    // KNOWN GAP: every PNG this produces comes out empty. Rendering the Window and
+    // rendering its content root both give a transparent bitmap of the right size, on the
+    // hidden desktop and on a visible one, so the visual tree is laid out but never
+    // composited for RenderTargetBitmap. Until that is fixed nothing here can be
+    // pixel-scanned, which is a separate defect from anything the editor track changed.
     private static void RenderToPng(Window window, string path, double dpi = 96)
     {
         window.UpdateLayout();

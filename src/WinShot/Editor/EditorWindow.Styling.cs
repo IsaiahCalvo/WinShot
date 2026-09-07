@@ -307,7 +307,7 @@ public partial class EditorWindow : Window
     {
         BuildSelectModeRows();
         CheckRowByTag(SelectModeList, _marqueePreference);
-        SelectModePopup.IsOpen = !SelectModePopup.IsOpen;
+        OpenPopover(SelectModePopup, SelectModeList);
     }
 
     private void BuildSelectModeRows()
@@ -360,7 +360,7 @@ public partial class EditorWindow : Window
     {
         BuildArrowStyleRows();
         CheckRowByTag(ArrowStyleList, _tool == EditorTool.CurvedArrow ? ArrowStyle.Curved : _arrowStyle);
-        ArrowStylePopup.IsOpen = !ArrowStylePopup.IsOpen;
+        OpenPopover(ArrowStylePopup, ArrowStyleList);
     }
 
     private void BuildArrowStyleRows()
@@ -369,7 +369,7 @@ public partial class EditorWindow : Window
         foreach (ArrowStyle style in Enum.GetValues<ArrowStyle>())
         {
             var row = AddPopoverRow(ArrowStyleList, "ArrowStyle",
-                BuildArrowPreview(style), style, style.ToString());
+                BuildArrowPreview(style), style, ArrowStyleLabel(style));
             ArrowStyle picked = style;
             row.Click += (_, _) =>
             {
@@ -378,6 +378,20 @@ public partial class EditorWindow : Window
             };
         }
     }
+
+    /// <summary>
+    /// What a screen reader says for an arrow row. The rows carry no text at all on screen —
+    /// the preview IS the choice — so the accessible name is the only thing a non-sighted
+    /// user gets, and "Double" on its own is not it.
+    /// </summary>
+    private static string ArrowStyleLabel(ArrowStyle style) => style switch
+    {
+        ArrowStyle.Double => "Double-headed arrow",
+        ArrowStyle.Thin => "Thin arrow",
+        ArrowStyle.Fancy => "Fancy arrow",
+        ArrowStyle.Curved => "Curved arrow",
+        _ => "Straight arrow",
+    };
 
     /// <summary>A 40x16 preview drawn from the same geometry the tool will draw.</summary>
     private static Grid BuildArrowPreview(ArrowStyle style)
@@ -444,7 +458,7 @@ public partial class EditorWindow : Window
     {
         BuildTextStyleRows();
         CheckRowByTag(TextStyleList, _textStyle);
-        TextStylePopup.IsOpen = !TextStylePopup.IsOpen;
+        OpenPopover(TextStylePopup, TextStyleList);
     }
 
     private void BuildTextStyleRows()
@@ -457,7 +471,7 @@ public partial class EditorWindow : Window
             FrameworkElement preview = AnnotationFactory.CreateStyledTextLabel(
                 style.ToString(), Brushes.White, 14, style);
             preview.VerticalAlignment = VerticalAlignment.Center;
-            var row = AddPopoverRow(TextStyleList, "TextStyle", preview, style, style.ToString());
+            var row = AddPopoverRow(TextStyleList, "TextStyle", preview, style, $"{style} text");
             TextStyle picked = style;
             row.Click += (_, _) =>
             {
@@ -471,7 +485,7 @@ public partial class EditorWindow : Window
     {
         BuildCropRatioRows();
         CheckRowByTag(CropRatioList, _cropRatioTag);
-        CropRatioPopup.IsOpen = !CropRatioPopup.IsOpen;
+        OpenPopover(CropRatioPopup, CropRatioList);
     }
 
     private void BuildCropRatioRows()
@@ -549,6 +563,11 @@ public partial class EditorWindow : Window
     /// preference for people who draw that way; Alt flips it for the one arrow that wants
     /// the other order, without a trip to Settings — which is exactly what that setting's
     /// own hint has always promised.
+    ///
+    /// DELIBERATE DEVIATION: the sweep report says Cmd-drag, i.e. Ctrl on Windows. Ctrl is
+    /// already the override for object snap and crop snap in this same window (see
+    /// EditorWindow.Input.cs), so one key would mean two things mid-drag. Alt is free, and
+    /// the Settings hint names Alt to match.
     /// </summary>
     private (Point Tail, Point Head) ArrowEnds(Point from, Point to) =>
         AnnotationFactory.ArrowEnds(
@@ -682,7 +701,7 @@ public partial class EditorWindow : Window
     {
         BuildRedactStyleRows();
         CheckRowByTag(RedactStyleList, SelectedRedactStyle() ?? _redactStyle);
-        RedactStylePopup.IsOpen = !RedactStylePopup.IsOpen;
+        OpenPopover(RedactStylePopup, RedactStyleList);
     }
 
     private RedactStyle? SelectedRedactStyle() =>
@@ -880,7 +899,7 @@ public partial class EditorWindow : Window
         }
         SyncColorPickerInputs(CurrentTargetColor());
         RebuildSavedColorsRow();
-        ColorPickerPopup.IsOpen = !ColorPickerPopup.IsOpen;
+        OpenPopover(ColorPickerPopup, ColorPickerGrid);
     }
 
     /// <summary>Whichever colour the open tab is editing.</summary>
@@ -921,15 +940,10 @@ public partial class EditorWindow : Window
     {
         var btn = new Button
         {
-            Width = 22,
-            Height = 22,
-            Margin = new Thickness(2),
-            Cursor = Cursors.Hand,
+            Style = (Style)FindResource("SwatchButton"),
             ToolTip = label,
             Tag = c,
             Background = new SolidColorBrush(c),
-            BorderBrush = (Brush)FindResource("BorderStrongBrush"),
-            BorderThickness = new Thickness(1),
         };
         AutomationProperties.SetName(btn, $"Colour {label}");
         AutomationProperties.SetHelpText(btn, saved
@@ -999,6 +1013,13 @@ public partial class EditorWindow : Window
         SvSquareBorder.ReleaseMouseCapture();
         CommitPickerColor();
     }
+
+    /// <summary>
+    /// Closing the popup mid-drag (Escape in the hex box) unloads the child and drops the
+    /// capture without a MouseUp; the flag has to come down with it, or the thumb tracks the
+    /// pointer with no button held the next time the picker is opened.
+    /// </summary>
+    private void OnSvSquareLostCapture(object sender, MouseEventArgs e) => _draggingSv = false;
 
     private void UpdateSvFromPointer(Point p)
     {

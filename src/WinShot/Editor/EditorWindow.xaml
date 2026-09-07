@@ -57,7 +57,7 @@
                             AutomationProperties.Name="Selection mode"
                             AutomationProperties.HelpText="Choose how a rubber band picks marks: by drag direction, fully enclosed only, or anything it touches."/>
                     <Popup x:Name="SelectModePopup" PlacementTarget="{Binding ElementName=SelectModeButton}"
-                           Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                           Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                         <Border Style="{StaticResource PopoverSurface}">
                             <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                             <StackPanel x:Name="SelectModeList" Width="216"/>
@@ -105,7 +105,7 @@
                                 ToolTip="Colour" AutomationProperties.Name="Colour"
                                 AutomationProperties.HelpText="Open the colour picker for the active tool."/>
                         <Popup x:Name="ColorPickerPopup" PlacementTarget="{Binding ElementName=CurrentColorIndicator}"
-                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Style="{StaticResource PopoverSurface}">
                                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                                 <StackPanel Width="252">
@@ -139,7 +139,8 @@
                                     <Border x:Name="SvSquareBorder" Height="104" CornerRadius="{StaticResource RadiusChip}"
                                             BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
                                             MouseLeftButtonDown="OnSvSquareDown" MouseMove="OnSvSquareMove"
-                                            MouseLeftButtonUp="OnSvSquareUp" Cursor="Cross">
+                                            MouseLeftButtonUp="OnSvSquareUp" LostMouseCapture="OnSvSquareLostCapture"
+                                            Cursor="Cross">
                                         <Grid ClipToBounds="True">
                                             <Rectangle x:Name="SvHueLayer"/>
                                             <Rectangle>
@@ -170,7 +171,7 @@
                                         <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
                                                    Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
                                         <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
-                                                 Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
+                                                 KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
                                                  ToolTip="Type a hex colour" AutomationProperties.Name="Hex colour"/>
                                         <Button x:Name="PickerEyedropperBtn" Grid.Column="2" Style="{StaticResource ToolIconButton}"
                                                 Width="30" Height="30" FontSize="{StaticResource GlyphBadge}" Content="&#xEF3C;"
@@ -209,7 +210,7 @@
                             </Grid>
                         </Border>
                         <Popup x:Name="SizePresetPopup" PlacementTarget="{Binding ElementName=SizeFieldBorder}"
-                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Style="{StaticResource PopoverSurface}">
                                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                                 <StackPanel Width="168">
@@ -262,7 +263,7 @@
                                 AutomationProperties.Name="Arrow style"
                                 AutomationProperties.HelpText="Choose straight, double, thin, fancy or curved, previewed at real weight."/>
                         <Popup x:Name="ArrowStylePopup" PlacementTarget="{Binding ElementName=ArrowStyleButton}"
-                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Style="{StaticResource PopoverSurface}">
                                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                                 <StackPanel Width="176">
@@ -279,7 +280,7 @@
                                 AutomationProperties.Name="Text style"
                                 AutomationProperties.HelpText="Choose plain, bold, outline, pill or huge, previewed as the style itself."/>
                         <Popup x:Name="TextStylePopup" PlacementTarget="{Binding ElementName=TextStyleButton}"
-                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Style="{StaticResource PopoverSurface}">
                                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                                 <StackPanel Width="176">
@@ -309,7 +310,7 @@
                                 AutomationProperties.Name="Redaction style"
                                 AutomationProperties.HelpText="Choose pixelate, blur (secure), blur (smooth) or black out. The style can be changed after the mark is drawn."/>
                         <Popup x:Name="RedactStylePopup" PlacementTarget="{Binding ElementName=RedactStyleButton}"
-                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Style="{StaticResource PopoverSurface}">
                                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                                 <StackPanel Width="184">
@@ -318,6 +319,15 @@
                                 </StackPanel>
                             </Border>
                         </Popup>
+                        <!-- Text only belongs to the STYLE, not the strength: "black out
+                             only the words" is one of the four things this row exists for,
+                             and living inside the strength group made it vanish for the one
+                             style that has no strength. -->
+                        <CheckBox x:Name="RedactTextOnlyCheck" Style="{StaticResource DarkCheckBox}" Content="Text only"
+                                  Margin="10,0,0,0" VerticalAlignment="Center"
+                                  ToolTip="Cover only the words in the region, leaving pictures visible"
+                                  AutomationProperties.Name="Redact text only"
+                                  AutomationProperties.HelpText="Read the region and cover each word it finds, leaving photos and graphics visible."/>
                     </StackPanel>
 
                     <!-- Continuous, and gone entirely for Black Out — there is no such
@@ -331,11 +341,6 @@
                                 AutomationProperties.HelpText="How coarse the mosaic or how wide the blur is."/>
                         <TextBlock x:Name="RedactStrengthValue" Text="45" Style="{StaticResource ValueLabel}" MinWidth="28"
                                    TextAlignment="Right" Margin="6,0,0,0"/>
-                        <CheckBox x:Name="RedactTextOnlyCheck" Style="{StaticResource DarkCheckBox}" Content="Text only"
-                                  Margin="10,0,0,0"
-                                  ToolTip="Cover only the words in the region, leaving pictures visible"
-                                  AutomationProperties.Name="Redact text only"
-                                  AutomationProperties.HelpText="Read the region and cover each word it finds, leaving photos and graphics visible."/>
                     </StackPanel>
 
                     <StackPanel x:Name="CropRatioPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -344,7 +349,7 @@
                                 AutomationProperties.Name="Crop ratio"
                                 AutomationProperties.HelpText="Constrain the crop to a fixed aspect ratio, or leave it free."/>
                         <Popup x:Name="CropRatioPopup" PlacementTarget="{Binding ElementName=CropRatioButton}"
-                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Style="{StaticResource PopoverSurface}">
                                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                                 <StackPanel Width="160">
@@ -456,11 +461,17 @@
                              pointed at the source bitmap instead of the screen. -->
                         <Canvas x:Name="EyedropLoupe" Visibility="Collapsed" IsHitTestVisible="False"/>
                         <!-- Rule-of-thirds guides inside the crop rectangle. -->
+                        <!-- Two-tone: a dark hairline one screen pixel under a light one, so
+                             the guides read over a white region as well as a dark one. -->
                         <Canvas x:Name="CropGuides" Visibility="Collapsed" IsHitTestVisible="False">
-                            <Line x:Name="ThirdV1" Stroke="#66FFFFFF"/>
-                            <Line x:Name="ThirdV2" Stroke="#66FFFFFF"/>
-                            <Line x:Name="ThirdH1" Stroke="#66FFFFFF"/>
-                            <Line x:Name="ThirdH2" Stroke="#66FFFFFF"/>
+                            <Line x:Name="ThirdV1Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdV2Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdH1Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdH2Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdV1" Stroke="{StaticResource GuideStrokeBrush}"/>
+                            <Line x:Name="ThirdV2" Stroke="{StaticResource GuideStrokeBrush}"/>
+                            <Line x:Name="ThirdH1" Stroke="{StaticResource GuideStrokeBrush}"/>
+                            <Line x:Name="ThirdH2" Stroke="{StaticResource GuideStrokeBrush}"/>
                         </Canvas>
                     </Canvas>
                 </Grid>
@@ -496,7 +507,7 @@
                         <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
                                      Tag="Eyedropper" Content="&#xEF3C;" Checked="OnToolChecked" ToolTip="Eyedropper"
                                      AutomationProperties.Name="Eyedropper"
-                                     AutomationProperties.HelpText="Sample a source pixel and make it the current annotation color."/>
+                                     AutomationProperties.HelpText="Sample a source pixel and make it the current annotation colour."/>
                     </StackPanel>
 
                     <StackPanel x:Name="ShapesToolRow" Orientation="Horizontal" Visibility="Collapsed">
@@ -507,7 +518,7 @@
                         <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
                                      Tag="FilledRectangle" Content="&#xE73B;" Checked="OnFilledRectangleToolChecked"
                                      ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
-                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current color."/>
+                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current colour."/>
                         <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
                                      Tag="Ellipse" Content="&#xEA3A;" Checked="OnToolChecked" ToolTip="Ellipse (E)"
                                      AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."/>
@@ -620,8 +631,8 @@
                             ToolTip="Copy to clipboard (Ctrl+C)" Click="OnCopy" AutomationProperties.Name="Copy"
                             AutomationProperties.HelpText="Copy the source-resolution edited image, or just the selection. Shortcut Ctrl+C."/>
                     <Button x:Name="BtnCenter" Style="{StaticResource CircleActionButton}" Content="&#xE9A6;"
-                            ToolTip="Fit &amp; center (Ctrl+1)" Click="OnCenterView" AutomationProperties.Name="Fit and center"
-                            AutomationProperties.HelpText="Fit and center the whole image. Shortcut Ctrl+1."/>
+                            ToolTip="Fit &amp; centre (Ctrl+1)" Click="OnCenterView" AutomationProperties.Name="Fit and centre"
+                            AutomationProperties.HelpText="Fit and centre the whole image. Shortcut Ctrl+1."/>
                 </StackPanel>
             </Grid>
         </Border>

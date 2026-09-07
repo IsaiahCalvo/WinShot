@@ -34,13 +34,17 @@ public partial class EditorWindow : Window
         Hide();
 
         SD.Bitmap? shot = null;
+        bool failed = false;
         try
         {
             shot = await capture();
         }
         catch (Exception ex)
         {
+            // The editor un-hides with nothing added; without this the only record of why
+            // is the log, while the sibling failure below already says so out loud.
             Log.Error("Add capture failed", ex);
+            failed = true;
         }
         finally
         {
@@ -55,6 +59,9 @@ public partial class EditorWindow : Window
         if (shot is null || _closed)
         {
             shot?.Dispose();
+            if (failed && !_closed)
+                ThemedMessageDialog.Show(this, "Could not take the capture",
+                    "WinShot could not take that shot. Try again in a moment.");
             return;
         }
 
@@ -68,8 +75,11 @@ public partial class EditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Adding the capture to the canvas failed", ex);
-            ThemedMessageDialog.Show(this, "Could not add the capture",
-                "WinShot took the shot but could not add it to this canvas.");
+            // The await above can outlive the window; ThemedMessageDialog assigns Owner
+            // unconditionally and WPF throws on a closed one, out of an async void handler.
+            if (!_closed)
+                ThemedMessageDialog.Show(this, "Could not add the capture",
+                    "WinShot took the shot but could not add it to this canvas.");
         }
         finally
         {
@@ -115,7 +125,12 @@ public partial class EditorWindow : Window
     /// </summary>
     private async void OnExtractText(object sender, RoutedEventArgs e)
     {
-        if (_sourceOperationActive) return;
+        if (_sourceOperationActive || _ocrRunning) return;
+        // A cold read of a large region takes seconds with nothing on screen; two clicks
+        // used to mean two passes and two toasts. T6 owns the shared working indicator —
+        // this is the guard that stops the second pass in the meantime.
+        _ocrRunning = true;
+        OcrRegionBtn.IsEnabled = false;
         SD.Bitmap flat = Flatten();
         try
         {
@@ -147,8 +162,13 @@ public partial class EditorWindow : Window
         finally
         {
             flat.Dispose();
+            _ocrRunning = false;
+            if (!_closed) OcrRegionBtn.IsEnabled = true;
         }
     }
+
+    /// <summary>An OCR pass is in flight; the button is disabled and a second click is dropped.</summary>
+    private bool _ocrRunning;
 
     /// <summary>
     /// "Text only": covers each WORD the OCR engine finds inside the dragged region and
@@ -156,6 +176,8 @@ public partial class EditorWindow : Window
     /// so each one can still be moved, restyled or deleted afterwards — and the whole set is
     /// one undo step, because "hide the text here" was one gesture.
     /// </summary>
+    private const int MaxTextOnlyBoxes = 250;
+
     private async Task RedactTextInRegionAsync(Rect area)
     {
         SD.Rectangle region = ToPixelRect(area);
@@ -177,7 +199,21 @@ public partial class EditorWindow : Window
 
         if (boxes.Count == 0)
         {
-            App.Toast("Redact text", "No text found in that area.");
+            // An empty result and a missing language pack look identical from here, and
+            // "no text found" sends the user hunting for text that was never readable.
+            App.Toast("Redact text", OcrService.HasLanguagePack()
+                ? "No text found in that area."
+                : "No OCR language pack is installed. Add one in Settings > Time & language.");
+            return;
+        }
+
+        if (boxes.Count > MaxTextOnlyBoxes)
+        {
+            // Every box is a live redaction: its own GDI render now, and another one each
+            // time the picture is cropped, rotated or resized. A full page of text is ~800
+            // of them on the UI thread, which is where a nice feature becomes a freeze.
+            App.Toast("Redact text",
+                $"That area has more than {MaxTextOnlyBoxes} words. Redact it in smaller pieces, or drop Text only to cover the whole region.");
             return;
         }
 

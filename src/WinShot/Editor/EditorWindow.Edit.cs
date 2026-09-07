@@ -247,6 +247,14 @@ public partial class EditorWindow : Window
         // Let an open text annotation keep its own keyboard behavior.
         if (Keyboard.FocusedElement is TextBox) return;
 
+        // An open popover owns Escape: it is the only way out of a menu for a keyboard
+        // user, and it must not also deselect or abort whatever is on the canvas behind it.
+        if (e.Key == Key.Escape && CloseOpenPopover())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Space)
         {
             if (!_spaceDown)
@@ -707,10 +715,14 @@ public partial class EditorWindow : Window
         {
             PlacementTarget = ZoomMenuButton,
             Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+            // Without both styles this pops the Aero2 default — white chrome over the dark
+            // editor, on the control built to replace the dead zoom combo.
+            Style = (Style)FindResource("DarkContextMenu"),
         };
+        var itemStyle = (Style)FindResource("DarkMenuItem");
         void Row(string header, string gesture, Action run)
         {
-            var item = new MenuItem { Header = header, InputGestureText = gesture };
+            var item = new MenuItem { Header = header, InputGestureText = gesture, Style = itemStyle };
             item.Click += (_, _) => run();
             menu.Items.Add(item);
         }
@@ -805,7 +817,10 @@ public partial class EditorWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Before/after GIF export failed: {dialog.FileName}", ex);
-            ThemedMessageDialog.Show(this, "Couldn't save the GIF", FriendlyError.For(ex));
+            // The encode can outlive the window; ThemedMessageDialog assigns Owner
+            // unconditionally and WPF throws on a closed one, out of an async void handler.
+            if (!_closed)
+                ThemedMessageDialog.Show(this, "Couldn't save the GIF", FriendlyError.For(ex));
         }
         finally
         {

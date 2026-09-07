@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -10,6 +11,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Core;
+using WinShot.Recording;
 using SD = System.Drawing;
 
 namespace WinShot.Editor;
@@ -29,6 +31,15 @@ public partial class EditorWindow : Window
 {
     private const double MinZoom = 0.05;
     private const double MaxZoom = 16.0;
+
+    /// <summary>
+    /// The editor's preferred footprint, in DIPs. The viewport zooms and pans instead of
+    /// sizing itself to the image, so a sensible default is enough — but it must be a plain
+    /// number, not something read back off the primary monitor's work area, because the
+    /// grow tween scales it by the CAPTURE monitor's DPI.
+    /// </summary>
+    private const double DefaultWidthDip = 1167;
+    private const double DefaultHeightDip = 590;
 
     private const string SaveDialogFilter =
         "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp|WinShot project|*.winshot";
@@ -260,9 +271,13 @@ public partial class EditorWindow : Window
         // image, so a sensible default footprint is enough; the image is
         // fitted and centered once layout is known.
         var wa = SystemParameters.WorkArea;
-        Width = Math.Min(1167, wa.Width * 0.9);
-        Height = Math.Min(590, wa.Height * 0.9);
+        Width = Math.Min(DefaultWidthDip, wa.Width * EditorGrowLayout.MaxWorkAreaFraction);
+        Height = Math.Min(DefaultHeightDip, wa.Height * EditorGrowLayout.MaxWorkAreaFraction);
 
+        // EVERY gesture that takes the viewport's mouse capture aborts here. Alt+Tab, a
+        // context menu or a modal dialog takes capture away mid-drag; a gesture whose flag
+        // only a MouseUp clears would otherwise keep running with no button held, and the
+        // next plain click would commit it.
         Viewport.LostMouseCapture += (_, _) =>
         {
             AbortDrag();
@@ -271,6 +286,8 @@ public partial class EditorWindow : Window
             AbortMarquee();
             AbortCurveHandle();
             AbortResize();
+            AbortZoomGesture();
+            AbortMagnifierFocusDrag();
         };
         Loaded += (_, _) => FitToView();
         // Loaded can fire before the window has its final size; this catches the first
@@ -370,51 +387,69 @@ public partial class EditorWindow : Window
     private SD.Rectangle? _origin;
     private IDisposable? _growMotion;
 
-    /// <summary>~220 ms, the same "one surface becoming another" beat as the card's restack.</summary>
-    private const int GrowDurationMs = 220;
-
     /// <summary>
     /// Places the window on the origin's display and tweens it out of the origin rect.
-    /// Runs once, on the first frame that has an HWND — device-to-DIP conversion needs the
-    /// window's own PresentationSource, and on a mixed-DPI desktop the primary monitor's
-    /// scale is the wrong answer.
+    /// Runs once, on the first frame that has an HWND, and entirely in DEVICE PIXELS with
+    /// the ORIGIN monitor's DPI: at this moment the window has not been moved yet, so its
+    /// own PresentationSource still reports the primary's scale, which on a mixed-DPI
+    /// desktop is the wrong answer for every number involved. History places itself the
+    /// same way (SetWindowPos + GetDpiForMonitor) and for the same reason.
     /// </summary>
     private void BeginGrowFromOrigin()
     {
         if (_origin is not SD.Rectangle origin) return;
         _origin = null;
 
-        if (PresentationSource.FromVisual(this)?.CompositionTarget is not CompositionTarget target)
-            return;
-        Matrix toDip = target.TransformFromDevice;
+        IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
 
+        double scale = RecordingMonitorDpi.ScaleFor(origin);
         SD.Rectangle work = System.Windows.Forms.Screen.FromRectangle(origin).WorkingArea;
-        Rect to = EditorGrowLayout.Target(ToDip(toDip, work), new Size(Width, Height));
-        Rect from = EditorGrowLayout.Origin(ToDip(toDip, origin));
+        SD.Rectangle to = EditorGrowLayout.Target(work, new Size(DefaultWidthDip, DefaultHeightDip), scale);
+        SD.Rectangle from = EditorGrowLayout.Origin(origin);
+
+        // WPF enforces MinWidth/MinHeight through WM_GETMINMAXINFO, so without this every
+        // frame of the tween would paint at the 980x520 floor and only the position would
+        // move — a full-size window sliding in from the card's corner instead of growing
+        // out of it. The floor is a resize constraint for the user, not for the entrance.
+        double minWidth = MinWidth, minHeight = MinHeight;
+        MinWidth = 0;
+        MinHeight = 0;
+
+        // Motion.Run applies nothing synchronously — its first frame arrives on the first
+        // timer tick — so the start rect is written here. Otherwise the window paints once
+        // at CW_USEDEFAULT on the PRIMARY monitor before the tween ever starts.
+        PlaceWindow(hwnd, from);
 
         _growMotion?.Dispose();
-        _growMotion = Motion.Run(GrowDurationMs, Motion.EaseOutCubic, p =>
+        _growMotion = Motion.Run(Motion.SwapMs, Motion.EaseOutCubic, p =>
         {
             if (_closed) return;
-            Left = from.X + (to.X - from.X) * p;
-            Top = from.Y + (to.Y - from.Y) * p;
-            Width = from.Width + (to.Width - from.Width) * p;
-            Height = from.Height + (to.Height - from.Height) * p;
-        }, onDone: () => _growMotion = null);
+            PlaceWindow(hwnd, EditorGrowLayout.Lerp(from, to, p));
+        }, onDone: () =>
+        {
+            _growMotion = null;
+            MinWidth = minWidth;
+            MinHeight = minHeight;
+        });
     }
 
     /// <summary>
-    /// A device rect in DIPs. The size goes through Transform(Vector), not Transform(Point):
-    /// a size has no origin, and the point overload would add the matrix's offset to it.
-    /// TransformFromDevice happens to be offset-free today, which is exactly the kind of
-    /// thing that stops being true quietly.
+    /// One frame of the grow. Left/Top/Width/Height are DIPs in whichever monitor's scale
+    /// the window currently believes it is on, which is exactly what breaks when it moves
+    /// between monitors mid-tween; SetWindowPos takes the physical rect and means it.
     /// </summary>
-    private static Rect ToDip(Matrix toDip, SD.Rectangle device)
-    {
-        Point topLeft = toDip.Transform(new Point(device.Left, device.Top));
-        Vector size = toDip.Transform(new Vector(device.Width, device.Height));
-        return new Rect(topLeft.X, topLeft.Y, size.X, size.Y);
-    }
+    private static void PlaceWindow(IntPtr hwnd, SD.Rectangle rect) =>
+        SetWindowPos(hwnd, IntPtr.Zero, rect.X, rect.Y, rect.Width, rect.Height,
+            SwpNoZOrder | SwpNoActivate);
+
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
     internal static EditorWindow CreateForDirectCapture(
         SD.Bitmap source,
@@ -695,6 +730,9 @@ public partial class EditorWindow : Window
     /// "is there more above this?" while the view moves, and to be gone once it has been
     /// answered — so they fade out rather than sitting on the picture.
     /// </summary>
+    /// <summary>Whether the indicators are currently up, so the flash is not restarted per frame.</summary>
+    private bool _scrollBarsShown;
+
     private void UpdateScrollOverlay()
     {
         if (ScrollOverlay is null) return;
@@ -722,10 +760,17 @@ public partial class EditorWindow : Window
         Place(ScrollBarV, vertical);
         if (horizontal is null && vertical is null)
         {
+            _scrollBarsShown = false;
             ScrollOverlay.BeginAnimation(OpacityProperty, null);
             ScrollOverlay.Opacity = 0;
             return;
         }
+        // This runs on every pan MouseMove and on every frame of a zoom tween. Restarting
+        // the flash each time gave the storyboard a fresh 0.9 s dwell ~35 times per zoom, so
+        // the bars only began fading long after the view stopped. Start it when the bars
+        // APPEAR; while they are already up, the one running clock owns the fade.
+        if (_scrollBarsShown) return;
+        _scrollBarsShown = true;
         ScrollOverlay.BeginStoryboard((Storyboard)FindResource("ScrollHintFlash"));
     }
 
@@ -915,14 +960,62 @@ public partial class EditorWindow : Window
                 rb.IsChecked = false;
     }
 
+    /// <summary>
+    /// Every toolbar popover, each with the control that opened it — one list, so a new
+    /// popover cannot be forgotten by the close-all path (RedactStylePopup was) or by the
+    /// Escape path.
+    /// </summary>
+    private (Popup Popup, Control Owner)[] ToolbarPopups() => new (Popup, Control)[]
+    {
+        (SizePresetPopup, SizePresetButton),
+        (SelectModePopup, SelectModeButton),
+        (ArrowStylePopup, ArrowStyleButton),
+        (TextStylePopup, TextStyleButton),
+        (RedactStylePopup, RedactStyleButton),
+        (CropRatioPopup, CropRatioButton),
+        (ColorPickerPopup, CurrentColorIndicator),
+    };
+
     private void CloseToolbarPopups()
     {
-        SizePresetPopup.IsOpen = false;
-        SelectModePopup.IsOpen = false;
-        ArrowStylePopup.IsOpen = false;
-        TextStylePopup.IsOpen = false;
-        CropRatioPopup.IsOpen = false;
-        ColorPickerPopup.IsOpen = false;
+        foreach ((Popup popup, _) in ToolbarPopups())
+            popup.IsOpen = false;
+    }
+
+    /// <summary>
+    /// Escape closes the open popover and hands focus back to the button that opened it,
+    /// so a keyboard user is never trapped inside a menu. Returns false when none is open,
+    /// and Escape goes on to mean what it always meant.
+    /// </summary>
+    private bool CloseOpenPopover()
+    {
+        foreach ((Popup popup, Control owner) in ToolbarPopups())
+        {
+            if (!popup.IsOpen) continue;
+            popup.IsOpen = false;
+            owner.Focus();
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Opens (or toggles) a popover and puts keyboard focus on the row it is showing as
+    /// chosen. A Popup's child lives in its own PresentationSource, so Tab from the opening
+    /// button never reaches it — without this the arrow keys have nothing to move between
+    /// and the menu is mouse-only. The focus has to wait for the popup to realise its child.
+    /// </summary>
+    private void OpenPopover(Popup popup, Panel rows)
+    {
+        popup.IsOpen = !popup.IsOpen;
+        if (!popup.IsOpen) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            if (!popup.IsOpen) return;
+            Control? row = rows.Children.OfType<Control>().FirstOrDefault(c => c is ToggleButton { IsChecked: true })
+                ?? rows.Children.OfType<Control>().FirstOrDefault(c => c.Focusable);
+            row?.Focus();
+        });
     }
 
     // ------------------------------------------------------------- categories
@@ -1147,7 +1240,7 @@ public partial class EditorWindow : Window
     }
 
     private void OnSizePresetClick(object sender, RoutedEventArgs e) =>
-        SizePresetPopup.IsOpen = !SizePresetPopup.IsOpen;
+        OpenPopover(SizePresetPopup, SizePresetList);
 
     private void OnSizePresetPicked(object sender, RoutedEventArgs e)
     {

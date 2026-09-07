@@ -426,6 +426,13 @@ public static class OcrService
         }
     }
 
+    /// <summary>
+    /// Whether an OCR engine can be created at all. Callers that tolerate a missing language
+    /// pack (word boxes come back empty) need this to tell "nothing to read here" apart from
+    /// "this machine cannot read anything".
+    /// </summary>
+    public static bool HasLanguagePack() => GetEngine() is not null;
+
     private static OcrEngine? GetEngine()
     {
         if (_engineInitialized)

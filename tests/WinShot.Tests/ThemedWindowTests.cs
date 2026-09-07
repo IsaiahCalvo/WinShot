@@ -543,6 +543,20 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, color.Visibility);
         Assert.True(((RadioButton)editor.FindName("CategoryRedactBtn")!).IsChecked);
 
+        // "Text only" belongs to the STYLE group, not the strength group. Inside the
+        // strength group it vanished for Black Out - the one style whose text-only form
+        // Shottr's row exists for - while the flag stayed live and every drag silently
+        // produced one mark per word with no control on screen to say so.
+        var textOnly = (CheckBox)editor.FindName("RedactTextOnlyCheck")!;
+        Assert.Same(redactStyle, textOnly.Parent);
+        var applyRedactStyle = editor.GetType().GetMethod("ApplyRedactStyle",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        applyRedactStyle.Invoke(editor, new object[] { RedactStyle.BlackOut });
+        Assert.Equal(Visibility.Collapsed, redactStrength.Visibility);
+        Assert.Equal(Visibility.Visible, redactStyle.Visibility);
+        Assert.Equal(Visibility.Visible, textOnly.Visibility);
+        applyRedactStyle.Invoke(editor, new object[] { RedactStyle.Pixelate });
+
         ((RadioButton)editor.FindName("CropUtilityBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
         Assert.Equal(Visibility.Visible, cropTools.Visibility);

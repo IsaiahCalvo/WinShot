@@ -572,8 +572,23 @@ internal static class AnnotationFactory
         }
     }
 
-    /// <summary>The pill background's fill — dark enough for white text at any size.</summary>
-    private static readonly Color PillFill = Color.FromArgb(0xD9, 0x1E, 0x1E, 0x1E);
+    /// <summary>
+    /// A pill's plate colour and the ink that goes on it. The plate is the TOOL's colour —
+    /// the colour control has to mean something on a pill, and a fixed dark plate made it
+    /// mean nothing — and the ink is black or white by luminance, never the raw pick. The
+    /// plate is fully opaque: at 85 % the effective backdrop moved with the screenshot
+    /// underneath, so the same label passed 4.5:1 over a dark region and failed over a
+    /// light one. Opaque + <see cref="ColorMath.TextOn"/> is >= 4.58:1 for every colour in
+    /// the picker, black and #3A3A3C included.
+    /// </summary>
+    private static (Brush Plate, Brush Ink) PillBrushes(Brush foreground)
+    {
+        Color plate = foreground is SolidColorBrush { Color: var c } ? c : Colors.Black;
+        // A translucent pick keeps its translucency; the ink is chosen against the colour
+        // the plate resolves to at full strength, which is what the eye reads.
+        return (new SolidColorBrush(plate),
+                new SolidColorBrush(ColorMath.TextOn(Color.FromRgb(plate.R, plate.G, plate.B))));
+    }
 
     /// <summary>
     /// A pill label and its pointer tail. The tail sticks out past the label, so the two
@@ -586,17 +601,18 @@ internal static class AnnotationFactory
     /// </summary>
     public static Grid CreatePillLabel(string text, Brush foreground, double fontSize)
     {
+        (Brush plate, Brush ink) = PillBrushes(foreground);
         var pill = new Border
         {
-            Background = new SolidColorBrush(PillFill),
+            Background = plate,
             CornerRadius = new CornerRadius(fontSize * 0.55),
             Padding = new Thickness(fontSize * 0.5, fontSize * 0.2, fontSize * 0.5, fontSize * 0.2),
-            Child = CreateTextLabel(text, foreground, fontSize),
+            Child = CreateTextLabel(text, ink, fontSize),
         };
         var tail = new Path
         {
             Name = PillTailName,
-            Fill = new SolidColorBrush(PillFill),
+            Fill = plate,
             IsHitTestVisible = false,
         };
         // The tail is drawn OUTSIDE the label's bounds, and a Path asked for its desired
