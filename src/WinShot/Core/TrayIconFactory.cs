@@ -13,8 +13,9 @@ internal static class TrayIconFactory
     /// <summary>Draws the tray icon at runtime so the repo needs no binary assets.</summary>
     public static SD.Icon Create() => _idle ??= Draw(recording: false);
 
-    /// <summary>The icon shown while a take is running: the same disc wearing a stop square,
-    /// so one click on the tray ends the recording and the tray says a recording is live.</summary>
+    /// <summary>The icon shown while a take is running: the same disc wearing a stop square.
+    /// Double-clicking the tray while it shows this stops and saves the recording (App wires
+    /// that), so the square is an action and not only a status light.</summary>
     public static SD.Icon CreateRecording() => _recording ??= Draw(recording: true);
 
     private static SD.Icon Draw(bool recording)

@@ -106,6 +106,10 @@ public partial class App : Application
             Log.Error("Unhandled WinForms UI exception (continuing)", args.Exception);
 
         _settings.Load();
+        // A take that ended with the process (a crash, a kill, a power loss) left the user's
+        // notification banners switched off. The breadcrumb FocusAssist wrote before touching
+        // them is what puts them back, and this is the first moment the settings folder is known.
+        Core.FocusAssist.RecoverFromCrash();
         _history = new HistoryService(_settings);
         _recordingRecovery = new RecordingRecoveryStartup(
             excludedPaths => RecordingTempRecovery.Discover(excludedPaths: excludedPaths),
@@ -312,7 +316,15 @@ public partial class App : Application
         menu.Items.Add(MenuItem("About WinShot…", null, OpenAbout));
         menu.Items.Add(MenuItem("Exit", null, Shutdown));
         _tray.ContextMenuStrip = menu;
-        _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
+        // While a take is running the icon IS a stop square, so double-clicking it has to stop
+        // the recording. It used to launch a region screenshot over the live take instead.
+        _tray.DoubleClick += (_, _) =>
+        {
+            if (_recording is { IsRecording: true } recording)
+                recording.RequestStop();
+            else
+                QueueCaptureCommand("capture-area");
+        };
         _tray.BalloonTipClicked += (_, _) => { if (_pendingUpdate is not null) _ = InstallPendingUpdateAsync(); };
     }
 

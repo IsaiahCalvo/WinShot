@@ -101,6 +101,70 @@ public class FocusAssistTests
         Assert.Empty(store.Writes);
     }
 
+    /// <summary>
+    /// The in-memory copy dies with the process, so the saved values go to disk BEFORE the
+    /// switches are touched. Without that breadcrumb a crash mid-take left the user's
+    /// notification banners off for good.
+    /// </summary>
+    [Fact]
+    public void Suppress_PersistsTheSavedValuesBeforeTouchingTheSwitches()
+    {
+        var store = new FakeStore();
+        List<(string Key, string Value, int? Data)>? persisted = null;
+        var session = new FocusAssist.Session(
+            store.Read,
+            store.Write,
+            saved => persisted = saved.ToList(),
+            () => persisted = null);
+        foreach ((string key, string value) in FocusAssist.Switches)
+            store.Values[(key, value)] = 1;
+
+        session.Suppress();
+
+        Assert.NotNull(persisted);
+        Assert.Equal(FocusAssist.Switches.Count, persisted!.Count);
+        Assert.All(persisted, entry => Assert.Equal(1, entry.Data));
+        // ...and it is written before the first switch moves, so a crash between the two
+        // writes is still recoverable.
+        Assert.All(FocusAssist.Switches, s => Assert.Equal(0, store.Values[(s.Key, s.Value)]));
+    }
+
+    [Fact]
+    public void Restore_ClearsThePersistedCopy()
+    {
+        var store = new FakeStore();
+        bool cleared = false;
+        var session = new FocusAssist.Session(store.Read, store.Write, _ => { }, () => cleared = true);
+
+        session.Suppress();
+        Assert.False(cleared);
+        session.Restore();
+
+        Assert.True(cleared);
+    }
+
+    /// <summary>A crash means the breadcrumb is never cleared, which is exactly what the next
+    /// launch reads to put the switches back.</summary>
+    [Fact]
+    public void Crash_LeavesThePersistedCopyBehindForTheNextLaunch()
+    {
+        var store = new FakeStore();
+        List<(string Key, string Value, int? Data)>? persisted = null;
+        var dying = new FocusAssist.Session(
+            store.Read, store.Write, saved => persisted = saved.ToList(), () => persisted = null);
+        foreach ((string key, string value) in FocusAssist.Switches)
+            store.Values[(key, value)] = 1;
+
+        dying.Suppress();
+        // ...the process dies here: no Restore, so the breadcrumb survives.
+
+        Assert.NotNull(persisted);
+        foreach ((string key, string value, int? data) in persisted!)
+            store.Write(key, value, data);
+
+        Assert.All(FocusAssist.Switches, s => Assert.Equal(1, store.Values[(s.Key, s.Value)]));
+    }
+
     [Fact]
     public void Switches_CoverBothTheWindows10AndWindows11Keys()
     {
