@@ -1,4 +1,4 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 
 namespace WinShot.Capture;
 
@@ -16,7 +16,7 @@ public static class FastSelectorLoupeLayout
 {
     private const int OffsetX = 24;
     private const int OffsetY = 52;
-    private const int FlipY = 56;
+    internal const int FlipY = 56;
 
     public static FastSelectorLoupe Calculate(
         SD.Size clientSize,

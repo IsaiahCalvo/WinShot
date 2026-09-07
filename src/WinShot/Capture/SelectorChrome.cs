@@ -77,8 +77,8 @@ internal static class SelectorChrome
 
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.
     /// <paramref name="alpha"/> scales the whole pill, so a caller can fade one out
-    /// (TextRenderer cannot draw translucent text, so the text is drawn through
-    /// Graphics.DrawString once the pill is no longer fully opaque).</summary>
+    /// (TextRenderer cannot draw translucent text, so the text goes through
+    /// Graphics.DrawString at every alpha -- switching renderers mid-fade moved the glyphs).</summary>
     public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y,
         double alpha = 1d)
     {
@@ -100,13 +100,10 @@ internal static class SelectorChrome
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
-        if (amount >= 1d)
-        {
-            WF.TextRenderer.DrawText(g, text, font, bg, ThemePalette.TextPrimary,
-                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
-            return;
-        }
-
+        // One renderer at every alpha. It used to draw through TextRenderer (GDI, hinted) at
+        // rest and through DrawString (GDI+, different metrics) below 1, so the pill's text
+        // visibly re-laid out on the first frame of the 140 ms fade -- a snap inside the
+        // transition that exists so nothing snaps.
         using var textBrush = new SD.SolidBrush(SD.Color.FromArgb(Scale(255, amount), ThemePalette.TextPrimary));
         using var format = new SD.StringFormat
         {

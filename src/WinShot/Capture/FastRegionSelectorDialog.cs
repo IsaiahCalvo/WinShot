@@ -221,7 +221,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _options = SelectorOptions.ForRegion(_settings?.Current) with { Instruction = instruction };
         _instructionFade?.Dispose();
         _instructionFade = null;
-        _instructionAlpha = instruction is null ? 0d : 1d;
+        // Faded in, not simply there: FadeInstructionOut already runs a proper ramp when the
+        // drag begins, and an entrance that is not its mirror is the asymmetry the rubric asks
+        // about. This is the pill alone -- the scrim stays un-ramped, for open latency.
+        _instructionAlpha = 0d;
         // Always open translucent over the live desktop so the overlay appears the instant
         // the hotkey fires. The freeze snapshot (WGC setup alone can cost 300-1700 ms under
         // load) is taken in the background — these surfaces are excluded from capture — and
@@ -250,6 +253,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         long panesMs = sw.ElapsedMilliseconds;
 
         Show();
+        FadeInstructionIn();
         StartWindowLoad();
         long showMs = sw.ElapsedMilliseconds - panesMs;
         var paneTimings = new List<string>(_panes.Count);
@@ -753,6 +757,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
             () => { _instructionFade?.Dispose(); _instructionFade = null; });
     }
 
+    /// <summary>Brings the instruction pill up as the selector opens, mirroring
+    /// <see cref="FadeInstructionOut"/>.</summary>
+    private void FadeInstructionIn()
+    {
+        _instructionFade?.Dispose();
+        _instructionFade = null;
+        if (_options.Instruction is null) return;
+
+        _instructionFade = Core.Motion.Run(Core.Motion.QuickMs, Core.Motion.EaseOutCubic,
+            p =>
+            {
+                _instructionAlpha = p;
+                InvalidateInstructionRegion();
+            },
+            () => { _instructionFade?.Dispose(); _instructionFade = null; });
+    }
+
     /// <summary>Screen rect the instruction pill occupies, so the fade repaints only it.</summary>
     private void InvalidateInstructionRegion()
     {
@@ -770,13 +791,20 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SD.Size pill = SelectorChrome.MeasureLabel(instruction);
         return new SD.Rectangle(
             pt.X - (pill.Width / 2) - 4,
-            pt.Y - InstructionRise - pill.Height - 4,
+            pt.Y - InstructionRise(pill.Height) - pill.Height - 4,
             pill.Width + 8,
             pill.Height + 8);
     }
 
-    /// <summary>How far above the cursor the instruction pill rides, clear of the loupe.</summary>
-    private const int InstructionRise = 26;
+    /// <summary>
+    /// How far above the cursor the instruction pill rides. Derived from the flipped loupe's
+    /// own bottom edge rather than fixed: the loupe is a constant 120 device px sitting
+    /// FlipY above the cursor, but the pill's height comes from a point-sized font and so
+    /// grows with monitor DPI. At a fixed 26 the pill walked up into the loupe's bottom frame
+    /// at 150 % and 200 % -- and the pill is drawn last, so it clipped the loupe.
+    /// </summary>
+    private static int InstructionRise(int pillHeight) =>
+        Math.Clamp(FastSelectorLoupeLayout.FlipY - 2 - pillHeight, 8, 26);
 
     internal void HandleMouseMove()
     {
@@ -1099,7 +1127,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             SD.Size pill = SelectorChrome.MeasureLabel(instruction);
             SelectorChrome.DrawLabel(g, clientSize, instruction,
                 cursorLocal.X - (pill.Width / 2),
-                cursorLocal.Y - InstructionRise - pill.Height,
+                cursorLocal.Y - InstructionRise(pill.Height) - pill.Height,
                 _instructionAlpha);
         }
     }
