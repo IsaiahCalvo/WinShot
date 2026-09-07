@@ -62,6 +62,7 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeHighlighter:
             case AnnotationData.TypeImage:
             case AnnotationData.TypeRedact:
+            case AnnotationData.TypeMagnifier:
                 LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe));
                 break;
             default:
@@ -435,8 +436,9 @@ public partial class EditorWindow : Window
                 ResizeBoxShape(fe, b);
                 break;
             case AnnotationData.TypeRedact:
-                // Resizing a redaction changes WHAT it covers, so the pixels behind it are
-                // re-run, live, on the same drag.
+            case AnnotationData.TypeMagnifier:
+                // Resizing either changes WHAT it shows, so the pixels behind it are re-run,
+                // live, on the same drag.
                 ResizeBoxShape(fe, b);
                 meta.Rect = new[] { b.X, b.Y, b.Width, b.Height };
                 RefreshRedaction(fe);
@@ -636,6 +638,7 @@ public partial class EditorWindow : Window
         switch (snap.Type)
         {
             case AnnotationData.TypeRedact:
+            case AnnotationData.TypeMagnifier:
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
             case AnnotationData.TypeImage:
@@ -698,7 +701,7 @@ public partial class EditorWindow : Window
         meta.Angle = snap.Angle;
 
         fe.Tag = meta;
-        if (meta.Type == AnnotationData.TypeRedact)
+        if (meta.Type is AnnotationData.TypeRedact or AnnotationData.TypeMagnifier)
             RefreshRedaction(fe);
     }
 
@@ -1066,6 +1069,7 @@ public partial class EditorWindow : Window
             Key.H => EditorTool.Highlighter,
             Key.X => EditorTool.Redact,
             Key.O => EditorTool.Spotlight,
+            Key.M => EditorTool.Magnifier,
             Key.S => EditorTool.Step,
             Key.C => EditorTool.Crop,
             _ => null,

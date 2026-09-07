@@ -23,6 +23,9 @@ internal enum EditorContextControls
     /// so the toolbar shrinks to the controls that mean something.
     /// </summary>
     RedactStrength = 1 << 10,
+
+    /// <summary>How much a magnifier callout blows the picture up.</summary>
+    Magnification = 1 << 11,
 }
 
 /// <summary>The five tool families the toolbar's category buttons switch between.</summary>
@@ -76,7 +79,7 @@ internal static class EditorShellContract
             "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step",
         },
         EditorToolCategory.Text => new[] { "Text" },
-        EditorToolCategory.Redact => new[] { "Redact", "Spotlight" },
+        EditorToolCategory.Redact => new[] { "Redact", "Spotlight", "Magnifier" },
         EditorToolCategory.Image => new[] { "Crop" },
         _ => Array.Empty<string>(),
     };
@@ -92,7 +95,7 @@ internal static class EditorShellContract
         EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
             or EditorTool.CurvedArrow or EditorTool.Step => EditorToolCategory.Shapes,
         EditorTool.Text => EditorToolCategory.Text,
-        EditorTool.Redact or EditorTool.Spotlight => EditorToolCategory.Redact,
+        EditorTool.Redact or EditorTool.Spotlight or EditorTool.Magnifier => EditorToolCategory.Redact,
         EditorTool.Crop => EditorToolCategory.Image,
         _ => null,
     };
@@ -145,6 +148,9 @@ internal static class EditorShellContract
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,
         EditorTool.Redact => EditorContextControls.RedactStyle | EditorContextControls.RedactStrength,
+        EditorTool.Magnifier =>
+            EditorContextControls.Color | EditorContextControls.Thickness |
+            EditorContextControls.Magnification,
         EditorTool.Crop => EditorContextControls.CropRatio | EditorContextControls.CropTools,
         _ => EditorContextControls.None,
     };

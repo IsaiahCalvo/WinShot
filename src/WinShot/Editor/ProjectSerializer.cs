@@ -45,6 +45,13 @@ internal sealed class AnnotationData
     /// </summary>
     public const string TypeRedact = "redact";
 
+    /// <summary>
+    /// A zoomed callout: a rounded bubble filled with a piece of the source blown up.
+    /// <c>Rect</c> is the bubble; <c>Points[0]</c> is the point of the picture it is
+    /// looking at, which is why the bubble can be dragged away from what it shows.
+    /// </summary>
+    public const string TypeMagnifier = "magnifier";
+
     public string Type { get; set; } = "";
 
     /// <summary>Geometry points: arrow/line = [from, to]; curved arrow = [from, control, to];
@@ -83,6 +90,9 @@ internal sealed class AnnotationData
 
     /// <summary>Redaction intensity, 1–100. Meaningless for the Black Out style.</summary>
     public int? Strength { get; set; }
+
+    /// <summary>Magnification of a callout, 1.5-8.</summary>
+    public double? Zoom { get; set; }
 
     /// <summary><see cref="StrokeDash"/> name for shape outlines. Absent reads as Solid,
     /// which is how every shape drawn before dashes existed was saved.</summary>
@@ -137,6 +147,18 @@ internal sealed class AnnotationData
         Thickness = thickness,
         Fill = fill.ToString(),
         FillColor = fillColor is Color fc ? ToHex(fc) : null,
+    };
+
+    /// <summary>A zoomed callout over <paramref name="focus"/>, drawn inside <paramref name="bounds"/>.</summary>
+    public static AnnotationData ForMagnifier(
+        Rect bounds, Point focus, double scale, Color border, double thickness) => new()
+    {
+        Type = TypeMagnifier,
+        Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
+        Points = ToArray(new[] { focus }),
+        Zoom = MagnifierLayout.ClampScale(scale),
+        Color = ToHex(border),
+        Thickness = thickness,
     };
 
     public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) => new()
@@ -435,6 +457,24 @@ internal static class ProjectSerializer
                     number, RequireColor(a), RequireThickness(a), letters);
                 SetPos(badge, pts[0]);
                 return badge;
+            }
+            case AnnotationData.TypeMagnifier:
+            {
+                var bounds = RequireRect(a);
+                // The fill is painted by the editor, which owns the source bitmap; from a
+                // project reload the bubble arrives empty and is filled by the refresh pass
+                // that runs after every load, exactly as a redaction is.
+                var bubble = new Shapes.Rectangle
+                {
+                    Width = bounds.Width,
+                    Height = bounds.Height,
+                    RadiusX = 6,
+                    RadiusY = 6,
+                    Stroke = new SolidColorBrush(RequireColor(a)),
+                    StrokeThickness = RequireThickness(a),
+                };
+                SetPos(bubble, bounds.TopLeft);
+                return bubble;
             }
             case AnnotationData.TypeSpotlight:
             {

@@ -386,6 +386,46 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
+    /// Starts a magnifier callout. Like a redaction, the mark IS the preview: it fills with
+    /// the blown-up pixels as the bubble grows, rather than being a dashed box that only
+    /// becomes a callout on mouse-up.
+    /// </summary>
+    private System.Windows.Shapes.Rectangle BeginMagnifier(Rect bounds)
+    {
+        var bubble = new System.Windows.Shapes.Rectangle
+        {
+            RadiusX = 6,
+            RadiusY = 6,
+            Stroke = new SolidColorBrush(WithOpacity(_color, _opacity)),
+            StrokeThickness = _thickness,
+        };
+        Canvas.SetLeft(bubble, bounds.X);
+        Canvas.SetTop(bubble, bounds.Y);
+        AnnotationFactory.PaintMagnifier(
+            bubble, _source, bounds, MagnifierLayout.DefaultFocus(bounds), _magnification);
+        _redactPreviewClock.Restart();
+        return bubble;
+    }
+
+    /// <summary>
+    /// Live preview of a growing callout. It looks at its own centre while it is being
+    /// drawn, so what you see is the pixels the bubble is over, blown up; aiming it
+    /// somewhere else is the ring's job, afterwards. Rate-limited on the same clock the
+    /// redaction preview uses, and for the same reason.
+    /// </summary>
+    private void UpdateMagnifierPreview(System.Windows.Shapes.Rectangle bubble, Rect bounds, bool force)
+    {
+        Canvas.SetLeft(bubble, bounds.X);
+        Canvas.SetTop(bubble, bounds.Y);
+        bubble.Width = Math.Max(1, bounds.Width);
+        bubble.Height = Math.Max(1, bounds.Height);
+        if (!force && _redactPreviewClock.ElapsedMilliseconds < RedactPreviewIntervalMs) return;
+        _redactPreviewClock.Restart();
+        AnnotationFactory.PaintMagnifier(
+            bubble, _source, bounds, MagnifierLayout.DefaultFocus(bounds), _magnification);
+    }
+
+    /// <summary>
     /// Repaints a committed redaction from the pixels it covers NOW — after a move, a
     /// resize, a crop shift, a style change or an undo. The seed rides in the metadata so
     /// a mosaic redraws with the same blocks instead of reshuffling on every recompute.
@@ -393,11 +433,32 @@ public partial class EditorWindow : Window
     private void RefreshRedaction(UIElement element)
     {
         if (element is not System.Windows.Shapes.Rectangle mark ||
-            mark.Tag is not AnnotationData meta || meta.Type != AnnotationData.TypeRedact)
+            mark.Tag is not AnnotationData meta)
             return;
-        AnnotationFactory.PaintRedaction(mark, _source, RedactionBounds(mark, meta),
-            Redaction.Parse(meta.Style), meta.Strength ?? Redaction.DefaultStrength, meta.Seed ?? 0);
+
+        // Two marks are painted from the pixels underneath rather than from their own
+        // properties, and both have to be repainted by the same six callers — every move,
+        // resize, crop, rotate, undo and redo. One entry point, so a new pixel-backed mark
+        // never has to find those six again.
+        switch (meta.Type)
+        {
+            case AnnotationData.TypeRedact:
+                AnnotationFactory.PaintRedaction(mark, _source, RedactionBounds(mark, meta),
+                    Redaction.Parse(meta.Style), meta.Strength ?? Redaction.DefaultStrength, meta.Seed ?? 0);
+                break;
+            case AnnotationData.TypeMagnifier:
+                AnnotationFactory.PaintMagnifier(mark, _source, RedactionBounds(mark, meta),
+                    MagnifierFocus(meta), meta.Zoom ?? MagnifierLayout.DefaultScale);
+                break;
+        }
     }
+
+    /// <summary>The point of the picture a callout is looking at, defaulting to its own centre.</summary>
+    private static Point MagnifierFocus(AnnotationData meta) =>
+        meta.Points is { Length: >= 1 } pts && pts[0] is { Length: >= 2 } p
+            ? new Point(p[0], p[1])
+            : MagnifierLayout.DefaultFocus(
+                meta.Rect is { Length: >= 4 } r ? new Rect(r[0], r[1], r[2], r[3]) : default);
 
     /// <summary>
     /// Where a redaction sits in source pixels, move offset included. A rotated redaction
@@ -415,7 +476,7 @@ public partial class EditorWindow : Window
         return new Rect(x + offset.X, y + offset.Y, Math.Max(1, w), Math.Max(1, h));
     }
 
-    /// <summary>Repaints every redaction on the canvas — after a crop, rotate or resize of the source.</summary>
+    /// <summary>Repaints every pixel-backed mark — after a crop, rotate or resize of the source.</summary>
     private void RefreshAllRedactions()
     {
         foreach (UIElement child in AnnotationCanvas.Children)

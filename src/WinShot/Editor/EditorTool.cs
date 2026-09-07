@@ -21,6 +21,12 @@ public enum EditorTool
     /// </summary>
     Redact,
     Spotlight,
+
+    /// <summary>
+    /// A zoomed callout: a bubble showing a piece of the picture blown up, with a ring
+    /// saying which piece — draggable, so the bubble can sit somewhere it is not in the way.
+    /// </summary>
+    Magnifier,
     CurvedArrow,
     Emoji,
 }

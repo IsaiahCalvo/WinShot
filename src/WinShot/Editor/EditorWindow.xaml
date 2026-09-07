@@ -244,6 +244,18 @@
                                       AutomationProperties.HelpText="Draw shapes with a sketched, hand-drawn line instead of a ruled one."/>
                     </StackPanel>
 
+                    <StackPanel x:Name="MagnifyPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                        <TextBlock x:Name="MagnifyValueLabel" Style="{StaticResource ValueLabel}"
+                                   VerticalAlignment="Center" Margin="0,0,6,0" MinWidth="30"/>
+                        <Slider x:Name="MagnifySlider" Style="{StaticResource DarkSlider}" Width="92"
+                                Minimum="1.5" Maximum="8" Value="2" SmallChange="0.5" LargeChange="1"
+                                ValueChanged="OnMagnifyChanged" PreviewMouseUp="OnMagnifyReleased"
+                                LostMouseCapture="OnMagnifyReleased"
+                                ToolTip="How much the callout magnifies"
+                                AutomationProperties.Name="Magnification"
+                                AutomationProperties.HelpText="How much of the picture the callout blows up, from 1.5 to 8 times."/>
+                    </StackPanel>
+
                     <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                         <Button x:Name="ArrowStyleButton" Style="{StaticResource ToolIconButton}" Content="&#xE72A;"
                                 Click="OnArrowStyleClick" ToolTip="Arrow style"
@@ -423,6 +435,14 @@
                                    StrokeDashArray="4 3" Opacity="0.6" Visibility="Collapsed"/>
                         <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
                                  Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
+                        <!-- What a selected magnifier callout is looking at. Hollow, so the
+                             pixels it is pointing at stay visible under it, and joined to
+                             the bubble by a leader so the pair reads as one mark. -->
+                        <Line x:Name="MagnifierLeader" Stroke="{StaticResource InfoBrush}" StrokeThickness="1"
+                              StrokeDashArray="3 3" Opacity="0.8" Visibility="Collapsed"/>
+                        <Ellipse x:Name="MagnifierFocusHandle" Width="12" Height="12"
+                                 Stroke="{StaticResource InfoBrush}" StrokeThickness="2"
+                                 Fill="Transparent" Visibility="Collapsed"/>
                         <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
                         <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
                                 CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
@@ -520,6 +540,10 @@
                                      Tag="Spotlight" Content="&#xE8FB;" Checked="OnToolChecked" ToolTip="Spotlight (O)"
                                      AutomationProperties.Name="Spotlight"
                                      AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area. Shortcut O."/>
+                        <RadioButton x:Name="MagnifierToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
+                                     Tag="Magnifier" Content="&#xE71E;" Checked="OnToolChecked" ToolTip="Magnify (M)"
+                                     AutomationProperties.Name="Magnify"
+                                     AutomationProperties.HelpText="Drag a bubble that shows a piece of the picture blown up. Drag its ring to aim it somewhere else. Shortcut M."/>
                     </StackPanel>
 
                     <StackPanel x:Name="ImageToolRow" Orientation="Horizontal" Visibility="Collapsed">

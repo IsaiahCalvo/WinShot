@@ -103,6 +103,11 @@ public partial class EditorWindow : Window
     private RedactStyle _redactStyle = RedactStyle.Pixelate;
     private int _redactStrength = Redaction.DefaultStrength;
     private int _activeRedactSeed;
+
+    /// <summary>Magnification for the NEXT callout; a selected one carries its own.</summary>
+    private double _magnification = MagnifierLayout.DefaultScale;
+    private AnnotationData? _magnifyBefore;
+    private UIElement? _magnifyElement;
     private readonly System.Diagnostics.Stopwatch _redactPreviewClock = new();
 
     // Strength-slider gesture: a continuous drag previews live but records ONE undo entry.
@@ -171,6 +176,10 @@ public partial class EditorWindow : Window
 
     /// <summary>The gesture came from the zoom menu, so it disarms after one use.</summary>
     private bool _zoomArmedByMenu;
+
+    /// <summary>Dragging the ring that says what a magnifier callout is looking at.</summary>
+    private bool _draggingMagnifierFocus;
+    private Point _magnifierFocusBefore;
 
     /// <summary>Whether a dragged mark lines itself up with the others. On by default,
     /// with Ctrl as the per-drag escape, and switchable from the pointer's own menu.</summary>
@@ -1005,6 +1014,7 @@ public partial class EditorWindow : Window
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         CropToolsPanel.Visibility = Show(Has(EditorContextControls.CropTools));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        MagnifyPanel.Visibility = Show(Has(EditorContextControls.Magnification));
         if (Has(EditorContextControls.Thickness))
             SyncSizeField();
 
@@ -1014,6 +1024,9 @@ public partial class EditorWindow : Window
 
         if (Has(EditorContextControls.RedactStrength))
             SyncRedactStrengthSlider();
+
+        if (Has(EditorContextControls.Magnification))
+            SyncMagnifySlider();
 
         if (Has(EditorContextControls.CropTools))
             SyncImageSizeLabel();

@@ -61,6 +61,18 @@ public partial class EditorWindow : Window
             CommitPendingCurve();
         }
 
+        // The focus ring beats the box handles: it sits outside the bubble, so the two
+        // never overlap, and it is the smaller target of the pair.
+        if (MagnifierFocusHandle.Visibility == Visibility.Visible &&
+            (pos - CurrentMagnifierFocus()).Length <= 10 / _zoom)
+        {
+            _draggingMagnifierFocus = true;
+            _magnifierFocusBefore = CurrentMagnifierFocus();
+            Viewport.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
         // Resize handles take priority over selection/draw so grabbing a thumb on a
         // selected annotation (or a pending crop rect) starts a resize rather than a move.
         if (_handleKind != HandleKind.None)
@@ -100,6 +112,11 @@ public partial class EditorWindow : Window
             _pendingCurve.Data = AnnotationFactory.CurvedArrowGeometry(
                 _curveFrom, _curveControl, _curveTo, _curveThickness);
             UpdateCurveHandleVisual();
+            return;
+        }
+        if (_draggingMagnifierFocus)
+        {
+            SetMagnifierFocus(e.GetPosition(AnnotationCanvas));
             return;
         }
         if (_activeHandle >= 0)
@@ -183,6 +200,9 @@ public partial class EditorWindow : Window
                 // redaction after the mouse comes up.
                 UpdateRedactionPreview(mark, new Rect(_dragStart, ConstrainDrawClamped(pos)), force: false);
                 break;
+            case EditorTool.Magnifier when _activeShape is System.Windows.Shapes.Rectangle bubble:
+                UpdateMagnifierPreview(bubble, new Rect(_dragStart, ConstrainDrawClamped(pos)), force: false);
+                break;
             case EditorTool.Spotlight:
                 ShowDragRect(new Rect(_dragStart, ConstrainDrawClamped(pos)), dim: true);
                 break;
@@ -232,6 +252,11 @@ public partial class EditorWindow : Window
             return;
         }
         if (e.ChangedButton != MouseButton.Left) return;
+        if (_draggingMagnifierFocus)
+        {
+            EndMagnifierFocusDrag();
+            return;
+        }
         if (_zoomDragging)
         {
             EndZoomGesture(e.GetPosition(AnnotationCanvas));
@@ -342,6 +367,24 @@ public partial class EditorWindow : Window
                 }
                 else if (shape is not null) AnnotationCanvas.Children.Remove(shape);
                 return;
+            case EditorTool.Magnifier:
+            {
+                if (shape is not System.Windows.Shapes.Rectangle bubble) return;
+                var bounds = new Rect(_dragStart, ClampToSurface(pos));
+                if (bounds.Width < 12 || bounds.Height < 12)
+                {
+                    // A callout smaller than its own border is not a callout.
+                    AnnotationCanvas.Children.Remove(bubble);
+                    return;
+                }
+                UpdateMagnifierPreview(bubble, bounds, force: true);
+                Point focus = MagnifierLayout.ClampFocus(
+                    MagnifierLayout.DefaultFocus(bounds), new Size(_sourceWidth, _sourceHeight));
+                bubble.Tag = AnnotationData.ForMagnifier(
+                    bounds, focus, _magnification, StrokeColorOf(bubble), bubble.StrokeThickness);
+                PushAddElement(bubble);
+                return;
+            }
             case EditorTool.Redact:
                 if (shape is not System.Windows.Shapes.Rectangle mark) return;
                 var area = new Rect(_dragStart, ClampToSurface(pos));
@@ -419,6 +462,7 @@ public partial class EditorWindow : Window
         }
 
         _dragStart = _tool is EditorTool.Redact or EditorTool.Crop or EditorTool.Spotlight
+            or EditorTool.Magnifier
             ? ClampToSurface(pos) : pos;
         _dragging = true;
         Viewport.CaptureMouse();
@@ -505,6 +549,9 @@ public partial class EditorWindow : Window
             case EditorTool.Redact:
                 _activeShape = BeginRedaction(new Rect(_dragStart, _dragStart));
                 break;
+            case EditorTool.Magnifier:
+                _activeShape = BeginMagnifier(new Rect(_dragStart, _dragStart));
+                break;
             case EditorTool.Spotlight:
                 ShowDragRect(new Rect(_dragStart, _dragStart), dim: true);
                 break;
@@ -533,7 +580,8 @@ public partial class EditorWindow : Window
         {
             EditorTool.Line or EditorTool.Arrow or EditorTool.CurvedArrow =>
                 DragConstraints.QuantizeBearing(_dragStart, pos),
-            EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Redact or EditorTool.Spotlight =>
+            EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Redact or EditorTool.Spotlight
+                or EditorTool.Magnifier =>
                 DragConstraints.Square(_dragStart, pos),
             _ => pos,
         };
@@ -688,6 +736,98 @@ public partial class EditorWindow : Window
     private void AbortCurveHandle() => _draggingCurveHandle = false;
 
     /// <summary>Positions the control-point handle; sized in screen px regardless of zoom.</summary>
+    // ------------------------------------------------------- magnifier focus
+
+    /// <summary>The point of the picture the selected callout is looking at.</summary>
+    private Point CurrentMagnifierFocus() =>
+        _selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+        meta.Type == AnnotationData.TypeMagnifier
+            ? MagnifierFocusOf(meta)
+            : default;
+
+    private static Point MagnifierFocusOf(AnnotationData meta) =>
+        meta.Points is { Length: >= 1 } pts && pts[0] is { Length: >= 2 } p
+            ? new Point(p[0], p[1])
+            : default;
+
+    /// <summary>
+    /// Aims the selected callout at a new point, live. The bubble does not move: dragging
+    /// the ring is how you point a callout at something OTHER than what it is sitting on,
+    /// which is the whole reason the two are separate.
+    /// </summary>
+    private void SetMagnifierFocus(Point focus)
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
+            meta.Type != AnnotationData.TypeMagnifier)
+            return;
+
+        Point clamped = MagnifierLayout.ClampFocus(focus, new Size(_sourceWidth, _sourceHeight));
+        meta.Points = new[] { new[] { clamped.X, clamped.Y } };
+        RefreshRedaction(fe);
+        UpdateMagnifierFocusVisual();
+    }
+
+    /// <summary>Commits the aim as one undo step; a ring put back where it started records nothing.</summary>
+    private void EndMagnifierFocusDrag()
+    {
+        _draggingMagnifierFocus = false;
+        Viewport.ReleaseMouseCapture();
+
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
+            meta.Type != AnnotationData.TypeMagnifier)
+            return;
+
+        Point after = MagnifierFocusOf(meta);
+        Point before = _magnifierFocusBefore;
+        if ((after - before).Length < 0.5) return;
+
+        void Aim(Point p)
+        {
+            if (fe.Tag is not AnnotationData m) return;
+            m.Points = new[] { new[] { p.X, p.Y } };
+            RefreshRedaction(fe);
+            if (ReferenceEquals(_selected, fe)) UpdateMagnifierFocusVisual();
+        }
+
+        Push(new EditorAction(undo: () => Aim(before), redo: () => Aim(after)), apply: false);
+    }
+
+    /// <summary>
+    /// Draws the focus ring and the leader joining it to the bubble, at constant SCREEN
+    /// size so both stay grabbable however far the canvas is zoomed. Hidden for every other
+    /// selection, and for none.
+    /// </summary>
+    private void UpdateMagnifierFocusVisual()
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
+            meta.Type != AnnotationData.TypeMagnifier)
+        {
+            MagnifierFocusHandle.Visibility = Visibility.Collapsed;
+            MagnifierLeader.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        Point focus = MagnifierFocusOf(meta);
+        double d = 12 / _zoom;
+        MagnifierFocusHandle.Width = d;
+        MagnifierFocusHandle.Height = d;
+        MagnifierFocusHandle.StrokeThickness = 2 / _zoom;
+        Canvas.SetLeft(MagnifierFocusHandle, focus.X - d / 2);
+        Canvas.SetTop(MagnifierFocusHandle, focus.Y - d / 2);
+        MagnifierFocusHandle.Visibility = Visibility.Visible;
+
+        Rect bubble = GetCanvasBounds(fe);
+        var centre = new Point(bubble.Left + bubble.Width / 2, bubble.Top + bubble.Height / 2);
+        MagnifierLeader.X1 = focus.X;
+        MagnifierLeader.Y1 = focus.Y;
+        MagnifierLeader.X2 = centre.X;
+        MagnifierLeader.Y2 = centre.Y;
+        MagnifierLeader.StrokeThickness = 1 / _zoom;
+        // A leader from a bubble to a ring underneath it is noise; it only earns its place
+        // once the callout has actually been moved off what it is showing.
+        MagnifierLeader.Visibility = bubble.Contains(focus) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private void UpdateCurveHandleVisual()
     {
         if (_pendingCurve is null)
@@ -1135,18 +1275,31 @@ public partial class EditorWindow : Window
         _selected = element;
         // Selecting a redaction pulls its own style and strength into the toolbar, so the
         // controls describe the mark you are looking at rather than the last one you drew.
-        if (element is FrameworkElement fe && fe.Tag is AnnotationData meta &&
-            meta.Type == AnnotationData.TypeRedact && IsLoaded)
+        if (element is FrameworkElement fe && fe.Tag is AnnotationData meta && IsLoaded)
         {
-            _redactStyle = Redaction.Parse(meta.Style);
-            _redactStrength = meta.Strength ?? Redaction.DefaultStrength;
-            UpdateContextPanels();
+            if (meta.Type == AnnotationData.TypeRedact)
+            {
+                _redactStyle = Redaction.Parse(meta.Style);
+                _redactStrength = meta.Strength ?? Redaction.DefaultStrength;
+                UpdateContextPanels();
+            }
+            else if (meta.Type == AnnotationData.TypeMagnifier)
+            {
+                // Same reason: the dial should read the callout you are looking at, not the
+                // last one you drew.
+                _magnification = MagnifierLayout.ClampScale(meta.Zoom ?? MagnifierLayout.DefaultScale);
+                UpdateContextPanels();
+            }
         }
         UpdateSelectionVisual();
     }
 
     private void UpdateSelectionVisual()
     {
+        // The focus ring belongs to the selection, so it follows it everywhere the
+        // selection chrome goes rather than being remembered at each call site.
+        UpdateMagnifierFocusVisual();
+
         // The crop-adjust overlay owns the handles while a pending crop is being fine-tuned;
         // don't let the selection refresh stomp it.
         if (_adjustingCrop || (_handleKind == HandleKind.Crop && _pendingCrop is not null))

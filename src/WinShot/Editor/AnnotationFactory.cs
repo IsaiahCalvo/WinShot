@@ -195,6 +195,47 @@ internal static class AnnotationFactory
         return all[(i < 0 ? 0 : i + 1) % all.Length];
     }
 
+    /// <summary>
+    /// Fills a magnifier callout with the piece of the picture it is looking at, blown up.
+    /// Nearest-neighbour scaling on purpose: the point of a callout is usually to show
+    /// exactly which pixels are there, and a smoothed blow-up hides that.
+    ///
+    /// A callout whose focus has been dragged off the picture, or that cannot be rendered,
+    /// paints nothing at all and keeps its border — an empty bubble reads as "there is
+    /// nothing here", which is the truth, where a black one would read as broken.
+    /// </summary>
+    public static void PaintMagnifier(
+        Rectangle target, SD.Bitmap? source, Rect bounds, Point focus, double scale)
+    {
+        target.Width = Math.Max(1, bounds.Width);
+        target.Height = Math.Max(1, bounds.Height);
+
+        if (source is null) { target.Fill = null; return; }
+
+        Rect region = MagnifierLayout.SourceRegion(bounds, focus, scale);
+        var crop = SD.Rectangle.Intersect(
+            new SD.Rectangle(
+                (int)Math.Floor(region.X), (int)Math.Floor(region.Y),
+                (int)Math.Ceiling(region.Width), (int)Math.Ceiling(region.Height)),
+            new SD.Rectangle(0, 0, source.Width, source.Height));
+        if (crop.Width < 1 || crop.Height < 1) { target.Fill = null; return; }
+
+        try
+        {
+            using SD.Bitmap piece = CaptureService.Crop(source, crop);
+            var image = CaptureService.ToBitmapSource(piece);
+            var brush = new ImageBrush(image) { Stretch = Stretch.UniformToFill };
+            RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.NearestNeighbor);
+            if (brush.CanFreeze) brush.Freeze();
+            target.Fill = brush;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Magnifier callout render failed", ex);
+            target.Fill = null;
+        }
+    }
+
     /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
     public static ArrowStyle ParseArrowStyle(string? name) =>
         Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;

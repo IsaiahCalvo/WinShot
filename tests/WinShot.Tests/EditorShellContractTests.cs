@@ -22,7 +22,8 @@ public class EditorShellContractTests
             EditorShellContract.ToolsIn(EditorToolCategory.Shapes));
         Assert.Equal(new[] { "Text" }, EditorShellContract.ToolsIn(EditorToolCategory.Text));
         // One redaction tool, not two: pixelate and blur are styles on the mark it draws.
-        Assert.Equal(new[] { "Redact", "Spotlight" },
+        // The three region tools that act on the pixels underneath share a row.
+        Assert.Equal(new[] { "Redact", "Spotlight", "Magnifier" },
             EditorShellContract.ToolsIn(EditorToolCategory.Redact));
         Assert.Equal(new[] { "Crop" }, EditorShellContract.ToolsIn(EditorToolCategory.Image));
 

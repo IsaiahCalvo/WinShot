@@ -760,6 +760,77 @@ public partial class EditorWindow : Window
             redo: () => { fe.Tag = after; RefreshRedaction(el); }), apply: false);
     }
 
+    // ------------------------------------------------------- magnification
+
+    /// <summary>
+    /// The magnification dial. Live on the selection with ONE undo entry for the whole
+    /// drag — the "before" is captured on the first tick and committed when the slider is
+    /// let go — exactly as the redaction strength works, because it is the same gesture.
+    /// </summary>
+    private void OnMagnifyChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        double value = MagnifierLayout.ClampScale(e.NewValue);
+        if (MagnifyValueLabel is not null)
+            MagnifyValueLabel.Text = string.Create(CultureInfo.InvariantCulture, $"{value:0.#}x");
+        if (!IsLoaded || _syncingThicknessButtons) return;
+        _magnification = value;
+
+        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+            meta.Type == AnnotationData.TypeMagnifier)
+        {
+            if (_magnifyBefore is null || !ReferenceEquals(_magnifyElement, _selected))
+            {
+                CommitMagnifyGesture();
+                _magnifyBefore = meta.Clone();
+                _magnifyElement = _selected;
+            }
+            meta.Zoom = value;
+            RefreshRedaction(fe);
+        }
+    }
+
+    private void OnMagnifyReleased(object sender, RoutedEventArgs e) => CommitMagnifyGesture();
+
+    private void CommitMagnifyGesture()
+    {
+        if (_magnifyBefore is not { } before ||
+            _magnifyElement is not FrameworkElement fe || fe.Tag is not AnnotationData after)
+        {
+            _magnifyBefore = null;
+            _magnifyElement = null;
+            return;
+        }
+        UIElement el = _magnifyElement;
+        _magnifyBefore = null;
+        _magnifyElement = null;
+        if (before.Zoom == after.Zoom) return;
+
+        Push(new EditorAction(
+            undo: () => { fe.Tag = before; RefreshRedaction(el); },
+            redo: () => { fe.Tag = after; RefreshRedaction(el); }), apply: false);
+    }
+
+    /// <summary>Pulls the selected callout's own magnification into the dial.</summary>
+    private void SyncMagnifySlider()
+    {
+        if (MagnifySlider is null) return;
+        double value = _selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+            meta.Type == AnnotationData.TypeMagnifier
+                ? MagnifierLayout.ClampScale(meta.Zoom ?? MagnifierLayout.DefaultScale)
+                : _magnification;
+
+        _syncingThicknessButtons = true;
+        try
+        {
+            MagnifySlider.Value = value;
+            MagnifyValueLabel.Text = string.Create(CultureInfo.InvariantCulture, $"{value:0.#}x");
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
+        }
+    }
+
     private void ApplyCropRatio(string tag)
     {
         _cropRatioTag = tag;
