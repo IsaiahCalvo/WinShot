@@ -39,12 +39,47 @@ internal static class DarkControlPalette
     }
 
     /// <summary>
-    /// How far to lighten a button fill given how far into hover and press it is.
-    /// Fully pressed reads the same as the old discrete -12 even though the pointer
-    /// is necessarily also hovering: press does not stack on hover, it overrides it.
+    /// How far to lighten a button fill given how far into hover and press it is. The two
+    /// steps net rather than override: fully hovered AND pressed is -12, matching the old
+    /// discrete value, which is the state a real mouse press is always in.
     /// </summary>
     public static double HoverPressLighten(double hover, double press)
         => (18d * Math.Clamp(hover, 0d, 1d)) - (30d * Math.Clamp(press, 0d, 1d));
+
+    /// <summary>
+    /// The fill a control paints when it is <paramref name="hover"/> into hover and
+    /// <paramref name="press"/> into press. The one place that decides which direction a state
+    /// moves a fill, so every WinForms surface moves it the same way.
+    ///
+    /// A dark NEUTRAL fill lifts — on a near-black ground it has nowhere else to go. A SATURATED
+    /// fill dips instead, layering Theme.xaml's Hover/Press shades: lightening the accent took
+    /// the label on top of it from 3.26:1 to 2.74:1, so hovering the affirmative button of every
+    /// dialog made it HARDER to read.
+    ///
+    /// The two branches settle hover-plus-press differently, and deliberately: the saturated
+    /// branch REPLACES the hover, landing exactly on the authored pressed token, while the
+    /// neutral branch NETS against it (+18 lift, -30 dip, so -12 while the pointer is over the
+    /// control — which it always is during a real press). See <see cref="HoverPressLighten"/>.
+    /// </summary>
+    public static SD.Color StateFill(SD.Color rest, double hover, double press)
+    {
+        double h = Math.Clamp(hover, 0d, 1d);
+        double p = Math.Clamp(press, 0d, 1d);
+
+        // HSL saturation, so this keys on what the colour IS rather than on a list of tokens
+        // a later fill would have to be added to. Every dark neutral in the palette sits under
+        // 0.05; the accent and the status reds/ambers sit at 1.
+        if (rest.GetSaturation() < 0.25f)
+            return Lighten(rest, HoverPressLighten(h, p));
+
+        SD.Color hovered = ThemePalette.Over(ThemePalette.HoverShade, rest);
+        // The accent's pressed state is authored (Theme.xaml's AccentPressedColor), so the one
+        // accent presses to one colour whether a DarkButton or a FlatAppearance draws it.
+        SD.Color pressed = rest.ToArgb() == ThemePalette.Accent.ToArgb()
+            ? ThemePalette.AccentPressed
+            : ThemePalette.Over(ThemePalette.PressedShade, rest);
+        return Mix(Mix(rest, hovered, h), pressed, p);
+    }
 }
 
 /// <summary>
@@ -230,9 +265,7 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
 
         SD.Color fill = !Enabled
             ? DarkControlPalette.Lighten(DarkControlPalette.Card, 8)
-            : DarkControlPalette.Lighten(
-                FillColor,
-                DarkControlPalette.HoverPressLighten(_hover.Value, _press.Value));
+            : DarkControlPalette.StateFill(FillColor, _hover.Value, _press.Value);
 
         var rect = new SD.Rectangle(0, 0, Width - 1, Height - 1);
         using (var path = GdiPaths.RoundedRect(rect, S(CornerRadius)))
@@ -245,12 +278,19 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
             // on a HUD silently holds focus and looks different from its siblings.
             if (_isDefault || (Focused && ShowFocusCues))
             {
-                using var pen = new SD.Pen(SD.Color.FromArgb(150, ThemePalette.AccentHover), 1f);
+                using var pen = new SD.Pen(ThemePalette.AccentRing, 1f);
                 g.DrawPath(pen, path);
             }
         }
 
-        SD.Color textColor = Enabled ? ForeColor : SD.Color.FromArgb(120, 200, 200, 200);
+        // A saturated fill carries a white label, the same way ScrollControlsBar's accent
+        // buttons and the region selector's Done already paint theirs. The app was shipping
+        // two label colours on the one accent fill, and the DarkButton half took the darker
+        // of them: #F2F2F4 on the hovered accent is 4.10:1, under the 4.5:1 text floor, where
+        // white is 4.58:1. Keyed on the same saturation test StateFill uses, so a fill and
+        // its label are never decided by two different rules.
+        SD.Color label = FillColor.GetSaturation() < 0.25f ? ForeColor : SD.Color.White;
+        SD.Color textColor = Enabled ? label : SD.Color.FromArgb(120, 200, 200, 200);
         var flags = WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis;
         var textRect = ClientRectangle;
         if (TextAlign == SD.ContentAlignment.MiddleLeft)
@@ -383,7 +423,7 @@ public sealed class DarkDropDown : WF.Control
             using var brush = new SD.SolidBrush(fill);
             g.FillPath(brush, path);
             using var pen = new SD.Pen(
-                Focused ? SD.Color.FromArgb(150, ThemePalette.AccentHover) : DarkControlPalette.Hairline,
+                Focused ? ThemePalette.AccentRing : DarkControlPalette.Hairline,
                 1f);
             g.DrawPath(pen, path);
         }
@@ -535,7 +575,7 @@ public sealed class DarkNumberBox : WF.Control
         using var pen = new SD.Pen(
             DarkControlPalette.Mix(
                 DarkControlPalette.Hairline,
-                SD.Color.FromArgb(150, ThemePalette.AccentHover),
+                ThemePalette.AccentRing,
                 _focus.Value),
             1f);
         g.DrawPath(pen, path);
@@ -570,7 +610,10 @@ public sealed class DarkSegmented : WF.Control
     private IDisposable? _pillRun;
     private SD.Rectangle _pillRect;
     private bool _gliding;
-    private int _selectedIndex;
+    // -1, not 0: a picker nobody has given cells to has no selection, and the Options setter
+    // is what promotes it to cell 0 the moment there is a cell 0 to point at. Starting at 0
+    // made a never-assigned picker report a cell it did not have.
+    private int _selectedIndex = -1;
     private int _hotIndex = -1;
     private int _coolingIndex = -1;
     private string[] _options = [];
@@ -597,7 +640,16 @@ public sealed class DarkSegmented : WF.Control
     /// The cells. Assigning a shorter array used to leave the selection, the hot cell and a
     /// running pill glide pointing past the end of it and repaint nothing, so the setter
     /// clamps all three and abandons the glide — the pill has nowhere to glide to once the
-    /// track it was crossing no longer exists.
+    /// track it was crossing no longer exists. A clamp that MOVES the selection raises
+    /// <see cref="SelectedIndexChanged"/>: silently is how a settings row ends up holding the
+    /// value of a cell that is no longer under the pill. An empty picker reports -1, because
+    /// 0 is a real cell everywhere else and a caller reading it back deserves the truth.
+    ///
+    /// It raises for a move between two REAL cells only. -1 is the one value a handler cannot
+    /// use — the obvious shape, "persist what is selected now" (<c>Options[SelectedIndex]</c>),
+    /// throws on it, and it would throw out of a plain <c>seg.Options = …</c> assignment nobody
+    /// has a reason to wrap. Landing back on cell 0 when the picker is refilled is the control's
+    /// own default, not a choice anyone made, so that stays quiet too.
     /// </summary>
     public string[] Options
     {
@@ -608,10 +660,16 @@ public sealed class DarkSegmented : WF.Control
             _pillRun?.Dispose();
             _pillRun = null;
             _gliding = false;
-            _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, _options.Length - 1));
             _hotIndex = -1;
             _coolingIndex = -1;
+            int previous = _selectedIndex;
+            int clamped = _options.Length == 0
+                ? -1
+                : Math.Clamp(previous, 0, _options.Length - 1);
+            _selectedIndex = clamped;
             Invalidate();
+            if (clamped != previous && clamped >= 0 && previous >= 0)
+                SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
