@@ -24,35 +24,12 @@ public readonly record struct GifInfo(int Width, int Height, int FrameCount, int
 /// </summary>
 public static class GifTrim
 {
-    /// <summary>
-    /// The inclusive frame range covering [<paramref name="startSeconds"/>,
-    /// <paramref name="endSeconds"/>]. Always at least one frame, always inside the clip.
-    /// </summary>
-    public static (int First, int Last) FrameRange(
-        int frameCount,
-        double frameSeconds,
-        double startSeconds,
-        double endSeconds)
-    {
-        if (frameCount <= 0)
-            return (0, -1);
-
-        double step = frameSeconds > 0 && double.IsFinite(frameSeconds) ? frameSeconds : 0.01;
-        int first = Clamp((int)Math.Floor(CleanSeconds(startSeconds) / step), frameCount);
-        // The frame containing the out point is kept: an end exactly on a frame boundary is
-        // the boundary of the frame BEFORE it, not the start of one the user trimmed away.
-        int last = Clamp((int)Math.Ceiling(CleanSeconds(endSeconds) / step) - 1, frameCount);
-        if (last < first)
-            last = first;
-        return (first, last);
-    }
+    // FrameRange (seconds -> frame indices) lived here and nothing ever called it: the GIF
+    // editor works in frame indices end to end. It also mapped a non-finite out point to 0,
+    // so "keep everything" collapsed to one frame. Deleted rather than fixed — the trim UI
+    // never has seconds to convert.
 
     public static int FrameCount((int First, int Last) range) => Math.Max(0, range.Last - range.First + 1);
-
-    private static int Clamp(int index, int frameCount) => Math.Clamp(index, 0, frameCount - 1);
-
-    private static double CleanSeconds(double seconds) =>
-        double.IsFinite(seconds) && seconds > 0 ? seconds : 0;
 }
 
 /// <summary>

@@ -11,35 +11,6 @@ namespace WinShot.Tests;
 /// </summary>
 public class GifEditingTests
 {
-    [Theory]
-    [InlineData(0, 5, 0, 49)]        // whole clip
-    [InlineData(1, 2, 10, 19)]       // one second in the middle at 10 fps
-    [InlineData(0, 0.1, 0, 0)]       // the first frame alone
-    [InlineData(4.9, 5, 49, 49)]     // the last frame alone
-    public void FrameRange_CoversTheSecondsAsked(double start, double end, int first, int last)
-    {
-        var range = GifTrim.FrameRange(frameCount: 50, frameSeconds: 0.1, start, end);
-
-        Assert.Equal((first, last), range);
-    }
-
-    [Fact]
-    public void FrameRange_NeverProducesAnEmptyOrInvertedClip()
-    {
-        Assert.Equal((0, 0), GifTrim.FrameRange(50, 0.1, 0, 0));
-        Assert.Equal((49, 49), GifTrim.FrameRange(50, 0.1, 100, 100));
-        Assert.Equal(1, GifTrim.FrameCount(GifTrim.FrameRange(50, 0.1, 3, 2)));
-    }
-
-    [Fact]
-    public void FrameRange_SurvivesNonsenseInput()
-    {
-        Assert.Equal((0, -1), GifTrim.FrameRange(0, 0.1, 0, 5));
-        var range = GifTrim.FrameRange(10, 0, double.NaN, double.PositiveInfinity);
-        Assert.InRange(range.First, 0, 9);
-        Assert.InRange(range.Last, range.First, 9);
-    }
-
     [Fact]
     public void FrameCount_IsInclusive()
     {

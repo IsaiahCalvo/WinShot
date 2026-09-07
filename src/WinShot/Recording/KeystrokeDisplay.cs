@@ -81,9 +81,9 @@ public static class KeystrokeDisplay
             0x08 => "Backspace",
             0x09 => "⇥",   // ⇥
             0x0D => "↵",   // ↵
-            0x1B => "Esc",
+            0x1B => "⎋",   // ⎋
             0x14 => "CapsLock",
-            0x20 => "Space",
+            0x20 => "␣",   // ␣
             0x21 => "PgUp",
             0x22 => "PgDn",
             0x23 => "End",

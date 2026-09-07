@@ -59,10 +59,11 @@ public class KeystrokeDisplayTests
         Assert.Equal("↵", KeystrokeDisplay.KeyName(VkEnter, upperCase: false));
         Assert.Equal("←", KeystrokeDisplay.KeyName(VkLeft, upperCase: false));
         Assert.Equal("⇥", KeystrokeDisplay.KeyName(0x09, upperCase: false));
+        Assert.Equal("⎋", KeystrokeDisplay.KeyName(0x1B, upperCase: false));
+        Assert.Equal("␣", KeystrokeDisplay.KeyName(0x20, upperCase: false));
         // And keep a word where a symbol would be a guess.
-        Assert.Equal("Esc", KeystrokeDisplay.KeyName(0x1B, upperCase: false));
-        Assert.Equal("Space", KeystrokeDisplay.KeyName(0x20, upperCase: false));
         Assert.Equal("F5", KeystrokeDisplay.KeyName(VkF5, upperCase: false));
+        Assert.Equal("Home", KeystrokeDisplay.KeyName(0x24, upperCase: false));
     }
 
     [Theory]

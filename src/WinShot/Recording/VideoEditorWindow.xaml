@@ -34,7 +34,7 @@
             <TextBlock x:Name="ScrubHint" VerticalAlignment="Center"
                        Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
                        TextTrimming="CharacterEllipsis" Margin="{StaticResource LabelGutterMargin}"
-                       Text="Drag the filmstrip to scrub. Space plays and pauses."/>
+                       Text="Drag the filmstrip to scrub, or Tab to it and use the arrow keys. Space plays and pauses."/>
         </DockPanel>
 
         <!-- Filmstrip trim timeline: a dark frame-thumbnail track with two
@@ -47,14 +47,30 @@
             </Grid.RowDefinitions>
 
             <Border x:Name="TimelineTrack" Grid.Row="0" Height="56" CornerRadius="6"
-                    Background="{StaticResource ToolbarBgBrush}" BorderBrush="{StaticResource BorderBrush}"
+                    Background="{StaticResource ToolbarBgBrush}"
                     BorderThickness="1"
                     ClipToBounds="True" SizeChanged="OnTimelineSizeChanged"
                     MouseLeftButtonDown="OnTimelineClicked"
                     MouseMove="OnTimelineDragScrub"
                     MouseLeftButtonUp="OnTimelineScrubReleased"
                     LostMouseCapture="OnTimelineScrubReleased"
-                    MouseWheel="OnTimelineWheel">
+                    MouseWheel="OnTimelineWheel"
+                    Focusable="True" KeyboardNavigation.IsTabStop="True" KeyDown="OnTimelineKeyDown"
+                    AutomationProperties.Name="Preview position"
+                    AutomationProperties.HelpText="Use Left and Right Arrow to step a frame, Shift for one second and Control for five. Home and End jump to the ends. Plus and minus zoom the timeline; 0 fits the whole clip.">
+                <Border.Style>
+                    <!-- The filmstrip is the only seek control now, so keyboard focus on it
+                         has to be visible: the same InfoBrush ring every templated control
+                         in Theme.xaml uses. -->
+                    <Style TargetType="Border">
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                        <Style.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <Canvas x:Name="TimelineCanvas" ClipToBounds="True">
                     <!-- Frame thumbnails (best-effort) live here, added in code. -->
                     <ItemsControl x:Name="FilmstripItems" Canvas.Left="0" Canvas.Top="0">

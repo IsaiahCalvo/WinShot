@@ -294,6 +294,67 @@ public partial class VideoEditorWindow : Window
         SeekTo(XToSeconds(e.GetPosition(TimelineCanvas).X));
     }
 
+    /// <summary>
+    /// The filmstrip replaced the position slider, so it has to carry the keyboard seek the
+    /// slider had: arrows step, Home/End jump, and +/-/0 work the zoom the wheel otherwise
+    /// owns alone. Without this the frame-accurate trimming the timeline exists for was
+    /// unreachable without a mouse.
+    /// </summary>
+    private void OnTimelineKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_exporting || _durationSec <= 0)
+            return;
+
+        double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? 5
+            : Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 1
+            : FrameStepSeconds;
+
+        switch (e.Key)
+        {
+            case Key.Left:
+                SeekTo(Media.Position.TotalSeconds - step);
+                break;
+            case Key.Right:
+                SeekTo(Media.Position.TotalSeconds + step);
+                break;
+            case Key.Home:
+                SeekTo(0);
+                break;
+            case Key.End:
+                SeekTo(_durationSec);
+                break;
+            case Key.OemPlus:
+            case Key.Add:
+                ZoomTimeline(TimelineView.WheelZoomFactor);
+                break;
+            case Key.OemMinus:
+            case Key.Subtract:
+                ZoomTimeline(1 / TimelineView.WheelZoomFactor);
+                break;
+            case Key.D0:
+            case Key.NumPad0:
+                OnZoomFit(TimelineTrack, new RoutedEventArgs());
+                break;
+            default:
+                return;
+        }
+
+        e.Handled = true;
+    }
+
+    /// <summary>One frame at the clip's own rate, near enough: the editor never learns the
+    /// real frame rate, and 1/30 s is the step a nudge should feel like either way.</summary>
+    private const double FrameStepSeconds = 1.0 / 30;
+
+    /// <summary>Zooms about the playhead — the keyboard has no pointer to zoom about.</summary>
+    private void ZoomTimeline(double factor)
+    {
+        _zoomTween?.Dispose();
+        _zoomTween = null;
+        _view = _view.Zoomed(factor, Media.Position.TotalSeconds, _durationSec);
+        UpdateTrimUi();
+    }
+
     private void OnTimelineScrubReleased(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (!_scrubbing) return;
@@ -984,13 +1045,17 @@ public partial class VideoEditorWindow : Window
         if (string.Equals(exportedPath, _mp4Path, StringComparison.OrdinalIgnoreCase))
             return exportedPath;
 
-        int choice = ThemedMessageDialog.Choose(
+        // Two buttons for two outcomes. The old third one ("Save as new video") and the
+        // cancel both returned exportedPath, so the user was asked to tell two identical
+        // results apart.
+        bool replace = ThemedMessageDialog.Confirm(
             this,
             "Export finished",
             $"Saved {Path.GetFileName(exportedPath)}. Replace the original with it, or keep both?",
-            new[] { "Replace video", "Save as new video" },
+            confirmLabel: "Replace the original",
+            destructive: true,
             cancelLabel: "Keep both");
-        if (choice != 0)
+        if (!replace)
             return exportedPath;
 
         try
