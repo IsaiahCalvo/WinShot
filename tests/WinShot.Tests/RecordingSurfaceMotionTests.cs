@@ -105,32 +105,49 @@ public class RecordingSurfaceMotionTests
     /// alpha and then faded out on the way — an entrance and an exit that did not match.
     /// </summary>
     [Fact]
-    public void BorderOnlyMarker_RampsInInsteadOfSnapping()
+    public void BorderOnlyMarker_StartsAtZeroAndRampsUp()
     {
         using var animation = new Anim(true);
         PumpUntil(() => Motion.Holders == 0);
 
-        // Marker strips only exist where they can be laid out against the real desktop, so
-        // this one takes a small region inside it rather than the off-screen rect the holder
-        // tests use.
-        SD.Rectangle desktop = CaptureService.VirtualScreen;
-        var region = new SD.Rectangle(
-            desktop.Left + (desktop.Width / 4), desktop.Top + (desktop.Height / 4),
-            Math.Max(2, desktop.Width / 4), Math.Max(2, desktop.Height / 4));
-
-        var overlay = new FastRecordingDimOverlay(region, dimScreen: false);
+        var overlay = new FastRecordingDimOverlay(MarkerRegion(), dimScreen: false);
         Assert.NotEmpty(MarkerFades(overlay)); // border-only really did build markers
         overlay.Show();
 
-        // The frame Show() returns on, the strips are still at (or near) zero.
+        // The frame Show() returns on, the strips are still at (or near) zero — before the fix
+        // they were already at full alpha, because Show() returned before the entrance tween
+        // whenever there were no dim bands to ramp.
         Assert.All(MarkerFades(overlay), fade => Assert.True(fade < 0.5, $"marker started at {fade}"));
-
-        PumpUntil(() => MarkerFades(overlay).All(f => f >= 0.999));
-        Assert.All(MarkerFades(overlay), fade => Assert.Equal(1d, fade, 3));
 
         overlay.Dispose();
         PumpUntil(() => Motion.Holders == 0);
         Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>...and the ramp resolves rather than leaving the marker invisible: with
+    /// animation off Motion.Run applies the end state inline, so the strips are fully on the
+    /// moment Show() returns.</summary>
+    [Fact]
+    public void BorderOnlyMarker_IsFullyOnImmediatelyWithAnimationOff()
+    {
+        using var animation = new Anim(false);
+
+        var overlay = new FastRecordingDimOverlay(MarkerRegion(), dimScreen: false);
+        overlay.Show();
+
+        Assert.NotEmpty(MarkerFades(overlay));
+        Assert.All(MarkerFades(overlay), fade => Assert.Equal(1d, fade, 3));
+        overlay.Dispose();
+    }
+
+    /// <summary>Marker strips only exist where they can be laid out against the real desktop,
+    /// so these take a region inside it rather than the off-screen rect the holder tests use.</summary>
+    private static SD.Rectangle MarkerRegion()
+    {
+        SD.Rectangle desktop = CaptureService.VirtualScreen;
+        return new SD.Rectangle(
+            desktop.Left + (desktop.Width / 4), desktop.Top + (desktop.Height / 4),
+            Math.Max(2, desktop.Width / 4), Math.Max(2, desktop.Height / 4));
     }
 
     /// <summary>The marker pulses on a bare timer for the whole take, so it is the one piece
@@ -140,12 +157,7 @@ public class RecordingSurfaceMotionTests
     {
         using var animation = new Anim(false);
 
-        SD.Rectangle desktop = CaptureService.VirtualScreen;
-        var region = new SD.Rectangle(
-            desktop.Left + (desktop.Width / 4), desktop.Top + (desktop.Height / 4),
-            Math.Max(2, desktop.Width / 4), Math.Max(2, desktop.Height / 4));
-
-        var overlay = new FastRecordingDimOverlay(region, dimScreen: false);
+        var overlay = new FastRecordingDimOverlay(MarkerRegion(), dimScreen: false);
         overlay.Show();
         WF.Application.DoEvents();
 
