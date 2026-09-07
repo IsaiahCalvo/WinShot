@@ -91,6 +91,13 @@ public partial class EditorWindow : Window
     private bool _filledRectangleMode;
     private TextStyle _textStyle = TextStyle.Plain;
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
+
+    /// <summary>Outline dashes and line quality for the NEXT shape; a selected one carries its own.</summary>
+    private StrokeDash _strokeDash = StrokeDash.Solid;
+    private StrokeRender _strokeRender = StrokeRender.Clean;
+
+    /// <summary>The jitter seed of the shape being drawn, so its wobble is stable as the drag grows.</summary>
+    private int _sketchSeed;
     private double _opacity = 1.0; // annotation alpha multiplier (0.25–1.0) for new + restyled marks
     // Redaction defaults for the NEXT mark; a selected redaction carries its own.
     private RedactStyle _redactStyle = RedactStyle.Pixelate;
@@ -1232,6 +1239,129 @@ public partial class EditorWindow : Window
             _fillMode = mode;
             if (IsLoaded)
                 RestyleSelected(color: null, thickness: null, fill: mode);
+        }
+    }
+
+    /// <summary>
+    /// Cycles the outline: solid → dashed → dotted → solid. One button rather than three,
+    /// because there are only three states and the button's own look says which one it is;
+    /// three radio chips for a property this small would cost more toolbar than it earns.
+    /// </summary>
+    private void OnDashClick(object sender, RoutedEventArgs e)
+    {
+        _strokeDash = _strokeDash switch
+        {
+            StrokeDash.Solid => StrokeDash.Dashed,
+            StrokeDash.Dashed => StrokeDash.Dotted,
+            _ => StrokeDash.Solid,
+        };
+        SyncStrokeStyleButtons();
+        ApplyStrokeStyleToSelection();
+    }
+
+    private void OnSketchClick(object sender, RoutedEventArgs e)
+    {
+        _strokeRender = _strokeRender == StrokeRender.Sketchy ? StrokeRender.Clean : StrokeRender.Sketchy;
+        SyncStrokeStyleButtons();
+        ApplyStrokeStyleToSelection();
+    }
+
+    private void SyncStrokeStyleButtons()
+    {
+        if (DashToolBtn is null || SketchToolBtn is null) return;
+        DashToolBtn.IsChecked = _strokeDash != StrokeDash.Solid;
+        DashToolBtn.ToolTip = _strokeDash switch
+        {
+            StrokeDash.Dashed => "Dashed outline (again for dotted)",
+            StrokeDash.Dotted => "Dotted outline (again for solid)",
+            _ => "Dashed outline (again for dotted)",
+        };
+        SketchToolBtn.IsChecked = _strokeRender == StrokeRender.Sketchy;
+    }
+
+    /// <summary>
+    /// Re-draws the selected shape in the current outline style. A dash change restyles the
+    /// element in place; changing the line quality has to swap the element, because clean
+    /// and sketchy are two different geometries and a Rectangle cannot become a Path. The
+    /// swap keeps size, position, angle and z-order, and is one undo step either way.
+    /// </summary>
+    private void ApplyStrokeStyleToSelection()
+    {
+        if (!IsLoaded) return;
+        if (_selected is not Shape old || old.Tag is not AnnotationData meta) return;
+        if (meta.Type is not (AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)) return;
+
+        var before = meta.Clone();
+        var after = meta.Clone();
+        after.Dash = _strokeDash.ToString();
+        after.Sketch = _strokeRender.ToString();
+
+        if (StrokeStyles.ParseRender(before.Sketch) == _strokeRender)
+        {
+            if (StrokeStyles.ParseDash(before.Dash) == _strokeDash) return;
+            Push(new EditorAction(
+                undo: () => ApplyDashData(old, before),
+                redo: () => ApplyDashData(old, after)),
+                apply: false);
+            ApplyDashData(old, after);
+            return;
+        }
+
+        after.Seed = meta.Seed ?? Random.Shared.Next();
+        Shape next = BuildRestyledShape(old, after);
+        int z = AnnotationCanvas.Children.IndexOf(old);
+        if (z < 0) return;
+
+        Push(new EditorAction(
+            undo: () => SwapShape(next, old, z),
+            redo: () => SwapShape(old, next, z)),
+            apply: false);
+        SwapShape(old, next, z);
+    }
+
+    private static void ApplyDashData(Shape shape, AnnotationData meta)
+    {
+        AnnotationFactory.ApplyDash(shape, StrokeStyles.ParseDash(meta.Dash));
+        shape.Tag = meta;
+    }
+
+    /// <summary>The same mark in the other line quality: everything but the geometry is copied.</summary>
+    private static Shape BuildRestyledShape(Shape from, AnnotationData meta)
+    {
+        var shape = AnnotationFactory.CreateShape(
+            meta.Type == AnnotationData.TypeEllipse,
+            StrokeStyles.ParseRender(meta.Sketch),
+            meta.Seed ?? 0);
+        shape.Stroke = from.Stroke;
+        shape.StrokeThickness = from.StrokeThickness;
+        shape.Fill = from.Fill;
+        shape.Opacity = from.Opacity;
+        AnnotationFactory.ApplyDash(shape, StrokeStyles.ParseDash(meta.Dash));
+        shape.Width = from.Width;
+        shape.Height = from.Height;
+        Canvas.SetLeft(shape, Canvas.GetLeft(from));
+        Canvas.SetTop(shape, Canvas.GetTop(from));
+        shape.RenderTransform = from.RenderTransform;
+        shape.RenderTransformOrigin = from.RenderTransformOrigin;
+        shape.Tag = meta;
+        return shape;
+    }
+
+    /// <summary>
+    /// Puts <paramref name="next"/> where <paramref name="old"/> was, at the same z-index,
+    /// and moves the selection with it — a mark that vanished from under the handles after
+    /// its own restyle would read as a delete.
+    /// </summary>
+    private void SwapShape(Shape old, Shape next, int z)
+    {
+        int at = AnnotationCanvas.Children.IndexOf(old);
+        if (at >= 0) AnnotationCanvas.Children.RemoveAt(at);
+        int insert = Math.Clamp(at >= 0 ? at : z, 0, AnnotationCanvas.Children.Count);
+        AnnotationCanvas.Children.Insert(insert, next);
+        if (ReferenceEquals(_selected, old))
+        {
+            _selected = next;
+            UpdateSelectionVisual();
         }
     }
 

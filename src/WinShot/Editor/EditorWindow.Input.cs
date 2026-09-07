@@ -286,9 +286,13 @@ public partial class EditorWindow : Window
                                  double.IsNaN(shape.Width) || double.IsNaN(shape.Height)
                         ? r
                         : new Rect(bx, by, shape.Width, shape.Height);
-                    shape.Tag = AnnotationData.ForShape(
+                    var shapeMeta = AnnotationData.ForShape(
                         _tool == EditorTool.Rectangle ? AnnotationData.TypeRectangle : AnnotationData.TypeEllipse,
                         bounds, StrokeColorOf(shape), shape.StrokeThickness, _fillMode, _fillColor);
+                    shapeMeta.Dash = _strokeDash.ToString();
+                    shapeMeta.Sketch = _strokeRender.ToString();
+                    shapeMeta.Seed = _sketchSeed;
+                    shape.Tag = shapeMeta;
                     PushAddElement(shape);
                 }
                 return;
@@ -297,7 +301,9 @@ public partial class EditorWindow : Window
                 {
                     // The pencil captures raw points during the drag for responsiveness;
                     // on release, smooth them so the committed stroke looks polished.
-                    if (_tool == EditorTool.Freehand)
+                    // "Smooth pencil" off keeps the raw path — some people are drawing a
+                    // signature, and a smoothed signature is somebody else's.
+                    if (_tool == EditorTool.Freehand && _settings.Current.SmoothPencil)
                         stroke.Points = AnnotationFactory.SmoothFreehandPoints(stroke.Points);
                     stroke.Tag = AnnotationData.ForStroke(
                         _tool == EditorTool.Freehand ? AnnotationData.TypeFreehand : AnnotationData.TypeHighlighter,
@@ -427,23 +433,17 @@ public partial class EditorWindow : Window
                 };
                 break;
             case EditorTool.Rectangle:
-                _activeShape = new Rectangle
-                {
-                    Stroke = brush,
-                    StrokeThickness = _thickness,
-                    RadiusX = 2, RadiusY = 2,
-                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity), _fillColor),
-                };
-                Canvas.SetLeft(_activeShape, pos.X);
-                Canvas.SetTop(_activeShape, pos.Y);
-                break;
             case EditorTool.Ellipse:
-                _activeShape = new Ellipse
-                {
-                    Stroke = brush,
-                    StrokeThickness = _thickness,
-                    Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity), _fillColor),
-                };
+                // The seed is drawn once per mark, here, so a sketchy outline never
+                // re-scribbles itself as the drag grows.
+                _sketchSeed = Random.Shared.Next();
+                var box = AnnotationFactory.CreateShape(
+                    _tool == EditorTool.Ellipse, _strokeRender, _sketchSeed);
+                box.Stroke = brush;
+                box.StrokeThickness = _thickness;
+                box.Fill = ShapeFillBrush.Create(_fillMode, WithOpacity(_color, _opacity), _fillColor);
+                AnnotationFactory.ApplyDash(box, _strokeDash);
+                _activeShape = box;
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
                 break;

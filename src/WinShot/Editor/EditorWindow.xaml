@@ -230,6 +230,18 @@
                         <RadioButton x:Name="FillSolidBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;" ToolTip="Solid fill"
                                      Checked="OnFillChecked" AutomationProperties.Name="Solid fill"
                                      AutomationProperties.HelpText="Draw shapes with a solid fill."/>
+
+                        <!-- The outline's own two choices, in the group that already owns
+                             how a shape is painted rather than as two more toolbar rows. -->
+                        <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                        <ToggleButton x:Name="DashToolBtn" Style="{StaticResource ToolButton}"
+                                      Content="&#xE72D;" ToolTip="Dashed outline (again for dotted)"
+                                      Click="OnDashClick" AutomationProperties.Name="Outline dashes"
+                                      AutomationProperties.HelpText="Cycle the outline between solid, dashed and dotted."/>
+                        <ToggleButton x:Name="SketchToolBtn" Style="{StaticResource ToolButton}"
+                                      Content="&#xEC87;" ToolTip="Hand-drawn outline"
+                                      Click="OnSketchClick" AutomationProperties.Name="Hand-drawn outline"
+                                      AutomationProperties.HelpText="Draw shapes with a sketched, hand-drawn line instead of a ruled one."/>
                     </StackPanel>
 
                     <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">

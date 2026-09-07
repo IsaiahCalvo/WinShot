@@ -117,6 +117,65 @@ internal static class AnnotationFactory
     }
 
     /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
+    /// <summary>
+    /// The element for a rectangle or ellipse annotation, in whichever line quality is
+    /// asked for. Clean is the plain WPF shape it has always been; Sketchy is a
+    /// <see cref="Path"/> whose data is the same outline drawn by a shaky hand.
+    ///
+    /// The Path is <see cref="Stretch.Fill"/>ed into its Width/Height, so it sizes and
+    /// resizes exactly the way the plain shapes do — every caller that sets
+    /// Canvas.Left/Top and Width/Height keeps working, and the stroke stays the asked-for
+    /// thickness rather than being scaled by the fit. The seed lives on the annotation, so
+    /// a sketchy mark redraws identically after a move, an undo or a project reload.
+    /// </summary>
+    public static Shape CreateShape(bool ellipse, StrokeRender render, int seed)
+    {
+        if (render != StrokeRender.Sketchy)
+            return ellipse ? new Ellipse() : new Rectangle { RadiusX = 2, RadiusY = 2 };
+
+        // Jitter is generated in a fixed unit box and stretched to the mark's real size:
+        // sizing the wobble with the mark would make a big rectangle wildly shaky and a
+        // small one perfectly straight.
+        var box = new Rect(0, 0, SketchUnitBox, SketchUnitBox);
+        var outline = ellipse
+            ? StrokeStyles.SketchPolygon(StrokeStyles.EllipsePoints(box), seed)
+            : StrokeStyles.SketchPolygon(StrokeStyles.RectCorners(box), seed);
+
+        var figure = new PathFigure { StartPoint = outline[0], IsClosed = true, IsFilled = true };
+        for (int i = 1; i < outline.Count; i++)
+            figure.Segments.Add(new LineSegment(outline[i], isStroked: true));
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        geometry.Freeze();
+
+        return new Path { Data = geometry, Stretch = Stretch.Fill };
+    }
+
+    /// <summary>
+    /// The box a sketchy outline is generated in. 100 units keeps
+    /// <see cref="StrokeStyles.SketchAmplitude"/> reading as a percentage of the mark,
+    /// which is what makes the wobble look the same at every size.
+    /// </summary>
+    private const double SketchUnitBox = 100;
+
+    /// <summary>
+    /// Applies a dash pattern to a shape's outline. Called on create and on restyle, so a
+    /// mark drawn solid can become dotted without being redrawn.
+    /// </summary>
+    public static void ApplyDash(Shape shape, StrokeDash dash)
+    {
+        shape.StrokeDashArray = StrokeStyles.DashArray(dash);
+        var cap = StrokeStyles.CapFor(dash);
+        shape.StrokeDashCap = cap;
+        // A dotted OUTLINE needs round ends on every dash; a solid one keeps whatever the
+        // caller set, because a line and an arrow already choose their own caps.
+        if (dash != StrokeDash.Solid)
+        {
+            shape.StrokeStartLineCap = cap;
+            shape.StrokeEndLineCap = cap;
+        }
+    }
+
     public static ArrowStyle ParseArrowStyle(string? name) =>
         Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;
 
@@ -244,7 +303,10 @@ internal static class AnnotationFactory
     /// </summary>
     public static PointCollection SmoothFreehandPoints(IList<Point> raw)
     {
-        var pts = MovingAverage(raw, window: 2);
+        // Simplify first: RDP throws away the points the pointer contributed and the hand
+        // did not, so the Catmull-Rom below interpolates the stroke's actual shape rather
+        // than smoothing a recording of the mouse's own jitter.
+        var pts = MovingAverage(StrokeStyles.Simplify(AsList(raw), FreehandSimplifyEpsilon), window: 2);
         var result = new PointCollection();
         if (pts.Count < 3)
         {
@@ -270,6 +332,16 @@ internal static class AnnotationFactory
         }
         return result;
     }
+
+    /// <summary>
+    /// How far a sampled point may sit off the line its neighbours describe before it is
+    /// worth keeping. 1.2 px removes the pointer's own noise while leaving every
+    /// deliberate change of direction — a scribble that reads as drawn, not as recorded.
+    /// </summary>
+    private const double FreehandSimplifyEpsilon = 1.2;
+
+    private static IReadOnlyList<Point> AsList(IList<Point> raw) =>
+        raw as IReadOnlyList<Point> ?? raw.ToList();
 
     /// <summary>Catmull-Rom interpolation (tension 0.5) between p1 and p2 at parameter t∈[0,1].</summary>
     private static Point CatmullRom(Point p0, Point p1, Point p2, Point p3, double t)

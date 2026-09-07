@@ -972,6 +972,8 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Pencil tool"/>
                                     <CheckBox x:Name="SmoothPencilCheck" Content="Smooth drawing"/>
                                 </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Turns a scribble into a smooth curve when you let go. Turn it off to keep the line exactly as drawn."/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Background tool"/>
                                     <CheckBox x:Name="RememberLastToolCheck" Content="Remember if tool was opened"/>

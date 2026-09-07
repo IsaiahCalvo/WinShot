@@ -84,6 +84,13 @@ internal sealed class AnnotationData
     /// <summary>Redaction intensity, 1–100. Meaningless for the Black Out style.</summary>
     public int? Strength { get; set; }
 
+    /// <summary><see cref="StrokeDash"/> name for shape outlines. Absent reads as Solid,
+    /// which is how every shape drawn before dashes existed was saved.</summary>
+    public string? Dash { get; set; }
+
+    /// <summary><see cref="StrokeRender"/> name. Absent reads as Clean.</summary>
+    public string? Sketch { get; set; }
+
     /// <summary>
     /// Mosaic jitter seed. Stored so a redaction redraws identically after a move, an undo
     /// or a project reload instead of reshuffling its blocks every time it is recomputed.
@@ -369,12 +376,14 @@ internal static class ProjectSerializer
             {
                 var bounds = RequireRect(a);
                 var color = RequireColor(a);
-                Shapes.Shape shape = a.Type == AnnotationData.TypeRectangle
-                    ? new Shapes.Rectangle { RadiusX = 2, RadiusY = 2 }
-                    : new Shapes.Ellipse();
+                Shapes.Shape shape = AnnotationFactory.CreateShape(
+                    a.Type == AnnotationData.TypeEllipse,
+                    StrokeStyles.ParseRender(a.Sketch),
+                    a.Seed ?? 0);
                 shape.Stroke = new SolidColorBrush(color);
                 shape.StrokeThickness = RequireThickness(a);
                 shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color, ParseOptionalColor(a.FillColor));
+                AnnotationFactory.ApplyDash(shape, StrokeStyles.ParseDash(a.Dash));
                 shape.Width = bounds.Width;
                 shape.Height = bounds.Height;
                 SetPos(shape, bounds.TopLeft);
