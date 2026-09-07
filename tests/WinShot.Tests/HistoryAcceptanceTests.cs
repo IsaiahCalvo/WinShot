@@ -240,16 +240,24 @@ public class HistoryAcceptanceTests
         }
     }
 
+    /// <summary>
+    /// The cap is on the LONGEST edge, not the width. History used to reimplement DragPreview's
+    /// sizing and cap the width alone, so a scrolling capture — 1200x9000, and a first-class
+    /// WinShot capture type that lands right here — dragged as a topmost 200x1500 strip trailing
+    /// the cursor down the whole screen. Both callers spend DragPreview's one number now.
+    /// </summary>
     [Theory]
-    [InlineData(180, 120, 180, 120)]  // a still's own 180px thumbnail is already the right size
-    [InlineData(640, 360, 200, 113)]  // a video frame decodes far larger and is scaled down
-    public void DragGhost_ReusesTheTileThumbnailWithoutOversizingIt(
+    [InlineData(180, 120, 180, 120)]     // already inside the cap: handed back untouched
+    [InlineData(640, 360, 180, 101)]     // a video frame decodes far larger and is scaled down
+    [InlineData(1200, 9000, 24, 180)]    // a scrolling capture: the HEIGHT is what binds
+    [InlineData(200, 2000, 18, 180)]     // and a portrait window capture
+    public void DragGhost_CapsTheLongestEdgeWhicheverItIs(
         int width, int height, int expectedWidth, int expectedHeight)
     {
         var source = new System.Windows.Media.Imaging.WriteableBitmap(
             width, height, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
 
-        var ghost = HistoryWindow.DragThumbnail(source);
+        var ghost = DragPreview.Fit(source, 1d);
 
         Assert.NotNull(ghost);
         Assert.Equal(expectedWidth, ghost!.PixelWidth);
@@ -259,7 +267,7 @@ public class HistoryAcceptanceTests
 
     [Fact]
     public void DragGhost_IsSkippedWhenTheTileHasNoThumbnailYet() =>
-        Assert.Null(HistoryWindow.DragThumbnail(null));
+        Assert.Null(DragPreview.Fit(null, 1d));
 
     /// <summary>
     /// The tile frame is 260 DIP, so a fixed 180 px decode was an upscale at every scale the app
@@ -277,23 +285,25 @@ public class HistoryAcceptanceTests
         Assert.Equal(expectedPixels, HistoryWindow.TileThumbnailPixelWidth(dpiScale));
 
     /// <summary>DragPreview divides the ghost's pixel size by the DPI scale to get its logical
-    /// size, so the cap has to be in real pixels: 200 logical px on screen at every scale.</summary>
+    /// size, so the cap has to be in real pixels: 180 logical px on screen at every scale, and
+    /// the same 180 whether the drag started in the editor or in History.</summary>
     [Theory]
-    [InlineData(1.0, 200)]
-    [InlineData(1.25, 250)]
-    [InlineData(1.5, 300)]
-    [InlineData(2.0, 400)]
-    [InlineData(0, 200)]     // an unreadable scale falls back to 1.0 rather than collapsing
+    [InlineData(1.0, 180)]
+    [InlineData(1.25, 225)]
+    [InlineData(1.5, 270)]
+    [InlineData(2.0, 360)]
+    [InlineData(0, 180)]     // an unreadable scale falls back to 1.0 rather than collapsing
     public void DragGhost_IsTheSameLogicalSizeAtEveryScale(double dpiScale, int expectedPixels)
     {
-        Assert.Equal(expectedPixels, HistoryWindow.DragGhostPixelWidth(dpiScale));
+        Assert.Equal(expectedPixels, DragPreview.MaxEdgePixels(dpiScale));
 
-        var oversized = new System.Windows.Media.Imaging.WriteableBitmap(
+        var landscape = new System.Windows.Media.Imaging.WriteableBitmap(
             1600, 900, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
-        var ghost = HistoryWindow.DragThumbnail(oversized, dpiScale);
+        Assert.Equal(expectedPixels, DragPreview.Fit(landscape, dpiScale)!.PixelWidth);
 
-        Assert.NotNull(ghost);
-        Assert.Equal(expectedPixels, ghost!.PixelWidth);
+        var scrolling = new System.Windows.Media.Imaging.WriteableBitmap(
+            1200, 9000, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+        Assert.Equal(expectedPixels, DragPreview.Fit(scrolling, dpiScale)!.PixelHeight);
     }
 
     [Fact]

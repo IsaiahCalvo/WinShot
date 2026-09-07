@@ -172,6 +172,70 @@ public class HistoryRefreshTests
         finally { Cleanup(dir); }
     }
 
+    /// <summary>
+    /// The hole the "keep an item that has no thumbnail yet" clause left: a decode that already
+    /// FAILED also has no thumbnail, so the failed item was reused on every later diff no matter
+    /// what happened to the bytes, and both load passes skip an item whose Tried flag is set. A
+    /// capture copied into the folder is decoded mid-write, fails, and the tile then said "can't
+    /// read this picture" over a finished, perfectly readable file until History was reopened.
+    /// </summary>
+    [Fact]
+    public void ADiffRebuildsAnItemWhoseDecodeFailedOverAFileThatChanged()
+    {
+        string dir = TempDir();
+        try
+        {
+            string file = WritePng(dir, 40, 40);
+            var failed = new HistoryItem(file) { ThumbnailTried = true };
+            Assert.Null(failed.Thumbnail);
+
+            // Same bytes: the tile really is unreadable, so re-decoding it every reload would be
+            // the shimmer-forever bug the flag exists to stop.
+            (List<HistoryItem> unchanged, _) = HistoryWindow.DiffItems(new[] { file }, new[] { failed });
+            Assert.Same(failed, unchanged[0]);
+
+            // Rewritten under the same name — the copy finished, or a rotate landed. A fresh item
+            // is what lets the decode run again.
+            Thread.Sleep(20);
+            using (var bitmap = new SD.Bitmap(64, 64))
+            {
+                using (var graphics = SD.Graphics.FromImage(bitmap)) graphics.Clear(SD.Color.Coral);
+                bitmap.Save(file, ImageFormat.Png);
+            }
+
+            (List<HistoryItem> rebuilt, HashSet<HistoryItem> live) =
+                HistoryWindow.DiffItems(new[] { file }, new[] { failed });
+            Assert.NotSame(failed, rebuilt[0]);
+            Assert.False(rebuilt[0].ThumbnailTried);
+            Assert.DoesNotContain(failed, live);
+        }
+        finally { Cleanup(dir); }
+    }
+
+    /// <summary>The video half of the same flag: a clip whose frame would not decode is rebuilt
+    /// once the file changes, rather than keeping the "MP4" card for good.</summary>
+    [Fact]
+    public void ADiffRebuildsAVideoWhoseFrameFailedOverAFileThatChanged()
+    {
+        string dir = TempDir();
+        try
+        {
+            string file = Path.Combine(dir, "20260803-120000-000.mp4");
+            File.WriteAllBytes(file, new byte[64]);
+            var failed = new HistoryItem(file) { VideoFrameTried = true };
+
+            (List<HistoryItem> unchanged, _) = HistoryWindow.DiffItems(new[] { file }, new[] { failed });
+            Assert.Same(failed, unchanged[0]);
+
+            Thread.Sleep(20);
+            File.WriteAllBytes(file, new byte[256]);
+            (List<HistoryItem> rebuilt, _) = HistoryWindow.DiffItems(new[] { file }, new[] { failed });
+            Assert.NotSame(failed, rebuilt[0]);
+            Assert.False(rebuilt[0].VideoFrameTried);
+        }
+        finally { Cleanup(dir); }
+    }
+
     private static string TempDir()
     {
         string dir = Path.Combine(Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));

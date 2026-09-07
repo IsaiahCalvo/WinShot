@@ -15,9 +15,13 @@ namespace WinShot.History;
 /// The file name is the whole metadata channel, so the executable has to be found again from
 /// the process name. A copy of that app still running is the only reliable way to do that, so
 /// a capture from an app the user has since quit simply gets no badge — the same outcome as a
-/// capture with no owning app at all, which is what CleanShot shows too. Resolution is cached
-/// per process name, misses included, because the miss is the expensive one: it walks every
-/// process on the machine.
+/// capture with no owning app at all, which is what CleanShot shows too.
+///
+/// Hits are cached per process name; misses deliberately are not. Caching a miss made the badge
+/// depend on what happened to be running the first time History opened: open it with Chrome
+/// closed, start Chrome, refresh, and every "@chrome" tile stayed unbadged for the rest of the
+/// WinShot session. A miss costs one Process.GetProcessesByName, it runs off the UI thread after
+/// the tiles are already up, and it only runs for tiles that carry a tag at all.
 /// </summary>
 internal static class SourceAppIcons
 {
@@ -37,8 +41,12 @@ internal static class SourceAppIcons
         }
 
         ImageSource? icon = Load(processName);
-        lock (Cache)
-            Cache[processName] = icon;
+        if (icon is not null)
+        {
+            lock (Cache)
+                Cache[processName] = icon;
+        }
+
         return icon;
     }
 

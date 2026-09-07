@@ -127,6 +127,9 @@
     <SolidColorBrush x:Key="HoverShadeBrush"    Color="{StaticResource HoverShadeColor}"/>
     <SolidColorBrush x:Key="PressedShadeBrush"   Color="{StaticResource PressedShadeColor}"/>
     <SolidColorBrush x:Key="BadgeScrimBrush"    Color="{StaticResource BadgeScrimColor}"/>
+    <!-- Plate behind a source app's own icon, which carries its own colours: a light
+         ground is what keeps a dark monochrome icon legible over a screenshot. -->
+    <SolidColorBrush x:Key="IconPlateBrush" Color="White"/>
 
     <SolidColorBrush x:Key="BorderBrush"        Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
@@ -223,8 +226,6 @@
          t^3 - t*a*sin(pi*t) and Motion.EaseOutBack is the standard c1 = 1.70158
          cubic — so do not pair one with the other in a single composite move.
          ================================================================== -->
-    <SolidColorBrush x:Key="IconPlateBrush" Color="White"/>
-
     <Duration x:Key="MotionQuick">0:0:0.14</Duration>
     <Duration x:Key="MotionSwap">0:0:0.22</Duration>
     <Duration x:Key="MotionEnter">0:0:0.28</Duration>

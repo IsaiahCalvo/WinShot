@@ -79,8 +79,11 @@
                     <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
                                FontSize="{StaticResource TextBodyLg}" VerticalAlignment="Center" Margin="20,0,16,0"/>
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
+                    <!-- MinWidth is sized for "Clear selection", the longer of the two labels this
+                         one button toggles between: without it every button to its right slid
+                         ~35 DIP sideways and back on every press. -->
                     <Button x:Name="AllSelectionButton" Style="{StaticResource PillButtonSecondary}" Click="OnToggleSelectAll" AutomationProperties.Name="Select all">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock x:Name="SelectAllText" Text="Select all"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock x:Name="SelectAllText" Text="Select all" MinWidth="92"/></StackPanel>
                     </Button>
                     <Button x:Name="CopyToButton" Style="{StaticResource PillButtonSecondary}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Copy to"/></StackPanel>
@@ -194,7 +197,7 @@
                                     <Grid>
                                         <Grid x:Name="ThumbnailSurface">
                                             <Image x:Name="ThumbnailImage" Source="{Binding Thumbnail}" Stretch="UniformToFill" Visibility="{Binding ThumbnailVisibility}"/>
-                                            <Grid x:Name="MediaFallback" Visibility="{Binding MediaFallbackVisibility}" Background="{StaticResource SurfaceBrush}">
+                                            <Grid Visibility="{Binding MediaFallbackVisibility}" Background="{StaticResource SurfaceBrush}">
                                                 <TextBlock Text="{Binding ExtensionLabel}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextDisplay}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Grid>
                                             <!-- Placeholder while the thumbnail decodes. The highlight sweeping
@@ -319,6 +322,15 @@
                                     <StopStoryboard BeginStoryboardName="ShimmerLoop"/>
                                 </DataTrigger.ExitActions>
                             </DataTrigger>
+                            <!-- The trigger above is the only thing that stops a Forever clock, and it
+                                 only goes false when the decode lands. A tile deleted or filtered out
+                                 while it is still shimmering loses its container with the clock still
+                                 running, and the grid is deliberately non-virtualizing so nothing
+                                 recycles it. Unloaded is the container's own end; ReflowWrapPanel's
+                                 CancelReflow and the window's fade disposal are the same idea. -->
+                            <EventTrigger RoutedEvent="FrameworkElement.Unloaded" SourceName="Card">
+                                <StopStoryboard BeginStoryboardName="ShimmerLoop"/>
+                            </EventTrigger>
                             <!-- A decoded thumbnail fades up over the tile's surface instead of popping.
                                  From is explicit: the Setter above is unapplied the instant the trigger
                                  goes false, so an animation with only a To would interpolate from the
@@ -368,6 +380,14 @@
                                             <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource MotionQuick}">
                                                 <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
                                             </DoubleAnimation>
+                                            <!-- The media bar and the action row are both bottom-anchored inside the
+                                                 thumbnail, so on hover the duration/size line sat under the Edit and
+                                                 Delete labels on a double scrim (bar + gradient ≈ 96 % black). The bar
+                                                 hands the band over on the same trigger and the same 140 ms rather
+                                                 than sharing it. Still tiles have no bar, so this is a no-op there. -->
+                                            <DoubleAnimation Storyboard.TargetName="MediaBar" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource MotionQuick}">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </MultiDataTrigger.EnterActions>
@@ -375,6 +395,9 @@
                                     <BeginStoryboard>
                                         <Storyboard>
                                             <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource MotionQuick}">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="MediaBar" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource MotionQuick}">
                                                 <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
                                             </DoubleAnimation>
                                         </Storyboard>
@@ -408,7 +431,11 @@
                 <TextBlock x:Name="EmptyStateGlyph" Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphHero}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
                 <TextBlock x:Name="EmptyStateTitle" Text="No captures yet" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
                 <TextBlock x:Name="EmptyStateBody" Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextBody}" Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="{StaticResource ActionRowMargin}">
+                <!-- Collapsed with its children: "History is turned off", and the Videos/GIFs/
+                     Scrolling filtered states, show no button at all, and a zero-height row still
+                     spent its 16 DIP top margin — dropping those panels lower in the centred
+                     block than the ones that do have a button. -->
+                <StackPanel x:Name="EmptyStateActions" Orientation="Horizontal" HorizontalAlignment="Center" Margin="{StaticResource ActionRowMargin}">
                     <Button x:Name="NewCaptureButton" Content="New capture" Style="{StaticResource PillButtonPrimary}"
                             Click="OnNewCapture" Visibility="Collapsed"
                             AutomationProperties.Name="Take a new region capture"/>

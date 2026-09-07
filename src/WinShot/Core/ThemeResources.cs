@@ -59,6 +59,9 @@ public static class ThemeResources
         return null;
     }
 
+    /// <summary>Theme.xaml's loop-period key, which the zeroing pass below leaves alone.</summary>
+    internal const string ShimmerDurationKey = "MotionShimmer";
+
     /// <summary>
     /// Honours Settings &gt; Accessibility &gt; Visual effects &gt; Animation effects on the
     /// WPF side. Core/Motion.cs already jumps straight to the end state when the user has
@@ -87,9 +90,6 @@ public static class ThemeResources
     /// The preference is read once per process. Motion.Run re-reads it per tween, so the
     /// WinForms stack follows a mid-session toggle and the WPF stack needs a restart.
     /// </summary>
-    /// <summary>Theme.xaml's loop-period key, which the zeroing pass below leaves alone.</summary>
-    internal const string ShimmerDurationKey = "MotionShimmer";
-
     internal static void ApplyAnimationPreference(ResourceDictionary theme)
     {
         if (Motion.AnimationsEnabled())

@@ -34,6 +34,8 @@ public partial class HistoryWindow : Window
     private readonly HistoryService _history;
     private readonly SettingsService _settings;
     private readonly HistoryIncrementalCollection _paging = new();
+    /// <summary>Files with a rotate in flight; see <see cref="OnRotate"/>.</summary>
+    private readonly HashSet<string> _rotating = new(StringComparer.OrdinalIgnoreCase);
     private ObservableCollection<HistoryItem> _items => _paging.VisibleItems;
     private CancellationTokenSource? _loadCts;
     private string _filter = "all";
@@ -398,6 +400,18 @@ public partial class HistoryWindow : Window
             return false;
         if (MenuInside(container) is not { } menu) return false;
 
+        // The ContextMenu lives in the item's DataTemplate, so these two writes stick to that
+        // tile. ContextMenuService resets PlacementTarget on a later right-click but NOT
+        // Placement, so without putting it back one Shift+F10 left that tile's menu opening
+        // under the card for the rest of the session instead of at the cursor.
+        System.Windows.Controls.Primitives.PlacementMode placement = menu.Placement;
+        void Restore(object? s, RoutedEventArgs e)
+        {
+            menu.Closed -= Restore;
+            menu.Placement = placement;
+        }
+
+        menu.Closed += Restore;
         menu.PlacementTarget = container;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
         menu.IsOpen = true;
@@ -436,8 +450,11 @@ public partial class HistoryWindow : Window
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        // Tunneling so the chips/scroll viewer never swallow Space.
-        if (e.Key == Key.Space)
+        // Tunneling so the chips/scroll viewer never swallow Space — but only while focus is in
+        // the grid. Claiming it window-wide meant Space never reached a focused control, so
+        // tabbing to the empty state's "New capture" or "Try again" and pressing it opened a
+        // quick preview of nothing instead of activating the button.
+        if (e.Key == Key.Space && (ItemsList.IsKeyboardFocusWithin || _previewOpen))
         {
             ToggleQuickPreview();
             e.Handled = true;
@@ -507,8 +524,7 @@ public partial class HistoryWindow : Window
         var live = new HashSet<HistoryItem>();
         foreach (string file in files)
         {
-            HistoryItem item = kept.TryGetValue(file, out HistoryItem? existing) &&
-                               (existing.Thumbnail is null || existing.MatchesFileOnDisk())
+            HistoryItem item = kept.TryGetValue(file, out HistoryItem? existing) && Reusable(existing)
                 ? existing
                 : new HistoryItem(file);
             newItems.Add(item);
@@ -516,6 +532,18 @@ public partial class HistoryWindow : Window
         }
 
         return (newItems, live);
+
+        // An item is worth keeping while the bytes it was built from are still on disk, or while
+        // it has not read them yet. "Has not read them yet" is Thumbnail == null AND neither
+        // decode pass has been tried: once a pass has run and come back empty the item carries a
+        // permanent "can't read this picture", and reusing it made that permanent for the FILE
+        // too. A capture copied into the folder is stat'd and decoded mid-write, fails, and then
+        // the completion event's reload reused the failed item forever — the tile stayed on the
+        // warning glyph over a perfectly readable file, through the watcher, Refresh and Try
+        // again alike, until History was closed and reopened.
+        static bool Reusable(HistoryItem existing) =>
+            (existing.Thumbnail is null && !existing.ThumbnailTried && !existing.VideoFrameTried)
+            || existing.MatchesFileOnDisk();
     }
 
     private async Task ReloadAsync()
@@ -948,6 +976,9 @@ public partial class HistoryWindow : Window
         EmptyStateBody.Text = state.Body;
         NewCaptureButton.Visibility = state.ShowNewCapture ? Visibility.Visible : Visibility.Collapsed;
         RetryLoadButton.Visibility = state.ShowRetry ? Visibility.Visible : Visibility.Collapsed;
+        EmptyStateActions.Visibility = state.ShowNewCapture || state.ShowRetry
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         // Moving between two empty filters (Videos → GIFs) swaps three lines of copy in place, and
         // a failed "Try again" rewrites them to the same words. Fading again is what says the app
@@ -1508,12 +1539,14 @@ public partial class HistoryWindow : Window
     private DragPreview? ShowDragPreview(HistoryItem item)
     {
         double dpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        // Decode for the ghost instead of reusing the tile's thumbnail: that one is 180 raw
-        // pixels whatever the scale, and DragPreview divides by the DPI to get its logical size,
-        // so the ghost shrank as the scale rose — 180 px at 100 %, 120 at 150 %, 90 at 200 %.
+        // The tile's own thumbnail first: it decodes at TileThumbnailPixelWidth (260 x the scale),
+        // which is already larger than the ghost's cap at every scale WinShot runs at, so it is
+        // both the right size and free. Decoding from disk here instead cost ~110 ms on the UI
+        // thread for a tall scrolling capture — landing exactly where the user has already
+        // committed to the gesture — and is now only the fallback for a tile that has none yet.
         BitmapSource? thumbnail =
-            DragThumbnail(TryLoadThumbnail(item.FilePath, DragGhostPixelWidth(dpiScale)), dpiScale)
-            ?? DragThumbnail(item.Thumbnail, dpiScale);
+            DragPreview.Fit(item.Thumbnail, dpiScale)
+            ?? DragPreview.Fit(TryLoadThumbnail(item.FilePath, DragPreview.MaxEdgePixels(dpiScale)), dpiScale);
         if (thumbnail is null)
             return null;
 
@@ -1529,30 +1562,6 @@ public partial class HistoryWindow : Window
             return null;
         }
     }
-
-    /// <summary>How wide the drag ghost decodes, in real pixels: a constant 200 logical px on
-    /// screen whatever the monitor's scale, and crisp rather than upscaled at 150 % and 200 %.</summary>
-    internal static int DragGhostPixelWidth(double dpiScale) =>
-        Math.Max(1, (int)Math.Round(DragPreviewMaxWidth * (dpiScale > 0 ? dpiScale : 1d)));
-
-    /// <summary>A thumbnail sized for the ghost, scaled down if it came in larger than the cap
-    /// (a video frame decodes at up to 640 px, which would follow the cursor as a full-size
-    /// window).</summary>
-    internal static BitmapSource? DragThumbnail(ImageSource? source, double dpiScale = 1d)
-    {
-        if (source is not BitmapSource bitmap || bitmap.PixelWidth <= 0)
-            return null;
-        int max = DragGhostPixelWidth(dpiScale);
-        if (bitmap.PixelWidth <= max)
-            return bitmap;
-
-        double scale = (double)max / bitmap.PixelWidth;
-        var scaled = new TransformedBitmap(bitmap, new ScaleTransform(scale, scale));
-        scaled.Freeze();
-        return scaled;
-    }
-
-    private const int DragPreviewMaxWidth = 200;
 
     private async void OnCopy(object sender, RoutedEventArgs e)
     {
@@ -1627,6 +1636,14 @@ public partial class HistoryWindow : Window
             return;
         }
 
+        // A rotate is several hundred milliseconds of load, rotate, save and swap on a large PNG,
+        // with nothing on the tile saying so — which is the shape that invites a second click.
+        // Two runs on the same file each stage their own copy and each move it over the
+        // destination, so the pair lands as 180 degrees or as a "Rotate failed" from one load
+        // reading the file mid-swap. Keyed on the path, not the item, because a reload landing in
+        // the middle replaces the instance.
+        if (!_rotating.Add(item.FilePath)) return;
+
         try
         {
             // Write to temp and swap: a half-written history file is worse than a failed
@@ -1661,6 +1678,10 @@ public partial class HistoryWindow : Window
             ThemedMessageDialog.Show(this, "Rotate failed", FriendlyError.For(ex));
             return;
         }
+        finally
+        {
+            _rotating.Remove(item.FilePath);
+        }
 
         // The reload notices the file changed underneath the item and re-decodes it; the toast
         // is what says so before the new pixels land, and covers a rotate that changes so little
@@ -1678,14 +1699,14 @@ public partial class HistoryWindow : Window
     /// grid had no equivalent. A decode is milliseconds; anything still holding the file after
     /// the last try is a real conflict and the exception is the user's answer.
     /// </summary>
-    private static void MoveOverBusyFile(string staging, string destination)
+    private static void MoveOverBusyFile(string staging, string destination, bool overwrite = true)
     {
         const int attempts = 6;
         for (int attempt = 1; ; attempt++)
         {
             try
             {
-                File.Move(staging, destination, overwrite: true);
+                File.Move(staging, destination, overwrite);
                 return;
             }
             catch (Exception ex) when (attempt < attempts && ex is IOException or UnauthorizedAccessException)
@@ -1726,7 +1747,9 @@ public partial class HistoryWindow : Window
 
             try
             {
-                File.Move(item.FilePath, result.Path!);
+                // Same wait as Rotate: a thumbnail decode in flight holds the source file, so a
+                // rename fired right after a reload used to answer "access is denied".
+                MoveOverBusyFile(item.FilePath, result.Path!, overwrite: false);
             }
             catch (Exception ex)
             {
@@ -1742,7 +1765,7 @@ public partial class HistoryWindow : Window
             // indistinguishable from having cancelled the dialog.
             App.Toast(
                 "Renamed",
-                $"Saved as {Path.GetFileName(result.Path!)}",
+                $"Saved as {Path.GetFileName(result.Path!)}.",
                 severity: ToastSeverity.Success);
             _ = ReloadAsync();
             return;
