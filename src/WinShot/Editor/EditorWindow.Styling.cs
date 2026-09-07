@@ -498,8 +498,11 @@ public partial class EditorWindow : Window
             }
             else
             {
-                // An empty slot: outline only, so the row reads as ten places rather than as
-                // a short row of colors. Disabled, so it is not a tab stop either.
+                // An empty slot reads as a recessed well: the popup's own window colour under
+                // the hairline. The hairline alone is BorderStrongColor over ElevatedColor,
+                // which computes to 1.89:1 against the popup -- below WCAG 1.4.11's 3:1 for a
+                // control boundary, and on these slots the boundary is the whole affordance.
+                slot.Background = (Brush)FindResource("WindowBgBrush");
                 AutomationProperties.SetName(slot, "Empty saved color slot");
             }
 
