@@ -344,22 +344,31 @@ public class QuickActionsMenuTests
     }
 
     [Theory]
-    // Everything the card's tooltips and shortcut column advertise.
+    // The four Ctrl chords the card's tooltips and shortcut column advertise on hover.
     [InlineData(WF.Keys.Control | WF.Keys.C, true)]
     [InlineData(WF.Keys.Control | WF.Keys.S, true)]
     [InlineData(WF.Keys.Control | WF.Keys.E, true)]
     [InlineData(WF.Keys.Control | WF.Keys.W, true)]
-    [InlineData(WF.Keys.C, true)]
-    [InlineData(WF.Keys.P, true)]
-    [InlineData(WF.Keys.O, true)]
-    [InlineData(WF.Keys.B, true)]
-    [InlineData(WF.Keys.Escape, true)]
-    [InlineData(WF.Keys.Tab, true)]
-    [InlineData(WF.Keys.Shift | WF.Keys.Tab, true)]
-    [InlineData(WF.Keys.Apps, true)]
-    [InlineData(WF.Keys.Shift | WF.Keys.F10, true)]
-    // Everything that belongs to the window underneath.
+    // Everything that belongs to the window underneath. The hook is gated on hover, not on
+    // focus, so a bare letter it swallowed would be a letter the user was typing into a
+    // document — and the card would run a save or an OCR pass instead of printing it. The
+    // bare P/O/B, Escape and Tab the card also handles still work, through its own KeyDown,
+    // once it genuinely has focus — which right-clicking it (the only place those shortcuts
+    // are advertised) already does.
+    [InlineData(WF.Keys.C, false)]
+    [InlineData(WF.Keys.S, false)]
+    [InlineData(WF.Keys.E, false)]
     [InlineData(WF.Keys.W, false)]
+    [InlineData(WF.Keys.P, false)]
+    [InlineData(WF.Keys.O, false)]
+    [InlineData(WF.Keys.B, false)]
+    [InlineData(WF.Keys.Escape, false)]
+    [InlineData(WF.Keys.Tab, false)]
+    [InlineData(WF.Keys.Shift | WF.Keys.Tab, false)]
+    [InlineData(WF.Keys.Enter, false)]
+    [InlineData(WF.Keys.Space, false)]
+    [InlineData(WF.Keys.Apps, false)]
+    [InlineData(WF.Keys.Shift | WF.Keys.F10, false)]
     [InlineData(WF.Keys.Control | WF.Keys.V, false)]
     [InlineData(WF.Keys.Control | WF.Keys.Z, false)]
     [InlineData(WF.Keys.Alt | WF.Keys.F4, false)]
@@ -367,17 +376,9 @@ public class QuickActionsMenuTests
     [InlineData(WF.Keys.A, false)]
     [InlineData(WF.Keys.F10, false)]
     [InlineData(WF.Keys.Control | WF.Keys.Shift | WF.Keys.S, false)]
-    public void TheCardClaimsOnlyTheChordsItAdvertises(WF.Keys keyData, bool claimed)
-        => Assert.Equal(claimed, QuickActionsMenu.ClaimsKey(keyData, hasFocusedButton: false));
-
-    [Fact]
-    public void EnterAndSpaceAreClaimedOnlyWhileAButtonHasKeyboardFocus()
-    {
-        Assert.False(QuickActionsMenu.ClaimsKey(WF.Keys.Enter, hasFocusedButton: false));
-        Assert.False(QuickActionsMenu.ClaimsKey(WF.Keys.Space, hasFocusedButton: false));
-        Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Enter, hasFocusedButton: true));
-        Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Space, hasFocusedButton: true));
-    }
+    [InlineData(WF.Keys.Control | WF.Keys.Alt | WF.Keys.S, false)]
+    public void TheHoverHookClaimsOnlyTheFourCtrlChordsTheCardAdvertises(WF.Keys keyData, bool claimed)
+        => Assert.Equal(claimed, QuickActionsMenu.ClaimsKey(keyData));
 
     [Fact]
     public void TheBatchRowsSitInTheSameBlockAsCloseAndAskBeforeTheyAct()
@@ -399,9 +400,11 @@ public class QuickActionsMenuTests
         var rows = QuickActionsMenu.Rows(false, true, true)
             .Where(r => r.Id != QuickActionsMenu.Separator)
             .ToDictionary(r => r.Id, r => r.Text);
+        // Only the row that asks for something gets the ellipsis: Save all opens a folder
+        // picker. Close all and Temporarily hide act immediately (and say what they did),
+        // so promising more input would be a lie.
         Assert.EndsWith("…", rows[QuickActionsMenu.SaveAll], StringComparison.Ordinal);
-        Assert.EndsWith("…", rows[QuickActionsMenu.CloseAll], StringComparison.Ordinal);
-        // Temporarily hide is instant and reversible, so it does not ask.
+        Assert.False(rows[QuickActionsMenu.CloseAll].EndsWith("…", StringComparison.Ordinal));
         Assert.False(rows[QuickActionsMenu.TemporarilyHide].EndsWith("…", StringComparison.Ordinal));
     }
 

@@ -92,9 +92,10 @@ internal static class QuickActionsMenu
 
         rows.Add(new Row(Separator, Separator));
         // One block with Close: these are all "get this out of the way", strongest first.
-        // The two batch rows end in an ellipsis because both ask before they act.
+        // Only Save all earns an ellipsis — it asks for a folder. Close all acts immediately
+        // (and says how many it closed), so promising more input would be a lie.
         rows.Add(new Row(SaveAll, "Save all…"));
-        rows.Add(new Row(CloseAll, "Close all…"));
+        rows.Add(new Row(CloseAll, "Close all"));
         rows.Add(new Row(TemporarilyHide, "Temporarily hide"));
         rows.Add(new Row(Close, "Close", "Ctrl+W"));
         return rows;
@@ -256,13 +257,6 @@ internal static class QuickActionsMenu
     }
 
     /// <summary>
-    /// Whether the card claims <paramref name="keyData"/> while the pointer is on it.
-    /// Deliberately separate from the handler: the hover-gated keyboard hook has to decide
-    /// whether to swallow a key inside the hook callback, but must not run the action
-    /// there — opening the context menu from a hook spins a modal message loop inside it.
-    /// Every chord here is one the card advertises in a tooltip or its shortcut column.
-    /// </summary>
-    /// <summary>
     /// The rows that only make sense with more than one card on screen. They are built into
     /// every menu and hidden when the stack is a single card, rather than rebuilt on every
     /// capture: the menu is warmed while the card is idle so the right-click is instant, and
@@ -270,38 +264,30 @@ internal static class QuickActionsMenu
     /// </summary>
     internal static bool NeedsAStack(string id) => id is SaveAll or CloseAll;
 
-    internal static bool ClaimsKey(WF.Keys keyData, bool hasFocusedButton)
+    /// <summary>
+    /// Whether the hover-gated keyboard hook swallows <paramref name="keyData"/> system-wide.
+    /// Deliberately separate from the handler: the hook has to decide inside its callback,
+    /// but must not run the action there — opening the context menu from a hook spins a
+    /// modal message loop inside it.
+    ///
+    /// Only the four Ctrl chords the card prints on its own tooltips and shortcut column.
+    /// Hover is not focus: the card is never activated, so the keys the hook eats belong to
+    /// whatever the user is actually typing in, and a card parked in the corner used to
+    /// swallow every bare c/s/e/p/o/b, Escape and Tab out of the document underneath — and
+    /// run a save or an OCR pass instead. The bare-letter and Tab/Enter/Space cases still
+    /// work, through the card's real KeyDown, once it genuinely has keyboard focus.
+    /// </summary>
+    internal static bool ClaimsKey(WF.Keys keyData)
     {
         WF.Keys key = keyData & WF.Keys.KeyCode;
         WF.Keys modifiers = keyData & WF.Keys.Modifiers;
-        bool ctrl = (modifiers & WF.Keys.Control) != 0;
-        bool alt = (modifiers & WF.Keys.Alt) != 0;
-        bool shift = (modifiers & WF.Keys.Shift) != 0;
 
-        // Alt is the app's own "keep the card open" modifier on the mouse actions, and
-        // Alt+anything belongs to the window underneath.
-        if (alt)
-            return false;
-        if (key == WF.Keys.Tab && !ctrl)
-            return true;
-        if (key is WF.Keys.Enter or WF.Keys.Space && modifiers == WF.Keys.None)
-            return hasFocusedButton;
-        if (key == WF.Keys.Apps && !ctrl)
-            return true;
-        if (key == WF.Keys.F10 && shift && !ctrl)
-            return true;
-
-        // Shift disqualifies the letter chords: Ctrl+Shift+S is somebody else's Save as.
-        if (shift)
+        // Ctrl alone. Alt+anything belongs to the window underneath, and Shift disqualifies
+        // the letters too: Ctrl+Shift+S is somebody else's Save as.
+        if (modifiers != WF.Keys.Control)
             return false;
 
-        return key switch
-        {
-            WF.Keys.C or WF.Keys.S or WF.Keys.E => ctrl || modifiers == WF.Keys.None,
-            WF.Keys.W => ctrl,
-            WF.Keys.Escape or WF.Keys.P or WF.Keys.O or WF.Keys.B => modifiers == WF.Keys.None,
-            _ => false,
-        };
+        return key is WF.Keys.C or WF.Keys.S or WF.Keys.E or WF.Keys.W;
     }
 
     internal static bool FileReady(string? path) => path is not null && File.Exists(path);
