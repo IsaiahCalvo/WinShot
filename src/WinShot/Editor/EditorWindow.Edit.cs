@@ -491,6 +491,12 @@ public partial class EditorWindow : Window
         base.OnClosing(e);
         if (e.Cancel || _closed || ImageCommitted is not { } committed)
             return;
+        // Nothing was drawn, so nothing to hand back. Flatten() is a full-size WPF render
+        // and the card answers it by re-encoding the on-disk history file — opening the
+        // editor and pressing Done used to cost both, and a JPEG history entry a
+        // generation of quality, for a visit that changed nothing.
+        if (_undoStack.Count == 0)
+            return;
 
         // Cleared first: a handler that reopens or re-closes must not be handed a second copy.
         ImageCommitted = null;

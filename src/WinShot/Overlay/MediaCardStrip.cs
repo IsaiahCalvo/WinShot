@@ -113,13 +113,13 @@ internal static class MediaCardStrip
         double value = bytes / 1024d;
         foreach (string unit in new[] { "KB", "MB", "GB" })
         {
-            if (value < 1024d || unit == "GB")
-            {
-                string text = value < 10d && unit != "KB"
-                    ? value.ToString("0.0", CultureInfo.InvariantCulture)
-                    : Math.Round(value).ToString(CultureInfo.InvariantCulture);
-                return $"{text} {unit}";
-            }
+            // Round FIRST, then decide whether the unit still holds — the same fix the
+            // duration above needed. Choosing on the raw value and rounding afterwards
+            // printed "1024 KB" for anything in the last half-kilobyte below a megabyte.
+            bool oneDecimal = value < 10d && unit != "KB";
+            double rounded = oneDecimal ? Math.Round(value, 1) : Math.Round(value);
+            if (rounded < 1024d || unit == "GB")
+                return $"{rounded.ToString(oneDecimal ? "0.0" : "0", CultureInfo.InvariantCulture)} {unit}";
             value /= 1024d;
         }
         return $"{bytes} B";

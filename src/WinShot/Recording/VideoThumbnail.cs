@@ -13,9 +13,6 @@ namespace WinShot.Recording;
 /// </summary>
 public static class VideoThumbnail
 {
-    public static async Task<SD.Bitmap> CreateAsync(string filePath)
-        => (await CreateWithDurationAsync(filePath)).Thumbnail;
-
     /// <summary>
     /// The poster frame and how long the recording runs. The card prints the duration in
     /// its bottom strip, and the file is already open here — asking again later would mean

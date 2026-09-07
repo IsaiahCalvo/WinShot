@@ -1,10 +1,14 @@
-﻿using System.Reflection;
+﻿using System.Globalization;
+using System.Reflection;
 using System.IO;
+using System.Xml.Linq;
 using WinShot.Core;
 using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
+using W = System.Windows;
 using WF = System.Windows.Forms;
+using WM = System.Windows.Media;
 
 namespace WinShot.Tests;
 
@@ -395,6 +399,61 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    /// <summary>
+    /// The recording strip's camcorder is the smallest glyph on the card, so it is the one
+    /// that shows a mismatched stroke weight first. <see cref="SvgIcons"/> fits the whole
+    /// viewBox into the square render box, so a viewBox with empty margin renders the
+    /// artwork small and its 1.85 stroke light: on the stock 24x24 box the camcorder
+    /// occupied 14 of 24 rows, so it drew at 0.58x and its stroke landed at 0.69 device px
+    /// beside 1.08 px everywhere else on the same card.
+    ///
+    /// Measured off the asset rather than off a render: RenderTargetBitmap draws nothing on
+    /// a bare test thread (no dispatcher, so no media context) — every glyph comes back
+    /// blank there, which would make a pixel scan assert something that is true of the test
+    /// host and not of the app.
+    /// </summary>
+    [Fact]
+    public void TheRecordingGlyphsViewBoxIsCroppedToWhatItActuallyDraws()
+    {
+        using Stream stream = typeof(FastQuickActionsWindow).Assembly
+            .GetManifestResourceStream("WinShot.Assets.quick-access-camcorder.svg")
+            ?? throw new Xunit.Sdk.XunitException("the camcorder asset is not embedded");
+        XElement root = XDocument.Load(stream).Root!;
+
+        string[] box = root.Attribute("viewBox")!.Value.Split(' ');
+        var viewBox = new W.Rect(
+            double.Parse(box[0], CultureInfo.InvariantCulture),
+            double.Parse(box[1], CultureInfo.InvariantCulture),
+            double.Parse(box[2], CultureInfo.InvariantCulture),
+            double.Parse(box[3], CultureInfo.InvariantCulture));
+
+        // Half the stroke sits outside the path, so the ink is wider than the geometry.
+        double half = double.Parse(root.Attribute("stroke-width")!.Value, CultureInfo.InvariantCulture) / 2d;
+        W.Rect ink = W.Rect.Empty;
+        foreach (XElement element in root.Descendants())
+        {
+            WM.Geometry? geometry = element.Name.LocalName switch
+            {
+                "path" => WM.Geometry.Parse(element.Attribute("d")!.Value),
+                "rect" => new WM.RectangleGeometry(new W.Rect(
+                    double.Parse(element.Attribute("x")!.Value, CultureInfo.InvariantCulture),
+                    double.Parse(element.Attribute("y")!.Value, CultureInfo.InvariantCulture),
+                    double.Parse(element.Attribute("width")!.Value, CultureInfo.InvariantCulture),
+                    double.Parse(element.Attribute("height")!.Value, CultureInfo.InvariantCulture))),
+                _ => null,
+            };
+            if (geometry is null)
+                continue;
+            W.Rect bounds = geometry.Bounds;
+            bounds.Inflate(half, half);
+            ink.Union(bounds);
+        }
+
+        Assert.True(viewBox.Contains(ink), $"the viewBox {viewBox} clips the ink {ink}");
+        Assert.True(ink.Width / viewBox.Width > 0.95, $"the viewBox is {viewBox.Width} wide for {ink.Width} of ink");
+        Assert.True(ink.Height / viewBox.Height > 0.95, $"the viewBox is {viewBox.Height} tall for {ink.Height} of ink");
+    }
+
     private static string? InvokeIconFor(string id) =>
         (string?)typeof(FastQuickActionsWindow).Assembly
             .GetType("WinShot.Overlay.QuickActionsMenu")!
@@ -758,6 +817,8 @@ public class QuickAccessOverlayInteractionTests
                 .GetField("_imageVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
             overlay.StepAside();
+            // The card dims out over QuickMs rather than cutting, so wait the fade out.
+            PumpUntil(() => !overlay.Visible, 3000);
 
             // Out of the way, not gone — and it must not auto-close under the editor.
             Assert.False(overlay.Visible);
@@ -889,6 +950,7 @@ public class QuickAccessOverlayInteractionTests
             second.Show();
 
             Invoke(second, "RunMenuAction", QuickActionsMenu.TemporarilyHide);
+            PumpUntil(() => !first.Visible && !second.Visible, 3000);
 
             Assert.False(first.Visible);
             Assert.False(second.Visible);

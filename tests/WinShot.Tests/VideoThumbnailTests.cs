@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using WinShot.Recording;
 using Xunit;
 using SD = System.Drawing;
@@ -10,8 +10,8 @@ public class VideoThumbnailTests
     [Fact]
     public async Task CreateAsync_UnreadableFile_ReturnsPlaceholder()
     {
-        using SD.Bitmap bmp = await VideoThumbnail.CreateAsync(
-            Path.Combine(Path.GetTempPath(), $"winshot-missing-{Guid.NewGuid():N}.mp4"));
+        using SD.Bitmap bmp = (await VideoThumbnail.CreateWithDurationAsync(
+            Path.Combine(Path.GetTempPath(), $"winshot-missing-{Guid.NewGuid():N}.mp4"))).Thumbnail;
         Assert.True(bmp.Width > 0 && bmp.Height > 0);
     }
 
@@ -28,7 +28,7 @@ public class VideoThumbnailTests
                 source.Save(path, SD.Imaging.ImageFormat.Gif);
             }
 
-            using SD.Bitmap bmp = await VideoThumbnail.CreateAsync(path);
+            using SD.Bitmap bmp = (await VideoThumbnail.CreateWithDurationAsync(path)).Thumbnail;
             Assert.Equal(40, bmp.Width);
             Assert.Equal(30, bmp.Height);
         }

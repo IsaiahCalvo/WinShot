@@ -31,6 +31,18 @@ public class MediaCardStripTests
     public void SizeCarriesADecimalOnlyWhereItMeansSomething(long bytes, string expected)
         => Assert.Equal(expected, MediaCardStrip.FormatSize(bytes));
 
+    /// <summary>
+    /// The unit is chosen from the rounded value, not the raw one. Choosing first and
+    /// rounding afterwards printed "1024 KB" for every size in the last half-kilobyte below
+    /// a megabyte — the same shape of bug the duration above needed fixing for.
+    /// </summary>
+    [Theory]
+    [InlineData(1024L * 1024 - 1)]
+    [InlineData(1024L * 1024 - 400)]
+    [InlineData(1024L * 1024)]
+    public void ASizeJustUnderTheNextUnitRollsOverInsteadOfPrinting1024(long bytes)
+        => Assert.Equal("1.0 MB", MediaCardStrip.FormatSize(bytes));
+
     [Fact]
     public void TheStripSitsFlushWithTheBottomOfTheCardAndScalesWithIt()
     {
