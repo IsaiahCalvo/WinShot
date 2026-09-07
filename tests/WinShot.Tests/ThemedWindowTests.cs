@@ -214,6 +214,9 @@ public class ThemedWindowTests
         // The shadow switch only means something once a background is on, so it rides the same
         // reveal as the colour field rather than sitting there greyed out under "None".
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("ScreenshotBackgroundShadowRow").Visibility);
+        // The corner trim applies to every window capture, so unlike the backdrop's shadow it
+        // has nothing to be revealed by and stands on its own.
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrimWindowShadowRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("NotificationsCard").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
@@ -256,7 +259,7 @@ public class ThemedWindowTests
             "PinnedShadowCheck", "PinnedBorderCheck", "AllInOneRememberCheck",
             "OcrJoinLinesCheck", "AskForNameCheck",
             "NotifyOcrCombo", "NotifyCopyCombo", "NotifySaveCombo",
-            "BackgroundCombo", "BackgroundColorBox", "BackgroundShadowCheck",
+            "BackgroundCombo", "BackgroundColorBox", "BackgroundShadowCheck", "TrimWindowShadowCheck",
             "RestoreDefaultsButton", "CancelButton", "SaveButton",
             "AboutCheckUpdatesButton",
             "AboutRepositoryButton", "AboutLogsButton", "AboutDiagnosticsToggle",

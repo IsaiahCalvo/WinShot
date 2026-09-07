@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -480,6 +480,7 @@ public partial class SettingsWindow : Window
         SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 1);
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
+        TrimWindowShadowCheck.IsChecked = s.TrimWindowShadow;
     }
 
     private void LoadAnnotate(Settings s)
@@ -959,6 +960,7 @@ public partial class SettingsWindow : Window
         s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
         s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
         s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
+        s.TrimWindowShadow = TrimWindowShadowCheck.IsChecked == true;
         s.SelfTimerSeconds = int.TryParse(SelectedTag(SelfTimerCombo, "3"), out int timer) ? timer : 3;
 
         // Advanced
@@ -1197,6 +1199,8 @@ public partial class SettingsWindow : Window
         Accessible(FreezeScreenCheck, "Freeze screen during selection", "Use a still desktop image while choosing a region.");
         Accessible(CrosshairModeCombo, "Crosshair mode", "Choose when selector crosshair guides appear.");
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
+        Accessible(TrimWindowShadowCheck, "Trim the window shadow",
+            "Cut the shadowed wedges out of the corners of a rounded window capture.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
         Accessible(AskForNameCheck, "Ask for a name after every capture", "Prompt for a file name before each save, defaulting to the template.");
@@ -1225,7 +1229,8 @@ public partial class SettingsWindow : Window
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, BackgroundCombo, BackgroundColorBox, BackgroundShadowCheck, SelfTimerCombo,
-            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TrimWindowShadowCheck,
+            TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck, AskForNameCheck,
             NotifyOcrCombo, NotifyCopyCombo, NotifySaveCombo,

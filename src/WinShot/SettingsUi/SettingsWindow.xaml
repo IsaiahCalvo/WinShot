@@ -1,4 +1,4 @@
-﻿<Window x:Class="WinShot.SettingsUi.SettingsWindow"
+<Window x:Class="WinShot.SettingsUi.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinShot.SettingsUi"
@@ -945,6 +945,12 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="ShowMagnifierCheck" Content="Show magnifier"/>
                                 </DockPanel>
+                                <DockPanel x:Name="TrimWindowShadowRow" Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Window capture"/>
+                                    <CheckBox x:Name="TrimWindowShadowCheck" Content="Trim the shadow from rounded corners"/>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Windows 11 rounds a window and draws its shadow behind those corners. Trimming leaves them transparent instead of keeping a grey wedge of whatever was underneath."/>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
                             </StackPanel>
