@@ -34,6 +34,13 @@ public partial class App : Application
     private RecordingRecoveryStartup? _recordingRecovery;
     private bool _captureInProgress;
     private string? _pendingCaptureCommand;
+    /// <summary>
+    /// The <c>?then=</c> set from the URL that started the capture now running, consumed by
+    /// the first <see cref="HandleCapture"/> that follows. A single slot is safe because a
+    /// single capture is: <see cref="QueueCaptureCommand"/> and <see cref="RunCaptureFlow"/>
+    /// both drop anything that arrives while <see cref="_captureInProgress"/> is set.
+    /// </summary>
+    private PostCaptureSet? _pendingThenOverride;
     private bool _pendingCaptureDrainActive;
     private long _autoCopySuppressedUntilTick;
     internal DirectEditCaptureTestHooks? DirectEditTestHooks { get; set; }
@@ -47,7 +54,11 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        string? incomingCommand = e.Args.Length > 0 ? CommandServer.ParseCommand(e.Args[0]) : null;
+        string? incomingArg = e.Args.Length > 0 ? e.Args[0] : null;
+        string? incomingCommand = incomingArg is null ? null : CommandServer.ParseCommand(incomingArg);
+        CaptureCommandOptions incomingOptions = incomingArg is null
+            ? CaptureCommandOptions.None
+            : CommandServer.ParseOptions(incomingArg);
 
         _mutex = new Mutex(true, "WinShot-SingleInstance", out _ownsMutex);
         if (!_ownsMutex)
@@ -57,7 +68,7 @@ public partial class App : Application
             // behind; without this probe WinShot would refuse to launch (no tray icon, no way
             // to recover short of a reboot).
             bool handledByRunningInstance = incomingCommand is not null
-                ? CommandServer.TrySendToRunningInstance(incomingCommand)
+                ? CommandServer.TrySendToRunningInstance(CommandServer.WithQuery(incomingCommand, incomingArg))
                 : CommandServer.IsInstanceRunning();
 
             if (handledByRunningInstance)
@@ -168,7 +179,7 @@ public partial class App : Application
             _ = StartupUpdateCheckAsync();
 
         if (incomingCommand is not null)
-            RunCommand(incomingCommand);
+            RunCommand(incomingCommand, incomingOptions);
 
         // Recovery stays behind normal startup initialization and never interrupts an
         // activation that immediately opens a capture/recording/settings surface.
@@ -695,15 +706,22 @@ public partial class App : Application
     private void OnCommandReceived(string raw)
     {
         string? cmd = CommandServer.ParseCommand(raw);
-        if (cmd is not null)
-            Dispatcher.BeginInvoke(() => RunCommand(cmd));
+        if (cmd is null)
+            return;
+        CaptureCommandOptions options = CommandServer.ParseOptions(raw);
+        Dispatcher.BeginInvoke(() => RunCommand(cmd, options));
     }
 
-    private void RunCommand(string cmd)
+    private void RunCommand(string cmd, CaptureCommandOptions? options = null)
     {
+        options ??= CaptureCommandOptions.None;
+
         if (IsCaptureCommand(cmd))
         {
-            QueueCaptureCommand(cmd);
+            if (options.DelaySeconds > 0)
+                RunDelayedCaptureCommand(cmd, options);
+            else
+                QueueCaptureCommand(cmd, options.Then);
             return;
         }
 
@@ -731,7 +749,27 @@ public partial class App : Application
         "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
-    private void QueueCaptureCommand(string cmd)
+    /// <summary>
+    /// Counts the delay down on screen rather than sleeping: <c>?delayed=5</c> means the user
+    /// is arranging something, and a countdown they can watch (and Escape out of) is the
+    /// difference between a timer and an app that has hung. Runs outside the capture guard so
+    /// the command still queues normally when the count reaches zero.
+    /// </summary>
+    private async void RunDelayedCaptureCommand(string cmd, CaptureCommandOptions options)
+    {
+        if (_captureInProgress || Recording.SelectionUiActive) return;
+        try
+        {
+            await FastSelfTimerWindow.RunAsync(options.DelaySeconds);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Delayed capture countdown failed", ex);
+        }
+        QueueCaptureCommand(cmd, options.Then);
+    }
+
+    private void QueueCaptureCommand(string cmd, PostCaptureSet? thenOverride = null)
     {
         // A capture flow is already active (selector open, overlay finishing): drop the
         // command instead of parking it in the pending slot. Every caller is user-initiated
@@ -739,6 +777,7 @@ public partial class App : Application
         // already open reads as a ghost re-trigger right after the user cancels with Esc.
         if (_captureInProgress || Recording.SelectionUiActive) return;
         _pendingCaptureCommand = cmd;
+        _pendingThenOverride = thenOverride;
         SchedulePendingCaptureDrain();
     }
 
@@ -811,9 +850,20 @@ public partial class App : Application
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
 
+    /// <summary>Takes the URL's <c>?then=</c> set once; null for every capture that did not
+    /// come from a URL carrying one.</summary>
+    private PostCaptureSet? TakeThenOverride()
+    {
+        PostCaptureSet? then = _pendingThenOverride;
+        _pendingThenOverride = null;
+        return then;
+    }
+
     private void FinishCaptureFlow()
     {
         _captureInProgress = false;
+        // A cancelled flow never reached HandleCapture; drop its override with it.
+        _pendingThenOverride = null;
         MemoryCleanup.Request();
         SchedulePendingCaptureDrain();
     }
@@ -868,6 +918,7 @@ public partial class App : Application
                     // QueueCaptureCommand — a press made while a capture is active must
                     // never replay after the user cancels.
                     _pendingCaptureCommand = null;
+                    _pendingThenOverride = null;
                     return;
                 }
 
@@ -1104,6 +1155,11 @@ public partial class App : Application
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
         PostCaptureSet? actionsOverride = null)
     {
+        // A winshot://…?then=copy,save URL overrides the after-capture set for this capture
+        // only. Taken (and cleared) unconditionally, so an override that never reached a
+        // capture — a cancelled selector — cannot leak into the next hotkey press.
+        actionsOverride ??= TakeThenOverride();
+
         // The shutter, at the moment the pixels exist. Fire-and-forget: audio never
         // delays the capture or the surface that follows it.
         CaptureSound.Play(_settings.Current);
