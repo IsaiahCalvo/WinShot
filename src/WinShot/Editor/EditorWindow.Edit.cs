@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Core;
 using WinShot.Editor.Background;
+using WinShot.Recording;
 using SD = System.Drawing;
 
 namespace WinShot.Editor;
@@ -235,6 +236,9 @@ public partial class EditorWindow : Window
     {
         BtnUndo.IsEnabled = _undoStack.Count > 0;
         BtnRedo.IsEnabled = _redoStack.Count > 0;
+        // An image arriving or leaving is always an action, so this is the one place that
+        // sees every moment the before/after GIF becomes possible or impossible.
+        SyncExportGifButton();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -727,6 +731,110 @@ public partial class EditorWindow : Window
         Row("Zoom to a region", "Z + drag", ArmZoomGesture);
 
         menu.IsOpen = true;
+    }
+
+    // ------------------------------------------------- before/after GIF export
+
+    /// <summary>
+    /// Two frames: the picture WITHOUT the added images, then with them. Aligning an
+    /// "after" screenshot over a "before" at half opacity is how the difference gets found;
+    /// this is how it gets shown to somebody else.
+    /// </summary>
+    private async void OnExportGif(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
+        CommitText();
+        CommitPendingCurve();
+
+        var overlays = ImageAnnotations();
+        if (overlays.Count == 0)
+        {
+            // The button is hidden without one, so this is belt and braces rather than the
+            // path anyone takes.
+            App.Toast("Export GIF", "Add an image to the canvas first.");
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            FileName = System.IO.Path.ChangeExtension(FileNamer.Next(_settings, "gif"), ".gif"),
+            InitialDirectory = _settings.Current.SaveFolder,
+            Filter = "GIF animation|*.gif",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        SD.Bitmap? before = null;
+        SD.Bitmap? after = null;
+        try
+        {
+            // "Before" is the canvas with the added images hidden — not the raw source:
+            // arrows and labels drawn on top belong in BOTH frames, or the animation is a
+            // flip between two different pictures rather than a comparison.
+            var restore = new List<(UIElement Element, Visibility Was)>();
+            foreach (UIElement overlay in overlays)
+            {
+                restore.Add((overlay, overlay.Visibility));
+                overlay.Visibility = Visibility.Hidden;
+            }
+            try
+            {
+                before = Flatten();
+            }
+            finally
+            {
+                foreach (var (element, was) in restore)
+                    element.Visibility = was;
+            }
+            after = Flatten();
+
+            SD.Bitmap frame1 = before, frame2 = after;
+            await Task.Run(() =>
+            {
+                using var stream = System.IO.File.Create(dialog.FileName);
+                // Two frames at 1 fps: a full second on each side is what makes a
+                // difference readable. Faster reads as a flicker, not a comparison.
+                using var gif = new GifEncoder(stream, frame1.Width, frame1.Height, fps: 1);
+                gif.AddFrame(frame1);
+                gif.AddFrame(frame2);
+                gif.Finish();
+            });
+
+            App.Toast("Saved the GIF", System.IO.Path.GetFileName(dialog.FileName),
+                severity: ToastSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Before/after GIF export failed: {dialog.FileName}", ex);
+            ThemedMessageDialog.Show(this, "Couldn't save the GIF", FriendlyError.For(ex));
+        }
+        finally
+        {
+            before?.Dispose();
+            after?.Dispose();
+        }
+    }
+
+    /// <summary>The image annotations on the canvas, bottom to top.</summary>
+    private List<UIElement> ImageAnnotations()
+    {
+        var found = new List<UIElement>();
+        foreach (UIElement child in AnnotationCanvas.Children)
+            if (child is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+                meta.Type == AnnotationData.TypeImage)
+                found.Add(child);
+        return found;
+    }
+
+    /// <summary>
+    /// Shows the GIF button once there is a second picture to flip to, and takes it away
+    /// again when the last one goes. A one-frame before/after animation is a PNG.
+    /// </summary>
+    private void SyncExportGifButton()
+    {
+        if (ExportGifBtn is null) return;
+        ExportGifBtn.Visibility = ImageAnnotations().Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>

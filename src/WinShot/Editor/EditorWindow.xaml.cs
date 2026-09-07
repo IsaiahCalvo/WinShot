@@ -994,10 +994,15 @@ public partial class EditorWindow : Window
             CategoryToolRow.BeginStoryboard((Storyboard)FindResource("SubRowIn"));
     }
 
+    /// <summary>The type of the picked mark, or null when nothing is picked.</summary>
+    private string? SelectedAnnotationType() =>
+        _selected is FrameworkElement fe && fe.Tag is AnnotationData meta ? meta.Type : null;
+
     /// <summary>Shows the active tool's own controls, and hides the row entirely when it has none.</summary>
     private void UpdateContextPanels()
     {
-        EditorContextControls controls = EditorShellContract.ContextFor(_tool, _filledRectangleMode);
+        EditorContextControls controls = EditorShellContract.ContextFor(
+            _tool, _filledRectangleMode, SelectedAnnotationType());
         static Visibility Show(bool show) => show ? Visibility.Visible : Visibility.Collapsed;
         bool Has(EditorContextControls value) => controls.HasFlag(value);
 
@@ -1314,6 +1319,27 @@ public partial class EditorWindow : Window
             {
                 _syncingThicknessButtons = false;
             }
+        }
+    }
+
+    /// <summary>
+    /// Puts the current opacity on the slider without it reading back as a user edit. Used
+    /// when the value came from the SELECTION rather than from the tool — an image's own
+    /// alpha, which has no tool preference behind it.
+    /// </summary>
+    private void SyncOpacitySlider()
+    {
+        if (OpacitySlider is null) return;
+        int pct = (int)Math.Round(Math.Clamp(_opacity, 0.25, 1) * 100);
+        _syncingThicknessButtons = true;
+        try
+        {
+            OpacitySlider.Value = pct;
+            if (OpacityValue is not null) OpacityValue.Text = $"{pct}%";
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
         }
     }
 

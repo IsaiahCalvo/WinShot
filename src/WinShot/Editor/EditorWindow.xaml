@@ -568,6 +568,13 @@
                                 Click="OnExtractText" ToolTip="Extract text"
                                 AutomationProperties.Name="Extract text"
                                 AutomationProperties.HelpText="Read the text in the crop region, or the whole image, and copy it to the clipboard."/>
+                        <!-- Appears only once there is an added image to flip between. A
+                             before/after GIF of one frame is a PNG. -->
+                        <Button x:Name="ExportGifBtn" Style="{StaticResource SubToolIconButton}" Content="&#xE786;"
+                                Click="OnExportGif" ToolTip="Export before/after GIF…"
+                                Visibility="Collapsed"
+                                AutomationProperties.Name="Export before and after GIF"
+                                AutomationProperties.HelpText="Save a two-frame animation flipping between the picture without the added images and with them."/>
                     </StackPanel>
                 </Grid>
             </Border>

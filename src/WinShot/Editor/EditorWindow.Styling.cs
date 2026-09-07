@@ -109,6 +109,9 @@ public partial class EditorWindow : Window
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter
                 or AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
                 or AnnotationData.TypeText or AnnotationData.TypeStep => true,
+            // A half-transparent image over the shot is how two frames get aligned by
+            // difference, which is the whole reason it can be dialled at all.
+            AnnotationData.TypeImage => true,
             _ => false,
         };
 
@@ -139,6 +142,10 @@ public partial class EditorWindow : Window
             }
 
             var meta = Meta.Clone();
+            // An image has no colour to hide an alpha in, so its transparency is a field
+            // of its own and lands on the element rather than on a brush.
+            if (opacity is double imageOp && Meta.Type == AnnotationData.TypeImage)
+                meta.Alpha = Math.Clamp(imageOp, 0, 1);
             meta.Color = ToHex(c);
             // Always carried, even when this call did not change it: the arrow rebuild
             // reads its weight back off the metadata, and a null there would reset the
@@ -166,6 +173,9 @@ public partial class EditorWindow : Window
 
         switch (meta.Type)
         {
+            case AnnotationData.TypeImage:
+                fe.Opacity = Math.Clamp(snap.Meta.Alpha ?? 1, 0, 1);
+                break;
             case AnnotationData.TypeArrow:
             case AnnotationData.TypeCurvedArrow:
                 if (element is Path arrow)

@@ -129,6 +129,20 @@ internal static class EditorShellContract
         return availablePhysical >= requiredPhysical;
     }
 
+    /// <summary>
+    /// The controls the toolbar offers. Normally that follows the armed TOOL — the row
+    /// describes what you are about to draw. The pointer is the exception: it draws
+    /// nothing, so with it armed the row describes the mark you have PICKED instead, for
+    /// the one property that has nowhere else to live. An image annotation's opacity is
+    /// that property: every other kind carries its transparency in its colour's alpha, and
+    /// an image has no colour.
+    /// </summary>
+    public static EditorContextControls ContextFor(
+        EditorTool tool, bool filledRectangle, string? selectedType) =>
+        tool == EditorTool.Select && selectedType == AnnotationData.TypeImage
+            ? EditorContextControls.Opacity
+            : ContextFor(tool, filledRectangle);
+
     public static EditorContextControls ContextFor(EditorTool tool, bool filledRectangle) => tool switch
     {
         EditorTool.Rectangle when filledRectangle =>

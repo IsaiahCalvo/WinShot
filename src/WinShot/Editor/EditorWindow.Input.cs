@@ -736,14 +736,33 @@ public partial class EditorWindow : Window
     private void AbortCurveHandle() => _draggingCurveHandle = false;
 
     /// <summary>Positions the control-point handle; sized in screen px regardless of zoom.</summary>
-    // ------------------------------------------------------- magnifier focus
+    // ------------------------------------------------- the one extra point handle
+
+    /// <summary>
+    /// Two marks carry one draggable point besides their own box: a magnifier callout's
+    /// focus, and a pill label's tail tip. One ring serves both — they are the same
+    /// gesture, and a second implementation would drift from the first.
+    ///
+    /// Both are in CANVAS coordinates here; the pill stores its tip relative to itself,
+    /// so it is converted at the boundary rather than in six places.
+    /// </summary>
+    private bool SelectionHasPointHandle() =>
+        _selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+        (meta.Type == AnnotationData.TypeMagnifier ||
+         (meta.Type == AnnotationData.TypeText && AnnotationFactory.PillTailTip(fe) is not null));
 
     /// <summary>The point of the picture the selected callout is looking at.</summary>
-    private Point CurrentMagnifierFocus() =>
-        _selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
-        meta.Type == AnnotationData.TypeMagnifier
-            ? MagnifierFocusOf(meta)
-            : default;
+    private Point CurrentMagnifierFocus()
+    {
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return default;
+        if (meta.Type == AnnotationData.TypeMagnifier) return MagnifierFocusOf(meta);
+        if (meta.Type == AnnotationData.TypeText && AnnotationFactory.PillTailTip(fe) is Point tip)
+        {
+            Rect box = GetCanvasBounds(fe);
+            return new Point(box.Left + tip.X, box.Top + tip.Y);
+        }
+        return default;
+    }
 
     private static Point MagnifierFocusOf(AnnotationData meta) =>
         meta.Points is { Length: >= 1 } pts && pts[0] is { Length: >= 2 } p
@@ -757,13 +776,32 @@ public partial class EditorWindow : Window
     /// </summary>
     private void SetMagnifierFocus(Point focus)
     {
-        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
-            meta.Type != AnnotationData.TypeMagnifier)
-            return;
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return;
 
         Point clamped = MagnifierLayout.ClampFocus(focus, new Size(_sourceWidth, _sourceHeight));
-        meta.Points = new[] { new[] { clamped.X, clamped.Y } };
-        RefreshRedaction(fe);
+        if (meta.Type == AnnotationData.TypeMagnifier)
+        {
+            meta.Points = new[] { new[] { clamped.X, clamped.Y } };
+            RefreshRedaction(fe);
+        }
+        else if (meta.Type == AnnotationData.TypeText)
+        {
+            // A pill's tip is stored relative to the label, so the label can be moved
+            // without every tail on the canvas having to be rewritten.
+            Rect box = GetCanvasBounds(fe);
+            var local = new Point(clamped.X - box.Left, clamped.Y - box.Top);
+            AnnotationFactory.SetPillTail(fe, local);
+            Point origin = meta.Points is { Length: >= 1 } p && p[0] is { Length: >= 2 } o
+                ? new Point(o[0], o[1])
+                : box.TopLeft;
+            meta.Points = new[]
+            {
+                new[] { origin.X, origin.Y },
+                new[] { local.X, local.Y },
+            };
+        }
+        else return;
+
         UpdateMagnifierFocusVisual();
     }
 
@@ -773,19 +811,20 @@ public partial class EditorWindow : Window
         _draggingMagnifierFocus = false;
         Viewport.ReleaseMouseCapture();
 
-        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
-            meta.Type != AnnotationData.TypeMagnifier)
-            return;
+        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData) return;
 
-        Point after = MagnifierFocusOf(meta);
+        Point after = CurrentMagnifierFocus();
         Point before = _magnifierFocusBefore;
         if ((after - before).Length < 0.5) return;
 
+        // Replayed through the same setter the drag used, so undo cannot diverge from the
+        // gesture it is undoing — which is where the two-mark version would otherwise rot.
         void Aim(Point p)
         {
-            if (fe.Tag is not AnnotationData m) return;
-            m.Points = new[] { new[] { p.X, p.Y } };
-            RefreshRedaction(fe);
+            UIElement? was = _selected;
+            _selected = fe;
+            SetMagnifierFocus(p);
+            _selected = was;
             if (ReferenceEquals(_selected, fe)) UpdateMagnifierFocusVisual();
         }
 
@@ -799,15 +838,14 @@ public partial class EditorWindow : Window
     /// </summary>
     private void UpdateMagnifierFocusVisual()
     {
-        if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
-            meta.Type != AnnotationData.TypeMagnifier)
+        if (!SelectionHasPointHandle() || _selected is not FrameworkElement fe)
         {
             MagnifierFocusHandle.Visibility = Visibility.Collapsed;
             MagnifierLeader.Visibility = Visibility.Collapsed;
             return;
         }
 
-        Point focus = MagnifierFocusOf(meta);
+        Point focus = CurrentMagnifierFocus();
         double d = 12 / _zoom;
         MagnifierFocusHandle.Width = d;
         MagnifierFocusHandle.Height = d;
@@ -825,7 +863,11 @@ public partial class EditorWindow : Window
         MagnifierLeader.StrokeThickness = 1 / _zoom;
         // A leader from a bubble to a ring underneath it is noise; it only earns its place
         // once the callout has actually been moved off what it is showing.
-        MagnifierLeader.Visibility = bubble.Contains(focus) ? Visibility.Collapsed : Visibility.Visible;
+        // A pill draws its own tail, so it needs no leader; the callout does.
+        bool needsLeader = fe.Tag is AnnotationData m2 && m2.Type == AnnotationData.TypeMagnifier;
+        MagnifierLeader.Visibility = needsLeader && !bubble.Contains(focus)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void UpdateCurveHandleVisual()
@@ -1290,6 +1332,19 @@ public partial class EditorWindow : Window
                 _magnification = MagnifierLayout.ClampScale(meta.Zoom ?? MagnifierLayout.DefaultScale);
                 UpdateContextPanels();
             }
+            else if (meta.Type == AnnotationData.TypeImage)
+            {
+                // The pointer offers an image's opacity, so picking one has to bring the
+                // row with it — and it has to read that image's value, not the last tool's.
+                _opacity = Math.Clamp(meta.Alpha ?? 1, 0.25, 1);
+                UpdateContextPanels();
+                SyncOpacitySlider();
+            }
+        }
+        else if (IsLoaded && _tool == EditorTool.Select)
+        {
+            // Deselecting has to take the row away again.
+            UpdateContextPanels();
         }
         UpdateSelectionVisual();
     }

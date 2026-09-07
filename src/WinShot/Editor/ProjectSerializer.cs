@@ -55,7 +55,8 @@ internal sealed class AnnotationData
     public string Type { get; set; } = "";
 
     /// <summary>Geometry points: arrow/line = [from, to]; curved arrow = [from, control, to];
-    /// freehand/highlighter = the polyline points; text/emoji/step = [topLeft].</summary>
+    /// freehand/highlighter = the polyline points; text/emoji/step = [topLeft], and a pill
+    /// label adds [tailTip] in its OWN coordinates; magnifier = [focus].</summary>
     public double[][]? Points { get; set; }
 
     /// <summary>[x, y, w, h] for rectangles, ellipses, the spotlight hole and image annotations.</summary>
@@ -93,6 +94,12 @@ internal sealed class AnnotationData
 
     /// <summary>Magnification of a callout, 1.5-8.</summary>
     public double? Zoom { get; set; }
+
+    /// <summary>
+    /// Element opacity, 0-1, for an image annotation. Every other kind carries its
+    /// transparency in the alpha channel of its colour; an image has no colour to put it in.
+    /// </summary>
+    public double? Alpha { get; set; }
 
     /// <summary><see cref="StrokeDash"/> name for shape outlines. Absent reads as Solid,
     /// which is how every shape drawn before dashes existed was saved.</summary>
@@ -161,10 +168,14 @@ internal sealed class AnnotationData
         Thickness = thickness,
     };
 
-    public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) => new()
+    public static AnnotationData ForText(
+        Point topLeft, string text, TextStyle style, double fontSize, Color color,
+        Point? tailTip = null) => new()
     {
         Type = TypeText,
-        Points = ToArray(new[] { topLeft }),
+        Points = tailTip is Point tip
+            ? ToArray(new[] { topLeft, tip })
+            : ToArray(new[] { topLeft }),
         Text = text,
         Style = style.ToString(),
         FontSize = fontSize,
@@ -435,6 +446,11 @@ internal static class ProjectSerializer
                 Enum.TryParse(a.Style, out TextStyle style); // unknown style → Plain
                 var label = AnnotationFactory.CreateStyledTextLabel(
                     text, new SolidColorBrush(RequireColor(a)), fontSize, style);
+                // A pill saved before tails existed has one point and gets the default tail
+                // on its first layout pass, which is where the label finally has a size.
+                if (style == TextStyle.Pill && a.Points is { Length: >= 2 } tp &&
+                    tp[1] is { Length: >= 2 } tail)
+                    AnnotationFactory.SetPillTail(label, new Point(tail[0], tail[1]));
                 SetPos(label, pts[0]);
                 return label;
             }
@@ -498,6 +514,7 @@ internal static class ProjectSerializer
                     Stretch = Stretch.Fill,
                 };
                 RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+                if (a.Alpha is double alpha) img.Opacity = Math.Clamp(alpha, 0, 1);
                 SetPos(img, bounds.TopLeft);
                 return img;
             }
