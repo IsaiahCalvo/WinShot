@@ -245,7 +245,7 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
             // on a HUD silently holds focus and looks different from its siblings.
             if (_isDefault || (Focused && ShowFocusCues))
             {
-                using var pen = new SD.Pen(SD.Color.FromArgb(150, ThemePalette.AccentHover), 1f);
+                using var pen = new SD.Pen(SD.Color.FromArgb(150, ThemePalette.AccentRing), 1f);
                 g.DrawPath(pen, path);
             }
         }
@@ -383,7 +383,7 @@ public sealed class DarkDropDown : WF.Control
             using var brush = new SD.SolidBrush(fill);
             g.FillPath(brush, path);
             using var pen = new SD.Pen(
-                Focused ? SD.Color.FromArgb(150, ThemePalette.AccentHover) : DarkControlPalette.Hairline,
+                Focused ? SD.Color.FromArgb(150, ThemePalette.AccentRing) : DarkControlPalette.Hairline,
                 1f);
             g.DrawPath(pen, path);
         }
@@ -535,7 +535,7 @@ public sealed class DarkNumberBox : WF.Control
         using var pen = new SD.Pen(
             DarkControlPalette.Mix(
                 DarkControlPalette.Hairline,
-                SD.Color.FromArgb(150, ThemePalette.AccentHover),
+                SD.Color.FromArgb(150, ThemePalette.AccentRing),
                 _focus.Value),
             1f);
         g.DrawPath(pen, path);
@@ -597,7 +597,10 @@ public sealed class DarkSegmented : WF.Control
     /// The cells. Assigning a shorter array used to leave the selection, the hot cell and a
     /// running pill glide pointing past the end of it and repaint nothing, so the setter
     /// clamps all three and abandons the glide — the pill has nowhere to glide to once the
-    /// track it was crossing no longer exists.
+    /// track it was crossing no longer exists. A clamp that MOVES the selection raises
+    /// <see cref="SelectedIndexChanged"/>: silently is how a settings row ends up holding the
+    /// value of a cell that is no longer under the pill. An empty picker reports -1, because
+    /// 0 is a real cell everywhere else and a caller reading it back deserves the truth.
     /// </summary>
     public string[] Options
     {
@@ -608,10 +611,16 @@ public sealed class DarkSegmented : WF.Control
             _pillRun?.Dispose();
             _pillRun = null;
             _gliding = false;
-            _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, _options.Length - 1));
             _hotIndex = -1;
             _coolingIndex = -1;
+            int clamped = _options.Length == 0
+                ? -1
+                : Math.Clamp(_selectedIndex, 0, _options.Length - 1);
+            bool moved = clamped != _selectedIndex;
+            _selectedIndex = clamped;
             Invalidate();
+            if (moved)
+                SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

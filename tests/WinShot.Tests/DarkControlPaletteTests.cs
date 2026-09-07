@@ -622,6 +622,43 @@ public class DarkControlPaletteTests
         Assert.Equal(TimeSpan.FromMilliseconds(Motion.EnterDurationMs), ((Duration)theme["MotionEnter"]).TimeSpan);
     });
 
+    /// <summary>
+    /// The WinForms half of the palette hovers the accent the same way the WPF half does.
+    /// It did not: ThemePalette lightened the accent to #409CFF, which took the white label on
+    /// "Start Capture", "Done" and the region selector's confirm button to 2.83:1 — below even
+    /// the 3:1 floor for graphics — while the same button in a WPF dialog dipped to 4.58:1.
+    /// Two halves of "one palette" disagreeing is exactly what this file exists to catch, so
+    /// the WinForms fills are asserted against the theme's own composite, not against a number.
+    /// </summary>
+    [Fact]
+    public void ThemePalette_HoversAndPressesTheAccentTheSameWayTheThemeDoes() => OnTheme(theme =>
+    {
+        static Color Wpf(SD.Color c) => Color.FromArgb(c.A, c.R, c.G, c.B);
+
+        Color accent = ((SolidColorBrush)theme["AccentBrush"]).Color;
+        Color hoverShade = ((SolidColorBrush)theme["HoverShadeBrush"]).Color;
+        Color pressShade = ((SolidColorBrush)theme["PressedShadeBrush"]).Color;
+
+        Assert.Equal(accent, Wpf(ThemePalette.Accent));
+        Assert.Equal(hoverShade, Wpf(ThemePalette.HoverShade));
+        Assert.Equal(pressShade, Wpf(ThemePalette.PressedShade));
+        Assert.Equal(Over(hoverShade, accent), Wpf(ThemePalette.AccentHovered));
+        Assert.Equal(((SolidColorBrush)theme["AccentPressedBrush"]).Color, Wpf(ThemePalette.AccentPressed));
+
+        double rest = Contrast(Colors.White, accent);
+        foreach ((string state, SD.Color fill) in new[]
+        {
+            ("hovered", ThemePalette.AccentHovered),
+            ("pressed", ThemePalette.AccentPressed),
+        })
+        {
+            double now = Contrast(Colors.White, Wpf(fill));
+            Assert.True(
+                now >= rest && now >= 3d,
+                $"a {state} WinForms accent fill renders White at {now:0.00}:1, against {rest:0.00}:1 at rest");
+        }
+    });
+
     /// <summary>0..1 relative luminance, WCAG 2.x.</summary>
     private static double Luminance(Color c)
     {

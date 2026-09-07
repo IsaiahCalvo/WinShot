@@ -22,7 +22,28 @@ public static class ThemePalette
 
     // Single accent identity (macOS dark-mode system blue).
     public static readonly SD.Color Accent = SD.Color.FromArgb(0x0A, 0x84, 0xFF);
-    public static readonly SD.Color AccentHover = SD.Color.FromArgb(0x40, 0x9C, 0xFF);
+
+    // Interaction shades for a SATURATED fill, mirroring Theme.xaml's HoverShade/PressedShade.
+    // Layer these over the fill; they are alpha, not colours of their own.
+    public static readonly SD.Color HoverShade = SD.Color.FromArgb(0x1F, 0x00, 0x00, 0x00);
+    public static readonly SD.Color PressedShade = SD.Color.FromArgb(0x2E, 0x00, 0x00, 0x00);
+
+    /// <summary>
+    /// The accent hovered, as one opaque colour for the WinForms fills that cannot layer
+    /// (<c>FlatAppearance.MouseOverBackColor</c> takes a single colour). Lightening the accent
+    /// instead — the old #409CFF — took the white label on top to 2.83:1, below even the 3:1
+    /// floor for graphics, on the affirmative button of every dialog. Dipping keeps it at 4.58:1.
+    /// </summary>
+    public static readonly SD.Color AccentHovered = Over(HoverShade, Accent);
+
+    /// <summary>The accent pressed — Theme.xaml's AccentPressedColor, so both halves press alike.</summary>
+    public static readonly SD.Color AccentPressed = SD.Color.FromArgb(0x00, 0x60, 0xDF);
+
+    /// <summary>
+    /// A lighter accent for a focus RING drawn on a dark field. Never a fill: nothing white
+    /// may sit on top of it. Use <see cref="AccentHovered"/> for a hovered accent surface.
+    /// </summary>
+    public static readonly SD.Color AccentRing = SD.Color.FromArgb(0x40, 0x9C, 0xFF);
 
     // Status colors, paired with the system-blue identity (macOS system red/orange).
     // Red doubles as the recording dot and destructive actions; Warn as paused/warning.
@@ -64,6 +85,14 @@ public static class ThemePalette
     public const float GlyphActionPt = 15f;     // 20 DIP
 
     /// <summary>
+    /// A word standing in for an icon — the All-In-One selector's "Aa" cell, sitting in the
+    /// same glyph row as five icon-font glyphs. Two bold letters carry more ink than one
+    /// icon, so this sits a step under <see cref="GlyphActionPt"/>; sizing it off a TEXT step
+    /// instead shrank it to 12 pt and opened a visible gap beside its unchanged neighbours.
+    /// </summary>
+    public const float GlyphTextPt = 13f;       // 17.3 DIP
+
+    /// <summary>
     /// Off the scale deliberately: the quick-actions card is pinned, and its menu
     /// was measured to 202x357 by hand at this size. TextCaptionPt reflows it.
     /// </summary>
@@ -94,6 +123,16 @@ public static class ThemePalette
 
     public static SD.Font UiFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
         => new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
+
+    /// <summary>Composites a straight-alpha colour over an opaque one, the way GDI+ paints it.</summary>
+    private static SD.Color Over(SD.Color top, SD.Color under)
+    {
+        double a = top.A / 255d;
+        return SD.Color.FromArgb(
+            (int)Math.Round((top.R * a) + (under.R * (1 - a))),
+            (int)Math.Round((top.G * a) + (under.G * (1 - a))),
+            (int)Math.Round((top.B * a) + (under.B * (1 - a))));
+    }
 
     private static bool IsFontInstalled(string name)
     {

@@ -264,12 +264,12 @@ public sealed class ScrollControlsBar : WF.Form
 
         _start = MakeButton("Start Capture", "ScrollCaptureStart", "Start scrolling capture",
             "Begin capturing without moving focus from the captured app. Keyboard shortcut: Alt+S.",
-            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
+            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHovered);
         _start.Click += (_, _) => PerformAction(ScrollChromeAction.Start);
 
         _done = MakeButton("Done", "ScrollCaptureDone", "Finish scrolling capture",
             "Keep the captured result. Keyboard shortcut: Alt+D.",
-            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHover);
+            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHovered);
         _done.Visible = false;
         _done.Click += (_, _) => PerformAction(ScrollChromeAction.Done);
 
