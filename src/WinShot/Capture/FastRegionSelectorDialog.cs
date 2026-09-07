@@ -307,6 +307,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _settings.Current.SelectorHintSessions =
                 SelectorHint.NextSessionCount(_settings.Current.SelectorHintSessions);
             _hintText = SelectorHint.Text(_mode == SelectorMode.Window);
+            _hintIsMessage = false;
             FadeHint(arriving: true);
             StartFollowMotion(); // the pill is drawn on the follow frames
         }
@@ -425,6 +426,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hintHold = null;
         _hintOpacity = 0d;
         _hintText = string.Empty;
+        _hintIsMessage = false;
         _barTween?.Dispose();
         _barTween = null;
         Array.Clear(_barHover);
@@ -806,7 +808,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
             StartFollowMotion(); // window mode tracks the cursor even with both chrome toggles off
         }
         if (_hintHold is null && _hintOpacity > 0d)
+        {
             _hintText = SelectorHint.Text(_mode == SelectorMode.Window);
+            _hintIsMessage = false;
+        }
         Cursor = CursorForCurrent();
         InvalidateAllSurfaces();
     }
@@ -1042,6 +1047,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private IDisposable? _hintTween;
     /// <summary>What that pill currently says — the first-run hint, or a copy confirmation.</summary>
     private string _hintText = string.Empty;
+    /// <summary>True while that pill is carrying a confirmation or a failure rather than the
+    /// first-run hint. The hint is suppressed once a selection is framed (it is about drawing
+    /// one, and the action bar is there now); a MESSAGE is the only feedback channel the
+    /// selector has, so it is painted in every state — including the states that are the only
+    /// way to reach some of the messages at all.</summary>
+    private bool _hintIsMessage;
     private IDisposable? _hintHold;
 
     /// <summary>How long a copy confirmation stays up before it fades.</summary>
@@ -1060,6 +1071,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private void FlashMessage(string text)
     {
         _hintText = text;
+        _hintIsMessage = true;
         FadeHint(arriving: true);
         _hintHold?.Dispose();
         _hintHold = WinShot.Core.Motion.Delay(MessageHoldMs, () =>
@@ -1183,6 +1195,24 @@ public sealed class FastRegionSelectorDialog : WF.Form
             () => _hintTween = null);
     }
 
+    /// <summary>
+    /// Where the pill goes on this surface: its usual spot, or pushed below the action bar
+    /// when the two would overlap. A confirmation that lands on top of Cancel/Done covers the
+    /// controls it is confirming, which is worse than showing it a little lower.
+    /// </summary>
+    private int? MessagePillTop(SD.Size clientSize, SD.Rectangle monitorBounds)
+    {
+        if (_pendingScreen is not SD.Rectangle pending)
+            return null;
+        SD.Rectangle pill = SelectorChrome.HintPillRect(clientSize, _hintText);
+        var (bar, _, _, _) = ActionBarRects(pending);
+        SD.Rectangle barLocal = ToLocal(bar, monitorBounds);
+        if (!pill.IntersectsWith(barLocal))
+            return null;
+        int below = barLocal.Bottom + 8;
+        return below + pill.Height <= clientSize.Height ? below : Math.Max(0, barLocal.Top - 8 - pill.Height);
+    }
+
     /// <summary>Repaints only the strip the hint pill occupies, on every surface.</summary>
     private void InvalidateHintBand()
     {
@@ -1190,6 +1220,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             InvalidateScreenRect(new SD.Rectangle(
                 monitor.Left, monitor.Top + (monitor.Height / 8) - 8, monitor.Width, 64));
+        }
+
+        // A message shown over a framed selection dodges the action bar, so the strip it can
+        // land in is around the bar, not one eighth down.
+        if (_pendingScreen is SD.Rectangle pending)
+        {
+            var (bar, _, _, _) = ActionBarRects(pending);
+            InvalidateScreenRect(new SD.Rectangle(
+                bar.Left - 200, bar.Top - 64, bar.Width + 400, bar.Height + 128));
         }
     }
 
@@ -1548,7 +1587,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     using var wash = new SD.SolidBrush(SD.Color.FromArgb(washAlpha, Accent));
                     g.FillRectangle(wash, local);
                 }
-                if (_hoverAppName.Length > 0)
+                // One pill per window, not one per monitor the window overlaps: this block
+                // runs on every surface, so a window spanning two displays used to draw its
+                // name twice, each centred in that display's slice of it.
+                if (_hoverAppName.Length > 0 && cursorOnThisSurface)
                 {
                     SD.Size pill = SelectorChrome.MeasureLabel(_hoverAppName);
                     SelectorChrome.DrawLabel(g, clientSize, _hoverAppName,
@@ -1563,8 +1605,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (cursorOnThisSurface)
             {
                 SD.Rectangle sized = labelScreen ?? bright;
+                // The readout is placed off the rect it LABELS, never off the interpolated
+                // border. `local` rides _hoverTween mid-retarget while ShutterPillScreenRect()
+                // — the thing a press is tested against — always uses the settled element, so
+                // deriving the position from `local` painted the shutter somewhere it could
+                // not be clicked for the whole 200 ms glide.
+                SD.Rectangle labelLocal = ToLocal(sized, monitorBounds);
                 string sizeText = $"{sized.Width} × {sized.Height}";
-                SD.Point at = new(local.Right + 8, local.Bottom + 8);
+                SD.Point at = new(labelLocal.Right + 8, labelLocal.Bottom + 8);
                 if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
                 {
                     at = new SD.Point(ToLocal(_currentScreen, monitorBounds).X + 14, ToLocal(_currentScreen, monitorBounds).Y + 18);
@@ -1576,9 +1624,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     // selection's top-right, flipped just inside when the region touches the
                     // monitor top.
                     SD.Size pill = SelectorChrome.MeasureLabel(sizeText);
-                    int pillTop = local.Top - pill.Height - 8;
-                    if (pillTop < 0) pillTop = local.Top + 8;
-                    at = new SD.Point(Math.Max(0, local.Right - pill.Width), pillTop);
+                    int pillTop = labelLocal.Top - pill.Height - 8;
+                    if (pillTop < 0) pillTop = labelLocal.Top + 8;
+                    at = new SD.Point(Math.Max(0, labelLocal.Right - pill.Width), pillTop);
                 }
                 if (labelScreen is not null)
                     SelectorChrome.DrawShutterPill(g, clientSize, sizeText, at, _pillSwap);
@@ -1601,9 +1649,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 DrawActionBar(g, monitorBounds, bar, padButton, cancel, done);
         }
 
-        if (_hintOpacity > 0d && cursorOnThisSurface && _pendingScreen is null && !_dragging)
+        if (_hintOpacity > 0d && cursorOnThisSurface &&
+            (_hintIsMessage || (_pendingScreen is null && !_dragging)))
         {
-            SelectorChrome.DrawHint(g, clientSize, _hintText, _hintOpacity);
+            SelectorChrome.DrawHint(g, clientSize, _hintText, _hintOpacity, MessagePillTop(clientSize, monitorBounds));
         }
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
@@ -2057,6 +2106,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hintHold?.Dispose();
         _hintHold = null;
         _hintOpacity = 0d;
+        _hintIsMessage = false;
         _barTween?.Dispose();
         _barTween = null;
         _pillTween?.Dispose();
@@ -2086,7 +2136,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
     internal WF.Cursor CursorForCurrent()
     {
         if (_mode == SelectorMode.Window || _pillHover)
-            return SelectorCursors.Camera;
+        {
+            // Sized for the monitor the pointer is actually on: a custom HCURSOR is drawn at
+            // its native pixel size, so a cursor built for the primary reads wrong the moment
+            // it crosses onto a monitor at another DPI.
+            return SelectorCursors.Camera(
+                WinShot.Recording.RecordingMonitorDpi.ScaleFor(MonitorBoundsAt(_currentScreen)));
+        }
 
         if (_pendingScreen is SD.Rectangle p)
         {

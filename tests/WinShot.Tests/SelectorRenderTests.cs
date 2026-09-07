@@ -255,6 +255,136 @@ public class SelectorRenderTests
         Assert.True(half < full, $"a half-faded pill should be lighter ({half}) than a full one ({full})");
     }
 
+    /// <summary>
+    /// While the element-retarget glide is in flight the shutter pill must be painted where a
+    /// press will find it. The border rides the interpolation on purpose; the pill does not —
+    /// ShutterPillScreenRect() always answers with the settled element, so a pill drawn off the
+    /// interpolated rect was a button that visibly sat somewhere it could not be clicked.
+    /// </summary>
+    [Fact]
+    public void TheShutterPillIsPaintedInsideItsHitRectMidGlide()
+    {
+        var from = new SD.Rectangle(20, 20, 60, 40);
+        var to = new SD.Rectangle(180, 150, 120, 80);
+
+        using var selector = Seed(FlatDesktop(), new SD.Point(240, 190));
+        Set(selector, "_paneHover", true);
+        Set(selector, "_hoverPane", to);
+        var tween = (RectangleTween)typeof(FastRegionSelectorDialog)
+            .GetField("_hoverTween", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(selector)!;
+        tween.Retarget(from, to);
+        Assert.True(tween.IsActive && tween.Current != to, "the glide should still be short of the target");
+
+        SD.Rectangle hit = (SD.Rectangle)typeof(FastRegionSelectorDialog)
+            .GetMethod("ShutterPillScreenRect", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(selector, null)!;
+
+        // Where the pill WOULD have gone when it was placed off the interpolated border —
+        // the bug this test exists for. Well clear of the hit rect while the glide is young.
+        SD.Rectangle strayed = SelectorChrome.SizePillRect(
+            tween.Current, SelectorChrome.MeasureLabel($"{to.Width} × {to.Height}"), Monitor);
+        Assert.False(hit.IntersectsWith(strayed), "the two candidate spots must be distinguishable");
+
+        using SD.Bitmap painted = Paint(selector);
+
+        // Count only the pill's own ground: near-black AND neutral, so the accent border (which
+        // rides the glide on purpose) and the crosshair's shadow pass are not mistaken for it.
+        int PillPixels(SD.Rectangle area)
+        {
+            int found = 0;
+            for (int y = area.Top; y < area.Bottom; y++)
+            {
+                for (int x = area.Left; x < area.Right; x++)
+                {
+                    SD.Color px = painted.GetPixel(x, y);
+                    if (px.R < 45 && Math.Abs(px.R - px.B) < 20)
+                        found++;
+                }
+            }
+            return found;
+        }
+
+        Assert.True(PillPixels(hit) > 200, $"the pill should fill its hit rect, found {PillPixels(hit)} px");
+        Assert.Equal(0, PillPixels(strayed));
+
+        tween.Stop();
+    }
+
+    /// <summary>
+    /// The pill's TEXT has to fade with the pill. TextRenderer.DrawText is a GDI wrapper and
+    /// GDI drops the alpha byte, so the old call painted opaque text on a ghost background for
+    /// the whole tween and then snapped it away. The existing band test only counts the dark
+    /// ground, which is why it stayed green through that.
+    /// </summary>
+    [Fact]
+    public void TheHintPillsTextFadesWithThePillAndNotAfterIt()
+    {
+        int LightTextPixels(double opacity)
+        {
+            using var selector = Seed(FlatDesktop(), new SD.Point(390, 250));
+            Set(selector, "_hintOpacity", opacity);
+            Set(selector, "_hintText", SelectorHint.Text(windowMode: false));
+            using SD.Bitmap painted = Paint(selector);
+            int light = 0;
+            for (int y = (Height / 8) - 4; y < (Height / 8) + 28; y++)
+            {
+                for (int x = 0; x < 350; x++)
+                {
+                    // Text strokes: much brighter than the pill ground AND than the dim.
+                    if (painted.GetPixel(x, y).R > 150)
+                        light++;
+                }
+            }
+            return light;
+        }
+
+        int full = LightTextPixels(1d);
+        int half = LightTextPixels(0.4d);
+
+        Assert.True(full > 80, $"the hint should carry visible text, found {full} px");
+        Assert.True(half < full * 3 / 4, $"a fading pill should fade its text too: {half} vs {full}");
+    }
+
+    /// <summary>
+    /// A framed selection used to swallow every confirmation and every failure: the paint gate
+    /// refused the pill whenever _pendingScreen was set, which is the ONLY state three of the
+    /// four new actions run in — the "nothing to snap to" line was unreachable by construction.
+    /// The first-run hint is still suppressed there; a message is not.
+    /// </summary>
+    [Fact]
+    public void AMessageIsPaintedOverAFramedSelectionButTheFirstRunHintIsNot()
+    {
+        // A framed selection paints its own dark chrome (the Cancel/Done bar), so the pill is
+        // measured as the DIFFERENCE from the same scene with no pill at all.
+        int DarkPixels(double opacity, bool isMessage)
+        {
+            using var selector = Seed(FlatDesktop(), new SD.Point(390, 250));
+            Set(selector, "_pendingScreen", new SD.Rectangle(40, 40, 120, 80));
+            Set(selector, "_hintOpacity", opacity);
+            Set(selector, "_hintText", "Copied average color #336699");
+            Set(selector, "_hintIsMessage", isMessage);
+            using SD.Bitmap painted = Paint(selector);
+            int dark = 0;
+            for (int y = 0; y < Height; y++)
+            {
+                for (int x = 0; x < Width; x++)
+                {
+                    if (painted.GetPixel(x, y).R < 45)
+                        dark++;
+                }
+            }
+            return dark;
+        }
+
+        int baseline = DarkPixels(0d, isMessage: true);
+        int message = DarkPixels(1d, isMessage: true) - baseline;
+        int hint = DarkPixels(1d, isMessage: false) - baseline;
+
+        Assert.True(message > 200, $"the confirmation should be on screen, found {message} px");
+        Assert.Equal(0, hint);
+    }
+
     [Fact]
     public void TheCrosshairGuidesReachBothEdgesOfTheMonitor()
     {
