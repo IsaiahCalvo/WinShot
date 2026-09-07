@@ -112,7 +112,11 @@ public sealed class FastSelfTimerWindow : WF.Form
             WinShot.Core.Motion.Linear,
             amount =>
             {
-                _secondFraction = amount;
+                // With animations off Motion.Run lands 1.0 inline, which parked the ring a
+                // whole second ahead of the digit inside it — a 3-second countdown showed a
+                // third already consumed on its first frame. The step belongs at the START of
+                // the second it describes.
+                _secondFraction = WinShot.Core.Motion.AnimationsEnabled() ? amount : 0;
                 if (!IsDisposed)
                     Invalidate();
             },
@@ -127,11 +131,28 @@ public sealed class FastSelfTimerWindow : WF.Form
 
     protected override void OnClosed(EventArgs e)
     {
+        StopClocks();
+        base.OnClosed(e);
+    }
+
+    /// <summary>
+    /// Form.Dispose() does not raise Closed, so the tween handle cannot be released only in
+    /// OnClosed: a Dispose without a Close left timeBeginPeriod(1) raised for the life of the
+    /// process. Every call site closes today; this is what keeps that from mattering.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            StopClocks();
+        base.Dispose(disposing);
+    }
+
+    private void StopClocks()
+    {
         _second?.Dispose();
         _second = null;
         _timer.Stop();
         _timer.Dispose();
-        base.OnClosed(e);
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)

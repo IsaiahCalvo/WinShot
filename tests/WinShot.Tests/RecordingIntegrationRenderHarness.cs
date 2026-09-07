@@ -63,6 +63,9 @@ public class RecordingIntegrationRenderHarness
                 bar.Close();
 
                 canvas.Save(Path.Combine(outputDir, "recording-state-dim-controls-timer.png"), ImageFormat.Png);
+
+                // The HUD's own frames land beside this one; RecordingHudRenderTests paints
+                // them and is what pixel-scans them.
             }
             catch (Exception ex)
             {

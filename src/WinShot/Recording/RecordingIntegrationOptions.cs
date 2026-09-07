@@ -272,8 +272,17 @@ public static class RecordingMonitorDpi
     /// </summary>
     public static int Px(int logical, double scale) => (int)Math.Round(logical * scale);
 
+    /// <summary>
+    /// Test seam. The render tests pixel-scan the recording chrome at 100% and 150% and the
+    /// suite has no 150% monitor to draw on; null in the app, where the real DPI answers.
+    /// </summary>
+    internal static Func<SD.Rectangle, double>? ScaleSource;
+
     public static double ScaleFor(SD.Rectangle screenRect)
     {
+        if (ScaleSource is { } source)
+            return source(screenRect);
+
         try
         {
             var nativeRect = new NativeRect(screenRect.Left, screenRect.Top, screenRect.Right, screenRect.Bottom);

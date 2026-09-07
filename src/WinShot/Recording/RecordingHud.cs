@@ -1,6 +1,6 @@
 ﻿using WinShot.Core;
 using SD = System.Drawing;
-using WF = System.Windows.Forms;
+
 
 namespace WinShot.Recording;
 
@@ -175,6 +175,14 @@ public static class RecordingHudLayout
     /// <summary>Gap between the region and the HUD, and the inset from the monitor edge.</summary>
     public const int RegionGapDip = 12;
 
+    // The HUD's three faces, in DIP. The cards are laid out by hand in device pixels, so the
+    // fonts have to be too — a point size would scale a second time on a HiDPI monitor. The
+    // label sits on the text scale (TextBody); the readout and the glyphs are deliberately
+    // off it, sized to the cell boxes above rather than to a paragraph.
+    public const int LabelFontDip = 12;
+    public const int ValueFontDip = 15;
+    public const int GlyphFontDip = 18;
+
     private static readonly RecordingHudCell[] Toggles =
     [
         RecordingHudCell.Microphone,
@@ -335,8 +343,4 @@ public static class RecordingHudLayout
     };
 
     private const string Enter = "↵";
-
-    /// <summary>Measured width of the widest toggle glyph, for callers sizing a font.</summary>
-    internal static SD.Size MeasureGlyph(string glyph, SD.Font font) =>
-        WF.TextRenderer.MeasureText(glyph, font);
 }

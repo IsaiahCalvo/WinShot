@@ -119,6 +119,13 @@ public class RecordingSurfaceMotionTests
         // whenever there were no dim bands to ramp.
         Assert.All(MarkerFades(overlay), fade => Assert.True(fade < 0.5, $"marker started at {fade}"));
 
+        // ...and the ramp finishes. This assertion was dropped once on the theory that the
+        // marker's breathe pulse keeps a strip below 1 forever; it does not — the pulse writes
+        // _alpha and only SetFade writes the _fade these read. Without it an entrance tween
+        // that died mid-flight would leave the border at partial alpha for the whole take.
+        PumpUntil(() => MarkerFades(overlay).All(f => f >= 1d));
+        Assert.All(MarkerFades(overlay), fade => Assert.Equal(1d, fade, 3));
+
         overlay.Dispose();
         PumpUntil(() => Motion.Holders == 0);
         Assert.Equal(0, Motion.Holders);

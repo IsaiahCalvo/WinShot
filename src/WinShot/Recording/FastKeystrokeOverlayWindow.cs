@@ -29,6 +29,18 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     private const int MaxRunLength = 18;
     private const int VisibleMs = 1500;
     private const int FadeMs = 350;
+
+    /// <summary>
+    /// How long after the last key the typist counts as having stopped. Matches the pill's
+    /// whole life so "hide the cursor while typing" behaves exactly as it did when the two
+    /// clocks were one field — they are separate now only so a filtered keystroke can keep
+    /// the typing state alive without re-pinning a chord the pill had already let go of.
+    /// </summary>
+    private const int TypingIdleMs = VisibleMs + FadeMs;
+
+    /// <summary>The pill's face, in device pixels: deliberately off the UI type scale, sized
+    /// to stay legible after a recording is scaled down for sharing.</summary>
+    private const int FontDip = 30;
     private static readonly TimeSpan AppendWindow = TimeSpan.FromSeconds(1.2);
     private static readonly SD.Color PillBack = ThemePalette.ToolbarBg;
     private static readonly SD.Color PillBorder = ThemePalette.BorderStrong;
@@ -50,6 +62,7 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     private DateTime _lastKeyAt = DateTime.MinValue;
     private bool _modifierDownWithoutKey;
     private long _shownAtMs;
+    private long _typingAtMs;
     private double _opacity;
     private int _renderedWidth;
     private bool _typing;
@@ -86,7 +99,7 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
         _hookProc = KeyboardHookCallback;
         _scale = RecordingMonitorDpi.ScaleFor(regionScreenPx);
         // Pixel-unit font so the glyphs scale with the pill box, not the monitor DPI.
-        _font = ThemePalette.UiFontPx(S(30), SD.FontStyle.Bold);
+        _font = ThemePalette.UiFontPx(S(FontDip), SD.FontStyle.Bold);
 
         _timer.Tick += (_, _) => AdvanceFade();
     }
@@ -115,12 +128,34 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
 
     protected override void OnClosed(EventArgs e)
     {
+        Teardown();
+        base.OnClosed(e);
+    }
+
+    /// <summary>
+    /// Form.Dispose() does not raise Closed, so teardown cannot live only in OnClosed: a
+    /// Dispose without a Close left timeBeginPeriod(1) raised for the life of the process and
+    /// a WH_KEYBOARD_LL hook installed on a dead window.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            Teardown();
+        base.Dispose(disposing);
+    }
+
+    private bool _tornDown;
+
+    private void Teardown()
+    {
+        if (_tornDown)
+            return;
+        _tornDown = true;
         RemoveHook();
         StopMotion();
         SetTyping(false);
         _timer.Dispose();
         _font.Dispose();
-        base.OnClosed(e);
     }
 
     /// <summary>Draws the pill into an ARGB frame and presents it at the chosen corner of the
@@ -181,24 +216,35 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
 
     private void AdvanceFade()
     {
-        long elapsed = Environment.TickCount64 - _shownAtMs;
-        if (elapsed <= VisibleMs)
+        long now = Environment.TickCount64;
+
+        // Two independent clocks. The chord's own dwell decides the pill; the last keystroke
+        // of any kind decides the typing state. Sharing one field is what let a filtered plain
+        // keystroke re-pin — or resurrect — the chord before it.
+        if (now - _typingAtMs > TypingIdleMs)
+            SetTyping(false);
+
+        long elapsed = now - _shownAtMs;
+        if (_run.Length > 0 && elapsed <= VisibleMs)
         {
             _opacity = 1;
         }
         else
         {
             _runAppendable = false;
-            _opacity = Math.Max(0, 1 - ((elapsed - VisibleMs) / (double)FadeMs));
+            _opacity = _run.Length == 0
+                ? 0
+                : Math.Max(0, 1 - ((elapsed - VisibleMs) / (double)FadeMs));
             if (_opacity <= 0)
             {
                 _renderedWidth = 0;
-                SetTyping(false);
-                StopMotion();
+                if (!_typing)
+                    StopMotion();
             }
         }
 
-        RenderFrame();
+        if (_options.Render)
+            RenderFrame();
     }
 
     private void OnKeyEvent(bool down, int vk)
@@ -241,11 +287,13 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     {
         // Typing is happening either way — that is what "hide the cursor while typing" needs
         // to know — even when the pill itself is filtered out or turned off.
+        _typingAtMs = Environment.TickCount64;
         SetTyping(true);
 
         if (_options.CommandOnly && !isCommandChord)
         {
-            _shownAtMs = Environment.TickCount64; // keep the typing state alive while they type
+            // Filtered out of the pill entirely: the chord before it keeps its own dwell and
+            // fades on schedule. Only the typing clock above moved.
             if (!_timer.Enabled)
                 StartMotion();
             return;
@@ -357,11 +405,14 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
 
     /// <summary>
     /// Animation ticks only land on time while the high-resolution clock is held, so it is
-    /// acquired with the timer and released with it — never for longer.
+    /// acquired with the timer and released with it — never for longer. A hook-only overlay
+    /// (Render off, "hide the cursor while typing" on) presents nothing, so it runs the timer
+    /// to age its typing state out but never raises the clock for a frame it will not draw.
     /// </summary>
     private void StartMotion()
     {
-        _motionClock ??= WinShot.Core.Motion.Acquire();
+        if (_options.Render)
+            _motionClock ??= WinShot.Core.Motion.Acquire();
         _timer.Start();
     }
 

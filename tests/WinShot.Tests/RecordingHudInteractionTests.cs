@@ -143,6 +143,126 @@ public class RecordingHudInteractionTests
         }
     }
 
+    /// <summary>
+    /// The preset is a LOCK, not a one-shot snap. It used to be neither: PickAspect corrected
+    /// the rect once and nothing downstream read the ratio, so the first handle drag left the
+    /// chip painting "16:9" over a rectangle that was any shape at all — and Enter recorded
+    /// that shape.
+    /// </summary>
+    [Theory]
+    [InlineData(4)]  // BR corner
+    [InlineData(0)]  // TL corner
+    [InlineData(3)]  // right edge — the ratio has to supply the height
+    [InlineData(1)]  // top edge — and here, the width
+    public void ResizingUnderALockedRatioKeepsTheRatio(int handle)
+    {
+        var region = new SD.Rectangle(400, 200, 800, 450);
+        var press = new SD.Point(region.Left + 10, region.Top + 10);
+
+        RunSelector(region, press, selector =>
+        {
+            SetField(selector, "_aspectIndex", IndexOfRatio("1:1"));
+            SetField(selector, "_adjustStartRect", region);
+            SetField(selector, "_resizeHandle", handle);
+
+            var dragged = new SD.Point(region.Left + 640, region.Top + 90);
+            FastRegionSelectorDialog.CursorSource = () => dragged;
+            selector.HandleMouseMove();
+
+            SD.Rectangle after = Field<SD.Rectangle?>(selector, "_pendingScreen")!.Value;
+            Assert.True(after.Width > 1 && after.Height > 1, $"degenerate rect {after}");
+            Assert.True(
+                Math.Abs(after.Width - after.Height) <= 2,
+                $"handle {handle} left {after.Width}x{after.Height} under a 1:1 lock");
+        });
+    }
+
+    /// <summary>Drawing a fresh marquee is the other path that used to escape the lock — the
+    /// chip stayed lit while the new rectangle was freeform.</summary>
+    [Fact]
+    public void ANewMarqueeUnderALockedRatioIsDrawnAtThatRatio()
+    {
+        var region = new SD.Rectangle(400, 200, 800, 450);
+        var start = new SD.Point(200, 120);
+
+        RunSelector(region, start, selector =>
+        {
+            SetField(selector, "_aspectIndex", IndexOfRatio("1:1"));
+            SetField(selector, "_pendingScreen", (SD.Rectangle?)null);
+            SetField(selector, "_dragStartScreen", start);
+            SetField(selector, "_dragging", true);
+            SetField(selector, "_dragMoved", true);
+
+            var end = new SD.Point(start.X + 600, start.Y + 150);
+            FastRegionSelectorDialog.CursorSource = () => end;
+            SetField(selector, "_currentScreen", end);
+            selector.HandleMouseUp(new WF.MouseEventArgs(WF.MouseButtons.Left, 1, end.X, end.Y, 0));
+
+            SD.Rectangle drawn = Field<SD.Rectangle?>(selector, "_pendingScreen")!.Value;
+            Assert.True(
+                Math.Abs(drawn.Width - drawn.Height) <= 2,
+                $"a fresh marquee ignored the 1:1 lock: {drawn.Width}x{drawn.Height}");
+        });
+    }
+
+    /// <summary>Freeform is still freeform: the lock must not leak into ordinary drags.</summary>
+    [Fact]
+    public void FreeformLeavesEveryResizeAlone()
+    {
+        var region = new SD.Rectangle(400, 200, 800, 450);
+
+        RunSelector(region, SD.Point.Empty, selector =>
+        {
+            SetField(selector, "_aspectIndex", RecordingAspectPresets.FreeformIndex);
+            SetField(selector, "_adjustStartRect", region);
+            SetField(selector, "_resizeHandle", 4);
+
+            var dragged = new SD.Point(region.Left + 640, region.Top + 90);
+            FastRegionSelectorDialog.CursorSource = () => dragged;
+            selector.HandleMouseMove();
+
+            SD.Rectangle after = Field<SD.Rectangle?>(selector, "_pendingScreen")!.Value;
+            Assert.Equal(new SD.Rectangle(region.Left, region.Top, 640, 90), after);
+        });
+    }
+
+    /// <summary>
+    /// The cards carry 8 dip of padding that is not a cell, plus a 10 dip gap between them. A
+    /// press there used to fall all the way through to "start a new marquee", which threw the
+    /// framed selection away — a near-miss on the Record row cost the whole selection.
+    /// </summary>
+    [Fact]
+    public void AMissInsideTheHudsOwnPaddingIsInertRatherThanDestructive()
+    {
+        var region = new SD.Rectangle(600, 300, 700, 300);
+
+        RunSelector(region, SD.Point.Empty, selector =>
+        {
+            RecordingHudGeometry hud = HudGeometry(region);
+            SD.Point[] misses =
+            [
+                new(hud.ActionCard.Left + 2, hud.ActionCard.Top + 2),                     // action card pad
+                new(hud.ActionCard.Right - 2, hud.ActionCard.Bottom - 2),
+                new(hud.SettingsCard.Left + 2, hud.SettingsCard.Top + 2),                 // settings card pad
+                new(hud.SettingsCard.Left + 20, hud.SettingsCard.Bottom + 3),             // the gap between them
+            ];
+
+            foreach (SD.Point miss in misses)
+            {
+                Assert.Null(hud.HitTest(miss));
+                SetField(selector, "_pendingScreen", (SD.Rectangle?)region);
+                SetField(selector, "_dragging", false);
+                FastRegionSelectorDialog.CursorSource = () => miss;
+                SetField(selector, "_currentScreen", miss);
+
+                selector.HandleMouseDown(Click(miss, clicks: 1));
+
+                Assert.Equal(region, Field<SD.Rectangle?>(selector, "_pendingScreen"));
+                Assert.False(Field<bool>(selector, "_dragging"), $"{miss} started a new marquee");
+            }
+        });
+    }
+
     // ---- keyboard reach --------------------------------------------------------------
 
     [Fact]
@@ -236,6 +356,11 @@ public class RecordingHudInteractionTests
         object result = method.Invoke(null, [region])!;
         return ((SD.Rectangle, SD.Rectangle, SD.Rectangle))result;
     }
+
+    private static RecordingHudGeometry HudGeometry(SD.Rectangle region) =>
+        (RecordingHudGeometry)typeof(FastRegionSelectorDialog)
+            .GetMethod("HudGeometry", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, [region])!;
 
     private static int IndexOfRatio(string label)
     {

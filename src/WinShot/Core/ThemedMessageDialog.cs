@@ -58,46 +58,6 @@ public static class ThemedMessageDialog
     }
 
     /// <summary>
-    /// Shows a message with several named choices and returns the index of the one picked, or
-    /// -1 when the user cancelled. The LAST choice is the primary, so it is both the rightmost
-    /// button and the default — the same order Confirm uses.
-    /// </summary>
-    public static int Choose(
-        Window? owner,
-        string title,
-        string message,
-        IReadOnlyList<string> choices,
-        string cancelLabel = "Cancel")
-    {
-        ArgumentNullException.ThrowIfNull(choices);
-        if (choices.Count == 0)
-            return -1;
-
-        var (dialog, _, footer) = Build(owner, title, message);
-        int picked = -1;
-
-        AddButton(footer, cancelLabel, primary: false, () => { }).IsCancel = true;
-        for (int i = 0; i < choices.Count; i++)
-        {
-            int index = i;
-            bool primary = i == choices.Count - 1;
-            Button button = AddButton(
-                footer,
-                choices[i],
-                primary,
-                () =>
-                {
-                    picked = index;
-                    dialog.DialogResult = true;
-                });
-            if (primary)
-                button.IsDefault = true;
-        }
-
-        return dialog.ShowDialog() == true ? picked : -1;
-    }
-
-    /// <summary>
     /// Appends a themed footer button. Every dialog in the app gets its buttons from
     /// here, so nothing has to hand-roll a Background/Foreground pair again.
     /// </summary>

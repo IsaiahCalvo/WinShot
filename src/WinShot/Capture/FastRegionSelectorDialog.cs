@@ -1069,7 +1069,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             // Don't capture yet — present an adjustable selection (move/resize, then Enter or
             // double-click to confirm), matching CleanShot's behavior.
-            var rect = Normalize(_dragStartScreen, SnappedCursor());
+            SD.Rectangle rect = DragRect();
             rect.Intersect(_vs);
             if (rect.Width > 0 && rect.Height > 0)
             {
@@ -1143,7 +1143,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         bool showHandles = false;
         if (_dragging && _dragMoved)
         {
-            brightScreen = Normalize(_dragStartScreen, SnappedCursor());
+            brightScreen = DragRect();
         }
         else if (_pendingScreen is SD.Rectangle pending)
         {
@@ -1588,8 +1588,58 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return -1;
     }
 
+    /// <summary>
+    /// The ratio the HUD's aspect cell has locked, or null in Freeform (and always null
+    /// outside the recording flow, which has no aspect cell). Every path that reshapes the
+    /// pending rectangle reads this, so the chip can never describe a rectangle that is no
+    /// longer that shape.
+    /// </summary>
+    private double? LockedRatio =>
+        _recordingHud ? RecordingAspectPresets.All[_aspectIndex].Ratio : null;
+
+    /// <summary>
+    /// The marquee for the drag in flight, aspect-locked when the chip says so. Shared by the
+    /// live preview and the mouse-up that commits it so the two can never disagree.
+    /// </summary>
+    private SD.Rectangle DragRect()
+    {
+        SD.Point current = SnappedCursor();
+        return LockedRatio is double ratio
+            ? AllInOneDragLayout.CreatePixelRectangle(_dragStartScreen, current, ratio)
+            : Normalize(_dragStartScreen, current);
+    }
+
+    /// <summary>
+    /// Resize with the aspect lock on: the corner opposite the handle stays put and the ratio
+    /// supplies whichever side the handle does not drive, through the same helper the
+    /// All-In-One selector already uses for its ratio drags. An edge handle drives one axis
+    /// only — its other coordinate is pinned to the anchor so the ratio derives the rest.
+    /// </summary>
+    private SD.Rectangle LockedResize(SD.Rectangle start, int handle, SD.Point cursor, double ratio)
+    {
+        bool movesLeft = handle is 0 or 6 or 7;
+        bool movesRight = handle is 2 or 3 or 4;
+        bool movesTop = handle is 0 or 1 or 2;
+        bool movesBottom = handle is 4 or 5 or 6;
+
+        var anchor = new SD.Point(
+            movesLeft ? start.Right : start.Left,
+            movesTop ? start.Bottom : start.Top);
+        var current = new SD.Point(
+            movesLeft || movesRight ? Math.Clamp(cursor.X, _vs.Left, _vs.Right) : anchor.X,
+            movesTop || movesBottom ? Math.Clamp(cursor.Y, _vs.Top, _vs.Bottom) : anchor.Y);
+
+        SD.Rectangle rect = AllInOneDragLayout.CreatePixelRectangle(anchor, current, ratio);
+        // Clamping the cursor is not enough — the DERIVED side can still run off the desktop.
+        // Refitting keeps the ratio where a plain Intersect would quietly break it.
+        return _vs.Contains(rect) ? rect : RecordingAspectPresets.Apply(rect, ratio, _vs);
+    }
+
     private SD.Rectangle ResizeRect(SD.Rectangle start, int handle, SD.Point cursor)
     {
+        if (LockedRatio is double locked)
+            return LockedResize(start, handle, cursor, locked);
+
         int l = start.Left, t = start.Top, r = start.Right, b = start.Bottom;
         switch (handle)
         {
@@ -1939,9 +1989,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return true;
         }
 
-        RecordingHudCell? hit = HudGeometry(region).HitTest(screen);
-        if (hit is null || hit == RecordingHudCell.Dimensions)
-            return hit is not null; // the readout is inert but still part of the card
+        RecordingHudGeometry hud = HudGeometry(region);
+        RecordingHudCell? hit = hud.HitTest(screen);
+        if (hit is null)
+        {
+            // A press on the cards' own padding — the 8 dip around the record rows, the gap
+            // between the two cards — must be inert. Falling through threw the framed
+            // selection away and started a new marquee under the card the user was aiming at,
+            // so a near-miss on Record cost the whole selection.
+            return hud.Bounds.Contains(screen);
+        }
+        if (hit == RecordingHudCell.Dimensions)
+            return true; // the readout is inert but still part of the card
 
         _hudPressed = hit;
         _hudPressWash?.To(hit);
@@ -2233,9 +2292,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (!hud.Bounds.IntersectsWith(monitorBounds) && _menuAmount <= 0)
             return;
 
-        using SD.Font labelFont = ThemePalette.UiFontPx(Math.Max(9, (int)Math.Round(12 * s)));
-        using SD.Font valueFont = ThemePalette.UiFontPx(Math.Max(10, (int)Math.Round(15 * s)), SD.FontStyle.Bold);
-        using SD.Font glyphFont = ThemePalette.IconFontPx(Math.Max(10, (int)Math.Round(18 * s)));
+        using SD.Font labelFont = ThemePalette.UiFontPx(
+            Math.Max(9, RecordingMonitorDpi.Px(RecordingHudLayout.LabelFontDip, s)));
+        using SD.Font valueFont = ThemePalette.UiFontPx(
+            Math.Max(10, RecordingMonitorDpi.Px(RecordingHudLayout.ValueFontDip, s)), SD.FontStyle.Bold);
+        using SD.Font glyphFont = ThemePalette.IconFontPx(
+            Math.Max(10, RecordingMonitorDpi.Px(RecordingHudLayout.GlyphFontDip, s)));
 
         DrawHudCard(g, monitorBounds, hud.SettingsCard, s);
         DrawHudCard(g, monitorBounds, hud.ActionCard, s);
@@ -2350,14 +2412,22 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Escape backs out. The two record rows print their own shortcuts, so this is the one
         // way out the HUD would otherwise never mention. Below the block where the monitor
         // allows, above it when the block is already parked on the bottom edge.
-        int hintHeight = (int)Math.Round(16 * s);
-        int hintTop = hud.ActionCard.Bottom + (int)Math.Round(2 * s);
+        //
+        // It rides in the same pill every other floating string on this surface gets. Bare on
+        // the dimmed desktop it was TextSecondary over whatever happened to be behind it —
+        // 1.81:1 over a white window, which is a legibility failure no single screenshot shows.
+        const string EscHint = "Esc to cancel";
+        SD.Size hintText = WF.TextRenderer.MeasureText(EscHint, labelFont);
+        int hintHeight = hintText.Height + (int)Math.Round(6 * s);
+        int hintWidth = hintText.Width + (int)Math.Round(16 * s);
+        int hintTop = hud.ActionCard.Bottom + (int)Math.Round(6 * s);
         if (hintTop + hintHeight > monitor.Bottom)
-            hintTop = hud.SettingsCard.Top - hintHeight - (int)Math.Round(2 * s);
-        WF.TextRenderer.DrawText(
-            g, "Esc to cancel", labelFont,
-            ToLocal(new SD.Rectangle(hud.ActionCard.Left, hintTop, hud.ActionCard.Width, hintHeight), monitorBounds),
-            ThemePalette.TextSecondary, Centre);
+            hintTop = hud.SettingsCard.Top - hintHeight - (int)Math.Round(6 * s);
+        var hintPill = new SD.Rectangle(
+            hud.ActionCard.Left + ((hud.ActionCard.Width - hintWidth) / 2), hintTop, hintWidth, hintHeight);
+        SD.Rectangle hintLocal = ToLocal(hintPill, monitorBounds);
+        FillPill(g, hintLocal);
+        WF.TextRenderer.DrawText(g, EscHint, labelFont, hintLocal, ThemePalette.TextSecondary, Centre);
 
         // What the hovered glyph means. The toggles are icon-only, so without this the
         // microphone and the webcam are two shapes the user has to guess between.
@@ -2410,16 +2480,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             height);
         SD.Rectangle local = ToLocal(pill, monitorBounds);
 
-        SD.Drawing2D.SmoothingMode previous = g.SmoothingMode;
-        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(local, local.Height / 2))
-        {
-            using (var fill = new SD.SolidBrush(ThemePalette.ToolbarBg))
-                g.FillPath(fill, path);
-            using (var edge = new SD.Pen(ThemePalette.BorderStrong, 1))
-                g.DrawPath(edge, path);
-        }
-        g.SmoothingMode = previous;
+        FillPill(g, local);
         WF.TextRenderer.DrawText(
             g, label, font, local, ThemePalette.TextPrimary,
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
@@ -2469,6 +2530,26 @@ public sealed class FastRegionSelectorDialog : WF.Form
             g.Transform = saved;
             saved.Dispose();
         }
+    }
+
+    /// <summary>
+    /// The container every floating string on the HUD sits in: an opaque toolbar fill with the
+    /// standard hairline. Nothing on this surface may be text alone — what is behind the HUD is
+    /// the dimmed desktop, i.e. arbitrary content, so an uncontained string has no contrast
+    /// anyone can compute.
+    /// </summary>
+    private static void FillPill(SD.Graphics g, SD.Rectangle local)
+    {
+        SD.Drawing2D.SmoothingMode previous = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = GdiPaths.RoundedRect(local, local.Height / 2))
+        {
+            using (var fill = new SD.SolidBrush(ThemePalette.ToolbarBg))
+                g.FillPath(fill, path);
+            using (var edge = new SD.Pen(ThemePalette.BorderStrong, 1))
+                g.DrawPath(edge, path);
+        }
+        g.SmoothingMode = previous;
     }
 
     private static void DrawHudCard(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle card, double s)

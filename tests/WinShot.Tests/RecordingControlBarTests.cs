@@ -355,7 +355,9 @@ public class RecordingControlBarTests
 
         SetHover(bar, 0);
         Assert.True(Wash(bar, "_hover", 0) < 0.99, "hover arrived at full strength in one frame");
-        PumpUntil(() => Wash(bar, "_hover", 0) >= 0.999);
+        // Wait for the tween to LAND, not merely to get close: Motion.Run applies exactly
+        // 1.0 on its final frame, and 0.999 let the pump exit a frame early on a slow run.
+        PumpUntil(() => Wash(bar, "_hover", 0) >= 1d);
         Assert.Equal(1d, Wash(bar, "_hover", 0), 3);
 
         SetHover(bar, -1);
