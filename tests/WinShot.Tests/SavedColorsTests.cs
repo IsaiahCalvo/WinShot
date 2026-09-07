@@ -1,3 +1,5 @@
+﻿using System.IO;
+using System.Xml.Linq;
 using WinShot.Core;
 using Xunit;
 using SD = System.Drawing;
@@ -81,5 +83,44 @@ public class SavedColorsTests
 
         Assert.Equal(SavedColors.MaxCount, SavedColors.Sanitize(stored).Count);
         Assert.Equal(SavedColors.MaxCount, SavedColors.With(stored, Rgb(1, 2, 3)).Count);
+    }
+
+    /// <summary>
+    /// The row is drawn as a fixed number of slots inside a fixed-width popup so it never
+    /// resizes as the palette fills, which means the cap and the layout have to agree. They
+    /// did not: the grid was cut to eight columns to stop the slots clipping, silently
+    /// halving a ten-colour palette to the eight the user could see and click.
+    /// </summary>
+    [Fact]
+    public void EverySavedSlotHasSomewhereToBeDrawn()
+    {
+        XDocument xaml = XDocument.Load(FindRepoFile("src", "WinShot", "Editor", "EditorWindow.xaml"));
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        XElement grid = xaml.Descendants()
+            .Single(e => e.Name.LocalName == "UniformGrid" && (string?)e.Attribute(x + "Name") == "SavedColorGrid");
+        XElement column = grid.Ancestors().First(e => e.Name.LocalName == "StackPanel");
+
+        int columns = int.Parse((string)grid.Attribute("Columns")!);
+        double width = double.Parse((string)column.Attribute("Width")!);
+
+        Assert.Equal(SavedColors.MaxCount, columns);
+        // 22 px swatch + 2 px margins a side, the same cell the palette above it uses.
+        Assert.True(width / columns >= 26,
+            $"{width} px over {columns} columns is {width / columns:0.#} px a cell, so the 26 px slots clip.");
+    }
+
+    private static string FindRepoFile(params string[] parts)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            string candidate = Path.Combine(new[] { directory.FullName }.Concat(parts).ToArray());
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        throw new FileNotFoundException($"Could not find repository file: {Path.Combine(parts)}");
     }
 }

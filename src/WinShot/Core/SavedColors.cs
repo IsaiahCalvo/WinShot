@@ -1,4 +1,4 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 
 namespace WinShot.Core;
 
@@ -11,7 +11,9 @@ namespace WinShot.Core;
 /// </summary>
 public static class SavedColors
 {
-    /// <summary>Ten slots, which is what fits one row of the picker without it resizing.</summary>
+    /// <summary>Ten slots, which is what fits one row of the picker without it resizing.
+    /// The popup is sized to this: ten 22 px swatches with 2 px margins is 260 px, which is
+    /// the width the picker's content column carries.</summary>
     public const int MaxCount = 10;
 
     /// <summary>

@@ -201,7 +201,12 @@
                                 <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
                                         BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
                                         Effect="{StaticResource FloatingShadow}">
-                                    <StackPanel Width="232">
+                                    <!-- 260 and not 232: the saved row is ten slots at the same
+                                         22 px swatch + 2 px margins the palette above uses, which
+                                         needs 26 px a cell. At 232 the ten cells were 23.2 px and
+                                         every slot was clipped; at 260 both rows fit their swatches
+                                         with the palette simply carrying the wider gutter. -->
+                                    <StackPanel Width="260">
                                         <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
                                         <TextBlock Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,8,0,2"/>
                                         <!-- Ten slots always, unused ones drawn as empty outlines, so
