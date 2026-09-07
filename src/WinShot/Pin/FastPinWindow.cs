@@ -101,6 +101,11 @@ public sealed class FastPinWindow : WF.Form
     /// top and must stay legible, so this is not see-through.</summary>
     private double _imageAlpha = 1d;
     private IDisposable? _imageFade;
+    /// <summary>The ramp behind Toggle pins visibility. The window's own opacity is what
+    /// moves -- a pin can carry a user-chosen opacity from Ctrl+wheel, so the value to come
+    /// back to is held rather than assumed.</summary>
+    private IDisposable? _visibilityFade;
+    private double _visibleOpacity = 1d;
     /// <summary>A locked pin answers HTTRANSPARENT, so it gets no WM_MOUSELEAVE. This runs
     /// only while the pointer is over a locked pin and stops as soon as it is not.</summary>
     private readonly WF.Timer _lockedHoverTimer = new() { Interval = 120 };
@@ -234,6 +239,8 @@ public sealed class FastPinWindow : WF.Form
             _chromeFade = null;
             _imageFade?.Dispose();
             _imageFade = null;
+            _visibilityFade?.Dispose();
+            _visibilityFade = null;
             _lockedHoverTimer.Stop();
             _lockedHoverTimer.Dispose();
             _readoutTimer.Dispose();
@@ -271,6 +278,8 @@ public sealed class FastPinWindow : WF.Form
             _chromeFade = null;
             _imageFade?.Dispose();
             _imageFade = null;
+            _visibilityFade?.Dispose();
+            _visibilityFade = null;
             _lockedHoverTimer.Stop();
             _lockedHoverTimer.Dispose();
             // Closed only fires for a window that was actually closed; a disposed one would
@@ -327,14 +336,59 @@ public sealed class FastPinWindow : WF.Form
         {
             try
             {
-                if (hide) pin.Hide();
-                else pin.Show();
+                if (hide) pin.FadeOutAndHide();
+                else pin.ShowFadingIn();
             }
             catch (Exception ex)
             {
                 Log.Error("Could not toggle a pinned window's visibility (non-fatal)", ex);
             }
         }
+    }
+
+    /// <summary>Takes this pin off screen over QuickMs. A pin leaving in one frame is the
+    /// one thing the rest of this window does not do -- its chrome, its dim and its zoom
+    /// chip all ramp -- and vanishing without a transition reads as a glitch, not a
+    /// command.</summary>
+    private void FadeOutAndHide()
+    {
+        if (!Visible)
+            return;
+        _visibleOpacity = Opacity;
+        RampOpacity(Opacity, 0d, () =>
+        {
+            Hide();
+            Opacity = _visibleOpacity; // restored while hidden, so Show() has nothing to fix
+        });
+    }
+
+    /// <summary>Brings this pin back at the opacity it left with, over the mirror ramp.</summary>
+    private void ShowFadingIn()
+    {
+        if (Visible)
+            return;
+        double target = _visibleOpacity;
+        Opacity = 0d;
+        Show();
+        RampOpacity(0d, target, null);
+    }
+
+    private void RampOpacity(double from, double target, Action? onDone)
+    {
+        _visibilityFade?.Dispose();
+        _visibilityFade = Motion.Run(Motion.QuickMs, ExitAware(from, target),
+            p =>
+            {
+                if (IsDisposed) return;
+                Opacity = Math.Clamp(from + ((target - from) * p), 0d, 1d);
+            },
+            () =>
+            {
+                _visibilityFade?.Dispose();
+                _visibilityFade = null;
+                if (!IsDisposed)
+                    onDone?.Invoke();
+            });
     }
 
     public static void CloseAll()

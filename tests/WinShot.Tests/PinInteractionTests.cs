@@ -331,6 +331,13 @@ public class PinInteractionTests
     {
         RunSta(() =>
         {
+            // Which way the set moves is the question here; the ramp that carries it there is
+            // covered in BreakerProbesRound2. Animations off so Motion.Run lands on the end
+            // state inside the call and the set can be read straight after the toggle.
+            Func<bool> previousAnim = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => false;
+            try
+            {
             FastPinWindow.CloseAll();
             Assert.False(FastPinWindow.AnyOpen);
 
@@ -356,6 +363,11 @@ public class PinInteractionTests
 
             FastPinWindow.CloseAll();
             Assert.False(FastPinWindow.AnyOpen);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previousAnim;
+            }
         });
     }
 
