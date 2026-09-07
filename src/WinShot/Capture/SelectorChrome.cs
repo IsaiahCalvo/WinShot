@@ -1,5 +1,6 @@
 ﻿using System.Drawing.Drawing2D;
 using WinShot.Core;
+using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -81,15 +82,21 @@ internal static class SelectorChrome
     /// centred horizontally near the top of the surface, so it reads as guidance rather than
     /// as another readout. <paramref name="opacity"/> lets the caller fade it out on dismissal.
     /// </summary>
-    public static void DrawHint(SD.Graphics g, SD.Size clientSize, string text, double opacity = 1)
+    /// <param name="scale">The pill's monitor scale. Both the face and the padding go through
+    /// it, so the box keeps the same proportions at 150% instead of squeezing the text.</param>
+    public static void DrawHint(
+        SD.Graphics g, SD.Size clientSize, string text, double opacity = 1, double scale = 1)
     {
         if (string.IsNullOrEmpty(text) || opacity <= 0)
             return;
 
-        using SD.Font font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
+        // Pixel-unit face: the padding below is in device pixels, so a point-size font would
+        // scale a second time on a HiDPI monitor and burst the box it was measured into.
+        using SD.Font font = ThemePalette.UiFontPx(
+            RecordingMonitorDpi.Px((int)Math.Round(ThemePalette.TextBodyLgPt * 96 / 72), scale));
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + 28;
-        int h = size.Height + 14;
+        int w = size.Width + RecordingMonitorDpi.Px(28, scale);
+        int h = size.Height + RecordingMonitorDpi.Px(14, scale);
         int left = Math.Max(0, (clientSize.Width - w) / 2);
         int top = Math.Max(0, (int)Math.Round(clientSize.Height * 0.12));
         var bg = new SD.Rectangle(left, top, w, h);
@@ -98,12 +105,13 @@ internal static class SelectorChrome
         SmoothingMode prev = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, h / 2))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb((int)Math.Round(238 * amount), 0xF2, 0xF2, 0xF4)))
+        using (var bgBrush = new SD.SolidBrush(
+            SD.Color.FromArgb((int)Math.Round(238 * amount), ThemePalette.TextPrimary)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
         WF.TextRenderer.DrawText(g, text, font, bg,
-            SD.Color.FromArgb((int)Math.Round(255 * amount), 0x1C, 0x1C, 0x1E),
+            SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.WindowBg),
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
     }
 
@@ -121,7 +129,7 @@ internal static class SelectorChrome
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, 0x1C, 0x1C, 0x1E)))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
