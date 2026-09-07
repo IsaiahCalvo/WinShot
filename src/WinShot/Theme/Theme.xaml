@@ -87,6 +87,13 @@
     <!-- Hairlines / borders (one token for structure, one for emphasis) -->
     <Color x:Key="BorderColor">#1FFFFFFF</Color>         <!-- ~12% white: dividers, toolbar/panel edge, separators -->
     <Color x:Key="BorderStrongColor">#33FFFFFF</Color>   <!-- ~20% white: input focus / emphasis ring -->
+    <!-- 9% white. The cross-fade idiom stacks a hover layer OVER the rest layer instead of
+         replacing it, which is exact for an opaque fill and wrong for a translucent one: a
+         BorderStrongColor ring drawn over a BorderColor ring composites to ~30% white, half
+         again over its own token. Pre-divided so it lands on BorderStrongColor exactly:
+         1-(1-0.12)(1-0.09) = 0.20. Use this, not BorderStrongBrush, for a ring that fades in
+         on top of the resting BorderBrush ring. -->
+    <Color x:Key="BorderStrongOverBorderColor">#17FFFFFF</Color>
     <Color x:Key="TopHighlightColor">#10FFFFFF</Color>   <!-- ~6% white: raised-glass inner top highlight -->
 
     <!-- ============================ BRUSHES ============================ -->
@@ -123,6 +130,7 @@
 
     <SolidColorBrush x:Key="BorderBrush"        Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
+    <SolidColorBrush x:Key="BorderStrongOverBorderBrush" Color="{StaticResource BorderStrongOverBorderColor}"/>
     <SolidColorBrush x:Key="TopHighlightBrush"  Color="{StaticResource TopHighlightColor}"/>
 
     <!-- ===================== TOKENS (radii / sizes) ==================== -->
@@ -140,6 +148,7 @@
     <CornerRadius x:Key="RadiusButtonInner1">7</CornerRadius> <!-- RadiusButton 8 - BorderThickness 1 -->
     <CornerRadius x:Key="RadiusInputInner">7</CornerRadius>   <!-- RadiusInput  8 - BorderThickness 1 -->
     <CornerRadius x:Key="RadiusChipInner">5</CornerRadius>    <!-- RadiusChip   6 - Margin 1 (focus ring) -->
+    <CornerRadius x:Key="RadiusThumb">4</CornerRadius>        <!-- 8px rail - 2px inset either side -->
 
     <sys:Double x:Key="ToolButtonSize">36</sys:Double>
     <sys:Double x:Key="ToolGlyphSize">17</sys:Double>
@@ -189,6 +198,7 @@
     <Thickness x:Key="GroupSepMargin">0,8,0,8</Thickness>     <!-- Space2 either side -->
     <Thickness x:Key="LabelGutterMargin">0,0,12,0</Thickness> <!-- Space3 between label and control -->
     <Thickness x:Key="ChipGutterMargin">0,0,8,0</Thickness>   <!-- Space2 between chips in a row -->
+    <Thickness x:Key="ThumbInset">2</Thickness>               <!-- scrollbar thumb inside its 8px rail -->
 
     <!-- Settings' two-column geometry. Everything under a labelled row starts at
          the control column: the label width plus one Space3 gutter. That sum was
@@ -899,18 +909,27 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bg" Background="Transparent"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
-                                          TextElement.FontSize="{TemplateBinding FontSize}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        <Grid>
+                            <Border x:Name="Hover" Opacity="0" Background="{StaticResource HoverFillBrush}"/>
+                            <Border x:Name="Press" Opacity="0" Background="{StaticResource PressedShadeBrush}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                              TextElement.FontSize="{TemplateBinding FontSize}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                            <!-- The glyph colour still swaps; only the fill has a layer to fade.
+                                 This button shares the annotation size field with ToolButtons that
+                                 cross-fade, so an instant wash beside them was the odd one out. -->
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource PressedShadeBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -978,6 +997,11 @@
                             <Border x:Name="Box" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource SurfaceAltBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                            <!-- Before the chip, so a checked box's accent covers it. The ring
+                                 is the pre-divided brush: it lands ON Box's resting BorderBrush
+                                 ring, same geometry and thickness, so the two composite. -->
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
+                                    BorderBrush="{StaticResource BorderStrongOverBorderBrush}" BorderThickness="1"/>
                             <Border x:Name="Chip" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
                                     Background="{StaticResource AccentBrush}"
                                     BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
@@ -1002,7 +1026,8 @@
                             </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>
@@ -1090,21 +1115,40 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
+                    <!-- Rings stack rather than swap Stroke on one ellipse, so the hover and
+                         selected states cross-fade the way the swatch's neighbours in the
+                         editor colour row do. Order is z-order, last on top: rest, hover,
+                         checked, focus. Note that a wider ring does NOT cover a narrower one
+                         — an Ellipse at Stretch=Fill insets its geometry by StrokeThickness/2,
+                         so every ring shares the same OUTER edge and grows inward. Covering is
+                         what the stacking order does; thickness only decides how far in a
+                         layer reaches. -->
                     <Grid>
                         <Ellipse x:Name="Ring" Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1.5"/>
+                        <Ellipse x:Name="Hover" Opacity="0" Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1.5"/>
+                        <Ellipse x:Name="Check" Opacity="0" Stroke="White" StrokeThickness="2"/>
+                        <!-- Focus is its own topmost layer. As a thickness on the base ring it
+                             was painted over by the 2px white checked ring stacked above it,
+                             and checked+focused is the ordinary keyboard case here: the
+                             swatches are one RadioButton group, so an arrow key moves focus
+                             and the selection together. -->
+                        <Ellipse x:Name="Focus" Opacity="0" Stroke="{StaticResource InfoBrush}" StrokeThickness="2.5"/>
                         <Ellipse Width="14" Height="14" Fill="{TemplateBinding Background}"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource TextSecondaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="White"/>
-                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource CheckIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource CheckOut}"/></Trigger.ExitActions>
                         </Trigger>
+                        <!-- A focus ring appearing the instant focus lands is conventional, so
+                             it stays a setter while the two fades animate — it just shows its
+                             own layer instead of restyling one underneath them. -->
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource InfoBrush}"/>
-                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2.5"/>
+                            <Setter TargetName="Focus" Property="Opacity" Value="1"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -1123,11 +1167,18 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
-                    <Border x:Name="Th" CornerRadius="4" Margin="2"
-                            Background="{StaticResource BorderStrongBrush}"/>
+                    <Grid>
+                        <!-- The two layers must stay geometrically identical or the hover
+                             fill peeks past the rest fill, so both read the same tokens. -->
+                        <Border x:Name="Th" CornerRadius="{StaticResource RadiusThumb}" Margin="{StaticResource ThumbInset}"
+                                Background="{StaticResource BorderStrongBrush}"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusThumb}" Margin="{StaticResource ThumbInset}"
+                                Background="{StaticResource TextSecondaryBrush}"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Th" Property="Background" Value="{StaticResource TextSecondaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
