@@ -64,9 +64,10 @@ internal static class CaptureExclusion
 /// </summary>
 internal static class ScrollChromeFade
 {
-    /// <summary>From the vocabulary, not a number of its own: a same-place opacity ramp is
-    /// exactly what <see cref="Motion.QuickMs"/> names.</summary>
-    public const int DurationMs = Motion.QuickMs;
+    /// <summary>From the vocabulary: the dim, the controls bar and the preview panel are
+    /// three windows arriving on screen, which is what <see cref="Motion.EnterDurationMs"/>
+    /// names -- QuickMs is for hover fills and other same-place tint changes.</summary>
+    public const int DurationMs = Motion.EnterDurationMs;
 
     public static IDisposable In(Action<byte> apply)
     {
@@ -74,10 +75,16 @@ internal static class ScrollChromeFade
         return Motion.Run(DurationMs, Motion.EaseOutCubic, p => apply(Alpha(p)));
     }
 
-    public static Task Out(Action<byte> apply)
+    /// <summary>
+    /// Fades out and completes when it is gone. The cancel handle comes back too: the caller
+    /// closes its form on a timeout race, and a discarded handle left an uncancellable tween
+    /// holding Motion.Acquire() with its form already destroyed.
+    /// </summary>
+    public static Task Out(Action<byte> apply, out IDisposable handle)
     {
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Motion.Run(DurationMs, Motion.EaseInCubic, p => apply(Alpha(1d - p)), () => done.TrySetResult());
+        handle = Motion.Run(DurationMs, Motion.EaseInCubic, p => apply(Alpha(1d - p)),
+            () => done.TrySetResult());
         return done.Task;
     }
 
@@ -152,8 +159,7 @@ public sealed class ScrollDimOverlay : WF.Form
     {
         if (IsDisposed || _surface is null) return Task.CompletedTask;
         _fade?.Dispose();
-        _fade = null;
-        return ScrollChromeFade.Out(SetAlpha);
+        return ScrollChromeFade.Out(SetAlpha, out _fade);
     }
 
     private void SetAlpha(byte alpha)
@@ -402,8 +408,7 @@ public sealed class ScrollControlsBar : WF.Form
     {
         if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
         _fade?.Dispose();
-        _fade = null;
-        return ScrollChromeFade.Out(SetChromeAlpha);
+        return ScrollChromeFade.Out(SetChromeAlpha, out _fade);
     }
 
     private void SetChromeAlpha(byte alpha)
@@ -734,8 +739,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     {
         if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
         _fade?.Dispose();
-        _fade = null;
-        return ScrollChromeFade.Out(SetChromeAlpha);
+        return ScrollChromeFade.Out(SetChromeAlpha, out _fade);
     }
 
     private void SetChromeAlpha(byte alpha)

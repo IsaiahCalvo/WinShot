@@ -958,9 +958,8 @@ public partial class SettingsWindow : Window
     /// picking one would silently fall back to the profile language with nothing said -- and
     /// hid the dozens Windows does ship packs for. "Automatically detect" is always first and
     /// is the whole list when no pack is installed, which is the honest answer.
-    /// </summary>
-    /// <summary>
-    /// The installed recognizer packs, plus <paramref name="stored"/> itself when its pack is
+    ///
+    /// The list is the installed recognizer packs, plus <paramref name="stored"/> itself when its pack is
     /// not installed right now. Without that last row the combo fell back to "Automatically
     /// detect" and the next Save wrote it over the user's choice -- so merely opening Settings
     /// while a pack was uninstalled destroyed the preference. OcrService's own fallback is
