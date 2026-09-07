@@ -46,6 +46,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private QuickAccessTooltipWindow? _tooltipWindow;
     private SD.Rectangle _placedWorkingArea;
     private IDisposable? _enterMotion;
+    private bool _enterMotionRunning;
     private WF.Timer? _exitMotionTimer;
     private WF.Timer? _stackMotionTimer;
     private IDisposable? _exitMotionClock;
@@ -167,8 +168,13 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = _visuals.CardFill;
-        AccessibleName = "Quick Access capture preview";
-        AccessibleDescription = "Captured image actions. Press Tab to move through actions or Shift+F10 for more actions.";
+        // The strip's duration and size are painted, not spoken, so without this a screen
+        // reader could not tell a recording card from a screenshot card at all.
+        AccessibleName = mediaFilePath is null ? "Quick Access capture preview" : "Quick Access recording preview";
+        AccessibleDescription = mediaFilePath is null
+            ? "Captured image actions. Double-click the preview to annotate. Press Tab to move through actions or Shift+F10 for more actions."
+            : $"Screen recording, {MediaCardStrip.FormatDuration(mediaDuration ?? TimeSpan.Zero)} long, "
+              + $"{MediaCardStrip.FormatSize(_mediaSizeBytes)}. Press Tab to move through actions or Shift+F10 for more actions.";
         DoubleBuffered = true;
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
@@ -184,6 +190,12 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         BuildLayout(image, _dpi);
         RenderFirstPreview();
+        // A hidden stack is waiting to be wanted again; the next capture is that moment.
+        // Revived BEFORE this card takes its own slot: PositionFromSettings only counts
+        // visible cards, so placing this one first and reviving after put the oldest
+        // restored card and the brand-new card in exactly the same rectangle.
+        foreach (FastQuickActionsWindow card in OpenWindows.ToArray().Where(w => w._temporarilyHidden))
+            card.ComeBack();
         PositionFromSettings();
         BuildOverflowMenu();
         _tooltipTimer.Tick += (_, _) => ShowActionTooltip();
@@ -220,9 +232,6 @@ public sealed class FastQuickActionsWindow : WF.Form
             DisposeImageWhenUnused();
             ReflowOpenWindowsAnimated();
         };
-        // A hidden stack is waiting to be wanted again; the next capture is that moment.
-        foreach (FastQuickActionsWindow card in OpenWindows.ToArray().Where(w => w._temporarilyHidden))
-            card.ComeBack();
         OpenWindows.Add(this);
         TrimStackToCapacity();
 
@@ -393,10 +402,13 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// The card is deliberately never activated — it appears without stealing focus — so
     /// nothing was ever delivering the Ctrl+C / Ctrl+S / Ctrl+E / Ctrl+W its own tooltips
     /// and menu advertise. A low-level keyboard hook, installed only while the pointer is
-    /// actually on the card, routes exactly the chords the card claims into its handler and
-    /// swallows them; every other key goes straight through to whatever the user is working
-    /// in. Hover-gating is the whole safety property: without it the card would eat Ctrl+S
-    /// from the real app for as long as it sat in the corner.
+    /// actually on the card, routes exactly those four chords into its handler and swallows
+    /// them; every other key goes straight through to whatever the user is working in.
+    ///
+    /// Hover is not focus, which is why the hook claims nothing but the Ctrl chords: the
+    /// keys it eats belong to the foreground app, and the pointer parked in the corner is a
+    /// normal resting place. The bare letters, Tab, Enter and Escape still work — through
+    /// the real KeyDown below, once the card has actually been clicked into.
     /// </summary>
     private void SetShortcutHook(bool wanted)
     {
@@ -434,7 +446,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             {
                 var data = Marshal.PtrToStructure<KeyboardHookStruct>(lParam);
                 WF.Keys keyData = (WF.Keys)data.VirtualKey | WF.Control.ModifierKeys;
-                if (QuickActionsMenu.ClaimsKey(keyData, _focusedButton >= 0))
+                if (QuickActionsMenu.ClaimsKey(keyData))
                 {
                     // Posted, not called: the action can open the context menu, and doing
                     // that from inside a hook callback runs a modal loop in the hook.
@@ -847,39 +859,44 @@ public sealed class FastQuickActionsWindow : WF.Form
         try
         {
             g.SetClip(clip, CombineMode.Intersect);
-            // Inflated brush rect: a gradient laid on exactly its own bounds wraps at the
-            // last pixel row and leaves a bright hairline.
-            using (var gradient = new LinearGradientBrush(
-                       SD.Rectangle.Inflate(band, 1, 1),
-                       SD.Color.FromArgb(0, 0, 0, 0),
-                       SD.Color.FromArgb(190, 0, 0, 0),
-                       LinearGradientMode.Vertical))
-                g.FillRectangle(gradient, band);
+            SD.Color scrim = _visuals.MediaStripScrim;
+            var lead = new SD.Rectangle(band.Left, band.Top, band.Width, band.Height - strip.Height);
+            if (lead.Height > 0)
+            {
+                // Inflated brush rect: a gradient laid on exactly its own bounds wraps at the
+                // last pixel row and leaves a bright hairline.
+                using var gradient = new LinearGradientBrush(
+                    SD.Rectangle.Inflate(lead, 1, 1),
+                    SD.Color.FromArgb(0, scrim),
+                    scrim,
+                    LinearGradientMode.Vertical);
+                g.FillRectangle(gradient, lead);
+            }
+            // Flat under the strip, not the tail of one long ramp: the text is centred in the
+            // strip's upper half, which on a ramp never reaches the alpha the contrast floor
+            // needs over a bright capture.
+            using (var flat = new SD.SolidBrush(scrim))
+                g.FillRectangle(flat, strip);
 
             int pad = MediaCardStrip.Padding(_dpi);
+            (int runLeft, int runRight) = MediaCardStrip.TextRun(
+                strip, _buttons.Select(b => b.Bounds), pad);
+            if (runRight <= runLeft)
+                return;
+
             using var font = ThemePalette.UiFont(ThemePalette.MediaStripLabelPt);
             var flags = WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding | WF.TextFormatFlags.VerticalCenter;
 
             int glyphSize = Math.Max(8, strip.Height - pad);
             SD.Bitmap? glyph = CreateSvgIcon("quick-access-camcorder.svg", glyphSize, _visuals.Glyph);
-            int textLeft = strip.Left + pad;
-            if (glyph is not null)
+            int textLeft = runLeft;
+            if (glyph is not null && glyph.Width < runRight - runLeft)
             {
                 g.DrawImageUnscaled(glyph, textLeft, strip.Top + (strip.Height - glyph.Height) / 2);
                 textLeft += glyph.Width + Math.Max(2, pad / 2);
             }
 
-            if (_mediaDuration is { } duration)
-            {
-                WF.TextRenderer.DrawText(
-                    g,
-                    MediaCardStrip.FormatDuration(duration),
-                    font,
-                    new SD.Rectangle(textLeft, strip.Top, strip.Right - pad - textLeft, strip.Height),
-                    _visuals.Glyph,
-                    flags);
-            }
-
+            int textRight = runRight;
             if (_mediaSizeBytes > 0)
             {
                 string size = MediaCardStrip.FormatSize(_mediaSizeBytes);
@@ -888,7 +905,19 @@ public sealed class FastQuickActionsWindow : WF.Form
                     g,
                     size,
                     font,
-                    new SD.Rectangle(strip.Right - pad - measured.Width, strip.Top, measured.Width, strip.Height),
+                    new SD.Rectangle(runRight - measured.Width, strip.Top, measured.Width, strip.Height),
+                    _visuals.Glyph,
+                    flags);
+                textRight = runRight - measured.Width - pad;
+            }
+
+            if (_mediaDuration is { } duration && textRight > textLeft)
+            {
+                WF.TextRenderer.DrawText(
+                    g,
+                    MediaCardStrip.FormatDuration(duration),
+                    font,
+                    new SD.Rectangle(textLeft, strip.Top, textRight - textLeft, strip.Height),
                     _visuals.Glyph,
                     flags);
             }
@@ -1118,7 +1147,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // The card is re-laid-out and re-placed once it learns its monitor's DPI, and that
         // can land after the window is already visible — which would drop the card straight
         // onto its slot and eat the entrance. Re-aim the slide at the new slot instead.
-        if (_enterMotion is not null)
+        if (_enterMotionRunning)
             BeginEnterMotion();
     }
 
@@ -1140,12 +1169,18 @@ public sealed class FastQuickActionsWindow : WF.Form
         SD.Point start = QuickAccessOverlayMotion.EnterOrigin(
             _placedWorkingArea,
             Bounds,
-            _settings.Current.OverlayPosition);
+            _settings.Current.OverlayPosition,
+            QuickAccessOverlayLayout.StackGutter(_dpi));
         if (start == target)
             return;
 
         StopEnterMotion();
         MoveWithoutActivation(start);
+        // The flag, not the handle, is what "an entrance is in flight" reads: with animation
+        // turned off Motion.Run applies the end state and calls onDone INLINE, before the
+        // caller ever gets a handle to assign — so the handle field stayed non-null forever
+        // and every later reposition re-ran the whole entrance.
+        _enterMotionRunning = true;
         _enterMotion = Motion.Run(
             QuickAccessOverlayMotion.EnterDurationMs,
             QuickAccessOverlayMotion.EaseOutBack,
@@ -1155,13 +1190,14 @@ public sealed class FastQuickActionsWindow : WF.Form
                     return;
                 MoveWithoutActivation(QuickAccessOverlayMotion.InterpolateUnclamped(start, target, eased));
             },
-            () => _enterMotion = null);
+            () => _enterMotionRunning = false);
     }
 
     private void StopEnterMotion()
     {
         _enterMotion?.Dispose();
         _enterMotion = null;
+        _enterMotionRunning = false;
     }
 
     /// <summary>
@@ -1175,7 +1211,8 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (area.Height <= 0)
             return;
 
-        int capacity = QuickAccessOverlayLayout.StackCapacity(area, Size, _dpi);
+        int capacity = QuickAccessOverlayLayout.StackCapacity(
+            area, Size, _settings.Current.OverlayPosition, _dpi);
         var stacked = OpenWindows
             .Where(w => !w.IsDisposed && !w._closed && !w._exitMotionStarted && w._placedWorkingArea == area)
             .ToList();
@@ -1341,7 +1378,9 @@ public sealed class FastQuickActionsWindow : WF.Form
         };
         _overflowMenu.Opening += (_, _) =>
         {
-            bool stacked = OpenWindows.Count(w => !w.IsDisposed && !w._exitMotionStarted) > 1;
+            // Visible, not merely open: a card held off screen by the editor is not part of
+            // the stack these rows act on, so advertising them over it reads as a lie.
+            bool stacked = OpenWindows.Count(w => !w.IsDisposed && !w._exitMotionStarted && w.Visible) > 1;
             foreach (WF.ToolStripItem item in _overflowMenu.Items)
             {
                 if (item is QuickActionMenuItem row && QuickActionsMenu.NeedsAStack(row.Id))
@@ -1520,15 +1559,10 @@ public sealed class FastQuickActionsWindow : WF.Form
                     _ = SaveEveryCardAsync();
                     return;
                 case QuickActionsMenu.CloseAll:
-                    foreach (FastQuickActionsWindow card in OpenWindows.ToArray())
-                        card.Close();
+                    CloseEveryCard();
                     return;
                 case QuickActionsMenu.TemporarilyHide:
-                    foreach (FastQuickActionsWindow card in OpenWindows.ToArray())
-                    {
-                        card.StepAside();
-                        card._temporarilyHidden = true;
-                    }
+                    HideEveryCard();
                     return;
                 case QuickActionsMenu.Close:
                     Close();
@@ -1543,6 +1577,49 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             Log.Error($"Quick-actions menu action '{id}' failed", ex);
         }
+    }
+
+    /// <summary>
+    /// Dismisses the whole stack, and says so. There is no confirmation dialog — the row
+    /// does not promise one any more — but a click that clears four captures at once has to
+    /// name what it did and say they are recoverable, which is what the last line is for.
+    /// </summary>
+    private void CloseEveryCard()
+    {
+        SD.Point anchor = ToastAnchor();
+        var cards = OpenWindows.ToArray();
+        foreach (FastQuickActionsWindow card in cards)
+            card.Close();
+        if (cards.Length == 0)
+            return;
+        ShowToastAt(
+            anchor,
+            $"Closed {cards.Length} {(cards.Length == 1 ? "capture" : "captures")}",
+            "They are still in your capture history.",
+            Core.ToastSeverity.Info);
+    }
+
+    /// <summary>
+    /// Clears the corner without discarding anything. Nothing else on screen says the
+    /// captures survived or how to get them back, so the toast is the whole affordance —
+    /// it names the count and names the way back.
+    /// </summary>
+    private void HideEveryCard()
+    {
+        SD.Point anchor = ToastAnchor();
+        var cards = OpenWindows.ToArray();
+        foreach (FastQuickActionsWindow card in cards)
+        {
+            card.StepAside();
+            card._temporarilyHidden = true;
+        }
+        if (cards.Length == 0)
+            return;
+        ShowToastAt(
+            anchor,
+            $"Hid {cards.Length} {(cards.Length == 1 ? "capture" : "captures")}",
+            "Your next capture brings them back.",
+            Core.ToastSeverity.Info);
     }
 
     /// <summary>
@@ -1728,18 +1805,35 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// passed: an info glyph on "share failed" looks exactly like a confirmation.
     /// </summary>
     private void ShowCardToast(string title, string message, Core.ToastSeverity severity)
+        => ShowToastAt(ToastAnchor(), title, message, severity);
+
+    /// <summary>Where this card is, or was — a save closes it before the message lands.</summary>
+    private SD.Point ToastAnchor()
     {
         try
         {
-            SD.Rectangle card = RectangleToScreen(_cardRect);
-            // Through App, not a bare `new ToastWindow(...).Show()`: that is where the
-            // dispose-on-throw guard and the tray-balloon fallback live, and a share failure
-            // is exactly the message that must not go quiet when a window won't create.
-            App.Toast(title, message, new SD.Point(card.Left, card.Top), severity: severity);
+            SD.Rectangle card = IsHandleCreated && !IsDisposed ? RectangleToScreen(_cardRect) : Bounds;
+            return new SD.Point(card.Left, card.Top);
         }
         catch (Exception ex)
         {
-            Log.Error("Share toast failed", ex);
+            Log.Error("Could not anchor the card toast", ex);
+            return SD.Point.Empty;
+        }
+    }
+
+    private static void ShowToastAt(SD.Point anchor, string title, string message, Core.ToastSeverity severity)
+    {
+        try
+        {
+            // Through App, not a bare `new ToastWindow(...).Show()`: that is where the
+            // dispose-on-throw guard and the tray-balloon fallback live, and a save failure
+            // is exactly the message that must not go quiet when a window won't create.
+            App.Toast(title, message, anchor, severity: severity);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Card toast failed", ex);
         }
     }
 
@@ -2025,7 +2119,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         SD.Bitmap? preview = null;
         try
         {
-            preview = CreatePreviewBitmap(_image, _thumbRect.Width, _thumbRect.Height);
+            preview = CreatePreviewBitmap(_image, _thumbRect.Width, _thumbRect.Height, fast: true);
             SD.Bitmap? old;
             lock (_previewSync)
             {
@@ -2092,7 +2186,13 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    private static SD.Bitmap CreatePreviewBitmap(SD.Bitmap image, int width, int height)
+    /// <summary>
+    /// <paramref name="fast"/> is the synchronous first pass: bicubic cost scales with the
+    /// SOURCE, so a fullscreen 4K grab spent ~42 ms of UI thread on a downscale the async
+    /// pass immediately redoes anyway. Bilinear is a few ms, and the bicubic version lands
+    /// a frame or two later without anybody seeing the difference.
+    /// </summary>
+    private static SD.Bitmap CreatePreviewBitmap(SD.Bitmap image, int width, int height, bool fast = false)
     {
         var preview = new SD.Bitmap(width, height, PixelFormat.Format32bppPArgb);
         lock (image)
@@ -2100,7 +2200,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             using var g = SD.Graphics.FromImage(preview);
             g.CompositingMode = CompositingMode.SourceCopy;
             g.CompositingQuality = CompositingQuality.HighSpeed;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.InterpolationMode = fast ? InterpolationMode.HighQualityBilinear : InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.Half;
             g.SmoothingMode = SmoothingMode.None;
             double scale = Math.Max(width / (double)Math.Max(1, image.Width), height / (double)Math.Max(1, image.Height));
@@ -2257,7 +2357,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         try
         {
             string path = await EnsureDragFileAsync();
-            if (_closed || IsDisposed) return;
+            // OLE marshals CF_BITMAP off this object while DoDragDrop pumps messages, and it
+            // takes none of the locks CreatePreviewBitmap does — a thumbnail render still in
+            // flight is the "Object is currently in use elsewhere" crash all over again.
+            if (!await WaitForRenderIdleAsync()) return;
 
             bool keepOpen = IsAltDown();
             WF.DataObject data = CreateDragData(path, _image);
@@ -2348,8 +2451,14 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         // The thumbnail is the biggest target on the card and did nothing at all. Double
         // rather than single click, so the drag gesture stays unambiguous.
-        if (onTheBody && e.Clicks == 2 && _cardRect.Contains(e.Location))
-            EditRequested?.Invoke(this);
+        if (!onTheBody || e.Clicks != 2 || !_cardRect.Contains(e.Location))
+            return;
+        if (EditRequested is { } edit)
+            edit(this);
+        else
+            // A recording with no editor behind it: silently doing nothing reads as a
+            // broken double-click rather than as "this one cannot be edited".
+            ShowCardToast("This recording can't be edited", "No video editor is available for it.", Core.ToastSeverity.Info);
     }
 
     private int HitTestButton(SD.Point point)
@@ -2488,6 +2597,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// Saves every open card into one folder the user picks. Each card writes through its
     /// own save path, so a recording copies its file and a screenshot encodes its bitmap,
     /// and every card closes behind its own save exactly as a single Save does.
+    ///
+    /// One toast at the end, not one per card: five cards raised five "Saved &lt;name&gt;"
+    /// toasts that replaced each other, so the user read one filename and could not tell
+    /// that a card had failed to write at all.
     /// </summary>
     private async Task SaveEveryCardAsync()
     {
@@ -2504,12 +2617,37 @@ public sealed class FastQuickActionsWindow : WF.Form
             folder = dialog.SelectedPath;
         }
 
+        SD.Point anchor = ToastAnchor();
+        int written = 0;
+        int failed = 0;
         foreach (FastQuickActionsWindow card in OpenWindows.ToArray())
         {
             if (card.IsDisposed || card._closed)
                 continue;
-            await card.SaveCoreAsync(askForDestination: false, closeAfterSave: true, folder: folder);
+            if (await card.SaveCoreAsync(
+                    askForDestination: false, closeAfterSave: true, folder: folder, announce: false))
+                written++;
+            else
+                failed++;
         }
+
+        (string title, string body) = BatchSaveConfirmation(written, failed, folder);
+        App.Toast(title, body, anchor,
+            severity: failed > 0 ? Core.ToastSeverity.Error : Core.ToastSeverity.Success);
+    }
+
+    /// <summary>The batch confirmation: how many were written, where, and how many were not.</summary>
+    internal static (string Title, string Body) BatchSaveConfirmation(int written, int failed, string folder)
+    {
+        string where = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar));
+        if (where.Length == 0)
+            where = folder;
+        if (failed == 0)
+            return ($"Saved {written} {(written == 1 ? "capture" : "captures")}", where);
+        if (written == 0)
+            return ("Nothing was saved", $"{failed} {(failed == 1 ? "capture" : "captures")} could not be written to {where}.");
+        return ($"Saved {written} of {written + failed} captures",
+            $"{failed} could not be written to {where}.");
     }
 
     private void SaveFromInput()
@@ -2517,7 +2655,13 @@ public sealed class FastQuickActionsWindow : WF.Form
             askForDestination: IsAltDown() || QuickAccessOverlayLayout.NormalizeSaveBehavior(_settings.Current.OverlaySaveButtonBehavior) == "ask",
             closeAfterSave: true);
 
-    private async Task SaveCoreAsync(bool askForDestination, bool closeAfterSave, string? folder = null)
+    /// <summary>
+    /// Writes this card's capture. Returns false only when the write actually failed —
+    /// backing out of the dialog is not a failure — so the batch above can count what
+    /// landed and what did not instead of reporting success for a partly-failed run.
+    /// </summary>
+    private async Task<bool> SaveCoreAsync(
+        bool askForDestination, bool closeAfterSave, string? folder = null, bool announce = true)
     {
         try
         {
@@ -2527,10 +2671,12 @@ public sealed class FastQuickActionsWindow : WF.Form
                 {
                     // Batch save: a recording is already a file, so this is a copy into
                     // the chosen folder rather than another dialog per card.
-                    AnnounceSave(await CopyMediaFileIntoAsync(folder));
+                    string copied = await CopyMediaFileIntoAsync(folder);
+                    if (announce)
+                        AnnounceSave(copied);
                     if (closeAfterSave && !_closed && !IsDisposed)
                         Close();
-                    return;
+                    return true;
                 }
 
                 // The recording is already saved; Save here means "save a copy as…".
@@ -2542,14 +2688,15 @@ public sealed class FastQuickActionsWindow : WF.Form
                     Filter = $"{extension.ToUpperInvariant()} file|*.{extension}|All files|*.*",
                 };
                 if (mediaDialog.ShowDialog(this) != WF.DialogResult.OK)
-                    return;
+                    return true;
                 string source = _mediaFilePath;
                 string chosen = mediaDialog.FileName;
                 await Task.Run(() => File.Copy(source, chosen, overwrite: true));
-                AnnounceSave(chosen);
+                if (announce)
+                    AnnounceSave(chosen);
                 if (closeAfterSave && !_closed && !IsDisposed)
                     Close();
-                return;
+                return true;
             }
             string destination = folder ?? _settings.Current.SaveFolder;
             Directory.CreateDirectory(destination);
@@ -2569,7 +2716,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                     },
                 };
                 if (dialog.ShowDialog(this) != WF.DialogResult.OK)
-                    return;
+                    return true;
                 path = dialog.FileName;
             }
             else
@@ -2583,13 +2730,24 @@ public sealed class FastQuickActionsWindow : WF.Form
                 using (copy)
                     ImageSaver.Save(copy, path);
             });
-            AnnounceSave(path);
+            if (announce)
+                AnnounceSave(path);
             if (closeAfterSave && !_closed && !IsDisposed)
                 Close();
+            return true;
         }
         catch (Exception ex)
         {
+            // Success had feedback and failure had none: the card flew off screen and
+            // nothing said the file was never written. The raw exception stays in the log.
             Log.Error("Save failed", ex);
+            if (announce)
+                ShowToastAt(
+                    ToastAnchor(),
+                    "Save failed",
+                    "WinShot could not write the file. Check the folder still exists and you have permission to write to it.",
+                    Core.ToastSeverity.Error);
+            return false;
         }
     }
 

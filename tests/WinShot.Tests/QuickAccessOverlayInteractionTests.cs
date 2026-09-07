@@ -102,7 +102,7 @@ public class QuickAccessOverlayInteractionTests
 
         var method = typeof(FastQuickActionsWindow)
             .GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!;
-        using var preview = (SD.Bitmap)method.Invoke(null, new object[] { source, 192, 120 })!;
+        using var preview = (SD.Bitmap)method.Invoke(null, new object[] { source, 192, 120, false })!;
 
         SD.Color left = preview.GetPixel(4, preview.Height / 2);
         SD.Color center = preview.GetPixel(preview.Width / 2, preview.Height / 2);
@@ -188,7 +188,7 @@ public class QuickAccessOverlayInteractionTests
             Assert.Contains("Open with…", labels);
             Assert.Contains("Move to Recycle Bin", labels);
             Assert.Contains("Save all…", labels);
-            Assert.Contains("Close all…", labels);
+            Assert.Contains("Close all", labels);
             Assert.Contains("Temporarily hide", labels);
             // Cloud upload and Quick Look are the CleanShot rows we skipped — Quick Look
             // because Pin already is one.
@@ -493,7 +493,7 @@ public class QuickAccessOverlayInteractionTests
                 using var overlay = new FastQuickActionsWindow(bitmap, settings);
                 var method = typeof(FastQuickActionsWindow).GetMethod("SaveCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-                var task = (Task)method.Invoke(overlay, new object?[] { false, false, null })!;
+                var task = (Task)method.Invoke(overlay, new object?[] { false, false, null, true })!;
                 var deadline = DateTime.UtcNow.AddSeconds(5);
                 while (!task.IsCompleted && DateTime.UtcNow < deadline)
                 {
@@ -509,6 +509,35 @@ public class QuickAccessOverlayInteractionTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void ABatchSaveSaysHowManyLandedAndNamesTheFolder()
+    {
+        string folder = Path.Combine("C:", "Users", "someone", "Captures");
+
+        (string title, string body) = FastQuickActionsWindow.BatchSaveConfirmation(4, 0, folder);
+        Assert.Equal("Saved 4 captures", title);
+        Assert.Equal("Captures", body);
+
+        (string one, _) = FastQuickActionsWindow.BatchSaveConfirmation(1, 0, folder);
+        Assert.Equal("Saved 1 capture", one);
+    }
+
+    [Fact]
+    public void ABatchSaveThatPartlyFailedNeverReportsPlainSuccess()
+    {
+        string folder = Path.Combine("C:", "Users", "someone", "Captures");
+
+        // The whole reason the batch counts instead of toasting per card: five per-card
+        // toasts replaced each other and a failure was invisible behind the last one.
+        (string partial, string partialBody) = FastQuickActionsWindow.BatchSaveConfirmation(3, 2, folder);
+        Assert.Equal("Saved 3 of 5 captures", partial);
+        Assert.Contains("2 could not be written", partialBody);
+
+        (string none, string noneBody) = FastQuickActionsWindow.BatchSaveConfirmation(0, 2, folder);
+        Assert.Equal("Nothing was saved", none);
+        Assert.Contains("Captures", noneBody);
     }
 
     [Fact]
@@ -663,7 +692,7 @@ public class QuickAccessOverlayInteractionTests
         var thumb = (SD.Rectangle)type.GetField("_thumbRect", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(overlay)!;
         var preview = (SD.Bitmap)type.GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!
-            .Invoke(null, new object[] { source, thumb.Width, thumb.Height })!;
+            .Invoke(null, new object[] { source, thumb.Width, thumb.Height, false })!;
         var blurred = (SD.Bitmap)type.GetMethod("CreateBlurred", BindingFlags.Static | BindingFlags.NonPublic)!
             .Invoke(null, new object[] { preview })!;
         type.GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, preview);
@@ -803,6 +832,7 @@ public class QuickAccessOverlayInteractionTests
                 int capacity = QuickAccessOverlayLayout.StackCapacity(
                     WF.Screen.PrimaryScreen!.WorkingArea,
                     cards[^1].Size,
+                    settings.Current.OverlayPosition,
                     cards[^1].DeviceDpi);
                 int living = cards.Count(c => !c.IsDisposed && !IsLeaving(c));
 
