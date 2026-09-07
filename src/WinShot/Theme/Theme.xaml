@@ -1136,24 +1136,32 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Bg" Background="Transparent" Padding="{TemplateBinding Padding}"
+                    <Border x:Name="Bg" Background="Transparent"
                             CornerRadius="{StaticResource RadiusChip}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
-                                       FontSize="{StaticResource GlyphMicro}" VerticalAlignment="Center"
-                                       Margin="0,0,6,0" RenderTransformOrigin="0.5,0.5"
-                                       Foreground="{TemplateBinding Foreground}">
-                                <TextBlock.RenderTransform>
-                                    <RotateTransform x:Name="ChevronSpin" Angle="0"/>
-                                </TextBlock.RenderTransform>
-                            </TextBlock>
-                            <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True"/>
-                        </StackPanel>
+                        <Grid>
+                            <!-- The hover wash is its own layer at zero opacity so it can be faded
+                                 in, the way every other row in the theme does it. A bare Background
+                                 setter here snapped beside the chevron it sits next to. -->
+                            <Border x:Name="Hover" Opacity="0" Background="{StaticResource HoverFillBrush}"
+                                    CornerRadius="{StaticResource RadiusChip}"/>
+                            <StackPanel Orientation="Horizontal" Margin="{TemplateBinding Padding}">
+                                <TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
+                                           FontSize="{StaticResource GlyphMicro}" VerticalAlignment="Center"
+                                           Margin="0,0,6,0" RenderTransformOrigin="0.5,0.5"
+                                           Foreground="{TemplateBinding Foreground}">
+                                    <TextBlock.RenderTransform>
+                                        <RotateTransform x:Name="ChevronSpin" Angle="0"/>
+                                    </TextBlock.RenderTransform>
+                                </TextBlock>
+                                <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                            </StackPanel>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
