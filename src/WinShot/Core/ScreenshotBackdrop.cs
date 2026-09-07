@@ -54,7 +54,13 @@ public static class ScreenshotBackdrop
     /// the mode is <see cref="None"/> or the composition fails — in both cases the caller
     /// keeps the capture it already has. Never disposes or mutates <paramref name="shot"/>.
     /// </summary>
-    public static SD.Bitmap? Compose(SD.Bitmap shot, string? mode, string? solidColor)
+    /// <param name="shadow">
+    /// Whether to lift the shot off the backdrop with a drop shadow. This is the only shadow a
+    /// WinShot window capture ever has — the capture rect itself is DWM's extended frame
+    /// bounds, which already excludes the system one — so turning it off is what "trim the
+    /// window shadow" means here: a flat, hard-edged frame.
+    /// </param>
+    public static SD.Bitmap? Compose(SD.Bitmap shot, string? mode, string? solidColor, bool shadow = true)
     {
         string kind = Normalize(mode);
         if (kind == None || shot.Width <= 0 || shot.Height <= 0)
@@ -73,7 +79,8 @@ public static class ScreenshotBackdrop
                 g.PixelOffsetMode = SDD.PixelOffsetMode.HighQuality;
 
                 PaintBackdrop(g, size, kind, solidColor);
-                PaintShadow(g, new SD.Rectangle(pad, pad, shot.Width, shot.Height));
+                if (shadow)
+                    PaintShadow(g, new SD.Rectangle(pad, pad, shot.Width, shot.Height));
                 g.DrawImage(shot, new SD.Rectangle(pad, pad, shot.Width, shot.Height));
             }
             return canvas;

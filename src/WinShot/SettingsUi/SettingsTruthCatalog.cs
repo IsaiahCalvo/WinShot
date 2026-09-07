@@ -47,6 +47,7 @@ internal static class SettingsTruthCatalog
             "NotifyStyleSave",
             "ScreenshotBackground",
             "ScreenshotBackgroundColor",
+            "ScreenshotBackgroundShadow",
             "FreezeScreen",
             "CrosshairMode",
             "ShowCrosshair",

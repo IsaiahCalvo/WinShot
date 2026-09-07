@@ -1185,7 +1185,8 @@ public partial class App : Application
             ScreenshotBackdrop.Compose(
                 bmp,
                 _settings.Current.ScreenshotBackground,
-                _settings.Current.ScreenshotBackgroundColor) is SD.Bitmap framed)
+                _settings.Current.ScreenshotBackgroundColor,
+                _settings.Current.ScreenshotBackgroundShadow) is SD.Bitmap framed)
         {
             bmp.Dispose();
             bmp = framed;

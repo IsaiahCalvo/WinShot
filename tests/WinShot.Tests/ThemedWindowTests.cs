@@ -211,6 +211,9 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrayIconRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("AskForNameRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ScreenshotBackgroundRow").Visibility);
+        // The shadow switch only means something once a background is on, so it rides the same
+        // reveal as the colour field rather than sitting there greyed out under "None".
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("ScreenshotBackgroundShadowRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("NotificationsCard").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
@@ -253,7 +256,7 @@ public class ThemedWindowTests
             "PinnedShadowCheck", "PinnedBorderCheck", "AllInOneRememberCheck",
             "OcrJoinLinesCheck", "AskForNameCheck",
             "NotifyOcrCombo", "NotifyCopyCombo", "NotifySaveCombo",
-            "BackgroundCombo", "BackgroundColorBox",
+            "BackgroundCombo", "BackgroundColorBox", "BackgroundShadowCheck",
             "RestoreDefaultsButton", "CancelButton", "SaveButton",
             "AboutCheckUpdatesButton",
             "AboutRepositoryButton", "AboutLogsButton", "AboutDiagnosticsToggle",

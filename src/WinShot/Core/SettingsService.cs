@@ -110,6 +110,7 @@ public class Settings
     public bool ConvertToSrgb { get; set; } = false;    // TODO: wire behavior — convert screenshots to sRGB color profile
     public string ScreenshotBackground { get; set; } = "none"; // none | wallpaper | gradient | color
     public string ScreenshotBackgroundColor { get; set; } = "#1C1C1E"; // used when ScreenshotBackground is "color"
+    public bool ScreenshotBackgroundShadow { get; set; } = true; // drop shadow under the shot on that background
     public bool CursorOnScreenshots { get; set; } = false; // TODO: wire behavior — include cursor in fullscreen/self-timer shots
     public bool FreezeScreen { get; set; } = true;      // freeze the screen while selecting
     public bool ShowCrosshair { get; set; } = true;     // crosshair guides during selection

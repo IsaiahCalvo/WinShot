@@ -100,6 +100,32 @@ public class ScreenshotBackdropTests
         Assert.Equal(ThemePalette.WindowBg.ToArgb(), ScreenshotBackdrop.ParseColor(text).ToArgb());
     }
 
+    /// <summary>
+    /// The compositor's own shadow is the only shadow a WinShot capture ever carries (the
+    /// window rect is DWM's extended frame bounds, which excludes the system one), so this
+    /// switch is what "trim the window shadow" means here. Sampled just outside the shot,
+    /// where the shadow is darkest.
+    /// </summary>
+    [Fact]
+    public void TheShadowCanBeTrimmedLeavingAFlatFrame()
+    {
+        using SD.Bitmap shot = Shot();
+        int pad = ScreenshotBackdrop.Padding(shot.Size);
+        int backdrop = SD.Color.FromArgb(255, 0x20, 0x40, 0x80).ToArgb();
+
+        using (SD.Bitmap with = ScreenshotBackdrop.Compose(shot, "color", "#204080", shadow: true)!)
+        {
+            Assert.NotEqual(backdrop, with.GetPixel(pad - 1, pad + shot.Height / 2).ToArgb());
+        }
+
+        using SD.Bitmap without = ScreenshotBackdrop.Compose(shot, "color", "#204080", shadow: false)!;
+        Assert.Equal(backdrop, without.GetPixel(pad - 1, pad + shot.Height / 2).ToArgb());
+        // Only the shadow goes: the shot is still whole, centred and the same size.
+        Assert.Equal(ScreenshotBackdrop.CanvasFor(shot.Size), without.Size);
+        Assert.Equal(
+            SD.Color.FromArgb(255, 240, 0, 120).ToArgb(), without.GetPixel(pad, pad).ToArgb());
+    }
+
     [Fact]
     public void PaddingHasAFloorSoSmallCropsStillGetAMargin()
     {

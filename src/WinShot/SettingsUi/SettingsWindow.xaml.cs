@@ -471,6 +471,7 @@ public partial class SettingsWindow : Window
         HiDpiCheck.IsChecked = s.DownscaleHiDpi;
         SelectByTag(BackgroundCombo, ScreenshotBackdrop.Normalize(s.ScreenshotBackground), fallbackIndex: 0);
         BackgroundColorBox.Text = s.ScreenshotBackgroundColor;
+        BackgroundShadowCheck.IsChecked = s.ScreenshotBackgroundShadow;
         ApplyBackgroundModeRows(animate: false);
         SelectByTag(SelfTimerCombo, s.SelfTimerSeconds.ToString(), fallbackIndex: 0);
         SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
@@ -716,16 +717,18 @@ public partial class SettingsWindow : Window
         UpdateBackgroundColorSwatch();
 
     /// <summary>
-    /// The colour field and the explanation belong to modes that use them, so they arrive and
-    /// leave with the choice instead of sitting there greyed out.
+    /// The colour field, the shadow switch and the explanation belong to the modes that use
+    /// them, so they arrive and leave with the choice instead of sitting there greyed out.
     /// </summary>
     private void ApplyBackgroundModeRows(bool animate)
     {
-        if (BackgroundCombo is null || ScreenshotBackgroundColorRow is null || ScreenshotBackgroundHint is null)
+        if (BackgroundCombo is null || ScreenshotBackgroundColorRow is null ||
+            ScreenshotBackgroundShadowRow is null || ScreenshotBackgroundHint is null)
             return;
 
         string mode = ScreenshotBackdrop.Normalize(SelectedTag(BackgroundCombo, ScreenshotBackdrop.None));
         SetRowRevealed(ScreenshotBackgroundColorRow, mode == ScreenshotBackdrop.Solid, animate);
+        SetRowRevealed(ScreenshotBackgroundShadowRow, ScreenshotBackdrop.IsEnabled(mode), animate);
         SetRowRevealed(ScreenshotBackgroundHint, ScreenshotBackdrop.IsEnabled(mode), animate);
         UpdateBackgroundColorSwatch();
     }
@@ -952,6 +955,7 @@ public partial class SettingsWindow : Window
         s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
         s.ScreenshotBackground = ScreenshotBackdrop.Normalize(SelectedTag(BackgroundCombo, ScreenshotBackdrop.None));
         s.ScreenshotBackgroundColor = BackgroundColorBox.Text.Trim();
+        s.ScreenshotBackgroundShadow = BackgroundShadowCheck.IsChecked == true;
         s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
         s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
         s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
@@ -1187,6 +1191,8 @@ public partial class SettingsWindow : Window
         Accessible(HiDpiCheck, "Scale high DPI screenshots", "Scale high DPI screenshots down to one times size.");
         Accessible(BackgroundCombo, "Screenshot background", "Place every screenshot on a padded background as it is taken.");
         Accessible(BackgroundColorBox, "Background color", "Enter a hex color such as #1C1C1E.");
+        Accessible(BackgroundShadowCheck, "Background drop shadow",
+            "Lift the screenshot off its background with a drop shadow, or turn it off for a flat frame.");
         Accessible(SelfTimerCombo, "Self timer interval", "Choose how long the self timer waits before capture.");
         Accessible(FreezeScreenCheck, "Freeze screen during selection", "Use a still desktop image while choosing a region.");
         Accessible(CrosshairModeCombo, "Crosshair mode", "Choose when selector crosshair guides appear.");
@@ -1218,7 +1224,7 @@ public partial class SettingsWindow : Window
             WebcamSizeBox, MaxResolutionCombo,
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
-            FormatCombo, HiDpiCheck, BackgroundCombo, BackgroundColorBox, SelfTimerCombo,
+            FormatCombo, HiDpiCheck, BackgroundCombo, BackgroundColorBox, BackgroundShadowCheck, SelfTimerCombo,
             FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck, AskForNameCheck,
