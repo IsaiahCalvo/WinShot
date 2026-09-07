@@ -97,7 +97,7 @@ internal static class Motion
     }
 
     /// <summary>
-    /// Runs a tween: one shared timer at <see cref="FrameIntervalMs"/>, wall-clock time from a
+    /// Runs a tween: its own timer at <see cref="FrameIntervalMs"/>, wall-clock time from a
     /// stopwatch (a dropped frame shortens the animation instead of stretching it), and the
     /// high-resolution clock held for exactly as long as it runs.
     ///

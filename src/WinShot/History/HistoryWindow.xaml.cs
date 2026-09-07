@@ -1238,11 +1238,14 @@ public partial class HistoryWindow : Window
         {
             var bmp = await Task.Run(() => HistoryImageLoader.LoadDetachedBitmap(item.FilePath));
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership: true);
+            // A History tile has nothing that changes when a copy lands, so both outcomes
+            // used to look identical: the row sat there either way and only the log knew.
+            App.Toast("Copied", "The capture is on the clipboard.", severity: ToastSeverity.Success);
         }
         catch (Exception ex)
         {
             Log.Error($"Failed to copy history item {item.FilePath}", ex);
-            ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
+            App.Toast("Copy failed", FriendlyError.For(ex), severity: ToastSeverity.Error);
         }
     }
 
