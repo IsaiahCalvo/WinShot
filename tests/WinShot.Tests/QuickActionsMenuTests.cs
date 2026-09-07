@@ -344,11 +344,19 @@ public class QuickActionsMenuTests
     }
 
     [Theory]
-    // The four Ctrl chords the card's tooltips and shortcut column advertise on hover.
+    // The two chords hover may claim. Both misfire visibly and neither destroys anything:
+    // Ctrl+C puts the capture on the clipboard, Ctrl+E opens the editor on it.
     [InlineData(WF.Keys.Control | WF.Keys.C, true)]
-    [InlineData(WF.Keys.Control | WF.Keys.S, true)]
     [InlineData(WF.Keys.Control | WF.Keys.E, true)]
-    [InlineData(WF.Keys.Control | WF.Keys.W, true)]
+    // NOT Ctrl+S and NOT Ctrl+W, however much the card advertises them. Hovering a card is
+    // not a decision, and there is no honest signal that separates "reaching for the card"
+    // from "the pointer is parked in the corner" — the card is never activated, so focus
+    // never moves and nothing on screen changes. Getting Ctrl+S wrong saves the screenshot,
+    // toasts "Saved <name>.png", and leaves the document the user meant to save still
+    // dirty; Ctrl+W closes the card instead of the browser tab. Both still work through the
+    // card's own KeyDown once it genuinely has focus, which is where they are advertised.
+    [InlineData(WF.Keys.Control | WF.Keys.S, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.W, false)]
     // Everything that belongs to the window underneath. The hook is gated on hover, not on
     // focus, so a bare letter it swallowed would be a letter the user was typing into a
     // document — and the card would run a save or an OCR pass instead of printing it. The
@@ -375,10 +383,21 @@ public class QuickActionsMenuTests
     [InlineData(WF.Keys.Alt | WF.Keys.S, false)]
     [InlineData(WF.Keys.A, false)]
     [InlineData(WF.Keys.F10, false)]
-    [InlineData(WF.Keys.Control | WF.Keys.Shift | WF.Keys.S, false)]
-    [InlineData(WF.Keys.Control | WF.Keys.Alt | WF.Keys.S, false)]
-    public void TheHoverHookClaimsOnlyTheFourCtrlChordsTheCardAdvertises(WF.Keys keyData, bool claimed)
-        => Assert.Equal(claimed, QuickActionsMenu.ClaimsKey(keyData));
+    [InlineData(WF.Keys.Control | WF.Keys.Shift | WF.Keys.C, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.Alt | WF.Keys.C, false)]
+    public void TheHoverHookClaimsOnlyTheChordsItCanAffordToGetWrong(WF.Keys keyData, bool claimed)
+        => Assert.Equal(claimed, QuickActionsMenu.ClaimsKey(keyData, canEdit: true));
+
+    /// <summary>
+    /// A recording with no video editor behind it offers no Edit button and no "Edit video"
+    /// row, so the hook must not eat Ctrl+E out of the foreground app on its behalf either.
+    /// </summary>
+    [Fact]
+    public void ACardWithNoEditActionDoesNotClaimCtrlE()
+    {
+        Assert.False(QuickActionsMenu.ClaimsKey(WF.Keys.Control | WF.Keys.E, canEdit: false));
+        Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Control | WF.Keys.C, canEdit: false));
+    }
 
     [Fact]
     public void TheBatchRowsSitInTheSameBlockAsCloseAndAskBeforeTheyAct()

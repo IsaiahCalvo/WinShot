@@ -814,6 +814,10 @@ public sealed class FastPinWindow : WF.Form
         tween.Retarget(origin, target);
         Bounds = origin;
         _growMotion?.Dispose();
+        // EaseOutCubic, not the EaseOutBack the card arrives on: the pin grows from the
+        // card's own rectangle to its final size, and Back overshoots that size — a pin
+        // that swells past its bounds and settles back reads as a wobble, not an arrival.
+        // Same duration as the card's entrance, so it is still the same object relocating.
         _growMotion = Motion.Run(
             Motion.EnterDurationMs,
             Motion.EaseOutCubic,

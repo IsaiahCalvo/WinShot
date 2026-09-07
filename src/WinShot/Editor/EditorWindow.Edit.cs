@@ -506,7 +506,15 @@ public partial class EditorWindow : Window
         }
         catch (Exception ex)
         {
+            // The card fades back in holding the capture as it was before the editor opened,
+            // so without this the user draws, presses Done, and gets the original back with
+            // nothing on screen saying the annotations did not make it — and Copy, Save,
+            // drag-out and Pin then all serve the un-annotated bitmap.
             Log.Error("Handing the composed image back to the quick-actions card failed", ex);
+            App.Toast(
+                "Your annotations weren't saved",
+                FriendlyError.For(ex),
+                severity: ToastSeverity.Error);
         }
     }
 

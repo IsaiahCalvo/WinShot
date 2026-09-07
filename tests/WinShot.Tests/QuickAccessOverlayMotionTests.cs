@@ -151,6 +151,33 @@ public class QuickAccessOverlayMotionTests
         Assert.Equal(8, QuickAccessOverlayMotion.FrameIntervalMs);
     }
 
+    /// <summary>
+    /// Why BeginEnterMotion, BeginExitMotion and ReflowOpenWindowsAnimated all read the
+    /// working area the card was PLACED against rather than re-deriving one from Bounds.
+    /// Screen.FromRectangle picks the monitor holding most of the rectangle, and a card at
+    /// its entrance origin is almost entirely off its own monitor — on Isaiah's rig, where
+    /// the monitors sit above the laptop, that answer is the screen below and the card
+    /// restacks onto the wrong display.
+    /// </summary>
+    [Fact]
+    public void TheEntranceOriginSitsMostlyOutsideTheMonitorTheCardWasPlacedAgainst()
+    {
+        // The monitor above the laptop: its working area ENDS where the laptop's begins.
+        var above = new SD.Rectangle(0, -1440, 2560, 1400);
+        var size = new SD.Size(288, 180);
+
+        SD.Point slot = QuickAccessOverlayLayout.Place(above, size, "bottom-right", 0, 144);
+        SD.Point origin = QuickAccessOverlayMotion.EnterOrigin(
+            above, new SD.Rectangle(slot, size), "bottom-right", QuickAccessOverlayLayout.StackGutter(144));
+
+        SD.Rectangle starting = new(origin, size);
+        SD.Rectangle inside = SD.Rectangle.Intersect(above, starting);
+        long insideArea = (long)inside.Width * inside.Height;
+        long total = (long)starting.Width * starting.Height;
+        Assert.True(insideArea * 2 < total,
+            $"entrance origin {starting} keeps {insideArea}/{total} px on {above}");
+    }
+
     [Theory]
     [InlineData(-1, 0)]
     [InlineData(0, 0)]

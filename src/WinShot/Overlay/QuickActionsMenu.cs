@@ -270,24 +270,37 @@ internal static class QuickActionsMenu
     /// but must not run the action there — opening the context menu from a hook spins a
     /// modal message loop inside it.
     ///
-    /// Only the four Ctrl chords the card prints on its own tooltips and shortcut column.
-    /// Hover is not focus: the card is never activated, so the keys the hook eats belong to
-    /// whatever the user is actually typing in, and a card parked in the corner used to
-    /// swallow every bare c/s/e/p/o/b, Escape and Tab out of the document underneath — and
-    /// run a save or an OCR pass instead. The bare-letter and Tab/Enter/Space cases still
-    /// work, through the card's real KeyDown, once it genuinely has keyboard focus.
+    /// Hover is not focus: the card is never activated, so every key the hook eats belongs
+    /// to whatever the user is actually typing in. That rules out the bare letters (a parked
+    /// card would swallow every c/s/e/p/o/b, Escape and Tab out of the document underneath),
+    /// and it also rules out <b>Ctrl+S and Ctrl+W</b>, which the hook used to claim:
+    ///
+    /// hovering a card is not a decision, and there is no honest signal that separates
+    /// "reaching for the card" from "the pointer happens to be in the corner". Getting that
+    /// wrong on Ctrl+S saves the screenshot, says "Saved &lt;name&gt;.png", and leaves the
+    /// document the user meant to save still dirty with nothing on screen admitting it;
+    /// Ctrl+W closes the card instead of the browser tab. Ctrl+C and Ctrl+E misfire
+    /// visibly and cost nothing that cannot be redone, so those two stay.
+    ///
+    /// Every chord the card advertises — Ctrl+S and Ctrl+W included — still works through
+    /// the card's real KeyDown, once it genuinely has keyboard focus. So do the bare-letter,
+    /// Tab, Enter and Space cases.
+    ///
+    /// <paramref name="canEdit"/> is false on a recording with no video editor behind it:
+    /// that card offers no Edit button and no "Edit video" row, so the hook must not eat
+    /// Ctrl+E on its behalf either.
     /// </summary>
-    internal static bool ClaimsKey(WF.Keys keyData)
+    internal static bool ClaimsKey(WF.Keys keyData, bool canEdit)
     {
         WF.Keys key = keyData & WF.Keys.KeyCode;
         WF.Keys modifiers = keyData & WF.Keys.Modifiers;
 
         // Ctrl alone. Alt+anything belongs to the window underneath, and Shift disqualifies
-        // the letters too: Ctrl+Shift+S is somebody else's Save as.
+        // the letters too: Ctrl+Shift+C is somebody else's Inspect.
         if (modifiers != WF.Keys.Control)
             return false;
 
-        return key is WF.Keys.C or WF.Keys.S or WF.Keys.E or WF.Keys.W;
+        return key == WF.Keys.C || (key == WF.Keys.E && canEdit);
     }
 
     internal static bool FileReady(string? path) => path is not null && File.Exists(path);

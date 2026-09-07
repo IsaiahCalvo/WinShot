@@ -101,6 +101,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     private bool _temporarilyHidden;
     private bool _returningFromStepAside;
     private IDisposable? _stepAsideMotion;
+    // Same trap BeginEnterMotion documents: with animations off Motion.Run finishes INLINE
+    // and onDone nulls the field before the handle is assigned, so the handle alone can
+    // never say "a fade is in flight". The flag can.
+    private bool _stepAsideRunning;
     /// <summary>The opacity the card sits at when it is simply on screen, captured by StepAside.</summary>
     private double _fullOpacity = 1d;
 
@@ -441,12 +445,13 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     /// <summary>
     /// The card is deliberately never activated — it appears without stealing focus — so
-    /// nothing was ever delivering the Ctrl+C / Ctrl+S / Ctrl+E / Ctrl+W its own tooltips
-    /// and menu advertise. A low-level keyboard hook, installed only while the pointer is
-    /// actually on the card, routes exactly those four chords into its handler and swallows
-    /// them; every other key goes straight through to whatever the user is working in.
+    /// nothing was ever delivering the Ctrl chords its own tooltips and menu advertise. A
+    /// low-level keyboard hook, installed only while the pointer is actually on the card,
+    /// routes the ones <see cref="QuickActionsMenu.ClaimsKey"/> allows into its handler and
+    /// swallows them; every other key goes straight through to whatever the user is working
+    /// in — including Ctrl+S and Ctrl+W, which are deliberately not claimable on hover.
     ///
-    /// Hover is not focus, which is why the hook claims nothing but the Ctrl chords AND
+    /// Hover is not focus, which is why the hook claims nothing but those chords AND
     /// nothing outside the arming window below. The bare letters, Tab, Enter and Escape
     /// still work — through the real KeyDown, once the card has actually been clicked into.
     /// </summary>
@@ -489,9 +494,9 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// <summary>
     /// Hover alone is not enough to outrank the window the user is typing in. The bottom-
     /// right corner is a normal place to park a pointer, and by default the card never
-    /// auto-closes — so a card sitting there used to eat Ctrl+S out of a document (silently:
-    /// no save, no dirty-state change, no error) for as long as it was open. Two conditions
-    /// on top of hover fix that without costing the feature anything a user would notice:
+    /// auto-closes, so a card sitting there is not intent. The chords whose misfires cannot
+    /// be seen or undone are gone from <see cref="QuickActionsMenu.ClaimsKey"/> entirely;
+    /// these two conditions narrow what is left, at no cost a user would notice:
     ///
     /// - the pointer has to have done something on the card in the last few seconds. A
     ///   parked pointer is not intent; reaching for the card and pressing Ctrl+C is.
@@ -505,6 +510,34 @@ public sealed class FastQuickActionsWindow : WF.Form
         => Environment.TickCount64 - _shortcutArmedAt <= ShortcutArmMs
            && GetForegroundWindow() == _shortcutForeground;
 
+    /// <summary>
+    /// Whether this card has an Edit action at all — every screenshot card does, a recording
+    /// only when there is a video editor behind it. Same condition BuildButtons and
+    /// <see cref="QuickActionsMenu.Rows"/> use to decide whether to offer one.
+    /// </summary>
+    private bool CanEdit => _mediaFilePath is null || _mediaCanEdit;
+
+    /// <summary>
+    /// The Ctrl/Shift/Alt state a low-level keyboard hook cannot get any other way.
+    /// <c>KBDLLHOOKSTRUCT</c> carries a virtual key and nothing else, and
+    /// <see cref="WF.Control.ModifierKeys"/> is <c>GetKeyState</c> — which reports the state
+    /// as of the last keyboard message THIS thread read from its own queue. The card is
+    /// never activated, so its thread never reads those messages and ModifierKeys is
+    /// permanently <see cref="WF.Keys.None"/>: the hook claimed nothing, ever.
+    /// <c>GetAsyncKeyState</c> asks the hardware instead, which is what the app's other
+    /// low-level keyboard hook does (Recording/FastKeystrokeOverlayWindow.cs:246).
+    /// </summary>
+    private static WF.Keys HeldModifiers()
+    {
+        WF.Keys held = WF.Keys.None;
+        if (IsKeyDown(VkControl)) held |= WF.Keys.Control;
+        if (IsKeyDown(VkShift)) held |= WF.Keys.Shift;
+        if (IsKeyDown(VkMenu)) held |= WF.Keys.Alt;
+        return held;
+    }
+
+    private static bool IsKeyDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+
     private IntPtr OnShortcutKey(int code, IntPtr wParam, IntPtr lParam)
     {
         IntPtr hook = _keyHook;
@@ -514,8 +547,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             if (message is WmKeyDown or WmSysKeyDown)
             {
                 var data = Marshal.PtrToStructure<KeyboardHookStruct>(lParam);
-                WF.Keys keyData = (WF.Keys)data.VirtualKey | WF.Control.ModifierKeys;
-                if (QuickActionsMenu.ClaimsKey(keyData))
+                WF.Keys keyData = (WF.Keys)data.VirtualKey | HeldModifiers();
+                if (QuickActionsMenu.ClaimsKey(keyData, CanEdit))
                 {
                     // Posted, not called: the action can open the context menu, and doing
                     // that from inside a hook callback runs a modal loop in the hook.
@@ -798,6 +831,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         // The message wears the hover chrome, so seed the hover tween rather than forcing
         // it in OnPaint: the pointer arriving mid-message then hands over with nothing to
         // do, instead of the card snapping sharp for a frame and blurring back in.
+        //
+        // Set, not tweened, and deliberately NOT the mirror of the EaseOutCubic ramp
+        // EndStatusFlash uses on the way out. The chrome is not transitioning here — it is
+        // part of the message, which arrives whole (_flashAmount is 1 on the same line) the
+        // instant the row is clicked. Ramping it in would show the message sharp for 140 ms
+        // and blur it afterwards. Both halves of the message leave together instead.
         StopHoverMotion();
         _hoverAmount = 1.0;
         // Where the pointer was when the message went up. Reaching for the card dismisses
@@ -1303,6 +1342,16 @@ public sealed class FastQuickActionsWindow : WF.Form
         return union;
     }
 
+    /// <summary>
+    /// The working area this card was actually placed against. Every caller that needs the
+    /// card's monitor mid-motion reads this rather than <c>Screen.FromRectangle(Bounds)</c>:
+    /// with monitors stacked above the laptop (negative Y) a card that is sliding in, flying
+    /// out or being restacked sits mostly outside its own monitor, and FromRectangle then
+    /// answers with the neighbour. Empty only before the first placement.
+    /// </summary>
+    private SD.Rectangle PlacedWorkingArea
+        => _placedWorkingArea.Height > 0 ? _placedWorkingArea : WF.Screen.FromRectangle(Bounds).WorkingArea;
+
     private void PositionFromSettings()
     {
         var screen = _settings.Current.OverlayMoveToActiveScreen
@@ -1430,9 +1479,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             _overflowMenu.Close();
 
         SD.Point start = Location;
-        SD.Rectangle workingArea = WF.Screen.FromRectangle(Bounds).WorkingArea;
         SD.Point target = QuickAccessOverlayMotion.ExitTarget(
-            workingArea,
+            PlacedWorkingArea,
             Bounds,
             _settings.Current.OverlayPosition);
         double startingOpacity = Opacity;
@@ -1468,14 +1516,24 @@ public sealed class FastQuickActionsWindow : WF.Form
         _exitMotionTimer.Start();
     }
 
+    /// <summary>
+    /// Re-slots every card in the corner after one leaves. The cards are exactly
+    /// <see cref="StackedCards"/> — a card fading out for the annotate hand-off or for
+    /// "Temporarily hide" is neither moved nor given a slot, which is the same call
+    /// PositionFromSettings makes and stops a close landing inside that 140 ms fade from
+    /// leaving a gap in the column.
+    /// </summary>
     private static void ReflowOpenWindowsAnimated()
     {
         var offsets = new Dictionary<SD.Rectangle, int>();
         long started = Stopwatch.GetTimestamp();
-        foreach (FastQuickActionsWindow window in OpenWindows.ToArray().Where(w =>
-                     w.Visible && !w.IsDisposed && !w._exitMotionStarted))
+        foreach (FastQuickActionsWindow window in StackedCards().Where(w => w.Visible))
         {
-            SD.Rectangle workingArea = WF.Screen.FromRectangle(window.Bounds).WorkingArea;
+            // The area the card was placed against, never one re-derived from Bounds: a card
+            // mid-entrance sits a full card-height outside its own monitor, so
+            // Screen.FromRectangle answers with the monitor below and the restack lands the
+            // card on the wrong screen. Same reason BeginEnterMotion reads it.
+            SD.Rectangle workingArea = window.PlacedWorkingArea;
             offsets.TryGetValue(workingArea, out int offset);
             SD.Point target = QuickAccessOverlayLayout.Place(
                 workingArea,
@@ -1490,9 +1548,21 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private void BeginStackMotion(SD.Point target, long started)
     {
-        StopEnterMotion();
         StopStackMotionTimer();
-        if (_exitMotionStarted || _closed || IsDisposed || Location == target)
+        if (_exitMotionStarted || _closed || IsDisposed)
+            return;
+        // A card still sliding in owns its own motion. Stopping the entrance here dropped it
+        // wherever the slide had reached and restacked from there, so pinning one card threw
+        // away the arrival of the next. Re-aim the entrance at the new slot instead — the
+        // same handover PositionFromSettings does when the card learns its monitor's DPI.
+        if (_enterMotionRunning)
+        {
+            Location = target;
+            BeginEnterMotion();
+            return;
+        }
+        StopEnterMotion();
+        if (Location == target)
             return;
         if (!WinShot.Core.Motion.AnimationsEnabled())
         {
@@ -1793,10 +1863,17 @@ public sealed class FastQuickActionsWindow : WF.Form
             card.Close();
         if (cards.Length == 0)
             return;
+        // Only the promise we can keep: _historyPath completes as null when the history
+        // write threw, and Close discards the capture for good. The toast is the whole
+        // affordance for a click that clears the corner, so it must not say "recoverable"
+        // over a capture that is not.
+        bool allInHistory = cards.All(c => c._historyPath is not null);
         ShowToastAt(
             anchor,
             $"Closed {cards.Length} {(cards.Length == 1 ? "capture" : "captures")}",
-            "They are still in your capture history.",
+            allInHistory
+                ? "They are still in your capture history."
+                : "Any that reached your capture history are still there.",
             Core.ToastSeverity.Info);
     }
 
@@ -1830,9 +1907,21 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// </summary>
     private async void TransformImage(SD.RotateFlipType transform)
     {
-        if (!await WaitForRenderIdleAsync()) return;
-        _image.RotateFlip(transform);
-        OnImageChanged();
+        // Its own catch, not RunMenuAction's. Everything past the await resumes on a
+        // continuation outside that try, so with a thumbnail render actually in flight —
+        // the case WaitForRenderIdleAsync exists for — a throw here became an unhandled
+        // UI-thread exception instead of a message on the card.
+        try
+        {
+            if (!await WaitForRenderIdleAsync()) return;
+            _image.RotateFlip(transform);
+            OnImageChanged();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Quick-actions {transform} failed", ex);
+            ReportActionFailure("Couldn't rotate the capture", ex);
+        }
     }
 
     /// <summary>
@@ -1878,12 +1967,14 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         // It dims out where it stands instead of cutting to nothing. Not the exit flight —
         // this card is coming back, and a fly-out reads as "gone". ComeBack fades in over
-        // the same QuickMs, so the pair is symmetric.
+        // the same QuickMs on EaseOutCubic, so the pair reads as one gesture reversed:
+        // leaving eases IN, returning eases OUT.
         double from = Opacity;
         _fullOpacity = from;
+        _stepAsideRunning = true;
         _stepAsideMotion = Motion.Run(
             Motion.QuickMs,
-            Motion.EaseOutCubic,
+            Motion.EaseInCubic,
             eased =>
             {
                 if (!_closed && !IsDisposed)
@@ -1892,6 +1983,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             () =>
             {
                 _stepAsideMotion = null;
+                _stepAsideRunning = false;
                 if (_closed || IsDisposed)
                     return;
                 Visible = false;
@@ -1909,7 +2001,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (_closed || IsDisposed)
             return;
         // Up, not fading, not flagged: it is already here.
-        if (Visible && _stepAsideMotion is null && !_offScreen && !_temporarilyHidden)
+        if (Visible && !_stepAsideRunning && !_offScreen && !_temporarilyHidden)
             return;
 
         // The cancel comes BEFORE the Visible check, not after. A card one frame into the
@@ -1931,6 +2023,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // The card's real opacity, remembered by StepAside: a fade cancelled halfway leaves
         // Opacity somewhere in the middle, so reading it here would fade in to that.
         double target = _fullOpacity;
+        _stepAsideRunning = true;
         if (!Visible)
         {
             Opacity = 0.02d;
@@ -1957,6 +2050,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             () =>
             {
                 _stepAsideMotion = null;
+                _stepAsideRunning = false;
                 if (!_closed && !IsDisposed)
                     Opacity = target;
             });
@@ -1966,6 +2060,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         _stepAsideMotion?.Dispose();
         _stepAsideMotion = null;
+        _stepAsideRunning = false;
     }
 
     /// <summary>
@@ -1978,12 +2073,24 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private async Task ReplaceImageWhenIdleAsync(SD.Bitmap replacement)
     {
-        if (!await WaitForRenderIdleAsync())
+        try
         {
-            replacement.Dispose();
-            return;
+            if (!await WaitForRenderIdleAsync())
+            {
+                replacement.Dispose();
+                return;
+            }
+            ReplaceImage(replacement);
         }
-        ReplaceImage(replacement);
+        catch (Exception ex)
+        {
+            // Launched fire-and-forget, so a throw here used to fault an unobserved task and
+            // the annotation silently never landed on the card the user is looking at.
+            // Deliberately not disposing the replacement here: ReplaceImage may already have
+            // made it _image before it threw, and disposing it then would blank the card.
+            Log.Error("The editor's image could not be handed back to the card", ex);
+            ReportActionFailure("Your annotations didn't reach the card", ex);
+        }
     }
 
     private void ReplaceImage(SD.Bitmap replacement)
@@ -2036,13 +2143,26 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private async void ResizeImage()
     {
-        using var dialog = new ResizeImageDialog(_image.Size);
-        if (dialog.ShowDialog(this) != WF.DialogResult.OK || dialog.Result is not { } size)
-            return;
-        if (size == _image.Size)
-            return;
-        if (!await WaitForRenderIdleAsync()) return;
-        ReplaceImage(QuickActionsMenu.Resized(_image, size.Width, size.Height));
+        try
+        {
+            SD.Size size;
+            using (var dialog = new ResizeImageDialog(_image.Size))
+            {
+                if (dialog.ShowDialog(this) != WF.DialogResult.OK || dialog.Result is not { } chosen)
+                    return;
+                size = chosen;
+            }
+            if (size == _image.Size)
+                return;
+            if (!await WaitForRenderIdleAsync()) return;
+            ReplaceImage(QuickActionsMenu.Resized(_image, size.Width, size.Height));
+        }
+        catch (Exception ex)
+        {
+            // Same reason as TransformImage: the resize itself runs after an await.
+            Log.Error("Quick-actions resize failed", ex);
+            ReportActionFailure("Couldn't resize the capture", ex);
+        }
     }
 
     /// <summary>Runs a shell action that needs a real file, saving one first if the capture has none.</summary>
@@ -2901,19 +3021,22 @@ public sealed class FastQuickActionsWindow : WF.Form
                 return;
             }
 
-            int index = _buttons.FindIndex(b => b.Tip.StartsWith("Copy", StringComparison.Ordinal));
-            if (index < 0) return;
+            // The button itself, not its index into _buttons: BuildLayout clears and rebuilds
+            // that list (OnHandleCreated does it on a DPI correction), and an index resolved
+            // 1200 ms ago is only still valid because the count happens to be fixed per card.
+            ActionButton? copy = _buttons.Find(b => b.Tip.StartsWith("Copy", StringComparison.Ordinal));
+            if (copy is null) return;
 
-            _buttons[index].Label = "Copied";
-            Invalidate(_buttons[index].Bounds);
+            copy.Label = "Copied";
+            Invalidate(copy.Bounds);
             var timer = new WF.Timer { Interval = 1200 };
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
                 timer.Dispose();
                 if (_closed || IsDisposed) return;
-                _buttons[index].Label = "Copy";
-                Invalidate(_buttons[index].Bounds);
+                copy.Label = "Copy";
+                Invalidate(copy.Bounds);
             };
             timer.Start();
         }
@@ -2989,9 +3112,15 @@ public sealed class FastQuickActionsWindow : WF.Form
                 continue;
             if (await card.SaveCoreAsync(
                     askForDestination: false, closeAfterSave: true, folder: folder, announce: false))
+            {
                 written++;
-            else
-                failed++;
+                continue;
+            }
+            // A save that succeeded closed its own card. One that failed did not, and it is
+            // sitting there with the countdown SaveEveryCardAsync paused for the picker —
+            // so it would never auto-close again until the pointer happened to leave it.
+            failed++;
+            card.ResumeAutoCloseTimer();
         }
 
         (string title, string body) = BatchSaveConfirmation(written, failed, folder);
@@ -3167,6 +3296,9 @@ public sealed class FastQuickActionsWindow : WF.Form
     private const int WhKeyboardLl = 13;
     private const int WmKeyDown = 0x0100;
     private const int WmSysKeyDown = 0x0104;
+    private const int VkShift = 0x10;
+    private const int VkControl = 0x11;
+    private const int VkMenu = 0x12;
 
     private delegate IntPtr KeyboardHookProc(int code, IntPtr wParam, IntPtr lParam);
 
@@ -3194,6 +3326,9 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();

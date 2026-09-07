@@ -112,11 +112,12 @@ public static class ThemePalette
     /// <summary>
     /// Off the scale deliberately: the recording card's duration and size sit in a 17 px
     /// strip inside the pinned card, and anything larger crowds the two ends together on
-    /// the smallest card size. Same value as <see cref="PinnedTooltipPt"/> below and kept
-    /// separate on purpose: the tooltip's width is pinned by test, so consolidating the two
-    /// would tie the strip's face to a number that cannot move.
+    /// the smallest card size — the same face the quick-access tooltip needs, so it IS that
+    /// token rather than a second constant holding the same number. Two copies of 6.5 is
+    /// exactly the drift one type scale exists to prevent: move one and the strip and the
+    /// tooltip stop matching with nothing failing.
     /// </summary>
-    public const float MediaStripLabelPt = 6.5f;
+    public const float MediaStripLabelPt = PinnedTooltipPt;
 
     /// <summary>
     /// Off the scale deliberately: the quick-access tooltip is a 2 mm-tall chip whose

@@ -1092,7 +1092,8 @@ public class QuickAccessOverlayInteractionTests
     /// <summary>
     /// Hover alone must not outrank the window the user is typing in. The corner is a normal
     /// place to park a pointer and the card does not auto-close by default, so a hovered card
-    /// used to eat Ctrl+S out of a document — silently, for as long as it sat there.
+    /// used to eat chords out of a document for as long as it sat there. ClaimsKey drops the
+    /// two whose misfires cannot be seen or undone; this narrows what is left of the arming.
     /// </summary>
     [Fact]
     public void AParkedPointerStopsTheCardTakingKeysOffTheForegroundApp()
@@ -1504,6 +1505,137 @@ public class QuickAccessOverlayInteractionTests
             }
         });
     }
+
+    /// <summary>
+    /// Pinning a card closes it immediately, with no exit flight, and everything else in the
+    /// corner restacks. A card still sliding in must survive that: the restack used to stop
+    /// its entrance outright — before even checking whether the slot had changed — leaving
+    /// the card wherever the slide had reached and re-aiming it off a rectangle that, on a
+    /// monitor stacked above the laptop, belongs to the screen below.
+    /// </summary>
+    [Fact]
+    public void ClosingOneCardDoesNotAbortAnotherCardsEntrance()
+    {
+        RunSta(() =>
+        {
+            using var animations = new AnimationSetting(true);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var first = new SD.Bitmap(600, 400);
+            using var second = new SD.Bitmap(600, 400);
+
+            var landed = new FastQuickActionsWindow(first, settings);
+            landed.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            var arriving = new FastQuickActionsWindow(second, settings);
+            arriving.Show();
+            PumpUntil(() => EnterMotionRunning(arriving), 2000);
+            Assert.True(EnterMotionRunning(arriving), "the second card never started its entrance");
+
+            landed.CloseWithoutMotion();
+            WF.Application.DoEvents();
+            Assert.True(EnterMotionRunning(arriving), "the restack killed the entrance instead of re-aiming it");
+
+            SD.Point onlySlot = QuickAccessOverlayLayout.Place(
+                WF.Screen.PrimaryScreen!.WorkingArea, arriving.Size, settings.Current.OverlayPosition, 0, arriving.DeviceDpi);
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(onlySlot, arriving.Location);
+
+            arriving.CloseWithoutMotion();
+            PumpUntil(() => Motion.Holders == 0, 3000);
+            landed.Dispose();
+            arriving.Dispose();
+        });
+    }
+
+    /// <summary>
+    /// A card fading out for the annotate hand-off is out of the stack the moment the
+    /// gesture starts, and stays Visible for the 140 ms of the fade. The restack must agree
+    /// with PositionFromSettings and StackedCards about that, or a close landing inside that
+    /// window reserves a slot for a card that is on its way off screen and leaves a gap.
+    /// </summary>
+    [Fact]
+    public void ARestackSkipsACardThatIsSteppingAside()
+    {
+        RunSta(() =>
+        {
+            using var animations = new AnimationSetting(true);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var one = new SD.Bitmap(600, 400);
+            using var two = new SD.Bitmap(600, 400);
+            using var three = new SD.Bitmap(600, 400);
+
+            var a = new FastQuickActionsWindow(one, settings);
+            a.Show();
+            var b = new FastQuickActionsWindow(two, settings);
+            b.Show();
+            var c = new FastQuickActionsWindow(three, settings);
+            c.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            b.StepAside();
+            WF.Application.DoEvents();
+            Assert.True(b.Visible, "the test needs B still inside its fade");
+
+            c.CloseWithoutMotion();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            SD.Point bottomSlot = QuickAccessOverlayLayout.Place(
+                WF.Screen.PrimaryScreen!.WorkingArea, a.Size, settings.Current.OverlayPosition, 0, a.DeviceDpi);
+            SD.Point aSlot = a.Location;
+
+            a.CloseWithoutMotion();
+            b.CloseWithoutMotion();
+            PumpUntil(() => Motion.Holders == 0, 3000);
+            a.Dispose(); b.Dispose(); c.Dispose();
+
+            Assert.Equal(bottomSlot, aSlot);
+        });
+    }
+
+    /// <summary>
+    /// With animations off Motion.Run applies the end state and calls onDone INLINE, before
+    /// the caller is ever handed a tween to store — so the handle field is set AFTER onDone
+    /// cleared it and stays non-null for the life of the card. The entrance carries a
+    /// separate flag for exactly this; the step-aside pair now does too, and ComeBack's
+    /// "already up, nothing to do" fast path reads the flag instead of the handle.
+    /// </summary>
+    [Fact]
+    public void AStepAsideCycleWithAnimationsOffLeavesNothingInFlight()
+    {
+        RunSta(() =>
+        {
+            using var animations = new AnimationSetting(false);
+            using var bitmap = new SD.Bitmap(800, 500);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var card = new FastQuickActionsWindow(bitmap, settings);
+            card.Show();
+            PumpUntil(() => card.IsHandleCreated, 2000);
+
+            double opacity = card.Opacity;
+            SD.Point placed = card.Location;
+
+            card.StepAside();
+            PumpUntil(() => !card.Visible, 2000);
+            Assert.False(card.Visible);
+
+            card.ComeBack();
+            PumpUntil(() => card.Visible, 2000);
+            Assert.True(card.Visible);
+            Assert.Equal(opacity, card.Opacity, 3);
+            Assert.Equal(placed, card.Location);
+            Assert.False(StepAsideRunning(card), "the card still thinks a fade is in flight");
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    private static bool StepAsideRunning(FastQuickActionsWindow overlay)
+        => (bool)typeof(FastQuickActionsWindow)
+            .GetField("_stepAsideRunning", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
 
     private static object? EnterMotion(FastQuickActionsWindow overlay)
         => typeof(FastQuickActionsWindow)
