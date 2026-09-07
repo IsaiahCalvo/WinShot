@@ -1,4 +1,4 @@
-using WinShot.History;
+﻿using WinShot.History;
 using Xunit;
 
 namespace WinShot.Tests;
@@ -9,18 +9,21 @@ namespace WinShot.Tests;
 /// </summary>
 public class HistoryEmptyStateTests
 {
+    /// <summary>The third argument is whether "New capture" is offered: the button runs a region
+    /// SCREENSHOT, so under the Videos, GIFs or Scrolling chip it would take a capture and hand
+    /// the user back the identical empty panel.</summary>
     [Theory]
-    [InlineData("all", "No captures yet")]
-    [InlineData("images", "No screenshots in history")]
-    [InlineData("scrolling", "No scrolling captures in history")]
-    [InlineData("video", "No videos in history")]
-    [InlineData("gif", "No GIFs in history")]
-    public void EmptyGrid_NamesTheFilterItIsEmptyUnder(string filter, string expected)
+    [InlineData("all", "No captures yet", true)]
+    [InlineData("images", "No screenshots in history", true)]
+    [InlineData("scrolling", "No scrolling captures in history", false)]
+    [InlineData("video", "No videos in history", false)]
+    [InlineData("gif", "No GIFs in history", false)]
+    public void EmptyGrid_NamesTheFilterItIsEmptyUnder(string filter, string expected, bool offersACapture)
     {
         HistoryEmptyState state = HistoryEmptyState.For(filter, historyEnabled: true, loadError: null);
 
         Assert.Equal(expected, state.Title);
-        Assert.True(state.ShowNewCapture);
+        Assert.Equal(offersACapture, state.ShowNewCapture);
         Assert.False(state.ShowRetry);
     }
 

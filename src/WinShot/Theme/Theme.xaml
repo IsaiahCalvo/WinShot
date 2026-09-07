@@ -199,6 +199,10 @@
     <Thickness x:Key="LabelGutterMargin">0,0,12,0</Thickness> <!-- Space3 between label and control -->
     <Thickness x:Key="ChipGutterMargin">0,0,8,0</Thickness>   <!-- Space2 between chips in a row -->
     <Thickness x:Key="ThumbInset">2</Thickness>               <!-- scrollbar thumb inside its 8px rail -->
+    <Thickness x:Key="CaptionGapMargin">0,4,0,0</Thickness>   <!-- Space1 between a glyph and its caption -->
+    <Thickness x:Key="LeadGutterMargin">8,0,0,0</Thickness>   <!-- Space2 before text that follows a glyph -->
+    <Thickness x:Key="MediaBarPadding">8,4</Thickness>        <!-- Space2 across, Space1 down: a bar over a thumbnail -->
+    <Thickness x:Key="ActionRowMargin">0,16,0,0</Thickness>   <!-- Space4 above a row of buttons -->
 
     <!-- Settings' two-column geometry. Everything under a labelled row starts at
          the control column: the label width plus one Space3 gutter. That sum was

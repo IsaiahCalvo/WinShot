@@ -121,7 +121,11 @@ public class HistoryRenameTests
         string suggested = HistoryRename.SuggestedName(path);
 
         Assert.NotEqual(string.Empty, suggested);
-        Assert.Null(HistoryRename.Resolve(path, suggested, static _ => false).Error);
+        HistoryRename.Result result = HistoryRename.Resolve(path, suggested, static _ => false);
+        Assert.Null(result.Error);
+        // ...and never on one that stacks the tag it exists to preserve: the default for
+        // "-scroll.png" used to be "-scroll", which Resolve turned into "-scroll-scroll.png".
+        Assert.DoesNotContain("-scroll-scroll", result.Path!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

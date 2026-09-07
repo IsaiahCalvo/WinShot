@@ -914,10 +914,14 @@ public partial class App : Application
     private void OpenDirectEditCapture(SD.Bitmap bmp, HistoryCaptureKind historyKind)
     {
         DirectEditCaptureTestHooks? hooks = DirectEditTestHooks;
+        // Read the tag NOW, on the caller's thread. The field is overwritten by the next
+        // QueueCaptureCommand and this write runs later on the thread pool, so a second hotkey
+        // press straight after a capture used to stamp capture B's "@app" onto capture A's file.
+        string? sourceApp = _captureSourceApp;
         Func<SD.Bitmap, Task> historyWork = hooks?.HistoryWork ?? (source =>
             Task.Run(() =>
             {
-                try { _history.Add(source, historyKind, _captureSourceApp); }
+                try { _history.Add(source, historyKind, sourceApp); }
                 catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
             }));
         Func<SD.Bitmap, Task>? autoCopyWork = _settings.Current.AutoCopyToClipboard
@@ -966,12 +970,13 @@ public partial class App : Application
             }
         }
 
+        string? sourceApp = _captureSourceApp;
         return Task.Run(() =>
         {
             try
             {
                 using var copy = CaptureService.CloneBitmap(bmp);
-                return _history.Add(copy, historyKind, _captureSourceApp);
+                return _history.Add(copy, historyKind, sourceApp);
             }
             catch (Exception ex)
             {
@@ -985,11 +990,12 @@ public partial class App : Application
         SD.Bitmap copy,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
     {
+        string? sourceApp = _captureSourceApp;
         return Task.Run(() =>
         {
             using (copy)
             {
-                try { return _history.Add(copy, historyKind, _captureSourceApp); }
+                try { return _history.Add(copy, historyKind, sourceApp); }
                 catch (Exception ex)
                 {
                     Log.Error("Failed to add capture to history", ex);
@@ -1135,12 +1141,13 @@ public partial class App : Application
     {
         try
         {
+            string? sourceApp = _captureSourceApp;
             string? historyPath = await Task.Run(() =>
             {
                 try
                 {
                     using var copy = CaptureService.CloneBitmap(bmp);
-                    return _history.Add(copy, historyKind, _captureSourceApp);
+                    return _history.Add(copy, historyKind, sourceApp);
                 }
                 catch (Exception ex)
                 {

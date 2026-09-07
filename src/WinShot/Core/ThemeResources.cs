@@ -87,6 +87,9 @@ public static class ThemeResources
     /// The preference is read once per process. Motion.Run re-reads it per tween, so the
     /// WinForms stack follows a mid-session toggle and the WPF stack needs a restart.
     /// </summary>
+    /// <summary>Theme.xaml's loop-period key, which the zeroing pass below leaves alone.</summary>
+    internal const string ShimmerDurationKey = "MotionShimmer";
+
     internal static void ApplyAnimationPreference(ResourceDictionary theme)
     {
         if (Motion.AnimationsEnabled())
@@ -117,7 +120,13 @@ public static class ThemeResources
                 // not dictionary keys, so nothing above walks them, and they kept animating
                 // with the setting off. A window is parsed long after OnStartup runs this, so
                 // its {StaticResource MotionQuick} picks up the zeroed value.
-                case Duration:
+                // ...except the shimmer loop period. Its surfaces gate themselves on
+                // Motion.AnimationsEnabled, read live rather than once at startup, so turning
+                // animation back on mid-session starts a RepeatBehavior="Forever" storyboard —
+                // and a zeroed Duration on a Forever storyboard is a spinning clock, not a
+                // still gradient. The two halves have to agree about when the preference is
+                // read; this is the half that can afford to leave the value alone.
+                case Duration when !ShimmerDurationKey.Equals(key):
                     theme[key] = new Duration(TimeSpan.Zero);
                     break;
             }

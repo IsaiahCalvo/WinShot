@@ -279,13 +279,19 @@ public class ThemedWindowTests
             var scoped = new HistoryService(settings, () => dir);
             var window = new HistoryWindow(scoped, settings);
             window.Show();
+            var list = (ListBox)window.FindName("ItemsList");
+            // Showing the window starts its own refresh; wait it out so the explicit reload
+            // below is the only one in flight and its task really is the one to await.
+            WaitForCondition(
+                () => list.Items.Count == 12 && list.Items.Cast<HistoryItem>().All(i => i.Thumbnail is not null),
+                "the twelve captures should be on screen with a decoded thumbnail each");
+
             const System.Reflection.BindingFlags NP =
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
             var reload = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
             WaitForTask(reload);
             reload.GetAwaiter().GetResult();
 
-            var list = (ListBox)window.FindName("ItemsList");
             Assert.Equal(12, list.Items.Count);
             Assert.All(list.Items.Cast<HistoryItem>(), item => Assert.NotNull(item.Thumbnail));
 
@@ -348,13 +354,18 @@ public class ThemedWindowTests
             var scoped = new HistoryService(settings, () => dir);
             var window = new HistoryWindow(scoped, settings);
             window.Show();
+            var list = (ListBox)window.FindName("ItemsList");
+            // Let the show-refresh finish; it would otherwise cancel the explicit reload below.
+            WaitForCondition(
+                () => list.Items.Count == 1 && ((HistoryItem)list.Items[0]!).Thumbnail is not null,
+                "the fixture capture should be on screen with a decoded thumbnail");
+
             const System.Reflection.BindingFlags NP =
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
             var reload = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
             WaitForTask(reload);
             reload.GetAwaiter().GetResult();
 
-            var list = (ListBox)window.FindName("ItemsList");
             Assert.Single(list.Items);
             var before = (System.Windows.Media.Imaging.BitmapSource)((HistoryItem)list.Items[0]!).Thumbnail!;
             Assert.True(before.PixelWidth > before.PixelHeight, "the fixture should start landscape");
@@ -1107,6 +1118,24 @@ public class ThemedWindowTests
             PumpDispatcherOnce();
             Thread.Sleep(10);
         }
+    }
+
+    /// <summary>
+    /// Pumps until <paramref name="settled"/> holds. Showing a HistoryWindow kicks off its own
+    /// refresh (prune, then reload) and that reload cancels any other one in flight — which is
+    /// right for the app and murder for a test that awaits its OWN ReloadAsync task and finds it
+    /// returned early because the show-refresh took ownership. Let the window settle first.
+    /// </summary>
+    private static void WaitForCondition(Func<bool> settled, string because)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!settled() && DateTime.UtcNow < deadline)
+        {
+            PumpDispatcherOnce();
+            Thread.Sleep(10);
+        }
+
+        Assert.True(settled(), because);
     }
 
     private static void WaitForTask(Task task)

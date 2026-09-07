@@ -46,10 +46,10 @@ internal readonly record struct HistoryEmptyState(
 
         return filter switch
         {
-            "images" => Filtered("No screenshots in history"),
-            "scrolling" => Filtered("No scrolling captures in history"),
-            "video" => Filtered("No videos in history"),
-            "gif" => Filtered("No GIFs in history"),
+            "images" => Filtered("No screenshots in history", canTakeOne: true),
+            "scrolling" => Filtered("No scrolling captures in history", canTakeOne: false),
+            "video" => Filtered("No videos in history", canTakeOne: false),
+            "gif" => Filtered("No GIFs in history", canTakeOne: false),
             _ => new HistoryEmptyState(
                 PictureGlyph,
                 "No captures yet",
@@ -59,6 +59,16 @@ internal readonly record struct HistoryEmptyState(
         };
     }
 
-    private static HistoryEmptyState Filtered(string title) =>
-        new(PictureGlyph, title, "Pick another filter, or take one now.", ShowNewCapture: true, ShowRetry: false);
+    /// <summary>
+    /// <paramref name="canTakeOne"/> is whether the New capture button — which runs a region
+    /// screenshot — can actually fill this filter. It cannot for Videos, GIFs or Scrolling: the
+    /// button ran a capture and History came back to the identical empty panel, so those get the
+    /// sentence without the promise.
+    /// </summary>
+    private static HistoryEmptyState Filtered(string title, bool canTakeOne) =>
+        new(PictureGlyph,
+            title,
+            canTakeOne ? "Pick another filter, or take one now." : "Pick another filter to see the rest of your captures.",
+            ShowNewCapture: canTakeOne,
+            ShowRetry: false);
 }

@@ -81,8 +81,13 @@ internal static class HistoryRename
 
         // A hand-placed file whose whole stem is a tag ("@chrome.png", "-scroll.png") trims away
         // to nothing, and an empty default is one Resolve rejects the moment it is accepted.
-        // Fall back to the stem with the characters Resolve bans taken out of it.
+        // Fall back to the stem with the characters Resolve bans taken out of it — and with a
+        // LEADING classification tag stripped too: handing back "-scroll" for "-scroll.png" let
+        // Resolve re-append the tag it exists to preserve, so accepting the offered name renamed
+        // the file to "-scroll-scroll.png".
         string fallback = stem.Replace("@", string.Empty).Trim().TrimEnd('.');
+        if (fallback.StartsWith(ScrollTag, StringComparison.OrdinalIgnoreCase))
+            fallback = fallback[ScrollTag.Length..].Trim().TrimEnd('.');
         return fallback.Length > 0 ? fallback : "Capture";
     }
 
@@ -96,6 +101,9 @@ internal static class HistoryRename
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
 
+    /// <summary>The suffix <see cref="HistoryService"/> stamps on a scrolling capture.</summary>
+    private const string ScrollTag = "-scroll";
+
     /// <summary>The classification and source-app tags at the end of a stem, in that order.</summary>
     private static string TagsOf(string stem)
     {
@@ -107,8 +115,8 @@ internal static class HistoryRename
             stem = stem[..at];
         }
 
-        return stem.EndsWith("-scroll", StringComparison.OrdinalIgnoreCase)
-            ? "-scroll" + tags
+        return stem.EndsWith(ScrollTag, StringComparison.OrdinalIgnoreCase)
+            ? ScrollTag + tags
             : tags;
     }
 }

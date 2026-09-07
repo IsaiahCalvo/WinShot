@@ -79,7 +79,7 @@
                     <TextBlock x:Name="SelectionCountText" Text="0 selected" Foreground="{StaticResource TextPrimaryBrush}"
                                FontSize="{StaticResource TextBodyLg}" VerticalAlignment="Center" Margin="20,0,16,0"/>
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
-                    <Button x:Name="AllSelectionButton" Style="{StaticResource PillButtonSecondary}" Click="OnToggleSelectAll" AutomationProperties.Name="Select or clear all visible history items">
+                    <Button x:Name="AllSelectionButton" Style="{StaticResource PillButtonSecondary}" Click="OnToggleSelectAll" AutomationProperties.Name="Select all">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock x:Name="SelectAllText" Text="Select all"/></StackPanel>
                     </Button>
                     <Button x:Name="CopyToButton" Style="{StaticResource PillButtonSecondary}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
@@ -199,10 +199,17 @@
                                             </Grid>
                                             <!-- Placeholder while the thumbnail decodes. The highlight sweeping
                                                  across it says "loading" without a spinner; it is bound off when
-                                                 the user has animation turned off system-wide. -->
+                                                 the user has animation turned off system-wide, and off again once
+                                                 the decode has been tried and failed — a sweep with no terminating
+                                                 condition promises a picture that is never coming, so the tile
+                                                 settles on the warning glyph and says so instead. -->
                                             <Border Background="{StaticResource SurfaceBrush}" Opacity="0.72" Visibility="{Binding MissingThumbnailVisibility}">
                                                 <Grid ClipToBounds="True">
-                                                    <TextBlock Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphIllustration}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding PlaceholderGlyph}" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphIllustration}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
+                                                        <TextBlock Text="Can't read this picture" Visibility="{Binding UnreadableVisibility}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
+                                                                   HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="{StaticResource CaptionGapMargin}"/>
+                                                    </StackPanel>
                                                     <Rectangle x:Name="Shimmer" Width="110" HorizontalAlignment="Left" Visibility="{Binding ShimmerVisibility}">
                                                         <Rectangle.Fill>
                                                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -223,11 +230,11 @@
                                             <!-- Video tiles get a full-width bar instead of a corner glyph: the
                                                  length is what tells two recordings apart, and a bare camcorder
                                                  mark does not. -->
-                                            <Border x:Name="MediaBar" VerticalAlignment="Bottom" Padding="8,4"
+                                            <Border x:Name="MediaBar" VerticalAlignment="Bottom" Padding="{StaticResource MediaBarPadding}"
                                                     Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding MediaBarVisibility}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" Foreground="White" FontSize="{StaticResource GlyphBadge}" VerticalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding MediaBarText}" Foreground="White" FontSize="{StaticResource TextCaption}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding MediaBarText}" Foreground="White" FontSize="{StaticResource TextCaption}" Margin="{StaticResource LeadGutterMargin}" VerticalAlignment="Center"/>
                                                 </StackPanel>
                                             </Border>
                                             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="7" Padding="7,4" CornerRadius="4" Background="{StaticResource BadgeScrimBrush}" Visibility="{Binding GifBadgeVisibility}">
@@ -249,7 +256,12 @@
 
                                         <!-- Bottom-anchored gradient scrim holding the action row: hover adds
                                              controls without blurring or blacking out the preview itself. -->
-                                        <Border x:Name="OverlayActions" VerticalAlignment="Bottom" Height="56" Visibility="Collapsed">
+                                        <!-- Opacity, not Visibility, is what the hover state drives: two separate triggers
+                                             (mouse and keyboard) each animating the same property fought each
+                                             other, so hovering a tile that already had focus restarted the fade
+                                             and the row blinked. Base is hidden and untouchable; the single
+                                             trigger below fades it both ways. -->
+                                        <Border x:Name="OverlayActions" VerticalAlignment="Bottom" Height="56" Opacity="0" IsHitTestVisible="True">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                                                     <GradientStop Color="#00000000" Offset="0"/>
@@ -336,39 +348,43 @@
                                     </BeginStoryboard>
                                 </DataTrigger.EnterActions>
                             </DataTrigger>
+                            <!-- Written as the HIDDEN state, because "hovered OR focused" is not a
+                                 condition WPF can express but "neither" is - and one trigger owning the
+                                 property is what stops the two from restarting each other's fade. It is
+                                 active on arrival, so the fade to 0 runs from a base of 0 and nothing
+                                 flashes; leaving it fades back up; re-entering fades back down. Entrance
+                                 and exit are the same 140 ms, which the Visibility setter could not do
+                                 (WPF collapses the element before an exit animation can run). Hit-testing
+                                 goes with it so the invisible scrim never eats a click. -->
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
-                                    <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True"/>
-                                    <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="False"/>
+                                    <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="False"/>
+                                    <Condition Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="False"/>
                                 </MultiDataTrigger.Conditions>
-                                <Setter TargetName="OverlayActions" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="OverlayActions" Property="IsHitTestVisible" Value="False"/>
                                 <MultiDataTrigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="{StaticResource MotionQuick}">
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource MotionQuick}">
                                                 <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
                                             </DoubleAnimation>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </MultiDataTrigger.EnterActions>
-                            </MultiDataTrigger>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True"/>
-                                    <Condition Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="False"/>
-                                </MultiDataTrigger.Conditions>
-                                <Setter TargetName="OverlayActions" Property="Visibility" Value="Visible"/>
-                                <MultiDataTrigger.EnterActions>
+                                <MultiDataTrigger.ExitActions>
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="{StaticResource MotionQuick}">
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource MotionQuick}">
                                                 <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
                                             </DoubleAnimation>
                                         </Storyboard>
                                     </BeginStoryboard>
-                                </MultiDataTrigger.EnterActions>
+                                </MultiDataTrigger.ExitActions>
                             </MultiDataTrigger>
+                            <!-- Selection mode: check rings on, action row away outright. Visibility is
+                                 independent of the opacity the trigger above holds, so the two never argue. -->
                             <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" Value="True">
+                                <Setter TargetName="OverlayActions" Property="Visibility" Value="Collapsed"/>
                                 <Setter TargetName="SelectionCheck" Property="Visibility" Value="Visible"/>
                             </DataTrigger>
                             <MultiDataTrigger>
@@ -390,9 +406,9 @@
                  empty grid is usually "take one now". -->
             <StackPanel x:Name="EmptyState" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                 <TextBlock x:Name="EmptyStateGlyph" Text="&#xE91B;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource GlyphHero}" Foreground="{StaticResource TextDisabledBrush}" HorizontalAlignment="Center"/>
-                <TextBlock x:Name="EmptyStateTitle" Text="No captures yet" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock x:Name="EmptyStateTitle" Text="No captures yet" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextTitle}" Margin="0,12,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
                 <TextBlock x:Name="EmptyStateBody" Text="Screenshots and recordings you take will show up here." Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextBody}" Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="{StaticResource ActionRowMargin}">
                     <Button x:Name="NewCaptureButton" Content="New capture" Style="{StaticResource PillButtonPrimary}"
                             Click="OnNewCapture" Visibility="Collapsed"
                             AutomationProperties.Name="Take a new region capture"/>

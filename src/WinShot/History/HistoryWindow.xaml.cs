@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -477,8 +478,53 @@ public partial class HistoryWindow : Window
         base.OnPreviewKeyDown(e);
     }
 
+    /// <summary>
+    /// Works out which <see cref="HistoryItem"/>s the next page is built from, given the files
+    /// on disk and the items already loaded. A file that is still there keeps the SAME item, and
+    /// so keeps its decoded thumbnail and its card: handing <c>ReplaceAll</c> brand-new instances
+    /// made every visible tile a removal plus an insertion, so one capture landing while the
+    /// window was open blanked the whole grid back to shimmer and faded all of it in again.
+    ///
+    /// ...but only while the bytes behind that path are still the ones the item was built from.
+    /// A rotate rewrites the file under its own name, and reusing the item there kept the
+    /// thumbnail decoded from the old pixels, so the rotate was invisible until the window was
+    /// closed and reopened.
+    ///
+    /// Pure and static because it is expensive and must not run on the UI thread: it is one
+    /// <see cref="FileInfo"/> stat plus four string formats per new file, and a second stat per
+    /// kept one. Inside the dispatcher that is ~400 ms of frozen window for a 1,000-file library
+    /// and ~5 s at 5,000, on the very refresh path the incremental-reload work exists to smooth.
+    /// </summary>
+    internal static (List<HistoryItem> Items, HashSet<HistoryItem> Live) DiffItems(
+        IReadOnlyList<string> files,
+        IReadOnlyList<HistoryItem> previousItems)
+    {
+        var kept = new Dictionary<string, HistoryItem>(StringComparer.OrdinalIgnoreCase);
+        foreach (HistoryItem previous in previousItems)
+            kept[previous.FilePath] = previous;
+
+        var newItems = new List<HistoryItem>(files.Count);
+        var live = new HashSet<HistoryItem>();
+        foreach (string file in files)
+        {
+            HistoryItem item = kept.TryGetValue(file, out HistoryItem? existing) &&
+                               (existing.Thumbnail is null || existing.MatchesFileOnDisk())
+                ? existing
+                : new HistoryItem(file);
+            newItems.Add(item);
+            live.Add(item);
+        }
+
+        return (newItems, live);
+    }
+
     private async Task ReloadAsync()
     {
+        // Rename and Rotate are async void and reload after their awaits, so a reload can start
+        // after the window has gone. Without this it refills the paging state, regenerates
+        // containers for a closed window and decodes a page of thumbnails nothing will show.
+        if (_closed) return;
+
         _loadCts?.Cancel();
         var cts = _loadCts = new CancellationTokenSource();
         try
@@ -487,37 +533,22 @@ public partial class HistoryWindow : Window
             if (cts.IsCancellationRequested) return;
 
             cts.Token.ThrowIfCancellationRequested();
+            // Snapshot on the UI thread — two list copies, no file I/O — then leave it. The
+            // diff itself stats every file and is the one part of a reload that is genuinely
+            // expensive; see DiffItems.
+            (string? selectedPath, List<HistoryItem> previousItems) = await Dispatcher.InvokeAsync(
+                () => (SelectedItem()?.FilePath, _paging.AllItems.ToList()));
+            cts.Token.ThrowIfCancellationRequested();
+
+            (List<HistoryItem> newItems, HashSet<HistoryItem> live) =
+                await Task.Run(() => DiffItems(files, previousItems), cts.Token).ConfigureAwait(false);
+
             IReadOnlyList<HistoryItem> visibleItems = Array.Empty<HistoryItem>();
             await Dispatcher.InvokeAsync(() =>
             {
                 cts.Token.ThrowIfCancellationRequested();
+                if (_closed) return;
                 _loadError = null;
-                // Remember selection by path so a live refresh doesn't yank it away.
-                string? selectedPath = SelectedItem()?.FilePath;
-                var previousItems = _paging.AllItems.ToList();
-                // Diff by path: a file that is still there keeps the SAME HistoryItem, and so
-                // keeps its decoded thumbnail and its card. Handing ReplaceAll brand-new
-                // instances made every visible tile a removal plus an insertion, so one capture
-                // landing while the window is open blanked the whole grid back to shimmer and
-                // faded all of it in again. Now the new file is the only card that enters.
-                var kept = new Dictionary<string, HistoryItem>(StringComparer.OrdinalIgnoreCase);
-                foreach (HistoryItem previous in previousItems)
-                    kept[previous.FilePath] = previous;
-                var newItems = new List<HistoryItem>(files.Count);
-                var live = new HashSet<HistoryItem>();
-                foreach (string file in files)
-                {
-                    // ...but only while the bytes behind that path are still the ones it was
-                    // built from. A rotate rewrites the file under its own name, and reusing the
-                    // item there kept its already-decoded thumbnail — so the rotate was invisible
-                    // until the window was closed and reopened.
-                    HistoryItem item = kept.TryGetValue(file, out HistoryItem? existing) &&
-                                       (existing.Thumbnail is null || existing.MatchesFileOnDisk())
-                        ? existing
-                        : new HistoryItem(file);
-                    newItems.Add(item);
-                    live.Add(item);
-                }
 
                 HistoryItem? restored = _paging.ReplaceAll(
                     newItems,
@@ -568,6 +599,21 @@ public partial class HistoryWindow : Window
             Log.Error("Failed to load history", ex);
             await Dispatcher.InvokeAsync(() =>
             {
+                if (_closed) return;
+                // A refresh that fails over a page that is already up must not raise the panel:
+                // it is centred over the still-visible cards and takes the clicks aimed at them,
+                // so the user reads "can't read your folder" across a grid full of captures.
+                // Keep the last good page and say it in a toast; the panel is for a grid that
+                // really is empty.
+                if (_items.Count > 0)
+                {
+                    App.Toast(
+                        "Can't read your history folder",
+                        FriendlyError.For(ex),
+                        severity: ToastSeverity.Error);
+                    return;
+                }
+
                 _loadError = FriendlyError.For(ex);
                 UpdateEmptyState();
             });
@@ -669,6 +715,22 @@ public partial class HistoryWindow : Window
     internal static readonly int ThumbnailDecodeParallelism =
         Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
 
+    /// <summary>The tile's thumbnail frame, in DIPs (HistoryWindow.xaml's card width).</summary>
+    private const double TileThumbnailWidth = 260;
+
+    /// <summary>
+    /// How wide a tile thumbnail decodes, in real pixels. The frame is 260 DIP, so a fixed 180 px
+    /// decode was a 1.44× upscale at 100 %, 2.17× at 150 % and 2.89× at 200 % — a soft grid on
+    /// exactly the frame the shimmer and the fade-up put the user's eye on. The drag ghost already
+    /// sizes its decode this way; this is the call site that was left on the default.
+    ///
+    /// Capped at 2× because a page is 200 tiles and every one of them is a live bitmap: 260 DIP
+    /// at 200 % is already ~136 MB of thumbnails, and a 300 % monitor would take it past 300.
+    /// Beyond that cap the grid is very slightly soft, which is the cheaper of the two costs.
+    /// </summary>
+    internal static int TileThumbnailPixelWidth(double dpiScale) =>
+        (int)Math.Round(TileThumbnailWidth * Math.Clamp(dpiScale, 1d, 2d));
+
     private static BitmapImage? TryLoadThumbnail(string path, int decodePixelWidth = 180)
     {
         try
@@ -694,30 +756,45 @@ public partial class HistoryWindow : Window
         IEnumerable<HistoryItem> items,
         CancellationToken cancellationToken)
     {
+        // ThumbnailTried, not just "no thumbnail yet": a file no codec will open (a truncated PNG,
+        // a .webp on a machine without the WebP codec) would otherwise sit in this set forever —
+        // shimmering "loading" for the life of the window, and re-decoding on every reload, filter
+        // change and delete. The video pass has had the same flag since it hit the same wall.
         var pending = items
-            .Where(item => (item.IsImage || item.IsGif) && item.Thumbnail is null)
+            .Where(item => (item.IsImage || item.IsGif) && item.Thumbnail is null && !item.ThumbnailTried)
             .ToList();
-
-        // A page is 200 files; decoding them one after another is why the grid used to fill in
-        // visibly, top to bottom, over a static placeholder. They decode together instead, with
-        // a cap so a big page cannot swamp the thread pool the rest of the app shares.
-        using var decoding = new SemaphoreSlim(ThumbnailDecodeParallelism);
-        await Task.WhenAll(pending.Select(async item =>
+        if (pending.Count > 0)
         {
-            await decoding.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            int decodeWidth = await Dispatcher.InvokeAsync(
+                () => TileThumbnailPixelWidth(VisualTreeHelper.GetDpi(this).DpiScaleX));
+
+            // A page is 200 files; decoding them one after another is why the grid used to fill in
+            // visibly, top to bottom, over a static placeholder. They decode together instead, with
+            // a cap so a big page cannot swamp the thread pool the rest of the app shares.
+            using var decoding = new SemaphoreSlim(ThumbnailDecodeParallelism);
+            await Task.WhenAll(pending.Select(async item =>
             {
-                BitmapImage? thumbnail = await Task.Run(
-                    () => TryLoadThumbnail(item.FilePath),
-                    cancellationToken).ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-                await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);
-            }
-            finally
-            {
-                decoding.Release();
-            }
-        })).ConfigureAwait(false);
+                await decoding.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    BitmapImage? thumbnail = await Task.Run(
+                        () => TryLoadThumbnail(item.FilePath, decodeWidth),
+                        cancellationToken).ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        // Set first: the flag is what collapses the shimmer and raises the
+                        // "can't read this" mark when the decode came back with nothing.
+                        item.ThumbnailTried = true;
+                        item.Thumbnail = thumbnail;
+                    });
+                }
+                finally
+                {
+                    decoding.Release();
+                }
+            })).ConfigureAwait(false);
+        }
 
         await LoadVideoThumbnailsAsync(items, cancellationToken).ConfigureAwait(false);
         await LoadSourceAppIconsAsync(items, cancellationToken).ConfigureAwait(false);
@@ -1126,6 +1203,10 @@ public partial class HistoryWindow : Window
             : 0;
         SelectionCountText.Text = $"{count:N0} selected";
         SelectAllText.Text = EverythingSelected ? "Clear selection" : "Select all";
+        // An explicit AutomationProperties.Name overrides the content, so a fixed one made the
+        // toggle invisible to a screen reader — the same string in both halves of the one button
+        // this track merged the two into. SortDirectionButton keeps its name in step the same way.
+        AutomationProperties.SetName(AllSelectionButton, SelectAllText.Text);
         SelectionSummaryText.Text = count == 0 ? string.Empty : $"{count:N0} selected    {HistoryItem.FormatFileSize(bytes)}";
         bool hasSelection = count > 0;
         CopyToButton.IsEnabled = hasSelection;
@@ -1548,18 +1629,31 @@ public partial class HistoryWindow : Window
 
         try
         {
-            await Task.Run(() =>
+            // Write to temp and swap: a half-written history file is worse than a failed
+            // rotate, and staging inside the folder would flash up as a card of its own.
+            string staging = Path.Combine(
+                Path.GetTempPath(),
+                $"winshot-rotate-{Guid.NewGuid():N}{Path.GetExtension(item.FilePath)}");
+            try
             {
-                using SD.Bitmap image = HistoryImageLoader.LoadDetachedBitmap(item.FilePath);
-                image.RotateFlip(transform);
-                // Write to temp and swap: a half-written history file is worse than a failed
-                // rotate, and staging inside the folder would flash up as a card of its own.
-                string staging = Path.Combine(
-                    Path.GetTempPath(),
-                    $"winshot-rotate-{Guid.NewGuid():N}{Path.GetExtension(item.FilePath)}");
-                ImageSaver.Save(image, staging);
-                File.Move(staging, item.FilePath, overwrite: true);
-            });
+                await Task.Run(() =>
+                {
+                    using (SD.Bitmap image = HistoryImageLoader.LoadDetachedBitmap(item.FilePath))
+                    {
+                        image.RotateFlip(transform);
+                        ImageSaver.Save(image, staging);
+                    }
+
+                    MoveOverBusyFile(staging, item.FilePath);
+                });
+            }
+            finally
+            {
+                // The swap either consumed the staging file or threw with it still on disk; a
+                // failed rotate must not leave a copy of the capture in %TEMP% for good.
+                try { if (File.Exists(staging)) File.Delete(staging); }
+                catch (Exception ex) { Log.Error($"Failed to clean up rotate staging file {staging}", ex); }
+            }
         }
         catch (Exception ex)
         {
@@ -1573,6 +1667,32 @@ public partial class HistoryWindow : Window
         // of the tile at 180 px that the user cannot tell it ran.
         App.Toast("Rotated", $"Saved to {item.FileName}.", severity: ToastSeverity.Success);
         await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Replaces <paramref name="destination"/> with <paramref name="staging"/>, waiting out a
+    /// reader that has the destination open. History decodes up to
+    /// <see cref="ThumbnailDecodeParallelism"/> thumbnails at once and a decode in flight holds
+    /// its file, so a rotate fired right after a reload used to fail outright with "access is
+    /// denied" — the card's rotate has <c>WaitForRenderIdleAsync</c> for the same reason, and the
+    /// grid had no equivalent. A decode is milliseconds; anything still holding the file after
+    /// the last try is a real conflict and the exception is the user's answer.
+    /// </summary>
+    private static void MoveOverBusyFile(string staging, string destination)
+    {
+        const int attempts = 6;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(staging, destination, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (attempt < attempts && ex is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(40);
+            }
+        }
     }
 
     private void OnRename(object sender, RoutedEventArgs e)
@@ -1738,8 +1858,17 @@ public partial class HistoryWindow : Window
 
     private static void OpenItem(HistoryItem item)
     {
+        // Enter on a recording with no file association produced nothing at all — no window, no
+        // message — while every other action on this window says both outcomes.
         if (!File.Exists(item.FilePath))
+        {
+            App.Toast(
+                "Couldn't open the capture",
+                "That file is no longer in your history folder.",
+                severity: ToastSeverity.Error);
             return;
+        }
+
         try
         {
             Process.Start(new ProcessStartInfo(item.FilePath) { UseShellExecute = true });
@@ -1747,6 +1876,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to open {item.FilePath}", ex);
+            App.Toast("Couldn't open the capture", FriendlyError.For(ex), severity: ToastSeverity.Error);
         }
     }
 
@@ -1822,6 +1952,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
     private static readonly string[] VideoExtensions = { ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".webm" };
 
     private ImageSource? _thumbnail;
+    private bool _thumbnailTried;
     private ImageSource? _sourceAppIcon;
     private TimeSpan _duration;
     private readonly DateTime _writtenUtc;
@@ -1919,6 +2050,23 @@ public sealed class HistoryItem : INotifyPropertyChanged
     /// reload, filter change and delete — ahead of the app-icon pass, which waits behind it.</summary>
     internal bool VideoFrameTried { get; set; }
 
+    /// <summary>The still-image twin of <see cref="VideoFrameTried"/>: set once the decode has
+    /// been attempted, successfully or not. It keeps a file no codec will open out of the pending
+    /// set, and it is what turns the placeholder from a shimmer that promises a picture into a
+    /// static mark that says one is not coming.</summary>
+    internal bool ThumbnailTried
+    {
+        get => _thumbnailTried;
+        set
+        {
+            if (_thumbnailTried == value) return;
+            _thumbnailTried = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShimmerVisibility)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UnreadableVisibility)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaceholderGlyph)));
+        }
+    }
+
     private static string BuildCaption(DateTime captured, long bytes)
     {
         string when;
@@ -2003,11 +2151,24 @@ public sealed class HistoryItem : INotifyPropertyChanged
 
     /// <summary>The sweeping highlight over the placeholder. Off when the user has turned
     /// animation off system-wide, which leaves the plain placeholder rather than a still
-    /// gradient sitting in the corner of every tile.</summary>
+    /// gradient sitting in the corner of every tile — and off once the decode has been tried
+    /// and failed, because a shimmer is a promise that a picture is coming.</summary>
     public Visibility ShimmerVisibility =>
-        MissingThumbnailVisibility == Visibility.Visible && Motion.AnimationsEnabled()
+        MissingThumbnailVisibility == Visibility.Visible && !ThumbnailTried && Motion.AnimationsEnabled()
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+    /// <summary>The decode finished and came back with nothing: the placeholder settles into a
+    /// static "can't read this" mark instead of sweeping forever over a file that will never
+    /// load. Same shape as the "MP4" card a video with no readable frame keeps.</summary>
+    public Visibility UnreadableVisibility =>
+        MissingThumbnailVisibility == Visibility.Visible && ThumbnailTried
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    /// <summary>Segoe MDL2 picture while the tile is still loading, warning once it has given
+    /// up — the same two glyphs the empty state uses for the same two meanings.</summary>
+    public string PlaceholderGlyph => ThumbnailTried ? "" : "";
     public Visibility ScrollingVisibility => IsScrollingCapture ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Bar across the bottom of a video tile: camcorder glyph, clip length, file size.</summary>
@@ -2053,6 +2214,8 @@ public sealed class HistoryItem : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MissingThumbnailVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShimmerVisibility)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UnreadableVisibility)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaceholderGlyph)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ThumbnailVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFallbackVisibility)));
         }

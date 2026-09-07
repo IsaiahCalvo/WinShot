@@ -362,7 +362,10 @@ public class FoundationsBreakerTests
             if (theme[key] is Storyboard sb)
                 foreach (Timeline child in sb.Children)
                     Assert.Equal(TimeSpan.Zero, child.Duration.TimeSpan);
-            if (theme[key] is Duration d)
+            // MotionShimmer is deliberately left alone: it is a loop period on a Forever
+            // storyboard whose surfaces gate themselves on the preference read live, and a
+            // zeroed period there spins rather than stops. See ThemeResources.
+            if (theme[key] is Duration d && !ThemeResources.ShimmerDurationKey.Equals(key))
                 Assert.Equal(TimeSpan.Zero, d.TimeSpan);
         }
         });

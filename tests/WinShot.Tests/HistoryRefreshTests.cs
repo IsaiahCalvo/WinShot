@@ -1,9 +1,11 @@
 using System.Drawing.Imaging;
 using System.IO;
+using System.Windows;
 using WinShot.Core;
 using WinShot.History;
 using Xunit;
 using SD = System.Drawing;
+using SWMI = System.Windows.Media.Imaging;
 
 namespace WinShot.Tests;
 
@@ -78,6 +80,96 @@ public class HistoryRefreshTests
         item.VideoFrameTried = true;
         Assert.True(item.VideoFrameTried);
         Assert.Null(item.Thumbnail);
+    }
+
+    /// <summary>A still image whose decode failed is tried once too, and says so on the tile:
+    /// the shimmer is a promise that a picture is coming, and it must not outlive the attempt.</summary>
+    [Fact]
+    public void AThumbnailThatFailedToDecodeStopsShimmeringAndSaysSo()
+    {
+        var item = new HistoryItem(@"C:\sanitized-history\20260803-120000-000.png");
+
+        Assert.False(item.ThumbnailTried);
+        Assert.Equal(Visibility.Visible, item.MissingThumbnailVisibility);
+        Assert.Equal(Visibility.Collapsed, item.UnreadableVisibility);
+
+        item.ThumbnailTried = true;
+
+        // The placeholder stays (there is still no picture) but the sweep stops and the tile
+        // swaps the "loading" glyph for the warning one.
+        Assert.Equal(Visibility.Visible, item.MissingThumbnailVisibility);
+        Assert.Equal(Visibility.Collapsed, item.ShimmerVisibility);
+        Assert.Equal(Visibility.Visible, item.UnreadableVisibility);
+        Assert.Equal("\uE7BA", item.PlaceholderGlyph);
+    }
+
+    /// <summary>And a decode that worked shows no failure mark, tried or not.</summary>
+    [Fact]
+    public void AThumbnailThatDecodedShowsNoPlaceholderAtAll()
+    {
+        string dir = TempDir();
+        try
+        {
+            var item = new HistoryItem(WritePng(dir, 32, 32))
+            {
+                ThumbnailTried = true,
+                Thumbnail = new SWMI.BitmapImage(new Uri(WritePng(dir, 32, 32))),
+            };
+
+            Assert.Equal(Visibility.Collapsed, item.MissingThumbnailVisibility);
+            Assert.Equal(Visibility.Collapsed, item.ShimmerVisibility);
+            Assert.Equal(Visibility.Collapsed, item.UnreadableVisibility);
+        }
+        finally { Cleanup(dir); }
+    }
+
+    /// <summary>
+    /// The reload diff: a file whose bytes are unchanged keeps its item (and its thumbnail),
+    /// one that was rewritten under the same name is rebuilt, and one that went away is not
+    /// live. This is the loop that used to run inside Dispatcher.InvokeAsync and freeze the
+    /// window for the length of a page — it is pure and static now so it can run off-thread.
+    /// </summary>
+    [Fact]
+    public void ADiffKeepsUnchangedItemsAndRebuildsRewrittenOnes()
+    {
+        string dir = TempDir();
+        try
+        {
+            string kept = WritePng(dir, 40, 40);
+            string rewritten = Path.Combine(dir, "20260803-120001-000.png");
+            File.Copy(kept, rewritten);
+            string gone = Path.Combine(dir, "20260803-120002-000.png");
+            File.Copy(kept, gone);
+
+            var previous = new List<HistoryItem>
+            {
+                new(kept) { Thumbnail = new SWMI.BitmapImage(new Uri(kept)) },
+                new(rewritten) { Thumbnail = new SWMI.BitmapImage(new Uri(kept)) },
+                new(gone) { Thumbnail = new SWMI.BitmapImage(new Uri(kept)) },
+            };
+
+            using (var image = HistoryImageLoader.LoadDetachedBitmap(rewritten))
+            {
+                image.RotateFlip(SD.RotateFlipType.Rotate90FlipNone);
+                string staging = Path.Combine(Path.GetTempPath(), $"winshot-test-{Guid.NewGuid():N}.png");
+                ImageSaver.Save(image, staging);
+                File.Move(staging, rewritten, overwrite: true);
+            }
+
+            File.Delete(gone);
+
+            (List<HistoryItem> items, HashSet<HistoryItem> live) =
+                HistoryWindow.DiffItems(new[] { kept, rewritten }, previous);
+
+            Assert.Equal(2, items.Count);
+            Assert.Same(previous[0], items[0]);
+            Assert.NotSame(previous[1], items[1]);
+            Assert.Null(items[1].Thumbnail);
+            Assert.Contains(previous[0], live);
+            Assert.DoesNotContain(previous[1], live);
+            Assert.DoesNotContain(previous[2], live);
+        }
+        finally { Cleanup(dir); }
     }
 
     private static string TempDir()

@@ -261,6 +261,21 @@ public class HistoryAcceptanceTests
     public void DragGhost_IsSkippedWhenTheTileHasNoThumbnailYet() =>
         Assert.Null(HistoryWindow.DragThumbnail(null));
 
+    /// <summary>
+    /// The tile frame is 260 DIP, so a fixed 180 px decode was an upscale at every scale the app
+    /// runs at. It follows the monitor now — capped at 2x, because a page is 200 live bitmaps and
+    /// a 300 % monitor would otherwise put the grid past 300 MB of thumbnails.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0, 260)]
+    [InlineData(1.25, 325)]
+    [InlineData(1.5, 390)]
+    [InlineData(2.0, 520)]
+    [InlineData(3.0, 520)]   // capped
+    [InlineData(0, 260)]     // an unreadable scale falls back to 1.0 rather than collapsing
+    public void TileThumbnail_DecodesForTheMonitorItIsShownOn(double dpiScale, int expectedPixels) =>
+        Assert.Equal(expectedPixels, HistoryWindow.TileThumbnailPixelWidth(dpiScale));
+
     /// <summary>DragPreview divides the ghost's pixel size by the DPI scale to get its logical
     /// size, so the cap has to be in real pixels: 200 logical px on screen at every scale.</summary>
     [Theory]
