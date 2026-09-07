@@ -18,9 +18,15 @@ public sealed class FastQuickActionsWindow : WF.Form
     private const int CsDropShadow = 0x00020000;
     private const int WmNclbuttondown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
-    // Long enough to read three words, short enough not to be in the way.
+    // Long enough to read three words, short enough not to be in the way. It is the floor,
+    // not the whole story: StatusHoldMs stretches it for the longer lines the failure paths
+    // now put here (see FlashStatus).
     private const int FlashHoldMs = 1300;
     private const int FlashFadeMs = 420;
+    /// <summary>Ceiling on the stretched hold — past this the card is in the way, not helpful.</summary>
+    private const int FlashHoldMaxMs = 5200;
+    /// <summary>~200 wpm, the usual reading estimate, expressed per word.</summary>
+    private const int FlashHoldPerWordMs = 300;
     /// <summary>Pointer travel that counts as reaching for the card rather than jitter.</summary>
     private const int FlashDismissSlop = 3;
 
@@ -52,6 +58,9 @@ public sealed class FastQuickActionsWindow : WF.Form
     private SD.Rectangle _cardRect;
     private SD.Rectangle _thumbRect;   // fixed-ratio, center-cropped capture preview
     private int _cornerRadius;
+    // The inset every drawn element on the card shares, kept off the layout record so the
+    // status flash lays out inside the same margin the corner buttons do.
+    private int _controlPadding;
     private int _dpi = 96;
     private readonly object _previewSync = new();
     private SD.Bitmap? _preview;
@@ -64,6 +73,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private string? _historyPath;
     private int _imageVersion;
     private string? _flashMessage;
+    private bool _flashIsFailure;
     private double _flashAmount;
     private WF.Timer? _flashTimer;
     private IDisposable? _flashTimerScope;
@@ -441,6 +451,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         _cardRect = layout.CardBounds;
         _thumbRect = layout.ThumbnailBounds;
         _cornerRadius = layout.CornerRadius;
+        _controlPadding = layout.ControlPadding;
 
         BuildButtons(layout);
     }
@@ -510,16 +521,27 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// where a tray toast would be more ceremony than the message deserves — "Text copied"
     /// belongs on the thing the text came from.
     /// </summary>
-    public void FlashStatus(string message)
+    public void FlashStatus(string message) => FlashStatus(message, failure: false);
+
+    /// <summary>
+    /// The failure form of the same line. Two things change, both timing — the pinned card's
+    /// chrome is not to be restyled, so a failure cannot wear a colour or a glyph here:
+    /// the hold stretches to the length of the message (a thirteen-word FriendlyError
+    /// sentence needs about four seconds where "Text copied" needs one), and the card does
+    /// not resume its auto-close afterwards, so a hard failure cannot erase itself and take
+    /// the capture with it a second later.
+    /// </summary>
+    private void FlashStatus(string message, bool failure)
     {
         if (_closed || IsDisposed) return;
         if (InvokeRequired)
         {
-            BeginInvoke(new Action(() => FlashStatus(message)));
+            BeginInvoke(new Action(() => FlashStatus(message, failure)));
             return;
         }
 
         _flashMessage = message;
+        _flashIsFailure = failure;
         _flashAmount = 1.0;
         // Where the pointer was when the message went up. Reaching for the card dismisses
         // it; the pointer merely sitting there — it usually is, the menu was just clicked —
@@ -535,13 +557,14 @@ public sealed class FastQuickActionsWindow : WF.Form
         _flashTimerScope ??= Motion.Acquire();
         _flashTimer = new WF.Timer { Interval = Motion.FrameIntervalMs };
         long start = Environment.TickCount64;
+        int hold = StatusHoldMs(message);
         _flashTimer.Tick += (_, _) =>
         {
             long elapsed = Environment.TickCount64 - start;
-            if (elapsed <= FlashHoldMs)
+            if (elapsed <= hold)
                 return;
 
-            double fade = (elapsed - FlashHoldMs) / (double)FlashFadeMs;
+            double fade = (elapsed - hold) / (double)FlashFadeMs;
             if (fade >= 1.0)
             {
                 EndStatusFlash();
@@ -553,6 +576,33 @@ public sealed class FastQuickActionsWindow : WF.Form
         };
         _flashTimer.Start();
         Invalidate(_cardRect);
+    }
+
+    /// <summary>
+    /// How long a message holds before it starts to fade. "Text copied" reads in a glance and
+    /// keeps the beat it always had; a failure line is a whole sentence and used to be gone
+    /// before it could be read. Pure so the curve can be checked without a window.
+    /// </summary>
+    internal static int StatusHoldMs(string? message)
+    {
+        int words = message?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length ?? 0;
+        return Math.Clamp(words * FlashHoldPerWordMs, FlashHoldMs, FlashHoldMaxMs);
+    }
+
+    /// <summary>
+    /// Says an action failed on whichever surface is still there. The card is the right place
+    /// while it is under the pointer that clicked the row; after an auto-close, an Escape or
+    /// the next capture landing there is nothing left to paint on and FlashStatus returns
+    /// silently, so the same line goes to the corner toast — which outlives the card by
+    /// design, and is why the share paths were given it in the first place.
+    /// </summary>
+    private void ReportActionFailure(string title, Exception ex)
+    {
+        string message = FriendlyError.For(ex);
+        if (!_closed && !IsDisposed)
+            FlashStatus(message, failure: true);
+        else
+            ShowShareToast(title, message, Core.ToastSeverity.Error);
     }
 
     /// <summary>
@@ -582,10 +632,15 @@ public sealed class FastQuickActionsWindow : WF.Form
         _flashTimerScope = null;
         _flashAmount = 0;
         _flashMessage = null;
+        bool wasFailure = _flashIsFailure;
+        _flashIsFailure = false;
         if (_closed || IsDisposed)
             return;
         Invalidate(_cardRect);
-        if (!_hovering)
+        // A failure leaves the card up. Resuming the countdown here would dismiss the capture
+        // moments after telling the user something went wrong with it, and the only record
+        // left would be the log line.
+        if (!_hovering && !wasFailure)
             ResumeAutoCloseTimer();
     }
 
@@ -616,7 +671,10 @@ public sealed class FastQuickActionsWindow : WF.Form
             LineAlignment = SD.StringAlignment.Center,
             Trimming = SD.StringTrimming.EllipsisCharacter,
         };
-        g.DrawString(_flashMessage, font, text, _cardRect, format);
+        // Inside the same margin every other element on the card sits in. The rect used to be
+        // _cardRect exactly, which was invisible while the only message was "Text copied" and
+        // ran a wrapped failure sentence into both rounded edges the moment one arrived.
+        g.DrawString(_flashMessage, font, text, SD.Rectangle.Inflate(_cardRect, -_controlPadding, -_controlPadding), format);
     }
 
     private void DrawThumbnail(SD.Graphics g, bool blurred)
@@ -1086,10 +1144,10 @@ public sealed class FastQuickActionsWindow : WF.Form
                     OpenMediaFile();
                     return;
                 case QuickActionsMenu.OpenWith:
-                    _ = WithFileAsync(QuickActionsMenu.ShowOpenWith, closeAfter: true);
+                    _ = WithFileAsync(QuickActionsMenu.ShowOpenWith, closeAfter: true, "Couldn't open the capture");
                     return;
                 case QuickActionsMenu.ShowInFolder:
-                    _ = WithFileAsync(QuickActionsMenu.ShowInExplorer, closeAfter: true);
+                    _ = WithFileAsync(QuickActionsMenu.ShowInExplorer, closeAfter: true, "Couldn't show the capture");
                     return;
                 case QuickActionsMenu.MoveToRecycleBin:
                     MoveToRecycleBin();
@@ -1201,7 +1259,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     /// <summary>Runs a shell action that needs a real file, saving one first if the capture has none.</summary>
-    private async Task WithFileAsync(Action<string> action, bool closeAfter)
+    private async Task WithFileAsync(Action<string> action, bool closeAfter, string failureTitle)
     {
         try
         {
@@ -1215,9 +1273,10 @@ public sealed class FastQuickActionsWindow : WF.Form
             // "Open with…" and "Show in folder" both need a file on disk, and both used to
             // close or do nothing at all when the save behind them failed — the two cases
             // FriendlyError has exact lines for (a full disk, a save folder that is gone).
-            // The card is still under the pointer that clicked the row, so it says so itself.
+            // The await above is long enough for the card to have gone, so the message goes
+            // to whichever surface is still there rather than only to the card.
             Log.Error("Quick-actions file action failed", ex);
-            FlashStatus(FriendlyError.For(ex));
+            ReportActionFailure(failureTitle, ex);
         }
     }
 
@@ -1249,23 +1308,43 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
-    /// <summary>The app's one toast, anchored to this card. Every caller so far is a failure,
-    /// so the severity is passed rather than left at Info — an info glyph on "share failed"
-    /// looks exactly like the "Copied" confirmation.</summary>
+    /// <summary>The app's one toast, anchored to this card when there is still a card to
+    /// anchor to. Every caller so far is a failure, so the severity is passed rather than left
+    /// at Info — an info glyph on "share failed" looks exactly like the "Copied"
+    /// confirmation.</summary>
     private void ShowShareToast(string title, string message, Core.ToastSeverity severity)
     {
         try
         {
-            SD.Rectangle card = RectangleToScreen(_cardRect);
             // Through App, not a bare `new ToastWindow(...).Show()`: that is where the
             // dispose-on-throw guard and the tray-balloon fallback live, and a share failure
             // is exactly the message that must not go quiet when a window won't create.
-            App.Toast(title, message, new SD.Point(card.Left, card.Top), severity: severity);
+            App.Toast(title, message, ToastAnchor(), severity: severity);
         }
         catch (Exception ex)
         {
             Log.Error("Share toast failed", ex);
         }
+    }
+
+    /// <summary>
+    /// Where a toast about this card should point, or null for the corner. The card is asked
+    /// only while it is alive: every caller sits after an await — the share sheet's own error
+    /// callback arrives whenever Windows gets round to preparing the files — and
+    /// RectangleToScreen forces a handle, which throws ObjectDisposedException on a card the
+    /// auto-close timer already took. That threw out of ShowShareToast's first line, so its
+    /// catch swallowed the very failure the toast exists to report. The corner placement is
+    /// where a message about a card that is gone belongs anyway.
+    /// </summary>
+    internal SD.Point? ToastAnchor()
+    {
+        if (_closed || IsDisposed)
+            return null;
+
+        SD.Rectangle card = RectangleToScreen(_cardRect);
+        // ToastWindow.Place centres on the anchor, so the card's left edge hung the toast off
+        // to one side of the surface it is about.
+        return new SD.Point(card.Left + (card.Width / 2), card.Top);
     }
 
     private async Task ShareAsync()
@@ -1310,7 +1389,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 // there — but staying open silently is indistinguishable from a click that
                 // missed. It says why it is still here.
                 Log.Error($"Failed to recycle {path}", ex);
-                FlashStatus(FriendlyError.For(ex));
+                ReportActionFailure("Couldn't move the capture to the Recycle Bin", ex);
                 return;
             }
         }
@@ -1909,7 +1988,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // keepOpen=false Close() above was skipped, and the clipboard still held whatever
             // it held before — with the only trace one line in the log. The status flash is
             // the card's own channel and it is directly under the pointer that just clicked.
-            FlashStatus(FriendlyError.For(ex));
+            ReportActionFailure("Couldn't copy the capture", ex);
         }
     }
 

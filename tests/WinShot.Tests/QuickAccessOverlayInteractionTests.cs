@@ -311,6 +311,159 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    /// <summary>
+    /// Until the failure paths landed, the only string this surface ever drew was "Text
+    /// copied" — two words, nowhere near an edge, which is why nobody noticed the layout rect
+    /// was _cardRect with no inset at all while every other element on the card sits inside
+    /// ControlPadding. Scanned rather than eyeballed, per HANDOFF: the ink is isolated by
+    /// rendering the same flash with an empty message and diffing, so the card fill, the
+    /// scrim and the edge hairline all cancel out.
+    ///
+    /// Every message FriendlyError can put here is checked, plus a run with no space in it —
+    /// which is what makes the scan mean something. GDI+ breaks a word too long for the
+    /// layout rect by character, filling the full width, so that case reaches the card's
+    /// edge exactly when the rect is not inset and stays in the margin when it is.
+    /// </summary>
+    [Fact]
+    public void CardStatusFlashStaysInsideTheCardPadding()
+    {
+        RunSta(() =>
+        {
+            using var capture = new SD.Bitmap(1200, 760);
+            using var overlay = FastQuickActionsWindow.CreateForTheme(
+                capture, new SettingsService(), QuickAccessOverlayTheme.Dark);
+            overlay.CreateControl();
+
+            var card = (SD.Rectangle)typeof(FastQuickActionsWindow)
+                .GetField("_cardRect", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(overlay)!;
+            var padding = (int)typeof(FastQuickActionsWindow)
+                .GetField("_controlPadding", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(overlay)!;
+            SD.Rectangle inside = SD.Rectangle.Inflate(card, -padding, -padding);
+
+            using SD.Bitmap blank = PaintFlash(overlay, string.Empty);
+            foreach (string message in FlashMessages())
+            {
+                using SD.Bitmap painted = PaintFlash(overlay, message);
+                SD.Rectangle ink = InkBounds(painted, blank);
+
+                Assert.False(ink.IsEmpty, $"'{message}' drew nothing at all");
+                Assert.True(ink.Left >= inside.Left, $"'{message}' starts {inside.Left - ink.Left}px into the left margin");
+                Assert.True(ink.Right <= inside.Right, $"'{message}' runs {ink.Right - inside.Right}px past the right margin");
+                Assert.True(ink.Top >= inside.Top, $"'{message}' starts {inside.Top - ink.Top}px above the top margin");
+                Assert.True(ink.Bottom <= inside.Bottom, $"'{message}' runs {ink.Bottom - inside.Bottom}px past the bottom margin");
+            }
+        });
+    }
+
+    /// <summary>Everything the status flash can be asked to draw: the confirmation it was
+    /// built for, every friendly failure line the card's actions route to it, and an
+    /// unbreakable run to make the layout rect prove it is inset.</summary>
+    private static IEnumerable<string> FlashMessages()
+    {
+        yield return "Text copied";
+        foreach (Exception ex in new Exception[]
+        {
+            new UnauthorizedAccessException(),
+            new DirectoryNotFoundException(),
+            new PathTooLongException(),
+            new FileNotFoundException(),
+            new IOException(),
+            new System.Net.Http.HttpRequestException(),
+            new OutOfMemoryException(),
+            new ClipboardBusyException(null),
+            new Exception("something nobody mapped"),
+        })
+            yield return FriendlyError.For(ex);
+
+        yield return new string('W', 60);
+    }
+
+    /// <summary>The bounding box of everything that differs between two renders of the same
+    /// card, which is exactly the message's ink.</summary>
+    private static SD.Rectangle InkBounds(SD.Bitmap painted, SD.Bitmap blank)
+    {
+        int minX = int.MaxValue, maxX = int.MinValue, minY = int.MaxValue, maxY = int.MinValue;
+        for (int y = 0; y < painted.Height; y++)
+        {
+            for (int x = 0; x < painted.Width; x++)
+            {
+                if (painted.GetPixel(x, y) == blank.GetPixel(x, y))
+                    continue;
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y);
+                maxY = Math.Max(maxY, y);
+            }
+        }
+
+        return minX > maxX
+            ? SD.Rectangle.Empty
+            : SD.Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+    }
+
+    /// <summary>
+    /// The share failures are on the toast precisely because a toast can outlive the card —
+    /// the sheet's error callback lands whenever Windows gets round to it, by which time the
+    /// auto-close timer, an Escape or the next capture can all have taken the window. Asking
+    /// the dead card where to sit threw ObjectDisposedException out of the toast call's first
+    /// line, and the catch around it swallowed the failure the toast was reporting.
+    /// </summary>
+    [Fact]
+    public void ToastAboutAClosedCardFallsBackToTheCorner()
+    {
+        RunSta(() =>
+        {
+            using var capture = new SD.Bitmap(1200, 760);
+            var card = new FastQuickActionsWindow(capture, new SettingsService());
+            card.Show();
+
+            SD.Point? live = card.ToastAnchor();
+            Assert.NotNull(live);
+            SD.Rectangle onScreen = card.RectangleToScreen(card.ClientRectangle);
+            // Centred on the card, not hung off its left edge: ToastWindow.Place reads an
+            // anchor as the point to centre above.
+            Assert.Equal(onScreen.Left + (onScreen.Width / 2), live!.Value.X);
+
+            card.Dispose();
+            Assert.Null(card.ToastAnchor());
+
+            var method = typeof(FastQuickActionsWindow)
+                .GetMethod("ShowShareToast", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            method.Invoke(card, new object[] { "Share failed", "The drive is full.", ToastSeverity.Error });
+        });
+    }
+
+    /// <summary>The hold scales with the message so a sentence is readable, and "Text copied"
+    /// keeps exactly the beat it has always had.</summary>
+    [Fact]
+    public void StatusFlashHoldsLongerForALongerMessage()
+    {
+        int copied = FastQuickActionsWindow.StatusHoldMs("Text copied");
+        int failure = FastQuickActionsWindow.StatusHoldMs(
+            FriendlyError.For(new UnauthorizedAccessException()));
+
+        Assert.Equal(1300, copied);
+        Assert.True(failure >= 3000, $"a thirteen-word failure line holds only {failure}ms");
+        Assert.True(failure <= 5200, $"a failure line holds {failure}ms, which is in the way");
+        Assert.Equal(1300, FastQuickActionsWindow.StatusHoldMs(null));
+    }
+
+    private static SD.Bitmap PaintFlash(FastQuickActionsWindow overlay, string message)
+    {
+        overlay.FlashStatus(message);
+        var surface = new SD.Bitmap(overlay.ClientSize.Width, overlay.ClientSize.Height);
+        using (var g = SD.Graphics.FromImage(surface))
+        using (var args = new WF.PaintEventArgs(g, new SD.Rectangle(SD.Point.Empty, surface.Size)))
+        {
+            // An opaque ground, for the same reason the hairline test uses one: the card
+            // paints onto the desktop, and a transparent bitmap reads back the compositing.
+            g.Clear(SD.Color.Black);
+            typeof(FastQuickActionsWindow).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(overlay, new object[] { args });
+        }
+        return surface;
+    }
+
     private static int Brightest(SD.Bitmap surface, int fromX, int toX, int y)
     {
         int best = 0;

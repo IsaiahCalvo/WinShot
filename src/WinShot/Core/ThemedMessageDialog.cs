@@ -123,12 +123,24 @@ public static class ThemedMessageDialog
     /// Window: a RenderTransform on the Window shrinks its content inside a frame that does
     /// not move, and the 2% band left at the edges is the same brush either way.
     ///
+    /// Deliberately asymmetric, and written down here rather than left to be inferred from an
+    /// absence: the dialog leaves in one frame. A modal answers a question, and a window that
+    /// lingers 140 ms after the click that dismissed it reads as the app being slow to accept
+    /// the answer — which is not what the toast's exit fade has to overcome, since nobody
+    /// dismissed that.
+    ///
     /// The duration is the theme's, so Settings &gt; Accessibility &gt; Animation effects
     /// zeroes this along with every other transition (ThemeResources zeroes the token itself).
-    /// The literal is only reached by a dialog raised before the theme is merged.
+    /// The literal is only reached by a dialog raised before the theme is merged — which is
+    /// why the preference is read here as well: it was the one motion path in the app that
+    /// inferred the setting from a resource instead of asking, so a missed lookup animated
+    /// for a user who had turned animation off.
     /// </summary>
     private static void Enter(Window dialog, UIElement content)
     {
+        if (!Motion.AnimationsEnabled())
+            return;
+
         var scale = new ScaleTransform(0.98d, 0.98d);
         content.RenderTransform = scale;
         content.RenderTransformOrigin = new Point(0.5d, 0.5d);

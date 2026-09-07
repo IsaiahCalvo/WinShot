@@ -1105,12 +1105,22 @@
                 <ControlTemplate TargetType="RadioButton">
                     <!-- Rings stack rather than swap Stroke on one ellipse, so the hover and
                          selected states cross-fade the way the swatch's neighbours in the
-                         editor colour row do. Each layer is wider than the one under it, so
-                         whichever is opaque covers the rest: focus, then checked, then hover. -->
+                         editor colour row do. Order is z-order, last on top: rest, hover,
+                         checked, focus. Note that a wider ring does NOT cover a narrower one
+                         — an Ellipse at Stretch=Fill insets its geometry by StrokeThickness/2,
+                         so every ring shares the same OUTER edge and grows inward. Covering is
+                         what the stacking order does; thickness only decides how far in a
+                         layer reaches. -->
                     <Grid>
                         <Ellipse x:Name="Ring" Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1.5"/>
                         <Ellipse x:Name="Hover" Opacity="0" Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1.5"/>
                         <Ellipse x:Name="Check" Opacity="0" Stroke="White" StrokeThickness="2"/>
+                        <!-- Focus is its own topmost layer. As a thickness on the base ring it
+                             was painted over by the 2px white checked ring stacked above it,
+                             and checked+focused is the ordinary keyboard case here: the
+                             swatches are one RadioButton group, so an arrow key moves focus
+                             and the selection together. -->
+                        <Ellipse x:Name="Focus" Opacity="0" Stroke="{StaticResource InfoBrush}" StrokeThickness="2.5"/>
                         <Ellipse Width="14" Height="14" Fill="{TemplateBinding Background}"/>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -1122,12 +1132,11 @@
                             <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource CheckIn}"/></Trigger.EnterActions>
                             <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource CheckOut}"/></Trigger.ExitActions>
                         </Trigger>
-                        <!-- A focus ring appearing the instant focus lands is conventional, and
-                             it has to outrank both fades, so it stays a setter on the base ring
-                             at a thickness neither overlay covers. -->
+                        <!-- A focus ring appearing the instant focus lands is conventional, so
+                             it stays a setter while the two fades animate — it just shows its
+                             own layer instead of restyling one underneath them. -->
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource InfoBrush}"/>
-                            <Setter TargetName="Ring" Property="StrokeThickness" Value="3.5"/>
+                            <Setter TargetName="Focus" Property="Opacity" Value="1"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
