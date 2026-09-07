@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -13,7 +13,8 @@ namespace WinShot.Capture;
 /// Two rules run through all of it. Colour is the grammar: crimson is a distance the app
 /// computed, blue is a guide the user placed, and the two never blur. And functional data
 /// never animates — hovering re-measures and redraws instantly, because an easing measurement
-/// reads as imprecise. The only motion here is the hint strip's entrance, which is chrome.
+/// reads as imprecise. The two animations here — the hint strip's entrance and the pill's
+/// hover outline — are both chrome; no number and no hairline ever eases.
 /// </summary>
 public sealed partial class FastRegionSelectorDialog
 {
@@ -44,6 +45,12 @@ public sealed partial class FastRegionSelectorDialog
 
     private IDisposable? _hintTween;
     private double _hintAmount;
+
+    /// <summary>The freeze snapshot was attempted and did not arrive, so it never will this
+    /// session. Without this there is no way to tell "not yet" from "never", and a mode whose
+    /// only persistent surface says "Preparing the screen snapshot…" forever teaches the user
+    /// to keep waiting for something that is not coming.</summary>
+    private bool _freezeFailed;
 
     /// <summary>Shift is held rather than tapped, and key-repeat fires many times a second;
     /// the latch keeps the axis-lock repaint to one on the way down and one on the way up.</summary>
@@ -143,6 +150,20 @@ public sealed partial class FastRegionSelectorDialog
             HandleMeasureMouseMove();
     }
 
+    /// <summary>
+    /// The freeze snapshot was attempted and did not arrive. There is exactly one attempt per
+    /// session, so this is terminal: the mode has no input and will not get one. Latching it
+    /// is what lets the hint strip and every gesture's answer stop saying "not yet" — the
+    /// toast that reports the failure dwells out, and a persistent surface that keeps
+    /// promising a snapshot is the same bug as a failed history load reading "No captures yet".
+    /// </summary>
+    internal void NoteFrozenSnapshotFailed()
+    {
+        _freezeFailed = true;
+        if (_mode == SelectorMode.Measure)
+            InvalidateAllSurfaces();
+    }
+
     /// <summary>Render seam: moves the measuring cursor and re-reads the pixels under it.</summary>
     internal void MoveMeasureCursorForRender(SD.Point cursor)
     {
@@ -164,6 +185,7 @@ public sealed partial class FastRegionSelectorDialog
         _contrastFor = SD.Rectangle.Empty;
         _draggingGuide = null;
         _shiftLatched = false;
+        _freezeFailed = false;
         _hintAmount = 0;
         StopHintEntrance();
     }
@@ -390,18 +412,19 @@ public sealed partial class FastRegionSelectorDialog
 
         switch (e.KeyCode)
         {
-            case WF.Keys.H when shift:
+            case WF.Keys.H when shift && !ctrl:
                 _measure.AddGuideY(SnapCoordinate(_currentScreen.Y, _snapEdgesY));
                 Handled(e);
                 return true;
 
-            case WF.Keys.V when shift:
+            case WF.Keys.V when shift && !ctrl:
                 _measure.AddGuideX(SnapCoordinate(_currentScreen.X, _snapEdgesX));
                 Handled(e);
                 return true;
 
-            // All four guarded on !ctrl: Ctrl+V is paste everywhere else on Windows and
-            // must not quietly hold a height here.
+            // All four guarded on !ctrl — the guide pair above included: Ctrl+V is paste
+            // everywhere else on Windows, Ctrl+Shift+C is already a real binding two cases
+            // down, and this modifier space is not free enough to leave half-claimed.
             case WF.Keys.H when !ctrl && _measured is SD.Rectangle wide:
                 _measure.Hold(wide, horizontal: true, _currentScreen);
                 Handled(e);
@@ -506,9 +529,10 @@ public sealed partial class FastRegionSelectorDialog
     /// one thing a mode whose hint strip advertises six gestures cannot do.</summary>
     private void NothingToMeasureYet() => App.Toast("Measure", NothingToMeasureMessage);
 
-    internal string NothingToMeasureMessage => _frozen is null
-        ? "Still preparing — the screen snapshot has not landed yet."
-        : "Nothing to measure here.";
+    internal string NothingToMeasureMessage =>
+        _frozen is not null ? "Nothing to measure here."
+        : _freezeFailed ? "The screen could not be read, so there is nothing to measure. Press Esc to close."
+        : "Still preparing — the screen snapshot has not landed yet.";
 
     private void Handled(WF.KeyEventArgs e)
     {
@@ -626,7 +650,8 @@ public sealed partial class FastRegionSelectorDialog
             return;
         }
         if (TrySetClipboardText(text))
-            App.Toast("Measure", _measure.Holds.Count > 1 ? "Measurements copied." : "Dimensions copied.");
+            App.Toast("Measure", _measure.Holds.Count > 1 ? "Measurements copied." : "Dimensions copied.",
+                severity: ToastSeverity.Success);
     }
 
     private void CopyPixelColor(SD.Point at)
@@ -662,7 +687,7 @@ public sealed partial class FastRegionSelectorDialog
 
         string hex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         if (TrySetClipboardText(hex))
-            App.Toast("Measure", $"Copied {hex}.");
+            App.Toast("Measure", $"Copied {hex}.", severity: ToastSeverity.Success);
     }
 
     private static bool TrySetClipboardText(string text)
@@ -1105,9 +1130,15 @@ public sealed partial class FastRegionSelectorDialog
     internal string HintStripText()
     {
         // Until the snapshot lands there is nothing to measure, and advertising six gestures
-        // that all answer "not yet" is worse than saying so. A loading state is a surface.
+        // that all answer "not yet" is worse than saying so. A loading state is a surface —
+        // and so is a failed one: the error toast dwells out after a few seconds, and after
+        // that the strip is the only thing left to say the mode cannot work and how to leave.
         if (_frozen is null)
-            return "Preparing the screen snapshot…";
+        {
+            return _freezeFailed
+                ? "The screen could not be read, so there is nothing to measure  ·  Esc closes"
+                : "Preparing the screen snapshot…";
+        }
 
         string scale = _measure.UseApca ? "APCA" : "WCAG";
         return $"Tolerance {_measure.Tolerance}  ·  H / V hold  ·  Shift+H / Shift+V guide  ·  " +

@@ -100,30 +100,35 @@ internal static class SelectorChrome
         bool serifLow = true, bool serifHigh = true)
     {
         bool horizontal = a.Y == b.Y;
+        var parts = new List<SD.Rectangle>(3);
+        if (horizontal)
+        {
+            int left = Math.Min(a.X, b.X);
+            int right = Math.Max(a.X, b.X);
+            parts.Add(new SD.Rectangle(left, a.Y, right - left + 1, 1));
+            if (serifLow)
+                parts.Add(new SD.Rectangle(left, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1));
+            if (serifHigh)
+                parts.Add(new SD.Rectangle(right, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1));
+        }
+        else
+        {
+            int top = Math.Min(a.Y, b.Y);
+            int bottom = Math.Max(a.Y, b.Y);
+            parts.Add(new SD.Rectangle(a.X, top, 1, bottom - top + 1));
+            if (serifLow)
+                parts.Add(new SD.Rectangle(a.X - SerifHalf, top, (SerifHalf * 2) + 1, 1));
+            if (serifHigh)
+                parts.Add(new SD.Rectangle(a.X - SerifHalf, bottom, (SerifHalf * 2) + 1, 1));
+        }
+
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+        DrawHairlineShadow(g, parts);
         using (var brush = new SD.SolidBrush(color))
         {
-            if (horizontal)
-            {
-                int left = Math.Min(a.X, b.X);
-                int right = Math.Max(a.X, b.X);
-                g.FillRectangle(brush, left, a.Y, right - left + 1, 1);
-                if (serifLow)
-                    g.FillRectangle(brush, left, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
-                if (serifHigh)
-                    g.FillRectangle(brush, right, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1);
-            }
-            else
-            {
-                int top = Math.Min(a.Y, b.Y);
-                int bottom = Math.Max(a.Y, b.Y);
-                g.FillRectangle(brush, a.X, top, 1, bottom - top + 1);
-                if (serifLow)
-                    g.FillRectangle(brush, a.X - SerifHalf, top, (SerifHalf * 2) + 1, 1);
-                if (serifHigh)
-                    g.FillRectangle(brush, a.X - SerifHalf, bottom, (SerifHalf * 2) + 1, 1);
-            }
+            foreach (SD.Rectangle part in parts)
+                g.FillRectangle(brush, part);
         }
         g.SmoothingMode = prev;
 
@@ -152,16 +157,40 @@ internal static class SelectorChrome
     /// ABSENCE of the dimension vocabulary is what says "a guide, not a distance".</summary>
     public static void DrawGuide(SD.Graphics g, SD.Size clientSize, bool vertical, int at, SD.Color color)
     {
+        SD.Rectangle line = vertical
+            ? new SD.Rectangle(at, 0, 1, clientSize.Height)
+            : new SD.Rectangle(0, at, clientSize.Width, 1);
+
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+        DrawHairlineShadow(g, new[] { line });
         using (var brush = new SD.SolidBrush(color))
-        {
-            if (vertical)
-                g.FillRectangle(brush, at, 0, 1, clientSize.Height);
-            else
-                g.FillRectangle(brush, 0, at, clientSize.Width, 1);
-        }
+            g.FillRectangle(brush, line);
         g.SmoothingMode = prev;
+    }
+
+    /// <summary>
+    /// The 1 px halo every measurement hairline sits on. A coloured 1 px line drawn straight
+    /// onto arbitrary desktop pixels can land on a surface of its own colour and vanish —
+    /// crimson #E0244A over a mid-red button is 1.17:1, well under WCAG 1.4.11's 3:1 floor
+    /// for a graphical object, and no amount of dimming helps because the measured run is
+    /// BRIGHTENED, not dimmed. So the ruler carries its own contrast the way the crosshair
+    /// already does: the same 120-alpha black, one pixel proud on every side.
+    ///
+    /// Filled as one winding path rather than as separate rectangles, so the serif/span
+    /// overlaps do not double the alpha into a dark knot at each end of the dimension.
+    /// </summary>
+    private static void DrawHairlineShadow(SD.Graphics g, IReadOnlyList<SD.Rectangle> parts)
+    {
+        using var path = new SD.Drawing2D.GraphicsPath { FillMode = SD.Drawing2D.FillMode.Winding };
+        foreach (SD.Rectangle part in parts)
+        {
+            SD.Rectangle halo = part;
+            halo.Inflate(1, 1);
+            path.AddRectangle(halo);
+        }
+        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(120, 0, 0, 0));
+        g.FillPath(shadow, path);
     }
 
     private const int LabelPadX = 16;

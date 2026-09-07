@@ -200,10 +200,17 @@ public sealed class EdgeSnap : IDisposable
         while (true)
         {
             int next = at + step;
-            if (increment ? next == maxDim : next == 0)
+            if (increment ? next == maxDim : next < 0)
             {
                 // The ray reached the frame edge — degrade to it rather than fail. There is
                 // no edge there to be sure of, so it is never a firm one.
+                //
+                // Both guards fire only AFTER the last in-bounds index has been compared:
+                // the high side stops at next == maxDim (index maxDim-1 was tested), so the
+                // low side has to stop at next < 0 (index 0 was tested). Stopping at
+                // next == 0 instead would hand back index 0 without ever comparing it, and
+                // every run whose neighbour is the first column or row of the virtual
+                // desktop would swallow one background pixel and measure a pixel too wide.
                 return (increment ? maxDim - 1 : 0, false);
             }
 

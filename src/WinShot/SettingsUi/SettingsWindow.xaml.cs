@@ -977,12 +977,12 @@ public partial class SettingsWindow : Window
     private static string SelectedTag(ComboBox combo, string fallback) =>
         (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? fallback;
 
-    /// <summary>The Low/Medium/High tag nearest a stored tolerance. The measure overlay's
-    /// wheel writes any value in 0-255, and a combo that showed nothing for 45 would read
-    /// as broken.</summary>
     /// <summary>What <see cref="MeasureToleranceCombo"/> was showing when the pane loaded.</summary>
     private int _loadedTolerance = 30;
 
+    /// <summary>The Low/Medium/High tag nearest a stored tolerance. The measure overlay's
+    /// wheel writes any value in 0-255, and a combo that showed nothing for 45 would read
+    /// as broken.</summary>
     internal static string NearestTolerancePreset(int tolerance)
     {
         int[] presets = [15, 30, 60];

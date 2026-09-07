@@ -320,12 +320,14 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         if (_frozen is null)
         {
             // Measure mode has nothing to read and no way to get it; say so rather than
-            // leaving a reticle and a hint strip that will never measure anything.
+            // leaving a reticle and a hint strip that will never measure anything. The toast
+            // dwells out in a few seconds, so the failure is latched too: from here the hint
+            // strip and every gesture's answer say the mode cannot work and how to leave it.
+            NoteFrozenSnapshotFailed();
             if (_mode == SelectorMode.Measure)
             {
-                App.Toast("Measure", "Could not read the screen, so there is nothing to measure.",
+                App.Toast("Measure", "The screen could not be read, so there is nothing to measure.",
                     severity: ToastSeverity.Error);
-                InvalidateAllSurfaces();
             }
             return;
         }

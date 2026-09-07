@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Drawing;
 using WinShot.Capture;
 using WinShot.Core;
@@ -763,12 +763,98 @@ public class MeasureModeTests
         Assert.False(selector.IsDraggingGuideForRender);
         Assert.Equal(Card, selector.MeasuredScreenRect);
     }
+
+    // ----------------------------------------------------------------- legibility
+
+    [Fact]
+    public void EveryMeasurementHairlineSitsOnItsOwnShadow()
+    {
+        // A bare 1 px crimson line lands on arbitrary desktop pixels and can vanish into a
+        // surface of its own colour, which is the WCAG 1.4.11 case for a graphical object.
+        // The crosshair has always carried a 120-alpha black halo; the dimension vocabulary
+        // has to as well, or the mode's primary datum is the one thing that can disappear.
+        using var selector = Measuring(new Point(80, 60), out _);
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+        selector.MoveMeasureCursorForRender(new Point(250, 200));
+        using Bitmap render = Render(selector);
+
+        // A guide's own column, and the two columns either side of it, on a row far from
+        // the reticle: the halo is what separates the two.
+        Color line = render.GetPixel(80, 250);
+        Color halo = render.GetPixel(79, 250);
+        Color ground = render.GetPixel(76, 250);
+        Assert.True(
+            line.R == ThemePalette.Accent.R && line.G == ThemePalette.Accent.G && line.B == ThemePalette.Accent.B,
+            $"the guide itself is no longer accent blue: {line}");
+        Assert.True(Luminance(halo) < Luminance(ground) - 8,
+            $"guide halo {halo} is not darker than the ground {ground} it lies on");
+        Assert.True(Luminance(render.GetPixel(81, 250)) < Luminance(ground) - 8,
+            "the halo is on both sides of the guide");
+    }
+
+    [Fact]
+    public void TheSpanAndItsSerifsAreShadowedToo()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+        using Bitmap render = Render(selector);
+
+        // One row above the horizontal span, inside the reticle gap so nothing else is there,
+        // against the card the span is drawn over.
+        Color card = render.GetPixel(120, 75);
+        Assert.True(Luminance(render.GetPixel(75, 59)) < Luminance(card) - 8,
+            "the span's halo is missing on the brightened run it is drawn over");
+        // And one pixel past a serif's tip.
+        Assert.True(Luminance(render.GetPixel(Card.Left, 57)) < Luminance(card) - 8,
+            "the serif carries no halo");
+    }
+
+    private static double Luminance(Color c) => (0.2126 * c.R) + (0.7152 * c.G) + (0.0722 * c.B);
+
+    // ----------------------------------------------------------------- no snapshot
+
+    [Fact]
+    public void AFailedSnapshotSaysSoInsteadOfClaimingItIsStillLoading()
+    {
+        using var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        selector.EnterMeasureForRender(null, Screen, new Point(80, 60));
+
+        // Before the attempt resolves, "not yet" is the honest answer.
+        Assert.Contains("Preparing", selector.HintStripText());
+
+        selector.NoteFrozenSnapshotFailed();
+
+        // After it fails there is no snapshot coming, so neither surface may keep promising
+        // one — and the strip has to say how to leave a mode that cannot work.
+        Assert.DoesNotContain("Preparing", selector.HintStripText());
+        Assert.Contains("could not be read", selector.HintStripText());
+        Assert.Contains("Esc", selector.HintStripText());
+        Assert.DoesNotContain("Still preparing", selector.NothingToMeasureMessage);
+        Assert.Contains("could not be read", selector.NothingToMeasureMessage);
+    }
+
+    [Fact]
+    public void AFailedSnapshotDoesNotLeakIntoTheNextPooledSession()
+    {
+        var selector = FastRegionSelectorDialog.Rent(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        selector.EnterMeasureForRender(null, Screen, new Point(80, 60));
+        selector.NoteFrozenSnapshotFailed();
+
+        FastRegionSelectorDialog.Return(selector);
+        var again = FastRegionSelectorDialog.Rent(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        again.EnterMeasureForRender(null, Screen, new Point(80, 60));
+
+        Assert.Contains("Preparing", again.HintStripText());
+        FastRegionSelectorDialog.Return(again);
+    }
 }
 
 /// <summary>
-/// The hint strip's entrance is the only animation in Measure mode, so it is the only place
-/// the mode can leak a high-resolution-clock holder. Motion.Holders is process-global, so
-/// this rides the serialized collection.
+/// The hint strip's entrance and the pill's hover outline are the only animations in Measure
+/// mode, so they are the only places the mode can leak a high-resolution-clock holder.
+/// Motion.Holders is process-global, so this rides the serialized collection.
 /// </summary>
 [Collection("MotionRefcount")]
 public class MeasureMotionTests

@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using WinShot.Capture;
 using Xunit;
 
@@ -310,5 +310,65 @@ public class EdgeSnapTests
 
         // A disposed view answers rather than throwing, so a late follow-tick cannot crash.
         Assert.Equal(new Rectangle(0, 0, 200, 200), snap.DetectEdges(new Point(22, 102), 30));
+    }
+
+    [Fact]
+    public void ARunWhoseNeighbourIsTheFirstColumnOrRowIsNotSwallowedWhole()
+    {
+        // The low-side rays used to stop one step early — index 0 was returned as the edge
+        // without ever being compared — so any object sitting against the first column or
+        // row of the virtual desktop measured one background pixel too wide.
+        using var bmp = new Bitmap(40, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.Black);
+            using var white = new SolidBrush(Color.White);
+            g.FillRectangle(white, new Rectangle(1, 1, 10, 10));
+        }
+        using var snap = EdgeSnap.Lock(bmp);
+
+        Assert.Equal(
+            new Rectangle(1, 1, 10, 10),
+            snap.DetectEdges(new Point(5, 5), EdgeSnap.DefaultTolerance));
+    }
+
+    [Fact]
+    public void TheLowAndHighRaysAgreeAboutTheLastPixelTheyTest()
+    {
+        // The mirror of the case above, and the reason it was a bug rather than a choice:
+        // the high side has always compared index maxDim-1, so the low side must compare 0.
+        using var bmp = new Bitmap(40, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.Black);
+            using var white = new SolidBrush(Color.White);
+            g.FillRectangle(white, new Rectangle(29, 29, 10, 10));
+        }
+        using var snap = EdgeSnap.Lock(bmp);
+
+        Assert.Equal(
+            new Rectangle(29, 29, 10, 10),
+            snap.DetectEdges(new Point(33, 33), EdgeSnap.DefaultTolerance));
+    }
+
+    [Fact]
+    public void ARunTouchingTheFrameStillDegradesToItRatherThanFailing()
+    {
+        // Nothing but background in column/row 0 to stop on: the ray runs off the frame and
+        // says so by never calling that edge firm.
+        using var bmp = new Bitmap(40, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.Black);
+            using var white = new SolidBrush(Color.White);
+            g.FillRectangle(white, new Rectangle(0, 0, 10, 10));
+        }
+        using var snap = EdgeSnap.Lock(bmp);
+
+        EdgeRun run = snap.DetectRun(new Point(5, 5), EdgeSnap.DefaultTolerance);
+        Assert.Equal(new Rectangle(0, 0, 10, 10), run.Bounds);
+        Assert.False(run.LeftFirm, "a ray that ran off the frame is never a firm edge");
+        Assert.False(run.TopFirm, "a ray that ran off the frame is never a firm edge");
+        Assert.True(run.RightFirm && run.BottomFirm, "the hard edges keep their firmness");
     }
 }

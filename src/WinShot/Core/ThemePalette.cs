@@ -58,7 +58,8 @@ public static class ThemePalette
     /// Measurement crimson. Colour is the grammar of the measure overlay and it must not
     /// blur: crimson is a distance the app computed, Accent blue is a guide the user placed.
     /// Red is the recording dot and destructive actions, and is orange-leaning besides, so
-    /// measurement gets its own value rather than borrowing one.
+    /// measurement gets its own value rather than borrowing one. WinForms-only, and so the
+    /// one colour here with no Theme.xaml twin: no WPF surface shows a measurement.
     /// </summary>
     public static readonly SD.Color Measure = SD.Color.FromArgb(0xE0, 0x24, 0x4A);
 
