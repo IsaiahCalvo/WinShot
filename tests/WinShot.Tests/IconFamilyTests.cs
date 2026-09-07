@@ -1,7 +1,7 @@
 using System.Xml.Linq;
 using WinShot.Core;
 using Xunit;
-using SD = System.Drawing;
+using W = System.Windows;
 
 namespace WinShot.Tests;
 
@@ -51,6 +51,17 @@ public class IconFamilyTests
         Assert.Null(filled.Attribute("stroke-width"));
     }
 
+    // Optical size is measured through SvgIcons.OpticalExtent — the renderer's own content
+    // bounds and scale — not by scanning a rasterized bitmap. RenderTargetBitmap produces a
+    // fully transparent image in a test host that has never shown a window, so a pixel scan
+    // here measures nothing and passes or fails on test ordering rather than on the assets.
+    private static double LongEdge(string asset, int pixelSize = 20)
+    {
+        W.Size? extent = SvgIcons.OpticalExtent(asset, pixelSize);
+        Assert.NotNull(extent);
+        return Math.Max(extent!.Value.Width, extent.Value.Height);
+    }
+
     [Fact]
     public void GlyphsAreScaledByContent_SoTheyShareAnOpticalSize()
     {
@@ -59,43 +70,33 @@ public class IconFamilyTests
         // the X's ~75%, or huge, depending on which asset drifted.
         foreach (string asset in StrokedAssets)
         {
-            SD.Bitmap? bmp = SvgIcons.Get(asset, 20, SD.Color.White);
-            Assert.NotNull(bmp);
-            SD.Rectangle ink = InkBounds(bmp!);
-            Assert.True(Math.Max(ink.Width, ink.Height) >= 17,
-                $"{asset} renders {ink.Width}x{ink.Height} in a 20px box — it is not filling it");
-            Assert.True(Math.Max(ink.Width, ink.Height) <= 20,
-                $"{asset} renders {ink.Width}x{ink.Height} and overflows its 20px box");
+            double edge = LongEdge(asset);
+            Assert.True(edge >= 17, $"{asset} draws {edge:0.0}px in a 20px box — it is not filling it");
+            Assert.True(edge <= 20, $"{asset} draws {edge:0.0}px and overflows its 20px box");
         }
     }
 
     [Fact]
     public void PinAndCloseRenderAtTheSameOpticalSize()
     {
-        SD.Bitmap pin = SvgIcons.Get("quick-access-pin.svg", 20, SD.Color.White)!;
-        SD.Bitmap close = SvgIcons.Get("quick-access-close.svg", 20, SD.Color.White)!;
-
-        SD.Rectangle a = InkBounds(pin);
-        SD.Rectangle b = InkBounds(close);
-        Assert.True(Math.Abs(Math.Max(a.Width, a.Height) - Math.Max(b.Width, b.Height)) <= 1,
-            $"pin {a.Width}x{a.Height} vs close {b.Width}x{b.Height}");
+        // The original defect: a filled pin among stroked siblings, fitted to its viewBox
+        // rather than its art, rendering ~75% larger than the X next to it on the same card.
+        double pin = LongEdge("quick-access-pin.svg");
+        double close = LongEdge("quick-access-close.svg");
+        Assert.True(Math.Abs(pin - close) <= 1, $"pin {pin:0.0}px vs close {close:0.0}px");
     }
 
-    /// <summary>Bounding box of everything the glyph actually painted.</summary>
-    private static SD.Rectangle InkBounds(SD.Bitmap bmp)
+    [Fact]
+    public void FittingUsesTheArt_NotTheDeclaredViewBox()
     {
-        int minX = bmp.Width, minY = bmp.Height, maxX = -1, maxY = -1;
-        for (int y = 0; y < bmp.Height; y++)
-        {
-            for (int x = 0; x < bmp.Width; x++)
-            {
-                if (bmp.GetPixel(x, y).A <= 24) continue;
-                if (x < minX) minX = x;
-                if (y < minY) minY = y;
-                if (x > maxX) maxX = x;
-                if (y > maxY) maxY = y;
-            }
-        }
-        return maxX < 0 ? SD.Rectangle.Empty : SD.Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+        // Guards the fix itself: the pin's art does not fill its 24-grid, so a viewBox fit
+        // would leave it visibly small. If someone reverts to scaling by the box, the pin
+        // stops filling its 20px button and this fails before the eye catches it.
+        XElement pin = Root("quick-access-pin.svg");
+        Assert.Equal("0 0 24 24", pin.Attribute("viewBox")?.Value);
+
+        List<XElement> paths = pin.Descendants().Where(e => e.Name.LocalName == "path").ToList();
+        Assert.NotEmpty(paths);
+        Assert.True(LongEdge("quick-access-pin.svg") >= 17);
     }
 }
