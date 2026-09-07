@@ -1,4 +1,4 @@
-using WinShot.Capture;
+﻿using WinShot.Capture;
 using Xunit;
 
 namespace WinShot.Tests;
@@ -55,5 +55,31 @@ public class SelectorHintTests
     public void TheAreaHintNamesTheMagnifierBecauseAltIsTheLeastGuessableKey()
     {
         Assert.Contains("Alt", SelectorHint.Text(windowMode: false), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The counter clamps BEFORE it adds. Adding first meant a hand-edited or corrupted
+    /// settings.json holding int.MaxValue wrapped to int.MinValue, which ShouldShow reads as
+    /// "none seen" — the runaway guard producing the runaway it exists to stop.
+    /// </summary>
+    [Fact]
+    public void AnAbsurdStoredCountStillSaturatesInsteadOfWrapping()
+    {
+        Assert.Equal(SelectorHint.SessionsShown, SelectorHint.NextSessionCount(int.MaxValue));
+        Assert.False(SelectorHint.ShouldShow(SelectorHint.NextSessionCount(int.MaxValue)));
+    }
+
+    /// <summary>
+    /// A custom HCURSOR is drawn at its native PIXEL size — Windows never scales it the way it
+    /// scales the system cursors it stands in for — so one bitmap for the process rendered
+    /// two-thirds size on the 150% primary and could not follow the pointer to another monitor.
+    /// </summary>
+    [Fact]
+    public void TheCameraCursorIsBuiltPerMonitorScaleNotOncePerProcess()
+    {
+        Assert.Same(SelectorCursors.Camera(1.5), SelectorCursors.Camera(1.5));
+        Assert.NotSame(SelectorCursors.Camera(1.0), SelectorCursors.Camera(2.0));
+        // Out-of-range junk from a failed DPI query still lands on a real cursor.
+        Assert.Same(SelectorCursors.Camera(1.0), SelectorCursors.Camera(0.1));
     }
 }
