@@ -274,6 +274,19 @@ public class DarkControlPaletteTests
     /// floor for graphics, on the affirmative button of every dialog. Nothing computed the
     /// hovered pair, so nothing caught it. Hover on a saturated fill dips instead, so every
     /// interactive state has to beat the button sitting there doing nothing.
+    ///
+    /// The bar here is RELATIVE on purpose, and the exemption it grants has to be said out
+    /// loud: white on the bare accent is 3.65:1, under the 4.5:1 a text pair owes. That is
+    /// the accent identity itself (#0A84FF is fixed by the hard constraints), not something
+    /// this button chose, and raising the rest fill to clear 4.5:1 would mean a second blue.
+    /// So rest is held to the 3:1 graphics floor and every state has to beat it, which is
+    /// what stops the ramp drifting further down. Closing the gap for good means changing
+    /// the accent or the label, which is a whole-app decision and no track's to take alone.
+    ///
+    /// The cheapest version of that decision, for whoever takes it: AccentPressedBrush
+    /// (#0060DF) is already in the palette and carries white at 5.28:1. Making it the primary
+    /// button's REST fill and re-deriving the hover/press ramp from there clears 4.5:1 without
+    /// inventing a second blue and without touching the accent identity.
     /// </summary>
     [Fact]
     public void PillButtonPrimary_EveryStateReadsBetterThanAtRest() => OnTheme(theme =>
@@ -283,6 +296,7 @@ public class DarkControlPaletteTests
         Color hover = ((SolidColorBrush)theme["HoverShadeBrush"]).Color;
         Color press = ((SolidColorBrush)theme["PressedShadeBrush"]).Color;
         double rest = Contrast(white, accent);
+        Assert.True(rest >= 3d, $"White on the bare accent is {rest:0.00}:1, under the 3:1 graphics floor");
 
         foreach ((string state, Color fill) in new[]
         {
@@ -323,6 +337,39 @@ public class DarkControlPaletteTests
                     Contrast(over, ground) >= 4.5d,
                     $"{textKey} on {groundKey} is {Contrast(over, ground):0.00}:1");
             }
+        }
+    });
+
+    /// <summary>
+    /// TextDisabledBrush is the one text brush the test above deliberately leaves out, and
+    /// leaving it out silently would let the suite certify the theme as clear while three
+    /// surfaces read ENABLED copy through it, below the bar:
+    ///
+    ///   SettingsWindow.xaml   Hint / SubHint, and the retention tick labels
+    ///   HistoryWindow.xaml    "Screenshots and recordings you take will show up here."
+    ///
+    /// 4.5:1 is the right bar for those and they miss it (3.80:1 on WindowBg), but the fix is
+    /// a hint colour, which is T7's "hint contrast >= 4.5:1" row and a visible change to every
+    /// settings pane — not something to slip into a foundations sweep. What this pins instead
+    /// is the floor the brush owes AS a disabled brush, so the gap cannot widen unnoticed
+    /// while T7 gets to it, and the exemption is written down where the next reviewer reads it
+    /// rather than inferred from an absence.
+    /// </summary>
+    [Fact]
+    public void Theme_DisabledTextIsStillLegible_AndItsEnabledMisusesAreT7s() => OnTheme(theme =>
+    {
+        Color window = ((SolidColorBrush)theme["WindowBgBrush"]).Color;
+        Color text = ((SolidColorBrush)theme["TextDisabledBrush"]).Color;
+
+        foreach (string groundKey in new[] { "WindowBgBrush", "ToolbarBgBrush", "SurfaceBrush", "ElevatedBrush" })
+        {
+            Color raw = ((SolidColorBrush)theme[groundKey]).Color;
+            Color ground = raw.A == 255 ? raw : Over(raw, window);
+            Color over = text.A == 255 ? text : Over(text, ground);
+
+            Assert.True(
+                Contrast(over, ground) >= 3d,
+                $"TextDisabledBrush on {groundKey} is {Contrast(over, ground):0.00}:1");
         }
     });
 
@@ -488,10 +535,17 @@ public class DarkControlPaletteTests
     /// it only adds contrast. SizePresetRow's chip is the accent, and a 12 % white wash over
     /// it drops the white label from 3.65:1 to 3.13:1, so there the accent has to paint last.
     /// Pinned because "make these consistent" is the obvious wrong tidy-up.
+    ///
+    /// ColorSwatch is here for an accessibility reason rather than a contrast one: its focus
+    /// ring has to sit above the checked ring. Those swatches are one RadioButton group, so an
+    /// arrow key moves focus and the selection in the same keystroke — checked+focused is the
+    /// ordinary keyboard state, not an edge one — and as a thickness on the base ring the
+    /// focus colour was painted over by the 2px white check stacked above it.
     /// </summary>
     [Theory]
     [InlineData("ToolButton", "Chip", "Hover")]
     [InlineData("SizePresetRow", "Hover", "Check")]
+    [InlineData("ColorSwatch", "Check", "Focus")]
     public void Theme_HoverAndCheckStackInTheOrderTheirGroundNeeds(
         string styleKey, string first, string second)
     {
@@ -534,6 +588,88 @@ public class DarkControlPaletteTests
                 child.Duration == new Duration(TimeSpan.Zero),
                 $"{where} still animates over {child.Duration} with animations turned off");
     }
+
+    /// <summary>
+    /// The wave converted the templates it could name and left five snapping, which put a
+    /// 140 ms cross-fade and an instant swap inside one control cluster — the annotation size
+    /// field's chevron and the colour swatches sit in the same editor bar as the ToolButtons
+    /// that ease. Mixing the two reads worse than the uniform snap it replaced, so the rule is
+    /// checked rather than the list: a state that repaints has to transition into it.
+    ///
+    /// Scoped to what actually repaints. A state trigger that only swaps Foreground or flips a
+    /// glyph's Visibility is exempt — a check mark appearing is a discrete thing, not a fade,
+    /// and ModeToolButton's white glyph is keyed to the accent chip that is itself fading
+    /// under it. So is IsKeyboardFocused: a focus ring that waits 140 ms to confirm the key
+    /// press is worse, not better, and every focus ring in the theme is deliberately a setter.
+    /// IsHighlighted is left out for the same reason — a menu highlight tracks the pointer
+    /// down a list, and a fade on each row would smear behind it. Two templates rely on that
+    /// carve-out and are named here so the next reviewer does not re-litigate them from
+    /// scratch: DarkMenuItem and DarkComboBoxItem both repaint their ground to the accent on
+    /// IsHighlighted with a bare setter, and both are pointer-tracked lists.
+    ///
+    /// The scan is the theme dictionary only. Ten window-local styles in src/WinShot/*.xaml
+    /// still snap (HistoryWindow, SettingsWindow's MatrixCheck, RecordingRecoveryWindow);
+    /// they belong to T4 and T7, and green here is not app-wide coverage.
+    /// </summary>
+    [Fact]
+    public void Theme_NoControlStateRepaintsWithoutATransition() => OnTheme(theme =>
+    {
+        string[] states = { "IsMouseOver", "IsPressed", "IsChecked" };
+        string[] paint = { "Background", "BorderBrush", "Stroke", "Fill", "StrokeThickness", "Opacity" };
+        int visited = 0;
+
+        foreach (object key in theme.Keys.Cast<object>().ToList())
+        {
+            foreach (TriggerBase triggerBase in TriggersOf(theme[key]))
+            {
+                // MultiTrigger and DataTrigger count too. Theme.xaml has no repainting one
+                // today, which is exactly why they were easy to leave out — and exactly how a
+                // future multi-condition hover state would have slipped through green.
+                (string state, SetterBaseCollection setters) = triggerBase switch
+                {
+                    Trigger t when states.Contains(t.Property.Name) && Equals(t.Value, true)
+                        => (t.Property.Name, t.Setters),
+                    MultiTrigger mt when mt.Conditions.Any(c => states.Contains(c.Property?.Name) && Equals(c.Value, true))
+                        => (string.Join(" + ", mt.Conditions.Select(c => c.Property?.Name)), mt.Setters),
+                    DataTrigger dt => ("a data state", dt.Setters),
+                    MultiDataTrigger mdt => ("a data state", mdt.Setters),
+                    _ => (string.Empty, null!),
+                };
+
+                if (setters is null) continue;
+                visited++;
+
+                string[] repainted = setters
+                    .OfType<Setter>()
+                    .Select(setter => setter.Property.Name)
+                    .Where(paint.Contains)
+                    .Distinct()
+                    .ToArray();
+
+                if (repainted.Length == 0) continue;
+
+                // Not merely "carries a storyboard": a trigger that fades an unrelated layer
+                // while setting Background outright still snaps its Background, which is the
+                // half-converted template this rule exists to catch.
+                string[] animated = StoryboardsOf(triggerBase)
+                    .SelectMany(board => board.Children)
+                    .Select(child => Storyboard.GetTargetProperty(child)?.Path)
+                    .Where(path => !string.IsNullOrEmpty(path))
+                    .Select(path => path!)
+                    .ToArray();
+
+                foreach (string property in repainted)
+                    Assert.True(
+                        animated.Any(path => path.Contains(property, StringComparison.Ordinal)),
+                        $"{key}'s {state} state sets {property} with a bare setter and nothing " +
+                        "animates it, so it snaps beside templates that cross-fade");
+            }
+        }
+
+        // A rule that walks nothing passes forever. If a Uri change or a template move ever
+        // empties this scan, the suite has to say so instead of going quietly green.
+        Assert.True(visited >= 20, $"the rule only reached {visited} state triggers");
+    });
 
     /// <summary>Every trigger a theme value can carry: its own, and its template's.</summary>
     private static IEnumerable<TriggerBase> TriggersOf(object? value)
