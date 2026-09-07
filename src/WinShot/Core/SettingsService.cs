@@ -263,6 +263,19 @@ public class SettingsService
 
     public void Save()
     {
+        SaveQuietly();
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Writes the file without raising <see cref="Changed"/>. For pure runtime state that no
+    /// subscriber acts on -- the saved colour palette, say. Changed re-registers all eleven
+    /// global hotkeys, so eyedropping a colour and closing the editor briefly dropped every
+    /// one of them, and tripped the "Some hotkeys unavailable" path if another app grabbed
+    /// one in the gap.
+    /// </summary>
+    public void SaveQuietly()
+    {
         try
         {
             if (GuardSave())
@@ -272,7 +285,6 @@ public class SettingsService
         {
             Log.Error("Failed to save settings", ex);
         }
-        Changed?.Invoke();
     }
 
     public async Task SaveAsync()

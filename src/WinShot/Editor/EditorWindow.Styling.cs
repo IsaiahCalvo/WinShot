@@ -442,15 +442,11 @@ public partial class EditorWindow : Window
             if (!TryParseColor(hex, out var c)) continue;
             var btn = new Button
             {
-                Width = 22,
-                Height = 22,
-                Margin = new Thickness(2),
+                Style = (Style)FindResource("ColorSwatchButton"),
                 Cursor = Cursors.Hand,
                 ToolTip = hex,
                 Tag = c,
                 Background = new SolidColorBrush(c),
-                BorderBrush = (Brush)FindResource("BorderStrongBrush"),
-                BorderThickness = new Thickness(1),
             };
             AutomationProperties.SetName(btn, $"Color {hex}");
             AutomationProperties.SetHelpText(btn, $"Use local annotation color {hex}.");
@@ -483,13 +479,12 @@ public partial class EditorWindow : Window
             string? hex = i < saved.Count ? saved[i] : null;
             var slot = new Button
             {
-                Width = 22,
-                Height = 22,
-                Margin = new Thickness(2),
+                // The shared swatch style, whose template is a plain Border: a stock Button
+                // paints Aero2's own disabled fill over a locally-set Background, so the
+                // empty slots rendered as light-grey squares instead of outlines.
+                Style = (Style)FindResource("ColorSwatchButton"),
                 Cursor = hex is null ? Cursors.Arrow : Cursors.Hand,
                 IsEnabled = hex is not null,
-                BorderBrush = (Brush)FindResource("BorderStrongBrush"),
-                BorderThickness = new Thickness(1),
             };
 
             if (hex is not null && TryParseColor(hex, out Color color))
@@ -504,8 +499,7 @@ public partial class EditorWindow : Window
             else
             {
                 // An empty slot: outline only, so the row reads as ten places rather than as
-                // a short row of colours. Disabled, so it is not a tab stop either.
-                slot.Background = Brushes.Transparent;
+                // a short row of colors. Disabled, so it is not a tab stop either.
                 AutomationProperties.SetName(slot, "Empty saved color slot");
             }
 
@@ -569,18 +563,27 @@ public partial class EditorWindow : Window
     /// <summary>Builds the preview swatch's "Copy as" menu once.</summary>
     private void BuildColorCopyMenu()
     {
-        if (ColorPickerPreview.ContextMenu is not null) return;
+        if (ColorPickerPreviewButton.ContextMenu is not null) return;
 
-        var menu = new ContextMenu();
+        var menu = new ContextMenu { PlacementTarget = ColorPickerPreviewButton };
         foreach ((string label, WinShot.Core.ColorFormat format) in CopyFormats)
         {
             var item = new MenuItem { Header = $"Copy as {label}", Tag = format };
-            AutomationProperties.SetName(item, $"Copy the colour as {label}");
+            // The automation name is the visible label, so voice control can say it.
+            AutomationProperties.SetName(item, $"Copy as {label}");
             item.Click += OnCopyColorAs;
             menu.Items.Add(item);
         }
-        ColorPickerPreview.ContextMenu = menu;
-        ColorPickerPreview.ToolTip = "Right-click to copy this colour in another format";
+        ColorPickerPreviewButton.ContextMenu = menu;
+    }
+
+    /// <summary>Opens the format list from the swatch. It is a Button, so Tab reaches it and
+    /// Enter, Space, Shift+F10 and the Apps key all land here or on its context menu.</summary>
+    private void OnColorPickerPreviewClick(object sender, RoutedEventArgs e)
+    {
+        BuildColorCopyMenu();
+        if (ColorPickerPreviewButton.ContextMenu is ContextMenu menu)
+            menu.IsOpen = true;
     }
 
     /// <summary>
@@ -599,11 +602,13 @@ public partial class EditorWindow : Window
         try
         {
             await CaptureService.SetTextToClipboardAsync(text);
-            App.Toast("Copied", text);
+            // Success, so the checkmark glyph -- the info glyph is what "Save failed" and
+            // "Copied" looking identical was about.
+            App.Toast("Copied", text, severity: WinShot.Core.ToastSeverity.Success);
         }
         catch (Exception ex)
         {
-            WinShot.Core.Log.Error("Could not copy the colour", ex);
+            WinShot.Core.Log.Error("Could not copy the color", ex);
             App.Toast("Copy failed", WinShot.Core.FriendlyError.For(ex), severity: WinShot.Core.ToastSeverity.Error);
         }
     }
@@ -652,8 +657,10 @@ public partial class EditorWindow : Window
     {
         if (!_savedColorsDirty) return;
         _savedColorsDirty = false;
-        try { _settings.Save(); }
-        catch (Exception ex) { WinShot.Core.Log.Error("Could not save the colour palette (non-fatal)", ex); }
+        // Quietly: the palette is runtime state nothing subscribes to, and a plain Save()
+        // raises Changed, which unregisters and re-registers every global hotkey.
+        try { _settings.SaveQuietly(); }
+        catch (Exception ex) { WinShot.Core.Log.Error("Could not save the color palette (non-fatal)", ex); }
     }
 
     /// <summary>Parses "#RGB", "#RRGGBB", "#AARRGGBB" or bare hex; tolerates a missing leading '#'.</summary>

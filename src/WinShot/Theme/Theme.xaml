@@ -418,6 +418,58 @@
     </Style>
 
     <!-- ====================================================================
+         COLOUR SWATCH — one cell of the editor's palette, of the "My colors"
+         row, or the picker's own preview. Its whole appearance is its own
+         Background, so it needs a template that draws nothing else: with the
+         stock Aero2 chrome, an empty (disabled) slot picked up the built-in
+         Button.Disabled.Background from a template-part trigger, which beats a
+         locally-set Background, and the "outline only" placeholders rendered as
+         ten near-white squares under a dark popup.
+         ==================================================================== -->
+    <Style x:Key="ColorSwatchButton" TargetType="Button">
+        <Setter Property="Width"  Value="22"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border x:Name="Fill"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{StaticResource RadiusChipInner}"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
+                                Background="{StaticResource PressedShadeBrush}"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChipInner}"
+                                BorderBrush="Transparent" BorderThickness="2" Margin="-1"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
          PILL BUTTON — PRIMARY (blue). The affirmative/commit action ("Done").
          ==================================================================== -->
     <Style x:Key="PillButtonPrimary" TargetType="Button">

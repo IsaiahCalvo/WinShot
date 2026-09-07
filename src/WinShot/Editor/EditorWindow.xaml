@@ -207,7 +207,11 @@
                                          every slot was clipped; at 260 both rows fit their swatches
                                          with the palette simply carrying the wider gutter. -->
                                     <StackPanel Width="260">
-                                        <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
+                                        <!-- Ten columns, matching the saved row below it: at
+                                             eight the two grids sat on a 32.5 px and a 26 px
+                                             pitch, so the swatches above and below started at
+                                             different left edges. -->
+                                        <UniformGrid x:Name="ColorPickerGrid" Columns="10"/>
                                         <TextBlock Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,8,0,2"/>
                                         <!-- Ten slots always, unused ones drawn as empty outlines, so
                                              the popup never changes height as the palette fills. -->
@@ -215,8 +219,20 @@
                                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                            <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
-                                                       Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
+                                            <!-- A real focusable control, not a bare Rectangle: the
+                                                 "Copy as" formats hang off this, and a Shape can
+                                                 never take keyboard focus, so Shift+F10 went to the
+                                                 hex box instead and the whole feature was
+                                                 mouse-only. -->
+                                            <Button x:Name="ColorPickerPreviewButton" Grid.Column="0"
+                                                    Style="{StaticResource ColorSwatchButton}" Margin="0"
+                                                    Cursor="Hand" Click="OnColorPickerPreviewClick"
+                                                    ToolTip="Copy this color in another format"
+                                                    AutomationProperties.Name="Copy as"
+                                                    AutomationProperties.HelpText="Open the list of color formats to copy.">
+                                                <Rectangle x:Name="ColorPickerPreview" Width="16" Height="16"
+                                                           RadiusX="3" RadiusY="3"/>
+                                            </Button>
                                             <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
                                                      Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
                                                      ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
