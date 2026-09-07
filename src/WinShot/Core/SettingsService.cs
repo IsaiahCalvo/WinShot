@@ -80,11 +80,17 @@ public class Settings
     // Quick Access overlay (post-capture)
     public bool OverlayAutoClose { get; set; } = false; // CleanShot "Auto-close: Enable"; gates OverlayAutoCloseSeconds
 
-    // General / app behavior (UI-only persisted toggles; behavior wired later)
-    public bool PlaySounds { get; set; } = false;       // TODO: wire behavior — capture/record sound effects
-    public string ShutterSound { get; set; } = "default"; // TODO: wire behavior — which shutter sound to play
-    public bool ShowTrayIcon { get; set; } = true;      // TODO: wire behavior — show the menu/tray icon
+    // General / app behavior
+    public bool PlaySounds { get; set; } = false;       // capture/record sound effects
+    public string ShutterSound { get; set; } = "default"; // which shutter sound to play
+    public bool ShowTrayIcon { get; set; } = true;      // show the tray icon
     public bool CheckForUpdatesOnStartup { get; set; } = true; // poll GitHub Releases on launch
+
+    // How each routine success confirms itself: "in-app" | "system" | "off".
+    // Failures ignore these — see NotificationStyle.
+    public string NotifyStyleOcr { get; set; } = NotificationStyle.InApp;
+    public string NotifyStyleCopy { get; set; } = NotificationStyle.InApp;
+    public string NotifyStyleSave { get; set; } = NotificationStyle.InApp;
 
     // The after-capture matrix: an independent set of actions per capture type, not a
     // single choice. Every one of these runs; see PostCaptureSet.

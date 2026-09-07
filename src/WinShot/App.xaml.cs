@@ -1448,8 +1448,9 @@ public partial class App : Application
             if (showSuccess)
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    ShowBalloon("Copied", "The capture is on the clipboard.", ToastSeverity.Success);
-                    PlayTrayConfirmation();
+                    NotifyAction(
+                        NotifiedAction.Copy, "Copied", "The capture is on the clipboard.",
+                        trayBeat: true);
                 });
         }
         catch (Exception ex)
@@ -1574,7 +1575,10 @@ public partial class App : Application
         try
         {
             Directory.CreateDirectory(_settings.Current.SaveFolder);
-            path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, _settings.Current.ImageFormat);
+            path = FileNamer.NextUniquePath(
+                _settings,
+                _settings.Current.SaveFolder,
+                ImageFormatChooser.Resolve(_settings.Current.ImageFormat, bmp));
         }
         catch (Exception ex)
         {
@@ -1628,8 +1632,8 @@ public partial class App : Application
                     ImageSaver.Save(bmp, path);
                     Dispatcher.InvokeAsync(() =>
                     {
-                        ShowBalloon("Saved", Path.GetFileName(path), ToastSeverity.Success);
-                        PlayTrayConfirmation();
+                        NotifyAction(
+                            NotifiedAction.Save, "Saved", Path.GetFileName(path), trayBeat: true);
                     });
                 }
                 catch (Exception ex)
@@ -1759,7 +1763,7 @@ public partial class App : Application
     private void ShowOcrToast(
         string title, string preview, SD.Point? anchor, Action? onOpen,
         ToastSeverity severity = ToastSeverity.Success, bool holdLong = false) =>
-        ShowToast(title, preview, anchor, onOpen, severity, holdLong);
+        NotifyAction(NotifiedAction.Ocr, title, preview, anchor, onOpen, severity, holdLong);
 
     private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
@@ -1970,6 +1974,43 @@ public partial class App : Application
     internal void ShowBalloon(
         string title, string message, ToastSeverity severity = ToastSeverity.Info, bool holdLong = false) =>
         ShowToast(title, message, anchor: null, onOpen: null, severity, holdLong);
+
+    /// <summary>
+    /// A routine success — text recognised, capture copied, capture saved — confirmed in
+    /// whichever channel the user chose for that action. Off means off, tray beat included:
+    /// someone who silenced "Copied" is not asking for a quieter "Copied".
+    /// </summary>
+    /// <remarks>
+    /// Only successes come through here. <see cref="ShowBalloon"/> stays the path for
+    /// failures, which are never silenced by a preference about confirmations.
+    /// </remarks>
+    private void NotifyAction(
+        NotifiedAction action,
+        string title,
+        string message,
+        SD.Point? anchor = null,
+        Action? onOpen = null,
+        ToastSeverity severity = ToastSeverity.Success,
+        bool holdLong = false,
+        bool trayBeat = false)
+    {
+        switch (NotificationStyle.For(action, _settings.Current))
+        {
+            case NotificationStyle.Off:
+                return;
+            case NotificationStyle.System:
+                // The shell notification carries no buttons, so an action (the OCR "Open
+                // link") is lost here by construction. The text is already on the clipboard.
+                ShowShellBalloon(title, message, severity);
+                break;
+            default:
+                ShowToast(title, message, anchor, onOpen, severity, holdLong);
+                break;
+        }
+
+        if (trayBeat)
+            PlayTrayConfirmation();
+    }
 
     /// <summary>
     /// The one way to put a toast on screen, for callers outside App as well: it is what

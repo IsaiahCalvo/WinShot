@@ -498,6 +498,9 @@ public partial class SettingsWindow : Window
         TemplateBox.Text = s.FileNameTemplate;
         AskForNameCheck.IsChecked = s.AskForNameAfterCapture;
         AddRetinaSuffixCheck.IsChecked = s.AddRetinaSuffix;
+        SelectByTag(NotifyOcrCombo, NotificationStyle.Normalize(s.NotifyStyleOcr), fallbackIndex: 0);
+        SelectByTag(NotifyCopyCombo, NotificationStyle.Normalize(s.NotifyStyleCopy), fallbackIndex: 0);
+        SelectByTag(NotifySaveCombo, NotificationStyle.Normalize(s.NotifyStyleSave), fallbackIndex: 0);
         SelectByTag(CopyFormatCombo, s.CopyToClipboardFormat, fallbackIndex: 0);
         PinnedRoundedCornersCheck.IsChecked = s.PinnedRoundedCorners;
         PinnedShadowCheck.IsChecked = s.PinnedShadow;
@@ -731,10 +734,19 @@ public partial class SettingsWindow : Window
         if (_settings is null || TemplatePreviewText is null || TemplateBox is null) return;
         try
         {
+            string format = SelectedTag(FormatCombo, "png");
+            bool auto = ImageFormatChooser.IsAuto(format);
+
+            // The hint only appears for the option that needs explaining, and only says what
+            // the choice will do — the preview below still has to show a real file name, so
+            // it shows the one Automatic picks for the screenshots it is picked for.
+            if (FormatAutoHint is not null)
+                FormatAutoHint.Visibility = auto ? Visibility.Visible : Visibility.Collapsed;
+
             var preview = new SettingsService();
             preview.Current.FileNameTemplate = TemplateBox.Text;
             preview.Current.NextCounter = _settings.Current.NextCounter;
-            TemplatePreviewText.Text = FileNamer.Next(preview, SelectedTag(FormatCombo, "png"));
+            TemplatePreviewText.Text = FileNamer.Next(preview, auto ? "png" : format);
         }
         catch (Exception ex)
         {
@@ -907,6 +919,9 @@ public partial class SettingsWindow : Window
         s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
         s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
         s.AskForNameAfterCapture = AskForNameCheck.IsChecked == true;
+        s.NotifyStyleOcr = SelectedTag(NotifyOcrCombo, NotificationStyle.InApp);
+        s.NotifyStyleCopy = SelectedTag(NotifyCopyCombo, NotificationStyle.InApp);
+        s.NotifyStyleSave = SelectedTag(NotifySaveCombo, NotificationStyle.InApp);
     }
 
     // ------------------------------------------------------- live apply
@@ -1122,7 +1137,7 @@ public partial class SettingsWindow : Window
         Accessible(OptimizeGifsCheck, "Optimize GIFs", "Use the selected palette quality while encoding locally.");
         Accessible(GifSizeCombo, "Maximum GIF width", "Choose the largest GIF width; smaller recordings are not enlarged.");
 
-        Accessible(FormatCombo, "Screenshot file format", "Choose PNG, JPG, or WEBP.");
+        Accessible(FormatCombo, "Screenshot file format", "Choose PNG, JPG, WEBP, or Automatic.");
         Accessible(HiDpiCheck, "Scale high DPI screenshots", "Scale high DPI screenshots down to one times size.");
         Accessible(SelfTimerCombo, "Self timer interval", "Choose how long the self timer waits before capture.");
         Accessible(FreezeScreenCheck, "Freeze screen during selection", "Use a still desktop image while choosing a region.");
@@ -1137,6 +1152,9 @@ public partial class SettingsWindow : Window
         Accessible(PinnedBorderCheck, "Pinned screenshot border", "Show a border around pinned screenshots.");
         Accessible(AllInOneRememberCheck, "Remember All-In-One selection", "Restore the last All-In-One selection.");
         Accessible(OcrJoinLinesCheck, "Join recognized text lines", "Copy recognized text as joined lines instead of preserving line breaks.");
+        Accessible(NotifyOcrCombo, "Text captured confirmation", "Choose how WinShot confirms that text was recognized and copied.");
+        Accessible(NotifyCopyCombo, "Copied confirmation", "Choose how WinShot confirms that a capture reached the clipboard.");
+        Accessible(NotifySaveCombo, "Saved confirmation", "Choose how WinShot confirms that a capture was written to disk.");
 
         foreach (Control control in new Control[]
         {
@@ -1156,6 +1174,7 @@ public partial class SettingsWindow : Window
             FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck, AskForNameCheck,
+            NotifyOcrCombo, NotifyCopyCombo, NotifySaveCombo,
         })
         {
             control.TabIndex = tabIndex++;

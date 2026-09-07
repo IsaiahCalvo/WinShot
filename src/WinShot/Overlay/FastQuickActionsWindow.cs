@@ -1920,15 +1920,18 @@ public sealed class FastQuickActionsWindow : WF.Form
                 return;
             }
             Directory.CreateDirectory(_settings.Current.SaveFolder);
+            // "Automatic" resolves against this image's own pixels before the name or the
+            // dialog's preselected filter is built from it.
+            string format = ImageFormatChooser.Resolve(_settings.Current.ImageFormat, _image);
             string path;
             if (askForDestination)
             {
                 using var dialog = new WF.SaveFileDialog
                 {
-                    FileName = FileNamer.Next(_settings, _settings.Current.ImageFormat),
+                    FileName = FileNamer.Next(_settings, format),
                     InitialDirectory = _settings.Current.SaveFolder,
                     Filter = "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp",
-                    FilterIndex = _settings.Current.ImageFormat switch
+                    FilterIndex = format switch
                     {
                         "jpg" => 2,
                         "webp" => 3,
@@ -1941,7 +1944,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
             else
             {
-                path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, _settings.Current.ImageFormat);
+                path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, format);
             }
 
             var copy = CaptureService.CloneBitmap(_image);

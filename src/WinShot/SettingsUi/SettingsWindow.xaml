@@ -867,8 +867,12 @@
                                         <ComboBoxItem Content="PNG" Tag="png"/>
                                         <ComboBoxItem Content="JPG" Tag="jpg"/>
                                         <ComboBoxItem Content="WEBP" Tag="webp"/>
+                                        <ComboBoxItem Content="Automatic" Tag="auto"/>
                                     </ComboBox>
                                 </DockPanel>
+                                <TextBlock x:Name="FormatAutoHint" Style="{StaticResource SubHint}"
+                                           Visibility="Collapsed"
+                                           Text="Automatic saves screenshots of text and interfaces as PNG, and photographic captures as JPEG."/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
                                     <CheckBox x:Name="HiDpiCheck" Content="Scale HiDPI screenshots to 1x"/>
@@ -1034,6 +1038,40 @@
                                     <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{title}" Click="OnInsertToken"><Run Text="{}{title}"/></Hyperlink><Run Text="  active window title"/><LineBreak/>
                                     <Run Text="Click a token to insert it."/>
                                 </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <Border x:Name="NotificationsCard" Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Confirmations"/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Text captured"/>
+                                    <ComboBox x:Name="NotifyOcrCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="In WinShot (default)" Tag="in-app"/>
+                                        <ComboBoxItem Content="Windows notification" Tag="system"/>
+                                        <ComboBoxItem Content="Nothing" Tag="off"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <Rectangle Style="{StaticResource GroupSep}"/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Copied"/>
+                                    <ComboBox x:Name="NotifyCopyCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="In WinShot (default)" Tag="in-app"/>
+                                        <ComboBoxItem Content="Windows notification" Tag="system"/>
+                                        <ComboBoxItem Content="Nothing" Tag="off"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <Rectangle Style="{StaticResource GroupSep}"/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Saved"/>
+                                    <ComboBox x:Name="NotifySaveCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="In WinShot (default)" Tag="in-app"/>
+                                        <ComboBoxItem Content="Windows notification" Tag="system"/>
+                                        <ComboBoxItem Content="Nothing" Tag="off"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Windows notifications can be held back by Focus assist and carry no buttons. Nothing also stops the tray icon's confirmation. Failures are always shown."/>
                             </StackPanel>
                         </Border>
 
