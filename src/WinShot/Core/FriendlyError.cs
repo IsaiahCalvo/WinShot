@@ -16,6 +16,11 @@ public static class FriendlyError
     private const int ErrorHandleDiskFull = unchecked((int)0x80070027);
     internal const int ClipboardCantOpen = unchecked((int)0x800401D0);
 
+    /// <summary>The catch-all. Named so a caller can tell "nothing specific to say" apart
+    /// from a real answer — the quick-actions card shows the action's own title instead of
+    /// this, because a one-line surface has no room to say both.</summary>
+    public const string Generic = "Something went wrong. The details are in the log.";
+
     public static string For(Exception? ex) => ex switch
     {
         null => "Something went wrong.",
@@ -57,7 +62,7 @@ public static class FriendlyError
             => "The image could not be processed. Try the capture again.",
         ArgumentException when ex.GetType() == typeof(ArgumentException)
             => "The image could not be processed. Try the capture again.",
-        _ => "Something went wrong. The details are in the log.",
+        _ => Generic,
     };
 }
 
