@@ -654,6 +654,63 @@ internal static class ScrollHintText
 }
 
 /// <summary>
+/// How big the live preview's picture area is allowed to get. A fixed box turns the whole
+/// point of the preview inside out: the stitch is meant to read as <em>filling</em>, but a
+/// capture growing from 900 px to 6000 px inside 220x300 only ever gets thinner. So the box
+/// grows along the capture axis -- 60% of the monitor's height for a vertical run, 55% of its
+/// width for a horizontal one -- and starts scaling down only once it has run out of monitor.
+///
+/// The capture loop's preview strips size their snapshots from the same numbers, so the
+/// bitmap arriving at the panel always has at least as many pixels as the panel will draw.
+/// </summary>
+internal static class ScrollPreviewLayout
+{
+    /// <summary>Picture area of the panel at its smallest, in logical pixels: the 220x300
+    /// panel less its 8 px padding and the 32 px caption row.</summary>
+    public const int MinContentWidth = 204;
+    public const int MinContentHeight = 252;
+
+    /// <summary>The min/max picture box, in physical pixels, for the monitor a region is on.</summary>
+    public static (SD.Size Min, SD.Size Max) For(SD.Rectangle regionScreen)
+    {
+        SD.Rectangle monitor = WF.Screen.FromRectangle(regionScreen).Bounds;
+        double scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitor);
+        var min = new SD.Size(
+            WinShot.Recording.RecordingMonitorDpi.Px(MinContentWidth, scale),
+            WinShot.Recording.RecordingMonitorDpi.Px(MinContentHeight, scale));
+        return (min, Cap(monitor, min));
+    }
+
+    /// <summary>The ceiling the box grows to, never below the box it starts at.</summary>
+    public static SD.Size Cap(SD.Rectangle monitor, SD.Size min) => new(
+        Math.Max(min.Width, (int)Math.Round(monitor.Width * 0.55)),
+        Math.Max(min.Height, (int)Math.Round(monitor.Height * 0.60)));
+
+    /// <summary>
+    /// The picture box for the stitch so far. The box only ever grows to stop the image being
+    /// scaled <em>down</em>, never to blow it up: a stitch that still fits at 1:1 leaves the
+    /// box alone -- which is also what keeps the first few frames of a vertical run, still
+    /// wider than they are tall, from being mistaken for a sideways capture. Past that, the
+    /// axis that overflows is the capture axis: it follows the image's aspect up to the cap
+    /// while the other edge stays pinned, since a preview that changed both edges every
+    /// 150 ms would wobble instead of fill.
+    /// </summary>
+    public static SD.Size Content(SD.Size image, SD.Size min, SD.Size max)
+    {
+        if (image.Width <= 0 || image.Height <= 0) return min;
+        if (image.Width <= min.Width && image.Height <= min.Height) return min;
+
+        if (image.Height - min.Height >= image.Width - min.Width)
+        {
+            int height = (int)Math.Round(min.Width * (image.Height / (double)image.Width));
+            return new SD.Size(min.Width, Math.Clamp(height, min.Height, Math.Max(min.Height, max.Height)));
+        }
+        int width = (int)Math.Round(min.Height * (image.Width / (double)image.Height));
+        return new SD.Size(Math.Clamp(width, min.Width, Math.Max(min.Width, max.Width)), min.Height);
+    }
+}
+
+/// <summary>
 /// Live preview panel pinned to the bottom-right of the region's monitor, showing the
 /// stitched image growing as the capture proceeds (CleanShot shows the same). Excluded from
 /// capture so it never appears in the stitch; never activates.
@@ -662,6 +719,13 @@ public sealed class ScrollPreviewPanel : WF.Form
 {
     private readonly WF.PictureBox _pic;
     private readonly WF.Label _caption;
+    private readonly SD.Rectangle _region;
+    private readonly SD.Size _chrome;   // padding + caption row, i.e. Size - picture area
+    private readonly SD.Size _minContent;
+    private readonly SD.Size _maxContent;
+    private readonly WinShot.Capture.RectangleTween _grow = new();
+    private SD.Size _content;
+    private IDisposable? _growTween;
     private bool _hintShowing;
     private IDisposable? _fade;
 
@@ -675,6 +739,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     public ScrollPreviewPanel(SD.Rectangle regionScreen)
     {
         SD.Rectangle targetScreen = WF.Screen.FromRectangle(regionScreen).Bounds;
+        _region = regionScreen;
         _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(targetScreen);
         Location = targetScreen.Location;
         AutoScaleMode = WF.AutoScaleMode.None;
@@ -684,7 +749,12 @@ public sealed class ScrollPreviewPanel : WF.Form
         TopMost = true;
         BackColor = ThemePalette.Elevated;
         Padding = new WF.Padding(S(8));
-        Size = new SD.Size(S(220), S(300));
+        _chrome = new SD.Size(S(8) * 2, (S(8) * 2) + S(32));
+        _minContent = new SD.Size(
+            S(ScrollPreviewLayout.MinContentWidth), S(ScrollPreviewLayout.MinContentHeight));
+        _maxContent = ScrollPreviewLayout.Cap(targetScreen, _minContent);
+        _content = _minContent;
+        Size = _content + _chrome;
 
         _caption = new WF.Label
         {
@@ -763,6 +833,39 @@ public sealed class ScrollPreviewPanel : WF.Form
         old?.Dispose();
         if (!_hintShowing)
             _caption.Text = caption;
+        GrowTo(ScrollPreviewLayout.Content(image.Size, _minContent, _maxContent));
+    }
+
+    /// <summary>The picture area right now, in physical pixels. Grows with the stitch.</summary>
+    internal SD.Size ContentSize => _content;
+
+    /// <summary>
+    /// Glides the panel to a new picture area, staying anchored to its bottom-right corner so
+    /// the stitch reads as filling upward (or leftward) rather than the window jumping. Each
+    /// snapshot lands 150 ms apart and the glide takes 140 ms, so consecutive growth steps
+    /// join into one continuous fill.
+    /// </summary>
+    private void GrowTo(SD.Size content)
+    {
+        if (IsDisposed || content == _content) return;
+        _content = content;
+        SD.Rectangle to = BoundsFor(content + _chrome);
+        if (!IsHandleCreated)
+        {
+            Bounds = to;
+            return;
+        }
+
+        _growTween?.Dispose();
+        _grow.Retarget(Bounds, to);
+        _growTween = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic,
+            p =>
+            {
+                if (IsDisposed) return;
+                _grow.Update((float)p);
+                Bounds = _grow.Current;
+            },
+            () => _grow.Stop());
     }
 
     /// <summary>Live progress text under the preview ("12 frames — 4000px").</summary>
@@ -792,15 +895,35 @@ public sealed class ScrollPreviewPanel : WF.Form
     {
         _fade?.Dispose();
         _fade = null;
+        _growTween?.Dispose();
+        _growTween = null;
+        _grow.Stop();
         _pic.Image?.Dispose();
         _pic.Image = null;
         base.OnFormClosed(e);
     }
 
-    private void PositionBottomRight(SD.Rectangle region)
+    /// <summary>A panel disposed without being closed (the teardown path when the capture
+    /// ends mid-glide) must drop the growth tween too, or it keeps the process-wide
+    /// high-resolution clock raised for a window that no longer exists.</summary>
+    protected override void Dispose(bool disposing)
     {
-        var mon = WF.Screen.FromRectangle(region).Bounds;
+        if (disposing)
+        {
+            _growTween?.Dispose();
+            _growTween = null;
+            _grow.Stop();
+        }
+        base.Dispose(disposing);
+    }
+
+    private void PositionBottomRight(SD.Rectangle region) => Bounds = BoundsFor(Size);
+
+    private SD.Rectangle BoundsFor(SD.Size size)
+    {
+        var mon = WF.Screen.FromRectangle(_region).Bounds;
         int inset = S(20);
-        Location = new SD.Point(mon.Right - Width - inset, mon.Bottom - Height - inset);
+        return new SD.Rectangle(
+            mon.Right - size.Width - inset, mon.Bottom - size.Height - inset, size.Width, size.Height);
     }
 }

@@ -233,6 +233,117 @@ public class ScrollCaptureChromeTests
         }
     }
 
+    /// <summary>
+    /// The preview's whole job is to read as filling. A fixed 220x300 box does the opposite:
+    /// the stitch is scaled to fit from the very first frame, so the longer the capture runs
+    /// the thinner it gets. The box now follows the capture axis until it runs out of monitor
+    /// -- 60% of the height going down, 55% of the width going sideways -- and only then
+    /// starts scaling down.
+    /// </summary>
+    [Fact]
+    public void ThePreviewBox_FollowsTheCaptureAxisUntilItRunsOutOfMonitor()
+    {
+        var min = new SD.Size(204, 252);
+        SD.Size max = ScrollPreviewLayout.Cap(new SD.Rectangle(0, 0, 1920, 1080), min);
+        Assert.Equal(new SD.Size(1056, 648), max);
+
+        // Nothing captured yet, and a stitch still shorter than the box: stay at the box.
+        Assert.Equal(min, ScrollPreviewLayout.Content(SD.Size.Empty, min, max));
+        Assert.Equal(min, ScrollPreviewLayout.Content(new SD.Size(204, 120), min, max));
+
+        // Growing downward: the width is pinned, the height tracks the stitch 1:1.
+        Assert.Equal(new SD.Size(204, 400), ScrollPreviewLayout.Content(new SD.Size(204, 400), min, max));
+
+        // A narrow region's strip is narrower than the box and still fits it: shown at 1:1
+        // rather than blown up to fill, which would only make it blurrier.
+        Assert.Equal(min, ScrollPreviewLayout.Content(new SD.Size(102, 250), min, max));
+
+        // Past 60% of the monitor it stops growing -- from here it scales down, as before.
+        Assert.Equal(new SD.Size(204, 648), ScrollPreviewLayout.Content(new SD.Size(204, 6000), min, max));
+
+        // Sideways runs are the mirror image: the height is pinned, the width grows to 55%.
+        Assert.Equal(new SD.Size(504, 252), ScrollPreviewLayout.Content(new SD.Size(500, 250), min, max));
+        Assert.Equal(new SD.Size(1056, 252), ScrollPreviewLayout.Content(new SD.Size(6000, 252), min, max));
+    }
+
+    /// <summary>A monitor shorter than the box it starts at (a 1024x600 netbook panel, or a
+    /// portrait strip beside the main display) must not hand back a negative-growth cap.</summary>
+    [Fact]
+    public void ThePreviewBox_NeverShrinksBelowTheBoxItStartsAt()
+    {
+        var min = new SD.Size(204, 252);
+        SD.Size max = ScrollPreviewLayout.Cap(new SD.Rectangle(0, 0, 320, 240), min);
+
+        Assert.Equal(min, max);
+        Assert.Equal(min, ScrollPreviewLayout.Content(new SD.Size(204, 6000), min, max));
+        Assert.Equal(min, ScrollPreviewLayout.Content(new SD.Size(6000, 204), min, max));
+    }
+
+    /// <summary>
+    /// The live panel: it grows into each snapshot, stays pinned to the corner it started in
+    /// (so the stitch fills upward instead of the window walking across the screen), stops at
+    /// the cap, and leaves no tween holding the process-wide clock.
+    /// </summary>
+    [Fact]
+    public void ThePreviewPanel_GrowsWithTheStitchAndStaysInItsCorner()
+    {
+        Assert.Equal(0, Motion.Holders);
+        var region = new SD.Rectangle(120, 120, 700, 500);
+        SD.Rectangle monitor = WF.Screen.FromRectangle(region).Bounds;
+
+        using (var preview = new ScrollPreviewPanel(region))
+        {
+            preview.Show();
+            WF.Application.DoEvents();
+            PumpUntil(() => Motion.Holders == 0);
+
+            SD.Size start = preview.ContentSize;
+            if (ScrollPreviewLayout.Cap(monitor, start).Height <= start.Height)
+                return; // a monitor too short to grow into; the pure tests cover the maths
+
+            var corner = new SD.Point(preview.Right, preview.Bottom);
+
+            preview.SetImage(new SD.Bitmap(start.Width, start.Height * 3), "Capturing…");
+            PumpUntil(() => Motion.Holders == 0);
+
+            Assert.True(preview.ContentSize.Height > start.Height,
+                $"the box stayed {preview.ContentSize.Height}px tall for a stitch 3x its height");
+            Assert.Equal(start.Width, preview.ContentSize.Width);
+            Assert.Equal(corner, new SD.Point(preview.Right, preview.Bottom));
+
+            preview.SetImage(new SD.Bitmap(start.Width, start.Height * 40), "Capturing…");
+            PumpUntil(() => Motion.Holders == 0);
+            SD.Size capped = preview.ContentSize;
+
+            preview.SetImage(new SD.Bitmap(start.Width, start.Height * 80), "Capturing…");
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(capped, preview.ContentSize);
+            Assert.Equal(corner, new SD.Point(preview.Right, preview.Bottom));
+            preview.Hide();
+        }
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>A capture that ends mid-glide disposes the panel without closing it; the
+    /// growth tween has to go with it.</summary>
+    [Fact]
+    public void DisposingThePanelMidGrowth_ReleasesTheMotionHold()
+    {
+        Assert.Equal(0, Motion.Holders);
+        var region = new SD.Rectangle(140, 140, 600, 400);
+        var preview = new ScrollPreviewPanel(region);
+        preview.Show();
+        WF.Application.DoEvents();
+
+        preview.SetImage(new SD.Bitmap(preview.ContentSize.Width, preview.ContentSize.Height * 4), "Capturing…");
+        preview.Dispose();
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
     [Theory]
     [InlineData(1.00, 250, 24, 40)]
     [InlineData(1.25, 312, 30, 50)]   // Math.Round is to-even: 312.5 lands on 312

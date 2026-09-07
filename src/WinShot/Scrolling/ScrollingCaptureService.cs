@@ -279,8 +279,12 @@ public static class ScrollingCaptureService
             _horizontal = new HorizontalStitchBuffer(region.Height, _horizontalLimit);
             if (preview is not null)
             {
-                _strip = new PreviewStrip(region.Width);
-                _horizontalStrip = new HorizontalPreviewStrip(region.Height);
+                // The panel grows with the stitch, so the snapshots have to carry enough
+                // pixels for the biggest box it can reach -- a strip capped at the panel's
+                // starting size would just be upscaled and blurred as the panel filled.
+                (SD.Size min, SD.Size max) = ScrollPreviewLayout.For(region);
+                _strip = new PreviewStrip(region.Width, min.Width, max.Height);
+                _horizontalStrip = new HorizontalPreviewStrip(region.Height, min.Height, max.Width);
             }
         }
 
@@ -1872,16 +1876,16 @@ public static class ScrollingCaptureService
     /// once, avoiding repeated downscales of the full growing capture.</summary>
     private sealed class HorizontalPreviewStrip : IDisposable
     {
-        private const int MaxPreviewWidth = 204;
-        private const int MaxPreviewHeight = 280;
+        private readonly int _maxWidth;
         private readonly int _height;
         private readonly double _scale;
         private SD.Bitmap? _strip;
         private int _used;
 
-        public HorizontalPreviewStrip(int regionHeight)
+        public HorizontalPreviewStrip(int regionHeight, int previewHeight, int maxPreviewWidth)
         {
-            _height = Math.Min(MaxPreviewHeight, regionHeight);
+            _maxWidth = maxPreviewWidth;
+            _height = Math.Min(previewHeight, regionHeight);
             _scale = _height / (double)regionHeight;
         }
 
@@ -1908,7 +1912,7 @@ public static class ScrollingCaptureService
         public SD.Bitmap? SnapshotWhole()
         {
             if (_strip is null || _used == 0) return null;
-            double scale = Math.Min(1.0, MaxPreviewWidth / (double)_used);
+            double scale = Math.Min(1.0, _maxWidth / (double)_used);
             int width = Math.Max(1, (int)Math.Round(_used * scale));
             int height = Math.Max(1, (int)Math.Round(_height * scale));
             var snapshot = new SD.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
@@ -1952,17 +1956,16 @@ public static class ScrollingCaptureService
 
     private sealed class PreviewStrip : IDisposable
     {
-        private const int MaxStripWidth = 204;
-        private const int WindowHeight = 280;
-
         private SD.Bitmap? _strip;
         private readonly int _width;
+        private readonly int _maxHeight;
         private readonly double _scale;
         private int _used;
 
-        public PreviewStrip(int regionWidth)
+        public PreviewStrip(int regionWidth, int previewWidth, int maxPreviewHeight)
         {
-            _width = Math.Min(MaxStripWidth, regionWidth); // never upscale a narrow region
+            _width = Math.Min(previewWidth, regionWidth); // never upscale a narrow region
+            _maxHeight = maxPreviewHeight;
             _scale = _width / (double)regionWidth;
         }
 
@@ -1993,7 +1996,7 @@ public static class ScrollingCaptureService
         {
             if (_strip is null || _used == 0)
                 return null;
-            double s = Math.Min(1.0, WindowHeight / (double)_used);
+            double s = Math.Min(1.0, _maxHeight / (double)_used);
             int w = Math.Max(1, (int)Math.Round(_width * s));
             int h = Math.Max(1, (int)Math.Round(_used * s));
             var snap = new SD.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
