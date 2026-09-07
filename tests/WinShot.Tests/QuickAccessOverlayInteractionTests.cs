@@ -1094,6 +1094,92 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    /// <summary>
+    /// The re-aim in PositionFromSettings has to fire while an entrance is in flight and
+    /// never after one has landed. It reads a flag rather than the Motion handle because
+    /// with animation turned off Motion.Run applies the end state and calls onDone INLINE,
+    /// before the caller ever gets a handle to assign — so the handle field is non-null for
+    /// a tween that already finished, and a handle-based guard replayed the whole entrance
+    /// on every later reposition: the card thrown off screen and snapped back, on a machine
+    /// whose owner asked for no animation at all.
+    /// </summary>
+    [Fact]
+    public void ARepositionReAimsAnEntranceInFlightButNeverReplaysOneThatLanded()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            // Pin the monitor: "move to the active screen" reads the live cursor, so a second
+            // placement could otherwise choose a different slot for reasons of its own.
+            settings.Current.OverlayMoveToActiveScreen = false;
+
+            using (new AnimationSetting(false))
+            {
+                using var landed = new FastQuickActionsWindow(bitmap, settings);
+                landed.Show();
+
+                // The trap itself, asserted: the tween is over, and its handle is not null.
+                Assert.NotNull(EnterMotion(landed));
+                Assert.False(EnterMotionRunning(landed));
+
+                SD.Rectangle area = WF.Screen.FromRectangle(landed.Bounds).WorkingArea;
+                var moves = new List<SD.Rectangle>();
+                void Track(object? sender, EventArgs e) => moves.Add(landed.Bounds);
+                landed.LocationChanged += Track;
+                Invoke(landed, "PositionFromSettings");
+                landed.LocationChanged -= Track;
+
+                // The settled location alone proves nothing — a replay ends where it began.
+                // Watch the way through: the entrance starts from outside the anchored edge,
+                // so a replayed one is the only thing that puts the card off the working area.
+                // (Not an equality against one slot: OpenWindows is static and another test
+                // class's card landing mid-run legitimately restacks this one.)
+                Assert.All(moves, bounds => Assert.True(
+                    area.Contains(bounds),
+                    $"a landed card must not leave the working area on a reposition, but went to {bounds}"));
+            }
+
+            using (new AnimationSetting(true))
+            {
+                using var flying = new FastQuickActionsWindow(bitmap, settings);
+                flying.Show();
+
+                // The other half of the guard: a card still on its way is re-aimed, or
+                // learning its monitor's DPI mid-slide drops it on the stale slot and eats
+                // the entrance. A fresh tween handle is that re-aim.
+                Assert.True(EnterMotionRunning(flying));
+                object? before = EnterMotion(flying);
+                Invoke(flying, "PositionFromSettings");
+                Assert.NotSame(before, EnterMotion(flying));
+                flying.Hide();
+            }
+        });
+    }
+
+    private static object? EnterMotion(FastQuickActionsWindow overlay)
+        => typeof(FastQuickActionsWindow)
+            .GetField("_enterMotion", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay);
+
+    private static bool EnterMotionRunning(FastQuickActionsWindow overlay)
+        => (bool)typeof(FastQuickActionsWindow)
+            .GetField("_enterMotionRunning", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+
+    private sealed class AnimationSetting : IDisposable
+    {
+        private readonly Func<bool> _previous;
+
+        public AnimationSetting(bool enabled)
+        {
+            _previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => enabled;
+        }
+
+        public void Dispose() => Motion.AnimationsEnabled = _previous;
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
