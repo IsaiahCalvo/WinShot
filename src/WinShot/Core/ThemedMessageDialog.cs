@@ -54,6 +54,9 @@ public static class ThemedMessageDialog
 
         var input = new TextBox { Text = initialValue, Margin = new Thickness(0, 0, 0, 18) };
         input.SetResourceReference(FrameworkElement.StyleProperty, "DarkTextBox");
+        // The sentence above the field is the only label it has; without this a screen reader
+        // announces an unnamed edit box.
+        System.Windows.Automation.AutomationProperties.SetName(input, message);
         // Build hands back the whole card, footer included, so the field goes in above it.
         body.Children.Insert(body.Children.IndexOf(footer), input);
         dialog.Loaded += (_, _) =>

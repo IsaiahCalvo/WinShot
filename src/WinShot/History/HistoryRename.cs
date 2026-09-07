@@ -46,6 +46,14 @@ internal static class HistoryRename
         string directory = Path.GetDirectoryName(currentPath) ?? string.Empty;
         string candidate = Path.Combine(directory, name + tags + extension);
 
+        // Windows rejects these two itself. Catching them here keeps every bad name on the same
+        // path — a sentence in the prompt the user can act on — instead of letting File.Move
+        // throw and downgrading the answer to a generic "Rename failed".
+        if (ReservedDeviceNames.Contains(name + tags, StringComparer.OrdinalIgnoreCase))
+            return Result.Failed("Windows reserves that name for a device. Pick another one.");
+        if (candidate.Length > MaxPathLength)
+            return Result.Failed("That name is too long — the file path would not fit.");
+
         if (string.Equals(candidate, currentPath, StringComparison.OrdinalIgnoreCase))
             return Result.Renamed(currentPath);
         if (fileExists(candidate))
@@ -53,6 +61,32 @@ internal static class HistoryRename
 
         return Result.Renamed(candidate);
     }
+
+    /// <summary>
+    /// What the rename prompt should open with: the part of the name the user actually reads,
+    /// with the tags <see cref="Resolve"/> re-appends stripped off. Accepting the offered
+    /// default therefore round-trips to the current path, instead of being rejected for the '@'
+    /// WinShot itself put there or stacking a second "-scroll" on the end.
+    /// </summary>
+    public static string SuggestedName(string currentPath)
+    {
+        string stem = Path.GetFileNameWithoutExtension(currentPath);
+        string name = stem[..^TagsOf(stem).Length];
+        // A stray '@' TagsOf did not read as a tag (a trailing one, say) would still come back
+        // as an error the moment the user pressed Enter. Never offer a name Resolve refuses.
+        int at = name.LastIndexOf('@');
+        return at >= 0 ? name[..at] : name;
+    }
+
+    /// <summary>Longest full path Windows accepts without long-path support turned on.</summary>
+    private const int MaxPathLength = 259;
+
+    private static readonly string[] ReservedDeviceNames =
+    [
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
 
     /// <summary>The classification and source-app tags at the end of a stem, in that order.</summary>
     private static string TagsOf(string stem)

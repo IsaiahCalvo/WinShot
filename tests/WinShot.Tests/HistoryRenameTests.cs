@@ -48,6 +48,74 @@ public class HistoryRenameTests
         Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 
+    // Windows would reject these itself, and File.Move throwing downgrades the good copy this
+    // resolver produces to a generic "Rename failed" dialog.
+    [Theory]
+    [InlineData("CON")]
+    [InlineData("nul")]
+    [InlineData("COM1")]
+    [InlineData("LPT9")]
+    public void Rename_RefusesNamesWindowsKeepsForDevices(string requested)
+    {
+        HistoryRename.Result result = HistoryRename.Resolve(
+            Path.Combine(Dir, "20260803-120000-000.png"), requested, static _ => false);
+
+        Assert.Null(result.Path);
+        Assert.Contains("device", result.Error!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // A tag makes the stem something Windows accepts again, so the guard must not over-reach.
+    [Fact]
+    public void Rename_AllowsADeviceNameOnceATagFollowsIt()
+    {
+        HistoryRename.Result result = HistoryRename.Resolve(
+            Path.Combine(Dir, "20260803-120000-000-scroll.png"), "CON", static _ => false);
+
+        Assert.Null(result.Error);
+        Assert.Equal(Path.Combine(Dir, "CON-scroll.png"), result.Path);
+    }
+
+    [Fact]
+    public void Rename_RefusesANameThatWouldNotFitInAPath()
+    {
+        HistoryRename.Result result = HistoryRename.Resolve(
+            Path.Combine(Dir, "20260803-120000-000.png"), new string('x', 300), static _ => false);
+
+        Assert.Null(result.Path);
+        Assert.Contains("too long", result.Error!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The prompt opens on SuggestedName, so accepting the offered default unchanged has to be a
+    /// no-op. Offering the whole stem meant pressing Enter on it either failed on the '@' WinShot
+    /// itself wrote, or stacked a second "-scroll" onto the name.
+    /// </summary>
+    [Theory]
+    [InlineData("20260803-120000-000.png")]
+    [InlineData("20260803-120000-000-scroll.png")]
+    [InlineData("20260803-120000-000@chrome.png")]
+    [InlineData("20260803-120000-000-scroll@chrome.png")]
+    [InlineData("Login page@chrome.png")]
+    public void TheSuggestedName_RoundTripsToTheSameFile(string fileName)
+    {
+        string path = Path.Combine(Dir, fileName);
+
+        HistoryRename.Result result = HistoryRename.Resolve(
+            path, HistoryRename.SuggestedName(path), static _ => true);
+
+        Assert.Null(result.Error);
+        Assert.Equal(path, result.Path);
+    }
+
+    [Fact]
+    public void TheSuggestedName_IsTheReadablePartOnly()
+    {
+        Assert.Equal(
+            "20260803-120000-000",
+            HistoryRename.SuggestedName(Path.Combine(Dir, "20260803-120000-000-scroll@chrome.png")));
+        Assert.Equal("Login page", HistoryRename.SuggestedName(Path.Combine(Dir, "Login page.png")));
+    }
+
     [Fact]
     public void Rename_RefusesToOverwriteAnotherCapture()
     {
