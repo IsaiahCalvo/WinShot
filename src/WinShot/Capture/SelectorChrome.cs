@@ -96,7 +96,7 @@ internal static class SelectorChrome
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         using (var path = GdiPaths.RoundedRect(bg, 6))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(Scale(235, amount), 0x1C, 0x1C, 0x1E)))
+        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(Scale(235, amount), ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
@@ -109,6 +109,10 @@ internal static class SelectorChrome
         {
             Alignment = SD.StringAlignment.Center,
             LineAlignment = SD.StringAlignment.Center,
+            // The pill is measured with TextRenderer and filled with DrawString; GDI+ is the
+            // narrower of the two for every string these pills carry, but without NoWrap a
+            // future longer one would silently wrap inside a pill sized for one line.
+            FormatFlags = SD.StringFormatFlags.NoWrap,
         };
         g.DrawString(text, font, textBrush, bg, format);
     }

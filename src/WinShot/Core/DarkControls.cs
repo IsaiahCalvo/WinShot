@@ -917,10 +917,15 @@ public sealed class DarkSegmented : WF.Control
 /// </summary>
 public sealed class DarkCheckBox : WF.CheckBox
 {
-    private bool _hot;
+    // Hover and checked both ramp: this control now sits on the toast next to DarkButtons
+    // that ease through StateAmount, and two controls on one card must not behave differently.
+    private readonly StateAmount _hover;
+    private readonly StateAmount _check;
 
     public DarkCheckBox()
     {
+        _hover = new StateAmount(this);
+        _check = new StateAmount(this);
         SetStyle(
             WF.ControlStyles.UserPaint |
             WF.ControlStyles.AllPaintingInWmPaint |
@@ -931,11 +936,29 @@ public sealed class DarkCheckBox : WF.CheckBox
         BackColor = DarkControlPalette.Card;
         Cursor = WF.Cursors.Hand;
         ForeColor = DarkControlPalette.Text;
-        CheckedChanged += (_, _) => Invalidate();
+        CheckedChanged += (_, _) => _check.To(Checked ? 1d : 0d);
         GotFocus += (_, _) => Invalidate();
         LostFocus += (_, _) => Invalidate();
-        MouseEnter += (_, _) => { _hot = true; Invalidate(); };
-        MouseLeave += (_, _) => { _hot = false; Invalidate(); };
+        MouseEnter += (_, _) => _hover.To(1d);
+        MouseLeave += (_, _) => _hover.To(0d);
+    }
+
+    /// <summary>A box built already ticked is at rest ticked -- the ramp is for the change,
+    /// not for the arrival.</summary>
+    protected override void OnCreateControl()
+    {
+        base.OnCreateControl();
+        _check.Reset(Checked ? 1d : 0d);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _hover.Dispose();
+            _check.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     /// <summary>Manual DPI scale, like every other hand-laid-out surface in the app.</summary>
@@ -960,12 +983,26 @@ public sealed class DarkCheckBox : WF.CheckBox
         var rect = new SD.Rectangle(0, (Height - box) / 2, box, box);
         int cornerRadius = S(4);
 
-        if (Checked)
+        // The box cross-fades from the empty field to the accent fill, and the tick fades in
+        // over it, so ticking is a change you can see happen rather than one frame of blue.
+        double checkAmount = _check.Value;
+        using (var path = GdiPaths.RoundedRect(rect, cornerRadius))
         {
-            using var fill = new SD.SolidBrush(ThemePalette.Accent);
-            using (var path = GdiPaths.RoundedRect(rect, cornerRadius))
+            using (var fill = new SD.SolidBrush(DarkControlPalette.Mix(
+                DarkControlPalette.Field, ThemePalette.Accent, checkAmount)))
                 g.FillPath(fill, path);
-            using var pen = new SD.Pen(SD.Color.White, Math.Max(2f, box / 8f))
+            int borderAlpha = (int)Math.Round((64 + (56 * _hover.Value)) * (1d - checkAmount));
+            if (borderAlpha > 1)
+            {
+                using var pen = new SD.Pen(SD.Color.FromArgb(borderAlpha, 255, 255, 255), 1f);
+                g.DrawPath(pen, path);
+            }
+        }
+        if (checkAmount > 0.004d)
+        {
+            using var pen = new SD.Pen(
+                SD.Color.FromArgb((int)Math.Round(255 * checkAmount), SD.Color.White),
+                Math.Max(2f, box / 8f))
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round,
@@ -977,14 +1014,6 @@ public sealed class DarkCheckBox : WF.CheckBox
                 new SD.PointF(rect.X + box * 0.43f, rect.Y + box * 0.72f),
                 new SD.PointF(rect.X + box * 0.75f, rect.Y + box * 0.31f),
             });
-        }
-        else
-        {
-            using var fill = new SD.SolidBrush(DarkControlPalette.Field);
-            using var pen = new SD.Pen(SD.Color.FromArgb(_hot ? 120 : 64, 255, 255, 255), 1f);
-            using var path = GdiPaths.RoundedRect(rect, cornerRadius);
-            g.FillPath(fill, path);
-            g.DrawPath(pen, path);
         }
 
         int textX = box + S(8);

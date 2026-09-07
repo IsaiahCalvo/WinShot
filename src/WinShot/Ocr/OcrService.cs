@@ -42,8 +42,11 @@ public static class OcrService
     ];
 
     private static OcrEngine? _engine;
-    private static bool _engineInitialized;
-    private static string _engineLanguage = AutoLanguage;
+    // Volatile because the unlocked fast path in GetEngine reads them: the engine is built
+    // under EngineGate on whichever thread ran the capture, and the next capture can be on
+    // another. Without this a stale read costs one more capture on the previous language.
+    private static volatile bool _engineInitialized;
+    private static volatile string _engineLanguage = AutoLanguage;
 
     /// <summary>The "let Windows decide" value of <see cref="PreferredLanguage"/>.</summary>
     public const string AutoLanguage = "auto";
@@ -454,7 +457,9 @@ public static class OcrService
                 ?? OcrEngine.TryCreateFromUserProfileLanguages()
                 ?? OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
             _engineLanguage = wanted;
-            _engineInitialized = true;
+            _engineInitialized = true; // last: the fast path gates on it, so _engine and
+                                       // _engineLanguage must both be published first
+
             return _engine;
         }
     }

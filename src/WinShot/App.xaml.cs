@@ -1376,7 +1376,11 @@ public partial class App : Application
         CheckboxChanged = dontDetect =>
         {
             _settings.Current.OcrDetectLinks = !dontDetect;
-            _settings.Save();
+            // Quietly: Save() raises Changed, which unregisters and re-registers all eleven
+            // global hotkeys. A tick on a toast checkbox must not risk "Some hotkeys
+            // unavailable" because another app grabbed a gesture in the gap, and nothing
+            // subscribes to OcrDetectLinks anyway.
+            _settings.SaveQuietly();
         },
     };
 

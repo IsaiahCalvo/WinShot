@@ -177,6 +177,21 @@ public sealed class ScrollDimOverlay : WF.Form
         base.OnFormClosed(e);
     }
 
+    /// <summary>
+    /// A form disposed without being closed never raises FormClosed, and an in-flight fade
+    /// holds Motion's process-wide high-resolution clock for the rest of the process. Both
+    /// teardown paths have to release it.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _fade?.Dispose();
+            _fade = null;
+        }
+        base.Dispose(disposing);
+    }
+
     private void RenderLayered()
     {
         int w = Math.Max(1, _monitor.Width), h = Math.Max(1, _monitor.Height);
@@ -585,6 +600,24 @@ public sealed class ScrollControlsBar : WF.Form
         base.OnFormClosed(e);
     }
 
+    /// <summary>
+    /// A form disposed without being closed never raises FormClosed, and an in-flight fade
+    /// holds Motion's process-wide high-resolution clock for the rest of the process. Both
+    /// teardown paths have to release it.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _revealTween?.Dispose();
+            _revealTween = null;
+            _fade?.Dispose();
+            _fade = null;
+            _reveal.Stop();
+        }
+        base.Dispose(disposing);
+    }
+
     private void PositionNear(SD.Rectangle region)
     {
         var mon = WF.Screen.FromRectangle(region).Bounds;
@@ -795,6 +828,21 @@ public sealed class ScrollPreviewPanel : WF.Form
         _pic.Image?.Dispose();
         _pic.Image = null;
         base.OnFormClosed(e);
+    }
+
+    /// <summary>
+    /// A form disposed without being closed never raises FormClosed, and an in-flight fade
+    /// holds Motion's process-wide high-resolution clock for the rest of the process. Both
+    /// teardown paths have to release it.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _fade?.Dispose();
+            _fade = null;
+        }
+        base.Dispose(disposing);
     }
 
     private void PositionBottomRight(SD.Rectangle region)
