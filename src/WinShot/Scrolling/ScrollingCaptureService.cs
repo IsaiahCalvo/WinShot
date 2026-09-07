@@ -26,7 +26,12 @@ public enum ScrollHint
 /// reach the right window without the loop moving anyone's cursor.</summary>
 internal static class ScrollAutoScrollGate
 {
-    public static bool MayInject(SD.Rectangle region, SD.Point cursor) => region.Contains(cursor);
+    /// <param name="cursorRouted">Whether the input method in use routes by pointer position.
+    /// Only the injected wheel does; a wheel message and a page key are posted to a window
+    /// handle and work with the pointer anywhere, so gating those would stall a run -- and
+    /// tell the user to move a pointer that has nothing to do with it -- for no reason.</param>
+    public static bool MayInject(bool cursorRouted, SD.Rectangle region, SD.Point cursor) =>
+        !cursorRouted || region.Contains(cursor);
 }
 
 /// <summary>Hard limits that keep an in-memory scroll capture within a predictable budget.</summary>
@@ -1438,7 +1443,8 @@ public static class ScrollingCaptureService
 
             bool wantAuto = _autoScroll() && hasFrame;
 
-            if (wantAuto && !ScrollAutoScrollGate.MayInject(_region, _cursor()))
+            if (wantAuto && !ScrollAutoScrollGate.MayInject(
+                    _method == ScrollMethod.WheelInput, _region, _cursor()))
             {
                 // Pointer parked outside the region: hold the wheel and say so. Auto-Scroll
                 // is not cancelled — moving back over the region resumes on the next tick.

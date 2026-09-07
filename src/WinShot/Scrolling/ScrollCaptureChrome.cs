@@ -64,7 +64,9 @@ internal static class CaptureExclusion
 /// </summary>
 internal static class ScrollChromeFade
 {
-    public const int DurationMs = 120;
+    /// <summary>From the vocabulary, not a number of its own: a same-place opacity ramp is
+    /// exactly what <see cref="Motion.QuickMs"/> names.</summary>
+    public const int DurationMs = Motion.QuickMs;
 
     public static IDisposable In(Action<byte> apply)
     {
@@ -276,9 +278,6 @@ public sealed class ScrollControlsBar : WF.Form
 
     private int S(int logical) => WinShot.Recording.RecordingMonitorDpi.Px(logical, _scale);
 
-    // Amber warning — the palette only has red (error); these are nudges, not errors.
-    private static readonly SD.Color WarnColor = ThemePalette.Warn;
-
     public ScrollControlsBar(SD.Rectangle regionScreen)
     {
         SD.Rectangle targetScreen = WF.Screen.FromRectangle(regionScreen).Bounds;
@@ -323,7 +322,7 @@ public sealed class ScrollControlsBar : WF.Form
         cancel.Click += (_, _) => PerformAction(ScrollChromeAction.Cancel);
 
         _auto = MakeButton("Auto-Scroll", "ScrollCaptureAuto", "Toggle automatic scrolling",
-            "Start or pause automatic scrolling. Keyboard shortcut: Alt+A.",
+            "Start or pause automatic scrolling. Auto-scroll runs only while the pointer is over the region. Keyboard shortcut: Alt+A.",
             ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
         _auto.Visible = false; // revealed with the status line when capture starts
         _auto.Click += (_, _) => PerformAction(ScrollChromeAction.ToggleAuto);
@@ -508,14 +507,15 @@ public sealed class ScrollControlsBar : WF.Form
         Announce(text);
     }
 
-    /// <summary>Shows a persistent amber hint that overrides the live status text until the
-    /// service clears it (the next <see cref="SetStatus"/> repaints normal text once cleared).</summary>
+    /// <summary>Shows a persistent hint that overrides the live status text until the service
+    /// clears it (the next <see cref="SetStatus"/> repaints normal text once cleared). Amber
+    /// for the nudges, body text for the pointer gate -- see ScrollHintText.ColorFor.</summary>
     public void SetHint(ScrollHint hint)
     {
         if (IsDisposed) return;
         _hint = hint;
         if (hint == ScrollHint.None) return;
-        _status.ForeColor = WarnColor;
+        _status.ForeColor = ScrollHintText.ColorFor(hint);
         _status.Text = ScrollHintText.For(hint) ?? _status.Text;
         Announce(_status.Text);
     }
@@ -631,6 +631,15 @@ internal static class ScrollHintText
         ScrollHint.MoveCursorHere => "Move the pointer over the region to keep scrolling",
         _ => null,
     };
+
+    /// <summary>
+    /// Amber is for the two nudges that mean something went wrong. MoveCursorHere is
+    /// Auto-Scroll's ordinary paused state -- and the state the user is in the instant they
+    /// press the button, since the controls bar sits outside the region -- so a warning
+    /// colour there fires during normal use and stops meaning "warning".
+    /// </summary>
+    public static SD.Color ColorFor(ScrollHint hint) =>
+        hint == ScrollHint.MoveCursorHere ? ThemePalette.TextSecondary : ThemePalette.Warn;
 }
 
 /// <summary>
@@ -644,9 +653,6 @@ public sealed class ScrollPreviewPanel : WF.Form
     private readonly WF.Label _caption;
     private bool _hintShowing;
     private IDisposable? _fade;
-
-    // Amber warning — matches the controls bar's nudge color.
-    private static readonly SD.Color WarnColor = ThemePalette.Warn;
 
     // Same reason as ScrollControlsBar: AutoScaleMode.Dpi never fires on the monitor a
     // window is born on, so the panel laid out at 96-dpi metrics while its point-sized
@@ -757,8 +763,8 @@ public sealed class ScrollPreviewPanel : WF.Form
         _caption.Text = text;
     }
 
-    /// <summary>Amber warning shown under the preview, mirroring the controls bar — the
-    /// user is usually watching this panel while scrolling.</summary>
+    /// <summary>The hint shown under the preview, mirroring the controls bar — the user is
+    /// usually watching this panel while scrolling.</summary>
     public void SetHint(ScrollHint hint)
     {
         if (IsDisposed) return;
@@ -768,7 +774,7 @@ public sealed class ScrollPreviewPanel : WF.Form
             _caption.ForeColor = ThemePalette.TextSecondary;
             return;
         }
-        _caption.ForeColor = WarnColor;
+        _caption.ForeColor = ScrollHintText.ColorFor(hint);
         _caption.Text = ScrollHintText.For(hint) ?? _caption.Text;
     }
 

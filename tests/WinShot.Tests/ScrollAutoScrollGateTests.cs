@@ -1,4 +1,4 @@
-using WinShot.Scrolling;
+﻿using WinShot.Scrolling;
 using Xunit;
 using SD = System.Drawing;
 
@@ -18,7 +18,7 @@ public class ScrollAutoScrollGateTests
     [InlineData(300, 350)]
     [InlineData(499, 499)]   // bottom-right pixel is inside
     public void PointerInsideTheRegion_MayInject(int x, int y)
-        => Assert.True(ScrollAutoScrollGate.MayInject(Region, new SD.Point(x, y)));
+        => Assert.True(ScrollAutoScrollGate.MayInject(true, Region, new SD.Point(x, y)));
 
     [Theory]
     [InlineData(99, 350)]
@@ -27,5 +27,11 @@ public class ScrollAutoScrollGateTests
     [InlineData(300, 500)]   // bottom edge is exclusive
     [InlineData(-2000, -900)] // a monitor above and left of the primary
     public void PointerOutsideTheRegion_HoldsTheWheel(int x, int y)
-        => Assert.False(ScrollAutoScrollGate.MayInject(Region, new SD.Point(x, y)));
+        => Assert.False(ScrollAutoScrollGate.MayInject(true, Region, new SD.Point(x, y)));
+
+    /// <summary>The ladder's other two methods post to a window handle, so the pointer is
+    /// irrelevant to them and the gate must not pause a run that has fallen back to one.</summary>
+    [Fact]
+    public void AMethodThatDoesNotFollowTheCursor_IsNeverGated()
+        => Assert.True(ScrollAutoScrollGate.MayInject(false, Region, new SD.Point(-2000, -900)));
 }
