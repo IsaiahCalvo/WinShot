@@ -58,7 +58,12 @@ public sealed class FastQuickActionsWindow : WF.Form
     private SD.Bitmap? _tallScaled;
     private int _tallScaledVersion = -1;
     private SD.Size _tallScaledSize;
-    private bool _tallScaling;
+    /// <summary>The in-flight resample. It is a SECOND background reader of <see cref="_image"/>,
+    /// so it is tracked as a task rather than a flag: every pixel edit has to wait it out
+    /// through <see cref="WaitForRenderIdleAsync"/> exactly like the thumbnail render, or a
+    /// rotate lands inside the pool thread's <c>DrawImage</c> and GDI+ throws "Object is
+    /// currently in use elsewhere".</summary>
+    private Task? _tallScaleTask;
     private WF.Timer? _exitMotionTimer;
     private WF.Timer? _stackMotionTimer;
     private IDisposable? _exitMotionClock;
@@ -403,10 +408,9 @@ public sealed class FastQuickActionsWindow : WF.Form
             return;
         }
 
-        if (_tallScaling)
+        if (_tallScaleTask is { IsCompleted: false })
             return;
-        _tallScaling = true;
-        _ = ScaleTallCapturePreviewAsync(_image, bounds, _imageVersion);
+        _tallScaleTask = ScaleTallCapturePreviewAsync(_image, bounds, _imageVersion);
     }
 
     /// <summary>
@@ -438,7 +442,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         finally
         {
             scaled?.Dispose();
-            _tallScaling = false;
         }
     }
 
@@ -1368,11 +1371,17 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// throws "Object is currently in use elsewhere". Every pixel edit waits the in-flight
     /// render out first. The wait is awaited rather than blocked: that render finishes by
     /// posting its bitmaps back to this thread, so blocking here would deadlock it.
+    /// The tall-capture resample reads the same bitmap from the pool, so it waits here too.
     /// </summary>
     private async Task<bool> WaitForRenderIdleAsync()
     {
-        while (_previewTask is { IsCompleted: false } pending)
+        while (true)
         {
+            Task? pending =
+                _previewTask is { IsCompleted: false } render ? render :
+                _tallScaleTask is { IsCompleted: false } resample ? resample : null;
+            if (pending is null)
+                break;
             await pending;
             if (_closed || IsDisposed) return false;
         }
@@ -1727,8 +1736,9 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private Task? PendingImageUseTask()
     {
-        var tasks = new List<Task>(3);
+        var tasks = new List<Task>(4);
         if (_previewTask is { IsCompleted: false } previewTask) tasks.Add(previewTask);
+        if (_tallScaleTask is { IsCompleted: false } scaleTask) tasks.Add(scaleTask);
         if (_releaseAfterTask is { IsCompleted: false } releaseTask) tasks.Add(releaseTask);
         if (_copyTask is { IsCompleted: false } copyTask) tasks.Add(copyTask);
 
