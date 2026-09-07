@@ -234,6 +234,47 @@ public class FeedbackCopyTests
     }
 
     /// <summary>
+    /// A busy clipboard is the one failure with an answer better than "check the log", and none
+    /// of the three shapes the copy paths actually throw used to reach that line. The image copy
+    /// is hand-rolled Win32, so its give-up threw a Win32Exception whose own message was
+    /// "Clipboard is busy." and the user read "Something went wrong"; the file copy threw a bare
+    /// ExternalException and was told to retake a capture that was fine. Only SetText's
+    /// COMException landed. All three are the same condition and now say the same thing.
+    /// </summary>
+    [Fact]
+    public void EveryShapeOfABusyClipboardSaysTheClipboardIsBusy()
+    {
+        const string expected = "Another app is holding the clipboard. Try again in a moment.";
+        const int clipboardCantOpen = unchecked((int)0x800401D0);
+
+        // CaptureService.CopyToClipboard's give-up, wrapping the last Win32 error for the log.
+        var busy = new ClipboardBusyException(
+            new System.ComponentModel.Win32Exception(1418, "OpenClipboard failed"));
+        Assert.Equal(expected, FriendlyError.For(busy));
+        Assert.NotNull(busy.InnerException);
+
+        // Clipboard.SetFileDropList (the card's "copy file", History, a finished recording).
+        Assert.Equal(expected, FriendlyError.For(new System.Runtime.InteropServices.ExternalException(
+            "Requested Clipboard operation did not succeed.", clipboardCantOpen)));
+
+        // Clipboard.SetText (the OCR path).
+        Assert.Equal(expected, FriendlyError.For(new System.Runtime.InteropServices.COMException(
+            "OpenClipboard Failed", clipboardCantOpen)));
+    }
+
+    /// <summary>
+    /// ...and the reason the mapper keys on the HRESULT rather than on the type: a bare
+    /// Win32Exception is a failed Process.Start as often as a clipboard, so it must not be
+    /// read as one just because its native code happens to be ERROR_ACCESS_DENIED.
+    /// </summary>
+    [Fact]
+    public void AFailedProcessStartIsStillNotAClipboardFailure()
+    {
+        string message = FriendlyError.For(new System.ComponentModel.Win32Exception(5, "CreateProcess failed"));
+        Assert.DoesNotContain("clipboard", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Trim walks the message one word at a time and re-measures the whole remainder each
     /// pass, so its cost is quadratic. Nothing produces a huge message today, but Trim is
     /// reachable from any future caller and it runs on the UI thread.
