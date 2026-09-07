@@ -12,6 +12,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Capture;
 using WinShot.Core;
+using WinShot.Recording;
 using WF = System.Windows.Forms;
 
 namespace WinShot.SettingsUi;
@@ -86,6 +87,17 @@ public partial class SettingsWindow : Window
         bool enabled = OverlayAutoCloseCheck.IsChecked == true;
         OverlayCloseBox.IsEnabled = enabled;
         OverlayActionCombo.IsEnabled = enabled;
+    }
+
+    /// <summary>The two keystroke sub-options only mean anything while the pill is on; "Hide
+    /// the cursor while typing" is deliberately independent of it.</summary>
+    private void OnKeystrokesToggled(object sender, RoutedEventArgs e)
+    {
+        if (KeystrokesCheck is null || KeystrokesCommandOnlyCheck is null || KeystrokePositionCombo is null)
+            return;
+        bool enabled = KeystrokesCheck.IsChecked == true;
+        KeystrokesCommandOnlyCheck.IsEnabled = enabled;
+        KeystrokePositionCombo.IsEnabled = enabled;
     }
 
     /// <summary>Maps each input box to the index of the section that contains it.</summary>
@@ -295,6 +307,8 @@ public partial class SettingsWindow : Window
         ClickHighlightsCheck.IsChecked = s.ShowClickHighlights;
         KeystrokesCheck.IsChecked = s.ShowKeystrokes;
         KeystrokesCommandOnlyCheck.IsChecked = s.KeystrokesCommandOnly;
+        KeystrokesCommandOnlyCheck.IsEnabled = s.ShowKeystrokes;
+        KeystrokePositionCombo.IsEnabled = s.ShowKeystrokes;
         HideCursorWhenTypingCheck.IsChecked = s.HideCursorWhenTyping;
         SelectByTag(
             KeystrokePositionCombo,
@@ -305,9 +319,20 @@ public partial class SettingsWindow : Window
         CountdownBox.Text = s.RecordingCountdownSeconds.ToString();
         SelectByTag(WebcamCombo, s.WebcamOverlayPosition, fallbackIndex: 0);
         WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(s.WebcamOverlaySizePercent).ToString();
+        LoadDeviceCombo(WebcamDeviceCombo, RecordingDevices.Cameras(), "First camera found", s.RecordingWebcamDevice);
 
         // Recording > Video
         SelectByTag(MaxResolutionCombo, s.RecordingMaxResolution, fallbackIndex: 0);
+        SelectByTag(
+            VideoQualityCombo,
+            RecordingOptions.ClampVideoQuality(s.RecordingVideoQuality) switch
+            {
+                >= 85 => "85",
+                <= 50 => "50",
+                _ => "70",
+            },
+            fallbackIndex: 1);
+        LoadDeviceCombo(MicrophoneDeviceCombo, RecordingDevices.Microphones(), "System default", s.RecordingMicrophoneDevice);
         RecordingFpsBox.Text = s.RecordingFps.ToString();
         RecordAudioCheck.IsChecked = s.RecordAudio;
         SystemAudioCheck.IsChecked = s.RecordSystemAudio;
@@ -590,9 +615,14 @@ public partial class SettingsWindow : Window
             s.RecordingCountdownSeconds = countdown;
             s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
             s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
+            s.RecordingWebcamDevice = SelectedTag(WebcamDeviceCombo, "");
 
             // Recording > Video
             s.RecordingMaxResolution = SelectedTag(MaxResolutionCombo, "original");
+            s.RecordingVideoQuality = int.TryParse(SelectedTag(VideoQualityCombo, "70"), out int quality)
+                ? RecordingOptions.ClampVideoQuality(quality)
+                : RecordingOptions.DefaultVideoQuality;
+            s.RecordingMicrophoneDevice = SelectedTag(MicrophoneDeviceCombo, "");
             s.RecordingFps = recordingFps;
             s.RecordAudio = RecordAudioCheck.IsChecked == true;
             s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
@@ -678,6 +708,9 @@ public partial class SettingsWindow : Window
         Accessible(RecordingShowOverlayCheck, "Show Quick Access after recording", "Show the local completion overlay after a recording finishes.");
         Accessible(RecordingCopyCheck, "Copy recording after capture", "Copy the completed recording file to the clipboard.");
         Accessible(MaxResolutionCombo, "Maximum video resolution", "Choose the largest output resolution for MP4 recordings.");
+        Accessible(VideoQualityCombo, "Video quality", "Choose the encode quality for MP4 recordings. Lower quality writes a smaller file.");
+        Accessible(MicrophoneDeviceCombo, "Microphone", "Choose which microphone recordings capture.");
+        Accessible(WebcamDeviceCombo, "Camera", "Choose which camera the webcam overlay uses.");
         Accessible(RecordingFpsBox, "Video frames per second", "Enter a value from 10 to 60.");
         Accessible(RecordAudioCheck, "Record microphone", "Capture microphone audio in MP4 recordings.");
         Accessible(SystemAudioCheck, "Record system audio", "Capture Windows system audio in MP4 recordings.");
@@ -714,8 +747,9 @@ public partial class SettingsWindow : Window
             KeystrokesCheck, KeystrokesCommandOnlyCheck, KeystrokePositionCombo,
             HideCursorWhenTypingCheck,
             RememberLastSelectionCheck, DimScreenCheck, CountdownBox, WebcamCombo,
-            WebcamSizeBox, RecordingShowOverlayCheck, RecordingCopyCheck, MaxResolutionCombo,
-            RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
+            WebcamSizeBox, WebcamDeviceCombo, RecordingShowOverlayCheck, RecordingCopyCheck,
+            MaxResolutionCombo, VideoQualityCombo,
+            RecordingFpsBox, RecordAudioCheck, MicrophoneDeviceCombo, SystemAudioCheck, RecordAudioMonoCheck,
             OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, SelfTimerCombo,
             FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
@@ -984,6 +1018,30 @@ public partial class SettingsWindow : Window
 
     private static string SelectedTag(ComboBox combo, string fallback) =>
         (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? fallback;
+
+    /// <summary>
+    /// Fills a device picker: a "let the system choose" row first, then whatever hardware is
+    /// present right now, with the stored pick re-selected when that device still exists.
+    /// The tag is the recorder's own DeviceName, which is what gets persisted.
+    /// </summary>
+    private static void LoadDeviceCombo(
+        ComboBox combo,
+        IReadOnlyList<RecordingDevice> devices,
+        string defaultLabel,
+        string stored)
+    {
+        combo.Items.Clear();
+        combo.Items.Add(new ComboBoxItem { Content = defaultLabel, Tag = "" });
+        foreach (RecordingDevice device in devices)
+        {
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = device.Label.Length <= 40 ? device.Label : device.Label[..39] + "…",
+                Tag = device.DeviceName,
+            });
+        }
+        SelectByTag(combo, stored ?? "", fallbackIndex: 0);
+    }
 
     // Delegates to the shared helper so Settings and the boot-time self-heal write the
     // identical Run-key value (see WinShot.Core.StartupRegistration).

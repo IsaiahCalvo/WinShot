@@ -157,6 +157,14 @@ public sealed class RecordingController
     }
 
     /// <summary>Hotkey/tray entry point: starts the recording flow, or stops the active recording.</summary>
+    /// <summary>Stops and saves the running take. For the tray's stop-square icon, which is an
+    /// affordance and has to do what it shows.</summary>
+    public void RequestStop()
+    {
+        if (IsRecording)
+            StopRecording(discard: false);
+    }
+
     public void ToggleFlow() => ToggleFlow(pickDisplay: false, selectedVirtualRegion: null);
 
     public void ToggleFlowWithRegion(SD.Rectangle selectedVirtualRegion) =>
@@ -300,6 +308,11 @@ public sealed class RecordingController
             s.WebcamOverlaySizePercent = dialog.WebcamSizePercent;
             s.RecordingFps = dialog.RecordingFps;
             s.GifFps = dialog.GifFps;
+            // The modal is the only surface with live device pickers, so its picks become the
+            // persisted ones the region-first flow reads.
+            s.RecordingMicrophoneDevice = dialog.MicrophoneDeviceName ?? "";
+            s.RecordingWebcamDevice = dialog.WebcamDeviceName ?? "";
+            s.RecordingVideoQuality = RecordingOptions.ClampVideoQuality(dialog.VideoQuality);
         }
         finally
         {
@@ -363,10 +376,10 @@ public sealed class RecordingController
             s.HideCursorWhenTyping,
             WebcamPositionFor(toggles.Webcam, s.WebcamOverlayPosition),
             s.WebcamOverlaySizePercent,
-            WebcamDeviceName: null,
-            MicrophoneDeviceName: null,
+            WebcamDeviceName: NullIfBlank(s.RecordingWebcamDevice),
+            MicrophoneDeviceName: NullIfBlank(s.RecordingMicrophoneDevice),
             s.RecordingFps,
-            DefaultVideoQuality,
+            RecordingOptions.ClampVideoQuality(s.RecordingVideoQuality),
             s.GifFps,
             sessionUi.ShowControls,
             sessionUi.ShowTimer,
@@ -381,9 +394,10 @@ public sealed class RecordingController
         StartCapture(parameters, trackBarPerf: true);
     }
 
-    /// <summary>Quality is not on the HUD; it is a persisted preference and this is the value
-    /// the options modal has always defaulted to.</summary>
-    private const int DefaultVideoQuality = 70;
+    /// <summary>A blank device name means "whatever the system picks", which is what the
+    /// recorder wants as null.</summary>
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
     /// The HUD's webcam cell is a plain on/off, so turning it on restores whatever corner was
@@ -959,6 +973,7 @@ public sealed class RecordingController
         _discard = false;
         _paused = false;
         _tempPath = null;
+        _recordingSourceIds = Array.Empty<string>(); // never carry a dead session's handles forward
         CloseDimOverlay();
         StopElapsedTimer();
         RestoreDesktopIcons();
@@ -1042,8 +1057,11 @@ public sealed class RecordingController
         EndSession();
     }
 
-    private static void ShowRecordingFailure(string message)
+    private void ShowRecordingFailure(string message)
     {
+        // The bar is TopMost, so a "Saving…" spinner would sit on top of the dialog saying the
+        // save failed. It leaves before the bad news arrives.
+        FadeOutBar();
         try
         {
             ThemedMessageDialog.Show(null, "Recording failed", message);

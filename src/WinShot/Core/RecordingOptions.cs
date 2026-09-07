@@ -10,6 +10,11 @@ public static class RecordingOptions
     public const string WebcamOff = "off";
     public const string WebcamFullscreen = "fullscreen";
 
+    /// <summary>H.264 quality (1-100). 70 is the "Medium" the options modal always defaulted to.</summary>
+    public const int DefaultVideoQuality = 70;
+
+    public static int ClampVideoQuality(int quality) => Math.Clamp(quality, 1, 100);
+
     private static readonly HashSet<string> WebcamPositions =
     [
         WebcamOff,

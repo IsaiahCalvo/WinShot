@@ -693,7 +693,7 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
                                         <CheckBox x:Name="ScaleHiDpiVideoCheck" Content="Scale HiDPI videos to 1x"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="DoNotDisturbRow" Style="{StaticResource Row}">
+                                    <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Notifications"/>
                                         <CheckBox x:Name="DoNotDisturbCheck" Content="Silence notifications while recording"/>
                                     </DockPanel>
@@ -712,7 +712,8 @@
                                     </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Keyboard"/>
-                                        <CheckBox x:Name="KeystrokesCheck" Content="Show keystrokes"/>
+                                        <CheckBox x:Name="KeystrokesCheck" Content="Show keystrokes"
+                                                  Checked="OnKeystrokesToggled" Unchecked="OnKeystrokesToggled"/>
                                     </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
@@ -776,6 +777,12 @@
                                             <TextBlock Style="{StaticResource Hint}" Text="10-45%"/>
                                         </StackPanel>
                                     </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Camera"/>
+                                        <ComboBox x:Name="WebcamDeviceCombo" HorizontalAlignment="Stretch"/>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Cameras are re-listed each time this pane opens."/>
                                 </StackPanel>
                             </Border>
 
@@ -820,12 +827,26 @@
                                             <TextBlock Style="{StaticResource Hint}" Text="10-60 fps"/>
                                         </StackPanel>
                                     </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Quality"/>
+                                        <ComboBox x:Name="VideoQualityCombo" HorizontalAlignment="Stretch">
+                                            <ComboBoxItem Content="High" Tag="85"/>
+                                            <ComboBoxItem Content="Medium" Tag="70"/>
+                                            <ComboBoxItem Content="Low" Tag="50"/>
+                                        </ComboBox>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Lower quality writes a smaller file at the same resolution."/>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Audio"/>
                                         <CheckBox x:Name="RecordAudioCheck" Content="Capture microphone while recording"/>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Microphone"/>
+                                        <ComboBox x:Name="MicrophoneDeviceCombo" HorizontalAlignment="Stretch"/>
                                     </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>

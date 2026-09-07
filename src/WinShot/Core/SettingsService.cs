@@ -54,6 +54,11 @@ public class Settings
     public bool CaptureCursor { get; set; } = true;
     public string WebcamOverlayPosition { get; set; } = "off"; // off | top-left | top-right | bottom-left | bottom-right | fullscreen
     public int WebcamOverlaySizePercent { get; set; } = RecordingOptions.DefaultWebcamSizePercent;
+    // Device picks and encode quality live here, not on the recording HUD: the HUD carries the
+    // five things that change per take, and these three are set once and kept.
+    public string RecordingMicrophoneDevice { get; set; } = ""; // "" = the system default input
+    public string RecordingWebcamDevice { get; set; } = "";     // "" = the first camera found
+    public int RecordingVideoQuality { get; set; } = RecordingOptions.DefaultVideoQuality;
 
     // OCR
     public bool OcrJoinLines { get; set; } = false;

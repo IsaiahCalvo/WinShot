@@ -329,11 +329,9 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         {
             // Re-enumerate devices on every open — the cached dialog otherwise shows
             // the hardware set from first open forever (a webcam plugged in later
-            // would stay invisible). Keep the user's picks when they still exist.
-            string? mic = dialog.MicrophoneDeviceName;
-            string? cam = dialog.WebcamDeviceName;
+            // would stay invisible). ApplySettings then re-selects the persisted picks
+            // where those devices still exist.
             dialog.LoadDevices();
-            dialog.RestoreDeviceSelection(mic, cam);
             dialog.ApplySettings(settings);
             dialog.Opacity = 1;
             dialog.ShowInTaskbar = false;
@@ -549,7 +547,15 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             <= 9 => 3,
             _ => 2,
         };
-        _qualityCombo.SelectedIndex = 1;
+        _qualityCombo.SelectedIndex = RecordingOptions.ClampVideoQuality(settings.RecordingVideoQuality) switch
+        {
+            >= 85 => 0,
+            <= 50 => 2,
+            _ => 1,
+        };
+        // The pickers open on whatever was chosen last, from Settings rather than a
+        // process-local cache, so a device pick survives a restart.
+        RestoreDeviceSelection(settings.RecordingMicrophoneDevice, settings.RecordingWebcamDevice);
         _webcamCombo.SelectedIndex = RecordingOptions.NormalizeWebcamPosition(settings.WebcamOverlayPosition) switch
         {
             "top-left" => 1,
