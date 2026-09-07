@@ -644,6 +644,12 @@ public class DarkControlPaletteTests
         Assert.Equal(pressShade, Wpf(ThemePalette.PressedShade));
         Assert.Equal(Over(hoverShade, accent), Wpf(ThemePalette.AccentHovered));
         Assert.Equal(((SolidColorBrush)theme["AccentPressedBrush"]).Color, Wpf(ThemePalette.AccentPressed));
+        // The focus ring is part of that parity and was the half nobody checked: WinForms
+        // strokes ThemePalette.AccentRing, WPF strokes InfoBrush, and while the two disagreed
+        // the WinForms ring sat at 2.37:1 against the field it rings — under WCAG 1.4.11's 3:1.
+        Assert.Equal(((SolidColorBrush)theme["InfoBrush"]).Color, Wpf(ThemePalette.AccentRing));
+        double ring = Contrast(Wpf(ThemePalette.AccentRing), Wpf(DarkControlPalette.Field));
+        Assert.True(ring >= 3d, $"the focus ring renders at {ring:0.00}:1 against the field it rings");
 
         double rest = Contrast(Colors.White, accent);
         foreach ((string state, SD.Color fill) in new[]
@@ -675,7 +681,10 @@ public class DarkControlPaletteTests
     {
         static Color Wpf(SD.Color c) => Color.FromArgb(255, c.R, c.G, c.B);
 
-        SD.Color label = ThemePalette.TextPrimary;
+        // The label the accent buttons actually paint. DarkButton picks white for a saturated
+        // fill now, which is what ScrollControlsBar and the region selector's Done always
+        // passed; measuring TextPrimary measured a colour no accent surface puts on screen.
+        SD.Color label = SD.Color.White;
         double rest = Contrast(Wpf(label), Wpf(ThemePalette.Accent));
         SD.Color fill = DarkControlPalette.StateFill(ThemePalette.Accent, hover, press);
         double now = Contrast(Wpf(label), Wpf(fill));

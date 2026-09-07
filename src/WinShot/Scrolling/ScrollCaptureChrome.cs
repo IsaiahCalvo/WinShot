@@ -254,22 +254,22 @@ public sealed class ScrollControlsBar : WF.Form
 
         var cancel = MakeButton("Cancel", "ScrollCaptureCancel", "Cancel scrolling capture",
             "Discard the capture. Keyboard shortcut: Alt+X or Escape.",
-            ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
+            ThemePalette.SurfaceAlt, ThemePalette.TextPrimary);
         cancel.Click += (_, _) => PerformAction(ScrollChromeAction.Cancel);
 
         _auto = MakeButton("Auto-Scroll", "ScrollCaptureAuto", "Toggle automatic scrolling",
             "Start or pause automatic scrolling. Keyboard shortcut: Alt+A.",
-            ThemePalette.SurfaceAlt, ThemePalette.TextPrimary, ThemePalette.SurfaceHover);
+            ThemePalette.SurfaceAlt, ThemePalette.TextPrimary);
         _auto.Click += (_, _) => PerformAction(ScrollChromeAction.ToggleAuto);
 
         _start = MakeButton("Start Capture", "ScrollCaptureStart", "Start scrolling capture",
             "Begin capturing without moving focus from the captured app. Keyboard shortcut: Alt+S.",
-            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHovered);
+            ThemePalette.Accent, SD.Color.White);
         _start.Click += (_, _) => PerformAction(ScrollChromeAction.Start);
 
         _done = MakeButton("Done", "ScrollCaptureDone", "Finish scrolling capture",
             "Keep the captured result. Keyboard shortcut: Alt+D.",
-            ThemePalette.Accent, SD.Color.White, ThemePalette.AccentHovered);
+            ThemePalette.Accent, SD.Color.White);
         _done.Visible = false;
         _done.Click += (_, _) => PerformAction(ScrollChromeAction.Done);
 
@@ -387,7 +387,7 @@ public sealed class ScrollControlsBar : WF.Form
     }
 
     private WF.Button MakeButton(string text, string name, string accessibleName,
-        string accessibleDescription, SD.Color back, SD.Color fore, SD.Color hover)
+        string accessibleDescription, SD.Color back, SD.Color fore)
     {
         var b = new WF.Button
         {
@@ -409,11 +409,13 @@ public sealed class ScrollControlsBar : WF.Form
             AccessibleRole = WF.AccessibleRole.PushButton,
         };
         b.FlatAppearance.BorderSize = 0;
-        b.FlatAppearance.MouseOverBackColor = hover;
-        // Press was the hover colour, so holding the button down on Start Capture, Done, Cancel
-        // or Auto-Scroll was pixel-identical to merely pointing at it — four commit actions that
-        // acknowledged nothing. The press step comes from the same function DarkButton paints
-        // with, so the bar presses the direction every other WinForms surface does.
+        // Both states come from the one function DarkButton paints with. Hover used to be a
+        // colour hand-passed by the caller, so the neutral buttons here hovered to SurfaceHover
+        // while every other neutral WinForms surface lifted +18 — the same button role wearing
+        // two hover shades, decided in two places. And press used to BE the hover colour, so
+        // holding down Start Capture, Done, Cancel or Auto-Scroll was pixel-identical to merely
+        // pointing at it: four commit actions that acknowledged nothing.
+        b.FlatAppearance.MouseOverBackColor = DarkControlPalette.StateFill(back, 1d, 0d);
         b.FlatAppearance.MouseDownBackColor = DarkControlPalette.StateFill(back, 1d, 1d);
         return b;
     }

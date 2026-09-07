@@ -39,9 +39,9 @@ internal static class DarkControlPalette
     }
 
     /// <summary>
-    /// How far to lighten a button fill given how far into hover and press it is.
-    /// Fully pressed reads the same as the old discrete -12 even though the pointer
-    /// is necessarily also hovering: press does not stack on hover, it overrides it.
+    /// How far to lighten a button fill given how far into hover and press it is. The two
+    /// steps net rather than override: fully hovered AND pressed is -12, matching the old
+    /// discrete value, which is the state a real mouse press is always in.
     /// </summary>
     public static double HoverPressLighten(double hover, double press)
         => (18d * Math.Clamp(hover, 0d, 1d)) - (30d * Math.Clamp(press, 0d, 1d));
@@ -54,7 +54,12 @@ internal static class DarkControlPalette
     /// A dark NEUTRAL fill lifts — on a near-black ground it has nowhere else to go. A SATURATED
     /// fill dips instead, layering Theme.xaml's Hover/Press shades: lightening the accent took
     /// the label on top of it from 3.26:1 to 2.74:1, so hovering the affirmative button of every
-    /// dialog made it HARDER to read. Press overrides hover either way, it does not stack.
+    /// dialog made it HARDER to read.
+    ///
+    /// The two branches settle hover-plus-press differently, and deliberately: the saturated
+    /// branch REPLACES the hover, landing exactly on the authored pressed token, while the
+    /// neutral branch NETS against it (+18 lift, -30 dip, so -12 while the pointer is over the
+    /// control — which it always is during a real press). See <see cref="HoverPressLighten"/>.
     /// </summary>
     public static SD.Color StateFill(SD.Color rest, double hover, double press)
     {
@@ -273,12 +278,19 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
             // on a HUD silently holds focus and looks different from its siblings.
             if (_isDefault || (Focused && ShowFocusCues))
             {
-                using var pen = new SD.Pen(SD.Color.FromArgb(150, ThemePalette.AccentRing), 1f);
+                using var pen = new SD.Pen(ThemePalette.AccentRing, 1f);
                 g.DrawPath(pen, path);
             }
         }
 
-        SD.Color textColor = Enabled ? ForeColor : SD.Color.FromArgb(120, 200, 200, 200);
+        // A saturated fill carries a white label, the same way ScrollControlsBar's accent
+        // buttons and the region selector's Done already paint theirs. The app was shipping
+        // two label colours on the one accent fill, and the DarkButton half took the darker
+        // of them: #F2F2F4 on the hovered accent is 4.10:1, under the 4.5:1 text floor, where
+        // white is 4.58:1. Keyed on the same saturation test StateFill uses, so a fill and
+        // its label are never decided by two different rules.
+        SD.Color label = FillColor.GetSaturation() < 0.25f ? ForeColor : SD.Color.White;
+        SD.Color textColor = Enabled ? label : SD.Color.FromArgb(120, 200, 200, 200);
         var flags = WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis;
         var textRect = ClientRectangle;
         if (TextAlign == SD.ContentAlignment.MiddleLeft)
@@ -411,7 +423,7 @@ public sealed class DarkDropDown : WF.Control
             using var brush = new SD.SolidBrush(fill);
             g.FillPath(brush, path);
             using var pen = new SD.Pen(
-                Focused ? SD.Color.FromArgb(150, ThemePalette.AccentRing) : DarkControlPalette.Hairline,
+                Focused ? ThemePalette.AccentRing : DarkControlPalette.Hairline,
                 1f);
             g.DrawPath(pen, path);
         }
@@ -563,7 +575,7 @@ public sealed class DarkNumberBox : WF.Control
         using var pen = new SD.Pen(
             DarkControlPalette.Mix(
                 DarkControlPalette.Hairline,
-                SD.Color.FromArgb(150, ThemePalette.AccentRing),
+                ThemePalette.AccentRing,
                 _focus.Value),
             1f);
         g.DrawPath(pen, path);

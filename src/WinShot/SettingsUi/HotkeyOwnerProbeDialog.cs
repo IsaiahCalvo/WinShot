@@ -77,8 +77,10 @@ internal static class HotkeyOwnerProbeDialog
             {
                 result = await HotkeyOwnerProbe.RunAsync(gesture, TimeSpan.FromSeconds(8), cts.Token);
                 // Eight seconds is long enough that Close or Escape usually beats the probe.
-                // Activate() on a closed Window throws, and the generic catch below would file
-                // an ERROR for an ordinary user action nobody can see.
+                // Nothing below throws on a closed Window — this guards against re-opening a
+                // card the user already dismissed: without it the probe's answer raised the
+                // window back into the user's face, and Activate on a window whose dispatcher
+                // has moved on logged an ERROR for an ordinary Close nobody can see.
                 if (!dialog.IsLoaded) return;
                 if (result.Found)
                 {

@@ -835,6 +835,14 @@ public sealed class FastPinWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Pin copy failed", ex);
+            // A pin has no button label to flip and no status line of its own, so the toast
+            // is its feedback channel — without it a busy clipboard left the pin looking as
+            // though the copy had worked.
+            App.Toast(
+                "Copy failed",
+                FriendlyError.For(ex),
+                new SD.Point(Left, Top),
+                severity: ToastSeverity.Error);
         }
     }
 

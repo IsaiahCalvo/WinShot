@@ -84,6 +84,10 @@ public class ScrollCaptureChromeTests
             SD.Color down = b.FlatAppearance.MouseDownBackColor;
 
             Assert.True(over.ToArgb() != down.ToArgb(), $"{name} presses to its own hover colour");
+            // Both ends of the ramp, not just press: hover was a colour the caller handed in,
+            // so the neutral buttons hovered to SurfaceHover while every other neutral
+            // WinForms surface lifted +18 — one button role, two hover shades.
+            Assert.Equal(DarkControlPalette.StateFill(b.BackColor, 1d, 0d), over);
             Assert.Equal(DarkControlPalette.StateFill(b.BackColor, 1d, 1d), down);
             // Press darkens, whichever track the button is on.
             Assert.True(

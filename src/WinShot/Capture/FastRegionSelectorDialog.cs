@@ -1495,10 +1495,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
         using var font = ActionBarFont(s);
 
         // Neutral fills lift on hover, the saturated one dips — a lighter blue under the white
-        // "Done" label reads worse than the button at rest. Press darkens either way.
-        SD.Color cancelFill = _pressedBarButton == 0 ? SD.Color.FromArgb(0x30, 0x30, 0x32)
-            : _hoverBarButton == 0 ? ThemePalette.SurfaceHover
-            : SD.Color.FromArgb(0x3A, 0x3A, 0x3C);
+        // "Done" label reads worse than the button at rest. Press darkens either way. Cancel
+        // goes through StateFill rather than the hand-mixed #3A3A3C/#303032 it used to carry:
+        // neither was a palette colour, so this one bar held a fourth neutral surface shade.
+        SD.Color cancelFill = DarkControlPalette.StateFill(
+            ThemePalette.SurfaceAlt,
+            _hoverBarButton == 0 ? 1d : 0d,
+            _pressedBarButton == 0 ? 1d : 0d);
         SD.Color doneFill = _pressedBarButton == 1 ? ThemePalette.AccentPressed
             : _hoverBarButton == 1 ? ThemePalette.AccentHovered
             : Accent;

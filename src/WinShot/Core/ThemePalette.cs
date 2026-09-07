@@ -40,10 +40,14 @@ public static class ThemePalette
     public static readonly SD.Color AccentPressed = SD.Color.FromArgb(0x00, 0x60, 0xDF);
 
     /// <summary>
-    /// A lighter accent for a focus RING drawn on a dark field. Never a fill: nothing white
-    /// may sit on top of it. Use <see cref="AccentHovered"/> for a hovered accent surface.
+    /// The keyboard focus RING on a dark field. Never a fill: nothing white may sit on top
+    /// of it — use <see cref="AccentHovered"/> for a hovered accent surface. This is
+    /// Theme.xaml's InfoColor, which is what the WPF half already strokes its focus rings
+    /// with, so both halves ring a focused control the same colour. It is drawn opaque:
+    /// the old #409CFF at 150 alpha composited over the field it rings to 2.37:1, under
+    /// WCAG 1.4.11's 3:1 floor for a control boundary. Opaque, it is 5.21:1.
     /// </summary>
-    public static readonly SD.Color AccentRing = SD.Color.FromArgb(0x40, 0x9C, 0xFF);
+    public static readonly SD.Color AccentRing = SD.Color.FromArgb(0x6B, 0xB1, 0xFF);
 
     // Status colors, paired with the system-blue identity (macOS system red/orange).
     // Red doubles as the recording dot and destructive actions; Warn as paused/warning.
@@ -132,7 +136,11 @@ public static class ThemePalette
     public static SD.Color Over(SD.Color top, SD.Color under)
     {
         double a = top.A / 255d;
+        // The composite keeps the UNDER layer's alpha: a shade laid over a translucent fill
+        // leaves it as translucent as it was. Forcing 255 here made StateFill silently
+        // opaque a translucent saturated fill while leaving a translucent neutral one alone.
         return SD.Color.FromArgb(
+            under.A,
             (int)Math.Round((top.R * a) + (under.R * (1 - a))),
             (int)Math.Round((top.G * a) + (under.G * (1 - a))),
             (int)Math.Round((top.B * a) + (under.B * (1 - a))));
