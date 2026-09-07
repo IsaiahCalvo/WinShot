@@ -161,6 +161,7 @@ public class QuickAccessOverlayStackTests
                 PumpUntil(() => Motion.Holders == 0, 6000);
                 Assert.Equal(1d, card.Opacity, 3);
                 Assert.Equal(settled, card.Location);
+                Assert.Equal(0, Motion.Holders);
             }
             finally
             {
@@ -193,6 +194,41 @@ public class QuickAccessOverlayStackTests
 
                 Invoke(card, "SetHovering", true);
                 Assert.Equal(1d, (double)Field(card, "_hoverAmount")!, 3);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+                WF.Application.DoEvents();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Closing the card in the middle of the step-aside fade. Motion.Run holds the
+    /// process-wide high-resolution clock for its whole life, so a tween whose owner is
+    /// disposed out from under it leaks timeBeginPeriod(1) for as long as the app runs.
+    /// </summary>
+    [Fact]
+    public void DisposingACardMidFadeReleasesTheMotionClock()
+    {
+        RunSta(() =>
+        {
+            var previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                var card = new FastQuickActionsWindow(new SD.Bitmap(600, 400), new SettingsService());
+                card.Show();
+                PumpUntil(() => Motion.Holders == 0, 6000);
+
+                card.StepAside();
+                PumpUntil(() => Motion.Holders > 0, 1000);
+                Assert.True(Motion.Holders > 0, "the step-aside fade never started");
+
+                card.Dispose();
+                WF.Application.DoEvents();
+                PumpUntil(() => Motion.Holders == 0, 2000);
+                Assert.Equal(0, Motion.Holders);
             }
             finally
             {
