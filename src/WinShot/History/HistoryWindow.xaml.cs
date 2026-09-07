@@ -45,6 +45,7 @@ public partial class HistoryWindow : Window
     private bool _previewOpen;
     private Point _dragStart;
     private HistoryItem? _dragItem;
+    private HistoryItem? _pendingSelectionClick;
     private bool _dragging;
     private bool _loadedOnce;
     private DragPreview? _dragPreview;
@@ -1090,9 +1091,22 @@ public partial class HistoryWindow : Window
         if (_selectionMode)
         {
             _dragItem = null;
+            _pendingSelectionClick = null;
             e.Handled = true;
             if (e.ClickCount > 1)
                 return;
+
+            // Grabbing a tile that is already part of the selection has to mean "drag all of
+            // these", so its toggle waits for mouse-up — deciding at mouse-down would deselect
+            // the tile in the first pixel of the drag. Shift- and Ctrl-clicks keep toggling
+            // immediately: they are how the selection is built, never how it is dragged.
+            if (Keyboard.Modifiers == ModifierKeys.None && ItemsList.SelectedItems.Contains(item))
+            {
+                _dragStart = e.GetPosition(null);
+                _dragItem = item;
+                _pendingSelectionClick = item;
+                return;
+            }
 
             ApplySelectionClick(item, Keyboard.Modifiers);
             return;
@@ -1144,6 +1158,19 @@ public partial class HistoryWindow : Window
         UpdateSelectionState();
     }
 
+    private void OnTileMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        HistoryItem? pending = _pendingSelectionClick;
+        _pendingSelectionClick = null;
+        _dragItem = null;
+        // The drag already consumed this gesture; toggling now would clear the selection the
+        // user just dropped somewhere.
+        if (pending is null || _dragging)
+            return;
+
+        ApplySelectionClick(pending, ModifierKeys.None);
+    }
+
     private void OnTileMouseMove(object sender, MouseEventArgs e)
     {
         if (_dragging || _dragItem is null || e.LeftButton != MouseButtonState.Pressed)
@@ -1162,6 +1189,7 @@ public partial class HistoryWindow : Window
         }
 
         _dragging = true;
+        _pendingSelectionClick = null;
         // Windows draws only its generic file-drag cursor, so without this the user cannot see
         // which capture is in flight. One preview window per History, shown and hidden around
         // the drag, tracked from GiveFeedback exactly as the editor's drag-out pill does.
@@ -1171,7 +1199,7 @@ public partial class HistoryWindow : Window
         try
         {
             source.GiveFeedback += OnFeedback;
-            var data = new DataObject(DataFormats.FileDrop, new[] { item.FilePath });
+            var data = new DataObject(DataFormats.FileDrop, DragPaths(item.FilePath, LiveSelectionPaths()));
             DragDrop.DoDragDrop(source, data, DragDropEffects.Copy);
         }
         catch (Exception ex)
@@ -1185,6 +1213,27 @@ public partial class HistoryWindow : Window
             _dragging = false;
             _dragItem = null;
         }
+    }
+
+    /// <summary>The selected paths that still exist on disk, or nothing at all outside
+    /// selection mode.</summary>
+    private IReadOnlyList<string> LiveSelectionPaths() =>
+        _selectionMode
+            ? SelectedItems().Select(entry => entry.FilePath).ToList()
+            : Array.Empty<string>();
+
+    /// <summary>Everything a drag is carrying. Grabbing a tile that is part of the current
+    /// selection drags the whole selection; grabbing anything else drags only itself, so a
+    /// selection made and then ignored cannot smuggle extra files into the drop.</summary>
+    internal static string[] DragPaths(string grabbedPath, IReadOnlyList<string> selection)
+    {
+        foreach (string path in selection)
+        {
+            if (string.Equals(path, grabbedPath, StringComparison.OrdinalIgnoreCase))
+                return selection.ToArray();
+        }
+
+        return new[] { grabbedPath };
     }
 
     private DragPreview? ShowDragPreview(HistoryItem item)

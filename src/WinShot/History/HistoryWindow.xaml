@@ -169,7 +169,7 @@
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Border x:Name="Card" Width="260" Background="Transparent" Cursor="Hand"
-                                MouseLeftButtonDown="OnTileMouseDown" MouseMove="OnTileMouseMove" MouseEnter="OnTileMouseEnter">
+                                MouseLeftButtonDown="OnTileMouseDown" MouseLeftButtonUp="OnTileMouseUp" MouseMove="OnTileMouseMove" MouseEnter="OnTileMouseEnter">
                             <Border.ContextMenu>
                                 <ContextMenu Style="{StaticResource DarkContextMenu}">
                                     <MenuItem Header="Restore to Quick Access" Click="OnRestore" Visibility="{Binding ImageOnlyVisibility}" Style="{StaticResource DarkMenuItem}"/>
