@@ -286,6 +286,11 @@ public class PinRenderHarness
                 using var pin = new FastPinWindow(source, settings);
                 pin.CreateControl();
                 SetField(pin, "_mouseInside", true);
+                // OnPaint gates the whole toolbar on _chromeAlpha and fades every chrome
+                // brush through it. Without this the render is a bare capture: no toolbar,
+                // no zoom chip, no focus ring -- which is exactly the render evidence this
+                // artifact exists to carry.
+                SetField(pin, "_chromeAlpha", 1d);
                 SetField(pin, "_hoverButton", 1);
                 SetField(pin, "_focusButton", 1);
                 Render(pin, output, showKeyboardFocus: true);
@@ -301,6 +306,36 @@ public class PinRenderHarness
 
         Assert.Null(failure);
         Assert.True(File.Exists(output));
+        AssertToolbarBandIsPresent(output);
+    }
+
+    /// <summary>
+    /// The artifact is only evidence if the chrome it is meant to show is actually in it.
+    /// A missing <c>_chromeAlpha</c> once produced a bare capture that looked perfectly
+    /// fine to a human -- HANDOFF's "never eyeball this" case -- so the band is counted.
+    /// </summary>
+    private static void AssertToolbarBandIsPresent(string path)
+    {
+        using var png = new SD.Bitmap(path);
+        int bandRows = 0;
+        for (int y = 0; y < png.Height; y++)
+        {
+            int neutral = 0;
+            for (int x = 0; x < png.Width; x++)
+            {
+                SD.Color c = png.GetPixel(x, y);
+                // The bar is 235/255 of ToolbarBg over the capture: dark and near-neutral,
+                // which nothing in the synthetic gradient capture is.
+                if (c.A > 200 && Math.Abs(c.R - c.G) < 8 && Math.Abs(c.G - c.B) < 8 &&
+                    c.R > 25 && c.R < 90)
+                    neutral++;
+            }
+            if (neutral > 30)
+                bandRows++;
+        }
+        Assert.True(bandRows > 8,
+            $"{path} carries no toolbar band ({bandRows} rows of near-neutral chrome) - " +
+            "the render painted a bare capture.");
     }
 
     [Fact]
