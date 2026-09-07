@@ -86,10 +86,15 @@ internal sealed class MeasureSession
     }
 
     /// <summary>Moves the guide at <paramref name="from"/> to <paramref name="to"/>, keeping
-    /// the list sorted. False when there is no guide there.</summary>
+    /// the list sorted. False when there is no guide there, or when a guide already sits on
+    /// the destination — one guide per coordinate is the same invariant <see cref="Insert"/>
+    /// holds, and a stacked pair would label its own zero-wide gap and then hand every drag
+    /// to whichever of the two the search happened to find first.</summary>
     public bool MoveGuide(bool vertical, int from, int to)
     {
         List<int> guides = vertical ? _guidesX : _guidesY;
+        if (guides.Contains(to))
+            return false;
         int at = guides.IndexOf(from);
         if (at < 0)
             return false;

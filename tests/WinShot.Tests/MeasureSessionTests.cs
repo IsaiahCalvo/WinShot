@@ -115,6 +115,19 @@ public class MeasureSessionTests
     }
 
     [Fact]
+    public void AGuideDraggedOntoAnotherStaysWhereItIsRatherThanStackingOnIt()
+    {
+        var session = new MeasureSession();
+        session.AddGuideX(100);
+        session.AddGuideX(140);
+
+        Assert.False(session.MoveGuide(vertical: true, 140, 100));
+        Assert.Equal(new[] { 100, 140 }, session.GuidesX);
+        // And the gap the pair labels is still a real one, not a zero.
+        Assert.Equal(new[] { (100, 140) }, MeasureSession.Pairs(session.GuidesX).ToArray());
+    }
+
+    [Fact]
     public void CopyFallsBackToTheLiveCrossWhenNothingIsHeld()
     {
         var session = new MeasureSession();
