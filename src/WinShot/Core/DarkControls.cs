@@ -831,6 +831,10 @@ public sealed class DarkSegmented : WF.Control
         if (disposing)
         {
             _pillRun?.Dispose();
+            // Same cleanup OnResize does: cancelling the tween's driver does not end the
+            // tween, so a control disposed mid-glide was left _gliding with a live target.
+            _pill.Stop();
+            _gliding = false;
             _hover.Dispose();
             _hoverOut.Dispose();
         }

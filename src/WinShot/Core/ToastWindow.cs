@@ -37,7 +37,14 @@ public sealed class ToastWindow : WF.Form
     /// <summary>Entrance/exit: fade plus a short rise. A toast is a surface arriving on
     /// screen, which is what EnterDurationMs names; scale is deliberately not used — the
     /// toast's children sit at fixed offsets, so resizing the form would crop them rather
-    /// than scale them.</summary>
+    /// than scale them.
+    ///
+    /// Declared deviation from F6, whose Fix column reads "~180 ms opacity + 0.92→1.0 scale
+    /// in/out": this is a rise instead of a scale, over the F2 vocabulary's EnterDurationMs
+    /// (280) rather than an invented 180. The intent F6 was after — nothing pops, entrance
+    /// and exit symmetric, one shared timing vocabulary — is met; the shape is not. Changing
+    /// it means moving the scale onto a content panel the way ThemedMessageDialog.Enter
+    /// does, which is a layout rewrite of the toast body, not a motion change.</summary>
     private const int RiseMs = Motion.EnterDurationMs;
     private const double RestOpacity = 0.97;
 
