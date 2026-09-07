@@ -877,14 +877,6 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
                                     <CheckBox x:Name="HiDpiCheck" Content="Scale HiDPI screenshots to 1x"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableSrgbRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Color management"/>
-                                    <CheckBox x:Name="ConvertToSrgbCheck" Content="Convert to sRGB profile"/>
-                                </DockPanel>
-                                <DockPanel x:Name="UnavailablePixelBorderRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Frame"/>
-                                    <CheckBox x:Name="AddPixelBorderCheck" Content="Add 1px border to all screenshots"/>
-                                </DockPanel>
                                 <DockPanel x:Name="ScreenshotBackgroundRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Background"/>
                                     <ComboBox x:Name="BackgroundCombo" HorizontalAlignment="Stretch"
@@ -1031,10 +1023,6 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="AskForNameCheck" Content="Ask for name after every capture"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableRetinaSuffixRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="AddRetinaSuffixCheck" Content="Add &quot;@2x&quot; suffix to HiDPI screenshots"/>
-                                </DockPanel>
                                 <!-- Every token is a link that inserts itself at the caret. A
                                      legend you have to retype is a legend you read once and
                                      then guess at. -->
@@ -1082,21 +1070,6 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Windows notifications can be held back by Focus assist and carry no buttons. Nothing also stops the tray icon's confirmation. Failures are always shown."/>
-                            </StackPanel>
-                        </Border>
-
-                        <Border x:Name="UnavailableCopyFormatCard" Style="{StaticResource Card}" Visibility="Collapsed">
-                            <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Copy to clipboard"/>
-                                    <ComboBox x:Name="CopyFormatCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="File &amp; image (default)" Tag="file-image"/>
-                                        <ComboBoxItem Content="File only" Tag="file"/>
-                                        <ComboBoxItem Content="Image only" Tag="image"/>
-                                    </ComboBox>
-                                </DockPanel>
-                                <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Adjust this option if you've encountered any issues with pasting from clipboard or clipboard managers."/>
                             </StackPanel>
                         </Border>
 
@@ -1173,17 +1146,6 @@
                                         <CheckBox x:Name="OcrJoinLinesCheck" Content="Join recognized lines"/>
                                         <CheckBox x:Name="OcrDetectLinksCheck" Content="Detect links" Margin="0,6,0,0" Visibility="Collapsed"/>
                                     </StackPanel>
-                                </DockPanel>
-                            </StackPanel>
-                        </Border>
-
-                        <Border x:Name="UnavailableResetWarningsCard" Style="{StaticResource Card}" Visibility="Collapsed">
-                            <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Dialogs"/>
-                                    <Button Content="Reset all warning dialogs" MinWidth="160"
-                                            HorizontalAlignment="Left"
-                                            Style="{StaticResource PillButtonSecondary}" Click="OnResetWarnings"/>
                                 </DockPanel>
                             </StackPanel>
                         </Border>

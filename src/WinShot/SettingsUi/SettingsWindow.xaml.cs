@@ -469,8 +469,6 @@ public partial class SettingsWindow : Window
     {
         SelectByTag(FormatCombo, s.ImageFormat, fallbackIndex: 0);
         HiDpiCheck.IsChecked = s.DownscaleHiDpi;
-        ConvertToSrgbCheck.IsChecked = s.ConvertToSrgb;
-        AddPixelBorderCheck.IsChecked = s.AddPixelBorder;
         SelectByTag(BackgroundCombo, ScreenshotBackdrop.Normalize(s.ScreenshotBackground), fallbackIndex: 0);
         BackgroundColorBox.Text = s.ScreenshotBackgroundColor;
         ApplyBackgroundModeRows(animate: false);
@@ -499,11 +497,9 @@ public partial class SettingsWindow : Window
     {
         TemplateBox.Text = s.FileNameTemplate;
         AskForNameCheck.IsChecked = s.AskForNameAfterCapture;
-        AddRetinaSuffixCheck.IsChecked = s.AddRetinaSuffix;
         SelectByTag(NotifyOcrCombo, NotificationStyle.Normalize(s.NotifyStyleOcr), fallbackIndex: 0);
         SelectByTag(NotifyCopyCombo, NotificationStyle.Normalize(s.NotifyStyleCopy), fallbackIndex: 0);
         SelectByTag(NotifySaveCombo, NotificationStyle.Normalize(s.NotifyStyleSave), fallbackIndex: 0);
-        SelectByTag(CopyFormatCombo, s.CopyToClipboardFormat, fallbackIndex: 0);
         PinnedRoundedCornersCheck.IsChecked = s.PinnedRoundedCorners;
         PinnedShadowCheck.IsChecked = s.PinnedShadow;
         PinnedBorderCheck.IsChecked = s.PinnedBorder;
@@ -540,16 +536,6 @@ public partial class SettingsWindow : Window
     {
         if (RetentionDaysBox is null) return;
         RetentionDaysBox.Text = SliderIndexToRetentionDays(e.NewValue).ToString();
-    }
-
-    /// <summary>
-    /// CleanShot's "Reset all warning dialogs" re-enables every "Don't show again" prompt.
-    /// WinShot has no suppressed-dialog store yet, so this just confirms there's nothing to
-    /// restore rather than silently doing nothing (which reads as a broken button).
-    /// </summary>
-    private void OnResetWarnings(object sender, RoutedEventArgs e)
-    {
-        ThemedMessageDialog.Show(this, "Reset warnings", "All warning dialogs are already enabled.");
     }
 
     // ------------------------------------------------------------ About tab

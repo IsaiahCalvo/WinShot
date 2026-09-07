@@ -215,7 +215,16 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("UnavailableCopyFormatCard").Visibility);
+        // Deleted rather than left Collapsed: a row for a setting nothing implements is dead
+        // XAML, and "it is in the file but hidden" is how it comes back by accident.
+        foreach (string gone in new[]
+        {
+            "UnavailableCopyFormatCard", "UnavailableSrgbRow", "UnavailablePixelBorderRow",
+            "UnavailableRetinaSuffixRow", "UnavailableResetWarningsCard",
+        })
+        {
+            Assert.Null(window.FindName(gone));
+        }
 
         var done = Named<System.Windows.Controls.Button>("SaveButton");
         var cancel = Named<System.Windows.Controls.Button>("CancelButton");
