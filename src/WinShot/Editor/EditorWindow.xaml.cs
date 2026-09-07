@@ -388,22 +388,9 @@ public partial class EditorWindow : Window
             return;
         Matrix toDip = target.TransformFromDevice;
 
-        var screen = System.Windows.Forms.Screen.FromRectangle(origin);
-        SD.Rectangle work = screen.WorkingArea;
-        Point workTopLeft = toDip.Transform(new Point(work.Left, work.Top));
-        Point workSize = toDip.Transform(new Point(work.Width, work.Height));
-
-        double width = Math.Min(Width, workSize.X * 0.9);
-        double height = Math.Min(Height, workSize.Y * 0.9);
-        var to = new Rect(
-            workTopLeft.X + (workSize.X - width) / 2,
-            workTopLeft.Y + (workSize.Y - height) / 2,
-            width,
-            height);
-
-        Point fromTopLeft = toDip.Transform(new Point(origin.Left, origin.Top));
-        Point fromSize = toDip.Transform(new Point(origin.Width, origin.Height));
-        var from = new Rect(fromTopLeft.X, fromTopLeft.Y, Math.Max(1, fromSize.X), Math.Max(1, fromSize.Y));
+        SD.Rectangle work = System.Windows.Forms.Screen.FromRectangle(origin).WorkingArea;
+        Rect to = EditorGrowLayout.Target(ToDip(toDip, work), new Size(Width, Height));
+        Rect from = EditorGrowLayout.Origin(ToDip(toDip, origin));
 
         _growMotion?.Dispose();
         _growMotion = Motion.Run(GrowDurationMs, Motion.EaseOutCubic, p =>
@@ -414,6 +401,19 @@ public partial class EditorWindow : Window
             Width = from.Width + (to.Width - from.Width) * p;
             Height = from.Height + (to.Height - from.Height) * p;
         }, onDone: () => _growMotion = null);
+    }
+
+    /// <summary>
+    /// A device rect in DIPs. The size goes through Transform(Vector), not Transform(Point):
+    /// a size has no origin, and the point overload would add the matrix's offset to it.
+    /// TransformFromDevice happens to be offset-free today, which is exactly the kind of
+    /// thing that stops being true quietly.
+    /// </summary>
+    private static Rect ToDip(Matrix toDip, SD.Rectangle device)
+    {
+        Point topLeft = toDip.Transform(new Point(device.Left, device.Top));
+        Vector size = toDip.Transform(new Vector(device.Width, device.Height));
+        return new Rect(topLeft.X, topLeft.Y, size.X, size.Y);
     }
 
     internal static EditorWindow CreateForDirectCapture(
