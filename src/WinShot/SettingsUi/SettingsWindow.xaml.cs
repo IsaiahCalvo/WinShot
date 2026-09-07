@@ -703,6 +703,21 @@ public partial class SettingsWindow : Window
             SaveFolderBox.Text = dialog.SelectedPath;
     }
 
+    /// <summary>Inserts the clicked token at the caret (replacing any selection) and puts the
+    /// caret after it, so a legend entry is one click instead of five keystrokes.</summary>
+    private void OnInsertToken(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Documents.Hyperlink link || link.Tag is not string token)
+            return;
+
+        int start = TemplateBox.SelectionStart;
+        string text = TemplateBox.Text.Remove(start, TemplateBox.SelectionLength).Insert(start, token);
+        TemplateBox.Text = text;
+        TemplateBox.SelectionStart = start + token.Length;
+        TemplateBox.SelectionLength = 0;
+        TemplateBox.Focus();
+    }
+
     private void OnTemplateChanged(object sender, TextChangedEventArgs e) => UpdateTemplatePreview();
 
     private void OnFormatChanged(object sender, SelectionChangedEventArgs e) => UpdateTemplatePreview();
@@ -891,6 +906,7 @@ public partial class SettingsWindow : Window
         s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
         s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
         s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
+        s.AskForNameAfterCapture = AskForNameCheck.IsChecked == true;
     }
 
     // ------------------------------------------------------- live apply
@@ -1114,6 +1130,7 @@ public partial class SettingsWindow : Window
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
+        Accessible(AskForNameCheck, "Ask for a name after every capture", "Prompt for a file name before each save, defaulting to the template.");
         Accessible(HistorySlider, "Capture history retention", "Choose how long local capture history is kept.");
         Accessible(PinnedRoundedCornersCheck, "Rounded pinned screenshot corners", "Use rounded corners for pinned screenshots.");
         Accessible(PinnedShadowCheck, "Pinned screenshot shadow", "Show a shadow around pinned screenshots.");
@@ -1138,7 +1155,7 @@ public partial class SettingsWindow : Window
             FormatCombo, HiDpiCheck, SelfTimerCombo,
             FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
-            OcrJoinLinesCheck,
+            OcrJoinLinesCheck, AskForNameCheck,
         })
         {
             control.TabIndex = tabIndex++;

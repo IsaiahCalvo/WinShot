@@ -41,6 +41,7 @@ internal static class SettingsTruthCatalog
             "PlaySounds",
             "ShutterSound",
             "ShowTrayIcon",
+            "AskForNameAfterCapture",
             "FreezeScreen",
             "CrosshairMode",
             "ShowCrosshair",
@@ -115,7 +116,6 @@ internal static class SettingsTruthCatalog
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
-            "AskForNameAfterCapture",
             "AddRetinaSuffix", "CopyToClipboardFormat", "OcrDetectLinks", "OcrLanguage",
         };
 

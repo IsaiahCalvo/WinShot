@@ -1528,6 +1528,41 @@ public partial class App : Application
             return;
         }
 
+        if (_settings.Current.AskForNameAfterCapture)
+        {
+            // The resolved template is the default, so the prompt costs one Enter for
+            // anyone who only wanted the option available.
+            string suggested = Path.GetFileNameWithoutExtension(path);
+            string? answer = ThemedInputDialog.Ask(
+                null,
+                "Name this capture",
+                $"Saving into {_settings.Current.SaveFolder}",
+                suggested);
+            if (answer is null)
+            {
+                // Cancelling a name prompt is a decision, not a failure.
+                bmp.Dispose();
+                Log.Info("Save cancelled at the name prompt");
+                return;
+            }
+            string chosen = ThemedInputDialog.SanitizeFileName(answer, suggested);
+            if (!string.Equals(chosen, suggested, StringComparison.Ordinal))
+            {
+                try
+                {
+                    path = FileNamer.UniquePathFor(
+                        _settings.Current.SaveFolder, chosen, Path.GetExtension(path));
+                }
+                catch (Exception ex)
+                {
+                    bmp.Dispose();
+                    Log.Error("Could not use the name you entered", ex);
+                    ShowBalloon("Save failed", FriendlyError.For(ex), ToastSeverity.Error);
+                    return;
+                }
+            }
+        }
+
         _ = Task.Run(() =>
         {
             using (bmp)

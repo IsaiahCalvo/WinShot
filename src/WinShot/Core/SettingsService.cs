@@ -150,7 +150,7 @@ public class Settings
     public bool PinnedBorder { get; set; } = false;
 
     // Advanced
-    public bool AskForNameAfterCapture { get; set; } = false; // TODO: wire behavior — prompt for a file name after each capture
+    public bool AskForNameAfterCapture { get; set; } = false;
     public bool AddRetinaSuffix { get; set; } = true;         // TODO: wire behavior — add "@2x" suffix to HiDPI screenshots
     public string CopyToClipboardFormat { get; set; } = "file-image"; // TODO: wire behavior — file-image | file | image
     public bool AllInOneRememberLast { get; set; } = true;    // All-in-One restores the last selection

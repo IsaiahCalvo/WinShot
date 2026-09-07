@@ -305,6 +305,19 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- A file-name token in the legend: reads as body text until you point at it. -->
+        <Style x:Key="TokenLink" TargetType="Hyperlink">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="TextDecorations" Value="{x:Null}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="TextDecorations" Value="Underline"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- The "not available for this column" placeholder, centered on the SAME line as the box. -->
         <Style x:Key="MatrixNA" TargetType="TextBlock">
             <Setter Property="Text" Value="—"/>
@@ -1000,7 +1013,7 @@
                                                FontSize="{StaticResource TextBody}" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableAskForNameRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="AskForNameRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="AskForNameCheck" Content="Ask for name after every capture"/>
                                 </DockPanel>
@@ -1008,13 +1021,18 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="AddRetinaSuffixCheck" Content="Add &quot;@2x&quot; suffix to HiDPI screenshots"/>
                                 </DockPanel>
-                                <TextBlock FontSize="{StaticResource TextCaption}" Foreground="{StaticResource TextSecondaryBrush}"
+                                <!-- Every token is a link that inserts itself at the caret. A
+                                     legend you have to retype is a legend you read once and
+                                     then guess at. -->
+                                <TextBlock x:Name="TemplateLegend" FontSize="{StaticResource TextCaption}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
                                            LineHeight="17" Margin="{StaticResource SettingsHintBelowMargin}">
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{date}"/><Run Text="  current date"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{time}"/><Run Text="  current time"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{n}"/><Run Text="  auto-incrementing counter"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{app}"/><Run Text="  active application name"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{title}"/><Run Text="  active window title"/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{date}" Click="OnInsertToken"><Run Text="{}{date}"/></Hyperlink><Run Text="  current date"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{time}" Click="OnInsertToken"><Run Text="{}{time}"/></Hyperlink><Run Text="  current time"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{n}" Click="OnInsertToken"><Run Text="{}{n}"/></Hyperlink><Run Text="  auto-incrementing counter"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{app}" Click="OnInsertToken"><Run Text="{}{app}"/></Hyperlink><Run Text="  active application name"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{title}" Click="OnInsertToken"><Run Text="{}{title}"/></Hyperlink><Run Text="  active window title"/><LineBreak/>
+                                    <Run Text="Click a token to insert it."/>
                                 </TextBlock>
                             </StackPanel>
                         </Border>
