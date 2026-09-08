@@ -134,6 +134,13 @@ public partial class App : Application
                 FileNamer.Next(_settings, candidate.Extension)),
             recoveredPath => _history.AddFile(recoveredPath));
         _settings.Changed += RegisterHotkeys;
+        // Every pin in the app gets a pencil chip, including the ones App does not build
+        // itself (the recording completion card raises its own), so the editor handoff is
+        // registered once here rather than at each construction site.
+        FastPinWindow.DefaultEditHandler = OpenEditorFromPin;
+        // The recognizer is cached per language, so pushing the choice here is enough:
+        // the next capture rebuilds the engine, and a settings save never pays for it.
+        _settings.Changed += () => OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
 
         _ = Task.Run(() =>
         {
@@ -171,7 +178,9 @@ public partial class App : Application
         BorderlessCaptureAccess.RequestOnce();
 
         // Building the Windows OCR engine is a one-time cost; do it now rather than on
-        // whoever presses the Extract text hotkey first.
+        // whoever presses the Extract text hotkey first. The language has to be set first
+        // or the warm-up caches an engine the user did not ask for.
+        OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
         OcrService.Warm();
 
         AnnounceCompletedUpdate();
@@ -334,6 +343,7 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr"), "\uE8D2"));
         menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"), "\uE8CB"));
         menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal"), "\uE8AB"));
+        menu.Items.Add(MenuItem("Scrolling capture (upward)", null, () => QueueCaptureCommand("scroll-up"), "\uE70E"));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("Open image…", null, OpenImageFileFlow, "\uE8E5"));
         menu.Items.Add(MenuItem("Pin to the screen…", null, PinFromFileFlow, "\uE718"));
@@ -346,6 +356,9 @@ public partial class App : Application
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("History…", s.HotkeyHistory, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
+        menu.Items.Add(MenuItem("Pin last screenshot", s.HotkeyPinLast, PinLastFlow));
+        menu.Items.Add(MenuItem("Toggle pins visibility", s.HotkeyPinToggleVisibility, TogglePinsFlow));
+        menu.Items.Add(MenuItem("Close all pins", s.HotkeyPinCloseAll, ClosePinsFlow));
         menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
         menu.Items.Add(new WF.ToolStripSeparator());
         // Dynamic "Update available" item — hidden until a check finds a newer release.
@@ -686,6 +699,9 @@ public partial class App : Application
         Reg(s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"));
         Reg(s.HotkeyLoadClipboard, LoadClipboardImageFlow);
         Reg(s.HotkeyMeasure, () => QueueCaptureCommand("measure"));
+        Reg(s.HotkeyPinToggleVisibility, TogglePinsFlow);
+        Reg(s.HotkeyPinCloseAll, ClosePinsFlow);
+        Reg(s.HotkeyPinLast, PinLastFlow);
 
         // The rest of the tray's commands, bound through the ShortcutBindings dictionary
         // rather than a Settings field each. Unbound actions are absent from it, so this
@@ -810,7 +826,8 @@ public partial class App : Application
     private static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
-        "all-in-one" or "ocr" or "measure" or "scrolling" or "scroll-horizontal" or "self-timer" or "self-timer-region"
+        "all-in-one" or "ocr" or "measure" or "scrolling" or "scroll-horizontal" or "scroll-up" or
+        "self-timer" or "self-timer-region"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
     private bool _delayedCountdownActive;
@@ -877,7 +894,11 @@ public partial class App : Application
             case "ocr": OcrFlow(); break;
             case "measure": MeasureFlow(); break;
             case "scrolling": ScrollingFlow(); break;
-            case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
+            case "scroll-horizontal":
+            case "scroll-up":
+                ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd),
+                    ScrollCaptureCommand.ReverseForCommand(cmd));
+                break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
             case "self-timer-region": CaptureRegionFlow(delaySeconds: _settings.Current.SelfTimerSeconds); break;
             // Automation hook (CleanShot's cleanshot://scrolling-capture analog):
@@ -2012,6 +2033,7 @@ public partial class App : Application
         FastQuickActionsWindow? card = null)
     {
         OcrCaptureResult result;
+        ToastWindow? working = null;
         try
         {
             var sw = Stopwatch.StartNew();
@@ -2020,7 +2042,24 @@ public partial class App : Application
             // InvalidOperationException instead caught the type and not the message: any
             // framework InvalidOperationException from the SoftwareBitmap/GDI+ work inside
             // ExtractAsync reached the user as raw exception text.
-            result = await OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
+            Task<OcrCaptureResult> extraction = OcrService.ExtractAsync(bmp, _settings.Current.OcrJoinLines);
+
+            // The selector is already gone and the result toast is not up yet, so a slow read
+            // used to happen against a completely unchanged screen. Only a read the user
+            // would actually notice is announced: a warm engine on a small crop finishes
+            // inside the delay and says nothing at all.
+            if (await Task.WhenAny(extraction, Task.Delay(WorkingIndicatorDelayMs)) != extraction)
+            {
+                // Sticky, not holdLong: a read slow enough to have earned an indicator can
+                // outlive 4.5 s (a cold engine on a big crop), and counting down would put
+                // the screen back to saying nothing with the work still in flight. Every
+                // exit below either closes this toast or replaces it with the result.
+                working = ShowOcrToast("Reading text", "Working on the selection.",
+                    anchor ?? CardAnchor(card), onOpen: null, ToastSeverity.Info,
+                    extras: new ToastExtras { Sticky = true });
+            }
+
+            result = await extraction;
             LogPerf("ocr extract", sw);
         }
         catch (OcrUnavailableException ex)
@@ -2036,21 +2075,40 @@ public partial class App : Application
             if (payload is null)
             {
                 if (card is not null)
+                {
+                    // The card's status flash is the feedback here, so nothing replaces the
+                    // working toast; close it rather than leave it dwelling over the answer.
+                    CloseWorkingToast(working);
                     card.FlashStatus("No text found");
-                else
-                    // The one OCR result the user has to read and act on, and the only one
-                    // with no action attached - so it holds the screen as long as a success.
-                    ShowOcrToast(
-                        "Nothing found", "No text or codes in the selection.", anchor,
-                        onOpen: null, ToastSeverity.Info, holdLong: true);
+                }
+                // A toast result replaces the working one; a null return means the toast could
+                // not be built and the shell balloon answered instead, so nothing replaced it
+                // and it would dwell for its full 30 s backstop over an answer already given.
+                else if (ShowOcrToast(
+                             "Nothing found", "No text or codes in the selection.", anchor,
+                             onOpen: null, ToastSeverity.Info, holdLong: true) is null)
+                    CloseWorkingToast(working);
                 return;
             }
 
             await CaptureService.SetTextToClipboardAsync(payload.ClipboardText);
-            if (card is not null)
-                card.FlashStatus("Text copied");
+            Action? open = BuildOpenAction(payload.ClipboardText);
+            if (card is not null && open is null)
+            {
+                // "Text copied" was hard-coded here, so a QR code run from the card was
+                // announced as text. The formatter already knows which it was.
+                CloseWorkingToast(working);
+                card.FlashStatus(payload.BalloonTitle);
+            }
             else
-                ShowOcrToast(payload.BalloonTitle, payload.Preview, anchor, BuildOpenAction(payload.ClipboardText));
+            {
+                // A decoded link is a decision, not a confirmation: the card's status flash
+                // has nowhere to put an Open button, so the toast comes up over the card.
+                if (ShowOcrToast(payload.BalloonTitle, payload.Preview,
+                        anchor ?? CardAnchor(card), open,
+                        extras: open is not null ? LinkExtras() : LineBreakExtras(result)) is null)
+                    CloseWorkingToast(working);
+            }
         }
         catch (COMException ex)
         {
@@ -2062,27 +2120,109 @@ public partial class App : Application
         }
     }
 
-    /// <summary>Returns an Open action when the copied text is a single http(s) URL
-    /// (e.g. a decoded QR code), else null.</summary>
-    private static Action? BuildOpenAction(string? clipboardText)
+    /// <summary>How long a read has to run before it is worth telling the user it is
+    /// running. Under this, the result lands before an indicator could be read.</summary>
+    private const int WorkingIndicatorDelayMs = 220;
+
+    /// <summary>Takes the working state down when the result is not itself a toast (the card
+    /// paths). A toast result replaces it on its own -- that is what showing one does.</summary>
+    private static void CloseWorkingToast(ToastWindow? working)
     {
-        string text = clipboardText?.Trim() ?? string.Empty;
-        if (Uri.TryCreate(text, UriKind.Absolute, out Uri? uri) &&
-            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        if (working is null || working.IsDisposed) return;
+        try { working.Close(); }
+        catch (Exception ex) { Log.Error("Could not close the OCR working toast (non-fatal)", ex); }
+    }
+
+    /// <summary>
+    /// Opening a link is a decision, so the toast waits for one: an explicit Don't open
+    /// beside Open link, and a checkbox that stops the offer for good. It used to be a 4.5 s
+    /// window with no way to decline and no way to say "stop asking".
+    ///
+    /// Declared deviation from §4.6, whose Fix column names the decline button "Dismiss":
+    /// against a primary reading "Open link", "Don't open" says what declining does instead of
+    /// naming the gesture, which is the sentence-case, consequence-phrased copy the rubric asks
+    /// for. The behaviour the Fix column specifies -- a real second answer, not just a timeout
+    /// -- is unchanged.
+    /// </summary>
+    private ToastExtras LinkExtras() => new()
+    {
+        Sticky = true,
+        SecondaryText = "Don't open",
+        CheckboxText = "Don't detect links",
+        CheckboxChanged = dontDetect =>
         {
-            return () => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
-        }
-        return null;
+            _settings.Current.OcrDetectLinks = !dontDetect;
+            // Quietly: Save() raises Changed, which unregisters and re-registers all eleven
+            // global hotkeys. A tick on a toast checkbox must not risk "Some hotkeys
+            // unavailable" because another app grabbed a gesture in the gap, and nothing
+            // subscribes to OcrDetectLinks anyway.
+            _settings.SaveQuietly();
+        },
+    };
+
+    /// <summary>
+    /// Line joining is a preference you can only judge after seeing the text, so the toast
+    /// offers the other answer in place and re-copies. The formatter is pure and takes the
+    /// flag as an argument, so this is the same call with it flipped.
+    /// </summary>
+    private ToastExtras? LineBreakExtras(OcrCaptureResult result)
+    {
+        // Nothing to join: one line either way, and a button that does nothing is worse
+        // than no button.
+        if (result.Lines.Count < 2) return null;
+
+        bool joined = _settings.Current.OcrJoinLines;
+        return new ToastExtras
+        {
+            ToggleText = joined ? "Add breaks" : "Cut breaks",
+            Toggle = async () =>
+            {
+                joined = !joined;
+                // Awaited, and through the same Combine the original copy used: a discarded
+                // Task hid a busy clipboard behind a button that relabelled itself anyway,
+                // and reformatting the text alone dropped any decoded code from underneath it.
+                string text = OcrClipboardFormatter.Combine(
+                    OcrTextFormatter.Format(result.Lines, joined), result.QrCodes);
+                await CaptureService.SetTextToClipboardAsync(text);
+                return joined ? "Add breaks" : "Cut breaks";
+            },
+        };
+    }
+
+    /// <summary>
+    /// The top edge of the quick-actions card, so a toast raised from the card path lands
+    /// over the capture it is about instead of in the tray corner. The card's midpoint would
+    /// be wrong: ToastWindow places an anchored toast with its *bottom* just above the anchor,
+    /// so anchoring to the centre parks a TopMost window across the card's upper band -- and a
+    /// sticky link toast would sit there until clicked, hiding the thumbnail and swallowing
+    /// the first click aimed at Copy or Edit. That is the overlap
+    /// <see cref="ToastWindow.CornerPlacement"/> exists to prevent.
+    /// </summary>
+    private static SD.Point? CardAnchor(FastQuickActionsWindow? card)
+    {
+        if (card is null || card.IsDisposed) return null;
+        SD.Rectangle bounds = card.Bounds;
+        return new SD.Point(bounds.Left + (bounds.Width / 2), bounds.Top);
+    }
+
+    /// <summary>Returns an Open action when the copied text is a single http(s) URL
+    /// (e.g. a decoded QR code) and the user still wants links detected, else null.</summary>
+    private Action? BuildOpenAction(string? clipboardText)
+    {
+        if (OcrLink.Detect(clipboardText, _settings.Current.OcrDetectLinks) is not Uri uri)
+            return null;
+        return () => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
     }
 
     /// <summary>Severity is per-call: "Nothing found" is not a success, and a checkmark on it
     /// reads as "it worked".</summary>
-    private void ShowOcrToast(
+    private ToastWindow? ShowOcrToast(
         string title, string preview, SD.Point? anchor, Action? onOpen,
-        ToastSeverity severity = ToastSeverity.Success, bool holdLong = false) =>
-        NotifyAction(NotifiedAction.Ocr, title, preview, anchor, onOpen, severity, holdLong);
+        ToastSeverity severity = ToastSeverity.Success, bool holdLong = false,
+        ToastExtras? extras = null) =>
+        NotifyAction(NotifiedAction.Ocr, title, preview, anchor, onOpen, severity, holdLong, extras: extras);
 
-    private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
+    private void ScrollingFlow(ScrollDirection? direction = null, bool reverse = false) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
         {
             SD.Rectangle? picked = null;
@@ -2091,7 +2231,10 @@ public partial class App : Application
             PerfLog.TrackFirstShown(selector, "scrolling selector");
             try
             {
-                if (await selector.ShowAsync(paneHover: true) == WF.DialogResult.OK &&
+                if (await selector.ShowAsync(paneHover: true,
+                        instruction: reverse
+                            ? "Drag over the part that scrolls, then scroll up"
+                            : "Drag over the part of the screen that scrolls") == WF.DialogResult.OK &&
                     selector.SelectedRegionPx is SD.Rectangle r)
                 {
                     picked = r;
@@ -2123,7 +2266,7 @@ public partial class App : Application
 
             // Escape and Cancel are the user finishing the flow the way they chose to; only a
             // run that came back with nothing to show for it is a failure worth a red card.
-            var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick);
+            var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick, reverse: reverse);
             if (stitched is not null)
                 HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
             else if (!cancelled)
@@ -2194,17 +2337,96 @@ public partial class App : Application
         overlay.Close();
     }
 
+    /// <summary>
+    /// Hides or restores every pin. Both this and <see cref="ClosePinsFlow"/> are bound to a
+    /// global hotkey and a tray row that are always enabled, and both used to return in
+    /// silence with no pin on screen -- indistinguishable from a hotkey that never registered.
+    /// The sibling flow already says "No capture in history to pin."; these say the same kind
+    /// of thing.
+    /// </summary>
+    private void TogglePinsFlow() => PinCommand(FastPinWindow.ToggleAllVisibility);
+
+    private void ClosePinsFlow() => PinCommand(FastPinWindow.CloseAll);
+
+    private void PinCommand(Action command)
+    {
+        if (!FastPinWindow.AnyOpen)
+        {
+            ShowBalloon("Pins", "No pinned screenshots on screen.", ToastSeverity.Info, holdLong: true);
+            return;
+        }
+
+        command();
+    }
+
+    /// <summary>
+    /// Pins the newest capture in history. The point is to get a reference back on screen
+    /// without opening History and hunting for it, so an empty history is a prerequisite not
+    /// met rather than a failure -- the same shape as "No previous region yet".
+    /// </summary>
+    private async void PinLastFlow()
+    {
+        string? path;
+        try
+        {
+            // Off the UI thread: GetItems enumerates the history folder, and a five-thousand
+            // file history would otherwise stall the hotkey press that asked for it.
+            // Recordings live in the same folder and sort in with the screenshots, so the
+            // newest entry after a recording is an .mp4 -- which loaded as "It is not an
+            // image WinShot can read" for a command the user invoked as Pin last screenshot.
+            path = await Task.Run(() =>
+                _history.GetItems().FirstOrDefault(p => !HistoryService.IsVideo(p)));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not read history for Pin last screenshot", ex);
+            ShowBalloon("Pin", FriendlyError.For(ex), ToastSeverity.Error);
+            return;
+        }
+
+        if (path is null)
+        {
+            ShowBalloon("Pin", "No capture in history to pin.", ToastSeverity.Info, holdLong: true);
+            return;
+        }
+
+        if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
+            return;
+
+        ShowPin(bmp);
+    }
+
     private void PinFromOverlay(FastQuickActionsWindow overlay)
     {
-        var win = new FastPinWindow(overlay.CloneImage(), _settings);
-        PerfLog.TrackFirstShown(win, "pin window");
-        win.Show();
         // The card is dismissed by a pin, exactly as it always has been — that dismissal is
         // part of the pinned surface and not this track's to change. The outline-to-solid
         // swap therefore has to be instant rather than a 140 ms cross-fade: it lands before
         // the card's own exit begins, so the glyph reads solid for the length of the exit
         // instead of racing it.
+        ShowPin(overlay.CloneImage());
         overlay.Close();
+    }
+
+    /// <summary>
+    /// Every pin App raises is created here. The pencil chip itself is wired once at startup
+    /// on <see cref="FastPinWindow.DefaultEditHandler"/>, so a pin built anywhere else -- the
+    /// recording completion card -- gets a working Edit too.
+    /// </summary>
+    private FastPinWindow ShowPin(SD.Bitmap image, string perfLabel = "pin window")
+    {
+        var win = new FastPinWindow(image, _settings);
+        PerfLog.TrackFirstShown(win, perfLabel);
+        win.Show();
+        return win;
+    }
+
+    /// <summary>The pin's pencil chip: the handoff Annotate already performs from the card,
+    /// with the pin left on screen and the editor given its own copy.</summary>
+    private void OpenEditorFromPin(SD.Bitmap image)
+    {
+        var win = EditorWindow.CreateForCapture(image, _settings, _history);
+        TrackFirstRender(win, "editor window");
+        win.Show();
     }
 
     private async void OcrFromOverlay(FastQuickActionsWindow overlay)
@@ -2255,11 +2477,7 @@ public partial class App : Application
     private async void PinFromHistory(string path)
     {
         if (await LoadBitmapCopyAsync(path) is SD.Bitmap bmp)
-        {
-            var win = new FastPinWindow(bmp, _settings);
-            PerfLog.TrackFirstShown(win, "pin window");
-            win.Show();
-        }
+            ShowPin(bmp);
     }
 
     private async void RestoreFromHistory(string path)
@@ -2275,9 +2493,7 @@ public partial class App : Application
             if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
                 continue;
 
-            var win = new FastPinWindow(bmp, _settings);
-            PerfLog.TrackFirstShown(win, "history pin window");
-            win.Show();
+            ShowPin(bmp, "history pin window");
         }
     }
 
@@ -2337,7 +2553,9 @@ public partial class App : Application
     /// Only successes come through here. <see cref="ShowBalloon"/> stays the path for
     /// failures, which are never silenced by a preference about confirmations.
     /// </remarks>
-    private void NotifyAction(
+    /// <returns>The toast that went up, or null when the style silenced it or the shell
+    /// balloon answered instead. A caller holding a working state needs to know which.</returns>
+    private ToastWindow? NotifyAction(
         NotifiedAction action,
         string title,
         string message,
@@ -2345,12 +2563,14 @@ public partial class App : Application
         Action? onOpen = null,
         ToastSeverity severity = ToastSeverity.Success,
         bool holdLong = false,
-        bool trayBeat = false)
+        bool trayBeat = false,
+        ToastExtras? extras = null)
     {
+        ToastWindow? shown = null;
         switch (NotificationStyle.For(action, _settings.Current))
         {
             case NotificationStyle.Off:
-                return;
+                return null;
             // A shell balloon needs a visible NotifyIcon to come out of. With "Show icon"
             // off the NotifyIcon is alive but invisible and ShowBalloonTip is a silent
             // no-op, so the user picks a confirmation channel and gets nothing. Fall back
@@ -2361,12 +2581,14 @@ public partial class App : Application
                 ShowShellBalloon(title, message, severity);
                 break;
             default:
-                ShowToast(title, message, anchor, onOpen, severity, holdLong);
+                shown = ShowToast(title, message, anchor, onOpen, severity, holdLong, extras);
                 break;
         }
 
         if (trayBeat)
             PlayTrayConfirmation();
+
+        return shown;
     }
 
     /// <summary>
@@ -2383,13 +2605,16 @@ public partial class App : Application
             app.ShowToast(title, message, anchor, onOpen, severity, holdLong);
     }
 
-    private void ShowToast(
+    /// <summary>Returns the toast that went up, or null when the balloon fallback ran. A
+    /// caller that put up a working state needs the handle to take it down again when its
+    /// result is not itself a toast.</summary>
+    private ToastWindow? ShowToast(
         string title, string message, SD.Point? anchor, Action? onOpen, ToastSeverity severity,
-        bool holdLong = false)
+        bool holdLong = false, ToastExtras? extras = null)
     {
         try
         {
-            var shown = new ToastWindow(title, message, anchor, onOpen, severity, holdLong);
+            var shown = new ToastWindow(title, message, anchor, onOpen, severity, holdLong, extras);
             try
             {
                 // Showing is what replaces whatever toast was already up.
@@ -2402,6 +2627,7 @@ public partial class App : Application
                 shown.Dispose();
                 throw;
             }
+            return shown;
         }
         catch (Exception ex)
         {
@@ -2410,6 +2636,7 @@ public partial class App : Application
             // When it is not there is nowhere left to put this, and the log is the record.
             Log.Error("Toast failed; falling back to the tray balloon", ex);
             ShowShellBalloon(title, message, severity);
+            return null;
         }
     }
 

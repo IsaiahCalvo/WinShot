@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using SD = System.Drawing;
 
 namespace WinShot.Capture;
@@ -17,7 +17,10 @@ internal readonly record struct SelectorOptions(
     bool ShowMagnifier,
     SelectorCrosshairMode CrosshairMode,
     bool RememberLastRegion,
-    bool AdjustBeforeCapture = false)
+    bool AdjustBeforeCapture = false,
+    /// <summary>Mode-specific copy shown in a cursor-following pill until the drag starts.
+    /// Null for the plain flows, where the crosshair is the whole affordance.</summary>
+    string? Instruction = null)
 {
     public static SelectorOptions ForRegion(Settings? settings) =>
         FromSettings(settings, rememberLastRegion: false);

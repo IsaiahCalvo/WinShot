@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
 using WinShot.Core;
@@ -15,6 +15,107 @@ namespace WinShot.Tests;
 /// </summary>
 public class QuickAccessOverlayRenderHarness
 {
+    /// <summary>
+    /// The tall-capture flyout floats directly above the pinned card, so it has to carry the
+    /// card's own hairline the same way the card does -- and the card's hairline is locked by
+    /// a pixel scan (CardKeepsAHairlineEdgeOverANearBlackCapture) precisely because HANDOFF
+    /// records that eyeballing it was wrong twice. A stroke laid on the fill's own boundary
+    /// puts more ink on two sides than the other two.
+    /// </summary>
+    [Fact]
+    public void TallCapturePreviewKeepsAnEvenHairlineOverANearBlackCapture()
+    {
+        using SD.Bitmap? surface = RenderTallPreview();
+        if (surface is null)
+            return;   // No working area tall enough on this host to place a preview.
+
+        int middle = surface.Height / 2;
+        int centreX = surface.Width / 2;
+        int interior = surface.GetPixel(centreX, middle).R;
+        int left = Brightest(surface, 0, 3, middle);
+        int right = Brightest(surface, surface.Width - 3, surface.Width, middle);
+
+        Assert.True(left > interior + 20, $"left edge {left} vs interior {interior}");
+        Assert.Equal(left, right);
+        Assert.True(left < 90, $"the edge is meant to be a hairline, not a frame: {left}");
+
+        // And the same on the other axis: the region used to be one pixel larger than the
+        // painted path, so the bottom row showed raw window background through the edge.
+        int top = BrightestColumn(surface, centreX, 0, 3);
+        int bottom = BrightestColumn(surface, centreX, surface.Height - 3, surface.Height);
+        Assert.Equal(top, bottom);
+    }
+
+    private static SD.Bitmap? RenderTallPreview()
+    {
+        using var strip = new SD.Bitmap(300, 4000, SD.Imaging.PixelFormat.Format32bppPArgb);
+        using (var g = SD.Graphics.FromImage(strip))
+            g.Clear(SD.Color.FromArgb(6, 6, 8));
+
+        SD.Rectangle area = WF.Screen.PrimaryScreen!.WorkingArea;
+        var card = new SD.Rectangle(area.Right - 190, area.Bottom - 170, 160, 120);
+        var visuals = QuickAccessOverlayThemePalette.For(QuickAccessOverlayTheme.Dark);
+        using TallCapturePreviewWindow? preview =
+            TallCapturePreviewWindow.TryCreate(strip, card, dpi: 96, visuals);
+        if (preview is null)
+            return null;
+
+        preview.CreateControl();
+        var bitmap = new SD.Bitmap(preview.ClientSize.Width, preview.ClientSize.Height,
+            SD.Imaging.PixelFormat.Format32bppArgb);
+        using var graphics = SD.Graphics.FromImage(bitmap);
+        // An opaque ground, for the same reason the card's own scan uses one.
+        graphics.Clear(SD.Color.Black);
+        using var args = new WF.PaintEventArgs(graphics, new SD.Rectangle(SD.Point.Empty, bitmap.Size));
+        typeof(TallCapturePreviewWindow)
+            .GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(preview, new object[] { args });
+        return bitmap;
+    }
+
+    private static int Brightest(SD.Bitmap surface, int fromX, int toX, int y)
+    {
+        int best = 0;
+        for (int x = Math.Max(0, fromX); x < Math.Min(surface.Width, toX); x++)
+            best = Math.Max(best, surface.GetPixel(x, y).R);
+        return best;
+    }
+
+    private static int BrightestColumn(SD.Bitmap surface, int x, int fromY, int toY)
+    {
+        int best = 0;
+        for (int y = Math.Max(0, fromY); y < Math.Min(surface.Height, toY); y++)
+            best = Math.Max(best, surface.GetPixel(x, y).R);
+        return best;
+    }
+
+    /// <summary>Visual evidence for the flyout, beside the card renders.</summary>
+    [Fact]
+    public void RenderTallCapturePreviewToPng()
+    {
+        if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_QUICK_ACCESS") != "1")
+            return;
+
+        string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUT")
+            ?? Path.Combine(Path.GetTempPath(), "winshot-quick-access-render");
+        Directory.CreateDirectory(outDir);
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using SD.Bitmap? surface = RenderTallPreview();
+                surface?.Save(Path.Combine(outDir, "tall-capture-preview.png"), SD.Imaging.ImageFormat.Png);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
     [Fact]
     public void RenderContextMenuToPng()
     {

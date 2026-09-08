@@ -21,9 +21,11 @@ public static class ScrollingStatusWindow
     /// image and mean opposite things to the person watching: an abort must not be reported
     /// back as a failure. <paramref name="presetDirection"/> forces an axis (the
     /// scroll-horizontal command); null auto-detects from the first movement.
+    /// <paramref name="reverse"/> captures upward, for content you are already at the
+    /// bottom of (the scroll-up command).
     /// </summary>
     public static async Task<(SD.Bitmap? Image, bool Cancelled)> Run(SD.Rectangle screenRegion, ScrollDirection? presetDirection = null,
-        bool autoStart = false, TimeSpan? autoStop = null, bool paneScoped = false)
+        bool autoStart = false, TimeSpan? autoStop = null, bool paneScoped = false, bool reverse = false)
     {
         using var cts = new CancellationTokenSource();
         bool cancelled = false;
@@ -91,7 +93,8 @@ public static class ScrollingStatusWindow
                 hint => MarshalHint(controls, preview, hint),
                 cts.Token,
                 thumb => PushPreview(preview, thumb),
-                paneScoped: paneScoped);
+                paneScoped: paneScoped,
+                reverse: reverse);
 
             if (cancelled)
             {
@@ -107,6 +110,22 @@ public static class ScrollingStatusWindow
         }
         finally
         {
+            // Fade all three out together before tearing them down, mirroring the ramp they
+            // arrived on. A failed fade must never leave the chrome on screen, so the close
+            // runs whatever happens.
+            try
+            {
+                // Raced against a deadline: the ramps run on WinForms timers, and a flow that
+                // ends while the pump is going away would otherwise never return the capture.
+                Task fades = Task.WhenAll(
+                    controls.FadeOutAsync(), preview.FadeOutAsync(), overlay.FadeOutAsync());
+                await Task.WhenAny(fades, Task.Delay(ScrollChromeFade.DurationMs * 4));
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Scroll chrome fade-out failed (non-fatal)", ex);
+            }
+
             try { controls.Close(); controls.Dispose(); } catch { /* best effort */ }
             try { preview.Close(); preview.Dispose(); } catch { /* best effort */ }
             try { overlay.Close(); overlay.Dispose(); } catch { /* best effort */ }

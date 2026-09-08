@@ -404,9 +404,38 @@ internal static class SelectorChrome
     /// the measurement pill carries its dip value and ratio under the pixel figure.</summary>
     public static SD.Size MeasureLabel(string text, double scale)
     {
+        var key = (text, Clean(scale));
+        if (TryCachedPill(key, out SD.Size known))
+            return known;
+
         using var font = PillFont(scale);
         SD.Size size = MeasureBlock(text, font);
-        return new SD.Size(size.Width + Px(PillPadX, scale), size.Height + Px(PillPadY, scale));
+        var measured = new SD.Size(size.Width + Px(PillPadX, scale), size.Height + Px(PillPadY, scale));
+        (_pillKeyB, _pillSizeB) = (_pillKeyA, _pillSizeA); // the older of the two ages out
+        (_pillKeyA, _pillSizeA) = (key, measured);
+        return measured;
+    }
+
+    /// <summary>
+    /// Two slots, not one. A pill whose string never changes -- the scrolling selector's
+    /// instruction -- is re-measured from the ~66 fps cursor-follow invalidation for as long
+    /// as it is up, and building a Font per frame is the cost this exists to avoid. Two,
+    /// because that selector has both pills up at once (the paint measures the size readout
+    /// while the follow tick measures the instruction) and a single slot missed on every call.
+    /// Keyed on the scale as well as the string: the same text is a different pill on a
+    /// different monitor, which is the whole point of the scale parameter.
+    /// </summary>
+    private static (string Text, double Scale) _pillKeyA = (string.Empty, 0d);
+    private static SD.Size _pillSizeA;
+    private static (string Text, double Scale) _pillKeyB = (string.Empty, 0d);
+    private static SD.Size _pillSizeB;
+
+    private static bool TryCachedPill((string Text, double Scale) key, out SD.Size size)
+    {
+        if (_pillKeyA == key) { size = _pillSizeA; return true; }
+        if (_pillKeyB == key) { size = _pillSizeB; return true; }
+        size = default;
+        return false;
     }
 
     /// <summary>One measured block, stacking on newlines so a multi-line pill is sized by its

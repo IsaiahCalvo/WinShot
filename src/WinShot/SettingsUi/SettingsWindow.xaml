@@ -1278,23 +1278,18 @@
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="Text recognition"/>
-                                <DockPanel x:Name="UnavailableOcrLanguageRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Text recognition"/>
-                                    <ComboBox x:Name="OcrLanguageCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="Detect language automatically" Tag="auto"/>
-                                        <ComboBoxItem Content="English" Tag="en"/>
-                                        <ComboBoxItem Content="Spanish" Tag="es"/>
-                                        <ComboBoxItem Content="French" Tag="fr"/>
-                                        <ComboBoxItem Content="German" Tag="de"/>
-                                        <ComboBoxItem Content="Italian" Tag="it"/>
-                                        <ComboBoxItem Content="Portuguese" Tag="pt"/>
-                                    </ComboBox>
+                                    <!-- Filled at load time from the recognizer packs this machine
+                                         actually has; a hard-coded list offers languages that would
+                                         silently fall back. -->
+                                    <ComboBox x:Name="OcrLanguageCombo" HorizontalAlignment="Stretch"/>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <StackPanel>
                                         <CheckBox x:Name="OcrJoinLinesCheck" Content="Join recognized lines"/>
-                                        <CheckBox x:Name="OcrDetectLinksCheck" Content="Detect links" Margin="0,6,0,0" Visibility="Collapsed"/>
+                                        <CheckBox x:Name="OcrDetectLinksCheck" Content="Offer to open a detected link" Margin="0,6,0,0"/>
                                     </StackPanel>
                                 </DockPanel>
                             </StackPanel>

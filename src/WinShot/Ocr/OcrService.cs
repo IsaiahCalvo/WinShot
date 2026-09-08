@@ -13,9 +13,18 @@ using SDI = System.Drawing.Imaging;
 
 namespace WinShot.Ocr;
 
-/// <summary>Combined result of one recognition pass: OCR text plus any decoded
-/// QR/DataMatrix/Aztec payloads found in the image.</summary>
-public sealed record OcrCaptureResult(string Text, List<string> QrCodes);
+/// <summary>
+/// Combined result of one recognition pass: OCR text plus any decoded QR/DataMatrix/Aztec
+/// payloads found in the image. <paramref name="Lines"/> is the recognizer's raw output before
+/// <see cref="OcrTextFormatter"/> joined or broke it, kept so the result toast can offer the
+/// other answer after the user has seen the text -- joining is a preference you can only
+/// judge once you are looking at it.
+/// </summary>
+public sealed record OcrCaptureResult(string Text, List<string> QrCodes, List<string> Lines)
+{
+    public OcrCaptureResult(string text, List<string> qrCodes)
+        : this(text, qrCodes, new List<string>()) { }
+}
 
 /// <summary>
 /// Extracts text from a bitmap using the built-in Windows OCR engine
@@ -33,7 +42,60 @@ public static class OcrService
     ];
 
     private static OcrEngine? _engine;
-    private static bool _engineInitialized;
+    // Volatile because the unlocked fast path in GetEngine reads them: the engine is built
+    // under EngineGate on whichever thread ran the capture, and the next capture can be on
+    // another. Without this a stale read costs one more capture on the previous language.
+    private static volatile bool _engineInitialized;
+    private static volatile string _engineLanguage = AutoLanguage;
+
+    /// <summary>The "let Windows decide" value of <see cref="PreferredLanguage"/>.</summary>
+    public const string AutoLanguage = "auto";
+
+    // Volatile, not guarded by EngineGate: GetEngine holds that lock across
+    // OcrEngine.TryCreateFromLanguage, and this setter runs on the UI thread from Settings'
+    // Changed event -- pressing Done while a capture built a cold engine stalled the UI for
+    // the length of the build. Publishing the string is all the setter ever needed to do;
+    // GetEngine re-reads it under the lock and rebuilds on the next capture.
+    private static volatile string _preferredLanguage = AutoLanguage;
+
+    /// <summary>
+    /// BCP-47 tag the recognizer should prefer, or <see cref="AutoLanguage"/> to follow the
+    /// user profile. App pushes Settings.OcrLanguage here at startup and whenever Settings is
+    /// saved; changing it rebuilds the cached engine on the next capture rather than
+    /// immediately, so a settings save never pays the engine-creation cost on the UI thread.
+    /// </summary>
+    public static string PreferredLanguage
+    {
+        get => _preferredLanguage;
+        set
+        {
+            string tag = string.IsNullOrWhiteSpace(value) ? AutoLanguage : value.Trim();
+            if (string.Equals(_preferredLanguage, tag, StringComparison.OrdinalIgnoreCase))
+                return;
+            _preferredLanguage = tag;
+        }
+    }
+
+    /// <summary>
+    /// The recognizer languages this machine actually has packs for, as BCP-47 tags with the
+    /// display names Windows gives them. Empty when no pack is installed at all -- the combo
+    /// then offers only "Automatically detect", which is the honest answer.
+    /// </summary>
+    public static IReadOnlyList<(string Tag, string Display)> AvailableLanguages()
+    {
+        try
+        {
+            return OcrEngine.AvailableRecognizerLanguages
+                .Select(l => (l.LanguageTag, string.IsNullOrWhiteSpace(l.DisplayName) ? l.LanguageTag : l.DisplayName))
+                .OrderBy(l => l.Item2, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not list OCR recognizer languages (non-fatal)", ex);
+            return Array.Empty<(string, string)>();
+        }
+    }
 
     private const double MaxInitialUpscale = 4.0;
     private const int OcrTargetLongSide = 1600;
@@ -122,6 +184,7 @@ public static class OcrService
             // before recognition; an empty read retries at double the scale
             // until the engine's dimension cap is hit.
             string text = string.Empty;
+            var lines = new List<string>();
             double scale = InitialOcrScale(bmp.Width, bmp.Height);
             while (true)
             {
@@ -138,7 +201,8 @@ public static class OcrService
                     step.Restart();
                     OcrResult result = await engine.RecognizeAsync(softwareBitmap);
                     recognizeMs += step.ElapsedMilliseconds;
-                    text = OcrTextFormatter.Format(result.Lines.Select(l => l.Text), joinLines);
+                    lines = result.Lines.Select(l => l.Text).ToList();
+                    text = OcrTextFormatter.Format(lines, joinLines);
                 }
 
                 if (!string.IsNullOrWhiteSpace(text))
@@ -161,7 +225,7 @@ public static class OcrService
             }
 
             LogOcrBreakdown(snapshot, snapshotMs, softwareBitmapMs, recognizeMs, barcodeMs, deepBarcodeMs, total.ElapsedMilliseconds);
-            return new OcrCaptureResult(text, qrCodes);
+            return new OcrCaptureResult(text, qrCodes, lines);
         }
     }
 
@@ -371,17 +435,31 @@ public static class OcrService
 
     private static OcrEngine? GetEngine()
     {
-        if (_engineInitialized)
+        if (_engineInitialized && string.Equals(_engineLanguage, _preferredLanguage, StringComparison.OrdinalIgnoreCase))
             return _engine;
 
         lock (EngineGate)
         {
-            if (_engineInitialized)
+            string wanted = _preferredLanguage;
+            if (_engineInitialized && string.Equals(_engineLanguage, wanted, StringComparison.OrdinalIgnoreCase))
                 return _engine;
 
-            _engine = OcrEngine.TryCreateFromUserProfileLanguages()
+            // An explicit choice is a preference, not a demand: a user who picks a language
+            // and then uninstalls its pack must still get OCR rather than "no engine".
+            OcrEngine? engine = null;
+            if (!string.Equals(wanted, AutoLanguage, StringComparison.OrdinalIgnoreCase))
+            {
+                try { engine = OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language(wanted)); }
+                catch (Exception ex) { Log.Error($"OCR language '{wanted}' is not available; falling back", ex); }
+            }
+
+            _engine = engine
+                ?? OcrEngine.TryCreateFromUserProfileLanguages()
                 ?? OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
-            _engineInitialized = true;
+            _engineLanguage = wanted;
+            _engineInitialized = true; // last: the fast path gates on it, so _engine and
+                                       // _engineLanguage must both be published first
+
             return _engine;
         }
     }

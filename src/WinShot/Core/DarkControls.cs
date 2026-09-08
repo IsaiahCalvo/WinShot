@@ -940,3 +940,118 @@ public sealed class DarkSegmented : WF.Control
         g.FillPath(brush, path);
     }
 }
+
+/// <summary>
+/// Owner-drawn dark checkbox: an accent-filled rounded box with a white check, replacing the
+/// stock WinForms flat glyph, which ignores the palette and renders a light box on a dark
+/// surface. Lived inside the recording options dialog until the OCR toast needed one too.
+/// </summary>
+public sealed class DarkCheckBox : WF.CheckBox
+{
+    // Hover and checked both ramp: this control now sits on the toast next to DarkButtons
+    // that ease through StateAmount, and two controls on one card must not behave differently.
+    private readonly StateAmount _hover;
+    private readonly StateAmount _check;
+
+    public DarkCheckBox()
+    {
+        _hover = new StateAmount(this);
+        _check = new StateAmount(this);
+        SetStyle(
+            WF.ControlStyles.UserPaint |
+            WF.ControlStyles.AllPaintingInWmPaint |
+            WF.ControlStyles.OptimizedDoubleBuffer |
+            WF.ControlStyles.ResizeRedraw,
+            true);
+        AutoSize = true;
+        BackColor = DarkControlPalette.Card;
+        Cursor = WF.Cursors.Hand;
+        ForeColor = DarkControlPalette.Text;
+        CheckedChanged += (_, _) => _check.To(Checked ? 1d : 0d);
+        GotFocus += (_, _) => Invalidate();
+        LostFocus += (_, _) => Invalidate();
+        MouseEnter += (_, _) => _hover.To(1d);
+        MouseLeave += (_, _) => _hover.To(0d);
+    }
+
+    /// <summary>A box built already ticked is at rest ticked -- the ramp is for the change,
+    /// not for the arrival.</summary>
+    protected override void OnCreateControl()
+    {
+        base.OnCreateControl();
+        _check.Reset(Checked ? 1d : 0d);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _hover.Dispose();
+            _check.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    /// <summary>Manual DPI scale, like every other hand-laid-out surface in the app.</summary>
+    public double Scale { get; init; } = 1.0;
+
+    private int S(int logical) => (int)Math.Round(logical * Scale);
+
+    public override SD.Size GetPreferredSize(SD.Size proposedSize)
+    {
+        SD.Size text = WF.TextRenderer.MeasureText(Text, Font);
+        int box = S(16);
+        return new SD.Size(box + S(8) + text.Width + 2, Math.Max(box + 2, text.Height + 2));
+    }
+
+    protected override void OnPaint(WF.PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        int box = S(16);
+        var rect = new SD.Rectangle(0, (Height - box) / 2, box, box);
+        int cornerRadius = S(4);
+
+        // The box cross-fades from the empty field to the accent fill, and the tick fades in
+        // over it, so ticking is a change you can see happen rather than one frame of blue.
+        double checkAmount = _check.Value;
+        using (var path = GdiPaths.RoundedRect(rect, cornerRadius))
+        {
+            using (var fill = new SD.SolidBrush(DarkControlPalette.Mix(
+                DarkControlPalette.Field, ThemePalette.Accent, checkAmount)))
+                g.FillPath(fill, path);
+            int borderAlpha = (int)Math.Round((64 + (56 * _hover.Value)) * (1d - checkAmount));
+            if (borderAlpha > 1)
+            {
+                using var pen = new SD.Pen(SD.Color.FromArgb(borderAlpha, 255, 255, 255), 1f);
+                g.DrawPath(pen, path);
+            }
+        }
+        if (checkAmount > 0.004d)
+        {
+            using var pen = new SD.Pen(
+                SD.Color.FromArgb((int)Math.Round(255 * checkAmount), SD.Color.White),
+                Math.Max(2f, box / 8f))
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round,
+            };
+            g.DrawLines(pen, new[]
+            {
+                new SD.PointF(rect.X + box * 0.26f, rect.Y + box * 0.54f),
+                new SD.PointF(rect.X + box * 0.43f, rect.Y + box * 0.72f),
+                new SD.PointF(rect.X + box * 0.75f, rect.Y + box * 0.31f),
+            });
+        }
+
+        int textX = box + S(8);
+        var textRect = new SD.Rectangle(textX, 0, Math.Max(1, Width - textX), Height);
+        WF.TextRenderer.DrawText(g, Text, Font, textRect, ForeColor,
+            WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Left | WF.TextFormatFlags.SingleLine);
+        if (Focused)
+            WF.ControlPaint.DrawFocusRectangle(g, textRect);
+    }
+}

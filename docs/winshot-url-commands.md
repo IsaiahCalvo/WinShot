@@ -1,4 +1,4 @@
-# WinShot URL and CLI commands
+﻿# WinShot URL and CLI commands
 
 WinShot registers `winshot://` for local automation. If WinShot is already running, the new command is sent to the tray app and the second process exits.
 
@@ -28,6 +28,7 @@ Supported commands:
 - `measure` — PixelSnap-style on-screen measurement (default `Ctrl+Shift+9`)
 - `scrolling`
 - `scroll-horizontal`
+- `scroll-up` (upward scrolling capture, for content you are already at the bottom of)
 - `history`
 - `settings`
 - `self-timer`

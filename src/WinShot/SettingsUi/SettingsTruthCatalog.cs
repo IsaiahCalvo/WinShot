@@ -1,4 +1,4 @@
-namespace WinShot.SettingsUi;
+﻿namespace WinShot.SettingsUi;
 
 /// <summary>
 /// Durable contract for the controls Settings is allowed to present. Every property in this
@@ -93,6 +93,11 @@ internal static class SettingsTruthCatalog
             "PinnedRoundedCorners",
             "PinnedShadow",
             "PinnedBorder",
+            "HotkeyPinToggleVisibility",
+            "HotkeyPinCloseAll",
+            "HotkeyPinLast",
+            "OcrDetectLinks",
+            "OcrLanguage",
         };
 
     /// <summary>
@@ -117,6 +122,9 @@ internal static class SettingsTruthCatalog
         "scrolling-capture",
         "scroll-horizontal",
         "capture-text",
+        "pin-toggle-visibility",
+        "pin-close-all",
+        "pin-last",
         "load-clipboard",
         "open-image",
         "pin-to-screen",
@@ -135,7 +143,7 @@ internal static class SettingsTruthCatalog
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
-            "AddRetinaSuffix", "CopyToClipboardFormat", "OcrDetectLinks", "OcrLanguage",
+            "AddRetinaSuffix", "CopyToClipboardFormat",
         };
 
     internal static readonly IReadOnlySet<string> NonInteractiveRuntimeStateProperties =
@@ -155,5 +163,6 @@ internal static class SettingsTruthCatalog
             "SelectorHintSessions",
             "LastRecordingRegion",
             "ShortcutBindings",
+            "SavedColors",
         };
 }

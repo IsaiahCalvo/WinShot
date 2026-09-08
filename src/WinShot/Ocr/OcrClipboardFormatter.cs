@@ -20,17 +20,26 @@ public static class OcrClipboardFormatter
             BuildPreview(text, PreviewLimit));
     }
 
-    private static string BuildClipboardText(OcrCaptureResult result)
+    private static string BuildClipboardText(OcrCaptureResult result) =>
+        Combine(result.Text, result.QrCodes);
+
+    /// <summary>
+    /// What actually goes on the clipboard: the recognized text, then any decoded payloads
+    /// underneath. Public because the result toast re-runs the line-break formatter over the
+    /// raw lines and has to put the codes back -- re-copying the text alone silently dropped
+    /// the QR payload the user could still see quoted in the toast.
+    /// </summary>
+    public static string Combine(string? text, IReadOnlyList<string> qrCodes)
     {
         var sb = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(result.Text))
-            sb.Append(result.Text.Trim());
+        if (!string.IsNullOrWhiteSpace(text))
+            sb.Append(text.Trim());
 
-        if (result.QrCodes.Count > 0)
+        if (qrCodes.Count > 0)
         {
             if (sb.Length > 0)
                 sb.AppendLine().AppendLine();
-            sb.Append(string.Join(Environment.NewLine, result.QrCodes));
+            sb.Append(string.Join(Environment.NewLine, qrCodes));
         }
 
         return sb.ToString();

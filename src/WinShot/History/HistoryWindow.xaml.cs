@@ -2017,7 +2017,6 @@ public partial class HistoryWindow : Window
 public sealed class HistoryItem : INotifyPropertyChanged
 {
     private static readonly string[] ImageExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".webp" };
-    private static readonly string[] VideoExtensions = { ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".webm" };
 
     private ImageSource? _thumbnail;
     private bool _thumbnailTried;
@@ -2030,7 +2029,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
         FilePath = filePath;
         string ext = Path.GetExtension(filePath).ToLowerInvariant();
         IsImage = ImageExtensions.Contains(ext);
-        IsVideo = VideoExtensions.Contains(ext);
+        IsVideo = WinShot.Core.HistoryService.IsVideo(filePath);
         IsGif = ext == ".gif";
         // "20260904-141233-091-scroll@chrome.png": the source-app tag is last, so strip it
         // before asking about the classification tag in front of it. Files written before

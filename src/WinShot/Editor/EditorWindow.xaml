@@ -201,13 +201,52 @@
                                 <Border Background="{StaticResource ElevatedBrush}" BorderBrush="{StaticResource BorderBrush}"
                                         BorderThickness="1" CornerRadius="{StaticResource RadiusInput}" Padding="10" Margin="0,4,12,12"
                                         Effect="{StaticResource FloatingShadow}">
-                                    <StackPanel Width="232">
-                                        <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
+                                    <!-- 260 and not 232: the saved row is ten slots at the same
+                                         22 px swatch + 2 px margins the palette above uses, which
+                                         needs 26 px a cell. At 232 the ten cells were 23.2 px and
+                                         every slot was clipped; at 260 both rows fit their swatches
+                                         with the palette simply carrying the wider gutter. -->
+                                    <StackPanel Width="260">
+                                        <!-- Eight columns because the palette is authored as five
+                                             rows of eight families (greys, reds/oranges,
+                                             greens/teals, blues/purples, pinks/browns); at ten it
+                                             reflowed into four rows that cut every family in half.
+                                             Left-aligned rather than stretched, so an unstretched
+                                             UniformGrid measures to columns x 26 px and the eight
+                                             swatches here share the saved row's pitch and left
+                                             edge instead of carrying a wider gutter. -->
+                                        <UniformGrid x:Name="ColorPickerGrid" Columns="8" HorizontalAlignment="Left"/>
+                                        <!-- Off the Space scale on purpose, and the only place in this popup that is:
+                                             left 2 aligns the label text with the 2 px cell margin the
+                                             swatch grids carry, and bottom 2 keeps it tight to its own
+                                             row. Space1 (4) on either would break that alignment. -->
+                                        <TextBlock Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,8,0,2"/>
+                                        <!-- Ten slots always, unused ones drawn as empty outlines, so
+                                             the popup never changes height as the palette fills. -->
+                                        <UniformGrid x:Name="SavedColorGrid" Columns="10" HorizontalAlignment="Left"/>
                                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,8"/>
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                            <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
-                                                       Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
+                                            <!-- A real focusable control, not a bare Rectangle: the
+                                                 "Copy as" formats hang off this, and a Shape can
+                                                 never take keyboard focus, so Shift+F10 went to the
+                                                 hex box instead and the whole feature was
+                                                 mouse-only. -->
+                                            <Button x:Name="ColorPickerPreviewButton" Grid.Column="0"
+                                                    Style="{StaticResource ColorSwatchButton}" Margin="2,0,0,0"
+                                                    Cursor="Hand" Click="OnColorPickerPreviewClick"
+                                                    ToolTip="Copy this color in another format"
+                                                    AutomationProperties.Name="Copy as"
+                                                    AutomationProperties.HelpText="Open the list of color formats to copy.">
+                                                <!-- 20 px inside a 22 px swatch: the palette
+                                                     cells and the filled My colors cells are
+                                                     22 px of solid colour edge to edge, and a
+                                                     16 px chip made the one swatch that says
+                                                     what colour is current read a size smaller
+                                                     than every swatch around it. -->
+                                                <Rectangle x:Name="ColorPickerPreview" Width="20" Height="20"
+                                                           RadiusX="3" RadiusY="3"/>
+                                            </Button>
                                             <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
                                                      Text="#FF3B30" KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
                                                      ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>

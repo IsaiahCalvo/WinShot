@@ -38,6 +38,7 @@ public class CommandServerTests
     [InlineData("--record-display", "record-display")]
     [InlineData("--capture-window-background", "capture-window-background")]
     [InlineData("--scroll-horizontal", "scroll-horizontal")]
+    [InlineData("--scroll-up", "scroll-up")]
     [InlineData("--settings", "settings")]
     [InlineData("-history", "history")]
     public void ParseCommand_AcceptsCliFlags(string input, string expected)

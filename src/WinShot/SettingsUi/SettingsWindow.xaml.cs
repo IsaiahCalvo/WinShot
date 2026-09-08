@@ -540,6 +540,7 @@ public partial class SettingsWindow : Window
         // age cleanup. Write it here rather than relying on the event.
         UpdateHistoryRetentionHint(SliderIndexToRetentionDays(HistorySlider.Value));
         AllInOneRememberCheck.IsChecked = s.AllInOneRememberLast;
+        LoadOcrLanguages(s.OcrLanguage);
         SelectByTag(OcrLanguageCombo, s.OcrLanguage, fallbackIndex: 0);
         OcrJoinLinesCheck.IsChecked = s.OcrJoinLines;
         OcrDetectLinksCheck.IsChecked = s.OcrDetectLinks;
@@ -1110,6 +1111,8 @@ public partial class SettingsWindow : Window
         s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
         s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
         s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
+        s.OcrDetectLinks = OcrDetectLinksCheck.IsChecked == true;
+        s.OcrLanguage = SelectedTag(OcrLanguageCombo, WinShot.Ocr.OcrService.AutoLanguage);
         s.AskForNameAfterCapture = AskForNameCheck.IsChecked == true;
         s.NotifyStyleOcr = SelectedTag(NotifyOcrCombo, NotificationStyle.InApp);
         s.NotifyStyleCopy = SelectedTag(NotifyCopyCombo, NotificationStyle.InApp);
@@ -1429,6 +1432,8 @@ public partial class SettingsWindow : Window
         Accessible(NotifyOcrCombo, "Text captured confirmation", "Choose how WinShot confirms that text was recognized and copied.");
         Accessible(NotifyCopyCombo, "Copied confirmation", "Choose how WinShot confirms that a capture reached the clipboard.");
         Accessible(NotifySaveCombo, "Saved confirmation", "Choose how WinShot confirms that a capture was written to disk.");
+        Accessible(OcrDetectLinksCheck, "Offer to open a detected link", "Show an Open link button when the recognized text is a single web address.");
+        Accessible(OcrLanguageCombo, "Text recognition language", "Choose which installed language pack reads the text.");
 
         foreach (Control control in new Control[]
         {
@@ -1450,7 +1455,7 @@ public partial class SettingsWindow : Window
             AdjustSelectionCheck, WindowBackgroundCombo, WindowPaddingCombo,
             CursorOnScreenshotsCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
-            OcrJoinLinesCheck, AskForNameCheck,
+            OcrJoinLinesCheck, OcrDetectLinksCheck, OcrLanguageCombo, AskForNameCheck,
             NotifyOcrCombo, NotifyCopyCombo, NotifySaveCombo,
         })
         {
@@ -1712,6 +1717,37 @@ public partial class SettingsWindow : Window
     private void SyncWindowPaddingEnabled() =>
         WindowPaddingRow.IsEnabled =
             WinShot.Capture.WindowBackdrop.IsEnabled(SelectedTag(WindowBackgroundCombo, "wallpaper"));
+    /// <summary>
+    /// Fills the recognition-language combo from the packs this machine actually has.
+    /// A hard-coded list of seven languages offered choices most machines cannot honour --
+    /// picking one would silently fall back to the profile language with nothing said -- and
+    /// hid the dozens Windows does ship packs for. "Automatically detect" is always first and
+    /// is the whole list when no pack is installed, which is the honest answer.
+    ///
+    /// The list is the installed recognizer packs, plus <paramref name="stored"/> itself when its pack is
+    /// not installed right now. Without that last row the combo fell back to "Automatically
+    /// detect" and the next Save wrote it over the user's choice -- so merely opening Settings
+    /// while a pack was uninstalled destroyed the preference. OcrService's own fallback is
+    /// deliberately non-destructive; the UI should not undo it.
+    /// </summary>
+    private void LoadOcrLanguages(string stored)
+    {
+        OcrLanguageCombo.Items.Clear();
+        OcrLanguageCombo.Items.Add(new ComboBoxItem
+        {
+            Content = "Automatically detect",
+            Tag = WinShot.Ocr.OcrService.AutoLanguage,
+        });
+        bool storedIsInstalled = string.Equals(stored, WinShot.Ocr.OcrService.AutoLanguage, StringComparison.OrdinalIgnoreCase);
+        foreach ((string tag, string display) in WinShot.Ocr.OcrService.AvailableLanguages())
+        {
+            OcrLanguageCombo.Items.Add(new ComboBoxItem { Content = display, Tag = tag });
+            storedIsInstalled |= string.Equals(tag, stored, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!storedIsInstalled && !string.IsNullOrWhiteSpace(stored))
+            OcrLanguageCombo.Items.Add(new ComboBoxItem { Content = $"{stored} (not installed)", Tag = stored });
+    }
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)
     {

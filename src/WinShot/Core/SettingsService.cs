@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace WinShot.Core;
@@ -72,6 +72,19 @@ public class Settings
     // Unassigned actions are simply absent. Real/global hotkeys keep their own fields above.
     public Dictionary<string, string> ShortcutBindings { get; set; } = new();
 
+    /// <summary>The user's own palette, newest first, capped at SavedColors.MaxCount. Runtime
+    /// state rather than a settings control: it is written by picking a colour, never typed.</summary>
+    public List<string> SavedColors { get; set; } = new();
+
+    /// <summary>Hide every pin, or bring them all back.</summary>
+    public string HotkeyPinToggleVisibility { get; set; } = "";
+
+    /// <summary>Dismiss every pin at once.</summary>
+    public string HotkeyPinCloseAll { get; set; } = "";
+
+    /// <summary>Pin the most recent capture without going through History.</summary>
+    public string HotkeyPinLast { get; set; } = "";
+
     // Recording extras
     public bool RecordSystemAudio { get; set; } = false;
     public bool ShowClickHighlights { get; set; } = false;
@@ -83,8 +96,12 @@ public class Settings
 
     // OCR
     public bool OcrJoinLines { get; set; } = false;
-    public bool OcrDetectLinks { get; set; } = true;   // TODO: wire behavior — detect URLs in recognized text
-    public string OcrLanguage { get; set; } = "auto";  // TODO: wire behavior — OCR recognition language ("auto" = detect)
+    /// <summary>Offer to open a decoded link (a QR code is usually a URL). Cleared by the
+    /// toast's own "Don't detect links" as well as by Settings.</summary>
+    public bool OcrDetectLinks { get; set; } = true;
+
+    /// <summary>BCP-47 recognizer language, or "auto" to follow the user profile.</summary>
+    public string OcrLanguage { get; set; } = "auto";
 
     // History
     public bool HistoryEnabled { get; set; } = true;   // false = keep nothing; the privacy stop
@@ -330,6 +347,20 @@ public class SettingsService
     /// </summary>
     public bool Save()
     {
+        bool saved = SaveQuietly();
+        Changed?.Invoke();
+        return saved;
+    }
+
+    /// <summary>
+    /// Writes the file without raising <see cref="Changed"/>. For pure runtime state that no
+    /// subscriber acts on -- the saved colour palette, say. Changed re-registers all eleven
+    /// global hotkeys, so eyedropping a colour and closing the editor briefly dropped every
+    /// one of them, and tripped the "Some hotkeys unavailable" path if another app grabbed
+    /// one in the gap.
+    /// </summary>
+    public bool SaveQuietly()
+    {
         bool saved = false;
         try
         {
@@ -342,7 +373,6 @@ public class SettingsService
             saved = false;
             Log.Error("Failed to save settings", ex);
         }
-        Changed?.Invoke();
         return saved;
     }
 

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using WinShot.Core;
 using WinShot.Pin;
 using Xunit;
@@ -98,6 +98,420 @@ public class PinInteractionTests
         Assert.Equal(expected, PinInteraction.ResolveSaveFolder(configured, fallback));
     }
 
+    /// <summary>
+    /// The pin is exactly the scaled image. It used to be two pixels larger with the image
+    /// inset by one over a black BackColor, which baked a dark hairline around every pin --
+    /// clearly visible on a light screenshot, and there with PinnedBorder off.
+    /// </summary>
+    [Fact]
+    public void ThePinIsExactlyTheScaledImage_WithNoBakedFrame()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(320, 180);
+            using var pin = new FastPinWindow(bitmap, new SettingsService());
+            pin.CreateControl();
+
+            SetScale(pin, 1.0);
+            Assert.Equal(new SD.Size(320, 180), pin.ClientSize);
+
+            SetScale(pin, 0.5);
+            Assert.Equal(new SD.Size(160, 90), pin.ClientSize);
+
+            // And the scale derived back from a resized client area agrees, so a border
+            // drag and a wheel notch cannot disagree about how big the pin is.
+            pin.ClientSize = new SD.Size(640, 360);
+            typeof(FastPinWindow)
+                .GetMethod("SyncScaleFromClientSize", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(pin, null);
+            Assert.Equal(2.0, (double)typeof(FastPinWindow)
+                .GetField("_scale", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(pin)!, 3);
+        });
+    }
+
+    /// <summary>
+    /// A settings-less pin has to look like a pin. The fallbacks were false, so any caller
+    /// that did not hand over a SettingsService got a hard-square, shadowless window.
+    /// </summary>
+    [Fact]
+    public void APinWithNoSettings_StillGetsRoundedCornersAndAShadow()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(320, 180);
+            using var pin = new FastPinWindow(bitmap);
+            pin.CreateControl();
+
+            Assert.NotNull(pin.Region);
+            var createParams = (WF.CreateParams)typeof(FastPinWindow)
+                .GetProperty("CreateParams", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(pin)!;
+            Assert.NotEqual(0, createParams.ClassStyle & 0x00020000);
+        });
+    }
+
+    /// <summary>
+    /// The hover chrome ramps instead of appearing at full alpha on the next paint. It is the
+    /// only state change this window has, so it is the whole of the pin's hover language.
+    /// Asserts the ramp finishes in both directions and releases the timer-resolution hold.
+    /// </summary>
+    [Fact]
+    public void HoverChromeFadesInAndOut_AndLeavesNoClockHolder()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                Assert.Equal(0, Motion.Holders);
+                using var bitmap = new SD.Bitmap(320, 180);
+                using var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+
+                Assert.Equal(0d, ChromeAlpha(pin));
+
+                SetField(pin, "_mouseInside", true);
+                UpdateChrome(pin);
+                Assert.True(Motion.Holders > 0, "the fade should be running");
+                PumpUntil(() => Motion.Holders == 0);
+                Assert.Equal(1d, ChromeAlpha(pin), 3);
+
+                SetField(pin, "_mouseInside", false);
+                UpdateChrome(pin);
+                PumpUntil(() => Motion.Holders == 0);
+                Assert.Equal(0d, ChromeAlpha(pin), 3);
+                Assert.Equal(0, Motion.Holders);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+            }
+        });
+    }
+
+    /// <summary>Closing a pin mid-fade must not strand the process-wide clock.</summary>
+    [Fact]
+    public void ClosingAPinMidFade_ReleasesTheClockHolder()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                Assert.Equal(0, Motion.Holders);
+                using var bitmap = new SD.Bitmap(320, 180);
+                var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+                SetField(pin, "_mouseInside", true);
+                UpdateChrome(pin);
+
+                pin.Close();
+                pin.Dispose();
+                PumpUntil(() => Motion.Holders == 0);
+                Assert.Equal(0, Motion.Holders);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+            }
+        });
+    }
+
+    /// <summary>
+    /// The zoom chip's label. It replaced an 800 ms cursor pill, so it has to be readable at
+    /// every scale a pin can reach -- including the fit scale of a 32,000 px scrolling
+    /// capture, which rounds to 0 % if you just print the integer.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0, "100%")]
+    [InlineData(0.5, "50%")]
+    [InlineData(3.0, "300%")]
+    [InlineData(1.324, "132%")]
+    [InlineData(0.078, "7.8%")]
+    [InlineData(0.004, "0.4%")]
+    [InlineData(0.0001, "0.1%")]
+    public void TheZoomChipReadsTheScale(double scale, string expected)
+        => Assert.Equal(expected, FastPinWindow.ZoomChipText(scale));
+
+    /// <summary>
+    /// A locked pin keeps its own way out. Locking used to put WS_EX_TRANSPARENT on the whole
+    /// window, so the pin received no mouse messages at all and the tray's "Unlock pinned
+    /// windows" was the only escape. The two chips it still offers have to be real rects that
+    /// hit-test, and the other two actions have to be gone -- they would need exactly the
+    /// click that lock exists to pass through.
+    /// </summary>
+    [Fact]
+    public void ALockedPinKeepsItsLockAndCloseChipsHitTestable()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(600, 400);
+            using var pin = new FastPinWindow(bitmap, new SettingsService());
+            pin.CreateControl();
+            SetField(pin, "_mouseInside", true);
+
+            Assert.Equal(new[] { 0, 1, 2, 3, 4 }, VisibleButtons(pin));
+            SetLocked(pin, true);
+            Assert.Equal(new[] { 3, 4 }, VisibleButtons(pin));
+
+            // Lock and Close are hit-testable; Copy and Save are not offered at all.
+            SD.Rectangle lockChip = ButtonBounds(pin, 3);
+            SD.Rectangle closeChip = ButtonBounds(pin, 4);
+            Assert.False(lockChip.IsEmpty);
+            Assert.False(closeChip.IsEmpty);
+            Assert.True(ButtonBounds(pin, 0).IsEmpty);
+            Assert.True(ButtonBounds(pin, 1).IsEmpty);
+            Assert.True(ButtonBounds(pin, 2).IsEmpty);
+            Assert.False(lockChip.IntersectsWith(closeChip));
+
+            Assert.Equal(3, HitTest(pin, Centre(lockChip)));
+            Assert.Equal(4, HitTest(pin, Centre(closeChip)));
+            Assert.Equal(-1, HitTest(pin, new SD.Point(pin.ClientSize.Width / 2, pin.ClientSize.Height - 4)));
+
+            // Unlocking puts everything back.
+            SetLocked(pin, false);
+            Assert.Equal(new[] { 0, 1, 2, 3, 4 }, VisibleButtons(pin));
+        });
+    }
+
+    /// <summary>
+    /// The dim a locked pin takes is hover-scoped and applies to the image, not the window:
+    /// window opacity would take the chips painted over it down too, and a permanent dim was
+    /// the old behaviour's other half. Window opacity itself must not move.
+    /// </summary>
+    [Fact]
+    public void ALockedPinDimsOnlyWhileHovered_AndOnlyItsImage()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => false;   // jump straight to the end state
+            try
+            {
+                using var bitmap = new SD.Bitmap(600, 400);
+                using var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+
+                SetLocked(pin, true);
+                Assert.Equal(1d, ImageAlpha(pin), 3);
+                Assert.Equal(1d, pin.Opacity, 3);
+
+                SetField(pin, "_mouseInside", true);
+                UpdateImage(pin);
+                Assert.Equal(PinInteraction.LockedOpacity(1d), ImageAlpha(pin), 3);
+                Assert.Equal(1d, pin.Opacity, 3);
+
+                SetField(pin, "_mouseInside", false);
+                UpdateImage(pin);
+                Assert.Equal(1d, ImageAlpha(pin), 3);
+
+                // And an unlocked pin never dims, hovered or not.
+                SetLocked(pin, false);
+                SetField(pin, "_mouseInside", true);
+                UpdateImage(pin);
+                Assert.Equal(1d, ImageAlpha(pin), 3);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Toggle-all is one gesture over the whole set, not a per-pin toggle: with two pins and
+    /// one already hidden, toggling each on its own leaves them alternating forever. Any
+    /// visible pin means "hide"; nothing visible means "bring them back".
+    /// </summary>
+    [Fact]
+    public void TogglingPinVisibility_MovesEveryPinTheSameWay()
+    {
+        RunSta(() =>
+        {
+            // Which way the set moves is the question here; the ramp that carries it there is
+            // covered in BreakerProbesRound2. Animations off so Motion.Run lands on the end
+            // state inside the call and the set can be read straight after the toggle.
+            Func<bool> previousAnim = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => false;
+            try
+            {
+            FastPinWindow.CloseAll();
+            Assert.False(FastPinWindow.AnyOpen);
+
+            using var first = new FastPinWindow(new SD.Bitmap(200, 120), new SettingsService());
+            using var second = new FastPinWindow(new SD.Bitmap(200, 120), new SettingsService());
+            first.StartPosition = WF.FormStartPosition.Manual;
+            second.StartPosition = WF.FormStartPosition.Manual;
+            first.Location = new SD.Point(-20_000, -20_000);
+            second.Location = new SD.Point(-20_000, -20_000);
+            first.Show();
+            second.Show();
+            Assert.True(FastPinWindow.AnyOpen);
+
+            // One already hidden: the set still moves together.
+            second.Hide();
+            FastPinWindow.ToggleAllVisibility();
+            Assert.False(first.Visible);
+            Assert.False(second.Visible);
+
+            FastPinWindow.ToggleAllVisibility();
+            Assert.True(first.Visible);
+            Assert.True(second.Visible);
+
+            FastPinWindow.CloseAll();
+            Assert.False(FastPinWindow.AnyOpen);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previousAnim;
+            }
+        });
+    }
+
+    /// <summary>Both statics are safe with no pins on screen -- they are bound to global
+    /// hotkeys, so they are reachable at any moment.</summary>
+    [Fact]
+    public void ThePinCommandsAreSafeWithNothingPinned()
+    {
+        RunSta(() =>
+        {
+            FastPinWindow.CloseAll();
+            FastPinWindow.ToggleAllVisibility();
+            FastPinWindow.CloseAll();
+            FastPinWindow.UnlockAllPins();
+            Assert.False(FastPinWindow.AnyOpen);
+        });
+    }
+
+    /// <summary>
+    /// The pencil chip hands the editor a copy and leaves the pin alone. Both halves matter:
+    /// the pin is still painting from its own bitmap, and editing a reference is a second
+    /// look at it rather than a replacement for it.
+    /// </summary>
+    [Fact]
+    public void TheEditChipHandsOutACopyAndLeavesThePinUp()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(120, 80);
+            using var pin = new FastPinWindow(bitmap, new SettingsService());
+            pin.CreateControl();
+
+            SD.Bitmap? handed = null;
+            pin.EditRequested += image => handed = image;
+            typeof(FastPinWindow)
+                .GetMethod("RaiseEditRequested", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(pin, null);
+
+            Assert.NotNull(handed);
+            Assert.NotSame(bitmap, handed);
+            Assert.Equal(bitmap.Size, handed!.Size);
+            Assert.False(pin.IsDisposed);
+            handed.Dispose();
+        });
+    }
+
+    /// <summary>
+    /// Not every pin is built by App -- the recording completion card raises its own -- and
+    /// the pencil chip and the Edit menu row are added to every pin unconditionally. Without a
+    /// fallback handler those pins shipped a chip that silently did nothing.
+    /// </summary>
+    [Fact]
+    public void APinNobodySubscribedTo_StillOpensTheEditor()
+    {
+        RunSta(() =>
+        {
+            Action<SD.Bitmap>? previous = FastPinWindow.DefaultEditHandler;
+            SD.Bitmap? handed = null;
+            FastPinWindow.DefaultEditHandler = image => handed = image;
+            try
+            {
+                using var bitmap = new SD.Bitmap(120, 80);
+                using var pin = new FastPinWindow(bitmap, new SettingsService());
+                pin.CreateControl();
+                typeof(FastPinWindow)
+                    .GetMethod("RaiseEditRequested", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(pin, null);
+
+                Assert.NotNull(handed);
+                Assert.NotSame(bitmap, handed);
+                handed!.Dispose();
+            }
+            finally { FastPinWindow.DefaultEditHandler = previous; }
+        });
+    }
+
+    private static void SetLocked(FastPinWindow pin, bool locked)
+        => typeof(FastPinWindow)
+            .GetMethod("SetLocked", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, new object[] { locked });
+
+    private static SD.Point Centre(SD.Rectangle rect)
+        => new(rect.Left + (rect.Width / 2), rect.Top + (rect.Height / 2));
+
+    private static int[] VisibleButtons(FastPinWindow pin)
+        => (int[])typeof(FastPinWindow)
+            .GetProperty("VisibleButtons", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(pin)!;
+
+    private static SD.Rectangle ButtonBounds(FastPinWindow pin, int index)
+        => (SD.Rectangle)typeof(FastPinWindow)
+            .GetMethod("ButtonBounds", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, new object[] { index })!;
+
+    private static int HitTest(FastPinWindow pin, SD.Point point)
+        => (int)typeof(FastPinWindow)
+            .GetMethod("HitTestButton", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, new object[] { point })!;
+
+    private static double ImageAlpha(FastPinWindow pin)
+        => (double)typeof(FastPinWindow)
+            .GetField("_imageAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(pin)!;
+
+    private static void UpdateImage(FastPinWindow pin)
+        => typeof(FastPinWindow)
+            .GetMethod("UpdateImageAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, null);
+
+    private static double ChromeAlpha(FastPinWindow pin)
+        => (double)typeof(FastPinWindow)
+            .GetField("_chromeAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(pin)!;
+
+    private static void UpdateChrome(FastPinWindow pin)
+        => typeof(FastPinWindow)
+            .GetMethod("UpdateChromeAlpha", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, null);
+
+    private static void SetField(FastPinWindow pin, string name, object value)
+        => typeof(FastPinWindow)
+            .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(pin, value);
+
+    private static void PumpUntil(Func<bool> condition, int ms = 5000)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < ms)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
+    }
+
+    private static void SetScale(FastPinWindow pin, double scale)
+    {
+        typeof(FastPinWindow)
+            .GetField("_scale", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(pin, scale);
+        typeof(FastPinWindow)
+            .GetMethod("ApplyScale", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(pin, null);
+    }
+
     [Fact]
     public void PinVisualSettingsAndAccessibility_AreApplied()
     {
@@ -121,10 +535,10 @@ public class PinInteractionTests
 
             WF.AccessibleObject accessible = pin.AccessibilityObject;
             Assert.Equal("Pinned screenshot", accessible.Name);
-            Assert.Equal(4, accessible.GetChildCount());
-            Assert.Equal(new[] { "Copy", "Save", "Lock", "Close" },
-                Enumerable.Range(0, 4).Select(i => accessible.GetChild(i)!.Name));
-            Assert.All(Enumerable.Range(0, 4), i =>
+            Assert.Equal(5, accessible.GetChildCount());
+            Assert.Equal(new[] { "Edit", "Copy", "Save", "Lock", "Close" },
+                Enumerable.Range(0, 5).Select(i => accessible.GetChild(i)!.Name));
+            Assert.All(Enumerable.Range(0, 5), i =>
             {
                 WF.AccessibleObject child = accessible.GetChild(i)!;
                 Assert.Equal(WF.AccessibleRole.PushButton, child.Role);
@@ -132,7 +546,7 @@ public class PinInteractionTests
                 Assert.Equal("Press", child.DefaultAction);
             });
 
-            accessible.GetChild(1)!.Select(WF.AccessibleSelection.TakeFocus);
+            accessible.GetChild(2)!.Select(WF.AccessibleSelection.TakeFocus);
             Assert.Equal("Save", accessible.GetFocused()!.Name);
 
             Assert.True(InvokeCommandKey(pin, WF.Keys.Tab));

@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using WinShot.Scrolling;
 using Xunit;
@@ -295,6 +295,136 @@ public class ScrollingCaptureServiceTests
         // …and nowhere inside the body.
         for (int y = 0; y < bodyRows; y++)
             Assert.NotEqual(footerTop, stitched.GetPixel(Width / 2, y).ToArgb());
+    }
+
+    /// <summary>
+    /// Auto-Scroll with the pointer parked off the region injects nothing and says why.
+    /// The loop keeps running (the user can move back and resume) — this is a pause, not a
+    /// stop. Deliberately only the "outside" case runs through the loop: with the pointer
+    /// inside, the loop would inject real wheel input, which tests never do.
+    /// </summary>
+    [Fact]
+    public void AutoScrollWithThePointerOutsideTheRegion_PausesAndSaysSo()
+    {
+        using var cts = new CancellationTokenSource();
+        var positions = Enumerable.Range(0, 6).Select(i => i * 40).ToList();
+        int index = 0;
+        var hints = new List<ScrollHint>();
+
+        SD.Bitmap FrameSource(SD.Rectangle _)
+        {
+            if (index >= positions.Count)
+            {
+                cts.Cancel();
+                return MakeFrame(positions[^1]);
+            }
+            return MakeFrame(positions[index++]);
+        }
+
+        using var stitched = ScrollingCaptureService.RunAsync(
+            new SD.Rectangle(0, 0, Width, FrameHeight),
+            ScrollDirection.Vertical,
+            autoScroll: () => true,
+            status: _ => { },
+            hint: hints.Add,
+            cts.Token,
+            preview: null,
+            frameSource: FrameSource,
+            paneScoped: false,
+            cursorSource: () => new SD.Point(-4000, -4000)).GetAwaiter().GetResult();
+
+        Assert.NotNull(stitched);
+        Assert.Contains(ScrollHint.MoveCursorHere, hints);
+        Assert.NotNull(ScrollHintText.For(ScrollHint.MoveCursorHere));
+    }
+
+    /// <summary>
+    /// Upward capture, for a chat thread or a log you are already at the bottom of. The user
+    /// scrolls up, so the newest content arrives ABOVE what is captured, and the finished
+    /// image must still read top-to-bottom in document order. Frames are flipped on the way
+    /// in and the canvas once on the way out, so the matcher and the seam healer run exactly
+    /// as they do downward -- this asserts the result of that, row by row.
+    /// </summary>
+    [Fact]
+    public void ReverseCapture_ReadsTopToBottomInDocumentOrder()
+    {
+        using var cts = new CancellationTokenSource();
+        // Starting low in the document and scrolling up to the top.
+        var positions = Enumerable.Range(0, 31).Select(i => 1200 - (i * 40)).ToList();
+        int index = 0;
+
+        SD.Bitmap FrameSource(SD.Rectangle _)
+        {
+            if (index >= positions.Count)
+            {
+                cts.Cancel();
+                return MakeFrame(positions[^1]);
+            }
+            return MakeFrame(positions[index++]);
+        }
+
+        using SD.Bitmap? stitched = ScrollingCaptureService.RunAsync(
+            new SD.Rectangle(0, 0, Width, FrameHeight),
+            ScrollDirection.Vertical,
+            autoScroll: () => false,
+            status: _ => { },
+            hint: _ => { },
+            cts.Token,
+            preview: null,
+            frameSource: FrameSource,
+            paneScoped: false,
+            cursorSource: null,
+            scrollInput: null,
+            reverse: true).GetAwaiter().GetResult();
+
+        Assert.NotNull(stitched);
+        Assert.Equal(1200 + FrameHeight, stitched!.Height);
+        for (int y = 0; y < stitched.Height; y += 71)
+            AssertRowIsDocRow(stitched, y, y);
+    }
+
+    /// <summary>
+    /// There is one Auto-Scroll button, so a horizontally-scrolling pane has to be found by
+    /// the loop: vertical input moves nothing, the input ladder is exhausted, and the loop
+    /// flips the axis rather than reporting "reached the bottom" on a pane it never
+    /// scrolled. The wheel goes to a sink here, never to real input.
+    /// </summary>
+    [Fact]
+    public void AutoScrollOnAHorizontalPane_DiscoversTheAxisAndStitchesWide()
+    {
+        using var cts = new CancellationTokenSource();
+        var region = new SD.Rectangle(0, 0, HorizontalFrameWidth, HorizontalHeight);
+        int left = 0, steps = 0;
+        bool sawHorizontalInput = false;
+
+        void ScrollInput(int delta, bool horizontal)
+        {
+            // Only the horizontal axis moves this pane; vertical notches do nothing, which
+            // is exactly what forces the discovery.
+            if (!horizontal) return;
+            sawHorizontalInput = true;
+            left += 40;
+            if (++steps >= 12) cts.Cancel();
+        }
+
+        using var stitched = ScrollingCaptureService.RunAsync(
+            region,
+            presetDirection: null,
+            autoScroll: () => true,
+            status: _ => { },
+            hint: _ => { },
+            cts.Token,
+            preview: null,
+            frameSource: _ => MakeHorizontalFrame(left),
+            paneScoped: false,
+            cursorSource: () => new SD.Point(10, 10),
+            scrollInput: ScrollInput).GetAwaiter().GetResult();
+
+        Assert.True(sawHorizontalInput, "the loop never tried the horizontal axis");
+        Assert.NotNull(stitched);
+        Assert.True(stitched!.Width > HorizontalFrameWidth,
+            $"expected a wide stitch, got {stitched.Width}x{stitched.Height}");
+        Assert.Equal(HorizontalHeight, stitched.Height);
     }
 
     [Fact]
