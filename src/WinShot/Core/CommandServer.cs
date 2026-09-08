@@ -31,6 +31,8 @@ public sealed class CommandServer : IDisposable
         "history",
         "settings",
         "self-timer",
+        "self-timer-region",
+        "load-clipboard",
         "restore-last",
         "exit",
     };

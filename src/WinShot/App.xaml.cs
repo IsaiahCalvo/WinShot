@@ -296,8 +296,10 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window")));
         menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
         menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen")));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", null, () => QueueCaptureCommand("self-timer")));
+        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer")));
+        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region")));
         menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
+        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow));
         menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
         menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
         menu.Items.Add(new WF.ToolStripSeparator());
@@ -359,6 +361,8 @@ public partial class App : Application
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
         Reg(s.HotkeyHistory, OpenHistory);
+        Reg(s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"));
+        Reg(s.HotkeyLoadClipboard, LoadClipboardImageFlow);
 
         if (failed.Count == 0)
         {
@@ -432,6 +436,7 @@ public partial class App : Application
         switch (cmd)
         {
             case "record": RecordFlow(); break;
+            case "load-clipboard": LoadClipboardImageFlow(); break;
             case "record-display": RecordDisplayFlow(); break;
             case "history": OpenHistory(); break;
             case "settings": OpenSettings(); break;
@@ -443,7 +448,7 @@ public partial class App : Application
     private static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
-        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
+        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer" or "self-timer-region"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Queues a capture command, or returns false when one was already running and this
@@ -479,6 +484,7 @@ public partial class App : Application
             case "scrolling": ScrollingFlow(); break;
             case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
+            case "self-timer-region": CaptureRegionFlow(delaySeconds: _settings.Current.SelfTimerSeconds); break;
             // Automation hook (CleanShot's cleanshot://scrolling-capture analog):
             // scroll-region:x,y,w,h[,auto][,save] — physical screen coords, no selector.
             case var c when c.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase):
@@ -628,7 +634,8 @@ public partial class App : Application
 
     private void CaptureRegionFlow(
         string? postCaptureActionOverride = null,
-        FastRegionSelectorDialog.SelectorMode mode = FastRegionSelectorDialog.SelectorMode.Area) => RunCaptureFlow(
+        FastRegionSelectorDialog.SelectorMode mode = FastRegionSelectorDialog.SelectorMode.Area,
+        int delaySeconds = 0) => RunCaptureFlow(
         "Region capture failed", "Capture failed", async () =>
         {
             var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
@@ -638,13 +645,46 @@ public partial class App : Application
                 if (await selector.ShowAsync(mode, elementHover: mode == FastRegionSelectorDialog.SelectorMode.Area) == WF.DialogResult.OK &&
                     selector.SelectedRegionPx is SD.Rectangle region)
                 {
-                    // Screen-freeze: the selector already cropped the result from its frozen
-                    // snapshot, so use that (exact, no dismiss delay). Fall back to a live grab.
-                    SD.Bitmap? frozenCrop = selector.TakeCapturedRegion();
+                    // A delayed capture must photograph what the screen looks like AFTER the
+                    // countdown, so the frozen crop taken at confirm time is exactly wrong for it.
+                    SD.Bitmap? frozenCrop = SelfTimerOptions.ShouldRunDelay(delaySeconds)
+                        ? null
+                        : selector.TakeCapturedRegion();
                     if (frozenCrop is null)
                     {
                         await WaitForOverlayDismissAsync();
+                        if (SelfTimerOptions.ShouldRunDelay(delaySeconds))
+                            await FastSelfTimerWindow.RunAsync(delaySeconds);
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
+                    }
+                    // selector.Mode, not the mode we ASKED for: Space flips Area<->Window
+                    // mid-session, so a capture-window run that ended as a hand-drawn
+                    // rectangle used to come back floating on the wallpaper with 48 px of
+                    // window padding and a mockup shadow — and with the wallpaper backdrop
+                    // the default, that fired with no opt-in at all.
+                    if (selector.Mode == FastRegionSelectorDialog.SelectorMode.Window &&
+                        postCaptureActionOverride is null &&
+                        !selector.BareBackgroundRequested &&
+                        WindowBackdrop.IsEnabled(_settings.Current.WindowCaptureBackground))
+                    {
+                        // Off the dispatcher, like every other capture step here: decoding
+                        // the wallpaper and compositing the shadow cost ~200 ms, and running
+                        // them inline froze the UI thread between the overlay closing and the
+                        // card appearing — which reads as capture latency and stalls any
+                        // motion in flight.
+                        SD.Bitmap bare = frozenCrop;
+                        (SD.Bitmap image, bool composed) result =
+                            await RunCaptureWorkAsync(() => ComposeWindowBackdrop(bare));
+                        frozenCrop = result.image;
+                        if (!result.composed)
+                        {
+                            // The user asked for a composite and got something else, so this
+                            // is the degraded-outcome glyph, not a neutral notice. The
+                            // capture itself is not lost, which is what the copy says.
+                            ShowBalloon("Window capture",
+                                "Saved the bare window — the backdrop could not be drawn.",
+                                ToastSeverity.Error);
+                        }
                     }
                     HandleCapture(frozenCrop, postCaptureActionOverride);
                 }
@@ -653,6 +693,46 @@ public partial class App : Application
             {
                 FastRegionSelectorDialog.Return(selector);
             }
+        });
+
+    /// <summary>
+    /// Puts a captured window on its backdrop, off the UI thread. Failure here must never
+    /// lose the capture, so a broken wallpaper or an out-of-memory canvas returns the bare
+    /// shot with <c>composed: false</c>, which the caller turns into one info line — the user
+    /// asked for a composite and would otherwise get a different image with no explanation.
+    /// </summary>
+    private (SD.Bitmap Image, bool Composed) ComposeWindowBackdrop(SD.Bitmap window)
+    {
+        try
+        {
+            SD.Bitmap composed = WindowBackdrop.ComposeOnWallpaper(
+                window, WindowBackdrop.PaddingFor(_settings.Current.WindowCapturePadding));
+            window.Dispose();
+            return (composed, true);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Window backdrop could not be composed; saving the bare window", ex);
+            return (window, false);
+        }
+    }
+
+    /// <summary>
+    /// Opens whatever image is on the clipboard in the editor. Editing a picture someone
+    /// pasted to you used to mean saving it to a file first — nothing in the app read an
+    /// image out of the clipboard at all.
+    /// </summary>
+    private void LoadClipboardImageFlow() => RunCaptureFlow(
+        "Open clipboard image failed", "Could not open the clipboard image", async () =>
+        {
+            SD.Bitmap? image = await RunCaptureWorkAsync(ClipboardImage.TryRead);
+            if (image is null)
+            {
+                ShowBalloon("Open clipboard image", "There is no image on the clipboard.",
+                    ToastSeverity.Info, holdLong: true);
+                return;
+            }
+            HandleCapture(image, PostCaptureAction.Edit);
         });
 
     private void CaptureFullscreenFlow() => RunCaptureFlow(
@@ -732,8 +812,14 @@ public partial class App : Application
                 FastAllInOneSelectorDialog.Return(selector);
             }
 
-            if (action is AllInOneAction.Scroll || (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr))
+            // Timer waits too: the whole point is to photograph what the screen looks like
+            // AFTER the delay, so the frozen crop is deliberately not used and the overlay
+            // has to be gone before the countdown starts.
+            if (action is AllInOneAction.Scroll or AllInOneAction.Timer ||
+                (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr))
+            {
                 await WaitForOverlayDismissAsync();
+            }
 
             if (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr)
                 captured = await CaptureSelectedRegionAsync(regionPx, $"all-in-one {action.ToString().ToLowerInvariant()}");
@@ -742,6 +828,10 @@ public partial class App : Application
             {
                 case AllInOneAction.Capture:
                     HandleCapture(captured!);
+                    break;
+                case AllInOneAction.Timer:
+                    await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
+                    HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
                     break;
                 case AllInOneAction.Ocr:
                     using (captured) await RunOcrToClipboard(captured!);
@@ -763,22 +853,38 @@ public partial class App : Application
 
     /// <summary>Captures the virtual desktop, optionally hiding desktop icons first per settings.</summary>
     private SD.Bitmap CaptureDesktopRespectingSettings() =>
-        DesktopIconCaptureGuard.Run(
-            _settings.Current.HideDesktopIconsDuringCapture,
-            () => DesktopIcons.Visible,
-            DesktopIcons.Hide,
-            DesktopIcons.Show,
-            Thread.Sleep,
-            CaptureService.CaptureVirtualDesktop);
+        WithCursorIfWanted(
+            DesktopIconCaptureGuard.Run(
+                _settings.Current.HideDesktopIconsDuringCapture,
+                () => DesktopIcons.Visible,
+                DesktopIcons.Hide,
+                DesktopIcons.Show,
+                Thread.Sleep,
+                CaptureService.CaptureVirtualDesktop),
+            CaptureService.VirtualScreen);
 
     private SD.Bitmap CaptureScreenRegionRespectingSettings(SD.Rectangle screenRect) =>
-        DesktopIconCaptureGuard.Run(
-            _settings.Current.HideDesktopIconsDuringCapture,
-            () => DesktopIcons.Visible,
-            DesktopIcons.Hide,
-            DesktopIcons.Show,
-            Thread.Sleep,
-            () => CaptureService.CaptureScreenRegion(screenRect));
+        WithCursorIfWanted(
+            DesktopIconCaptureGuard.Run(
+                _settings.Current.HideDesktopIconsDuringCapture,
+                () => DesktopIcons.Visible,
+                DesktopIcons.Hide,
+                DesktopIcons.Show,
+                Thread.Sleep,
+                () => CaptureService.CaptureScreenRegion(screenRect)),
+            screenRect);
+
+    /// <summary>
+    /// Draws the pointer into a live grab when the user asked for it. Only live grabs: the
+    /// selector's frozen snapshot excludes its own overlay and never has a cursor in it, so
+    /// there is nothing to honour on that path.
+    /// </summary>
+    private SD.Bitmap WithCursorIfWanted(SD.Bitmap capture, SD.Rectangle screenRect)
+    {
+        if (_settings.Current.CursorOnScreenshots)
+            CursorOverlay.Draw(capture, screenRect);
+        return capture;
+    }
 
     private async Task<SD.Bitmap> CaptureSelectedRegionAsync(SD.Rectangle virtualRegion, string metricName)
     {

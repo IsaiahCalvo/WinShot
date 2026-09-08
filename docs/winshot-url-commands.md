@@ -27,6 +27,8 @@ Supported commands:
 - `history`
 - `settings`
 - `self-timer`
+- `self-timer-region`
+- `load-clipboard`
 - `restore-last`
 - `exit`
 

@@ -1024,7 +1024,11 @@ public static class CaptureService
                         completion.SetResult(null);
                         return;
                     }
-                    catch (COMException) when (attempt < 3)
+                    // ExternalException, not COMException: .NET 8's Clipboard.SetText surfaces
+                    // CLIPBRD_E_CANT_OPEN as a plain ExternalException, so the narrower catch
+                    // meant the retry loop never fired for the one failure it exists for.
+                    // COMException derives from ExternalException, so both are covered.
+                    catch (ExternalException) when (attempt < 3)
                     {
                         Thread.Sleep(100);
                     }

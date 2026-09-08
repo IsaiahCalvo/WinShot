@@ -85,7 +85,8 @@ public partial class SettingsWindow : Window
         if (OverlayAutoCloseCheck is null || OverlayCloseBox is null || OverlayActionCombo is null) return;
         bool enabled = OverlayAutoCloseCheck.IsChecked == true;
         OverlayCloseBox.IsEnabled = enabled;
-        OverlayActionCombo.IsEnabled = enabled;
+        OverlayActionRow.IsEnabled = enabled; // the row, so the label dims with the combo
+
     }
 
     /// <summary>Maps each input box to the index of the section that contains it.</summary>
@@ -333,9 +334,16 @@ public partial class SettingsWindow : Window
         SelfTimerBox.Text = s.SelfTimerSeconds.ToString();
         CursorOnScreenshotsCheck.IsChecked = s.CursorOnScreenshots;
         FreezeScreenCheck.IsChecked = s.FreezeScreen;
-        SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 1);
+        SelectByTag(CrosshairModeCombo, s.ShowCrosshair ? s.CrosshairMode : "never", fallbackIndex: 0);
         ShowCrosshairCheck.IsChecked = s.ShowCrosshair;
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
+        AdjustSelectionCheck.IsChecked = s.AdjustSelectionBeforeCapturing;
+        SelectByTag(WindowBackgroundCombo, s.WindowCaptureBackground, fallbackIndex: 0);
+        SelectByTag(WindowPaddingCombo, s.WindowCapturePadding, fallbackIndex: 1);
+        // Padding does nothing for a bare window — App.CaptureRegionFlow never asks for it —
+        // so the row must not look live in that state.
+        WindowBackgroundCombo.SelectionChanged += (_, _) => SyncWindowPaddingEnabled();
+        SyncWindowPaddingEnabled();
 
         // Annotate
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
@@ -637,9 +645,13 @@ public partial class SettingsWindow : Window
 
             // Screenshots
             s.FreezeScreen = FreezeScreenCheck.IsChecked == true;
-            s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
+            s.CrosshairMode = SelectedTag(CrosshairModeCombo, "always");
             s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
+            s.AdjustSelectionBeforeCapturing = AdjustSelectionCheck.IsChecked == true;
+            s.WindowCaptureBackground = SelectedTag(WindowBackgroundCombo, "wallpaper");
+            s.WindowCapturePadding = SelectedTag(WindowPaddingCombo, "default");
+            s.CursorOnScreenshots = CursorOnScreenshotsCheck.IsChecked == true;
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
@@ -717,6 +729,14 @@ public partial class SettingsWindow : Window
         Accessible(SelfTimerCombo, "Self timer interval", "Choose how long the self timer waits before capture.");
         Accessible(FreezeScreenCheck, "Freeze screen during selection", "Use a still desktop image while choosing a region.");
         Accessible(CrosshairModeCombo, "Crosshair mode", "Choose when selector crosshair guides appear.");
+        Accessible(AdjustSelectionCheck, "Adjust selection before capturing",
+            "Leave the drag as an adjustable selection instead of capturing on release.");
+        Accessible(WindowBackgroundCombo, "Window capture background",
+            "Choose whether a window capture is composited onto the wallpaper.");
+        Accessible(WindowPaddingCombo, "Window capture padding",
+            "How much backdrop shows around a composited window capture.");
+        Accessible(CursorOnScreenshotsCheck, "Show cursor on screenshots",
+            "Draw the mouse pointer into captures taken without the selection overlay.");
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
@@ -739,7 +759,8 @@ public partial class SettingsWindow : Window
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             OpenVideoEditorCheck, GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, SelfTimerCombo,
-            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TemplateBox, HistorySlider,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, AdjustSelectionCheck, WindowBackgroundCombo, WindowPaddingCombo,
+            CursorOnScreenshotsCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
             OcrJoinLinesCheck,
         })
@@ -988,6 +1009,13 @@ public partial class SettingsWindow : Window
             return false;
         }
     }
+
+    /// <summary>Gates the whole padding ROW, not just its combo: a bare window has no
+    /// backdrop to pad, and a control that dims beside a label that does not reads as half
+    /// live. WPF pushes IsEnabled down the tree, and RowLabel dims with it.</summary>
+    private void SyncWindowPaddingEnabled() =>
+        WindowPaddingRow.IsEnabled =
+            WinShot.Capture.WindowBackdrop.IsEnabled(SelectedTag(WindowBackgroundCombo, "wallpaper"));
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)
     {

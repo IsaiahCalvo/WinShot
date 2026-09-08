@@ -7,4 +7,6 @@ public enum AllInOneAction
     Record,
     Ocr,
     Scroll,
+    /// <summary>Frame it now, capture it after the configured self-timer delay.</summary>
+    Timer,
 }

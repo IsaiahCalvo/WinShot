@@ -37,6 +37,12 @@ public class Settings
     public bool HideDesktopIconsDuringCapture { get; set; } = false;
     public string HotkeyCapturePrevious { get; set; } = "Ctrl+Shift+6";
     public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
+    // Unbound by default: Ctrl+Shift+1..8 are taken and there is no obvious ninth. The
+    // self-timer was reachable only from a tray row with an empty shortcut column.
+    public string HotkeySelfTimer { get; set; } = "";
+    // Also unbound by default. Editing an image someone sent you meant saving it to disk
+    // first, because nothing in the app ever read an image out of the clipboard.
+    public string HotkeyLoadClipboard { get; set; } = "";
 
     // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet
     // wired to behavior. Keyed by the catalog's stable action id -> gesture (e.g. "Ctrl+Alt+P").
@@ -90,11 +96,23 @@ public class Settings
     public bool AddPixelBorder { get; set; } = false;   // TODO: wire behavior — add 1px border to screenshots
     public bool ConvertToSrgb { get; set; } = false;    // TODO: wire behavior — convert screenshots to sRGB color profile
     public string ScreenshotBackground { get; set; } = "none"; // TODO: wire behavior — none | wallpaper | gradient | color
-    public bool CursorOnScreenshots { get; set; } = false; // TODO: wire behavior — include cursor in fullscreen/self-timer shots
+    // Draws the live pointer into captures taken without the selection overlay (fullscreen,
+    // display, self-timer, repeat-region). The overlay's own frozen snapshot never has one.
+    public bool CursorOnScreenshots { get; set; } = false;
     public bool FreezeScreen { get; set; } = true;      // freeze the screen while selecting
     public bool ShowCrosshair { get; set; } = true;     // crosshair guides during selection
-    public string CrosshairMode { get; set; } = "command"; // always | command | never — when crosshair is shown
+    public string CrosshairMode { get; set; } = "always";  // always | command | never — when crosshair is shown
     public bool ShowMagnifier { get; set; } = true;     // pixel magnifier during selection
+    // Off = releasing the drag takes the shot. On = the release leaves an adjustable
+    // selection you confirm with Enter/Done. Ctrl held at release picks the other one.
+    public bool AdjustSelectionBeforeCapturing { get; set; } = false;
+    // Window capture composites onto the wallpaper with padding and a shadow, which is what
+    // a window shot is usually wanted for. "none" gives the bare rectangle, and so does
+    // holding Shift as you take the shot.
+    public string WindowCaptureBackground { get; set; } = "wallpaper"; // none | wallpaper
+    public string WindowCapturePadding { get; set; } = "default";      // min | default | max
+    // How many selector sessions have carried the first-run hint pill. Saturates at the cap.
+    public int SelectorHintSessions { get; set; } = 0;
 
     // Quick Access overlay (extends the post-capture overlay block)
     public string OverlayPosition { get; set; } = "bottom-right"; // left | right | top | bottom | bottom-left | bottom-right

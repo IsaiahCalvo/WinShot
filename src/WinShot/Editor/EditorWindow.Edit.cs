@@ -281,7 +281,10 @@ public partial class EditorWindow : Window
         if (onlyShiftOrNone && _selected is not null &&
             e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
         {
-            double step = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 10 : 1;
+            // Same 1 px / 10 px idiom the capture selector uses, from the same helper, so
+            // Shift means one thing across the app.
+            double step = WinShot.Capture.SelectionNudge.StepFor(
+                (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
             (double dx, double dy) = e.Key switch
             {
                 Key.Left => (-step, 0.0),

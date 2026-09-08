@@ -28,6 +28,15 @@
             <Setter Property="TextAlignment" Value="Left"/>
             <Setter Property="Margin" Value="{StaticResource LabelGutterMargin}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
+            <Style.Triggers>
+                <!-- Matches DarkComboBox's disabled opacity, so a row whose control is gated
+                     dims as one object instead of leaving a full-strength label beside a
+                     ghosted control. Rows carry IsEnabled on the DockPanel; every future
+                     gated row inherits this for free. -->
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.4"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <!-- Hint: muted helper text, sits under or beside a control. -->
         <Style x:Key="Hint" TargetType="TextBlock">
@@ -619,7 +628,7 @@
                                     <CheckBox x:Name="OverlayAutoCloseCheck" Content="Enable"
                                               Checked="OnOverlayAutoCloseToggled" Unchecked="OnOverlayAutoCloseToggled"/>
                                 </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
+                                <DockPanel x:Name="OverlayActionRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Action"/>
                                     <ComboBox x:Name="OverlayActionCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Save and Close" Tag="save-close"/>
@@ -922,12 +931,12 @@
                                         <ComboBoxItem Content="15 Seconds" Tag="15"/>
                                     </ComboBox>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableScreenshotCursorRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Cursor"/>
                                     <CheckBox x:Name="CursorOnScreenshotsCheck" Content="Show on screenshots"/>
                                 </DockPanel>
-                                <TextBlock x:Name="UnavailableScreenshotCursorHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
-                                           Text="This works in Fullscreen or Self-Timer modes only."/>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Applies to captures taken without the selection overlay."/>
                             </StackPanel>
                         </Border>
 
@@ -948,6 +957,29 @@
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="ShowMagnifierCheck" Content="Show magnifier"/>
+                                </DockPanel>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Region capture"/>
+                                    <CheckBox x:Name="AdjustSelectionCheck" Content="Adjust selection before capturing"/>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="When off, releasing the drag takes the shot. Hold Ctrl as you release to get the other behavior once."/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Window capture"/>
+                                    <ComboBox x:Name="WindowBackgroundCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="On the wallpaper" Tag="wallpaper"/>
+                                        <ComboBoxItem Content="Bare window" Tag="none"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Hold Shift while taking a window shot to get the bare window this once."/>
+                                <DockPanel x:Name="WindowPaddingRow" Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Padding"/>
+                                    <ComboBox x:Name="WindowPaddingCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="Min" Tag="min"/>
+                                        <ComboBoxItem Content="Default" Tag="default"/>
+                                        <ComboBoxItem Content="Max" Tag="max"/>
+                                    </ComboBox>
                                 </DockPanel>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>

@@ -97,6 +97,13 @@ public static class ThemePalette
     public const float GlyphTextPt = 13f;       // 17.3 DIP
 
     /// <summary>
+    /// A glyph inside a pill or a badge — Theme.xaml's GlyphBadge step. The selector's size
+    /// pill cross-fades to a camera at this size; sized off <see cref="TextBodyPt"/> instead,
+    /// the camera read as a text character rather than as the button the pill has become.
+    /// </summary>
+    public const float GlyphBadgePt = 10.5f;    // 14 DIP
+
+    /// <summary>
     /// Off the scale deliberately: the quick-actions card is pinned, and its menu
     /// was measured to 202x357 by hand at this size. TextCaptionPt reflows it.
     /// </summary>
@@ -127,6 +134,28 @@ public static class ThemePalette
 
     public static SD.Font UiFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
         => new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
+
+    /// <summary>
+    /// The same two fonts in PIXELS, for owner-drawn surfaces that measure with
+    /// <c>TextRenderer</c> (GDI) and draw with <c>Graphics.DrawString</c> (GDI+). A
+    /// GraphicsUnit.Point font resolves its size against the screen DC captured when the
+    /// Font was constructed on the GDI side, and against the target Graphics' own DpiY on
+    /// the GDI+ side; under PerMonitorV2 those are two different monitors, so the pill is
+    /// measured at one display's text size and painted at another's. Pixels are unambiguous
+    /// — the caller multiplies by its own monitor's scale.
+    /// </summary>
+    public static SD.Font UiFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new("Segoe UI", Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
+
+    /// <inheritdoc cref="UiFontPx"/>
+    public static SD.Font IconFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new(HasFluentIcons ? "Segoe Fluent Icons" : "Segoe MDL2 Assets",
+            Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
+
+    /// <summary>A point-unit type token as physical pixels on a monitor at
+    /// <paramref name="scale"/> (72 pt to the inch, 96 px to the inch at 100%).</summary>
+    public static int PxForPt(float sizePt, double scale) =>
+        Math.Max(1, (int)Math.Round(sizePt * (96f / 72f) * (scale <= 0 ? 1d : scale)));
 
     /// <summary>
     /// Composites a straight-alpha colour over an opaque one, the way GDI+ paints it.

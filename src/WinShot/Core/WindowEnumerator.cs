@@ -299,6 +299,43 @@ public static class WindowEnumerator
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
+    /// <summary>
+    /// The friendly app name behind a window ("Notepad", "Chrome"), for the pill the window
+    /// selector floats over its target. Resolved for the ONE hovered window on demand, never
+    /// for the whole enumeration — opening every process in the list would cost more than the
+    /// enumeration itself. Falls back to the window title, then to nothing.
+    ///
+    /// NEVER call this on the UI thread. Like the rest of this class it opens the target
+    /// process and reads its PE version resource off disk, and for a protected or elevated
+    /// process it throws before it fails. Callers on a hover path resolve it in the
+    /// background and cache the answer per window handle.
+    /// </summary>
+    public static string AppNameFor(IntPtr hwnd, string fallbackTitle)
+    {
+        try
+        {
+            GetWindowThreadProcessId(hwnd, out uint pid);
+            if (pid != 0)
+            {
+                using var process = System.Diagnostics.Process.GetProcessById((int)pid);
+                string? description = process.MainModule?.FileVersionInfo.FileDescription;
+                if (!string.IsNullOrWhiteSpace(description))
+                    return description.Trim();
+                if (!string.IsNullOrWhiteSpace(process.ProcessName))
+                    return process.ProcessName;
+            }
+        }
+        catch
+        {
+            // Access denied (elevated or protected process), or it exited between the hover
+            // and this call. The title is a fine answer and this runs on the paint path.
+        }
+        return fallbackTitle ?? string.Empty;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 

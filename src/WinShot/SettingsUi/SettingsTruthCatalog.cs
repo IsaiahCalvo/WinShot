@@ -22,6 +22,8 @@ internal static class SettingsTruthCatalog
             "HotkeyCapturePrevious",
             "HotkeyAllInOne",
             "HotkeyHistory",
+            "HotkeySelfTimer",
+            "HotkeyLoadClipboard",
             "RecordingFps",
             "GifFps",
             "RecordAudio",
@@ -30,6 +32,7 @@ internal static class SettingsTruthCatalog
             "DownscaleHiDpi",
             "PostCaptureAction",
             "SelfTimerSeconds",
+            "CursorOnScreenshots",
             "HideDesktopIconsDuringCapture",
             "RecordSystemAudio",
             "ShowClickHighlights",
@@ -46,6 +49,9 @@ internal static class SettingsTruthCatalog
             "CrosshairMode",
             "ShowCrosshair",
             "ShowMagnifier",
+            "AdjustSelectionBeforeCapturing",
+            "WindowCaptureBackground",
+            "WindowCapturePadding",
             "AllInOneRememberLast",
             "RecordingShowOverlay",
             "RecordingCopy",
@@ -84,6 +90,8 @@ internal static class SettingsTruthCatalog
         "scrolling-capture",
         "capture-text",
         "history",
+        "self-timer",
+        "load-clipboard",
     ];
 
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =
@@ -93,7 +101,7 @@ internal static class SettingsTruthCatalog
             "ScreenshotShowOverlay", "ScreenshotCopy",
             "ScreenshotSave", "RecordingSave", "ScreenshotOpenAnnotate", "ScreenshotOpenEditor",
             "ScreenshotPin", "RecordingOpenEditor",
-            "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground", "CursorOnScreenshots",
+            "AddPixelBorder", "ConvertToSrgb", "ScreenshotBackground",
             "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
@@ -107,6 +115,7 @@ internal static class SettingsTruthCatalog
             "HistoryLimit",
             "NextCounter",
             "LastCaptureRegion",
+            "SelectorHintSessions",
             "LastRecordingRegion",
             "ShortcutBindings",
         };

@@ -24,7 +24,8 @@ public static class FastSelectorLoupeLayout
         SD.Point cursorClient,
         SD.Point cursorScreen,
         int loupeSize,
-        int zoom)
+        int zoom,
+        SD.Size dragSize = default)
     {
         if (clientSize.Width < 1 ||
             clientSize.Height < 1 ||
@@ -77,7 +78,7 @@ public static class FastSelectorLoupeLayout
             source,
             bounds,
             crosshair,
-            $"{cursorScreen.X}, {cursorScreen.Y}",
+            SelectorReadout.Text(cursorScreen, dragSize),
             zoom,
             targetSample,
             cornerRadius);
