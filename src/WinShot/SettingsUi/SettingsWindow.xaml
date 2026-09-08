@@ -459,7 +459,8 @@
                                 </DockPanel>
                                 <DockPanel x:Name="ShutterSoundRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Shutter sound"/>
-                                    <ComboBox x:Name="ShutterSoundCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="ShutterSoundCombo" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnShutterSoundChanged">
                                         <ComboBoxItem Content="Default" Tag="default"/>
                                         <ComboBoxItem Content="Classic" Tag="classic"/>
                                         <ComboBoxItem Content="Subtle" Tag="subtle"/>

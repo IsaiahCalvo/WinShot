@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using WinShot.Core;
 using Xunit;
 using SD = System.Drawing;
@@ -124,6 +124,30 @@ public class ScreenshotBackdropTests
         Assert.Equal(ScreenshotBackdrop.CanvasFor(shot.Size), without.Size);
         Assert.Equal(
             SD.Color.FromArgb(255, 240, 0, 120).ToArgb(), without.GetPixel(pad, pad).ToArgb());
+    }
+
+    /// <summary>
+    /// The shadow is painted UNDER the shot, so the fills that land where the shot goes are
+    /// invisible work — eight full-canvas alpha fills on the dispatcher between the shutter
+    /// and the card. Compose clips them out, but not all the way to the shot's edge: a
+    /// trimmed window capture has transparent corners, and the shadow showing through the
+    /// rounded wedge is exactly why the two settings sit next to each other.
+    /// </summary>
+    [Fact]
+    public void TheShadowStillReachesThroughATrimmedWindowsTransparentCorners()
+    {
+        using SD.Bitmap shot = Shot(400, 300);
+        using SD.Bitmap trimmed = WindowShadowTrim.Trim(shot, 12)!;
+        Assert.Equal(0, trimmed.GetPixel(0, 0).A); // the corner really is see-through
+
+        int pad = ScreenshotBackdrop.Padding(trimmed.Size);
+        using SD.Bitmap framed = ScreenshotBackdrop.Compose(trimmed, "color", "#204080", shadow: true)!;
+
+        SD.Color throughTheCorner = framed.GetPixel(pad, pad);
+        SD.Color plainBackdrop = framed.GetPixel(1, 1);
+        Assert.True(
+            throughTheCorner.R < plainBackdrop.R && throughTheCorner.B < plainBackdrop.B,
+            $"corner {throughTheCorner} is not darker than the bare backdrop {plainBackdrop}");
     }
 
     [Fact]

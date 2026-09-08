@@ -58,10 +58,13 @@
     <!-- Annotation / destructive red -->
     <Color x:Key="AnnotationRedColor">#FFFF453A</Color>  <!-- default stroke, step counter, record dot, destructive -->
     <!-- Same story as the accent's pressed shade: white on AnnotationRed is 3.4:1, so a destructive button's
-         FILL deepens while the stroke/dot colour is untouched. -->
+         FILL deepens while the stroke/dot colour is untouched. Its hover and press are the
+         shared HoverShade/PressedShade dips, NOT a brighter red: lightening the fill under
+         white type is exactly the mistake documented below, and #FF6B60 measured 2.79:1 —
+         a worse reading, hovered, than the 3.4:1 this deepening was here to fix. -->
     <Color x:Key="RedDeepColor">#FFD42B21</Color>
-    <Color x:Key="RedHoverColor">#FFFF6B60</Color>       <!-- brighter red, hover of destructive action -->
-    <Color x:Key="RedPressedColor">#FFE0352B</Color>     <!-- darker red, pressed of destructive action -->
+    <!-- A red that carries TYPE rather than sitting under it (TextErrorBrush). -->
+    <Color x:Key="RedHoverColor">#FFFF6B60</Color>
 
     <!-- Text -->
     <Color x:Key="TextPrimaryColor">#FFF2F2F4</Color>    <!-- ~95% white -->
@@ -122,8 +125,6 @@
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>
     <SolidColorBrush x:Key="InfoBrush"          Color="{StaticResource InfoColor}"/>
     <SolidColorBrush x:Key="AnnotationRedBrush" Color="{StaticResource AnnotationRedColor}"/>
-    <SolidColorBrush x:Key="RedHoverBrush"      Color="{StaticResource RedHoverColor}"/>
-    <SolidColorBrush x:Key="RedPressedBrush"    Color="{StaticResource RedPressedColor}"/>
     <!-- Red as TYPE, not as fill. AnnotationRedColor is a stroke/fill colour and only
          clears 4.5:1 on the darkest ground (4.99:1 on WindowBg, 4.43:1 on ToolbarBg),
          so a failure line on a dialog card - which is ToolbarBg - fell under the bar
@@ -237,8 +238,13 @@
     <Duration x:Key="MotionSwap">0:0:0.22</Duration>
     <Duration x:Key="MotionEnter">0:0:0.28</Duration>
 
+    <!-- The one long duration: a breath that repeats while the app waits on something it
+         cannot put a percentage on. Not a transition, so it is not in Motion.cs's ladder. -->
+    <Duration x:Key="MotionPulse">0:0:0.65</Duration>
+
     <CubicEase x:Key="EaseOutCubic" EasingMode="EaseOut"/>
     <BackEase  x:Key="EaseOutBack"  EasingMode="EaseOut" Amplitude="0.4"/>
+    <SineEase  x:Key="EaseInOutSine" EasingMode="EaseInOut"/>
 
     <!-- The cross-fade every control template below shares. A template stacks a
          layer named Hover / Press / Chip / Check over its rest fill at Opacity 0
@@ -554,10 +560,13 @@
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
+                            <!-- A saturated fill dips to hover and dips further to press — the
+                                 same ladder PillButtonPrimary uses, for the same reason: white
+                                 13pt type has to stay readable on whatever the fill becomes. -->
                             <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
-                                    Background="{StaticResource RedHoverBrush}"/>
+                                    Background="{StaticResource HoverShadeBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
-                                    Background="{StaticResource RedPressedBrush}"/>
+                                    Background="{StaticResource PressedShadeBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
                                               Margin="{TemplateBinding Padding}"/>

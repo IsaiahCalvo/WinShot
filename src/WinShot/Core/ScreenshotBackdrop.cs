@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text;
 using SD = System.Drawing;
 using SDD = System.Drawing.Drawing2D;
@@ -110,16 +110,13 @@ public static class ScreenshotBackdrop
     {
         var bounds = new SD.Rectangle(0, 0, size.Width, size.Height);
 
-        if (kind == Wallpaper && TryLoadWallpaper() is SD.Bitmap paper)
+        if (kind == Wallpaper && CachedWallpaper() is SD.Bitmap paper)
         {
-            using (paper)
-            {
-                DrawCoverFill(g, paper, bounds);
-                // A wallpaper is busy by definition; the veil is what keeps the shot on top
-                // of it readable, and is the same scrim weight the selector dims with.
-                using var veil = new SD.SolidBrush(SD.Color.FromArgb(90, 0, 0, 0));
-                g.FillRectangle(veil, bounds);
-            }
+            DrawCoverFill(g, paper, bounds);
+            // A wallpaper is busy by definition; the veil is what keeps the shot on top
+            // of it readable, and is the same scrim weight the selector dims with.
+            using var veil = new SD.SolidBrush(SD.Color.FromArgb(90, 0, 0, 0));
+            g.FillRectangle(veil, bounds);
             return;
         }
 
@@ -142,13 +139,31 @@ public static class ScreenshotBackdrop
     private static void PaintShadow(SD.Graphics g, SD.Rectangle shot)
     {
         const int layers = 8;
-        for (int i = layers; i >= 1; i--)
+        // Every one of these rects is covered by the shot a moment later, so all but the
+        // ring around it is invisible work - and it is eight full-canvas alpha fills, on the
+        // dispatcher, between the shutter and the card. Clipping the shot out leaves the
+        // same picture for about a tenth of the fill area.
+        //
+        // Inset, not the shot rect itself: a trimmed window capture has TRANSPARENT corners
+        // (WindowShadowTrim), and the shadow showing through the rounded wedge is the whole
+        // point of pairing the two. CornerBleed is wider than a Windows 11 corner at 200%.
+        SDD.GraphicsState state = g.Save();
+        try
         {
-            int spread = i * 2;
-            var rect = new SD.Rectangle(
-                shot.X - spread, shot.Y - spread + i, shot.Width + spread * 2, shot.Height + spread * 2);
+            const int cornerBleed = 24;
+            if (shot.Width > cornerBleed * 4 && shot.Height > cornerBleed * 4)
+                g.ExcludeClip(SD.Rectangle.Inflate(shot, -cornerBleed, -cornerBleed));
             using var brush = new SD.SolidBrush(SD.Color.FromArgb(10, 0, 0, 0));
-            g.FillRectangle(brush, rect);
+            for (int i = layers; i >= 1; i--)
+            {
+                int spread = i * 2;
+                g.FillRectangle(brush, new SD.Rectangle(
+                    shot.X - spread, shot.Y - spread + i, shot.Width + spread * 2, shot.Height + spread * 2));
+            }
+        }
+        finally
+        {
+            g.Restore(state);
         }
     }
 
@@ -160,8 +175,21 @@ public static class ScreenshotBackdrop
             bounds.Width / (double)image.Width, bounds.Height / (double)image.Height);
         int w = (int)Math.Ceiling(image.Width * scale);
         int h = (int)Math.Ceiling(image.Height * scale);
-        g.DrawImage(image, new SD.Rectangle(
-            bounds.X + (bounds.Width - w) / 2, bounds.Y + (bounds.Height - h) / 2, w, h));
+
+        // Bilinear, not the canvas-wide bicubic: this is a veiled photo behind a screenshot,
+        // where the two are indistinguishable, and bicubic across a 4K canvas costs about
+        // 40 ms on the dispatcher between the shutter and the card.
+        SDD.InterpolationMode previous = g.InterpolationMode;
+        g.InterpolationMode = SDD.InterpolationMode.HighQualityBilinear;
+        try
+        {
+            g.DrawImage(image, new SD.Rectangle(
+                bounds.X + (bounds.Width - w) / 2, bounds.Y + (bounds.Height - h) / 2, w, h));
+        }
+        finally
+        {
+            g.InterpolationMode = previous;
+        }
     }
 
     /// <summary>#RRGGBB or #AARRGGBB, with or without the hash. Anything else is the app's
@@ -180,7 +208,69 @@ public static class ScreenshotBackdrop
         return ThemePalette.WindowBg;
     }
 
-    private static SD.Bitmap? TryLoadWallpaper()
+    private static readonly object WallpaperLock = new();
+    private static SD.Bitmap? _wallpaper;
+    private static (string Path, DateTime Written, long Length) _wallpaperKey;
+
+    /// <summary>
+    /// The decoded desktop wallpaper, decoded once. Without this every capture read the
+    /// registry, decoded a 4K JPEG and copied it into a second 32bpp bitmap - a few hundred
+    /// milliseconds on the dispatcher, sitting between the shutter and the Quick Access
+    /// card's entrance, for a picture that had not changed.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the file's path, size and write time rather than hooked to WM_SETTINGCHANGE:
+    /// choosing a new wallpaper changes at least one of the three (Windows re-writes its own
+    /// transcoded copy), the check is one file-system stat, and there is no message loop to
+    /// own on the capture path. The cached bitmap is owned here; callers must not dispose it.
+    /// </remarks>
+    private static SD.Bitmap? CachedWallpaper()
+    {
+        string? file = WallpaperPath();
+        if (file is null)
+            return null;
+
+        (string, DateTime, long) key;
+        try
+        {
+            var info = new System.IO.FileInfo(file);
+            key = (file, info.LastWriteTimeUtc, info.Length);
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"Desktop wallpaper could not be read for the capture backdrop: {ex.Message}");
+            return null;
+        }
+
+        lock (WallpaperLock)
+        {
+            if (_wallpaper is not null && _wallpaperKey == key)
+                return _wallpaper;
+
+            SD.Bitmap? loaded = TryLoadWallpaper(file);
+            if (loaded is null)
+                return null;
+
+            _wallpaper?.Dispose();
+            _wallpaper = loaded;
+            _wallpaperKey = key;
+            return _wallpaper;
+        }
+    }
+
+    /// <summary>Drops the cached wallpaper. Test seam - nothing in the app calls it, because
+    /// the cache key notices a new wallpaper on its own.</summary>
+    internal static void InvalidateWallpaperCacheForTest()
+    {
+        lock (WallpaperLock)
+        {
+            _wallpaper?.Dispose();
+            _wallpaper = null;
+            _wallpaperKey = default;
+        }
+    }
+
+    private static string? WallpaperPath()
     {
         try
         {
@@ -189,9 +279,19 @@ public static class ScreenshotBackdrop
                 return null;
 
             string file = path.ToString();
-            if (file.Length == 0 || !System.IO.File.Exists(file))
-                return null;
+            return file.Length == 0 || !System.IO.File.Exists(file) ? null : file;
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"Desktop wallpaper unavailable for the capture backdrop: {ex.Message}");
+            return null;
+        }
+    }
 
+    private static SD.Bitmap? TryLoadWallpaper(string file)
+    {
+        try
+        {
             // Copied off the decoded image so the file handle does not stay open behind a
             // lazily-decoded Bitmap for the life of the process.
             using var loaded = new SD.Bitmap(file);

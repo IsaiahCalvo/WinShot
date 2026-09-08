@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -699,11 +699,14 @@ public partial class SettingsWindow : Window
     {
         if (!Motion.AnimationsEnabled())
             return;
-        element.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.55, new Duration(TimeSpan.FromMilliseconds(650)))
+        var host = element as FrameworkElement;
+        element.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.55,
+            host?.TryFindResource("MotionPulse") as Duration? ?? new Duration(TimeSpan.FromMilliseconds(650)))
         {
             AutoReverse = true,
             RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+            EasingFunction = host?.TryFindResource("EaseInOutSine") as IEasingFunction
+                             ?? new SineEase { EasingMode = EasingMode.EaseInOut },
         });
     }
 
@@ -1076,6 +1079,16 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>Plays the sound you just picked. Choosing between three clicks you cannot
+    /// hear meant leaving Settings, taking a capture, coming back and trying the next one.
+    /// Silent has nothing to play, and a load-time selection is not a choice.</summary>
+    private void OnShutterSoundChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_liveApplySuspended > 0 || !IsLoaded)
+            return;
+        CaptureSound.Preview(SelectedTag(ShutterSoundCombo, CaptureSound.Default));
+    }
+
     private void OnLiveApplyChanged(object sender, RoutedEventArgs e)
     {
         if (_liveApplySuspended > 0 || _saving)
@@ -1167,9 +1180,12 @@ public partial class SettingsWindow : Window
         PostCaptureMigration.Apply(defaults); // so the matrix reads as a fresh install would
         LoadSection(index, defaults);
 
-        // The tab's toggles apply at once; its text fields still commit on Done.
+        // The tab's toggles apply at once; its text fields still commit on Done. This is the
+        // highest-consequence commit in the window — every control on the tab has already
+        // snapped to its default — so a write that did not land has to say so here too.
         WriteToggleSettings(_settings.Current);
-        _settings.Save();
+        if (!_settings.Save())
+            ReportSaveFailed();
         ResetValidation();
     }
 
@@ -1496,7 +1512,9 @@ public partial class SettingsWindow : Window
     {
         box.BorderBrush = ErrorBrush;
         // Inline INSTEAD of a tooltip, which is what the audit asked for: the message is
-        // already under the field, and a hover repeating it is redundant chrome.
+        // already under the field, and a hover repeating it is redundant chrome. Show()
+        // also puts the message on the field's UIA HelpText — WPF surfaced the tooltip
+        // there for free, and an adorner is a raw visual a screen reader never sees.
         box.ToolTip = null;
         InlineValidation.Show(box, message);
     }

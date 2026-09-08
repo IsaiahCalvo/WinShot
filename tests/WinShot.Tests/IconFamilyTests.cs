@@ -1,7 +1,9 @@
+﻿using System.Linq;
 using System.Xml.Linq;
 using WinShot.Core;
 using Xunit;
 using W = System.Windows;
+using WM = System.Windows.Media;
 
 namespace WinShot.Tests;
 
@@ -49,6 +51,54 @@ public class IconFamilyTests
         XElement filled = Root("quick-access-pin-filled.svg");
         Assert.Equal("currentColor", filled.Attribute("fill")?.Value);
         Assert.Null(filled.Attribute("stroke-width"));
+    }
+
+    /// <summary>
+    /// "Filled" has to actually fill. The asset this replaced was an OUTLINE drawn as an
+    /// even-odd fill — an outer contour plus a counter subpath punching the hole back out —
+    /// so pressing P swapped one hollow pin for another and no state change was legible at
+    /// 16-32px. SvgIcons never reads fill-rule and WPF's Geometry.Parse defaults to EvenOdd,
+    /// so a second subpath is a hole either way: one contour, no fill-rule, is the assertion.
+    /// </summary>
+    [Fact]
+    public void ThePinnedGlyphIsSolid_NotAnOutlineDrawnAsAFill()
+    {
+        XElement filled = Root("quick-access-pin-filled.svg");
+        var paths = filled.Descendants().Where(e => e.Name.LocalName == "path").ToArray();
+        XElement path = Assert.Single(paths);
+
+        string d = path.Attribute("d")!.Value;
+        int subpaths = d.Count(c => c is 'M' or 'm');
+        Assert.True(subpaths == 1, $"the pinned glyph has {subpaths} subpaths; a second one is a hole");
+        Assert.Null(path.Attribute("fill-rule"));
+        Assert.Null(path.Attribute("clip-rule"));
+
+        // And the direct reading, through the same parser SvgIcons uses: the middle of the
+        // pin's head is ink. On the outline-as-a-fill asset it was the hole.
+        WM.Geometry solid = WM.Geometry.Parse(d);
+        Assert.True(solid.FillContains(new W.Point(12, 12)), "the pinned glyph's head is hollow");
+        Assert.False(solid.FillContains(new W.Point(2, 12)), "the pinned glyph bleeds outside the pin");
+    }
+
+    /// <summary>
+    /// And it has to be the SAME pin. The asset this replaced was the previous diagonal
+    /// thumbtack kept verbatim, so the active state substituted a different drawing rather
+    /// than filling the one on screen.
+    /// </summary>
+    [Fact]
+    public void ThePinnedGlyphIsTheSameSilhouetteAsTheOutline()
+    {
+        W.Rect outline = SvgIcons.ContentExtent("quick-access-pin.svg")!.Value;
+        W.Rect solid = SvgIcons.ContentExtent("quick-access-pin-filled.svg")!.Value;
+
+        // The solid path is the outline's centreline, so it sits inside the stroked ink by
+        // about half a stroke on each side — but it is the same upright pin, not a diagonal
+        // thumbtack with a tail (which measured 21.3 x 21.3, an aspect of 1.00 against 0.73).
+        double outlineAspect = outline.Width / outline.Height;
+        double solidAspect = solid.Width / solid.Height;
+        Assert.True(
+            Math.Abs(outlineAspect - solidAspect) < 0.08,
+            $"outline is {outline.Width:0.0}x{outline.Height:0.0}, solid is {solid.Width:0.0}x{solid.Height:0.0}");
     }
 
     // Two different measurements, and the difference is the whole point of these tests.

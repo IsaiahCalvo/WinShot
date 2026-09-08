@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Media;
 
 namespace WinShot.Core;
@@ -43,11 +43,21 @@ public static class CaptureSound
     /// a missing audio device or a busy mixer must not cost the user a capture.</summary>
     public static void Play(Settings settings)
     {
-        if (!ShouldPlay(settings))
+        if (settings.PlaySounds)
+            Preview(settings.ShutterSound);
+    }
+
+    /// <summary>Plays one shutter by name, ignoring <see cref="Settings.PlaySounds"/>:
+    /// picking between three synthesised clicks in Settings is the user asking to hear
+    /// this one now. Also warms the player, whose synchronous Load() otherwise lands on
+    /// the first capture of the session.</summary>
+    public static void Preview(string? shutterSound)
+    {
+        if (AssetFor(shutterSound) is not string asset)
             return;
         try
         {
-            Load(AssetFor(settings.ShutterSound)!)?.Play();
+            Load(asset)?.Play();
         }
         catch (Exception ex)
         {

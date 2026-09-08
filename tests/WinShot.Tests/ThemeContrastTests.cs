@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -12,18 +12,30 @@ namespace WinShot.Tests;
 /// </summary>
 public class ThemeContrastTests
 {
-    private static readonly Dictionary<string, (byte R, byte G, byte B)> Colors = LoadColors();
+    private static readonly Dictionary<string, (byte A, byte R, byte G, byte B)> Argb = LoadColors();
 
-    private static Dictionary<string, (byte, byte, byte)> LoadColors()
+    /// <summary>The opaque part of a token, which is what most of these assertions want.</summary>
+    private static Dictionary<string, (byte R, byte G, byte B)> Colors =>
+        _rgb ??= Argb.ToDictionary(e => e.Key, e => (e.Value.R, e.Value.G, e.Value.B), StringComparer.Ordinal);
+
+    private static Dictionary<string, (byte R, byte G, byte B)>? _rgb;
+
+    private static Dictionary<string, (byte, byte, byte, byte)> LoadColors()
     {
         string path = Path.Combine(RepoRoot(), "src", "WinShot", "Theme", "Theme.xaml");
         string xaml = File.ReadAllText(path);
-        var map = new Dictionary<string, (byte, byte, byte)>(StringComparer.Ordinal);
+        var map = new Dictionary<string, (byte, byte, byte, byte)>(StringComparer.Ordinal);
         foreach (Match m in Regex.Matches(xaml, @"<Color x:Key=""(?<key>\w+)"">#(?<hex>[0-9A-Fa-f]{6,8})</Color>"))
         {
             string hex = m.Groups["hex"].Value;
-            if (hex.Length == 8) hex = hex[2..]; // drop alpha; composited separately below
+            byte alpha = 255;
+            if (hex.Length == 8)
+            {
+                alpha = Convert.ToByte(hex[..2], 16);
+                hex = hex[2..];
+            }
             map[m.Groups["key"].Value] = (
+                alpha,
                 Convert.ToByte(hex[..2], 16),
                 Convert.ToByte(hex.Substring(2, 2), 16),
                 Convert.ToByte(hex.Substring(4, 2), 16));
@@ -64,6 +76,56 @@ public class ThemeContrastTests
         Assert.True(Colors.ContainsKey(fillToken), $"{fillToken} is missing from Theme.xaml");
         double ratio = Contrast(White, Colors[fillToken]);
         Assert.True(ratio >= 4.5, $"white on {fillToken} is {ratio:0.00}:1");
+    }
+
+    /// <summary>One token composited over another, the way a template's Hover/Press layer
+    /// sits over its rest fill at Opacity 1.</summary>
+    private static (byte, byte, byte) Over(string layerToken, (byte R, byte G, byte B) under)
+    {
+        (byte a, byte r, byte g, byte b) = Argb[layerToken];
+        double alpha = a / 255.0;
+        return (
+            (byte)Math.Round(under.R + alpha * (r - under.R)),
+            (byte)Math.Round(under.G + alpha * (g - under.G)),
+            (byte)Math.Round(under.B + alpha * (b - under.B)));
+    }
+
+    /// <summary>
+    /// The whole state ladder of a filled pill, not just its resting fill. Deepening
+    /// AccentDeep/RedDeep for contrast is undone the instant the pointer arrives if hover
+    /// lightens: the destructive pill shipped a hover of #FF6B60 at 2.79:1 — a worse reading
+    /// than the 3.4:1 the deepening existed to fix, and at exactly the moment the user is
+    /// looking at the button. Both templates now dip on hover and dip further on press, and
+    /// this asserts the composited result rather than the token in isolation.
+    /// </summary>
+    [Theory]
+    [InlineData("AccentDeepColor")]
+    [InlineData("RedDeepColor")]
+    public void WhiteLabelsClear45To1_Hovered_AndPressed(string fillToken)
+    {
+        var rest = Colors[fillToken];
+        var hovered = Over("HoverShadeColor", rest);
+        var pressed = Over("PressedShadeColor", hovered);
+
+        Assert.True(Contrast(White, hovered) >= 4.5,
+            $"white on hovered {fillToken} is {Contrast(White, hovered):0.00}:1");
+        Assert.True(Contrast(White, pressed) >= 4.5,
+            $"white on pressed {fillToken} is {Contrast(White, pressed):0.00}:1");
+
+        // Direction, not just the floor: a saturated fill must never LIGHTEN under white type.
+        Assert.True(Contrast(White, hovered) > Contrast(White, rest),
+            $"{fillToken} lightens on hover; a saturated fill dips");
+        Assert.True(Contrast(White, pressed) > Contrast(White, hovered),
+            $"{fillToken} lightens on press");
+    }
+
+    /// <summary>PillButtonPrimary's press layer is an authored opaque blue rather than the
+    /// shared dip, so it needs its own reading.</summary>
+    [Fact]
+    public void TheAccentsAuthoredPressedFillAlsoClearsTheFloor()
+    {
+        double ratio = Contrast(White, Colors["AccentPressedColor"]);
+        Assert.True(ratio >= 4.5, $"white on AccentPressedColor is {ratio:0.00}:1");
     }
 
     [Fact]
