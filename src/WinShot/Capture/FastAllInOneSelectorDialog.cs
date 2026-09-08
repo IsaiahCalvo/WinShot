@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -58,6 +58,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         ? (_pendingGlide.IsActive ? _pendingGlide.Current : p)
         : null;
     private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
+    private IDisposable? _freezeFade;    // live -> frozen ramp on the deferred entry
     // Per-monitor frozen-slice-with-dim baked once, so each follow-frame is a single opaque
     // blit instead of re-cropping the snapshot AND alpha-blending a full-screen dim every
     // tick. Same fix the region selector already carries; keyed by monitor.
@@ -145,6 +146,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// </summary>
     internal void Park()
     {
+        // The dialog is pooled, so an in-flight ramp would otherwise outlive the session that
+        // started it and keep the process-wide timer resolution raised.
+        _freezeFade?.Dispose();
+        _freezeFade = null;
         SelectorSurfaces.Park(this);
         foreach (var pane in _panes)
         {
@@ -192,15 +197,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForAllInOne(_settings?.Current);
-        // Open instantly over the live desktop; the freeze snapshot bakes in when it
-        // lands — see FastRegionSelectorDialog.ShowAsync.
-        SelectorChrome.ConfigurePresentation(this, freezeScreen: false);
+        // Grab the freeze BEFORE any surface is shown so the overlay opens already frozen —
+        // see SelectorFreeze for the root cause of the entry flicker this replaces.
         DisposeFrozen();
+        _frozen = SelectorFreeze.TryGrabBeforeShow(_options.FreezeScreen);
+        SelectorEntry entry = SelectorFreeze.ChooseEntry(_options.FreezeScreen, _frozen is not null);
         CreatePanes();
-        // Warm (pooled) surfaces may still be opaque from a previous frozen swap.
-        SelectorSurfaces.Unpark(this, SelectorChrome.LiveAlpha);
-        foreach (var pane in _panes)
-            SelectorSurfaces.Unpark(pane, SelectorChrome.LiveAlpha);
+        if (entry == SelectorEntry.OpaqueFrozen)
+            PrewarmDimmedSlices();
+        SelectorFreeze.Unpark(this, _panes, entry);
 
         Show();
         foreach (var pane in _panes)
@@ -233,7 +238,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _altLatched = false;
         if (_options.NeedsCursorFollow)
             StartFollowMotion();
-        if (_options.FreezeScreen)
+        if (entry == SelectorEntry.TransparentUntilFrozen)
             _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
     }
@@ -246,7 +251,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SD.Bitmap? snapshot = null;
         try
         {
-            snapshot = await Task.Run(CaptureService.CaptureVirtualDesktop);
+            snapshot = await Task.Run(CaptureService.CaptureFreezeFrame);
         }
         catch (Exception ex)
         {
@@ -261,29 +266,44 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         DisposeFrozen();
         _frozen = snapshot;
+        _freezeFade?.Dispose();
         if (_frozen is null)
+        {
+            // Surfaces are at alpha 0 waiting for a frame that never came; an invisible
+            // overlay is an unusable one, so ramp up to the translucent wash instead.
+            _freezeFade = Core.Motion.Run(
+                SelectorFreeze.FadeDurationMs,
+                Core.Motion.EaseOutCubic,
+                progress => SetAllSurfaceAlpha((byte)Math.Round(progress * SelectorChrome.LiveAlpha)));
             return;
+        }
 
-        // Bake the dimmed slices BEFORE the first frozen paint so no surface is opaque
-        // over a half-swapped state — see FastRegionSelectorDialog.FreezeWhileShownAsync.
+        // Bake the dimmed slices BEFORE anything moves — see
+        // FastRegionSelectorDialog.FreezeWhileShownAsync.
+        PrewarmDimmedSlices();
+        _freezeFade = SelectorFreeze.FadeToFrozen(this, _panes);
+    }
+
+    /// <summary>Bakes every surface's dimmed frozen slice — see the region selector's copy.</summary>
+    private void PrewarmDimmedSlices()
+    {
         GetDimmedBackground(_monitorBounds);
         foreach (var pane in _panes)
         {
             if (!pane.IsDisposed)
                 GetDimmedBackground(pane.MonitorBounds);
         }
+    }
 
-        // Paint each surface before going opaque — see
-        // FastRegionSelectorDialog.FreezeWhileShownAsync for why this ordering matters.
-        Invalidate();
-        Update();
-        WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, 255);
+    /// <summary>Sets the layered alpha of the coordinator and every live pane together.</summary>
+    private void SetAllSurfaceAlpha(byte alpha)
+    {
+        if (!IsDisposed && IsHandleCreated)
+            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, alpha);
         foreach (var pane in _panes)
         {
-            if (pane.IsDisposed || !pane.IsHandleCreated) continue;
-            pane.Invalidate();
-            pane.Update();
-            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
+            if (!pane.IsDisposed && pane.IsHandleCreated)
+                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, alpha);
         }
     }
 

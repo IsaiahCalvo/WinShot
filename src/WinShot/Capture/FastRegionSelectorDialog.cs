@@ -85,6 +85,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// user starts dragging: by then it has been read or it never will be.</summary>
     private double _instructionAlpha;
     private IDisposable? _instructionFade;
+    private IDisposable? _freezeFade;    // live -> frozen ramp on the deferred entry
     /// <summary>Alt-hover resolves the deepest UIA ELEMENT (normal captures) instead of the
     /// scrollable pane (scrolling captures).</summary>
     private bool _elementGranularity;
@@ -290,6 +291,8 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // that started it and keep the process-wide timer resolution raised.
         _instructionFade?.Dispose();
         _instructionFade = null;
+        _freezeFade?.Dispose();
+        _freezeFade = null;
         _instructionAlpha = 0d;
         SelectorSurfaces.Park(this);
         foreach (var pane in _panes)
@@ -360,16 +363,21 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         }
         _instructionFade?.Dispose();
         _instructionFade = null;
+        _freezeFade?.Dispose();
+        _freezeFade = null;
         // Faded in, not simply there: FadeInstructionOut already runs a proper ramp when the
         // drag begins, and an entrance that is not its mirror is the asymmetry the rubric asks
         // about. This is the pill alone -- the scrim stays un-ramped, for open latency.
         _instructionAlpha = 0d;
-        // Always open translucent over the live desktop so the overlay appears the instant
-        // the hotkey fires. The freeze snapshot (WGC setup alone can cost 300-1700 ms under
-        // load) is taken in the background — these surfaces are excluded from capture — and
-        // bakes in underneath when it lands; the dim level matches, so the swap is invisible.
-        SelectorChrome.ConfigurePresentation(this, freezeScreen: false);
+        // The freeze frame is grabbed HERE, before a single surface is shown, so the overlay
+        // can open already frozen and there is no live-to-frozen transition to see. A warm
+        // Desktop Duplication device answers in ~13 ms; when it is cold this returns null in
+        // microseconds and the session takes the transparent-and-ramp entry instead. See
+        // SelectorFreeze for why the old translucent-black open could not be made flicker-free
+        // by any amount of re-ordering.
         DisposeFrozen();
+        _frozen = SelectorFreeze.TryGrabBeforeShow(_options.FreezeScreen);
+        SelectorEntry entry = SelectorFreeze.ChooseEntry(_options.FreezeScreen, _frozen is not null);
         // Snapshot every snappable HWND rect BEFORE our own overlay windows go up, so the
         // list can never contain the selector itself (pooled surfaces are hidden here, and
         // invisible windows are filtered). Cheap (a few ms) and done once — hover detection
@@ -387,10 +395,15 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             .Distinct().OrderBy(y => y).ToArray();
         var sw = System.Diagnostics.Stopwatch.StartNew();
         CreatePanes();
-        // Warm (pooled) surfaces may still be opaque from a previous frozen swap.
-        SelectorSurfaces.Unpark(this, SelectorChrome.LiveAlpha);
-        foreach (var pane in _panes)
-            SelectorSurfaces.Unpark(pane, SelectorChrome.LiveAlpha);
+        // Bake the dimmed slices before the surfaces are unparked, never after: an opaque
+        // surface that has not painted yet shows its BackColor, and the whole point of the
+        // warm grab is that the first frame the user sees is the finished one.
+        if (entry == SelectorEntry.OpaqueFrozen)
+            PrewarmDimmedSlices();
+        long dimMs = sw.ElapsedMilliseconds;
+        // Pooled surfaces may still be opaque from a previous frozen session, so this sets
+        // the alpha outright rather than nudging it.
+        SelectorFreeze.Unpark(this, _panes, entry);
         long panesMs = sw.ElapsedMilliseconds;
 
         Show();
@@ -415,7 +428,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         {
             Log.Info(
                 "Perf selector open breakdown: " +
-                $"panes={panesMs} show={showMs} paneShow={paneShowMs} " +
+                $"entry={entry} dim={dimMs} panes={panesMs} show={showMs} paneShow={paneShowMs} " +
                 $"[{string.Join(" ", paneTimings)}] " +
                 $"activate={sw.ElapsedMilliseconds - panesMs - showMs - paneShowMs} total={sw.ElapsedMilliseconds} ms");
         }
@@ -460,17 +473,20 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             StartFollowMotion();
         if (mode == SelectorMode.Measure)
             StartHintEntrance();
-        if (_options.FreezeScreen)
+        if (entry == SelectorEntry.OpaqueFrozen)
+            NoteFrozenSnapshotAtOpen();
+        else if (entry == SelectorEntry.TransparentUntilFrozen)
             _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
     }
 
     /// <summary>
-    /// Grabs the freeze snapshot while the selector is already on screen and switches the
-    /// surfaces from translucent-live to opaque-frozen once it lands. Everything after the
-    /// await runs on the UI thread, serialized with Complete(), so the session guard is
-    /// race-free. If the session ended first the late snapshot is discarded; if the capture
-    /// failed we simply stay on the live translucent view.
+    /// The deferred entry: the duplication device was cold, so the surfaces are already on
+    /// screen at alpha 0 — the live desktop, untouched — and this grabs the snapshot and ramps
+    /// them up to it. Everything after the await runs on the UI thread, serialized with
+    /// Complete(), so the session guard is race-free. If the session ended first the late
+    /// snapshot is discarded; if the capture failed the surfaces stay transparent and the
+    /// session runs without a freeze.
     /// </summary>
     private async Task FreezeWhileShownAsync(TaskCompletionSource<WF.DialogResult> session)
     {
@@ -483,7 +499,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         SD.Bitmap? snapshot = null;
         try
         {
-            snapshot = await Task.Run(CaptureService.CaptureVirtualDesktop);
+            snapshot = await Task.Run(CaptureService.CaptureFreezeFrame);
         }
         catch (Exception ex)
         {
@@ -500,6 +516,16 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _frozen = snapshot;
         if (_frozen is null)
         {
+            // The surfaces are sitting at alpha 0 waiting for a frame that is not coming, and
+            // an invisible overlay is an unusable one. Ramp them up to the translucent wash
+            // instead — the same degraded look the freeze-off setting gets, arrived at
+            // smoothly rather than snapped to.
+            _freezeFade?.Dispose();
+            _freezeFade = Core.Motion.Run(
+                SelectorFreeze.FadeDurationMs,
+                Core.Motion.EaseOutCubic,
+                progress => SetAllSurfaceAlpha(
+                    (byte)Math.Round(progress * SelectorChrome.LiveAlpha)));
             // Measure mode has nothing to read and no way to get it; say so rather than
             // leaving a reticle and a hint strip that will never measure anything. The toast
             // dwells out in a few seconds, so the failure is latched too: from here the hint
@@ -516,52 +542,55 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        // Live mode paints solid black behind a 45% layered alpha; frozen mode paints the
-        // dimmed snapshot at full alpha. The two look identical on screen (0.553*desktop vs
-        // 0.549*desktop) — but only once the frozen paint has actually landed. Flipping alpha
-        // first left every surface fully opaque over its live-mode BLACK for as long as the
-        // first frozen paint took, which is a full-monitor bitmap allocation plus two blits
-        // per surface: a black flash across every monitor, worst on the first hotkey.
-        //
-        // So the dimmed slices are built first. There is deliberately no await between here
-        // and the repaint, so WinForms cannot pump a paint in the half-swapped state.
+        // Bake the dimmed slices before anything moves. There is deliberately no await
+        // between here and the ramp, so WinForms cannot pump a paint half-way through.
         var swap = System.Diagnostics.Stopwatch.StartNew();
+        PrewarmDimmedSlices();
+        long prewarmMs = swap.ElapsedMilliseconds;
+
+        // The snapshot IS the measurement's input, and on this path it lands well after the
+        // mode opened. Nothing else re-reads it: the follow tick returns early while the
+        // pointer has not moved, so without this the mode shows a reticle and no measurement
+        // until the user jiggles the mouse.
+        NoteFrozenSnapshotLanded();
+
+        // Ramp, not swap. The surfaces are at alpha 0 — compositing to exactly the live
+        // desktop — so raising them to the dimmed frozen slice is a monotonic darkening from
+        // 1.0*D to 0.549*D with no step at either end. The old code had to choose between a
+        // black flash and a brightness pop only because live mode painted BLACK behind a 45%
+        // alpha; from transparent there is nothing to choose. Every surface moves on the same
+        // frame, so the monitors darken together.
+        _freezeFade?.Dispose();
+        _freezeFade = SelectorFreeze.FadeToFrozen(this, _panes);
+        Log.Info($"Perf freeze ramp: prewarm={prewarmMs} paint={swap.ElapsedMilliseconds - prewarmMs} " +
+            $"fade={SelectorFreeze.FadeDurationMs} ms");
+    }
+
+    /// <summary>Sets the layered alpha of the coordinator and every live pane together.</summary>
+    private void SetAllSurfaceAlpha(byte alpha)
+    {
+        if (!IsDisposed && IsHandleCreated)
+            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, alpha);
+        foreach (var pane in _panes)
+        {
+            if (!pane.IsDisposed && pane.IsHandleCreated)
+                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, alpha);
+        }
+    }
+
+    /// <summary>
+    /// Bakes every surface's dimmed frozen slice. Building these is a full-monitor bitmap
+    /// allocation plus two blits each, so it always happens before a surface is asked to
+    /// paint or to change alpha — never in the middle of either.
+    /// </summary>
+    private void PrewarmDimmedSlices()
+    {
         GetDimmedBackground(_monitorBounds);
         foreach (var pane in _panes)
         {
             if (!pane.IsDisposed)
                 GetDimmedBackground(pane.MonitorBounds);
         }
-        long prewarmMs = swap.ElapsedMilliseconds;
-
-        // The snapshot IS the measurement's input, and it lands 300-1700 ms after the mode
-        // opens. Nothing else re-reads it: the follow tick returns early while the pointer
-        // has not moved, so without this the mode shows a reticle and no measurement until
-        // the user jiggles the mouse.
-        NoteFrozenSnapshotLanded();
-
-        // Per surface: paint the frozen frame FIRST, then go opaque. There is no ordering
-        // that is completely invisible — while the live desktop still shows through, the
-        // composite cannot equal the frozen one — but the two artifacts are not equal:
-        //   flip first  -> the surface is opaque over live mode's BLACK until the paint
-        //                  lands: a full-screen black flash, and it reads as a fault.
-        //   paint first -> for the length of that one paint the surface shows the frozen
-        //                  image THROUGH the 45% alpha, i.e. briefly brighter, which reads
-        //                  as the dim settling in.
-        // Doing it per surface also means no monitor waits on another monitor's paint.
-        long alphaStart = swap.ElapsedMilliseconds;
-        Invalidate();
-        Update();
-        WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, 255);
-        foreach (var pane in _panes)
-        {
-            if (pane.IsDisposed || !pane.IsHandleCreated) continue;
-            pane.Invalidate();
-            pane.Update();
-            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
-        }
-        Log.Info($"Perf freeze swap: prewarm={prewarmMs} alpha={alphaStart - prewarmMs} " +
-            $"paint={swap.ElapsedMilliseconds - alphaStart} ms");
     }
 
     private void ResetForUse(Func<Task<List<WindowInfo>>> windowsProvider, SettingsService? settings)

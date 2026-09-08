@@ -190,6 +190,20 @@ public sealed partial class FastRegionSelectorDialog
     }
 
     /// <summary>
+    /// The snapshot was already in hand when the mode opened — the warm-duplication entry, so
+    /// there was never a moment without one. Only the first reading needs seeding: the hint
+    /// strip has not entered yet and latches the right copy on its own entrance, so unlike
+    /// <see cref="NoteFrozenSnapshotLanded"/> this must NOT restart it.
+    /// </summary>
+    internal void NoteFrozenSnapshotAtOpen()
+    {
+        if (_mode != SelectorMode.Measure)
+            return;
+
+        HandleMeasureMouseMove();
+    }
+
+    /// <summary>
     /// The freeze snapshot was attempted and did not arrive. There is exactly one attempt per
     /// session, so this is terminal: the mode has no input and will not get one. Latching it
     /// is what lets the hint strip and every gesture's answer stop saying "not yet" — the

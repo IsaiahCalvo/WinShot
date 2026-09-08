@@ -170,6 +170,11 @@ public partial class App : Application
                 var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
                 selector.Prewarm();
                 FastRegionSelectorDialog.Return(selector);
+                // Warm surfaces are only half of an instant open: the freeze frame has to be
+                // in hand before the first paint too, or the overlay opens blank and ramps.
+                // A warm Desktop Duplication device answers in ~13 ms against ~155 ms cold,
+                // so pay the cold setup here, off the hotkey path.
+                CaptureService.PrewarmFreezeSource();
             }
             catch (Exception ex) { Log.Error("Selector prewarm failed (non-fatal)", ex); }
         }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);

@@ -69,6 +69,81 @@ public static class CaptureService
         }
     }
 
+    /// <summary>
+    /// Tries to grab the selector's freeze frame WITHOUT blocking — succeeds only when the
+    /// duplication device is already warm. When it does, the overlay can open already frozen
+    /// and there is no live-to-frozen transition to see at all.
+    /// </summary>
+    public static Bitmap? TryCaptureFreezeFrameWarm()
+    {
+        var sw = Stopwatch.StartNew();
+        Rectangle screenRect = VirtualScreen;
+        if (!ShouldUseDesktopDuplication(screenRect) ||
+            !DesktopDuplicationCapture.TryCaptureWarm(screenRect, out Bitmap? warm))
+        {
+            Log.Info($"Perf freeze source: warm=miss ({sw.ElapsedMilliseconds} ms) — opening deferred");
+            return null;
+        }
+
+        Log.Info($"Perf freeze source: warm=dxgi {sw.ElapsedMilliseconds} ms size={screenRect.Width}x{screenRect.Height}");
+        return warm;
+    }
+
+    /// <summary>
+    /// The selector's freeze source when the warm grab missed. Deliberately NOT
+    /// <see cref="CaptureVirtualDesktop"/>'s order: that tries Windows Graphics Capture first,
+    /// and WGC's device is torn down after every capture on purpose — a live session draws
+    /// Windows' yellow capture border and does idle GPU work — so every freeze paid 100-460 ms
+    /// of setup for a frame nobody could reuse. Desktop Duplication draws no border, so its
+    /// device is allowed to stay warm, which is what makes the warm path above possible at all.
+    ///
+    /// Measured on this 3847x2291 three-monitor desktop (tools\bench-capture):
+    /// duplication warm 12-14 ms, duplication cold 155 ms, GDI BitBlt 83-87 ms, WGC 374 ms.
+    /// </summary>
+    public static Bitmap CaptureFreezeFrame()
+    {
+        var total = Stopwatch.StartNew();
+        Rectangle screenRect = VirtualScreen;
+        long duplicationMs = 0;
+        if (ShouldUseDesktopDuplication(screenRect))
+        {
+            var step = Stopwatch.StartNew();
+            bool captured = DesktopDuplicationCapture.TryCaptureRegion(screenRect, out Bitmap? duplicated);
+            duplicationMs = step.ElapsedMilliseconds;
+            if (captured)
+            {
+                Log.Info($"Perf freeze source: deferred=dxgi {duplicationMs} ms size={screenRect.Width}x{screenRect.Height}");
+                return duplicated!;
+            }
+        }
+
+        try
+        {
+            var blit = Stopwatch.StartNew();
+            Bitmap bitmap = CaptureScreenRegionWithBitBlt(screenRect, includeLayeredWindows: false);
+            Log.Info(
+                $"Perf freeze source: deferred=bitblt {blit.ElapsedMilliseconds} ms " +
+                $"(dxgi={duplicationMs} total={total.ElapsedMilliseconds}) size={screenRect.Width}x{screenRect.Height}");
+            return bitmap;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("BitBlt freeze capture failed; falling back to CopyFromScreen", ex);
+            return CaptureScreenRegionWithGraphics(screenRect);
+        }
+    }
+
+    /// <summary>
+    /// Builds the duplication device at app idle so the very first hotkey finds it warm.
+    /// Fire-and-forget; failure just means the selector takes its deferred path.
+    /// </summary>
+    public static void PrewarmFreezeSource()
+    {
+        Rectangle screenRect = VirtualScreen;
+        if (ShouldUseDesktopDuplication(screenRect))
+            DesktopDuplicationCapture.Prewarm(screenRect);
+    }
+
     /// <summary>Captures a rectangle given in physical screen coordinates.</summary>
     public static Bitmap CaptureScreenRegion(Rectangle screenRect)
     {
