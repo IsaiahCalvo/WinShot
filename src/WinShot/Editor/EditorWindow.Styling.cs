@@ -426,12 +426,18 @@ public partial class EditorWindow : Window
         return grid;
     }
 
-    /// <summary>Binds a preview's ink to the row's own Foreground, so checked/hover states carry.</summary>
+    /// <summary>
+    /// Binds a preview's ink to its own button's Foreground, so checked / hover / disabled
+    /// states carry. ButtonBase, not RadioButton: the same previews are the content of the
+    /// popover's rows AND of the toolbar button that opens it, and a binding that only looked
+    /// for a RadioButton found no ancestor on the toolbar and painted nothing at all.
+    /// </summary>
     private static System.Windows.Data.Binding ForegroundOfRow() =>
         new("Foreground")
         {
             RelativeSource = new System.Windows.Data.RelativeSource(
-                System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(RadioButton), 1),
+                System.Windows.Data.RelativeSourceMode.FindAncestor,
+                typeof(System.Windows.Controls.Primitives.ButtonBase), 1),
         };
 
     /// <summary>
@@ -455,6 +461,62 @@ public partial class EditorWindow : Window
         if (IsLoaded) RestyleSelectedArrow(style);
     }
 
+    private void OnStrokeStyleClick(object sender, RoutedEventArgs e)
+    {
+        BuildStrokeDashRows();
+        SyncStrokeStyleButtons();
+        OpenPopover(StrokeStylePopup, StrokeDashList);
+    }
+
+    private void BuildStrokeDashRows()
+    {
+        if (StrokeDashList.Children.Count > 0) return;
+        foreach (StrokeDash dash in Enum.GetValues<StrokeDash>())
+        {
+            var row = AddPopoverRow(StrokeDashList, "StrokeDash",
+                BuildDashPreview(dash), dash, $"{dash} outline");
+            StrokeDash picked = dash;
+            row.Click += (_, _) =>
+            {
+                _strokeDash = picked;
+                SyncStrokeStyleButtons();
+                ApplyStrokeStyleToSelection();
+                StrokeStylePopup.IsOpen = false;
+            };
+        }
+    }
+
+    /// <summary>
+    /// A 40x16 preview drawn with the same DashArray and cap the tool will use, so the row
+    /// IS the choice. Solid, dashed and dotted are three states; the glyph toggle that used
+    /// to hold them could only cycle, and told dashed from dotted by tooltip alone.
+    /// </summary>
+    private static Grid BuildDashPreview(StrokeDash dash)
+    {
+        const double w = 40, h = 16, t = 3;
+        var line = new System.Windows.Shapes.Line
+        {
+            X1 = 1,
+            Y1 = h / 2,
+            X2 = w - 1,
+            Y2 = h / 2,
+            StrokeThickness = t,
+            StrokeDashArray = StrokeStyles.DashArray(dash),
+            StrokeStartLineCap = StrokeStyles.CapFor(dash),
+            StrokeEndLineCap = StrokeStyles.CapFor(dash),
+            StrokeDashCap = StrokeStyles.CapFor(dash),
+            Width = w,
+            Height = h,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        line.SetBinding(Shape.StrokeProperty, ForegroundOfRow());
+
+        var grid = new Grid();
+        grid.Children.Add(line);
+        return grid;
+    }
+
     private void OnTextStyleClick(object sender, RoutedEventArgs e)
     {
         BuildTextStyleRows();
@@ -469,12 +531,14 @@ public partial class EditorWindow : Window
         {
             // Huge is the same look at double size; previewing it at double size would
             // blow the menu open, so every row previews at one readable size.
-            // ponytail: the size comes off the type scale; the INK stays literal white.
-            // The arrow preview binds its ink to the row, but this factory paints three
-            // different element kinds (TextBlock, Path, Border) from one Brush argument, so
-            // following the row would mean teaching the factory about rows.
+            // ponytail: the ink is the row's own resting foreground, not the row's live one.
+            // The arrow preview binds to the row so hover and checked carry; this factory
+            // paints three element kinds (TextBlock, Path, Border) from one Brush argument,
+            // so following the row would mean teaching the factory about rows. A token, not
+            // a literal white: TextPrimaryBrush is the same value over ElevatedBrush.
             FrameworkElement preview = AnnotationFactory.CreateStyledTextLabel(
-                style.ToString(), Brushes.White, (double)FindResource("TextBodyLg"), style);
+                style.ToString(), (Brush)FindResource("TextPrimaryBrush"),
+                (double)FindResource("TextBodyLg"), style);
             preview.VerticalAlignment = VerticalAlignment.Center;
             var row = AddPopoverRow(TextStyleList, "TextStyle", preview, style, $"{style} text");
             TextStyle picked = style;
@@ -1121,6 +1185,13 @@ public partial class EditorWindow : Window
         SvThumb.Fill = new SolidColorBrush(opaque);
         SvThumb.Stroke = new SolidColorBrush(ColorMath.TextOn(opaque));
         ColorPickerPreview.Fill = new SolidColorBrush(colour);
+
+        // The alpha track ramps from nothing to the colour it is the alpha OF, so which end
+        // is see-through is on the control instead of in the user's head.
+        var ramp = new LinearGradientBrush(Color.FromArgb(0, opaque.R, opaque.G, opaque.B), opaque, 0);
+        ramp.Freeze();
+        AlphaSlider.Background = ramp;
+        AlphaValue.Text = $"{Math.Round(_pickerAlpha / 2.55):0}%";
 
         _suppressHexEvents = true;
         try { ColorPickerHex.Text = ColorPickerMath.ToHex(colour); }

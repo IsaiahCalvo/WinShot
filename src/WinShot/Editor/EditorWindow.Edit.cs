@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -89,13 +90,19 @@ public partial class EditorWindow : Window
 
         Select(null);
         SD.Bitmap before = _source;
-        SD.Bitmap flat = annotations.Count > 0 ? Flatten() : before;
+        SD.Bitmap flat = before;
         SD.Bitmap? after = null;
         Exception? failed = null;
         _sourceOperationActive = true;
         Cursor = Cursors.Wait;
         try
         {
+            // Inside the try: Flatten allocates a RenderTargetBitmap the full size of the
+            // canvas, which Add capture can grow without bound, so it throws on exactly the
+            // picture a rotate is most likely to be asked of. Outside, that throw left an
+            // async void handler and came back as the generic "WinShot error" toast instead
+            // of the "Could not change the image" dialog twenty lines below.
+            if (annotations.Count > 0) flat = Flatten();
             after = await Task.Run(() => transform(flat));
         }
         catch (Exception ex)
@@ -485,7 +492,12 @@ public partial class EditorWindow : Window
         }
         catch (Exception ex)
         {
+            // Flatten can run out of memory on a tall scrolling capture, and B is a keyboard
+            // shortcut: without this the user pressed it and the app did nothing at all,
+            // which is the one action on the Image row with no failure feedback.
             Log.Error("Editor background composer failed", ex);
+            if (!_closed)
+                ThemedMessageDialog.Show(this, "Could not open the background composer", FriendlyError.For(ex));
         }
     }
 
@@ -938,9 +950,15 @@ public partial class EditorWindow : Window
     private void SyncExportGifButton()
     {
         if (ExportGifBtn is null) return;
-        ExportGifBtn.Visibility = ImageAnnotations().Count > 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        Visibility show = ImageAnnotations().Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (ExportGifBtn.Visibility == show) return;
+
+        // Appear only, on the same recipe as the row it sits in. The collapse reflows every
+        // control docked beside it, and there is no softening a layout jump you are also
+        // removing the space for — so the honest trade is to ease the arrival and cut the exit.
+        ExportGifBtn.Visibility = show;
+        if (show == Visibility.Visible)
+            ExportGifBtn.BeginStoryboard((Storyboard)FindResource("ContextSwapIn"));
     }
 
     /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>

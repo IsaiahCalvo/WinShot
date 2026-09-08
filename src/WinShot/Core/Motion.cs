@@ -114,9 +114,12 @@ internal static class Motion
     /// no <paramref name="onDone"/>. Disposing after it finished does nothing.
     ///
     /// With animation turned off system-wide the end state is applied inline and no timer is
-    /// ever created.
+    /// ever created — and the return is NULL in that case, not an inert handle. It has to be:
+    /// the inline path runs <paramref name="onDone"/> before Run returns, so a caller whose
+    /// onDone nulls its own field would then have a non-null sentinel assigned back over that
+    /// null, and any later "is a tween running?" test would read backwards.
     /// </summary>
-    public static IDisposable Run(
+    public static IDisposable? Run(
         int durationMs,
         Func<double, double> ease,
         Action<double> onFrame,
@@ -129,7 +132,7 @@ internal static class Motion
         {
             onFrame(1d);
             onDone?.Invoke();
-            return Finished;
+            return null;
         }
 
         return new Tween(durationMs, ease, onFrame, onDone);
@@ -192,14 +195,6 @@ internal static class Motion
             timer.Stop();
             timer.Dispose();
         }
-    }
-
-    /// <summary>A handle for a tween that never started; disposing it is a no-op.</summary>
-    private static readonly IDisposable Finished = new NoTween();
-
-    private sealed class NoTween : IDisposable
-    {
-        public void Dispose() { }
     }
 
     private sealed class Tween : IDisposable

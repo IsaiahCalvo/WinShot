@@ -58,7 +58,7 @@ public class MotionEdgeCaseTests
         bool started = false;
         IDisposable? inner = null;
 
-        using IDisposable outer = Motion.Run(200, p => p, p =>
+        using IDisposable? outer = Motion.Run(200, p => p, p =>
         {
             if (!started && p > 0)
             {
@@ -88,7 +88,7 @@ public class MotionEdgeCaseTests
         Assert.Equal(0, Motion.Holders);
 
         int frames = 0;
-        using IDisposable handle = Motion.Run(200, p => p, _ =>
+        using IDisposable? handle = Motion.Run(200, p => p, _ =>
         {
             frames++;
             throw new InvalidOperationException("boom");
@@ -123,7 +123,7 @@ public class MotionEdgeCaseTests
 
         PumpUntil(() => secondDone > 0);
         second?.Dispose();
-        first.Dispose();
+        first!.Dispose();
 
         Assert.Equal(0, firstDone);                 // cancelled, so no final frame and no onDone
         Assert.Equal(1, secondDone);
@@ -148,7 +148,7 @@ public class MotionEdgeCaseTests
         Assert.Equal(3, frames);
         Assert.Equal(0, done);
         Assert.Equal(0, Motion.Holders);
-        handle.Dispose();
+        handle!.Dispose();
     }
 
     // ---------------------------------------------------------- DarkControls

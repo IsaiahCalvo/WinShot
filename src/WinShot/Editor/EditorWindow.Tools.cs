@@ -579,6 +579,10 @@ public partial class EditorWindow : Window
         // re-asking "is a repaint due?" would queue the same marks again forever.
         foreach (UIElement element in pending)
         {
+            // A mark queued mid-gesture can be deleted or undone before the flush reaches it.
+            // Painting a detached Rectangle is wasted GDI on exactly the large redactions the
+            // rate limit exists for, and the set would hold it alive until the next flush.
+            if (!AnnotationCanvas.Children.Contains(element)) continue;
             if (element is System.Windows.Shapes.Rectangle mark && mark.Tag is AnnotationData meta)
                 RepaintPixelBackedMark(mark, meta);
         }

@@ -1495,8 +1495,11 @@ public class QuickAccessOverlayInteractionTests
                 using var landed = new FastQuickActionsWindow(bitmap, settings);
                 landed.Show();
 
-                // The trap itself, asserted: the tween is over, and its handle is not null.
-                Assert.NotNull(EnterMotion(landed));
+                // The trap itself, asserted: the tween is over. With animations off Motion.Run
+                // finishes inline and answers null rather than an inert sentinel, so the
+                // handle field is the null its own onDone left — which is why "has the
+                // entrance landed?" is the RUNNING flag and never the handle.
+                Assert.Null(EnterMotion(landed));
                 Assert.False(EnterMotionRunning(landed));
 
                 SD.Rectangle area = WF.Screen.FromRectangle(landed.Bounds).WorkingArea;

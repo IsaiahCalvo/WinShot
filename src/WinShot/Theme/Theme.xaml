@@ -1071,6 +1071,58 @@
         </Setter>
     </Style>
 
+    <!-- ====================================================================
+         SPECTRUM SLIDER — a slider whose TRACK is the thing it selects: the hue
+         wheel, or the picked colour fading out. DarkSlider paints the filled
+         portion accent blue, which on a hue slider means the control that
+         chooses a colour is the one control that never shows one. Background is
+         the gradient; both repeat buttons are transparent so nothing covers it.
+         ==================================================================== -->
+    <Style x:Key="SpectrumSlider" TargetType="Slider">
+        <Setter Property="Height" Value="20"/>
+        <Setter Property="MinWidth" Value="120"/>
+        <Setter Property="IsMoveToPointEnabled" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid VerticalAlignment="Center">
+                        <Border Height="8" CornerRadius="4" VerticalAlignment="Center"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"/>
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="Slider.IncreaseLarge" Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent"/>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource SliderThumb}"/>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="DarkSlider" TargetType="Slider">
         <Setter Property="Height" Value="20"/>
         <Setter Property="MinWidth" Value="120"/>

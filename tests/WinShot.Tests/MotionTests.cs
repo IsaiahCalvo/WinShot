@@ -178,7 +178,7 @@ public class MotionTests
             var frames = new List<double>();
             int done = 0;
 
-            using IDisposable handle = Motion.Run(300, p => p, frames.Add, () => done++);
+            using IDisposable? handle = Motion.Run(300, p => p, frames.Add, () => done++);
             Assert.Equal(1, Motion.Holders);
 
             PumpUntil(() => done > 0);
@@ -200,7 +200,7 @@ public class MotionTests
             var frames = new List<double>();
             bool done = false;
 
-            using IDisposable handle = Motion.Run(300, Motion.EaseOutBack, frames.Add, () => done = true);
+            using IDisposable? handle = Motion.Run(300, Motion.EaseOutBack, frames.Add, () => done = true);
             PumpUntil(() => done);
 
             Assert.Contains(frames, f => f > 1d);   // only EaseOutBack produces these
@@ -221,11 +221,11 @@ public class MotionTests
             var frames = new List<double>();
             int done = 0;
 
-            IDisposable handle = Motion.Run(4000, p => p, frames.Add, () => done++);
+            IDisposable? handle = Motion.Run(4000, p => p, frames.Add, () => done++);
             Assert.Equal(1, Motion.Holders);
             PumpUntil(() => frames.Count > 0);
 
-            handle.Dispose();
+            handle!.Dispose();
             int atCancel = frames.Count;
             Assert.Equal(0, Motion.Holders);
 
@@ -251,7 +251,7 @@ public class MotionTests
             var frames = new List<double>();
             int done = 0;
 
-            using IDisposable handle = Motion.Run(400, Motion.EaseOutBack, frames.Add, () => done++);
+            using IDisposable? handle = Motion.Run(400, Motion.EaseOutBack, frames.Add, () => done++);
 
             Assert.Equal(new[] { 1d }, frames);
             Assert.Equal(1, done);
@@ -265,7 +265,7 @@ public class MotionTests
         using (Animations.ForcedOn())
         {
             var frames = new List<double>();
-            using IDisposable handle = Motion.Run(0, p => p, frames.Add);
+            using IDisposable? handle = Motion.Run(0, p => p, frames.Add);
 
             Assert.Equal(new[] { 1d }, frames);
             Assert.Equal(0, Motion.Holders);

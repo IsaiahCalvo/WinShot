@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using System.IO;
 using WinShot.Core;
 using WinShot.Recording;
@@ -373,9 +373,9 @@ public class SettingsUpgradeAndEdgeCaseTests
     public void MotionHoldersReturnToZero_AfterACancelledTweenAndAFinishedOne()
     {
         Assert.Equal(0, Motion.Holders);
-        IDisposable a = Motion.Run(5000, Motion.EaseOutBack, _ => { });
+        IDisposable? a = Motion.Run(5000, Motion.EaseOutBack, _ => { });
         Assert.Equal(1, Motion.Holders);
-        a.Dispose();
+        a!.Dispose();
         Assert.Equal(0, Motion.Holders);
         a.Dispose(); // double dispose must not underflow
         Assert.Equal(0, Motion.Holders);

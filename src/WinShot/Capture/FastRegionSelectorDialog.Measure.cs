@@ -1042,7 +1042,7 @@ public sealed partial class FastRegionSelectorDialog
 
         StopHintEntrance();
         bool finished = false;
-        IDisposable tween = Motion.Run(
+        IDisposable? tween = Motion.Run(
             Motion.QuickMs,
             Motion.EaseInCubic,
             amount =>
@@ -1070,7 +1070,7 @@ public sealed partial class FastRegionSelectorDialog
         StopHintEntrance();
         _hintAmount = from;
         bool finished = false;
-        IDisposable tween = Motion.Run(
+        IDisposable? tween = Motion.Run(
             Motion.EnterDurationMs,
             Motion.EaseOutCubic,
             amount =>

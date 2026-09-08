@@ -423,6 +423,30 @@ public class EditorHardeningTests
         Assert.True(EditorWindow.RedactRepaintDue(long.MaxValue, 250));
     }
 
+    /// <summary>
+    /// With animations off, Run applies the end state and runs onDone INLINE — before it
+    /// returns. A caller whose onDone nulls its own tween field then had a sentinel handle
+    /// assigned back over that null, so the field read "a tween is running" forever after.
+    /// Run answers null on that path, which is the only answer a field can hold truthfully.
+    /// </summary>
+    [Fact]
+    public void RunAnswersNullWhenItFinishedBeforeItReturned()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        try
+        {
+            Motion.AnimationsEnabled = () => false;
+            IDisposable? handle = null;
+            double last = 0;
+            handle = Motion.Run(200, Motion.EaseOutCubic, p => last = p, () => handle = null);
+
+            Assert.Equal(1d, last, 6);
+            Assert.Null(handle);
+            Assert.Equal(0, Motion.Holders);
+        }
+        finally { Motion.AnimationsEnabled = previous; }
+    }
+
     // ----------------------------------- does Motion.Run tick under a WPF Dispatcher loop?
 
     /// <summary>

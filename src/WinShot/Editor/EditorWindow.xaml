@@ -19,8 +19,14 @@
              category holds live in the 34 DIP sub-row below, which floats over
              the canvas instead of pushing it down. -->
         <Border x:Name="TopToolbar" Grid.Row="0" Style="{StaticResource FloatingToolbar}" Margin="12,12,12,6">
-            <DockPanel x:Name="ToolbarPrimaryRow">
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+            <!-- ClipToBounds because a DockPanel does not clip its fill child: on a display
+                 that cannot hold 1152 DIP the window's minimum is lowered to fit (see
+                 ClampMinimumsTo), and an unclipped context row arranged its buttons from
+                 x=0 outward straight over the Save as… / Done pair docked to its right.
+                 The pair is also given the higher ZIndex, so it stays on top of anything
+                 that reaches it. -->
+            <DockPanel x:Name="ToolbarPrimaryRow" ClipToBounds="True">
+                <StackPanel DockPanel.Dock="Right" Panel.ZIndex="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <StackPanel x:Name="CropPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                         <!-- Primary last, like every other button pair in the app. -->
                         <Button Style="{StaticResource PillButtonSecondary}" Content="Cancel" Click="OnCancelCrop"
@@ -94,7 +100,14 @@
                 </StackPanel>
 
                 <!-- The active tool's own controls, inline in this row. Every panel
-                     hides rather than greys, so the row shrinks to what is relevant. -->
+                     hides rather than greys, so the row shrinks to what is relevant.
+                     The fill child scrolls rather than being cut off: below 1152 DIP the
+                     crop group's last ~150 DIP (rotate / flip / Image size / Snap) had no
+                     route to it at all. The bar is the app's own 8 DIP slim one and only
+                     appears when there is something past the edge. -->
+                <ScrollViewer x:Name="ContextScroll" Focusable="False"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                              VerticalAlignment="Center" PanningMode="HorizontalOnly">
                 <StackPanel x:Name="ContextPanel" Orientation="Horizontal" VerticalAlignment="Center"
                             Visibility="Collapsed">
                     <Rectangle x:Name="ContextDivider" Style="{StaticResource ToolbarDivider}"/>
@@ -126,9 +139,11 @@
 
                                     <!-- Save stays docked right so saving the FIRST colour cannot move the
                                          button out from under the pointer; the row it creates eases in. -->
-                                    <DockPanel Margin="0,10,0,0" LastChildFill="True">
+                                    <DockPanel Margin="0,12,0,0" LastChildFill="True">
                                         <Button x:Name="SaveColorBtn" DockPanel.Dock="Right" VerticalAlignment="Bottom"
-                                                Style="{StaticResource ToolIconButton}" Width="26" Height="26"
+                                                Style="{StaticResource ToolIconButton}"
+                                                Width="{StaticResource SubToolButtonSize}"
+                                                Height="{StaticResource SubToolButtonSize}"
                                                 FontSize="{StaticResource GlyphBadge}" Content="&#xE710;" Click="OnSaveColor"
                                                 ToolTip="Save this color" AutomationProperties.Name="Save color"
                                                 AutomationProperties.HelpText="Keep the current color in My colors."/>
@@ -139,7 +154,7 @@
                                         </StackPanel>
                                     </DockPanel>
 
-                                    <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10"/>
+                                    <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,12"/>
 
                                     <!-- Saturation across, value up, with hue and alpha under it. -->
                                     <Border x:Name="SvSquareBorder" Height="104" CornerRadius="{StaticResource RadiusChip}"
@@ -166,34 +181,65 @@
                                         </Grid>
                                     </Border>
 
-                                    <Slider x:Name="HueSlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="360"
-                                            Margin="0,10,0,0" ValueChanged="OnHueChanged"
+                                    <!-- The track IS the choice on both of these: a hue slider
+                                         with no hue on it is drag-and-watch-the-square, and an
+                                         alpha slider with no ramp says nothing about which end
+                                         is see-through. The alpha ramp runs over the popover's
+                                         own dark surface rather than a checkerboard — one less
+                                         layer, and "less colour" still reads as "more
+                                         transparent" — and the percentage beside it matches the
+                                         toolbar's own opacity readout. -->
+                                    <Slider x:Name="HueSlider" Style="{StaticResource SpectrumSlider}" Minimum="0" Maximum="360"
+                                            Margin="0,12,0,0" ValueChanged="OnHueChanged"
                                             ToolTip="Hue" AutomationProperties.Name="Hue"
-                                            AutomationProperties.HelpText="Rotate the color around the wheel."/>
-                                    <Slider x:Name="AlphaSlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="100" Value="100"
-                                            Margin="0,6,0,0" ValueChanged="OnAlphaChanged"
-                                            ToolTip="Opacity" AutomationProperties.Name="Color opacity"
-                                            AutomationProperties.HelpText="How see-through the color is."/>
+                                            AutomationProperties.HelpText="Rotate the color around the wheel.">
+                                        <Slider.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                <GradientStop Color="#FF0000" Offset="0"/>
+                                                <GradientStop Color="#FFFF00" Offset="0.1667"/>
+                                                <GradientStop Color="#00FF00" Offset="0.3333"/>
+                                                <GradientStop Color="#00FFFF" Offset="0.5"/>
+                                                <GradientStop Color="#0000FF" Offset="0.6667"/>
+                                                <GradientStop Color="#FF00FF" Offset="0.8333"/>
+                                                <GradientStop Color="#FF0000" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Slider.Background>
+                                    </Slider>
+                                    <DockPanel Margin="0,6,0,0" LastChildFill="True">
+                                        <TextBlock x:Name="AlphaValue" DockPanel.Dock="Right" Text="100%"
+                                                   Style="{StaticResource ValueLabel}" MinWidth="38"
+                                                   TextAlignment="Right" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                        <Slider x:Name="AlphaSlider" Style="{StaticResource SpectrumSlider}" Minimum="0" Maximum="100" Value="100"
+                                                ValueChanged="OnAlphaChanged"
+                                                ToolTip="Opacity" AutomationProperties.Name="Color opacity"
+                                                AutomationProperties.HelpText="How see-through the color is."/>
+                                    </DockPanel>
 
-                                    <Grid Margin="0,10,0,0">
+                                    <Grid Margin="0,12,0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <!-- A real focusable control, not a bare Rectangle: the
                                              "Copy as" formats hang off this, and a Shape can never
                                              take keyboard focus, so Shift+F10 went to the hex box
                                              instead and the whole feature was mouse-only. -->
                                         <Button x:Name="ColorPickerPreviewButton" Grid.Column="0"
-                                                Style="{StaticResource ColorWellButton}" Cursor="Hand"
+                                                Style="{StaticResource SwatchButton}"
                                                 Click="OnColorPickerPreviewClick"
                                                 ToolTip="Copy this color in another format"
                                                 AutomationProperties.Name="Copy as"
                                                 AutomationProperties.HelpText="Open the list of color formats to copy.">
-                                            <Rectangle x:Name="ColorPickerPreview" Width="16" Height="16" RadiusX="3" RadiusY="3"/>
+                                            <!-- 20 inside a 22 px cell: the palette swatches are
+                                                 22 px of solid colour edge to edge, and a smaller
+                                                 chip made the one swatch that says what colour is
+                                                 CURRENT read a size below every swatch above it. -->
+                                            <Rectangle x:Name="ColorPickerPreview" Width="20" Height="20" RadiusX="3" RadiusY="3"/>
                                         </Button>
                                         <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
                                                  KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
                                                  ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
                                         <Button x:Name="PickerEyedropperBtn" Grid.Column="2" Style="{StaticResource ToolIconButton}"
-                                                Width="30" Height="30" FontSize="{StaticResource GlyphBadge}" Content="&#xEF3C;"
+                                                Width="{StaticResource SubToolButtonSize}"
+                                                Height="{StaticResource SubToolButtonSize}"
+                                                FontSize="{StaticResource GlyphBadge}" Content="&#xEF3C;"
                                                 Click="OnPickerEyedropper" ToolTip="Pick a color from the image"
                                                 AutomationProperties.Name="Eyedropper"
                                                 AutomationProperties.HelpText="Sample a color from the image, then come back here."/>
@@ -276,19 +322,44 @@
                         </Popup>
                     </StackPanel>
 
-                    <!-- The outline's own two choices. Their own panel, not the fill group's:
+                    <!-- The outline's own choices. Their own panel, not the fill group's:
                          an arrow has an outline and no fill, and the hand-drawn line is
-                         meaningless if it only reaches two of the six tools that draw one. -->
+                         meaningless if it only reaches two of the six tools that draw one.
+
+                         A popover with drawn previews, like arrow style and text style, not
+                         two glyph toggles. Solid / dashed / dotted is three states, which a
+                         two-state toggle can only express by cycling — the pressed chip and
+                         the accessible name were identical for dashed and dotted, and only a
+                         tooltip told them apart. The glyphs were worse than nothing: the dash
+                         toggle wore MDL2 E72D, which is Share (the card menu has a real
+                         Share… row), and the sketch toggle wore a pencil, which is what the
+                         Draw category button means. A line drawn in the style it selects
+                         cannot be mistaken for either. -->
                     <StackPanel x:Name="StrokePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <ToggleButton x:Name="DashToolBtn" Style="{StaticResource ToolButton}"
-                                      Content="&#xE72D;" ToolTip="Dashed outline (again for dotted)"
-                                      Click="OnDashClick" AutomationProperties.Name="Outline dashes"
-                                      AutomationProperties.HelpText="Cycle the outline between solid, dashed and dotted."/>
-                        <ToggleButton x:Name="SketchToolBtn" Style="{StaticResource ToolButton}"
-                                      Content="&#xEC87;" ToolTip="Hand-drawn outline"
-                                      Click="OnSketchClick" AutomationProperties.Name="Hand-drawn outline"
-                                      AutomationProperties.HelpText="Draw with a sketched, hand-drawn line instead of a ruled one."/>
+                        <!-- No glyph: the button draws the line it currently selects, so the
+                             control that chooses an outline style is the one place the active
+                             style is visible. SyncStrokeStyleButtons paints it. -->
+                        <Button x:Name="StrokeStyleButton" Style="{StaticResource ToolIconButton}"
+                                Click="OnStrokeStyleClick" ToolTip="Outline style"
+                                AutomationProperties.Name="Outline style"
+                                AutomationProperties.HelpText="Choose a solid, dashed or dotted outline, and whether it is ruled or hand-drawn."/>
+                        <Popup x:Name="StrokeStylePopup" PlacementTarget="{Binding ElementName=StrokeStyleButton}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Style="{StaticResource PopoverSurface}">
+                                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                                <StackPanel Width="184">
+                                    <TextBlock Text="Outline" Style="{StaticResource FieldLabel}" Margin="8,2,8,8"/>
+                                    <StackPanel x:Name="StrokeDashList"/>
+                                    <Rectangle Height="1" Margin="8,6" Fill="{StaticResource BorderBrush}"/>
+                                    <CheckBox x:Name="SketchCheck" Style="{StaticResource DarkCheckBox}" Content="Hand-drawn"
+                                              Margin="10,2,10,6" Click="OnSketchClick"
+                                              ToolTip="Draw the line with a sketched wobble instead of a ruled one"
+                                              AutomationProperties.Name="Hand-drawn outline"
+                                              AutomationProperties.HelpText="Draw with a sketched, hand-drawn line instead of a ruled one."/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
                     </StackPanel>
 
                     <StackPanel x:Name="MagnifyPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -370,7 +441,7 @@
                              and living inside the strength group made it vanish for the one
                              style that has no strength. -->
                         <CheckBox x:Name="RedactTextOnlyCheck" Style="{StaticResource DarkCheckBox}" Content="Text only"
-                                  Margin="10,0,0,0" VerticalAlignment="Center"
+                                  Margin="12,0,0,0" VerticalAlignment="Center"
                                   ToolTip="Cover only the words in the region, leaving pictures visible"
                                   AutomationProperties.Name="Redact text only"
                                   AutomationProperties.HelpText="Read the region and cover each word it finds, leaving photos and graphics visible."/>
@@ -378,7 +449,12 @@
 
                     <!-- Continuous, and gone entirely for Black Out — there is no such
                          thing as a stronger or weaker black rectangle. -->
-                    <StackPanel x:Name="RedactStrengthPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                    <StackPanel x:Name="RedactStrengthPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center"
+                                Margin="12,0,0,0">
+                        <!-- The margin the "Text only" checkbox beside it carries: without it
+                             the last glyph of "only" and the first pixel of the slider's
+                             track were adjacent, where every other group in this row is
+                             separated by a divider or a gap. -->
                         <Slider x:Name="RedactStrengthSlider" Style="{StaticResource DarkSlider}" Width="110"
                                 Minimum="1" Maximum="100" Value="45" SmallChange="1" LargeChange="10"
                                 ValueChanged="OnRedactStrengthChanged" PreviewMouseUp="OnRedactStrengthReleased"
@@ -448,6 +524,7 @@
                                    TextAlignment="Right" Margin="6,0,0,0"/>
                     </StackPanel>
                 </StackPanel>
+                </ScrollViewer>
             </DockPanel>
         </Border>
 

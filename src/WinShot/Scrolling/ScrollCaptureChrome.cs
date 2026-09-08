@@ -69,7 +69,7 @@ internal static class ScrollChromeFade
     /// names -- QuickMs is for hover fills and other same-place tint changes.</summary>
     public const int DurationMs = Motion.EnterDurationMs;
 
-    public static IDisposable In(Action<byte> apply)
+    public static IDisposable? In(Action<byte> apply)
     {
         apply(0);
         return Motion.Run(DurationMs, Motion.EaseOutCubic, p => apply(Alpha(p)));
@@ -92,7 +92,7 @@ internal static class ScrollChromeFade
     /// dim brightened to solid before it left. Every other ramp on these surfaces reads its
     /// live value; this one has to be told.
     /// </summary>
-    public static Task Out(Action<byte> apply, byte from, out IDisposable handle)
+    public static Task Out(Action<byte> apply, byte from, out IDisposable? handle)
     {
         double start = from / 255d;
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

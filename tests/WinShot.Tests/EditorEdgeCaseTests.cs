@@ -135,18 +135,18 @@ public class EditorEdgeCaseTests
         try
         {
             bool done = false;
-            var h = Motion.Run(200, Motion.EaseOutCubic, _ => { }, () => done = true);
+            IDisposable? h = Motion.Run(200, Motion.EaseOutCubic, _ => { }, () => done = true);
             Assert.True(done);
             Assert.Equal(start, Motion.Holders);
-            h.Dispose();
+            h?.Dispose();
             Assert.Equal(start, Motion.Holders);
         }
         finally { Motion.AnimationsEnabled = prev; }
 
         // cancelled mid-flight, never ticked
-        var live = Motion.Run(5000, Motion.EaseOutCubic, _ => { });
+        IDisposable? live = Motion.Run(5000, Motion.EaseOutCubic, _ => { });
         Assert.Equal(start + 1, Motion.Holders);
-        live.Dispose();
+        live!.Dispose();
         Assert.Equal(start, Motion.Holders);
         live.Dispose(); // double dispose must not unbalance
         Assert.Equal(start, Motion.Holders);

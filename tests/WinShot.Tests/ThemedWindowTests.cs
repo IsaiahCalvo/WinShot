@@ -1013,7 +1013,7 @@ public class ThemedWindowTests
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
             "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
-            "SnapToEdgesCheck", "RedactTextOnlyCheck", "DashToolBtn", "SketchToolBtn", "MagnifySlider",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck", "StrokeStyleButton", "SketchCheck", "MagnifySlider",
             "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
             "BorderTabBtn", "FillTabBtn", "SaveColorBtn", "PickerEyedropperBtn", "HueSlider", "AlphaSlider",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
@@ -1035,7 +1035,7 @@ public class ThemedWindowTests
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
             "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn",
-            "SnapToEdgesCheck", "RedactTextOnlyCheck", "DashToolBtn", "SketchToolBtn",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck", "StrokeStyleButton",
             "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
             "SaveColorBtn", "PickerEyedropperBtn",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
@@ -1051,16 +1051,20 @@ public class ThemedWindowTests
         // Every popover animates in from its anchor edge, which needs its own (unfrozen)
         // ScaleTransform on the surface — a Style-set one would be shared and frozen, and
         // animating a frozen Freezable throws the first time a popup opens.
-        foreach (string name in new[]
+        // Driven off ToolbarPopups(), not a literal list: FillPopup was missing from the
+        // literal one, so the single popover that could regress into a first-open crash was
+        // the one nothing watched. A new popover joins that list to work at all.
+        var popups = (Array)typeof(EditorWindow)
+            .GetMethod("ToolbarPopups", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, null)!;
+        Assert.True(popups.Length >= 8, $"only {popups.Length} toolbar popovers were enumerated.");
+        foreach (object entry in popups)
         {
-            "SelectModePopup", "ColorPickerPopup", "SizePresetPopup",
-            "ArrowStylePopup", "TextStylePopup", "CropRatioPopup", "RedactStylePopup",
-        })
-        {
-            var popup = Assert.IsType<Popup>(editor.FindName(name));
+            var popup = (Popup)entry.GetType().GetField("Item1")!.GetValue(entry)!;
+            var owner = (Control)entry.GetType().GetField("Item2")!.GetValue(entry)!;
             var surface = Assert.IsType<Border>(popup.Child);
             Assert.IsType<ScaleTransform>(surface.RenderTransform);
-            Assert.False(surface.RenderTransform.IsFrozen, name);
+            Assert.False(surface.RenderTransform.IsFrozen, owner.Name);
         }
 
         var select = (RadioButton)editor.FindName("SelectToolBtn")!;
@@ -1219,6 +1223,7 @@ public class ThemedWindowTests
         var toolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.True(toolbar.ActualWidth <= editor.ActualWidth);
         ToolbarFitsAtMinimumWidth(editor);
+        ContextRowNeverCoversTheFinishPair(editor);
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
     }
 
@@ -1235,6 +1240,57 @@ public class ThemedWindowTests
     /// minimum instead of forcing its Done button off the right edge. On such a display the
     /// arithmetic assertion is the contract; the clipping one has nothing to say.
     /// </summary>
+    /// <summary>
+    /// Below 1152 DIP the window's minimum is lowered to whatever the display holds, so the
+    /// primary row is given less than it needs — and a DockPanel does not clip its fill child,
+    /// so the context row's buttons used to be arranged from x=0 outward straight across the
+    /// Save as… / Done pair docked to its right. Two facts hold instead: the overflow is
+    /// scrollable rather than gone, and the finish pair is never painted over.
+    /// </summary>
+    private static void ContextRowNeverCoversTheFinishPair(EditorWindow editor)
+    {
+        var scroll = (ScrollViewer)editor.FindName("ContextScroll")!;
+        var context = (StackPanel)editor.FindName("ContextPanel")!;
+        var save = (Button)editor.FindName("BtnSave")!;
+        var check = typeof(EditorWindow).GetMethod("CheckToolButton",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        double width = editor.Width;
+        int overflowed = 0;
+        try
+        {
+            // The narrowest real case: a 1920x1080 display at 200 % is 960 DIP.
+            editor.MinWidth = 400;
+            editor.Width = 700;
+            foreach (EditorTool tool in Enum.GetValues<EditorTool>())
+            {
+                check.Invoke(editor, new object[] { tool });
+                editor.UpdateLayout();
+                if (context.Visibility != Visibility.Visible) continue;
+
+                Assert.True(scroll.ViewportWidth <= scroll.ExtentWidth + 0.5,
+                    $"{tool}: the context row reports more viewport than content.");
+                // The row's own painted extent stops at the scroller; the docked pair starts
+                // after it. A fill child that overran would put these the other way round.
+                Point rowRight = scroll.TranslatePoint(new Point(scroll.ActualWidth, 0), editor);
+                Point saveLeft = save.TranslatePoint(new Point(0, 0), editor);
+                Assert.True(rowRight.X <= saveLeft.X + 0.5,
+                    $"{tool}: the context row reaches {rowRight.X:0} DIP, past Save as… at {saveLeft.X:0}.");
+                if (scroll.ExtentWidth > scroll.ViewportWidth + 0.5) overflowed++;
+            }
+
+            // Otherwise the two assertions above are true of a row that always fits, and the
+            // case this method exists for was never reached.
+            Assert.True(overflowed > 0, "no tool overflowed a 700 DIP row, so nothing was tested.");
+        }
+        finally
+        {
+            editor.MinWidth = EditorShellContract.MinimumEditorLogicalWidth;
+            editor.Width = width;
+            editor.UpdateLayout();
+        }
+    }
+
     private static void ToolbarFitsAtMinimumWidth(EditorWindow editor)
     {
         var primaryRow = (DockPanel)editor.FindName("ToolbarPrimaryRow")!;

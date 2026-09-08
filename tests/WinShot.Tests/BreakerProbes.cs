@@ -48,9 +48,9 @@ public class BreakerProbes
         using var _ = new Anim(true);
         Assert.Equal(0, Motion.Holders);
         byte last = 255;
-        Task done = ScrollChromeFade.Out(a => last = a, 255, out IDisposable handle);
+        Task done = ScrollChromeFade.Out(a => last = a, 255, out IDisposable? handle);
         PumpUntil(() => done.IsCompleted);
-        handle.Dispose();
+        handle!.Dispose();
         Assert.True(done.IsCompleted);
         Assert.Equal(0, last);
         PumpUntil(() => Motion.Holders == 0, 2000);
@@ -67,9 +67,9 @@ public class BreakerProbes
     {
         using var _ = new Anim(true);
         Assert.Equal(0, Motion.Holders);
-        Task done = ScrollChromeFade.Out(_ => { }, 255, out IDisposable handle);
+        Task done = ScrollChromeFade.Out(_ => { }, 255, out IDisposable? handle);
         Assert.Equal(1, Motion.Holders);
-        handle.Dispose();
+        handle!.Dispose();
         Assert.Equal(0, Motion.Holders);
         Assert.False(done.IsCompleted, "a cancelled tween must not report that it finished");
     }
@@ -79,11 +79,16 @@ public class BreakerProbes
     {
         using var _ = new Anim(false);
         var seen = new List<byte>();
-        using IDisposable h = ScrollChromeFade.In(seen.Add);
+        using IDisposable? h = ScrollChromeFade.In(seen.Add);
         Assert.Equal(new byte[] { 0, 255 }, seen);
         seen.Clear();
-        Task done = ScrollChromeFade.Out(seen.Add, 255, out IDisposable outHandle);
-        outHandle.Dispose();
+        Task done = ScrollChromeFade.Out(seen.Add, 255, out IDisposable? outHandle);
+        // Both handles are null: with animations off Motion.Run applies the end state and
+        // runs its completion INLINE, so there is nothing left to cancel by the time either
+        // call returns. Disposing null is the caller's normal `?.Dispose()`.
+        Assert.Null(h);
+        Assert.Null(outHandle);
+        outHandle?.Dispose();
         Assert.True(done.IsCompleted);
         Assert.Equal(new byte[] { 0 }, seen);
         Assert.Equal(0, Motion.Holders);

@@ -67,7 +67,13 @@ public class AnnotationEditorRenderHarness
                 var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
                 SelectTool(editor, EditorTool.Select);
                 Pump(4);
+                // The SAME state at all three scales, so the three files can actually be
+                // diffed against each other. The old pair was captured in two different tool
+                // states, which made every comparison 5 % differing pixels that meant nothing
+                // — and there was no 150 % pass at all, which is the scale Isaiah runs.
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-primary-shell.png"));
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-150pct.png"), dpi: 144);
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-200pct.png"), dpi: 192);
 
                 var filledRectangle = (RadioButton)editor.FindName("FilledRectangleToolBtn")!;
                 filledRectangle.IsChecked = true;
@@ -95,7 +101,6 @@ public class AnnotationEditorRenderHarness
                 UIElement selectedRectangle = AddRepresentativeAnnotations(canvas);
                 Pump(6);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-annotations-overview.png"));
-                RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-200pct.png"), dpi: 192);
 
                 SelectTool(editor, EditorTool.Rectangle);
                 InvokePrivate(editor, "Select", selectedRectangle);
@@ -150,8 +155,22 @@ public class AnnotationEditorRenderHarness
         thread.Join();
 
         Assert.Null(failure);
-        // Eleven painted renders, each already pixel-scanned by SaveBitmap.
-        Assert.Equal(11, Directory.GetFiles(outDir, "*.png").Length);
+        // Twelve painted renders, each already pixel-scanned by SaveBitmap.
+        Assert.Equal(12, Directory.GetFiles(outDir, "*.png").Length);
+
+        // The three scale passes are one state rendered three ways, so their pixel sizes are
+        // exact multiples. Anything else means the states drifted apart again.
+        var shell = new SD.Bitmap(Path.Combine(outDir, "editor-after-primary-shell.png"));
+        var at150 = new SD.Bitmap(Path.Combine(outDir, "editor-after-shell-150pct.png"));
+        var at200 = new SD.Bitmap(Path.Combine(outDir, "editor-after-shell-200pct.png"));
+        using (shell)
+        using (at150)
+        using (at200)
+        {
+            Assert.Equal(Math.Round(shell.Width * 1.5), at150.Width);
+            Assert.Equal(shell.Width * 2, at200.Width);
+            Assert.Equal(shell.Height * 2, at200.Height);
+        }
     }
 
     private static SD.Bitmap CreateSanitizedSource()

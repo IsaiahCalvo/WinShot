@@ -1102,6 +1102,7 @@ public partial class EditorWindow : Window
         (RedactStylePopup, RedactStyleButton),
         (CropRatioPopup, CropRatioButton),
         (FillPopup, FillStyleButton),
+        (StrokeStylePopup, StrokeStyleButton),
         (ColorPickerPopup, CurrentColorIndicator),
     };
 
@@ -1178,7 +1179,14 @@ public partial class EditorWindow : Window
     private void SyncCategoryToTool()
     {
         if (EditorShellContract.CategoryOf(_tool) is not EditorToolCategory category)
+        {
+            // Cursor and Pan belong to no category. Returning here left the last category's
+            // chip lit beside the armed pointer chip — two chips in one row, at one weight,
+            // meaning two different things — with its sub-row still open and nothing in it
+            // armed. No category, no drawer.
+            CloseCategoryDrawer();
             return;
+        }
         _category = category;
         _syncingCategory = true;
         try
@@ -1191,6 +1199,23 @@ public partial class EditorWindow : Window
             _syncingCategory = false;
         }
         ShowCategoryRow(category);
+    }
+
+    /// <summary>Unlights every category and closes the sub-row. The row floats over the
+    /// canvas, so closing it moves nothing.</summary>
+    private void CloseCategoryDrawer()
+    {
+        _syncingCategory = true;
+        try
+        {
+            foreach (EditorToolCategory c in EditorShellContract.CategoryOrder)
+                if (CategoryButton(c) is RadioButton button) button.IsChecked = false;
+        }
+        finally
+        {
+            _syncingCategory = false;
+        }
+        CategoryToolRow.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>
@@ -1232,6 +1257,7 @@ public partial class EditorWindow : Window
         ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
         FillPanel.Visibility = Show(Has(EditorContextControls.Fill));
         StrokePanel.Visibility = Show(Has(EditorContextControls.Style));
+        if (StrokePanel.Visibility == Visibility.Visible) SyncStrokeStyleButtons();
         OpacityPanel.Visibility = Show(Has(EditorContextControls.Opacity));
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
         RedactStylePanel.Visibility = Show(Has(EditorContextControls.RedactStyle));
@@ -1597,41 +1623,28 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>
-    /// Cycles the outline: solid → dashed → dotted → solid. One button rather than three,
-    /// because there are only three states and the button's own look says which one it is;
-    /// three radio chips for a property this small would cost more toolbar than it earns.
-    /// </summary>
-    private void OnDashClick(object sender, RoutedEventArgs e)
-    {
-        _strokeDash = _strokeDash switch
-        {
-            StrokeDash.Solid => StrokeDash.Dashed,
-            StrokeDash.Dashed => StrokeDash.Dotted,
-            _ => StrokeDash.Solid,
-        };
-        SyncStrokeStyleButtons();
-        ApplyStrokeStyleToSelection();
-    }
-
     private void OnSketchClick(object sender, RoutedEventArgs e)
     {
-        _strokeRender = _strokeRender == StrokeRender.Sketchy ? StrokeRender.Clean : StrokeRender.Sketchy;
+        _strokeRender = SketchCheck.IsChecked == true ? StrokeRender.Sketchy : StrokeRender.Clean;
         SyncStrokeStyleButtons();
         ApplyStrokeStyleToSelection();
     }
 
     private void SyncStrokeStyleButtons()
     {
-        if (DashToolBtn is null || SketchToolBtn is null) return;
-        DashToolBtn.IsChecked = _strokeDash != StrokeDash.Solid;
-        DashToolBtn.ToolTip = _strokeDash switch
-        {
-            StrokeDash.Dashed => "Dashed outline (again for dotted)",
-            StrokeDash.Dotted => "Dotted outline (again for solid)",
-            _ => "Dashed outline (again for dotted)",
-        };
-        SketchToolBtn.IsChecked = _strokeRender == StrokeRender.Sketchy;
+        if (SketchCheck is null) return;
+        SketchCheck.IsChecked = _strokeRender == StrokeRender.Sketchy;
+        CheckRowByTag(StrokeDashList, _strokeDash);
+
+        // The button IS the readout. Dashed and dotted used to wear one glyph, one pressed
+        // state and one accessible name, so which of the three was active could only be
+        // learned by hovering — and a screen reader could not learn it at all.
+        StrokeStyleButton.Content = BuildDashPreview(_strokeDash);
+        string state = _strokeRender == StrokeRender.Sketchy
+            ? $"{_strokeDash}, hand-drawn"
+            : _strokeDash.ToString();
+        StrokeStyleButton.ToolTip = $"Outline style: {state.ToLowerInvariant()}";
+        AutomationProperties.SetName(StrokeStyleButton, $"Outline style, {state.ToLowerInvariant()}");
     }
 
     /// <summary>
