@@ -263,6 +263,63 @@ public static class OcrService
         return Math.Min(upscale, OcrEngine.MaxImageDimension / (double)maxSide);
     }
 
+    /// <summary>
+    /// Where the words are, in <paramref name="bmp"/>'s OWN pixel coordinates. The engine
+    /// reads a scaled copy, so every box is divided back down by the scale that was used —
+    /// a caller that skipped that would redact the top-left quarter of the text.
+    ///
+    /// Returns an empty list when there is no language pack rather than throwing: the
+    /// callers here are "hide the text if you can find it", not "read this out to me".
+    /// </summary>
+    public static async Task<IReadOnlyList<SD.Rectangle>> ExtractWordBoxesAsync(SD.Bitmap bmp)
+    {
+        OcrEngine? engine = GetEngine();
+        if (engine is null) return Array.Empty<SD.Rectangle>();
+
+        double scale = InitialOcrScale(bmp.Width, bmp.Height);
+        BgraSnapshot snapshot = await Task.Run(() => SnapshotAtScale(bmp, scale));
+        using SoftwareBitmap softwareBitmap = ToSoftwareBitmap(snapshot);
+        OcrResult result = await engine.RecognizeAsync(softwareBitmap);
+
+        var boxes = new List<SD.Rectangle>();
+        var image = new SD.Rectangle(0, 0, bmp.Width, bmp.Height);
+        foreach (OcrLine line in result.Lines)
+        {
+            foreach (OcrWord word in line.Words)
+            {
+                SD.Rectangle box = ScaleWordBox(
+                    word.BoundingRect.X, word.BoundingRect.Y,
+                    word.BoundingRect.Width, word.BoundingRect.Height,
+                    scale, image);
+                if (box.Width > 0 && box.Height > 0)
+                    boxes.Add(box);
+            }
+        }
+        return boxes;
+    }
+
+    /// <summary>
+    /// One word box, divided back down by the scale the engine read at and clipped to the
+    /// image. Rounding is deliberately outward — floor the origin, ceil the size — so the
+    /// box never lands a pixel INSIDE a glyph, which for a redaction would leave a sliver
+    /// of the letter showing.
+    /// </summary>
+    internal static SD.Rectangle ScaleWordBox(
+        double x, double y, double width, double height, double scale, SD.Rectangle image)
+    {
+        if (scale <= 0 || !double.IsFinite(scale)) return SD.Rectangle.Empty;
+
+        int left = (int)Math.Floor(x / scale);
+        int top = (int)Math.Floor(y / scale);
+        var box = new SD.Rectangle(
+            left,
+            top,
+            (int)Math.Ceiling((x + width) / scale) - left,
+            (int)Math.Ceiling((y + height) / scale) - top);
+        box.Intersect(image);
+        return box;
+    }
+
     /// <summary>Snapshots <paramref name="bmp"/> rendered at <paramref name="scale"/>
     /// with high-quality bicubic resampling (cheap ctor interpolation smears
     /// glyph edges and hurts OCR accuracy).</summary>
@@ -432,6 +489,13 @@ public static class OcrService
             return new List<string>();
         }
     }
+
+    /// <summary>
+    /// Whether an OCR engine can be created at all. Callers that tolerate a missing language
+    /// pack (word boxes come back empty) need this to tell "nothing to read here" apart from
+    /// "this machine cannot read anything".
+    /// </summary>
+    public static bool HasLanguagePack() => GetEngine() is not null;
 
     private static OcrEngine? GetEngine()
     {

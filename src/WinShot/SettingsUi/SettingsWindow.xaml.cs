@@ -1154,6 +1154,13 @@ public partial class SettingsWindow : Window
         s.PinnedBorder = PinnedBorderCheck.IsChecked == true;
         s.OcrJoinLines = OcrJoinLinesCheck.IsChecked == true;
         s.OcrDetectLinks = OcrDetectLinksCheck.IsChecked == true;
+
+        // Annotate: the four rows the editor actually reads. They were collected in Save()
+        // until Save() stopped collecting anything; the rest of the tab is still stored-only.
+        s.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
+        s.AutoExpandCanvas = AutoExpandCanvasCheck.IsChecked == true;
+        s.SmoothPencil = SmoothPencilCheck.IsChecked == true;
+        s.InverseArrowDirection = InverseArrowCheck.IsChecked == true;
         s.OcrLanguage = SelectedTag(OcrLanguageCombo, WinShot.Ocr.OcrService.AutoLanguage);
         s.AskForNameAfterCapture = AskForNameCheck.IsChecked == true;
         s.NotifyStyleOcr = SelectedTag(NotifyOcrCombo, NotificationStyle.InApp);

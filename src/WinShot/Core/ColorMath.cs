@@ -1,4 +1,5 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
+using Media = System.Windows.Media;
 
 namespace WinShot.Core;
 
@@ -152,4 +153,28 @@ public static class ColorMath
             (int)(bucket.R / bucket.Count),
             (int)(bucket.G / bucket.Count),
             (int)(bucket.B / bucket.Count));
+
+    // ------------------------------------------------------- the WPF side of the app
+
+    // The editor's label plates and the colour picker's marker are System.Windows.Media
+    // colours, and there is exactly one relative-luminance formula in this app. These are
+    // overloads, not a second copy: a WPF Color converts to a GDI one and the arithmetic
+    // above answers. (0.04045 is the sRGB threshold WCAG 2.1 corrected 2.0's 0.03928 to.)
+    private static SD.Color Gdi(Media.Color c) => SD.Color.FromArgb(c.R, c.G, c.B);
+
+    /// <summary>WCAG 2.x relative luminance of a WPF colour. Alpha is ignored.</summary>
+    public static double RelativeLuminance(Media.Color c) => RelativeLuminance(Gdi(c));
+
+    /// <summary>WCAG contrast ratio between two opaque WPF colours.</summary>
+    public static double ContrastRatio(Media.Color a, Media.Color b) => ContrastRatio(Gdi(a), Gdi(b));
+
+    /// <summary>
+    /// Black or white, whichever reads better on <paramref name="background"/>. The worse
+    /// of the two is never below 4.58:1, so any plate painted in any colour still carries
+    /// legible text — which is the whole reason a label's ink is not the user's own pick.
+    /// </summary>
+    public static Media.Color TextOn(Media.Color background) =>
+        ContrastRatio(Media.Colors.White, background) >= ContrastRatio(Media.Colors.Black, background)
+            ? Media.Colors.White
+            : Media.Colors.Black;
 }

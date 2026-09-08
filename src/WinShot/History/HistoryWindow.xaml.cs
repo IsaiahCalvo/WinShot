@@ -214,7 +214,7 @@ public partial class HistoryWindow : Window
         _windowFade?.Dispose();
         Opacity = from;
         bool finished = false;
-        IDisposable handle = Motion.Run(
+        IDisposable? handle = Motion.Run(
             Motion.EnterDurationMs,
             Motion.EaseOutCubic,
             progress => Opacity = from + ((1d - from) * progress),
@@ -248,7 +248,7 @@ public partial class HistoryWindow : Window
         // With animation off system-wide Motion.Run finishes before it returns, so the handle must
         // not be stored onto a window Close() has already torn down — the same guard FadeIn uses.
         bool finished = false;
-        IDisposable handle = Motion.Run(
+        IDisposable? handle = Motion.Run(
             Motion.SwapMs,
             Motion.EaseInCubic,
             progress => Opacity = from * (1d - progress),
@@ -978,7 +978,7 @@ public partial class HistoryWindow : Window
             EmptyState.IsHitTestVisible = false;
             double leaving = EmptyState.Opacity;
             bool hidden = false;
-            IDisposable exit = Motion.Run(
+            IDisposable? exit = Motion.Run(
                 Motion.SwapMs,
                 Motion.EaseInCubic,
                 progress => EmptyState.Opacity = leaving * (1d - progress),
@@ -1021,7 +1021,7 @@ public partial class HistoryWindow : Window
         double from = visible ? 0.35d : 0d;
         EmptyState.Opacity = from;
         bool shown = false;
-        IDisposable entrance = Motion.Run(
+        IDisposable? entrance = Motion.Run(
             Motion.SwapMs,
             Motion.EaseOutCubic,
             progress => EmptyState.Opacity = from + ((1d - from) * progress),

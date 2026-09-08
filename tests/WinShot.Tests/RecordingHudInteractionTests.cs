@@ -587,11 +587,11 @@ public class RecordingHudInteractionTests
             // The first frame of the open: painted at 0.94 about the card's bottom centre.
             SetField(selector, "_menuAmount", 0d);
 
-            var (card, rows) = RecordingHudLayout.AspectMenu(
-                HudGeometry(region).CellBounds(RecordingHudCell.Aspect),
-                Monitor,
-                1.0,
-                RecordingAspectPresets.All.Count);
+            // The selector's OWN rects, not a re-derivation: AspectMenuRects reads the real
+            // monitor under the region and its real DPI, so a hard-coded 1920x1080 at 100 %
+            // put the row somewhere the code never painted it — and the click landed on
+            // whichever row happened to be there on a 150 % display.
+            var (card, rows) = AspectMenuRects(region);
 
             const double Scale = 0.94;
             SD.Rectangle row = rows[0];
@@ -734,6 +734,17 @@ public class RecordingHudInteractionTests
                 .GetField("HudFocusOrder", BindingFlags.Static | BindingFlags.NonPublic)!
                 .GetValue(null)!,
             cell);
+
+    /// <summary>The aspect popover's card and rows exactly as the selector lays them out.</summary>
+    private static (SD.Rectangle Card, IReadOnlyList<SD.Rectangle> Rows) AspectMenuRects(SD.Rectangle region)
+    {
+        object result = typeof(FastRegionSelectorDialog)
+            .GetMethod("AspectMenuRects", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, [region])!;
+        Type tuple = result.GetType();
+        return ((SD.Rectangle)tuple.GetField("Item1")!.GetValue(result)!,
+                (IReadOnlyList<SD.Rectangle>)tuple.GetField("Item2")!.GetValue(result)!);
+    }
 
     private static T Field<T>(object target, string name) =>
         (T)typeof(FastRegionSelectorDialog)

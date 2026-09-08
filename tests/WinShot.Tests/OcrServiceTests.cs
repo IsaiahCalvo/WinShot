@@ -1,4 +1,4 @@
-using WinShot.Ocr;
+﻿using WinShot.Ocr;
 using Xunit;
 using ZXing;
 using ZXing.QrCode;
@@ -121,5 +121,39 @@ public class OcrServiceTests
         Assert.True(string.IsNullOrWhiteSpace(result.Text));
         Assert.Empty(result.QrCodes);
         Assert.True(sw.ElapsedMilliseconds < 1500, $"no-text answer took {sw.ElapsedMilliseconds} ms");
+    }
+
+    /// <summary>
+    /// The engine reads a SCALED copy, so a caller that forgot to divide back down would
+    /// redact the top-left corner of the text and leave the rest showing. Rounding is
+    /// outward on purpose: a box that lands a pixel inside a glyph leaves a sliver of the
+    /// letter visible under the mark.
+    /// </summary>
+    [Fact]
+    public void ScaleWordBox_DividesBackDownAndRoundsOutward()
+    {
+        var image = new SD.Rectangle(0, 0, 400, 300);
+
+        SD.Rectangle box = OcrService.ScaleWordBox(100, 50, 60, 20, scale: 2, image);
+        Assert.Equal(new SD.Rectangle(50, 25, 30, 10), box);
+
+        // 4.5 floors to 4, 4.5+7.5 = 12 ceils to 12 — the box grows, never shrinks.
+        SD.Rectangle rounded = OcrService.ScaleWordBox(9, 9, 15, 15, scale: 2, image);
+        Assert.Equal(4, rounded.X);
+        Assert.Equal(4, rounded.Y);
+        Assert.True(rounded.Right >= 12);
+        Assert.True(rounded.Bottom >= 12);
+    }
+
+    [Fact]
+    public void ScaleWordBox_ClipsToTheImageAndRejectsNonsenseScales()
+    {
+        var image = new SD.Rectangle(0, 0, 100, 100);
+
+        SD.Rectangle clipped = OcrService.ScaleWordBox(90, 90, 60, 60, scale: 1, image);
+        Assert.Equal(new SD.Rectangle(90, 90, 10, 10), clipped);
+
+        Assert.True(OcrService.ScaleWordBox(0, 0, 10, 10, scale: 0, image).IsEmpty);
+        Assert.True(OcrService.ScaleWordBox(0, 0, 10, 10, double.NaN, image).IsEmpty);
     }
 }

@@ -186,6 +186,8 @@ public partial class App : Application
         // or the warm-up caches an engine the user did not ask for.
         OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
         OcrService.Warm();
+        // The editor cannot reach the capture flow itself; this is the seam it asks through.
+        Editor.EditorWindow.RegionCaptureProvider = CaptureRegionForEditorAsync;
 
         AnnounceCompletedUpdate();
 
@@ -962,7 +964,7 @@ public partial class App : Application
 
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop, paneScoped: paneScoped);
             if (stitched is not null)
-                HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling);
+                HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling, region);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
@@ -1126,7 +1128,11 @@ public partial class App : Application
                                 ToastSeverity.Error);
                         }
                     }
-                    HandleCapture(frozenCrop, postCaptureActionOverride);
+                    // SelectedRegionPx is virtual-screen relative; the editor's target rect is
+                    // in real screen coordinates, which differ by the virtual origin on any
+                    // layout with a monitor above or left of the primary.
+                    HandleCapture(frozenCrop, postCaptureActionOverride,
+                        originScreenRect: ToScreenRect(region));
                 }
             }
             finally
@@ -1134,6 +1140,45 @@ public partial class App : Application
                 FastRegionSelectorDialog.Return(selector);
             }
         });
+
+    /// <summary>
+    /// A bare region capture for the editor's "Add capture": the same selector as
+    /// capture-area, but the result comes back to the caller instead of going through the
+    /// after-capture actions — it is being added to an open canvas, not captured afresh.
+    ///
+    /// That return value is why this cannot BE a <see cref="RunCaptureFlow"/>, but it still
+    /// takes that flow's guard: a global capture hotkey pressed while Add capture's selector
+    /// is up opened a SECOND full-screen layered selector on top of it, which is the 66 fps
+    /// z-order fight the guard exists to prevent — with the editor hidden behind both and no
+    /// way back until each is dismissed in turn. Null is "nothing added", which the editor
+    /// already handles.
+    /// </summary>
+    private async Task<SD.Bitmap?> CaptureRegionForEditorAsync()
+    {
+        if (_captureInProgress || Recording.SelectionUiActive) return null;
+        _captureInProgress = true;
+        var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+        try
+        {
+            if (await selector.ShowAsync(FastRegionSelectorDialog.SelectorMode.Area, elementHover: true)
+                    != WF.DialogResult.OK ||
+                selector.SelectedRegionPx is not SD.Rectangle region)
+                return null;
+
+            SD.Bitmap? crop = selector.TakeCapturedRegion();
+            if (crop is null)
+            {
+                await WaitForOverlayDismissAsync();
+                crop = await CaptureSelectedRegionAsync(region, "add-capture");
+            }
+            return crop;
+        }
+        finally
+        {
+            FastRegionSelectorDialog.Return(selector);
+            FinishCaptureFlow();
+        }
+    }
 
     /// <summary>
     /// Puts a captured window on its backdrop, off the UI thread. Failure here must never
@@ -1211,7 +1256,7 @@ public partial class App : Application
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("capture-fullscreen screen grab", sw);
-            HandleCapture(capture);
+            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureFullscreenTimerFlow() => RunCaptureFlow(
@@ -1221,7 +1266,7 @@ public partial class App : Application
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("self-timer screen grab", sw);
-            HandleCapture(capture);
+            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureDisplayFlow() => RunCaptureFlow(
@@ -1234,7 +1279,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-display screen grab", sw);
-                HandleCapture(capture);
+                HandleCapture(capture, originScreenRect: r);
             }
         });
 
@@ -1246,7 +1291,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-previous screen grab", sw);
-                HandleCapture(capture);
+                HandleCapture(capture, originScreenRect: r);
             }
             else
                 // Info, not Error: nothing went wrong, a prerequisite is simply not met yet —
@@ -1322,7 +1367,7 @@ public partial class App : Application
             switch (action)
             {
                 case AllInOneAction.Capture:
-                    HandleCapture(captured!);
+                    HandleCapture(captured!, originScreenRect: ToScreenRect(regionPx));
                     break;
                 case AllInOneAction.Timer:
                     await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
@@ -1339,7 +1384,7 @@ public partial class App : Application
                     region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
                     var (stitched, cancelled) = await ScrollingStatusWindow.Run(region);
                     if (stitched is not null)
-                        HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
+                        HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: region);
                     else if (!cancelled)
                         ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
                     break;
@@ -1381,10 +1426,17 @@ public partial class App : Application
         return capture;
     }
 
+    /// <summary>A selector rect (virtual-screen relative) as real screen coordinates.</summary>
+    private static SD.Rectangle ToScreenRect(SD.Rectangle virtualRegion)
+    {
+        var r = virtualRegion;
+        r.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
+        return r;
+    }
+
     private async Task<SD.Bitmap> CaptureSelectedRegionAsync(SD.Rectangle virtualRegion, string metricName)
     {
-        var screenRegion = virtualRegion;
-        screenRegion.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
+        var screenRegion = ToScreenRect(virtualRegion);
         var sw = Stopwatch.StartNew();
         try
         {
@@ -1443,6 +1495,7 @@ public partial class App : Application
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        SD.Rectangle? originScreenRect = null,
         PostCaptureSet? actionsOverride = null)
     {
         // A winshot://…?then=copy,save URL overrides the after-capture set for this capture
@@ -1510,7 +1563,7 @@ public partial class App : Application
         if (actions.IsEmpty)
             actions = actions with { Overlay = true };
 
-        RunPostCaptureSet(bmp, actions, historyKind);
+        RunPostCaptureSet(bmp, actions, historyKind, originScreenRect);
     }
 
     /// <summary>
@@ -1526,7 +1579,11 @@ public partial class App : Application
     /// the new owner's LockBits/Dispose on a single-accessor GDI+ bitmap, and a set can hand
     /// the same capture to four owners at once.
     /// </remarks>
-    private void RunPostCaptureSet(SD.Bitmap bmp, PostCaptureSet actions, HistoryCaptureKind historyKind)
+    private void RunPostCaptureSet(
+        SD.Bitmap bmp,
+        PostCaptureSet actions,
+        HistoryCaptureKind historyKind,
+        SD.Rectangle? originScreenRect = null)
     {
         bool cardOwns = actions.Overlay;
         bool editorOwns = !cardOwns && actions.Annotate;
@@ -1557,7 +1614,8 @@ public partial class App : Application
                 SaveSilently(CaptureService.CloneBitmap(bmp)); // takes ownership
 
             if (actions.Annotate && !editorOwns)
-                OpenDirectEditCapture(CaptureService.CloneBitmap(bmp), historyKind, addHistory: false, autoCopy: false);
+                OpenDirectEditCapture(CaptureService.CloneBitmap(bmp), historyKind,
+                    addHistory: false, autoCopy: false, originScreenRect: originScreenRect);
 
             if (actions.Pin)
             {
@@ -1581,7 +1639,8 @@ public partial class App : Application
 
             if (editorOwns)
             {
-                OpenDirectEditCapture(bmp, historyKind, addHistory: true, autoCopy: actions.Copy);
+                OpenDirectEditCapture(bmp, historyKind,
+                    addHistory: true, autoCopy: actions.Copy, originScreenRect: originScreenRect);
                 return;
             }
         }
@@ -1601,7 +1660,8 @@ public partial class App : Application
         SD.Bitmap bmp,
         HistoryCaptureKind historyKind,
         bool addHistory = true,
-        bool autoCopy = true)
+        bool autoCopy = true,
+        SD.Rectangle? originScreenRect = null)
     {
         DirectEditCaptureTestHooks? hooks = DirectEditTestHooks;
         // Read the tag NOW, on the caller's thread. The field is overwritten by the next
@@ -1627,6 +1687,10 @@ public partial class App : Application
         try
         {
             var win = EditorWindow.CreateForDirectCapture(bmp, _settings, _history, handoff.RunAsync);
+            // After-capture = Edit has an origin rect just like the quick-actions card does;
+            // without this the editor opened centred on the PRIMARY, so a shot taken on a
+            // second monitor left the display the user was looking at.
+            if (originScreenRect is SD.Rectangle origin) win.GrowFrom(origin);
             hooks?.ConfigureEditor?.Invoke(win);
             TrackFirstRender(win, "editor window");
             win.Show();
@@ -1643,8 +1707,9 @@ public partial class App : Application
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        SD.Rectangle? originScreenRect = null,
         PostCaptureSet? actionsOverride = null) =>
-        HandleCapture(bmp, postCaptureActionOverride, historyKind, actionsOverride);
+        HandleCapture(bmp, postCaptureActionOverride, historyKind, originScreenRect, actionsOverride);
 
     internal void SetHistoryForTest(HistoryService history) => _history = history;
 
@@ -2292,7 +2357,7 @@ public partial class App : Application
             // run that came back with nothing to show for it is a failure worth a red card.
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick, reverse: reverse);
             if (stitched is not null)
-                HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
+                HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: refined);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
@@ -2356,6 +2421,9 @@ public partial class App : Application
     private void OpenEditorFromOverlay(FastQuickActionsWindow overlay)
     {
         var win = EditorWindow.CreateForCapture(overlay.CloneImage(), _settings, _history);
+        // The editor grows out of the card it was opened from, and opens on THAT card's
+        // display — which for a capture taken on a second monitor is the one being looked at.
+        win.GrowFrom(overlay.Bounds);
         TrackFirstRender(win, "editor window");
         // The card steps aside rather than being consumed: annotate, save, and the same
         // card comes back holding the annotated image, with Copy / drag-out still on it.

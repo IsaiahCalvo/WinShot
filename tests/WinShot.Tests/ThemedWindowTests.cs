@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -91,7 +92,11 @@ public class ThemedWindowTests
                 var editor = new EditorWindow(NewBitmap(), settings, history);
                 editor.Show();
                 EditorShellContractSmoke(editor);
-                ApplyBlurUndoRedoSmoke(editor);
+                RedactionObjectSmoke(editor);
+                MagnifierZoomUndoSmoke(editor);
+                EyedropperPickerLatchSmoke(editor);
+                AnnotationClipboardSmoke(editor);
+                TextAndCounterSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
                 PinSmoke(editor);
@@ -103,6 +108,7 @@ public class ThemedWindowTests
                 composer.Close();
 
                 EditorFitsTallImageSmoke(settings, history);
+                EditorGrowLandsOnItsTargetSmoke(settings, history);
 
                 app.Shutdown();
             }
@@ -976,27 +982,41 @@ public class ThemedWindowTests
 
     private static void EditorShellContractSmoke(EditorWindow editor)
     {
-        var primary = (WrapPanel)editor.FindName("ToolPanel")!;
-        var primaryOrder = primary.Children.OfType<RadioButton>()
-            .Select(rb => (string)rb.Tag)
-            .ToArray();
-        Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
+        // The toolbar is one row now: undo/redo, the pointer pair, five categories, then
+        // the active tool's own controls. Nothing behind a "More" popup.
+        Assert.Null(editor.FindName("MoreToolsButton"));
+        Assert.Null(editor.FindName("MoreToolsPopup"));
+        Assert.Null(editor.FindName("MoreToolPanel"));
+        Assert.Null(editor.FindName("CurvedArrowToolBtn"));
+        Assert.Null(editor.FindName("EmojiToolBtn"));
+        Assert.Null(editor.FindName("DragMeHandle"));
 
-        var more = (UniformGrid)editor.FindName("MoreToolPanel")!;
-        var moreOrder = more.Children.OfType<RadioButton>()
-            .Select(rb => (string)rb.Tag)
-            .ToArray();
-        Assert.Equal(EditorShellContract.MoreToolOrder, moreOrder);
+        var categories = (StackPanel)editor.FindName("CategoryPanel")!;
+        Assert.Equal(
+            EditorShellContract.CategoryOrder.Select(c => c.ToString()).ToArray(),
+            categories.Children.OfType<RadioButton>().Select(rb => (string)rb.Tag).ToArray());
+
+        foreach (EditorToolCategory category in EditorShellContract.CategoryOrder)
+        {
+            var row = (StackPanel)editor.FindName($"{category}ToolRow")!;
+            Assert.Equal(
+                EditorShellContract.ToolsIn(category),
+                row.Children.OfType<RadioButton>().Select(rb => (string)rb.Tag).ToArray());
+        }
 
         string[] namedControls =
         {
-            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
+            "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
-            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
+            "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
-            "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck", "StrokeStyleButton", "SketchCheck", "MagnifySlider",
+            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
+            "BorderTabBtn", "FillTabBtn", "SaveColorBtn", "PickerEyedropperBtn", "HueSlider", "AlphaSlider",
+            "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
         };
         foreach (string name in namedControls)
@@ -1005,15 +1025,21 @@ public class ThemedWindowTests
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(element)), name);
         }
 
+        // Every control that shows only a glyph has to say what it does out loud.
         string[] iconOnlyControls =
         {
-            "CropUtilityBtn", "AddImageBtn", "AddBackgroundBtn", "SelectToolBtn",
+            "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
+            "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
             "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "PixelateToolBtn", "SpotlightToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn",
-            "MoreToolsButton", "PanToolBtn", "CurvedArrowToolBtn", "BlurToolBtn", "EyedropperToolBtn",
-            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
-            "BtnUndo", "BtnRedo", "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
+            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck", "StrokeStyleButton",
+            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
+            "SaveColorBtn", "PickerEyedropperBtn",
+            "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
+            "StepNumberBtn", "StepLetterBtn",
             "BtnPin", "BtnCopy", "BtnCenter",
         };
         foreach (string name in iconOnlyControls)
@@ -1022,13 +1048,29 @@ public class ThemedWindowTests
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(element)), name);
         }
 
-        Assert.Null(editor.FindName("EmojiToolBtn"));
-        Assert.Null(editor.FindName("DragMeHandle"));
+        // Every popover animates in from its anchor edge, which needs its own (unfrozen)
+        // ScaleTransform on the surface — a Style-set one would be shared and frozen, and
+        // animating a frozen Freezable throws the first time a popup opens.
+        // Driven off ToolbarPopups(), not a literal list: FillPopup was missing from the
+        // literal one, so the single popover that could regress into a first-open crash was
+        // the one nothing watched. A new popover joins that list to work at all.
+        var popups = (Array)typeof(EditorWindow)
+            .GetMethod("ToolbarPopups", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, null)!;
+        Assert.True(popups.Length >= 8, $"only {popups.Length} toolbar popovers were enumerated.");
+        foreach (object entry in popups)
+        {
+            var popup = (Popup)entry.GetType().GetField("Item1")!.GetValue(entry)!;
+            var owner = (Control)entry.GetType().GetField("Item2")!.GetValue(entry)!;
+            var surface = Assert.IsType<Border>(popup.Child);
+            Assert.IsType<ScaleTransform>(surface.RenderTransform);
+            Assert.False(surface.RenderTransform.IsFrozen, owner.Name);
+        }
 
         var select = (RadioButton)editor.FindName("SelectToolBtn")!;
-        var moreButton = (Button)editor.FindName("MoreToolsButton")!;
+        var undo = (Button)editor.FindName("BtnUndo")!;
         var copy = (Button)editor.FindName("BtnCopy")!;
-        foreach (Control control in new Control[] { select, moreButton, copy })
+        foreach (Control control in new Control[] { select, undo, copy })
         {
             control.ApplyTemplate();
             Assert.NotNull(control.Template.FindName("FocusRing", control));
@@ -1036,24 +1078,43 @@ public class ThemedWindowTests
             Assert.True(control.IsTabStop);
         }
 
-        var styleBar = (DockPanel)editor.FindName("EditorStyleBar")!;
+        var context = (StackPanel)editor.FindName("ContextPanel")!;
+        var subRow = (Border)editor.FindName("CategoryToolRow")!;
         var color = (StackPanel)editor.FindName("ColorPanel")!;
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
         var fill = (StackPanel)editor.FindName("FillPanel")!;
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
-        var effects = (StackPanel)editor.FindName("EffectStrengthPanel")!;
+        var zoomButton = (Button)editor.FindName("ZoomMenuButton")!;
+        var zoomLabel = (TextBlock)editor.FindName("ZoomLabel")!;
+        Assert.Null(editor.FindName("ZoomBox"));
+        var redactStyle = (StackPanel)editor.FindName("RedactStylePanel")!;
+        var redactStrength = (StackPanel)editor.FindName("RedactStrengthPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
+        var cropTools = (StackPanel)editor.FindName("CropToolsPanel")!;
         var sizeBox = (TextBox)editor.FindName("SizeBox")!;
-        var sizeLabel = (TextBlock)editor.FindName("ThicknessLabel")!;
+        var sizeField = (Border)editor.FindName("SizeFieldBorder")!;
+        var sizeHeading = (TextBlock)editor.FindName("SizePresetHeading")!;
         var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
+        var shapesRow = (StackPanel)editor.FindName("ShapesToolRow")!;
+        var drawRow = (StackPanel)editor.FindName("DrawToolRow")!;
 
-        Assert.Equal(Visibility.Collapsed, styleBar.Visibility);
+        // The pointer tool has no controls of its own, so the row disappears entirely.
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Collapsed, context.Visibility);
+
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, context.Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
-        Assert.Equal("Width", sizeLabel.Text);
+        Assert.Equal("Width", sizeHeading.Text);
+
+        // Arming a tool lights its category and swaps the floating sub-row to that row.
+        Assert.True(((RadioButton)editor.FindName("CategoryShapesBtn")!).IsChecked);
+        Assert.Equal(Visibility.Visible, subRow.Visibility);
+        Assert.Equal(Visibility.Visible, shapesRow.Visibility);
+        Assert.Equal(Visibility.Collapsed, drawRow.Visibility);
 
         // The size field takes any whole number, not just the old 2 / 4 / 6.
         sizeBox.Text = "17";
@@ -1073,13 +1134,16 @@ public class ThemedWindowTests
             AnnotationSize.Presets,
             sizePresets.Children.OfType<RadioButton>().Select(r => (int)r.Tag!).ToArray());
 
-        // Each tool keeps its own size: Text is independent of Arrow.
+        // Each tool keeps its own size: Text is independent of Arrow. The word "Width" /
+        // "Size" left the toolbar with the other labels and lives on the field instead.
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
-        Assert.Equal("Size", sizeLabel.Text);
+        Assert.Equal("Size", sizeHeading.Text);
+        Assert.Equal("Size", sizeField.ToolTip);
         Assert.Equal("4", sizeBox.Text);
+        Assert.True(((RadioButton)editor.FindName("CategoryTextBtn")!).IsChecked);
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Equal("Width", sizeLabel.Text);
+        Assert.Equal("Width", sizeHeading.Text);
         Assert.Equal("7", sizeBox.Text);
 
         ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
@@ -1087,44 +1151,421 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, thickness.Visibility);
         Assert.Equal(Visibility.Visible, fill.Visibility);
 
-        ((RadioButton)editor.FindName("PixelateToolBtn")!).IsChecked = true;
-        Assert.Equal(Visibility.Visible, effects.Visibility);
+        // One redaction tool with a style menu and a continuous strength — no S/M/L radios,
+        // and no colour well, because a redaction has no colour to pick.
+        ((RadioButton)editor.FindName("RedactToolBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, redactStyle.Visibility);
+        Assert.Equal(Visibility.Visible, redactStrength.Visibility);
         Assert.Equal(Visibility.Collapsed, color.Visibility);
+        Assert.True(((RadioButton)editor.FindName("CategoryRedactBtn")!).IsChecked);
+
+        // "Text only" belongs to the STYLE group, not the strength group. Inside the
+        // strength group it vanished for Black Out - the one style whose text-only form
+        // Shottr's row exists for - while the flag stayed live and every drag silently
+        // produced one mark per word with no control on screen to say so.
+        var textOnly = (CheckBox)editor.FindName("RedactTextOnlyCheck")!;
+        Assert.Same(redactStyle, textOnly.Parent);
+        var applyRedactStyle = editor.GetType().GetMethod("ApplyRedactStyle",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        applyRedactStyle.Invoke(editor, new object[] { RedactStyle.BlackOut });
+        Assert.Equal(Visibility.Collapsed, redactStrength.Visibility);
+        Assert.Equal(Visibility.Visible, redactStyle.Visibility);
+        Assert.Equal(Visibility.Visible, textOnly.Visibility);
+        applyRedactStyle.Invoke(editor, new object[] { RedactStyle.Pixelate });
 
         ((RadioButton)editor.FindName("CropUtilityBtn")!).IsChecked = true;
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
+        Assert.Equal(Visibility.Visible, cropTools.Visibility);
+        // The crop bar says how big the picture is, so "Image size" is an answer as well
+        // as a button.
+        Assert.Contains("×", ((TextBlock)editor.FindName("ImageSizeLabel")!).Text);
+        Assert.True(((RadioButton)editor.FindName("CategoryImageBtn")!).IsChecked);
+
+        // A category button opens its own row and arms that row's first tool; Image is the
+        // one that arms nothing, so clicking it cannot drop the user into a crop.
+        ((RadioButton)editor.FindName("CategoryDrawBtn")!).IsChecked = true;
+        Assert.Equal(Visibility.Visible, drawRow.Visibility);
+        Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
+        ((RadioButton)editor.FindName("CategoryImageBtn")!).IsChecked = true;
+        Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
+
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+
+        // The zoom readout is written in one place, on every view change — the old label +
+        // combo pair went stale after a wheel zoom and never came back. The percentages
+        // GLIDE now, so the tween is forced to land in one frame rather than raced.
+        var animations = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            typeof(EditorWindow).GetMethod("ZoomToPercent",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(editor, new object[] { 2.0 });
+            Assert.Equal("200%", zoomLabel.Text);
+        }
+        finally { Motion.AnimationsEnabled = animations; }
+        Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(zoomButton)));
+
+        // The one-row toolbar's 1152 DIP floor is not a promise a screen can keep — a
+        // 1536x1024 laptop at 150 % is 1024 DIP of work area — and WM_GETMINMAXINFO would
+        // enforce it anyway, opening the window wider than the monitor with the docked
+        // Save as… / Done pair off the right edge and no way to drag narrower. Every open
+        // path clamps, not just the grow: this editor came up the History/CLI way.
+        var work = SystemParameters.WorkArea;
+        Assert.True(editor.MinWidth <= work.Width + 0.5,
+            $"MinWidth {editor.MinWidth} exceeds the {work.Width:0} DIP work area.");
+        Assert.True(editor.MinHeight <= work.Height + 0.5,
+            $"MinHeight {editor.MinHeight} exceeds the {work.Height:0} DIP work area.");
+        Assert.True(editor.MinWidth > 0 && editor.MinHeight > 0);
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
         var toolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.True(toolbar.ActualWidth <= editor.ActualWidth);
-        Assert.True(primary.ActualHeight <= 42, $"Primary tools wrapped at minimum width: {primary.ActualHeight}");
+        ToolbarFitsAtMinimumWidth(editor);
+        ContextRowNeverCoversTheFinishPair(editor);
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
     }
 
-    private static void ApplyBlurUndoRedoSmoke(EditorWindow editor)
+    /// <summary>
+    /// The one row has to hold every tool's controls at the narrowest the window goes.
+    /// Measuring the row's HEIGHT proves nothing — it is a DockPanel, which does not wrap;
+    /// it clips its fill child's right-hand end away in silence, which is how a whole crop
+    /// group (Snap, then Image size) went missing without a red test. So this measures what
+    /// the row WANTS, unconstrained, against the declared budget — and, when the display can
+    /// actually hold a window that wide, against what the row is really given.
+    ///
+    /// The display check is not decoration: the minimum is 1152 DIP and a 1024 DIP screen
+    /// cannot produce a 1152 DIP window, which is the whole reason the editor now clamps its
+    /// minimum instead of forcing its Done button off the right edge. On such a display the
+    /// arithmetic assertion is the contract; the clipping one has nothing to say.
+    /// </summary>
+    /// <summary>
+    /// Below 1152 DIP the window's minimum is lowered to whatever the display holds, so the
+    /// primary row is given less than it needs — and a DockPanel does not clip its fill child,
+    /// so the context row's buttons used to be arranged from x=0 outward straight across the
+    /// Save as… / Done pair docked to its right. Two facts hold instead: the overflow is
+    /// scrollable rather than gone, and the finish pair is never painted over.
+    /// </summary>
+    private static void ContextRowNeverCoversTheFinishPair(EditorWindow editor)
     {
-        var type = typeof(EditorWindow);
-        var activeField = type.GetField(
-            "_sourceOperationActive",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var applyBlur = type.GetMethod(
-            "ApplyBlur",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var undoAsync = type.GetMethod(
-            "UndoAsync",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var redoAsync = type.GetMethod(
-            "RedoAsync",
+        var scroll = (ScrollViewer)editor.FindName("ContextScroll")!;
+        var context = (StackPanel)editor.FindName("ContextPanel")!;
+        var save = (Button)editor.FindName("BtnSave")!;
+        var check = typeof(EditorWindow).GetMethod("CheckToolButton",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
-        WaitForEditorOperation(editor, activeField);
-        applyBlur.Invoke(editor, new object[] { new SD.Rectangle(0, 0, 40, 40) });
-        WaitForEditorOperation(editor, activeField);
+        double width = editor.Width;
+        int overflowed = 0;
+        try
+        {
+            // The narrowest real case: a 1920x1080 display at 200 % is 960 DIP.
+            editor.MinWidth = 400;
+            editor.Width = 700;
+            foreach (EditorTool tool in Enum.GetValues<EditorTool>())
+            {
+                check.Invoke(editor, new object[] { tool });
+                editor.UpdateLayout();
+                if (context.Visibility != Visibility.Visible) continue;
+
+                Assert.True(scroll.ViewportWidth <= scroll.ExtentWidth + 0.5,
+                    $"{tool}: the context row reports more viewport than content.");
+                // The row's own painted extent stops at the scroller; the docked pair starts
+                // after it. A fill child that overran would put these the other way round.
+                Point rowRight = scroll.TranslatePoint(new Point(scroll.ActualWidth, 0), editor);
+                Point saveLeft = save.TranslatePoint(new Point(0, 0), editor);
+                Assert.True(rowRight.X <= saveLeft.X + 0.5,
+                    $"{tool}: the context row reaches {rowRight.X:0} DIP, past Save as… at {saveLeft.X:0}.");
+                if (scroll.ExtentWidth > scroll.ViewportWidth + 0.5) overflowed++;
+            }
+
+            // Otherwise the two assertions above are true of a row that always fits, and the
+            // case this method exists for was never reached.
+            Assert.True(overflowed > 0, "no tool overflowed a 700 DIP row, so nothing was tested.");
+        }
+        finally
+        {
+            editor.MinWidth = EditorShellContract.MinimumEditorLogicalWidth;
+            editor.Width = width;
+            editor.UpdateLayout();
+        }
+    }
+
+    private static void ToolbarFitsAtMinimumWidth(EditorWindow editor)
+    {
+        var primaryRow = (DockPanel)editor.FindName("ToolbarPrimaryRow")!;
+        var check = typeof(EditorWindow).GetMethod("CheckToolButton",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        foreach (EditorTool tool in Enum.GetValues<EditorTool>())
+        {
+            check.Invoke(editor, new object[] { tool });
+            editor.UpdateLayout();
+
+            primaryRow.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double needed = primaryRow.DesiredSize.Width;
+            double available = primaryRow.ActualWidth;
+            primaryRow.InvalidateMeasure();
+            editor.UpdateLayout();
+
+            Assert.True(needed <= EditorShellContract.PrimaryToolbarLogicalWidth,
+                $"{tool}'s toolbar row needs {needed:0} DIP, over the declared " +
+                $"{EditorShellContract.PrimaryToolbarLogicalWidth} DIP budget.");
+            if (editor.ActualWidth >= EditorShellContract.MinimumEditorLogicalWidth - 0.5)
+            {
+                Assert.True(needed <= available + 0.5,
+                    $"{tool}'s toolbar row is clipped at the minimum window width: " +
+                    $"needs {needed:0} DIP, has {available:0}.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A redaction is a live object: drawing one adds a canvas child and leaves the source
+    /// bitmap byte-for-byte alone, restyling it is one more undoable step, and undo walks
+    /// both back. The old destructive blur baked pixels and could only be undone by
+    /// restoring a backup crop — that whole path is gone.
+    /// </summary>
+    private static void RedactionObjectSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var source = (SD.Bitmap)type.GetField("_source", NP)!.GetValue(editor)!;
+        var undoAsync = type.GetMethod("UndoAsync", NP)!;
+        var redoAsync = type.GetMethod("RedoAsync", NP)!;
+
+        // Undo/redo refuse to run while the source is still loading, so let the initial
+        // image land first — otherwise every assertion below reads a no-op.
+        WaitForEditorOperation(editor, type.GetField("_sourceOperationActive", NP)!);
+        canvas.Children.Clear();
+        SD.Color before = source.GetPixel(12, 12);
+        var area = new Rect(4, 4, 40, 24);
+
+        var mark = (System.Windows.Shapes.Rectangle)type.GetMethod("BeginRedaction", NP)!
+            .Invoke(editor, new object[] { area })!;
+        canvas.Children.Add(mark);
+        type.GetMethod("UpdateRedactionPreview", NP)!.Invoke(editor, new object[] { mark, area, true });
+        mark.Tag = AnnotationData.ForRedaction(area, RedactStyle.Pixelate, 45, seed: 7);
+        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { mark });
+
+        Assert.Single(canvas.Children);
+        // The whole point: nothing was baked into the picture.
+        Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
+        Assert.IsType<ImageBrush>(mark.Fill);
+
+        // Restyling to Black Out is one undoable step and repaints flat black.
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { mark });
+        Assert.True((bool)type.GetMethod("RestyleSelectedRedaction", NP)!
+            .Invoke(editor, new object?[] { RedactStyle.BlackOut, null, true })!);
+        var blackedOut = Assert.IsType<SolidColorBrush>(mark.Fill);
+        Assert.Equal(Colors.Black, blackedOut.Color);
+
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
-        WaitForEditorOperation(editor, activeField);
+        Assert.IsType<ImageBrush>(mark.Fill);
         WaitForTask((Task)redoAsync.Invoke(editor, Array.Empty<object>())!);
-        WaitForEditorOperation(editor, activeField);
+        Assert.IsType<SolidColorBrush>(mark.Fill);
+
+        // Two more undos take the restyle and then the mark itself off the canvas; the
+        // source is untouched at every step.
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Empty(canvas.Children);
+        Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
+
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
+    }
+
+    /// <summary>
+    /// Arming the in-picker eyedropper and then picking another tool abandons the gesture,
+    /// so the "come back to the picker" latch has to come down with it. Left armed, the next
+    /// ordinary eyedropper sample reopened the picker on its own and wrote to whichever tab
+    /// happened to be selected.
+    /// </summary>
+    private static void EyedropperPickerLatchSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var latch = type.GetField("_reopenPickerAfterSample", NP)!;
+        var check = type.GetMethod("CheckToolButton", NP)!;
+
+        type.GetMethod("OnPickerEyedropper", NP)!
+            .Invoke(editor, new object?[] { null, new RoutedEventArgs() });
+        Assert.True((bool)latch.GetValue(editor)!);
+
+        check.Invoke(editor, new object?[] { EditorTool.Freehand });
+        Assert.False((bool)latch.GetValue(editor)!);
+
+        ((Popup)editor.FindName("ColorPickerPopup")!).IsOpen = false;
+        check.Invoke(editor, new object?[] { EditorTool.Select });
+    }
+
+    /// <summary>
+    /// Two magnification drags on one callout, then undo, undo, redo. The redo of the FIRST
+    /// drag has to come back at that drag's value: while the gesture mutated the live
+    /// AnnotationData in place, the first drag's undo entry and the second drag's shared one
+    /// object, so redo replayed 6x where the user left 4x.
+    /// </summary>
+    private static void MagnifierZoomUndoSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var undoAsync = type.GetMethod("UndoAsync", NP)!;
+        var redoAsync = type.GetMethod("RedoAsync", NP)!;
+
+        WaitForEditorOperation(editor, type.GetField("_sourceOperationActive", NP)!);
+        canvas.Children.Clear();
+
+        var area = new Rect(4, 4, 40, 24);
+        var bubble = (System.Windows.Shapes.Rectangle)type.GetMethod("BeginMagnifier", NP)!
+            .Invoke(editor, new object[] { area })!;
+        canvas.Children.Add(bubble);
+        bubble.Tag = AnnotationData.ForMagnifier(
+            area, MagnifierLayout.DefaultFocus(area), MagnifierLayout.DefaultScale, Colors.White, 3);
+        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { bubble });
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { bubble });
+
+        var slider = (Slider)editor.FindName("MagnifySlider")!;
+        var released = type.GetMethod("OnMagnifyReleased", NP)!;
+        foreach (double zoom in new[] { 4d, 6d })
+        {
+            slider.Value = zoom;
+            released.Invoke(editor, new object?[] { slider, new RoutedEventArgs() });
+        }
+
+        static double Zoom(FrameworkElement fe) => ((AnnotationData)fe.Tag!).Zoom ?? 0;
+
+        Assert.Equal(6d, Zoom(bubble));
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(4d, Zoom(bubble));
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(MagnifierLayout.DefaultScale, Zoom(bubble));
+        WaitForTask((Task)redoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(4d, Zoom(bubble));
+
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
+    }
+
+    /// <summary>
+    /// Copy / paste / duplicate work on annotation OBJECTS, and each lands as one undoable
+    /// step offset from the original so a copy is visibly a copy. The clipboard is static,
+    /// which is what makes a mark copied in one editor window paste into another.
+    /// </summary>
+    private static void AnnotationClipboardSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var select = type.GetMethod("Select", NP)!;
+        var copy = type.GetMethod("CopySelectedAnnotations", NP)!;
+        var paste = type.GetMethod("PasteAnnotations", NP)!;
+        var duplicate = type.GetMethod("DuplicateSelectedAnnotations", NP)!;
+        var undoAsync = type.GetMethod("UndoAsync", NP)!;
+
+        canvas.Children.Clear();
+        var original = new System.Windows.Shapes.Rectangle
+        {
+            Width = 30,
+            Height = 20,
+            Stroke = Brushes.Red,
+            StrokeThickness = 3,
+            Tag = AnnotationData.ForShape(
+                AnnotationData.TypeRectangle, new Rect(10, 10, 30, 20),
+                Colors.Red, 3, ShapeFillMode.None),
+        };
+        Canvas.SetLeft(original, 10);
+        Canvas.SetTop(original, 10);
+        canvas.Children.Add(original);
+
+        // Nothing selected: there is nothing to copy, and Ctrl+C falls through to the image.
+        select.Invoke(editor, new object?[] { null });
+        Assert.False((bool)copy.Invoke(editor, Array.Empty<object>())!);
+
+        select.Invoke(editor, new object?[] { original });
+        Assert.True((bool)copy.Invoke(editor, Array.Empty<object>())!);
+
+        paste.Invoke(editor, Array.Empty<object>());
+        Assert.Equal(2, canvas.Children.Count);
+        var pasted = (FrameworkElement)canvas.Children[1];
+        // Offset from the original, and carrying its own copy of the data.
+        Assert.Equal(32d, AnnotationTransform.OffsetOf(pasted).X, 3);
+        Assert.NotSame(original.Tag, pasted.Tag);
+
+        duplicate.Invoke(editor, Array.Empty<object>());
+        Assert.Equal(3, canvas.Children.Count);
+
+        // Each is exactly one undo step.
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(2, canvas.Children.Count);
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Single(canvas.Children);
+
+        select.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
+    }
+
+    /// <summary>
+    /// Text is multi-line now, and a committed counter can be re-numbered by typing over it
+    /// — with the rest of the sequence following, because renumbering one badge and leaving
+    /// the counter where it was would just make the next one collide.
+    /// </summary>
+    private static readonly string LineBreak = ((char)10).ToString();
+
+    private static void TextAndCounterSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+
+        // The editor box takes returns and wraps; a caption that runs long used to march
+        // off the edge of the picture.
+        var box = AnnotationFactory.CreateTextEditor(Brushes.White, 20);
+        Assert.True(box.AcceptsReturn);
+        Assert.Equal(TextWrapping.Wrap, box.TextWrapping);
+
+        // One line reads the same centred or left; a paragraph does not.
+        var oneLine = (TextBlock)AnnotationFactory.CreateStyledTextLabel(
+            "Caption", Brushes.White, 20, TextStyle.Plain);
+        Assert.Equal(TextAlignment.Center, oneLine.TextAlignment);
+        var paragraph = (TextBlock)AnnotationFactory.CreateStyledTextLabel(
+            string.Join(LineBreak, "one", "two", "three"), Brushes.White, 20, TextStyle.Plain);
+        Assert.Equal(TextAlignment.Left, paragraph.TextAlignment);
+
+        canvas.Children.Clear();
+        var badge = AnnotationFactory.CreateStepBadge(1, Colors.Red, 4, letters: false);
+        badge.Tag = AnnotationData.ForStep(new Point(5, 5), 1, Colors.Red, 4);
+        canvas.Children.Add(badge);
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { badge });
+
+        var retype = type.GetMethod("TryRetypeStepNumber", NP)!;
+        var nextStep = type.GetField("_nextStep", NP)!;
+        Assert.True((bool)retype.Invoke(editor, new object[] { Key.D1 })!);
+        Assert.True((bool)retype.Invoke(editor, new object[] { Key.D2 })!);
+
+        string caption = badge.Children.OfType<TextBlock>().First().Text;
+        Assert.Equal("12", caption);
+        Assert.Equal(13, (int)nextStep.GetValue(editor)!);
+
+        // The whole run is ONE undo entry, not one per digit.
+        type.GetMethod("CommitStepRetype", NP)!.Invoke(editor, Array.Empty<object>());
+        WaitForTask((Task)type.GetMethod("UndoAsync", NP)!.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal("1", badge.Children.OfType<TextBlock>().First().Text);
+        Assert.Equal(2, (int)nextStep.GetValue(editor)!);
+
+        // A letter is not a digit, so it never reaches the badge.
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { badge });
+        Assert.False((bool)retype.Invoke(editor, new object[] { Key.A })!);
+
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
     }
 
     private static void SaveProjectSmoke(EditorWindow editor, SettingsService settings, HistoryService history)
@@ -1180,6 +1621,65 @@ public class ThemedWindowTests
         Assert.True(zoom * imgW <= vw + 1 && zoom * 4000 <= vh + 1,
             $"tall image not fit-whole on open: zoom={zoom}, scaled={zoom * imgW}x{zoom * 4000}, viewport={vw}x{vh}");
     }
+
+    /// <summary>
+    /// The grow entrance has to LAND on the rect it tweened to. MinWidth/MinHeight are
+    /// zeroed so the tween can paint small frames and restored when it finishes, and
+    /// Windows enforces them through WM_GETMINMAXINFO — so a target below the floor is
+    /// resized back up on the next layout pass, which is the size snap the motion rule
+    /// forbids (and, with animations off, simply the wrong opening size).
+    /// </summary>
+    private static void EditorGrowLandsOnItsTargetSmoke(SettingsService settings, HistoryService history)
+    {
+        const System.Reflection.BindingFlags NS =
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+
+        var animations = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false; // the tween applies its end frame inline
+        EditorWindow? editor = null;
+        try
+        {
+            var origin = new SD.Rectangle(40, 40, 200, 130);
+            editor = EditorWindow.CreateForCapture(NewBitmap(), settings, history);
+            double minWidth = editor.MinWidth, minHeight = editor.MinHeight;
+            editor.GrowFrom(origin);
+            editor.Show();
+            for (int i = 0; i < 6; i++) PumpDispatcherOnce();
+
+            double scale = RecordingMonitorDpi.ScaleFor(origin);
+            SD.Rectangle work = WF.Screen.FromRectangle(origin).WorkingArea;
+            double wantW = (double)typeof(EditorWindow).GetField("DefaultWidthDip", NS)!.GetRawConstantValue()!;
+            double wantH = (double)typeof(EditorWindow).GetField("DefaultHeightDip", NS)!.GetRawConstantValue()!;
+            SD.Rectangle target = EditorGrowLayout.Target(
+                work, new Size(wantW, wantH), scale, new Size(minWidth, minHeight));
+
+            GetWindowRect(new System.Windows.Interop.WindowInteropHelper(editor).Handle, out RECT r);
+            var landed = new SD.Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+
+            Assert.True(Math.Abs(landed.Width - target.Width) <= 1 &&
+                        Math.Abs(landed.Height - target.Height) <= 1,
+                $"Editor grew to {landed} instead of its target {target}.");
+            // The restored floor must be something the landed window can hold, and must fit
+            // the monitor it opened on.
+            Assert.True(editor.MinWidth <= target.Width / scale + 0.5,
+                $"MinWidth {editor.MinWidth} exceeds the {target.Width / scale:0} DIP it landed at.");
+            Assert.True(editor.MinWidth > 0 && editor.MinHeight > 0,
+                "The grow left the editor with no minimum size at all.");
+            Assert.Equal(0, Motion.Holders);
+        }
+        finally
+        {
+            try { editor?.Close(); } catch { }
+            PumpDispatcherOnce();
+            Motion.AnimationsEnabled = animations;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
 
     private static void PinSmoke(EditorWindow editor)
     {

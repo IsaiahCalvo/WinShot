@@ -1,4 +1,5 @@
-using System.Drawing;
+﻿using System.Drawing;
+using Media = System.Windows.Media;
 using WinShot.Core;
 using Xunit;
 
@@ -90,5 +91,58 @@ public class ColorMathTests
         ColorMath.DominantPair(Sample, new Rectangle(0, 0, 3840, 2160), maxSamplesPerAxis: 48);
 
         Assert.True(reads <= 48 * 48 + 96, $"sampled {reads} pixels");
+    }
+
+    // ------------------------------------------- the WPF overloads the editor reads through
+
+    [Fact]
+    public void TheWpfOverloadsAgreeWithTheGdiOnesRatherThanCarryingTheirOwnFormula()
+    {
+        // One sRGB threshold in the app, not two: 0.04045, WCAG 2.1's correction of 2.0's
+        // 0.03928. A second copy of this class drifted to the old number once already.
+        Assert.Equal(21.0, ColorMath.ContrastRatio(Media.Colors.White, Media.Colors.Black), 2);
+        Assert.Equal(
+            ColorMath.RelativeLuminance(Color.FromArgb(0x0A, 0x84, 0xFF)),
+            ColorMath.RelativeLuminance(Media.Color.FromRgb(0x0A, 0x84, 0xFF)),
+            9);
+    }
+
+    /// <summary>
+    /// The pill's whole contract: a label plate painted in ANY colour the picker offers
+    /// still carries legible text, because the ink is chosen and not the user's raw pick.
+    /// Black and #3A3A3C used to render near-black glyphs at 1.26:1 and 1.47:1.
+    /// </summary>
+    [Theory]
+    [InlineData("#FF453A")] // the default annotation red
+    [InlineData("#000000")]
+    [InlineData("#3A3A3C")]
+    [InlineData("#8E8E93")] // the closest thing in the grid to the worst possible plate
+    [InlineData("#C7C7CC")]
+    [InlineData("#FFFFFF")]
+    [InlineData("#FFCC00")]
+    [InlineData("#0A84FF")]
+    public void TextOn_ClearsFourAndAHalfToOneOnEverySwatch(string hex)
+    {
+        var plate = (Media.Color)Media.ColorConverter.ConvertFromString(hex)!;
+
+        Assert.True(ColorMath.ContrastRatio(ColorMath.TextOn(plate), plate) >= 4.5,
+            $"{hex} -> {ColorMath.ContrastRatio(ColorMath.TextOn(plate), plate):0.00}:1");
+    }
+
+    [Fact]
+    public void TextOn_NeverDropsBelowTheCrossoverPoint()
+    {
+        // The worst plate is the one where black and white read the same; nothing can beat
+        // 4.58:1 there, and nothing may come out below it either.
+        double worst = 21;
+        for (int r = 0; r < 256; r += 5)
+            for (int g = 0; g < 256; g += 5)
+                for (int b = 0; b < 256; b += 5)
+                {
+                    var plate = Media.Color.FromRgb((byte)r, (byte)g, (byte)b);
+                    worst = Math.Min(worst, ColorMath.ContrastRatio(ColorMath.TextOn(plate), plate));
+                }
+
+        Assert.True(worst >= 4.5, $"worst plate read {worst:0.00}:1");
     }
 }

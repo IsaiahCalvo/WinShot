@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -251,18 +251,32 @@ public class ScrollingEditorHandoffTests
             image => Assert.True(((BitmapSource)image.Source).IsFrozen));
     }
 
+    /// <summary>
+    /// The editor that opens on a stitched scrolling capture is a working editor: a
+    /// redaction drawn on it lands on the canvas as one undoable object, and — the point
+    /// of the redaction rework — leaves the stitched bitmap byte-for-byte alone.
+    /// </summary>
     private static void ValidateEditable(EditorWindow editor, SD.Bitmap source)
     {
         FieldInfo activeField = typeof(EditorWindow).GetField("_sourceOperationActive", PrivateInstance)!;
         Assert.False((bool)activeField.GetValue(editor)!);
 
         SD.Color before = source.GetPixel(31, 31);
-        MethodInfo applyBlur = typeof(EditorWindow).GetMethod("ApplyBlur", PrivateInstance)!;
-        applyBlur.Invoke(editor, [new SD.Rectangle(8, 8, 96, 96)]);
-        WaitUntil(() => !(bool)activeField.GetValue(editor)!, TimeSpan.FromSeconds(10));
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        int childrenBefore = canvas.Children.Count;
 
-        SD.Color after = source.GetPixel(31, 31);
-        Assert.NotEqual(before.ToArgb(), after.ToArgb());
+        var area = new Rect(8, 8, 96, 96);
+        var mark = (System.Windows.Shapes.Rectangle)typeof(EditorWindow)
+            .GetMethod("BeginRedaction", PrivateInstance)!.Invoke(editor, [area])!;
+        canvas.Children.Add(mark);
+        typeof(EditorWindow).GetMethod("UpdateRedactionPreview", PrivateInstance)!
+            .Invoke(editor, [mark, area, true]);
+        mark.Tag = AnnotationData.ForRedaction(area, RedactStyle.Pixelate, 45, seed: 3);
+        typeof(EditorWindow).GetMethod("PushAddElement", PrivateInstance)!.Invoke(editor, [mark]);
+        PumpDispatcherOnce();
+
+        Assert.Equal(childrenBefore + 1, canvas.Children.Count);
+        Assert.Equal(before.ToArgb(), source.GetPixel(31, 31).ToArgb());
         object undoStack = typeof(EditorWindow).GetField("_undoStack", PrivateInstance)!.GetValue(editor)!;
         Assert.Equal(1, (int)undoStack.GetType().GetProperty("Count")!.GetValue(undoStack)!);
     }
@@ -370,8 +384,15 @@ public class ScrollingEditorHandoffTests
             };
 
             FieldInfo activeField = typeof(EditorWindow).GetField("_sourceOperationActive", PrivateInstance)!;
-            MethodInfo applyBlur = typeof(EditorWindow).GetMethod("ApplyBlur", PrivateInstance)!;
-            applyBlur.Invoke(editor, [new SD.Rectangle(20, 20, 128, 128)]);
+            // Any operation that replaces the source re-runs the tile conversion, which is
+            // where the lease that must outlive Close() is taken. A flip is the cheapest one.
+            MethodInfo applyTransform = typeof(EditorWindow).GetMethod(
+                "ApplySourceTransform",
+                PrivateInstance,
+                binder: null,
+                types: [typeof(SD.RotateFlipType)],
+                modifiers: null)!;
+            applyTransform.Invoke(editor, [SD.RotateFlipType.RotateNoneFlipX]);
             WaitForTask(conversionEntered.Task, TimeSpan.FromSeconds(5));
             editor.Close();
             PumpDispatcherOnce();

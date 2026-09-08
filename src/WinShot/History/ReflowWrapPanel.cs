@@ -127,7 +127,7 @@ internal sealed class ReflowWrapPanel : WrapPanel
         // With animation off system-wide Motion.Run applies the end state and finishes before it
         // returns, so the handle it hands back must not be recorded as a live tween.
         bool finished = false;
-        IDisposable handle = Motion.Run(
+        IDisposable? handle = Motion.Run(
             ReflowMs,
             Motion.EaseOutCubic,
             progress =>

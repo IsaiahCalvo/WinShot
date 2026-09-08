@@ -3,12 +3,14 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Core;
 using WinShot.Editor.Background;
+using WinShot.Recording;
 using SD = System.Drawing;
 
 namespace WinShot.Editor;
@@ -39,6 +41,14 @@ public partial class EditorWindow : Window
     {
         if (_sourceOperationActive) return;
         ApplySourceTransform(SD.RotateFlipType.RotateNoneFlipY);
+    }
+
+    /// <summary>Keeps the crop bar's Image size button reading the real dimensions.</summary>
+    private void SyncImageSizeLabel()
+    {
+        if (ImageSizeLabel is null) return;
+        ImageSizeLabel.Text = string.Create(CultureInfo.InvariantCulture,
+            $"Image size: {_source.Width} × {_source.Height}");
     }
 
     private void OnResizeImage(object sender, RoutedEventArgs e)
@@ -80,18 +90,25 @@ public partial class EditorWindow : Window
 
         Select(null);
         SD.Bitmap before = _source;
-        SD.Bitmap flat = annotations.Count > 0 ? Flatten() : before;
-        SD.Bitmap after;
+        SD.Bitmap flat = before;
+        SD.Bitmap? after = null;
+        Exception? failed = null;
         _sourceOperationActive = true;
         Cursor = Cursors.Wait;
         try
         {
+            // Inside the try: Flatten allocates a RenderTargetBitmap the full size of the
+            // canvas, which Add capture can grow without bound, so it throws on exactly the
+            // picture a rotate is most likely to be asked of. Outside, that throw left an
+            // async void handler and came back as the generic "WinShot error" toast instead
+            // of the "Could not change the image" dialog twenty lines below.
+            if (annotations.Count > 0) flat = Flatten();
             after = await Task.Run(() => transform(flat));
         }
         catch (Exception ex)
         {
             Log.Error("Source transform failed", ex);
-            return;
+            failed = ex;
         }
         finally
         {
@@ -99,6 +116,15 @@ public partial class EditorWindow : Window
             if (!_closed)
                 UpdateCursor();
             if (!ReferenceEquals(flat, before)) flat.Dispose(); // temp flatten only
+        }
+        if (failed is not null || after is null)
+        {
+            // Rotate, flip and Image size are on the crop bar now, so a silent failure is a
+            // button the user presses again on an unchanged picture. Reported after the
+            // finally, so the wait cursor is gone before the dialog takes over.
+            if (!_closed && failed is not null)
+                ThemedMessageDialog.Show(this, "Could not change the image", FriendlyError.For(failed));
+            return;
         }
         if (_closed)
         {
@@ -151,6 +177,7 @@ public partial class EditorWindow : Window
     {
         DragRect.Visibility = Visibility.Collapsed;
         CropDim.Visibility = Visibility.Collapsed;
+        CropGuides.Visibility = Visibility.Collapsed;
     }
 
     private void ClearCropPreview()
@@ -226,6 +253,9 @@ public partial class EditorWindow : Window
     {
         BtnUndo.IsEnabled = _undoStack.Count > 0;
         BtnRedo.IsEnabled = _redoStack.Count > 0;
+        // An image arriving or leaving is always an action, so this is the one place that
+        // sees every moment the before/after GIF becomes possible or impossible.
+        SyncExportGifButton();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -233,6 +263,14 @@ public partial class EditorWindow : Window
         base.OnPreviewKeyDown(e);
         // Let an open text annotation keep its own keyboard behavior.
         if (Keyboard.FocusedElement is TextBox) return;
+
+        // An open popover owns Escape: it is the only way out of a menu for a keyboard
+        // user, and it must not also deselect or abort whatever is on the canvas behind it.
+        if (e.Key == Key.Escape && CloseOpenPopover())
+        {
+            e.Handled = true;
+            return;
+        }
 
         if (e.Key == Key.Space)
         {
@@ -242,6 +280,26 @@ public partial class EditorWindow : Window
                 UpdateCursor();
             }
             e.Handled = true; // keep Space from clicking a focused toolbar button
+            return;
+        }
+        // Z arms the zoom gesture for as long as it is held: click a point or drag a
+        // rectangle. It is a held modifier rather than a tool, so it never takes the tool
+        // you were using away from you.
+        if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            if (!_zoomKeyDown)
+            {
+                _zoomKeyDown = true;
+                UpdateCursor();
+            }
+            e.Handled = true;
+            return;
+        }
+        // Q and W: 100 % on the two ends of whatever is selected.
+        if (Keyboard.Modifiers == ModifierKeys.None && e.Key is Key.Q or Key.W)
+        {
+            ZoomToCorner(bottomRight: e.Key == Key.W);
+            e.Handled = true;
             return;
         }
         // Z-order on the selected annotation: Ctrl+] / Ctrl+[ move it one step forward/back;
@@ -265,7 +323,16 @@ public partial class EditorWindow : Window
                 case EditorShortcutCommand.Undo: _ = UndoAsync(); break;
                 case EditorShortcutCommand.Redo: _ = RedoAsync(); break;
                 case EditorShortcutCommand.FitAndCenter: FitToView(); break;
-                case EditorShortcutCommand.Copy: OnCopy(this, new RoutedEventArgs()); break;
+                case EditorShortcutCommand.ActualSize: ZoomToPercent(1.0); break;
+                case EditorShortcutCommand.ZoomIn: StepZoom(1.2); break;
+                case EditorShortcutCommand.ZoomOut: StepZoom(1 / 1.2); break;
+                // Marks first: Ctrl+C with something selected copies the MARKS, and only
+                // falls through to the picture when nothing is selected.
+                case EditorShortcutCommand.Copy:
+                    if (!CopySelectedAnnotations()) OnCopy(this, new RoutedEventArgs());
+                    break;
+                case EditorShortcutCommand.Paste: PasteAnnotations(); break;
+                case EditorShortcutCommand.Duplicate: DuplicateSelectedAnnotations(); break;
                 case EditorShortcutCommand.SaveAs: OnSave(this, new RoutedEventArgs()); break;
             }
             e.Handled = true;
@@ -297,6 +364,15 @@ public partial class EditorWindow : Window
             return;
         }
 
+        // Typing over a selected counter re-numbers it, before the letter keys get a look
+        // in — a digit is never a tool shortcut, so nothing is shadowed.
+        if (Keyboard.Modifiers == ModifierKeys.None && TryRetypeStepNumber(e.Key))
+        {
+            e.Handled = true;
+            return;
+        }
+        CommitStepRetype(); // any other key ends the run
+
         // Single-letter tool shortcuts (no modifiers). Ignored while a curved arrow is
         // mid-edit so Escape/commit stays the only way out of that transient mode.
         if (Keyboard.Modifiers == ModifierKeys.None && _pendingCurve is null && TrySelectToolByKey(e.Key))
@@ -311,7 +387,15 @@ public partial class EditorWindow : Window
         }
         else if (e.Key == Key.Escape)
         {
-            if (_marqueeActive)
+            if (_zoomKeyDown || _zoomDragging)
+            {
+                AbortZoomGesture();
+                _zoomKeyDown = false;
+                _zoomArmedByMenu = false;
+                UpdateCursor();
+                e.Handled = true;
+            }
+            else if (_marqueeActive)
             {
                 AbortMarquee();
                 Viewport.ReleaseMouseCapture();
@@ -356,7 +440,22 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyUp(KeyEventArgs e)
     {
         base.OnPreviewKeyUp(e);
-        if (e.Key != Key.Space || Keyboard.FocusedElement is TextBox) return;
+        if (Keyboard.FocusedElement is TextBox) return;
+
+        if (e.Key == Key.Z && _zoomKeyDown)
+        {
+            _zoomKeyDown = false;
+            // Both flags together, or a menu-armed gesture that is pressed and released
+            // without a drag leaves the arming set and disarms the NEXT Z drag mid-gesture.
+            _zoomArmedByMenu = false;
+            // Letting Z go mid-drag abandons the gesture rather than zooming to a
+            // rectangle the user was no longer choosing.
+            AbortZoomGesture();
+            UpdateCursor();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key != Key.Space) return;
         if (_spaceDown)
         {
             _spaceDown = false;
@@ -393,7 +492,12 @@ public partial class EditorWindow : Window
         }
         catch (Exception ex)
         {
+            // Flatten can run out of memory on a tall scrolling capture, and B is a keyboard
+            // shortcut: without this the user pressed it and the app did nothing at all,
+            // which is the one action on the Image row with no failure feedback.
             Log.Error("Editor background composer failed", ex);
+            if (!_closed)
+                ThemedMessageDialog.Show(this, "Could not open the background composer", FriendlyError.For(ex));
         }
     }
 
@@ -541,6 +645,9 @@ public partial class EditorWindow : Window
     {
         CommitText();
         CommitPendingCurve();
+        // A live gesture may have deferred a redaction repaint; baking it now would put the
+        // pixels the mark USED to cover into the saved file.
+        FlushRedactionRefresh();
         CanvasHost.UpdateLayout();
         return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
     }
@@ -652,14 +759,26 @@ public partial class EditorWindow : Window
         if (_sourceOperationActive) return;
         try
         {
-            var flat = Flatten();
+            // A pending crop rectangle means "copy this bit", not "copy the picture" — and
+            // it does NOT close the window, so the crop is still there to adjust afterwards.
+            SD.Bitmap flat = Flatten();
+            if (_pendingCrop is SD.Rectangle region && region.Width > 1 && region.Height > 1)
+            {
+                try
+                {
+                    SD.Bitmap cropped = CaptureService.Crop(flat, region);
+                    flat.Dispose();
+                    flat = cropped;
+                }
+                catch (ArgumentException)
+                {
+                    // Out-of-range crop: fall back to the whole image rather than nothing.
+                }
+            }
             await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
             if (!IsVisible) return;
             // BtnCopy is a round glyph button — flash a checkmark, then restore the copy glyph.
-            BtnCopy.Content = "";
-            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
-            timer.Tick += (_, _) => { timer.Stop(); BtnCopy.Content = ""; };
-            timer.Start();
+            ButtonFlash.Show(BtnCopy, "", "");
         }
         catch (Exception ex)
         {
@@ -668,30 +787,178 @@ public partial class EditorWindow : Window
             // whatever was on the clipboard before. The line is FriendlyError's, not a
             // hand-written one: the fixed clipboard sentence this used to carry blamed
             // another app for a full disk, an out-of-memory flatten and a GDI+ encode too.
-            ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
+            // A busy clipboard is exactly the failure slow enough for the user to close the
+            // editor first, and ThemedMessageDialog assigns Owner unconditionally — WPF
+            // throws on a closed one, out of an async void handler with nobody to catch it.
+            if (!_closed)
+                ThemedMessageDialog.Show(this, "Could not copy", FriendlyError.For(ex));
         }
     }
 
-    /// <summary>Bottom-bar zoom preset dropdown: Fit / 50% / 100% / 150% / 200%.</summary>
-    private void OnZoomPresetChanged(object sender, SelectionChangedEventArgs e)
+    /// <summary>
+    /// The zoom menu. Every row carries its shortcut in the gesture column, which is how
+    /// the editor advertises the keys it now binds instead of hiding them.
+    /// </summary>
+    private void OnZoomMenuClick(object sender, RoutedEventArgs e)
     {
-        if (ZoomBox.SelectedItem is not ComboBoxItem item) return;
-        string choice = (item.Content as string) ?? "Fit";
-        if (choice == "Fit")
+        var menu = new ContextMenu
         {
-            FitToView();
+            PlacementTarget = ZoomMenuButton,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+            // Without both styles this pops the Aero2 default — white chrome over the dark
+            // editor, on the control built to replace the dead zoom combo.
+            Style = (Style)FindResource("DarkContextMenu"),
+        };
+        var itemStyle = (Style)FindResource("DarkMenuItem");
+        void Row(string header, string gesture, Action run)
+        {
+            var item = new MenuItem { Header = header, InputGestureText = gesture, Style = itemStyle };
+            item.Click += (_, _) => run();
+            menu.Items.Add(item);
+        }
+
+        Row("Fit", "Ctrl+1", FitToView);
+        Row("Fit width", "", FitToWidth);
+        menu.Items.Add(new Separator());
+        Row("50%", "", () => ZoomToPercent(0.5));
+        Row("100%", "Ctrl+0", () => ZoomToPercent(1.0));
+        Row("150%", "", () => ZoomToPercent(1.5));
+        Row("200%", "", () => ZoomToPercent(2.0));
+        menu.Items.Add(new Separator());
+        Row("Zoom in", "Ctrl++", () => StepZoom(1.2));
+        Row("Zoom out", "Ctrl+-", () => StepZoom(1 / 1.2));
+        menu.Items.Add(new Separator());
+        Row("Zoom to top left", "Q", () => ZoomToCorner(bottomRight: false));
+        Row("Zoom to bottom right", "W", () => ZoomToCorner(bottomRight: true));
+        Row("Zoom to a region", "Z + drag", ArmZoomGesture);
+
+        menu.IsOpen = true;
+    }
+
+    // ------------------------------------------------- before/after GIF export
+
+    /// <summary>
+    /// Two frames: the picture WITHOUT the added images, then with them. Aligning an
+    /// "after" screenshot over a "before" at half opacity is how the difference gets found;
+    /// this is how it gets shown to somebody else.
+    /// </summary>
+    private async void OnExportGif(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive || _gifExportRunning) return;
+        CommitText();
+        CommitPendingCurve();
+
+        var overlays = ImageAnnotations();
+        if (overlays.Count == 0)
+        {
+            // The button is hidden without one, so this is belt and braces rather than the
+            // path anyone takes.
+            App.Toast("Export GIF", "Add an image to the canvas first.");
             return;
         }
-        if (choice == "Fit Width")
+
+        var dialog = new SaveFileDialog
         {
-            FitToWidth();
-            return;
-        }
-        if (double.TryParse(choice.TrimEnd('%'), NumberStyles.Number, CultureInfo.InvariantCulture, out double pct)
-            && Viewport.ActualWidth > 1 && Viewport.ActualHeight > 1)
+            FileName = System.IO.Path.ChangeExtension(FileNamer.Next(_settings, "gif"), ".gif"),
+            InitialDirectory = _settings.Current.SaveFolder,
+            Filter = "GIF animation|*.gif",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        SD.Bitmap? before = null;
+        SD.Bitmap? after = null;
+        // Two flattens plus an encode is seconds on a large canvas. Without this the button
+        // stays live and says nothing is happening, and a second click opens a second save
+        // dialog over the first — the same guard OCR takes for the same reason.
+        _gifExportRunning = true;
+        ExportGifBtn.IsEnabled = false;
+        // Both flattens run on the UI thread before the encode moves off it, so the window
+        // is genuinely busy for that stretch — say so the way every other long edit does.
+        Cursor = Cursors.Wait;
+        try
         {
-            ZoomAt(new Point(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2), pct / 100.0);
+            // "Before" is the canvas with the added images hidden — not the raw source:
+            // arrows and labels drawn on top belong in BOTH frames, or the animation is a
+            // flip between two different pictures rather than a comparison.
+            var restore = new List<(UIElement Element, Visibility Was)>();
+            foreach (UIElement overlay in overlays)
+            {
+                restore.Add((overlay, overlay.Visibility));
+                overlay.Visibility = Visibility.Hidden;
+            }
+            try
+            {
+                before = Flatten();
+            }
+            finally
+            {
+                foreach (var (element, was) in restore)
+                    element.Visibility = was;
+            }
+            after = Flatten();
+
+            SD.Bitmap frame1 = before, frame2 = after;
+            await Task.Run(() =>
+            {
+                using var stream = System.IO.File.Create(dialog.FileName);
+                // Two frames at 1 fps: a full second on each side is what makes a
+                // difference readable. Faster reads as a flicker, not a comparison.
+                using var gif = new GifEncoder(stream, frame1.Width, frame1.Height, fps: 1);
+                gif.AddFrame(frame1);
+                gif.AddFrame(frame2);
+                gif.Finish();
+            });
+
+            App.Toast("Saved the GIF", System.IO.Path.GetFileName(dialog.FileName),
+                severity: ToastSeverity.Success);
         }
+        catch (Exception ex)
+        {
+            Log.Error($"Before/after GIF export failed: {dialog.FileName}", ex);
+            // The encode can outlive the window; ThemedMessageDialog assigns Owner
+            // unconditionally and WPF throws on a closed one, out of an async void handler.
+            if (!_closed)
+                ThemedMessageDialog.Show(this, "Could not save the GIF", FriendlyError.For(ex));
+        }
+        finally
+        {
+            _gifExportRunning = false;
+            if (!_closed) { ExportGifBtn.IsEnabled = true; UpdateCursor(); }
+            before?.Dispose();
+            after?.Dispose();
+        }
+    }
+
+    /// <summary>Set while a before/after GIF is being flattened and encoded.</summary>
+    private bool _gifExportRunning;
+
+    /// <summary>The image annotations on the canvas, bottom to top.</summary>
+    private List<UIElement> ImageAnnotations()
+    {
+        var found = new List<UIElement>();
+        foreach (UIElement child in AnnotationCanvas.Children)
+            if (child is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+                meta.Type == AnnotationData.TypeImage)
+                found.Add(child);
+        return found;
+    }
+
+    /// <summary>
+    /// Shows the GIF button once there is a second picture to flip to, and takes it away
+    /// again when the last one goes. A one-frame before/after animation is a PNG.
+    /// </summary>
+    private void SyncExportGifButton()
+    {
+        if (ExportGifBtn is null) return;
+        Visibility show = ImageAnnotations().Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (ExportGifBtn.Visibility == show) return;
+
+        // Appear only, on the same recipe as the row it sits in. The collapse reflows every
+        // control docked beside it, and there is no softening a layout jump you are also
+        // removing the space for — so the honest trade is to ease the arrival and cut the exit.
+        ExportGifBtn.Visibility = show;
+        if (show == Visibility.Visible)
+            ExportGifBtn.BeginStoryboard((Storyboard)FindResource("ContextSwapIn"));
     }
 
     /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>
@@ -769,6 +1036,10 @@ public partial class EditorWindow : Window
                     _history.Add(flat);
                 }
             });
+            // Two save actions on one toolbar behaved differently: the GIF export
+            // confirmed, Save as… said nothing at all.
+            App.Toast("Saved", System.IO.Path.GetFileName(dialog.FileName),
+                severity: ToastSeverity.Success);
         }
         catch (Exception ex)
         {
@@ -865,7 +1136,7 @@ public partial class EditorWindow : Window
             // malformed entry can never leak a half-initialized editor.
             var built = doc.Annotations
                 .OrderBy(a => a.Z)
-                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images)))
+                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images, source)))
                 .ToList();
 
             var win = new EditorWindow(bitmap, settings, history);
@@ -881,6 +1152,9 @@ public partial class EditorWindow : Window
             }
             win._projectPath = path;
             win.Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+            // CreateElement painted each redaction at its ORIGINAL rect; the move offsets
+            // were applied above, so re-read the pixels each one actually covers now.
+            win.RefreshAllRedactions();
 
             // A rotation pivot is the element's own centre, which is only known once the
             // element has been measured. Re-seat the pivots after the first layout pass,

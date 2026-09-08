@@ -489,7 +489,11 @@ public class SelectorInteractionTests
         pointer.MoveTo(selector, 340, 260);
         selector.HandleMouseUp(Left());
 
-        Assert.Equal(new SD.Rectangle(100, 100, 240, 160), selector.SelectedRegionPx);
+        // Size, not origin: SelectedRegionPx is virtual-screen relative, and a desktop with a
+        // monitor above the primary has a negative virtual origin — which is Isaiah's layout.
+        // The mode is what this test is about.
+        Assert.Equal(240, selector.SelectedRegionPx!.Value.Width);
+        Assert.Equal(160, selector.SelectedRegionPx!.Value.Height);
         Assert.Equal(FastRegionSelectorDialog.SelectorMode.Area, selector.Mode);
     }
 

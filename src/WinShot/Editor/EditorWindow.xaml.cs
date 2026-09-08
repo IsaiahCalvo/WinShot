@@ -2,13 +2,16 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Core;
+using WinShot.Recording;
 using SD = System.Drawing;
 
 namespace WinShot.Editor;
@@ -28,6 +31,15 @@ public partial class EditorWindow : Window
 {
     private const double MinZoom = 0.05;
     private const double MaxZoom = 16.0;
+
+    /// <summary>
+    /// The editor's preferred footprint, in DIPs. The viewport zooms and pans instead of
+    /// sizing itself to the image, so a sensible default is enough — but it must be a plain
+    /// number, not something read back off the primary monitor's work area, because the
+    /// grow tween scales it by the CAPTURE monitor's DPI.
+    /// </summary>
+    private const double DefaultWidthDip = 1167;
+    private const double DefaultHeightDip = 590;
 
     private const string SaveDialogFilter =
         "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp|WinShot project|*.winshot";
@@ -70,8 +82,17 @@ public partial class EditorWindow : Window
 
     private bool _syncingThicknessButtons;
 
-    /// <summary>Guards the swatch row while a tool switch re-checks it, so no restyle fires.</summary>
-    private bool _syncingColorSwatches;
+    /// <summary>Which category's sub-row is showing.</summary>
+    private EditorToolCategory _category = EditorToolCategory.Shapes;
+
+    /// <summary>Guards the category radios while a tool switch re-checks them, so no tool is re-armed.</summary>
+    private bool _syncingCategory;
+
+    /// <summary>The contextual set currently on screen, so only a real change animates.</summary>
+    private EditorContextControls _shownContext = EditorContextControls.None;
+
+    /// <summary>The Select chevron's rubber-band rule; Auto keeps the drag-direction gesture.</summary>
+    private MarqueeModePreference _marqueePreference = MarqueeModePreference.Auto;
 
     /// <summary>Re-entrancy guard for the size field (see ApplySize).</summary>
     private bool _applyingSize;
@@ -81,20 +102,66 @@ public partial class EditorWindow : Window
     private bool _filledRectangleMode;
     private TextStyle _textStyle = TextStyle.Plain;
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
+
+    /// <summary>Outline dashes and line quality for the NEXT shape; a selected one carries its own.</summary>
+    private StrokeDash _strokeDash = StrokeDash.Solid;
+    private StrokeRender _strokeRender = StrokeRender.Clean;
+
+    /// <summary>The jitter seed of the shape being drawn, so its wobble is stable as the drag grows.</summary>
+    private int _sketchSeed;
     private double _opacity = 1.0; // annotation alpha multiplier (0.25–1.0) for new + restyled marks
-    private EffectStrength _blurStrength = EffectStrength.Medium;
-    private EffectStrength _pixelateStrength = EffectStrength.Medium;
+    // Redaction defaults for the NEXT mark; a selected redaction carries its own.
+    private RedactStyle _redactStyle = RedactStyle.Pixelate;
+    private int _redactStrength = Redaction.DefaultStrength;
+    private int _activeRedactSeed;
+
+    /// <summary>Magnification for the NEXT callout; a selected one carries its own.</summary>
+    private double _magnification = MagnifierLayout.DefaultScale;
+    private AnnotationData? _magnifyBefore;
+    private UIElement? _magnifyElement;
+    private readonly System.Diagnostics.Stopwatch _redactPreviewClock = new();
+
+    // Strength-slider gesture: a continuous drag previews live but records ONE undo entry.
+    private AnnotationData? _redactStrengthBefore;
+    private UIElement? _redactStrengthElement;
+
+    // Counter re-numbering run: digits typed against one selected badge, committed as one
+    // undo entry when the selection changes or a non-digit key arrives.
+    private UIElement? _stepRetypeElement;
+    private AnnotationData? _stepRetypeBefore;
+    private int _stepRetypeValue;
 
     // Opacity-slider gesture: a continuous drag previews live but records ONE undo entry.
     // _opacityBefore is the selected element's style captured at gesture start.
     private StyleSnapshot? _opacityBefore;
     private UIElement? _opacityElement;
     private double? _cropRatio; // null = free
+    private string _cropRatioTag = ""; // the picked ratio menu row ("" = Free)
     private EditorTool _toolBeforeEyedropper = EditorTool.Select;
     private bool _colorPickerBuilt;
     private Color _customColor = Color.FromRgb(0xFF, 0x3B, 0x30); // last custom / eyedropper color
     private bool _savedColorsDirty;
     private bool _suppressHexEvents;
+
+    // Colour picker state. Hue is kept separately from the colour so dragging into the
+    // white corner does not lose which hue the user was on.
+    private double _pickerHue;
+    private double _pickerSaturation = 1;
+    private double _pickerValue = 1;
+    private byte _pickerAlpha = 255;
+    private bool _pickerFillTarget;
+    private bool _draggingSv;
+    private bool _suppressPickerEvents;
+
+    /// <summary>Set by the picker's own eyedropper, so a sample returns to the picker.</summary>
+    private bool _reopenPickerAfterSample;
+
+    /// <summary>
+    /// The fill colour for shapes, or null for "derive it from the stroke" — which is what
+    /// every shape drawn before the Fill tab existed did, so nothing already on a canvas
+    /// changes colour.
+    /// </summary>
+    private Color? _fillColor;
 
     /// <summary>Path of the .winshot project this session was opened from / saved to, if any.</summary>
     private string? _projectPath;
@@ -106,6 +173,9 @@ public partial class EditorWindow : Window
     private Point _curveTo;
     private Point _curveControl;
     private double _curveThickness;
+    private StrokeRender _curveRender = StrokeRender.Clean;
+    private StrokeDash _curveDash = StrokeDash.Solid;
+    private int _curveSeed;
     private bool _draggingCurveHandle;
 
     // View state (zoom/pan). _zoom mirrors ViewScale so math never reads the transform.
@@ -113,6 +183,22 @@ public partial class EditorWindow : Window
     private bool _panning;
     private Point _panLast; // viewport coords
     private bool _spaceDown;
+
+    /// <summary>Z held: the next click or drag is a zoom, whatever tool is armed.</summary>
+    private bool _zoomKeyDown;
+    private bool _zoomDragging;
+    private Point _zoomDragStart;
+
+    /// <summary>The gesture came from the zoom menu, so it disarms after one use.</summary>
+    private bool _zoomArmedByMenu;
+
+    /// <summary>Dragging the ring that says what a magnifier callout is looking at.</summary>
+    private bool _draggingMagnifierFocus;
+    private Point _magnifierFocusBefore;
+
+    /// <summary>Whether a dragged mark lines itself up with the others. On by default,
+    /// with Ctrl as the per-drag escape, and switchable from the pointer's own menu.</summary>
+    private bool _objectSnap = true;
 
     // Drawing state.
     private bool _dragging;
@@ -140,7 +226,15 @@ public partial class EditorWindow : Window
     private MarqueeMode _marqueeMode = MarqueeMode.Window;
     private bool _movingSelection;
     private Point _moveLast;   // content coords
-    private Vector _moveTotal; // accumulated drag delta for the undo record
+    private Vector _moveTotal; // the delta actually applied — the undo record
+    private Vector _moveRaw;   // the unconstrained drag, so Shift can be let go mid-move
+
+    /// <summary>
+    /// Cross-window annotation clipboard. Static so a mark copied in one editor pastes
+    /// into another — the data is a plain serialisable record, so there is nothing
+    /// window-specific to keep.
+    /// </summary>
+    private static readonly List<ClipboardMark> AnnotationClipboard = new();
 
     // Resize-handle state (shared between selected-annotation resize and crop adjust).
     // The eight box handles are indexed 0..7 (corners 0-3, edge midpoints 4-7); endpoint
@@ -181,9 +275,14 @@ public partial class EditorWindow : Window
         // image, so a sensible default footprint is enough; the image is
         // fitted and centered once layout is known.
         var wa = SystemParameters.WorkArea;
-        Width = Math.Min(1167, wa.Width * 0.9);
-        Height = Math.Min(590, wa.Height * 0.9);
+        ClampMinimumsTo(wa.Width, wa.Height);
+        Width = Math.Min(DefaultWidthDip, wa.Width * EditorGrowLayout.MaxWorkAreaFraction);
+        Height = Math.Min(DefaultHeightDip, wa.Height * EditorGrowLayout.MaxWorkAreaFraction);
 
+        // EVERY gesture that takes the viewport's mouse capture aborts here. Alt+Tab, a
+        // context menu or a modal dialog takes capture away mid-drag; a gesture whose flag
+        // only a MouseUp clears would otherwise keep running with no button held, and the
+        // next plain click would commit it.
         Viewport.LostMouseCapture += (_, _) =>
         {
             AbortDrag();
@@ -192,16 +291,18 @@ public partial class EditorWindow : Window
             AbortMarquee();
             AbortCurveHandle();
             AbortResize();
+            AbortZoomGesture();
+            AbortMagnifierFocusDrag();
         };
-        Loaded += (_, _) => FitToView();
+        Loaded += (_, _) => FitNow();
         // Loaded can fire before the window has its final size; this catches the first
         // laid-out frame for the initial fit.
-        SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        SizeChanged += (_, _) => { if (_pendingInitialFit) FitNow(); };
         // The WINDOW can stop resizing while the VIEWPORT keeps shrinking as the toolbars / zoom
         // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
         // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
         // until the user takes control.
-        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitNow(); };
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -211,6 +312,10 @@ public partial class EditorWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            _growMotion?.Dispose();
+            _growMotion = null;
+            CancelZoomTween();
+            StopRedactPendingTimer();
             _dragPreview?.Dispose();
             _dragPreview = null;
             Task sourceOperationsDrained = _sourceLifetime.BeginClose();
@@ -228,6 +333,10 @@ public partial class EditorWindow : Window
                 _ = DisposeOwnedAfterAsync(sourceOperationsDrained, owned);
             MemoryCleanup.Request();
         };
+        // "Keep the editor on top" was declared and never wired; the row it belongs to
+        // was collapsed because of it.
+        Topmost = _settings.Current.AlwaysOnTop;
+        SourceInitialized += (_, _) => BeginGrowFromOrigin();
         UpdateCursor();
         DarkTitleBar.Apply(this);
     }
@@ -251,6 +360,12 @@ public partial class EditorWindow : Window
             DispatcherPriority.Background,
             new Action(() =>
             {
+                // The sub-row opens on Shapes so the editor never starts with an empty
+                // tool strip — but no tool is armed: the pointer stays the active tool.
+                _syncingCategory = true;
+                try { CategoryShapesBtn.IsChecked = true; }
+                finally { _syncingCategory = false; }
+                ShowCategoryRow(EditorToolCategory.Shapes);
                 UpdateContextPanels();
                 EditorBottomBar.Visibility = Visibility.Visible;
             }));
@@ -260,6 +375,130 @@ public partial class EditorWindow : Window
     {
         return new EditorWindow(source, settings, history);
     }
+
+    /// <summary>
+    /// Where this editor came from on screen, in device pixels. Set it before Show() and
+    /// the window grows out of that rectangle and opens on THAT display — which for a
+    /// capture taken on a second monitor is the monitor the user is looking at, not the
+    /// primary. Leave it unset for History and the CLI: there is no origin to grow from,
+    /// so the window just opens centred.
+    /// </summary>
+    internal void GrowFrom(SD.Rectangle originScreenRect)
+    {
+        if (originScreenRect.Width < 1 || originScreenRect.Height < 1) return;
+        _origin = originScreenRect;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+    }
+
+    private SD.Rectangle? _origin;
+    private IDisposable? _growMotion;
+
+    /// <summary>
+    /// Lowers the declared minimum size to whatever the display can actually hold.
+    ///
+    /// <see cref="EditorShellContract.MinimumEditorLogicalWidth"/> is a consequence of the
+    /// one-row toolbar, not a promise a screen can keep: 1152 DIP is wider than a
+    /// 1536x1024 laptop at 150 % (1024 DIP) or a 2160x1440 at 200 %. Windows enforces
+    /// MinWidth through WM_GETMINMAXINFO, so leaving it declared on a display that small
+    /// opens the window WIDER than the monitor — and because Save as… / Done are docked to
+    /// the right of the row, what goes off the edge is the pair that finishes the job, with
+    /// no way to drag narrower because the minimum is what put them there. A toolbar
+    /// clipped at its right end is recoverable; an unreachable Done button is not.
+    ///
+    /// Every open path needs this, not just the grow: the constructor sizes itself from the
+    /// work area but never touched the floor, so History and the CLI hit exactly that case.
+    /// <see cref="EditorShellContract.FitsOnMonitor"/> is the same question asked as a
+    /// predicate.
+    /// </summary>
+    private void ClampMinimumsTo(double availableWidthDip, double availableHeightDip)
+    {
+        if (double.IsFinite(availableWidthDip) && availableWidthDip > 0)
+            MinWidth = Math.Min(MinWidth, availableWidthDip);
+        if (double.IsFinite(availableHeightDip) && availableHeightDip > 0)
+            MinHeight = Math.Min(MinHeight, availableHeightDip);
+    }
+
+    /// <summary>
+    /// Places the window on the origin's display and tweens it out of the origin rect.
+    /// Runs once, on the first frame that has an HWND, and entirely in DEVICE PIXELS with
+    /// the ORIGIN monitor's DPI: at this moment the window has not been moved yet, so its
+    /// own PresentationSource still reports the primary's scale, which on a mixed-DPI
+    /// desktop is the wrong answer for every number involved. History places itself the
+    /// same way (SetWindowPos + GetDpiForMonitor) and for the same reason.
+    /// </summary>
+    private void BeginGrowFromOrigin()
+    {
+        if (_origin is not SD.Rectangle origin) return;
+        _origin = null;
+
+        IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+
+        double scale = RecordingMonitorDpi.ScaleFor(origin);
+        SD.Rectangle work = System.Windows.Forms.Screen.FromRectangle(origin).WorkingArea;
+
+        // WPF enforces MinWidth/MinHeight through WM_GETMINMAXINFO, so without this every
+        // frame of the tween would paint at the 1152x520 floor and only the position would
+        // move — a full-size window sliding in from the card's corner instead of growing
+        // out of it. The floor is a resize constraint for the user, not for the entrance.
+        double minWidth = MinWidth, minHeight = MinHeight;
+
+        // The target has to KNOW about that floor, or the two disagree: on a display where
+        // 90 % of the work area is under 980x520 the tween lands on the smaller number and
+        // the restored minimum then yanks the window up to the larger one on the next
+        // layout pass, which is exactly the size snap the motion rule forbids.
+        SD.Rectangle to = EditorGrowLayout.Target(
+            work, new Size(DefaultWidthDip, DefaultHeightDip), scale, new Size(minWidth, minHeight));
+        SD.Rectangle from = EditorGrowLayout.Origin(origin);
+
+        // Restored to at most where the window actually landed, so a work area smaller than
+        // the declared floor cannot leave a minimum wider than the screen it opened on.
+        void RestoreMinimums()
+        {
+            MinWidth = minWidth;
+            MinHeight = minHeight;
+            ClampMinimumsTo(to.Width / scale, to.Height / scale);
+        }
+
+        MinWidth = 0;
+        MinHeight = 0;
+
+        // Motion.Run applies nothing synchronously — its first frame arrives on the first
+        // timer tick — so the start rect is written here. Otherwise the window paints once
+        // at CW_USEDEFAULT on the PRIMARY monitor before the tween ever starts.
+        PlaceWindow(hwnd, from);
+
+        _growMotion?.Dispose();
+        _growMotion = Motion.Run(Motion.SwapMs, Motion.EaseOutCubic, p =>
+        {
+            if (_closed) return;
+            // Motion swallows a throwing frame and never runs onDone; without this a single
+            // bad frame would leave a LIVE editor resizable down to nothing.
+            try { PlaceWindow(hwnd, EditorGrowLayout.Lerp(from, to, p)); }
+            catch { RestoreMinimums(); throw; }
+        }, onDone: () =>
+        {
+            _growMotion = null;
+            RestoreMinimums();
+        });
+    }
+
+    /// <summary>
+    /// One frame of the grow. Left/Top/Width/Height are DIPs in whichever monitor's scale
+    /// the window currently believes it is on, which is exactly what breaks when it moves
+    /// between monitors mid-tween; SetWindowPos takes the physical rect and means it.
+    /// </summary>
+    private static void PlaceWindow(IntPtr hwnd, SD.Rectangle rect) =>
+        SetWindowPos(hwnd, IntPtr.Zero, rect.X, rect.Y, rect.Width, rect.Height,
+            SwpNoZOrder | SwpNoActivate);
+
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
     internal static EditorWindow CreateForDirectCapture(
         SD.Bitmap source,
@@ -380,31 +619,58 @@ public partial class EditorWindow : Window
     // --------------------------------------------------------- view (zoom/pan)
 
     /// <summary>
-    /// Fits the WHOLE image into the viewport, centered (never above 100%) — so a tall scrolling
-    /// capture shows top-to-bottom at once instead of only its top. Use <see cref="FitToWidth"/>
-    /// (the "Fit Width" preset) to read a long capture at full width and scroll down it.
-    /// Ctrl+0 / Center button / open all route here.
+    /// Where "fit the whole image, centred" lands: the scale (never above 100 %) and the
+    /// translate that centres it. Null when the viewport is not laid out yet, in which case
+    /// the caller retries on the next trigger.
+    ///
+    /// Fit may legitimately need to go below MinZoom (a 32000 px scroll capture in a 650 px
+    /// viewport fits at ~0.02) — clamping it to MinZoom left only the middle band visible,
+    /// which read as "the editor clipped my capture". MinZoom still floors user zooming.
     /// </summary>
-    private void FitToView()
+    private ZoomView? FitWholeTarget()
     {
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
-        if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return; // viewport not ready; retry on next trigger
+        if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return null;
 
         const double margin = 24;
         double fit = Math.Min((vw - margin * 2) / _sourceWidth, (vh - margin * 2) / _sourceHeight);
-        // Fit may legitimately need to go below MinZoom (a 32000px scroll capture in a 650px
-        // viewport fits at ~0.02) — clamping it to MinZoom left only the middle band visible,
-        // which read as "the editor clipped my capture". MinZoom still floors user zooming.
-        _zoom = Math.Clamp(Math.Min(fit, 1.0), Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
+        double zoom = Math.Clamp(Math.Min(fit, 1.0), Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
+        return new ZoomView(zoom, new Vector(
+            Math.Round((vw - _sourceWidth * zoom) / 2),
+            Math.Round((vh - _sourceHeight * zoom) / 2)));
+    }
+
+    /// <summary>
+    /// The initial fit, applied with no transition: it runs on Loaded and on every
+    /// SizeChanged until the user takes control of the view, and a window that eased its
+    /// image into place four times while its toolbars settled would read as broken.
+    ///
+    /// Do NOT clear _pendingInitialFit here: the viewport keeps resizing as toolbars and the
+    /// zoom bar lay out after open, and an early fit computed against a too-large viewport
+    /// leaves the image too zoomed-in (bottom clipped).
+    /// </summary>
+    private void FitNow()
+    {
+        if (FitWholeTarget() is not ZoomView target) return;
+        _zoom = target.Zoom;
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
-        ViewTranslate.Y = Math.Round((vh - _sourceHeight * _zoom) / 2);
-        // Do NOT clear _pendingInitialFit here: the viewport keeps resizing as toolbars/the zoom
-        // bar lay out after open, and an early fit computed against a too-large viewport leaves the
-        // image too zoomed-in (bottom clipped). Keep re-fitting on every SizeChanged until the user
-        // actually takes control of the view (clicks/scrolls/zooms/pans — those clear the flag).
-        Log.Info($"Editor fit: src={_sourceWidth}x{_sourceHeight} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
+        ViewTranslate.X = target.Translate.X;
+        ViewTranslate.Y = target.Translate.Y;
+        Log.Info($"Editor fit: src={_sourceWidth}x{_sourceHeight} " +
+                 $"viewport={Viewport.ActualWidth:0}x{Viewport.ActualHeight:0} zoom={_zoom:0.000}");
         OnViewChanged();
+    }
+
+    /// <summary>
+    /// Fits the WHOLE image into the viewport, centered (never above 100%) — so a tall scrolling
+    /// capture shows top-to-bottom at once instead of only its top. Use <see cref="FitToWidth"/>
+    /// (the "Fit Width" preset) to read a long capture at full width and scroll down it.
+    /// Ctrl+1 / the Fit &amp; centre button / the zoom menu's Fit row route here, and they GLIDE:
+    /// every other row of that menu does, and half a menu that teleports is the tell.
+    /// </summary>
+    private void FitToView()
+    {
+        if (FitWholeTarget() is ZoomView target) ApplyZoomView(target);
     }
 
     /// <summary>Fits to WIDTH and pins the top, so a long capture is readable and you scroll down
@@ -417,12 +683,10 @@ public partial class EditorWindow : Window
         const double margin = 24;
         double fitW = (vw - margin * 2) / _sourceWidth;
         // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
-        _zoom = Math.Clamp(Math.Min(fitW, 1.0), Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
-        ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
-        ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
-        _pendingInitialFit = false; // explicit manual choice; SizeChanged would otherwise snap to fit-whole
-        OnViewChanged();
+        double zoom = Math.Clamp(Math.Min(fitW, 1.0), Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
+        ApplyZoomView(new ZoomView(zoom, new Vector(
+            Math.Round((vw - _sourceWidth * zoom) / 2),
+            margin))); // pin to the top; scroll reveals the rest
     }
 
     /// <summary>Zooms so the content point under <paramref name="anchor"/> (viewport coords) stays put.</summary>
@@ -430,6 +694,7 @@ public partial class EditorWindow : Window
     {
         newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
         if (Math.Abs(newZoom - _zoom) < 0.00001) return;
+        CancelZoomTween();
         _pendingInitialFit = false; // explicit zoom — stop auto-refitting on resize
 
         double cx = (anchor.X - ViewTranslate.X) / _zoom;
@@ -441,8 +706,112 @@ public partial class EditorWindow : Window
         OnViewChanged();
     }
 
+    /// <summary>The viewport's own middle — what a keyboard zoom pivots around.</summary>
+    private Point ViewportCentre() => new(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2);
+
+    /// <summary>
+    /// Ctrl+0, Ctrl+plus/minus and the zoom menu's fixed percentages: the viewport's middle
+    /// stays put and the view GLIDES there, the same way Q / W / Z do. The wheel keeps
+    /// <see cref="ZoomAt"/>'s instant path — a wheel notch is its own frame of animation.
+    /// </summary>
+    private void AnimateZoomTo(double zoom)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+        double clamped = Math.Clamp(zoom, MinZoom, MaxZoom);
+        if (Math.Abs(clamped - _zoom) < 0.00001) return;
+
+        Point anchor = ViewportCentre();
+        var centre = new Point(
+            (anchor.X - ViewTranslate.X) / _zoom,
+            (anchor.Y - ViewTranslate.Y) / _zoom);
+        ApplyZoomView(EditorZoom.CentreOnPoint(centre, ViewportSize(), clamped, MinZoom, MaxZoom));
+    }
+
+    /// <summary>Ctrl+0 and the zoom menu's fixed percentages.</summary>
+    private void ZoomToPercent(double zoom) => AnimateZoomTo(zoom);
+
+    /// <summary>
+    /// Q and W: 100 % on the selection's top-left or bottom-right corner — the two ends of
+    /// whatever you are working on, without a wheel or a pan. The corner goes to the middle
+    /// of the viewport rather than to the matching corner of the screen: it goes where you
+    /// are looking. With nothing selected the whole picture is the target, so the keys
+    /// still mean something.
+    /// </summary>
+    private void ZoomToCorner(bool bottomRight)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+
+        Rect target = _selected is not null
+            ? GetCanvasBounds(_selected)
+            : new Rect(0, 0, _sourceWidth, _sourceHeight);
+        if (target.IsEmpty) return;
+
+        ApplyZoomView(EditorZoom.CentreOnPoint(
+            EditorZoom.Corner(target, bottomRight), ViewportSize(), 1.0, MinZoom, MaxZoom));
+    }
+
+    /// <summary>Z + click: one step in, about the point clicked.</summary>
+    private void ZoomToPoint(Point contentPoint)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+        ApplyZoomView(EditorZoom.CentreOnPoint(
+            contentPoint, ViewportSize(), _zoom * 2, MinZoom, MaxZoom));
+    }
+
+    /// <summary>Z + drag: the dragged rectangle fills the viewport.</summary>
+    private void ZoomToRect(Rect content)
+    {
+        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
+        ApplyZoomView(EditorZoom.FitRect(content, ViewportSize(), _zoom, MinZoom, MaxZoom));
+    }
+
+    private Size ViewportSize() => new(Viewport.ActualWidth, Viewport.ActualHeight);
+
+    /// <summary>
+    /// Moves the view to a computed target over the shared Enter timing rather than
+    /// teleporting: a targeted zoom that jumps leaves you with no idea which part of the
+    /// picture you are now looking at. A second targeted zoom cancels the first.
+    /// </summary>
+    private void ApplyZoomView(ZoomView target)
+    {
+        _pendingInitialFit = false; // explicit zoom — stop auto-refitting on resize
+
+        double fromZoom = _zoom;
+        double fromX = ViewTranslate.X, fromY = ViewTranslate.Y;
+        CancelZoomTween();
+        _zoomTween = Motion.Run(Motion.EnterDurationMs, Motion.EaseOutCubic, t =>
+        {
+            _zoom = fromZoom + (target.Zoom - fromZoom) * t;
+            ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
+            ViewTranslate.X = fromX + (target.Translate.X - fromX) * t;
+            ViewTranslate.Y = fromY + (target.Translate.Y - fromY) * t;
+            OnViewChanged();
+        },
+        onDone: () => _zoomTween = null);
+    }
+
+    /// <summary>The in-flight targeted zoom, cancelled on a second one and on close.</summary>
+    private IDisposable? _zoomTween;
+
+    /// <summary>
+    /// Drops the glide so the user's own gesture wins. <see cref="ApplyZoomView"/> writes
+    /// _zoom and the view transforms ABSOLUTELY on every frame, so a wheel tick or a pan
+    /// during the 280 ms was overwritten 8 ms later and the view carried on to the menu's
+    /// target — a transition blocking input, which is the one thing the motion rule forbids.
+    /// Every gesture that moves the view itself calls this first.
+    /// </summary>
+    private void CancelZoomTween()
+    {
+        _zoomTween?.Dispose();
+        _zoomTween = null;
+    }
+
+    /// <summary>Ctrl+plus / Ctrl+minus: one step of the same 1.2 ratio the wheel uses.</summary>
+    private void StepZoom(double factor) => AnimateZoomTo(_zoom * factor);
+
     private void OnViewChanged()
     {
+        // The one place the zoom readout is written, so it can never go stale.
         ZoomLabel.Text = $"{Math.Round(_zoom * 100)}%";
         // Keep helper chrome hairline-thin on screen at any zoom; the dash
         // pattern is in thickness units, so it compensates automatically.
@@ -451,12 +820,84 @@ public partial class EditorWindow : Window
         SelectionRect.StrokeThickness = t;
         UpdateSelectionVisual();
         UpdateCurveHandleVisual();
+        UpdateScrollOverlay();
+    }
+
+    /// <summary>
+    /// Repositions the overlay scroll indicators and flashes them. They exist to answer
+    /// "is there more above this?" while the view moves, and to be gone once it has been
+    /// answered — so they fade out rather than sitting on the picture.
+    /// </summary>
+    /// <summary>Whether a flash is RUNNING, so it is not restarted on every frame of the
+    /// gesture that started it. Cleared when the flash ends — the guard suppresses
+    /// restarts while the clock is ticking, not for the rest of the session.</summary>
+    private bool _scrollBarsShown;
+
+    /// <summary>
+    /// Our own copy of ScrollHintFlash, so its Completed can clear the guard. The resource
+    /// is shared with every other editor window; subscribing to it directly would add a
+    /// handler per flash and fire for windows that did not raise it.
+    /// </summary>
+    private Storyboard? _scrollFlash;
+
+    private void UpdateScrollOverlay()
+    {
+        if (ScrollOverlay is null) return;
+        (Rect? horizontal, Rect? vertical) = EditorScrollBars.Calculate(
+            new Size(Viewport.ActualWidth, Viewport.ActualHeight),
+            new Size(_sourceWidth, _sourceHeight),
+            _zoom,
+            new Vector(ViewTranslate.X, ViewTranslate.Y));
+
+        static void Place(System.Windows.Shapes.Rectangle bar, Rect? area, double offset = 0)
+        {
+            if (area is not Rect r)
+            {
+                bar.Visibility = Visibility.Collapsed;
+                return;
+            }
+            Canvas.SetLeft(bar, r.X + offset);
+            Canvas.SetTop(bar, r.Y + offset);
+            bar.Width = r.Width;
+            bar.Height = r.Height;
+            bar.Visibility = Visibility.Visible;
+        }
+
+        // Shadow first, one pixel down-right, so the light bar keeps an edge over a white
+        // screenshot — the same pairing the thirds guides use for the same reason.
+        Place(ScrollBarHShadow, horizontal, 1);
+        Place(ScrollBarVShadow, vertical, 1);
+        Place(ScrollBarH, horizontal);
+        Place(ScrollBarV, vertical);
+        if (horizontal is null && vertical is null)
+        {
+            _scrollBarsShown = false;
+            ScrollOverlay.BeginAnimation(OpacityProperty, null);
+            ScrollOverlay.Opacity = 0;
+            return;
+        }
+        // This runs on every pan MouseMove and on every frame of a zoom tween. Restarting
+        // the flash each time gave the storyboard a fresh 0.9 s dwell ~35 times per zoom, so
+        // the bars only began fading long after the view stopped. While one is RUNNING, that
+        // clock owns the fade; once it has ended the next gesture gets its own flash. Gating
+        // on "the bars exist" instead answered "is there more above this?" exactly once and
+        // then never again while the view stayed zoomed in, which is the opposite of the job.
+        if (_scrollBarsShown) return;
+        _scrollBarsShown = true;
+        if (_scrollFlash is null)
+        {
+            _scrollFlash = ((Storyboard)FindResource("ScrollHintFlash")).Clone();
+            _scrollFlash.Completed += (_, _) => _scrollBarsShown = false;
+        }
+        ScrollOverlay.BeginStoryboard(_scrollFlash, HandoffBehavior.SnapshotAndReplace);
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();
 
     private void OnViewportMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        // A wheel tick is the user taking the view back off a running glide.
+        CancelZoomTween();
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             // Ctrl+wheel zooms around the cursor (ZoomAt clears _pendingInitialFit). A plain
@@ -476,11 +917,13 @@ public partial class EditorWindow : Window
             // capture. (Ctrl+wheel still zooms.)
             ViewTranslate.Y += e.Delta;
         }
+        UpdateScrollOverlay();
         e.Handled = true;
     }
 
     private void StartPan(Point viewportPos)
     {
+        CancelZoomTween();
         CommitText();
         _panning = true;
         _panLast = viewportPos;
@@ -509,6 +952,14 @@ public partial class EditorWindow : Window
         {
             Viewport.Cursor = Cursors.SizeAll;
             EditorSurface.Cursor = Cursors.SizeAll;
+        }
+        else if (_zoomKeyDown)
+        {
+            // Z arms a zoom over whatever tool is showing. Sharing Cross with the drawing
+            // tools is a small loss; SizeNWSE was a bigger one — it means "drag this corner
+            // to resize" everywhere else in Windows, so it named the wrong gesture outright.
+            Viewport.Cursor = Cursors.Cross;
+            EditorSurface.Cursor = Cursors.Cross;
         }
         else if (_spaceDown || _tool == EditorTool.Pan)
         {
@@ -540,7 +991,13 @@ public partial class EditorWindow : Window
             if (tool == EditorTool.Eyedropper && _tool != EditorTool.Eyedropper)
                 _toolBeforeEyedropper = _tool; // so a sample can return to the prior tool
             if (tool != EditorTool.Eyedropper)
-                EyedropSwatch.Visibility = Visibility.Collapsed;
+            {
+                HideEyedropperChrome();
+                // Arming the in-picker eyedropper and then picking another tool abandons the
+                // gesture. The latch has to die with it, or the NEXT ordinary sample reopens
+                // the picker on its own and writes to whichever tab was last open.
+                _reopenPickerAfterSample = false;
+            }
         }
         _tool = tool;
         if (ReferenceEquals(rb, RectangleToolBtn))
@@ -552,8 +1009,8 @@ public partial class EditorWindow : Window
         if (IsLoaded)
         {
             UncheckOtherToolButtons(rb);
-            MoreToolsPopup.IsOpen = false;
-            SizePresetPopup.IsOpen = false;
+            CloseToolbarPopups();
+            SyncCategoryToTool();
             UpdateCursor();
             UpdateContextPanels();
         }
@@ -578,8 +1035,8 @@ public partial class EditorWindow : Window
         if (FillSolidBtn is not null) FillSolidBtn.IsChecked = true;
         if (IsLoaded)
         {
-            MoreToolsPopup.IsOpen = false;
-            SizePresetPopup.IsOpen = false;
+            CloseToolbarPopups();
+            SyncCategoryToTool();
             UpdateCursor();
             UpdateContextPanels();
         }
@@ -587,12 +1044,42 @@ public partial class EditorWindow : Window
 
     private IEnumerable<RadioButton> ToolButtons()
     {
-        if (CropUtilityBtn is not null) yield return CropUtilityBtn;
-        if (ToolPanel is not null)
-            foreach (var rb in ToolPanel.Children.OfType<RadioButton>()) yield return rb;
-        if (MoreToolPanel is not null)
-            foreach (var rb in MoreToolPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (SelectToolBtn is not null) yield return SelectToolBtn;
+        if (PanToolBtn is not null) yield return PanToolBtn;
+        if (CategoryToolRow is null) yield break;
+        foreach (Panel row in CategoryRows())
+            foreach (var rb in row.Children.OfType<RadioButton>())
+                yield return rb;
     }
+
+    private IEnumerable<Panel> CategoryRows()
+    {
+        if (DrawToolRow is not null) yield return DrawToolRow;
+        if (ShapesToolRow is not null) yield return ShapesToolRow;
+        if (TextToolRow is not null) yield return TextToolRow;
+        if (RedactToolRow is not null) yield return RedactToolRow;
+        if (ImageToolRow is not null) yield return ImageToolRow;
+    }
+
+    private Panel? RowFor(EditorToolCategory category) => category switch
+    {
+        EditorToolCategory.Draw => DrawToolRow,
+        EditorToolCategory.Shapes => ShapesToolRow,
+        EditorToolCategory.Text => TextToolRow,
+        EditorToolCategory.Redact => RedactToolRow,
+        EditorToolCategory.Image => ImageToolRow,
+        _ => null,
+    };
+
+    private RadioButton? CategoryButton(EditorToolCategory category) => category switch
+    {
+        EditorToolCategory.Draw => CategoryDrawBtn,
+        EditorToolCategory.Shapes => CategoryShapesBtn,
+        EditorToolCategory.Text => CategoryTextBtn,
+        EditorToolCategory.Redact => CategoryRedactBtn,
+        EditorToolCategory.Image => CategoryImageBtn,
+        _ => null,
+    };
 
     private void UncheckOtherToolButtons(RadioButton selected)
     {
@@ -601,25 +1088,187 @@ public partial class EditorWindow : Window
                 rb.IsChecked = false;
     }
 
-    private void OnMoreToolsClick(object sender, RoutedEventArgs e) =>
-        MoreToolsPopup.IsOpen = !MoreToolsPopup.IsOpen;
+    /// <summary>
+    /// Every toolbar popover, each with the control that opened it — one list, so a new
+    /// popover cannot be forgotten by the close-all path (RedactStylePopup was) or by the
+    /// Escape path.
+    /// </summary>
+    private (Popup Popup, Control Owner)[] ToolbarPopups() => new (Popup, Control)[]
+    {
+        (SizePresetPopup, SizePresetButton),
+        (SelectModePopup, SelectModeButton),
+        (ArrowStylePopup, ArrowStyleButton),
+        (TextStylePopup, TextStyleButton),
+        (RedactStylePopup, RedactStyleButton),
+        (CropRatioPopup, CropRatioButton),
+        (FillPopup, FillStyleButton),
+        (StrokeStylePopup, StrokeStyleButton),
+        (ColorPickerPopup, CurrentColorIndicator),
+    };
 
-    /// <summary>Shows the crop-ratio, text-style, step-mode, arrow-style and effect-strength controls only while their tool is active.</summary>
+    private void CloseToolbarPopups()
+    {
+        foreach ((Popup popup, _) in ToolbarPopups())
+            popup.IsOpen = false;
+    }
+
+    /// <summary>
+    /// Escape closes the open popover and hands focus back to the button that opened it,
+    /// so a keyboard user is never trapped inside a menu. Returns false when none is open,
+    /// and Escape goes on to mean what it always meant.
+    /// </summary>
+    private bool CloseOpenPopover()
+    {
+        foreach ((Popup popup, Control owner) in ToolbarPopups())
+        {
+            if (!popup.IsOpen) continue;
+            popup.IsOpen = false;
+            owner.Focus();
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Opens (or toggles) a popover and puts keyboard focus on the row it is showing as
+    /// chosen. A Popup's child lives in its own PresentationSource, so Tab from the opening
+    /// button never reaches it — without this the arrow keys have nothing to move between
+    /// and the menu is mouse-only. The focus has to wait for the popup to realise its child.
+    /// </summary>
+    private void OpenPopover(Popup popup, Panel rows)
+    {
+        popup.IsOpen = !popup.IsOpen;
+        if (!popup.IsOpen) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            if (!popup.IsOpen) return;
+            Control? row = rows.Children.OfType<Control>().FirstOrDefault(c => c is ToggleButton { IsChecked: true })
+                ?? rows.Children.OfType<Control>().FirstOrDefault(c => c.Focusable);
+            row?.Focus();
+        });
+    }
+
+    // ------------------------------------------------------------- categories
+
+    /// <summary>
+    /// A category button opens its sub-row and arms the category's first tool — except
+    /// Image, whose row is mostly one-shot actions, so clicking it must not silently drop
+    /// the user into a crop. Re-picking the category the active tool already belongs to
+    /// leaves that tool alone.
+    /// </summary>
+    private void OnCategoryChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tag ||
+            !Enum.TryParse(tag, out EditorToolCategory category))
+            return;
+        if (!IsLoaded || _syncingCategory) { _category = category; return; }
+
+        _category = category;
+        ShowCategoryRow(category);
+        CloseToolbarPopups();
+
+        if (EditorShellContract.CategoryOf(_tool) == category)
+            return;
+        if (EditorShellContract.DefaultToolFor(category) is EditorTool armed)
+            CheckToolButton(armed);
+        else
+            UpdateContextPanels();
+    }
+
+    /// <summary>Lights the category that owns the active tool, without re-arming a tool.</summary>
+    private void SyncCategoryToTool()
+    {
+        if (EditorShellContract.CategoryOf(_tool) is not EditorToolCategory category)
+        {
+            // Cursor and Pan belong to no category. Returning here left the last category's
+            // chip lit beside the armed pointer chip — two chips in one row, at one weight,
+            // meaning two different things — with its sub-row still open and nothing in it
+            // armed. No category, no drawer.
+            CloseCategoryDrawer();
+            return;
+        }
+        _category = category;
+        _syncingCategory = true;
+        try
+        {
+            if (CategoryButton(category) is { IsChecked: not true } button)
+                button.IsChecked = true;
+        }
+        finally
+        {
+            _syncingCategory = false;
+        }
+        ShowCategoryRow(category);
+    }
+
+    /// <summary>Unlights every category and closes the sub-row. The row floats over the
+    /// canvas, so closing it moves nothing.</summary>
+    private void CloseCategoryDrawer()
+    {
+        _syncingCategory = true;
+        try
+        {
+            foreach (EditorToolCategory c in EditorShellContract.CategoryOrder)
+                if (CategoryButton(c) is RadioButton button) button.IsChecked = false;
+        }
+        finally
+        {
+            _syncingCategory = false;
+        }
+        CategoryToolRow.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Swaps the sub-row to one category's tools. The row floats over the canvas, so the
+    /// swap is a 6 DIP drop + fade rather than a cut — and the image never moves.
+    /// </summary>
+    private void ShowCategoryRow(EditorToolCategory category)
+    {
+        Panel? target = RowFor(category);
+        if (target is null) return;
+
+        bool wasHidden = CategoryToolRow.Visibility != Visibility.Visible;
+        bool changed = wasHidden;
+        foreach (Panel row in CategoryRows())
+        {
+            bool show = ReferenceEquals(row, target);
+            if (show && row.Visibility != Visibility.Visible) changed = true;
+            row.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        CategoryToolRow.Visibility = Visibility.Visible;
+        if (changed)
+            CategoryToolRow.BeginStoryboard((Storyboard)FindResource("SubRowIn"));
+    }
+
+    /// <summary>The type of the picked mark, or null when nothing is picked.</summary>
+    private string? SelectedAnnotationType() =>
+        _selected is FrameworkElement fe && fe.Tag is AnnotationData meta ? meta.Type : null;
+
+    /// <summary>Shows the active tool's own controls, and hides the row entirely when it has none.</summary>
     private void UpdateContextPanels()
     {
-        EditorContextControls controls = EditorShellContract.ContextFor(_tool, _filledRectangleMode);
+        EditorContextControls controls = EditorShellContract.ContextFor(
+            _tool, _filledRectangleMode, SelectedAnnotationType());
         static Visibility Show(bool show) => show ? Visibility.Visible : Visibility.Collapsed;
         bool Has(EditorContextControls value) => controls.HasFlag(value);
 
         ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
         ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
         FillPanel.Visibility = Show(Has(EditorContextControls.Fill));
+        StrokePanel.Visibility = Show(Has(EditorContextControls.Style));
+        if (StrokePanel.Visibility == Visibility.Visible) SyncStrokeStyleButtons();
         OpacityPanel.Visibility = Show(Has(EditorContextControls.Opacity));
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
-        EffectStrengthPanel.Visibility = Show(Has(EditorContextControls.EffectStrength));
+        RedactStylePanel.Visibility = Show(Has(EditorContextControls.RedactStyle));
+        // Black Out has no strength, so the control leaves rather than greying out.
+        RedactStrengthPanel.Visibility = Show(
+            Has(EditorContextControls.RedactStrength) && Redaction.UsesStrength(_redactStyle));
         TextStylePanel.Visibility = Show(Has(EditorContextControls.TextStyle));
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
+        CropToolsPanel.Visibility = Show(Has(EditorContextControls.CropTools));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        MagnifyPanel.Visibility = Show(Has(EditorContextControls.Magnification));
         if (Has(EditorContextControls.Thickness))
             SyncSizeField();
 
@@ -627,15 +1276,25 @@ public partial class EditorWindow : Window
         if (Has(EditorContextControls.Color))
             SyncColorFromTool();
 
-        if (Has(EditorContextControls.EffectStrength))
-        {
-            EffectStrengthLabel.Text = _tool == EditorTool.Blur ? "Blur" : "Pixelate";
-            SyncEffectStrengthButtons(_tool == EditorTool.Blur ? _blurStrength : _pixelateStrength);
-        }
+        if (Has(EditorContextControls.RedactStrength))
+            SyncRedactStrengthSlider();
 
-        EditorStyleBar.Visibility = controls == EditorContextControls.None
+        if (Has(EditorContextControls.Magnification))
+            SyncMagnifySlider();
+
+        if (Has(EditorContextControls.CropTools))
+            SyncImageSizeLabel();
+
+        ContextPanel.Visibility = controls == EditorContextControls.None
             ? Visibility.Collapsed
             : Visibility.Visible;
+
+        // The highest-frequency interaction in the app used to hard-cut nine panels in and
+        // out. Fading up from mostly-there reads as the row re-labelling itself rather than
+        // blinking; a full 0 -> 1 fade would read as a flash on every tool click.
+        if (IsLoaded && controls != _shownContext && controls != EditorContextControls.None)
+            ContextPanel.BeginStoryboard((Storyboard)FindResource("ContextSwapIn"));
+        _shownContext = controls;
     }
 
     /// <summary>
@@ -650,10 +1309,13 @@ public partial class EditorWindow : Window
         _syncingThicknessButtons = true;
         try
         {
+            // The field lost its "Width" / "Size" caption when the toolbar dropped its
+            // labels; the word now lives in the preset menu's heading, the tooltip and
+            // the accessible name, which is where it was always doing the real work.
             string label = AnnotationSize.LabelFor(_tool);
-            ThicknessLabel.Text = label;
             SizePresetHeading.Text = label;
             SizeBox.Text = ((int)_thickness).ToString(CultureInfo.InvariantCulture);
+            SizeFieldBorder.ToolTip = label;
             AutomationProperties.SetName(SizeBox, $"Annotation {label.ToLowerInvariant()}");
             SyncSizePresetRows();
         }
@@ -734,7 +1396,7 @@ public partial class EditorWindow : Window
     }
 
     private void OnSizePresetClick(object sender, RoutedEventArgs e) =>
-        SizePresetPopup.IsOpen = !SizePresetPopup.IsOpen;
+        OpenPopover(SizePresetPopup, SizePresetList);
 
     private void OnSizePresetPicked(object sender, RoutedEventArgs e)
     {
@@ -833,17 +1495,20 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Reflects the active blur/pixelate strength on the strength radio group without re-triggering an apply.</summary>
-    private void SyncEffectStrengthButtons(EffectStrength strength)
+    /// <summary>Puts the current strength on the slider without treating it as a user edit.</summary>
+    private void SyncRedactStrengthSlider()
     {
-        RadioButton target = strength switch
+        if (RedactStrengthSlider is null) return;
+        _syncingThicknessButtons = true;
+        try
         {
-            EffectStrength.Light => StrengthLightBtn,
-            EffectStrength.Strong => StrengthStrongBtn,
-            _ => StrengthMediumBtn,
-        };
-        if (target.IsChecked != true)
-            target.IsChecked = true; // OnEffectStrengthChecked re-stores the same value (idempotent)
+            RedactStrengthSlider.Value = _redactStrength;
+            RedactStrengthValue.Text = _redactStrength.ToString(CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
+        }
     }
 
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
@@ -863,11 +1528,18 @@ public partial class EditorWindow : Window
         UpdateContextPanels();
     }
 
-    private void OnColorChecked(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Arms a tool that has no button of its own — today only CurvedArrow, which is the
+    /// Curved row of the arrow-style menu. The Arrow button stays lit, because to the user
+    /// this is still the arrow tool wearing a different style.
+    /// </summary>
+    private void SetToolWithoutButton(EditorTool tool)
     {
-        if (_syncingColorSwatches) return;
-        if (sender is RadioButton rb && rb.Background is SolidColorBrush brush)
-            SetCurrentColor(brush.Color);
+        CommitText();
+        CommitPendingCurve();
+        _tool = tool;
+        UpdateCursor();
+        UpdateContextPanels();
     }
 
     /// <summary>
@@ -881,7 +1553,7 @@ public partial class EditorWindow : Window
         _opacity = style.BorderAlpha;
 
         if (CurrentColorIndicator is not null)
-            CurrentColorIndicator.Fill = new SolidColorBrush(style.BorderColor);
+            CurrentColorIndicator.Background = new SolidColorBrush(style.BorderColor);
 
         if (OpacitySlider is not null)
         {
@@ -897,35 +1569,26 @@ public partial class EditorWindow : Window
                 _syncingThicknessButtons = false;
             }
         }
-
-        // Reflect the remembered colour on the swatch row so the checked swatch matches.
-        SyncColorSwatches(style.BorderColor);
     }
 
-    /// <summary>Checks whichever preset swatch matches the colour, or the custom swatch.</summary>
-    private void SyncColorSwatches(Color color)
+    /// <summary>
+    /// Puts the current opacity on the slider without it reading back as a user edit. Used
+    /// when the value came from the SELECTION rather than from the tool — an image's own
+    /// alpha, which has no tool preference behind it.
+    /// </summary>
+    private void SyncOpacitySlider()
     {
-        if (ColorPanel is null) return;
-        RadioButton? match = null;
-        foreach (RadioButton swatch in ColorPanel.Children.OfType<RadioButton>())
-        {
-            if (ReferenceEquals(swatch, CustomSwatch)) continue;
-            if (swatch.Background is SolidColorBrush b && b.Color == color)
-            {
-                match = swatch;
-                break;
-            }
-        }
-
-        _syncingColorSwatches = true;
+        if (OpacitySlider is null) return;
+        int pct = (int)Math.Round(Math.Clamp(_opacity, 0.25, 1) * 100);
+        _syncingThicknessButtons = true;
         try
         {
-            if (match is not null) match.IsChecked = true;
-            else if (CustomSwatch is not null) CustomSwatch.IsChecked = true;
+            OpacitySlider.Value = pct;
+            if (OpacityValue is not null) OpacityValue.Text = $"{pct}%";
         }
         finally
         {
-            _syncingColorSwatches = false;
+            _syncingThicknessButtons = false;
         }
     }
 
@@ -936,9 +1599,15 @@ public partial class EditorWindow : Window
         _toolPrefs.Update(_tool, s => s.WithBorderColor(color));
         // Fires during XAML parse for the default swatch, before the indicator exists.
         if (CurrentColorIndicator is not null)
-            CurrentColorIndicator.Fill = new SolidColorBrush(color);
+            CurrentColorIndicator.Background = new SolidColorBrush(color);
         if (IsLoaded)
             RestyleSelected(color: color, thickness: null, fill: null);
+    }
+
+    private void OnFillStyleClick(object sender, RoutedEventArgs e)
+    {
+        CheckRowByTag(FillStyleList, _fillMode.ToString());
+        OpenPopover(FillPopup, FillStyleList);
     }
 
     private void OnFillChecked(object sender, RoutedEventArgs e)
@@ -946,8 +1615,157 @@ public partial class EditorWindow : Window
         if (sender is RadioButton rb && rb.Tag is string tag && Enum.TryParse(tag, out ShapeFillMode mode))
         {
             _fillMode = mode;
+            // The row that was picked is the answer; leaving the menu open would make the
+            // user close it themselves, which none of the other popovers ask for.
+            if (FillPopup is not null) FillPopup.IsOpen = false;
             if (IsLoaded)
                 RestyleSelected(color: null, thickness: null, fill: mode);
+        }
+    }
+
+    private void OnSketchClick(object sender, RoutedEventArgs e)
+    {
+        _strokeRender = SketchCheck.IsChecked == true ? StrokeRender.Sketchy : StrokeRender.Clean;
+        SyncStrokeStyleButtons();
+        ApplyStrokeStyleToSelection();
+    }
+
+    private void SyncStrokeStyleButtons()
+    {
+        if (SketchCheck is null) return;
+        SketchCheck.IsChecked = _strokeRender == StrokeRender.Sketchy;
+        CheckRowByTag(StrokeDashList, _strokeDash);
+
+        // The button IS the readout. Dashed and dotted used to wear one glyph, one pressed
+        // state and one accessible name, so which of the three was active could only be
+        // learned by hovering — and a screen reader could not learn it at all.
+        StrokeStyleButton.Content = BuildDashPreview(_strokeDash);
+        string state = _strokeRender == StrokeRender.Sketchy
+            ? $"{_strokeDash}, hand-drawn"
+            : _strokeDash.ToString();
+        StrokeStyleButton.ToolTip = $"Outline style: {state.ToLowerInvariant()}";
+        AutomationProperties.SetName(StrokeStyleButton, $"Outline style, {state.ToLowerInvariant()}");
+    }
+
+    /// <summary>
+    /// Re-draws the selected mark in the current outline style. A dash change restyles the
+    /// element in place; changing a SHAPE's line quality has to swap the element, because
+    /// clean and sketchy are two different geometries and a Rectangle cannot become a Path.
+    /// The swap keeps size, position, angle and z-order, and is one undo step either way.
+    /// An arrow is already a Path, so both changes happen in place.
+    /// </summary>
+    private void ApplyStrokeStyleToSelection()
+    {
+        if (!IsLoaded) return;
+        if (_selected is not Shape old || old.Tag is not AnnotationData meta) return;
+        if (meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow &&
+            old is Path arrowPath)
+        {
+            RestyleArrowOutline(arrowPath, meta);
+            return;
+        }
+        if (meta.Type is not (AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)) return;
+
+        var before = meta.Clone();
+        var after = meta.Clone();
+        after.Dash = _strokeDash.ToString();
+        after.Sketch = _strokeRender.ToString();
+
+        if (StrokeStyles.ParseRender(before.Sketch) == _strokeRender)
+        {
+            if (StrokeStyles.ParseDash(before.Dash) == _strokeDash) return;
+            Push(new EditorAction(
+                undo: () => ApplyDashData(old, before),
+                redo: () => ApplyDashData(old, after)),
+                apply: false);
+            ApplyDashData(old, after);
+            return;
+        }
+
+        after.Seed = meta.Seed ?? Random.Shared.Next();
+        Shape next = BuildRestyledShape(old, after);
+        int z = AnnotationCanvas.Children.IndexOf(old);
+        if (z < 0) return;
+
+        Push(new EditorAction(
+            undo: () => SwapShape(next, old, z),
+            redo: () => SwapShape(old, next, z)),
+            apply: false);
+        SwapShape(old, next, z);
+    }
+
+    private static void ApplyDashData(Shape shape, AnnotationData meta)
+    {
+        AnnotationFactory.ApplyDash(shape, StrokeStyles.ParseDash(meta.Dash));
+        shape.Tag = meta;
+    }
+
+    /// <summary>
+    /// The arrow half of <see cref="ApplyStrokeStyleToSelection"/>: dashes and the
+    /// hand-drawn quality both land on the element that is already there, so one undo
+    /// entry puts both back.
+    /// </summary>
+    private void RestyleArrowOutline(Path arrow, AnnotationData meta)
+    {
+        if (StrokeStyles.ParseDash(meta.Dash) == _strokeDash &&
+            StrokeStyles.ParseRender(meta.Sketch) == _strokeRender)
+            return;
+
+        var before = meta.Clone();
+        var after = meta.Clone();
+        after.Dash = _strokeDash.ToString();
+        after.Sketch = _strokeRender.ToString();
+        after.Seed = meta.Seed ?? Random.Shared.Next();
+
+        void Apply(AnnotationData data)
+        {
+            AnnotationFactory.ApplyDash(arrow, StrokeStyles.ParseDash(data.Dash));
+            ApplyArrowStyleData(arrow, data);
+        }
+
+        Push(new EditorAction(undo: () => Apply(before), redo: () => Apply(after)), apply: false);
+        Apply(after);
+    }
+
+    /// <summary>The same mark in the other line quality: everything but the geometry is copied.</summary>
+    private static Shape BuildRestyledShape(Shape from, AnnotationData meta)
+    {
+        var shape = AnnotationFactory.CreateShape(
+            meta.Type == AnnotationData.TypeEllipse,
+            StrokeStyles.ParseRender(meta.Sketch),
+            meta.Seed ?? 0);
+        shape.Stroke = from.Stroke;
+        shape.StrokeThickness = from.StrokeThickness;
+        shape.Fill = from.Fill;
+        shape.Opacity = from.Opacity;
+        AnnotationFactory.ApplyDash(shape, StrokeStyles.ParseDash(meta.Dash));
+        shape.Width = from.Width;
+        shape.Height = from.Height;
+        Canvas.SetLeft(shape, Canvas.GetLeft(from));
+        Canvas.SetTop(shape, Canvas.GetTop(from));
+        // A CLONE: the old element goes back on undo, and an unfrozen TransformGroup
+        // shared by both would let a later move or rotate through one move the other.
+        shape.RenderTransform = from.RenderTransform?.CloneCurrentValue();
+        shape.RenderTransformOrigin = from.RenderTransformOrigin;
+        shape.Tag = meta;
+        return shape;
+    }
+
+    /// <summary>
+    /// Puts <paramref name="next"/> where <paramref name="old"/> was, at the same z-index,
+    /// and moves the selection with it — a mark that vanished from under the handles after
+    /// its own restyle would read as a delete.
+    /// </summary>
+    private void SwapShape(Shape old, Shape next, int z)
+    {
+        int at = AnnotationCanvas.Children.IndexOf(old);
+        if (at >= 0) AnnotationCanvas.Children.RemoveAt(at);
+        int insert = Math.Clamp(at >= 0 ? at : z, 0, AnnotationCanvas.Children.Count);
+        AnnotationCanvas.Children.Insert(insert, next);
+        if (ReferenceEquals(_selected, old))
+        {
+            _selected = next;
+            UpdateSelectionVisual();
         }
     }
 

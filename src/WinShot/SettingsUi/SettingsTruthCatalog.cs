@@ -48,6 +48,10 @@ internal static class SettingsTruthCatalog
             "RecordingWebcamDevice",
             "RecordingVideoQuality",
             "OcrJoinLines",
+            "AlwaysOnTop",
+            "AutoExpandCanvas",
+            "SmoothPencil",
+            "InverseArrowDirection",
             "HistoryEnabled",
             "HistoryRetentionDays",
             "CheckForUpdatesOnStartup",
@@ -147,8 +151,8 @@ internal static class SettingsTruthCatalog
         new HashSet<string>(StringComparer.Ordinal)
         {
             "AddPixelBorder", "ConvertToSrgb", "ShowRecordingCountdown",
-            "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
-            "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
+            "RememberLastTool", "DrawShadowOnObjects",
+            "ShowColorNames", "ShowDockIcon",
             "AddRetinaSuffix", "CopyToClipboardFormat",
         };
 
@@ -169,6 +173,8 @@ internal static class SettingsTruthCatalog
             "SelectorHintSessions",
             "LastRecordingRegion",
             "ShortcutBindings",
+            "BackgroundPresets",
+            "BackgroundLastUsed",
             "SavedColors",
             // The corner to restore the webcam overlay to; written beside the position, never
             // presented as its own control.

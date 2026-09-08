@@ -292,6 +292,11 @@ public class SelectorRenderTests
         // rides the glide on purpose) and the crosshair's shadow pass are not mistaken for it.
         int PillPixels(SD.Rectangle area)
         {
+            // ShutterPillScreenRect answers in SCREEN coordinates, which on a desktop whose
+            // primary is not the whole virtual screen runs off this Monitor-sized canvas.
+            // Scan the part that is on it; a rect entirely off it counts zero, which is the
+            // right answer for "the pill is not there".
+            area.Intersect(new SD.Rectangle(0, 0, painted.Width, painted.Height));
             int found = 0;
             for (int y = area.Top; y < area.Bottom; y++)
             {

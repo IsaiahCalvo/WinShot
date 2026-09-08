@@ -58,16 +58,16 @@ public class BreakerProbesRound5
     {
         using var _ = new Anim(true);
         byte alpha = 0;
-        IDisposable inHandle = ScrollChromeFade.In(a => alpha = a);
+        IDisposable? inHandle = ScrollChromeFade.In(a => alpha = a);
         PumpUntil(() => alpha > 30 && alpha < 200, 2000);
         byte atCancel = alpha;
         Assert.InRange(atCancel, (byte)1, (byte)230);
 
-        inHandle.Dispose();
+        inHandle!.Dispose();
         var seen = new List<byte>();
-        Task done = ScrollChromeFade.Out(a => { seen.Add(a); alpha = a; }, atCancel, out IDisposable outHandle);
+        Task done = ScrollChromeFade.Out(a => { seen.Add(a); alpha = a; }, atCancel, out IDisposable? outHandle);
         PumpUntil(() => done.IsCompleted, 3000);
-        outHandle.Dispose();
+        outHandle!.Dispose();
 
         // The first frame of the exit is where a pop would show, and the last is gone.
         Assert.True(seen.Count > 0);

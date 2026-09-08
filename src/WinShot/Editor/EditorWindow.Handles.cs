@@ -61,6 +61,8 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
             case AnnotationData.TypeImage:
+            case AnnotationData.TypeRedact:
+            case AnnotationData.TypeMagnifier:
                 LayoutBoxHandles(UnrotatedCanvasBounds(fe), AnnotationTransform.AngleOf(fe));
                 break;
             default:
@@ -80,8 +82,15 @@ public partial class EditorWindow : Window
         var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
         var pts = BoxHandlePoints(b);
         EnsureThumbs(pts.Length);
+        // Round handles say "drag me anywhere"; the ONE square one is the text tool's
+        // bottom-right corner, which scales the type rather than reshaping a box. Square
+        // versus round IS the language for "this one resizes differently", so it is worth
+        // exactly one exception and no more.
+        bool textResize = _selected is FrameworkElement sel && sel.Tag is AnnotationData m &&
+            m.Type == AnnotationData.TypeText;
         for (int i = 0; i < pts.Length; i++)
-            PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle));
+            PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle),
+                square: textResize && i == 2);
 
         // The rotation handle sits a constant SCREEN distance above the top edge, so it
         // never drifts away from the mark as the user zooms.
@@ -139,8 +148,6 @@ public partial class EditorWindow : Window
             {
                 Fill = new SolidColorBrush(Colors.White),
                 Stroke = (Brush)FindResource("InfoBrush"),
-                RadiusX = 1.5,
-                RadiusY = 1.5,
             };
             _handleThumbs.Add(thumb);
             HandleLayer.Children.Add(thumb);
@@ -149,13 +156,18 @@ public partial class EditorWindow : Window
             _handleThumbs[i].Visibility = i < count ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void PlaceThumb(int index, Point center)
+    /// <summary>
+    /// A rounded Rectangle with radius = half its side IS a circle, so the handle layer
+    /// stays one control type and one hit test rather than two parallel collections.
+    /// </summary>
+    private void PlaceThumb(int index, Point center, bool square = false)
     {
         if (index < 0 || index >= _handleThumbs.Count) return;
         var thumb = _handleThumbs[index];
         double s = HandleScreenPx / _zoom;
         thumb.Width = s;
         thumb.Height = s;
+        thumb.RadiusX = thumb.RadiusY = square ? 1.5 / _zoom : s / 2;
         thumb.StrokeThickness = 1.5 / _zoom;
         Canvas.SetLeft(thumb, center.X - s / 2);
         Canvas.SetTop(thumb, center.Y - s / 2);
@@ -345,6 +357,14 @@ public partial class EditorWindow : Window
     {
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
+        // A text resize wrote a derived point size into the field without touching the
+        // ACTIVE tool's remembered size. Left there, the next LostFocus would commit that
+        // number as (usually) Select's size. Put the field back to what the tool actually holds.
+        if (_liveTextSizeShown)
+        {
+            _liveTextSizeShown = false;
+            SyncSizeField();
+        }
 
         if (_adjustingCrop)
         {
@@ -423,6 +443,14 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeImage:
                 ResizeBoxShape(fe, b);
                 break;
+            case AnnotationData.TypeRedact:
+            case AnnotationData.TypeMagnifier:
+                // Resizing either changes WHAT it shows, so the pixels behind it are re-run,
+                // live, on the same drag.
+                ResizeBoxShape(fe, b);
+                meta.Rect = new[] { b.X, b.Y, b.Width, b.Height };
+                RefreshRedaction(fe);
+                break;
             case AnnotationData.TypeText:
                 ResizeTextElement(fe, meta, b);
                 break;
@@ -459,6 +487,31 @@ public partial class EditorWindow : Window
         double newFont = Math.Clamp(baseFont * ratio, 6, 1000);
         SetFontSize(fe, newFont);
         fe.UpdateLayout();
+        // The size field reads the live point size while the corner is dragged, so the
+        // number the user will type next time is the number they are looking at now.
+        ShowLiveTextSize(newFont);
+    }
+
+    /// <summary>
+    /// Pushes a dragged text size into the size field without treating it as a user edit
+    /// (which would restyle the selection back and fight the drag).
+    /// </summary>
+    private bool _liveTextSizeShown;
+
+    private void ShowLiveTextSize(double fontSize)
+    {
+        if (SizeBox is null) return;
+        _liveTextSizeShown = true;
+        int width = AnnotationSize.Clamp((int)Math.Round((fontSize - 11) / 4));
+        _syncingThicknessButtons = true;
+        try
+        {
+            SizeBox.Text = width.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _syncingThicknessButtons = false;
+        }
     }
 
     /// <summary>Freehand / highlighter: scale every stored point about the box's top-left so the polyline fits the new box.</summary>
@@ -511,12 +564,15 @@ public partial class EditorWindow : Window
         if (curved)
         {
             // Keep the stored control point as-is so a previously bent curve keeps its shape.
-            path.Data = AnnotationFactory.CurvedArrowGeometry(from, control, to, thickness);
+            path.Data = AnnotationFactory.CurvedArrowGeometry(
+                from, control, to, thickness, StrokeStyles.ParseRender(meta.Sketch), meta.Seed ?? 0);
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { control.X, control.Y }, new[] { to.X, to.Y } };
         }
         else
         {
-            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style));
+            path.Data = AnnotationFactory.ArrowGeometry(
+                from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style),
+                StrokeStyles.ParseRender(meta.Sketch), meta.Seed ?? 0);
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
         }
         // Keep the stored geometry in sync so the end-of-drag snapshot reads the live state.
@@ -595,6 +651,8 @@ public partial class EditorWindow : Window
 
         switch (snap.Type)
         {
+            case AnnotationData.TypeRedact:
+            case AnnotationData.TypeMagnifier:
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
             case AnnotationData.TypeImage:
@@ -625,10 +683,12 @@ public partial class EditorWindow : Window
                     path.RenderTransform = null;
                     double thickness = meta.Thickness ?? path.StrokeThickness;
                     bool curved = snap.Type == AnnotationData.TypeCurvedArrow && sp.Length >= 3;
+                    StrokeRender render = StrokeStyles.ParseRender(meta.Sketch);
+                    int seed = meta.Seed ?? 0;
                     path.Data = curved
-                        ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness)
+                        ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness, render, seed)
                         : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness,
-                            AnnotationFactory.ParseArrowStyle(meta.Style));
+                            AnnotationFactory.ParseArrowStyle(meta.Style), render, seed);
                     meta.Points = sp.Select(p => new[] { p.X, p.Y }).ToArray();
                     meta.Tx = 0;
                     meta.Ty = 0;
@@ -657,6 +717,8 @@ public partial class EditorWindow : Window
         meta.Angle = snap.Angle;
 
         fe.Tag = meta;
+        if (meta.Type is AnnotationData.TypeRedact or AnnotationData.TypeMagnifier)
+            RefreshRedaction(fe);
     }
 
     /// <summary>Folds an element's TranslateTransform offset into its Canvas.Left/Top and clears the transform.</summary>
@@ -765,6 +827,7 @@ public partial class EditorWindow : Window
 
         var shown = new Rect(newPx.X, newPx.Y, newPx.Width, newPx.Height);
         ShowDragRect(shown, dim: true);
+        ShowThirdsGuides(shown);
         UpdateCropAdjustHandles();
     }
 
@@ -926,8 +989,90 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Maps a single-letter shortcut to a tool, mirroring the toolbar toggle. Returns false if unmapped.</summary>
+    /// <summary>
+    /// A committed counter can be re-numbered: select it and type. Subsequent counters
+    /// continue from the value you typed, which is the whole point — renumbering one badge
+    /// without moving the sequence would just make the next one collide.
+    ///
+    /// Digits accumulate while the same badge stays selected (so "1","2" is 12, not 2) and
+    /// the whole run commits as ONE undo entry. There is no timer: the run ends when the
+    /// selection changes or a non-digit key arrives, which are the only things that can
+    /// mean "done".
+    /// </summary>
+    private bool TryRetypeStepNumber(Key key)
+    {
+        if (_selected is not Grid badge || badge.Tag is not AnnotationData meta ||
+            meta.Type != AnnotationData.TypeStep)
+            return false;
+
+        int digit = key switch
+        {
+            >= Key.D0 and <= Key.D9 => key - Key.D0,
+            >= Key.NumPad0 and <= Key.NumPad9 => key - Key.NumPad0,
+            _ => -1,
+        };
+        if (digit < 0) return false;
+
+        if (!ReferenceEquals(_stepRetypeElement, _selected))
+        {
+            CommitStepRetype();
+            _stepRetypeElement = _selected;
+            _stepRetypeBefore = meta.Clone();
+            _stepRetypeValue = 0;
+        }
+
+        // 0-99. A third digit starts over rather than silently clamping to 99, which is
+        // what a typo feels like it should do.
+        int next = _stepRetypeValue * 10 + digit;
+        _stepRetypeValue = next > 99 ? digit : next;
+        ApplyStepNumber(badge, _stepRetypeValue);
+        _nextStep = _stepRetypeValue + 1;
+        return true;
+    }
+
+    /// <summary>Writes a number into a live counter badge and its metadata.</summary>
+    private static void ApplyStepNumber(Grid badge, int number)
+    {
+        if (badge.Tag is not AnnotationData meta) return;
+        bool letters = string.Equals(meta.Style, "Letter", StringComparison.Ordinal);
+        foreach (object child in badge.Children)
+            if (child is TextBlock caption)
+                caption.Text = letters
+                    ? AnnotationFactory.StepLetterLabel(number)
+                    : number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        meta.Number = number;
+    }
+
+    /// <summary>Ends a re-numbering run, recording it as one reversible step.</summary>
+    private void CommitStepRetype()
+    {
+        if (_stepRetypeElement is not Grid badge || _stepRetypeBefore is not { } before)
+        {
+            _stepRetypeElement = null;
+            _stepRetypeBefore = null;
+            return;
+        }
+        _stepRetypeElement = null;
+        _stepRetypeBefore = null;
+        if (badge.Tag is not AnnotationData after || before.Number == after.Number) return;
+
+        int beforeNumber = before.Number ?? 1;
+        int afterNumber = after.Number ?? 1;
+        Push(new EditorAction(
+            undo: () => { ApplyStepNumber(badge, beforeNumber); _nextStep = beforeNumber + 1; },
+            redo: () => { ApplyStepNumber(badge, afterNumber); _nextStep = afterNumber + 1; }),
+            apply: false);
+    }
+
+    /// <summary>
+    /// Single-letter keys. Tools arm a tool; B and I run the two image actions, which is
+    /// where B went when the redaction rework took it off Blur.
+    /// </summary>
     private bool TrySelectToolByKey(Key key)
     {
+        if (key == Key.B) { OnAddBackground(this, new RoutedEventArgs()); return true; }
+        if (key == Key.I) { OnAddImage(this, new RoutedEventArgs()); return true; }
+
         EditorTool? tool = key switch
         {
             Key.V => EditorTool.Select,
@@ -938,7 +1083,9 @@ public partial class EditorWindow : Window
             Key.T => EditorTool.Text,
             Key.P => EditorTool.Freehand, // Pen / Draw
             Key.H => EditorTool.Highlighter,
-            Key.B => EditorTool.Blur,
+            Key.X => EditorTool.Redact,
+            Key.O => EditorTool.Spotlight,
+            Key.M => EditorTool.Magnifier,
             Key.S => EditorTool.Step,
             Key.C => EditorTool.Crop,
             _ => null,
@@ -952,7 +1099,16 @@ public partial class EditorWindow : Window
     /// Moves an annotation by composing into its move offset (the same channel crop
     /// shifting uses). A rotation on the element is carried through untouched.
     /// </summary>
-    private static void MoveElement(UIElement element, double dx, double dy)
+    private void MoveElement(UIElement element, double dx, double dy)
+    {
+        MoveElementCore(element, dx, dy);
+        // A redaction hides whatever it is over, so moving it has to re-run the effect on
+        // the pixels it lands on. Every move — drag, nudge, crop shift, undo — comes
+        // through here, which is why the refresh lives here and not at each call site.
+        RefreshRedaction(element);
+    }
+
+    private static void MoveElementCore(UIElement element, double dx, double dy)
     {
         if (element is not FrameworkElement fe)
         {

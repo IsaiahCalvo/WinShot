@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -28,12 +28,25 @@ public class AnnotationEditorRenderHarness
         string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUTPUT")
             ?? Path.Combine(Path.GetTempPath(), "winshot-annotation-render");
         Directory.CreateDirectory(outDir);
+        // Start from empty, so "the renders exist" cannot be satisfied by a previous run.
+        foreach (string stale in Directory.GetFiles(outDir, "*.png")) File.Delete(stale);
 
         Exception? failure = null;
         var thread = new Thread(() =>
         {
             try
             {
+                // The assembly gets exactly one System.Windows.Application and
+                // ThemedWindowTests owns it (it creates one and shuts it down). Inheriting
+                // that app from another thread is how this harness produced transparent
+                // PNGs: the windows lay out but resolve their theme against a dispatcher
+                // that is not running. Refuse loudly instead of writing empty evidence.
+                if (Application.Current is { } inherited && !inherited.CheckAccess())
+                    throw new InvalidOperationException(
+                        "Another test already owns this AppDomain's Application. Run the render " +
+                        "harness on its own: tools\\run-tests.ps1 -Filter " +
+                        "FullyQualifiedName~AnnotationEditorRenderHarness");
+
                 var app = Application.Current ?? new Application();
                 app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 ThemeResources.EnsureLoaded();
@@ -54,23 +67,40 @@ public class AnnotationEditorRenderHarness
                 var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
                 SelectTool(editor, EditorTool.Select);
                 Pump(4);
+                // The SAME state at all three scales, so the three files can actually be
+                // diffed against each other. The old pair was captured in two different tool
+                // states, which made every comparison 5 % differing pixels that meant nothing
+                // — and there was no 150 % pass at all, which is the scale Isaiah runs.
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-primary-shell.png"));
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-150pct.png"), dpi: 144);
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-200pct.png"), dpi: 192);
 
                 var filledRectangle = (RadioButton)editor.FindName("FilledRectangleToolBtn")!;
                 filledRectangle.IsChecked = true;
                 Pump(4);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-filled-rectangle-context.png"));
 
-                var moreTools = (System.Windows.Controls.Primitives.Popup)editor.FindName("MoreToolsPopup")!;
-                moreTools.IsOpen = true;
+                SelectTool(editor, EditorTool.Arrow);
                 Pump(4);
-                RenderElementToPng(moreTools.Child, Path.Combine(outDir, "editor-after-more-tools-overflow.png"));
-                moreTools.IsOpen = false;
+                var arrowStyle = (System.Windows.Controls.Primitives.Popup)editor.FindName("ArrowStylePopup")!;
+                ((Button)editor.FindName("ArrowStyleButton")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump(6);
+                RenderElementToPng(arrowStyle.Child, Path.Combine(outDir, "editor-after-arrow-style-popover.png"));
+                arrowStyle.IsOpen = false;
+
+                // The colour picker is where the new 16-swatch grid and the My-colours row
+                // live, and a swatch's hover treatment is exactly the class of defect that
+                // is invisible from the code and has to be scanned as pixels.
+                var colorPicker = (System.Windows.Controls.Primitives.Popup)editor.FindName("ColorPickerPopup")!;
+                ((Button)editor.FindName("CurrentColorIndicator")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump(6);
+                RenderElementToPng(colorPicker.Child, Path.Combine(outDir, "editor-after-colour-picker-popover.png"));
+                colorPicker.IsOpen = false;
+                Pump(2);
 
                 UIElement selectedRectangle = AddRepresentativeAnnotations(canvas);
                 Pump(6);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-annotations-overview.png"));
-                RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-200pct.png"), dpi: 192);
 
                 SelectTool(editor, EditorTool.Rectangle);
                 InvokePrivate(editor, "Select", selectedRectangle);
@@ -78,9 +108,9 @@ public class AnnotationEditorRenderHarness
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-rectangle-selection-context.png"));
 
                 InvokePrivate(editor, "Select", null);
-                SelectTool(editor, EditorTool.Blur);
+                SelectTool(editor, EditorTool.Redact);
                 Pump(4);
-                RenderToPng(editor, Path.Combine(outDir, "editor-after-blur-strength-context.png"));
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-redaction-context.png"));
 
                 SelectTool(editor, EditorTool.Text);
                 Pump(4);
@@ -109,8 +139,8 @@ public class AnnotationEditorRenderHarness
                     "Sanitized WinShot annotation editor after-state\n" +
                     "Generated in-process with RenderTargetBitmap; WinShot.exe was not launched.\n" +
                     "Source content is synthetic and contains no user data.\n" +
-                    "Renders: primary shell, filled rectangle context, More overflow, annotations,\n" +
-                    "200% DPI, rectangle selection, blur strength, text style, crop ratio, and spotlight.\n");
+                    "Renders: primary shell, filled rectangle context, arrow-style and colour-picker popovers,\n" +
+                    "200% DPI, rectangle selection, redaction, text style, crop ratio, and spotlight.\n");
 
                 editor.Close();
                 Pump(2);
@@ -125,8 +155,22 @@ public class AnnotationEditorRenderHarness
         thread.Join();
 
         Assert.Null(failure);
-        Assert.True(File.Exists(Path.Combine(outDir, "editor-after-primary-shell.png")),
-            "No annotation editor overview PNG was produced.");
+        // Twelve painted renders, each already pixel-scanned by SaveBitmap.
+        Assert.Equal(12, Directory.GetFiles(outDir, "*.png").Length);
+
+        // The three scale passes are one state rendered three ways, so their pixel sizes are
+        // exact multiples. Anything else means the states drifted apart again.
+        var shell = new SD.Bitmap(Path.Combine(outDir, "editor-after-primary-shell.png"));
+        var at150 = new SD.Bitmap(Path.Combine(outDir, "editor-after-shell-150pct.png"));
+        var at200 = new SD.Bitmap(Path.Combine(outDir, "editor-after-shell-200pct.png"));
+        using (shell)
+        using (at150)
+        using (at200)
+        {
+            Assert.Equal(Math.Round(shell.Width * 1.5), at150.Width);
+            Assert.Equal(shell.Width * 2, at200.Width);
+            Assert.Equal(shell.Height * 2, at200.Height);
+        }
     }
 
     private static SD.Bitmap CreateSanitizedSource()
@@ -276,8 +320,43 @@ public class AnnotationEditorRenderHarness
         SaveBitmap(bitmap, path);
     }
 
+    /// <summary>
+    /// A render that came out transparent — or one flat colour — is worse than no render at
+    /// all: it looks like evidence and shows nothing, and "the file exists" passes on it. So
+    /// every bitmap is scanned before it is written, and an unpainted one fails the test with
+    /// the numbers that prove it.
+    /// </summary>
+    private static void AssertPainted(BitmapSource bitmap, string path)
+    {
+        int stride = bitmap.PixelWidth * 4;
+        var pixels = new byte[stride * bitmap.PixelHeight];
+        bitmap.CopyPixels(pixels, stride, 0);
+
+        int opaque = 0;
+        var colours = new HashSet<uint>();
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            if (pixels[i + 3] == 0) continue;
+            opaque++;
+            if (colours.Count <= MinDistinctColours) colours.Add(BitConverter.ToUInt32(pixels, i));
+        }
+
+        double coverage = (double)opaque / (pixels.Length / 4);
+        Assert.True(coverage >= MinOpaqueCoverage && colours.Count > MinDistinctColours,
+            $"{Path.GetFileName(path)} is not a painted render: {coverage:P1} of its pixels are " +
+            $"opaque (need {MinOpaqueCoverage:P0}) across {colours.Count} colours " +
+            $"(need more than {MinDistinctColours}). The visual tree laid out but never composited.");
+    }
+
+    // The real shell renders sit at ~93% opaque over 1700+ colours and the popovers at ~99.8%
+    // over 76, so these floors clear a genuine render by a wide margin and cannot be met by a
+    // transparent, flat or single-glyph bitmap.
+    private const double MinOpaqueCoverage = 0.6;
+    private const int MinDistinctColours = 16;
+
     private static void SaveBitmap(BitmapSource bitmap, string path)
     {
+        AssertPainted(bitmap, path);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);

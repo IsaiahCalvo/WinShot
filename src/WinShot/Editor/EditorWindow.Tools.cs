@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -86,8 +87,15 @@ public partial class EditorWindow : Window
         tb.LostKeyboardFocus += (_, _) => CommitText();
         tb.PreviewKeyDown += (_, ev) =>
         {
-            if (ev.Key == Key.Enter) { CommitText(); ev.Handled = true; }
-            else if (ev.Key == Key.Escape) { CancelText(); ev.Handled = true; }
+            if (ev.Key == Key.Escape) { CancelText(); ev.Handled = true; return; }
+            if (ev.Key != Key.Enter) return;
+
+            // Shift+Enter breaks the line; plain Enter and Ctrl+Enter both commit, so the
+            // habit of pressing Enter to finish survives the box becoming multi-line.
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+                return;
+            CommitText();
+            ev.Handled = true;
         };
     }
 
@@ -135,6 +143,18 @@ public partial class EditorWindow : Window
         double left = pos.X - badge.Width / 2, top = pos.Y - badge.Height / 2;
         Canvas.SetLeft(badge, left);
         Canvas.SetTop(badge, top);
+        // A counter lands rather than appearing: 0.6 -> 1 with a light overshoot, about its
+        // own centre so the badge does not slide while it grows. The centre is the SCALE's
+        // own CenterX/CenterY, not RenderTransformOrigin: AnnotationTransform.Apply builds
+        // its RotateTransform around an explicit element-local pivot on the assumption that
+        // the origin is (0,0), so a badge left at (0.5,0.5) would orbit rather than spin the
+        // day counters become rotatable.
+        badge.RenderTransform = new ScaleTransform(1, 1)
+        {
+            CenterX = badge.Width / 2,
+            CenterY = badge.Height / 2,
+        };
+        badge.BeginStoryboard((Storyboard)FindResource("CounterPopIn"));
         var data = AnnotationData.ForStep(new Point(left, top), number, _color, _thickness);
         // Record the caption mode so project reload rebuilds the same number/letter badge.
         if (letters) data.Style = "Letter";
@@ -153,115 +173,478 @@ public partial class EditorWindow : Window
             }));
     }
 
-    // ------------------------------------------------------------------ blur
+    // ------------------------------------------------- copy / paste / duplicate
 
-    private async void ApplyBlur(SD.Rectangle region)
+    /// <summary>
+    /// One mark on the annotation clipboard: its serialisable description plus, for an
+    /// image annotation, the bitmap it draws — the description alone only carries an index
+    /// into a project's embedded images, which means nothing across windows.
+    /// </summary>
+    private sealed record ClipboardMark(AnnotationData Data, BitmapSource? Image);
+
+    /// <summary>
+    /// The current geometry of a live annotation as serialisable data. Reads the box off
+    /// the ELEMENT rather than the metadata, so a mark that has been resized copies at the
+    /// size it is on screen rather than the size it was drawn at.
+    /// </summary>
+    private static AnnotationData SnapshotAnnotation(FrameworkElement fe, AnnotationData meta)
     {
-        if (_sourceOperationActive) return;
-        region.Intersect(new SD.Rectangle(0, 0, _source.Width, _source.Height));
-        if (region.Width < 2 || region.Height < 2) return;
+        var data = meta.Clone();
+        Vector offset = AnnotationTransform.OffsetOf(fe);
+        data.Tx = offset.X;
+        data.Ty = offset.Y;
+        data.Angle = AnnotationTransform.AngleOf(fe);
 
-        var backup = _source.Clone(region, _source.PixelFormat);
-        _owned.Add(backup);
-        var r = region;
-        // Capture the strength-mapped radius per action so undo → redo replays identically
-        // even if the user changes the strength control afterward.
-        int radius = AnnotationFactory.BlurRadiusFor(_blurStrength);
-        if (!await ApplySourceRegionEffectAsync(
-                () => BitmapEffects.Blur(_source, r, radius),
-                "Blur failed"))
+        double left = Canvas.GetLeft(fe), top = Canvas.GetTop(fe);
+        if (data.Rect is { Length: >= 4 } && !double.IsNaN(left) && !double.IsNaN(top))
         {
-            if (_owned.Remove(backup)) backup.Dispose();
+            double w = double.IsNaN(fe.Width) ? fe.ActualWidth : fe.Width;
+            double h = double.IsNaN(fe.Height) ? fe.ActualHeight : fe.Height;
+            data.Rect = new[] { left, top, w, h };
+        }
+        if (data.Type == AnnotationData.TypeText && CurrentFontSize(fe) is double fontSize)
+            data.FontSize = fontSize;
+        return data;
+    }
+
+    private List<ClipboardMark> SnapshotSelection()
+    {
+        var marks = new List<ClipboardMark>();
+        IEnumerable<UIElement> picked = _multiSelected.Count > 1
+            ? _multiSelected
+            : _selected is null ? Array.Empty<UIElement>() : new[] { _selected };
+        foreach (UIElement el in picked)
+        {
+            if (el is not FrameworkElement fe || fe.Tag is not AnnotationData meta) continue;
+            BitmapSource? image = el is Image img ? img.Source as BitmapSource : null;
+            marks.Add(new ClipboardMark(SnapshotAnnotation(fe, meta), image));
+        }
+        return marks;
+    }
+
+    /// <summary>Copies the selection to the annotation clipboard; false when nothing is selected.</summary>
+    private bool CopySelectedAnnotations()
+    {
+        List<ClipboardMark> marks = SnapshotSelection();
+        if (marks.Count == 0) return false;
+        AnnotationClipboard.Clear();
+        AnnotationClipboard.AddRange(marks);
+        // Ctrl+C over a mark used to be completely silent: nothing on screen, nothing on the
+        // Windows clipboard, while the button beside it said the image had been copied. The
+        // user pressed it twice with no clue why the first press did nothing. Same checkmark
+        // the picture copy flashes — this IS a copy, and the button's help text says which.
+        ButtonFlash.Show(BtnCopy, "", "");
+        return true;
+    }
+
+    /// <summary>How far a pasted or duplicated mark lands from the one it came from.</summary>
+    private const double PasteOffset = 32;
+
+    private void PasteAnnotations() => PlaceCopies(AnnotationClipboard);
+
+    private void DuplicateSelectedAnnotations() => PlaceCopies(SnapshotSelection());
+
+    /// <summary>
+    /// Rebuilds a set of copied marks through the same factory a project reload uses, offset
+    /// so the copy is visibly a copy, then selects them — one undo step for the whole set.
+    /// </summary>
+    private void PlaceCopies(IReadOnlyList<ClipboardMark> marks)
+    {
+        if (marks.Count == 0) return;
+        CommitText();
+        CommitPendingCurve();
+
+        var added = new List<UIElement>();
+        foreach (ClipboardMark mark in marks)
+        {
+            var data = mark.Data.Clone();
+            data.Tx += PasteOffset;
+            data.Ty += PasteOffset;
+            if (data.ImageIndex is not null) data.ImageIndex = 0;
+            IReadOnlyList<BitmapSource> images = mark.Image is null
+                ? Array.Empty<BitmapSource>()
+                : new[] { mark.Image };
+            UIElement element;
+            try
+            {
+                element = ProjectSerializer.CreateElement(data, images, _source);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Could not paste a '{data.Type}' annotation", ex);
+                continue;
+            }
+            if (element is FrameworkElement fe)
+            {
+                fe.Tag = data;
+                if (data.Tx != 0 || data.Ty != 0 || data.Angle != 0)
+                    AnnotationTransform.Apply(fe, new Vector(data.Tx, data.Ty), data.Angle);
+            }
+            AnnotationCanvas.Children.Add(element);
+            added.Add(element);
+        }
+        if (added.Count == 0)
+        {
+            // Every mark failed to rebuild. The reasons are in the log; without this the
+            // paste simply looks like it did nothing.
+            App.Toast("Paste", "WinShot could not paste those marks.", severity: ToastSeverity.Error);
             return;
         }
-        if (_closed) return;
 
         Push(new EditorAction(
-            undo: async () =>
+            undo: () =>
             {
-                await ApplySourceRegionEffectAsync(
-                    () => BitmapEffects.RestoreRegion(_source, backup, r),
-                    "Blur undo failed");
+                foreach (UIElement el in added) AnnotationCanvas.Children.Remove(el);
+                Select(null);
+                ClearMultiSelection();
             },
-            redo: async () =>
+            redo: () =>
             {
-                await ApplySourceRegionEffectAsync(
-                    () => BitmapEffects.Blur(_source, r, radius),
-                    "Blur redo failed");
-            },
-            onDiscard: () =>
-            {
-                if (_owned.Remove(backup)) backup.Dispose();
+                foreach (UIElement el in added)
+                    if (!AnnotationCanvas.Children.Contains(el))
+                        AnnotationCanvas.Children.Add(el);
             }), apply: false);
+
+        // A rotation pivot is the element's own centre, which is only known once the copy
+        // has been measured — the same deferral a project reload needs.
+        if (added.OfType<FrameworkElement>().Any(fe => fe.Tag is AnnotationData { Angle: not 0 }))
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                foreach (FrameworkElement fe in added.OfType<FrameworkElement>())
+                    if (fe.Tag is AnnotationData { Angle: not 0 } d)
+                        AnnotationTransform.SetAngle(fe, d.Angle);
+            }));
+        }
+
+        ClearMultiSelection();
+        if (added.Count == 1)
+        {
+            Select(added[0]);
+        }
+        else
+        {
+            Select(null);
+            _multiSelected.AddRange(added);
+            UpdateMultiSelectionVisual();
+        }
     }
 
     /// <summary>
-    /// Same interaction and undo pattern as blur, but the mosaic gets per-cell random
-    /// jitter so the censored text cannot be reconstructed. The seed is captured per
-    /// action, which keeps undo → redo byte-identical.
+    /// Alt-drag: leaves a copy behind and drags the copy, so the original stays put. The
+    /// clone lands exactly on top of the original (no paste offset) — the drag itself is
+    /// what separates them.
     /// </summary>
-    private async void ApplyPixelate(SD.Rectangle region)
+    private UIElement? CloneForAltDrag(UIElement source)
     {
-        if (_sourceOperationActive) return;
-        region.Intersect(new SD.Rectangle(0, 0, _source.Width, _source.Height));
-        if (region.Width < 2 || region.Height < 2) return;
-
-        var backup = _source.Clone(region, _source.PixelFormat);
-        _owned.Add(backup);
-        var r = region;
-        int seed = ToolRandom.Next();
-        // Capture the strength-mapped block size per action so undo → redo stays byte-identical.
-        int cellSize = AnnotationFactory.PixelateCellFor(_pixelateStrength);
-        if (!await ApplySourceRegionEffectAsync(
-                () => BitmapEffects.PixelateRandomized(_source, r, seed, cellSize),
-                "Pixelate failed"))
-        {
-            if (_owned.Remove(backup)) backup.Dispose();
-            return;
-        }
-        if (_closed) return;
-
-        Push(new EditorAction(
-            undo: async () =>
-            {
-                await ApplySourceRegionEffectAsync(
-                    () => BitmapEffects.RestoreRegion(_source, backup, r),
-                    "Pixelate undo failed");
-            },
-            redo: async () =>
-            {
-                await ApplySourceRegionEffectAsync(
-                    () => BitmapEffects.PixelateRandomized(_source, r, seed, cellSize),
-                    "Pixelate redo failed");
-            },
-            onDiscard: () =>
-            {
-                if (_owned.Remove(backup)) backup.Dispose();
-            }), apply: false);
-    }
-
-    private async Task<bool> ApplySourceRegionEffectAsync(Action effect, string logContext)
-    {
-        using IDisposable sourceOperation = _sourceLifetime.Acquire();
-        _sourceOperationActive = true;
-        Cursor = Cursors.Wait;
+        if (source is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return null;
+        var data = SnapshotAnnotation(fe, meta);
+        if (data.ImageIndex is not null) data.ImageIndex = 0;
+        IReadOnlyList<BitmapSource> images = source is Image img && img.Source is BitmapSource bs
+            ? new[] { bs }
+            : Array.Empty<BitmapSource>();
+        UIElement clone;
         try
         {
-            await Task.Run(effect);
-            await RefreshImageAsync();
-            return true;
+            clone = ProjectSerializer.CreateElement(data, images, _source);
         }
         catch (Exception ex)
         {
-            Log.Error(logContext, ex);
-            return false;
+            Log.Error($"Could not clone a '{data.Type}' annotation", ex);
+            return null;
         }
-        finally
+        if (clone is FrameworkElement cloneFe)
         {
-            _sourceOperationActive = false;
-            if (!_closed)
-                UpdateCursor();
+            cloneFe.Tag = data;
+            if (data.Tx != 0 || data.Ty != 0 || data.Angle != 0)
+                AnnotationTransform.Apply(cloneFe, new Vector(data.Tx, data.Ty), data.Angle);
         }
+        AnnotationCanvas.Children.Add(clone);
+        PushAddElement(clone);
+        return clone;
+    }
+
+    // -------------------------------------------------------------- redaction
+
+    /// <summary>
+    /// A redaction is a live object, not baked pixels: a rectangle filled with the
+    /// effected crop of whatever it currently covers. It can be moved, resized, restyled
+    /// and deleted for the whole session, and only <see cref="Flatten"/> bakes it — which
+    /// is what makes "I blurred the wrong line" a drag instead of an undo-and-redraw.
+    /// </summary>
+    private System.Windows.Shapes.Rectangle BeginRedaction(Rect bounds)
+    {
+        _activeRedactSeed = ToolRandom.Next();
+        var mark = new System.Windows.Shapes.Rectangle();
+        Canvas.SetLeft(mark, bounds.X);
+        Canvas.SetTop(mark, bounds.Y);
+        AnnotationFactory.PaintRedaction(mark, _source, bounds, _redactStyle, _redactStrength, _activeRedactSeed);
+        _redactPreviewClock.Restart();
+        return mark;
+    }
+
+    /// <summary>
+    /// The floor between two live repaints. Repainting means re-running the effect over the
+    /// covered pixels, which is linear in the AREA: measured on a 4K source, a 400x120
+    /// Blur-secure mark costs 2.5 ms a frame and a 2400x1400 one costs 173-267 ms.
+    /// ponytail: a fixed interval, not an adaptive one; measure before making it clever.
+    /// </summary>
+    private const int RedactPreviewIntervalMs = 30;
+
+    /// <summary>
+    /// Whether a live repaint is due. The gate is the interval OR the last repaint's own
+    /// cost, whichever is longer, because a fixed interval buys nothing on exactly the
+    /// marks that need it: a paint that takes 267 ms has already overrun a 30 ms floor by
+    /// the time the next mouse-move arrives, so every frame repaints and the editor drops
+    /// to ~4 fps. Charging the gesture the paint's own cost caps live repainting at about
+    /// half the drag's frames however big the mark is.
+    /// </summary>
+    internal static bool RedactRepaintDue(long sinceLastPaintMs, long lastPaintCostMs) =>
+        sinceLastPaintMs >= Math.Max(RedactPreviewIntervalMs, Math.Max(0, lastPaintCostMs));
+
+    /// <summary>What the last pixel-backed repaint cost, in milliseconds. See above.</summary>
+    private long _redactPaintCostMs;
+
+    /// <summary>
+    /// A clock that has never run means nothing has been painted yet, so the first repaint
+    /// of a mark loaded from a project is due immediately — without this it would be queued
+    /// against a stopwatch reading zero forever and never land.
+    /// </summary>
+    private bool RedactPreviewDue() =>
+        !_redactPreviewClock.IsRunning ||
+        RedactRepaintDue(_redactPreviewClock.ElapsedMilliseconds, _redactPaintCostMs);
+
+    /// <summary>Repaints a pixel-backed mark and remembers what it cost.</summary>
+    private void PaintPixelBackedMark(Action paint)
+    {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        paint();
+        _redactPaintCostMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        _redactPreviewClock.Restart();
+    }
+
+    /// <summary>Live preview while the drag is still happening.</summary>
+    private void UpdateRedactionPreview(System.Windows.Shapes.Rectangle mark, Rect bounds, bool force)
+    {
+        Canvas.SetLeft(mark, bounds.X);
+        Canvas.SetTop(mark, bounds.Y);
+        mark.Width = Math.Max(1, bounds.Width);
+        mark.Height = Math.Max(1, bounds.Height);
+        if (!force && !RedactPreviewDue()) return;
+        PaintPixelBackedMark(() => AnnotationFactory.PaintRedaction(
+            mark, _source, bounds, _redactStyle, _redactStrength, _activeRedactSeed));
+    }
+
+    /// <summary>
+    /// Starts a magnifier callout. Like a redaction, the mark IS the preview: it fills with
+    /// the blown-up pixels as the bubble grows, rather than being a dashed box that only
+    /// becomes a callout on mouse-up.
+    /// </summary>
+    private System.Windows.Shapes.Rectangle BeginMagnifier(Rect bounds)
+    {
+        var bubble = new System.Windows.Shapes.Rectangle
+        {
+            RadiusX = 6,
+            RadiusY = 6,
+            Stroke = new SolidColorBrush(WithOpacity(_color, _opacity)),
+            StrokeThickness = _thickness,
+        };
+        Canvas.SetLeft(bubble, bounds.X);
+        Canvas.SetTop(bubble, bounds.Y);
+        AnnotationFactory.PaintMagnifier(
+            bubble, _source, bounds, MagnifierLayout.DefaultFocus(bounds), _magnification);
+        _redactPreviewClock.Restart();
+        return bubble;
+    }
+
+    /// <summary>
+    /// Live preview of a growing callout. It looks at its own centre while it is being
+    /// drawn, so what you see is the pixels the bubble is over, blown up; aiming it
+    /// somewhere else is the ring's job, afterwards. Rate-limited on the same clock the
+    /// redaction preview uses, and for the same reason.
+    /// </summary>
+    private void UpdateMagnifierPreview(System.Windows.Shapes.Rectangle bubble, Rect bounds, bool force)
+    {
+        Canvas.SetLeft(bubble, bounds.X);
+        Canvas.SetTop(bubble, bounds.Y);
+        bubble.Width = Math.Max(1, bounds.Width);
+        bubble.Height = Math.Max(1, bounds.Height);
+        if (!force && !RedactPreviewDue()) return;
+        PaintPixelBackedMark(() => AnnotationFactory.PaintMagnifier(
+            bubble, _source, bounds, MagnifierLayout.DefaultFocus(bounds), _magnification));
+    }
+
+    /// <summary>
+    /// True while a pointer gesture is driving repaints frame by frame: a drag-move, a
+    /// handle resize, or one of the two live sliders. Those are the callers that must not
+    /// pay full price on every mouse-move; a nudge, a crop, an undo or a redo is a single
+    /// repaint and simply pays it.
+    /// </summary>
+    private bool RedactRepaintIsLive =>
+        _movingSelection || _activeHandle >= 0 ||
+        _redactStrengthElement is not null || _magnifyElement is not null;
+
+    /// <summary>Marks a live gesture skipped, repainted when the rate limit allows.</summary>
+    private readonly HashSet<UIElement> _redactPending = new();
+    private DispatcherTimer? _redactPendingTimer;
+
+    /// <summary>
+    /// Repaints a committed redaction from the pixels it covers NOW — after a move, a
+    /// resize, a crop shift, a style change or an undo. The seed rides in the metadata so
+    /// a mosaic redraws with the same blocks instead of reshuffling on every recompute.
+    ///
+    /// The initial drag rate-limits itself; move, resize and the strength slider used to
+    /// not, so the expensive gesture was the unguarded one — a 2400x1400 Blur-secure mark
+    /// ran 173-267 ms of GDI on the UI thread per mouse-move frame. They come through here,
+    /// so the gate lives here rather than at each call site, and a skipped frame is queued
+    /// instead of dropped: whatever the gesture skipped is repainted on the next tick, so
+    /// no mark can be left showing pixels it no longer covers.
+    /// </summary>
+    private void RefreshRedaction(UIElement element)
+    {
+        if (element is not System.Windows.Shapes.Rectangle mark ||
+            mark.Tag is not AnnotationData meta)
+            return;
+
+        if (RedactRepaintIsLive && !RedactPreviewDue())
+        {
+            _redactPending.Add(element);
+            StartRedactPendingTimer();
+            return;
+        }
+        _redactPending.Remove(element);
+        RepaintPixelBackedMark(mark, meta);
+    }
+
+    /// <summary>
+    /// Two marks are painted from the pixels underneath rather than from their own
+    /// properties, and both have to be repainted by the same six callers — every move,
+    /// resize, crop, rotate, undo and redo. One entry point, so a new pixel-backed mark
+    /// never has to find those six again.
+    /// </summary>
+    private void RepaintPixelBackedMark(System.Windows.Shapes.Rectangle mark, AnnotationData meta)
+    {
+        switch (meta.Type)
+        {
+            case AnnotationData.TypeRedact:
+                PaintPixelBackedMark(() => AnnotationFactory.PaintRedaction(
+                    mark, _source, RedactionBounds(mark, meta),
+                    Redaction.Parse(meta.Style), meta.Strength ?? Redaction.DefaultStrength, meta.Seed ?? 0));
+                break;
+            case AnnotationData.TypeMagnifier:
+                PaintPixelBackedMark(() => AnnotationFactory.PaintMagnifier(
+                    mark, _source, RedactionBounds(mark, meta),
+                    MagnifierFocus(meta), meta.Zoom ?? MagnifierLayout.DefaultScale));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Drains the skipped repaints once the rate limit allows. A timer rather than a hook
+    /// on each gesture's end: a mark whose repaint was skipped has to catch up whether the
+    /// gesture finished, was aborted, or lost mouse capture to an Alt+Tab.
+    /// </summary>
+    private void StartRedactPendingTimer()
+    {
+        if (_redactPendingTimer is not null) return;
+        _redactPendingTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(RedactPreviewIntervalMs),
+        };
+        _redactPendingTimer.Tick += (_, _) =>
+        {
+            if (_redactPending.Count > 0 && !RedactPreviewDue()) return;
+            StopRedactPendingTimer();
+            FlushRedactionRefresh();
+        };
+        _redactPendingTimer.Start();
+    }
+
+    private void StopRedactPendingTimer()
+    {
+        _redactPendingTimer?.Stop();
+        _redactPendingTimer = null;
+    }
+
+    /// <summary>
+    /// Repaints everything a live gesture skipped. Called from the timer and before the
+    /// canvas is read for pixels, so a flatten can never bake a stale redaction.
+    /// </summary>
+    private void FlushRedactionRefresh()
+    {
+        if (_redactPending.Count == 0) return;
+        UIElement[] pending = _redactPending.ToArray();
+        _redactPending.Clear();
+        // Straight to the paint, not back through the gate: this pass IS the catch-up, so
+        // re-asking "is a repaint due?" would queue the same marks again forever.
+        foreach (UIElement element in pending)
+        {
+            // A mark queued mid-gesture can be deleted or undone before the flush reaches it.
+            // Painting a detached Rectangle is wasted GDI on exactly the large redactions the
+            // rate limit exists for, and the set would hold it alive until the next flush.
+            if (!AnnotationCanvas.Children.Contains(element)) continue;
+            if (element is System.Windows.Shapes.Rectangle mark && mark.Tag is AnnotationData meta)
+                RepaintPixelBackedMark(mark, meta);
+        }
+    }
+
+    /// <summary>The point of the picture a callout is looking at, defaulting to its own centre.</summary>
+    private static Point MagnifierFocus(AnnotationData meta) =>
+        meta.Points is { Length: >= 1 } pts && pts[0] is { Length: >= 2 } p
+            ? new Point(p[0], p[1])
+            : MagnifierLayout.DefaultFocus(
+                meta.Rect is { Length: >= 4 } r ? new Rect(r[0], r[1], r[2], r[3]) : default);
+
+    /// <summary>
+    /// Where a redaction sits in source pixels, move offset included. A rotated redaction
+    /// samples its UNROTATED box — the mark still covers what it covers, and sampling a
+    /// rotated quad would need a resample pass for a case nobody has asked for.
+    /// </summary>
+    private static Rect RedactionBounds(FrameworkElement fe, AnnotationData meta)
+    {
+        double x = Canvas.GetLeft(fe), y = Canvas.GetTop(fe);
+        if (double.IsNaN(x)) x = meta.Rect is { Length: >= 4 } r0 ? r0[0] : 0;
+        if (double.IsNaN(y)) y = meta.Rect is { Length: >= 4 } r1 ? r1[1] : 0;
+        Vector offset = AnnotationTransform.OffsetOf(fe);
+        double w = double.IsNaN(fe.Width) ? fe.ActualWidth : fe.Width;
+        double h = double.IsNaN(fe.Height) ? fe.ActualHeight : fe.Height;
+        return new Rect(x + offset.X, y + offset.Y, Math.Max(1, w), Math.Max(1, h));
+    }
+
+    /// <summary>Repaints every pixel-backed mark — after a crop, rotate or resize of the source.</summary>
+    private void RefreshAllRedactions()
+    {
+        foreach (UIElement child in AnnotationCanvas.Children)
+            RefreshRedaction(child);
+    }
+
+    /// <summary>
+    /// Applies a style and/or strength to the selected redaction as one undoable step.
+    /// Returns false when nothing was selected, so the caller can treat the change as
+    /// setting the default for the next mark instead.
+    /// </summary>
+    private bool RestyleSelectedRedaction(RedactStyle? style, int? strength, bool push)
+    {
+        if (_selected is not System.Windows.Shapes.Rectangle mark ||
+            mark.Tag is not AnnotationData meta || meta.Type != AnnotationData.TypeRedact)
+            return false;
+
+        var before = meta.Clone();
+        var after = meta.Clone();
+        if (style is RedactStyle s) after.Style = s.ToString();
+        if (strength is int v) after.Strength = Redaction.ClampStrength(v);
+        if (before.Style == after.Style && before.Strength == after.Strength)
+            return true;
+
+        mark.Tag = after;
+        RefreshRedaction(mark);
+        if (push)
+        {
+            Push(new EditorAction(
+                undo: () => { mark.Tag = before; RefreshRedaction(mark); },
+                redo: () => { mark.Tag = after; RefreshRedaction(mark); }), apply: false);
+        }
+        return true;
     }
 
     // ------------------------------------------------------------------ crop
@@ -293,7 +676,7 @@ public partial class EditorWindow : Window
         // GetAwaiter().GetResult() on the UI thread, which awaits Dispatcher.InvokeAsync inside
         // RefreshImageAsync -> the UI thread blocks waiting on itself -> deadlock.
         _source = after;
-        await OnSourceReplacedAsync();
+        await OnSourceReplacedAsync(refreshPixelMarks: false);
         if (_closed) return;
         ShiftAnnotations(-region.X, -region.Y);
 
@@ -301,20 +684,26 @@ public partial class EditorWindow : Window
             undo: async () =>
             {
                 _source = before;
-                await OnSourceReplacedAsync();
+                await OnSourceReplacedAsync(refreshPixelMarks: false);
                 ShiftAnnotations(region.X, region.Y);
             },
             redo: async () =>
             {
                 _source = after;
-                await OnSourceReplacedAsync();
+                await OnSourceReplacedAsync(refreshPixelMarks: false);
                 ShiftAnnotations(-region.X, -region.Y);
             }), apply: false);
     }
 
     private void OnCancelCrop(object sender, RoutedEventArgs e) => ClearCropPreview();
 
-    private async Task OnSourceReplacedAsync()
+    /// <summary>
+    /// <paramref name="refreshPixelMarks"/> is false when the caller is about to shift every
+    /// annotation: ShiftAnnotations moves each mark through MoveElement, which repaints the
+    /// pixel-backed ones anyway. Doing it here as well made a crop on a shot with a large
+    /// redaction pay that cost twice for no visible difference — the second pass wins.
+    /// </summary>
+    private async Task OnSourceReplacedAsync(bool refreshPixelMarks = true)
     {
         using IDisposable sourceOperation = _sourceLifetime.Acquire();
         _sourceOperationActive = true;
@@ -332,8 +721,12 @@ public partial class EditorWindow : Window
         if (_closed)
             return;
         SetSurfaceSize(_source.Width, _source.Height);
+        SyncImageSizeLabel();
+        // The source under every redaction just changed (crop / rotate / resize), so each
+        // one has to re-read the pixels it now covers or it keeps showing the old ones.
+        if (refreshPixelMarks) RefreshAllRedactions();
         Select(null);
-        FitToView();
+        FitNow();
     }
 
     /// <summary>Translates every live annotation so it stays glued to the same image content after a crop.</summary>

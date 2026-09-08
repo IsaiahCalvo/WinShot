@@ -199,14 +199,20 @@ public class Settings
     public bool OptimizeGifs { get; set; } = true;          // palette reduction during encode
 
     // Annotate
-    public bool InverseArrowDirection { get; set; } = false; // TODO: wire behavior
-    public bool SmoothPencil { get; set; } = true;           // TODO: wire behavior
+    public bool InverseArrowDirection { get; set; } = false; // arrows point back at the drag start
+
+    public bool SmoothPencil { get; set; } = true;           // freehand commits as a smoothed curve
     public bool RememberLastTool { get; set; } = false;      // TODO: wire behavior — background tool remembers last
     public bool DrawShadowOnObjects { get; set; } = true;    // TODO: wire behavior
-    public bool AutoExpandCanvas { get; set; } = false;      // TODO: wire behavior
+    public bool AutoExpandCanvas { get; set; } = false;      // Add capture grows the canvas instead of dropping a floating image
     public bool ShowColorNames { get; set; } = false;        // TODO: wire behavior
-    public bool AlwaysOnTop { get; set; } = false;           // TODO: wire behavior — annotate window always on top
+    public bool AlwaysOnTop { get; set; } = false;           // annotation editor opens above other windows
     public bool ShowDockIcon { get; set; } = true;           // TODO: wire behavior
+
+    // Background composer: named presets ("name=state;…") and the slot behind
+    // "Apply previous settings", both in BackgroundComposerState's line format.
+    public string BackgroundPresets { get; set; } = "";
+    public string BackgroundLastUsed { get; set; } = "";
 
     // Pinned screenshots (CleanShot "Pin to screen")
     public bool PinnedRoundedCorners { get; set; } = true;

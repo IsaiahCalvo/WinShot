@@ -1,4 +1,4 @@
-namespace WinShot.Editor;
+﻿namespace WinShot.Editor;
 
 public enum EditorTool
 {
@@ -11,12 +11,22 @@ public enum EditorTool
     Freehand,
     Highlighter,
     Text,
-    Blur,
     Step,
     Crop,
     Eyedropper,
-    Pixelate,
+
+    /// <summary>
+    /// The one redaction tool. Pixelate / Blur (secure) / Blur (smooth) / Black Out are
+    /// styles on the mark it draws, not four separate tools, and the mark stays editable.
+    /// </summary>
+    Redact,
     Spotlight,
+
+    /// <summary>
+    /// A zoomed callout: a bubble showing a piece of the picture blown up, with a ring
+    /// saying which piece — draggable, so the bubble can sit somewhere it is not in the way.
+    /// </summary>
+    Magnifier,
     CurvedArrow,
     Emoji,
 }

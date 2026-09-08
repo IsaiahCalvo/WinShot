@@ -86,10 +86,11 @@ public class SavedColorsTests
     }
 
     /// <summary>
-    /// The row is drawn as a fixed number of slots inside a fixed-width popup so it never
-    /// resizes as the palette fills, which means the cap and the layout have to agree. They
-    /// did not: the grid was cut to eight columns to stop the slots clipping, silently
-    /// halving a ten-colour palette to the eight the user could see and click.
+    /// The cap and the layout have to agree, or a palette silently loses the colours it says
+    /// it kept: the grid was once cut to eight columns to stop the slots clipping, halving a
+    /// ten-colour palette to the eight the user could see and click. The editor's grid wraps
+    /// instead of capping, so what it owes is a cell wide enough not to clip and enough cells
+    /// at that pitch to draw the whole cap.
     /// </summary>
     [Fact]
     public void EverySavedSlotHasSomewhereToBeDrawn()
@@ -98,16 +99,17 @@ public class SavedColorsTests
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
 
         XElement grid = xaml.Descendants()
-            .Single(e => e.Name.LocalName == "UniformGrid" && (string?)e.Attribute(x + "Name") == "SavedColorGrid");
-        XElement column = grid.Ancestors().First(e => e.Name.LocalName == "StackPanel");
+            .Single(e => e.Name.LocalName == "UniformGrid" && (string?)e.Attribute(x + "Name") == "SavedColorsGrid");
 
         int columns = int.Parse((string)grid.Attribute("Columns")!);
-        double width = double.Parse((string)column.Attribute("Width")!);
+        double width = double.Parse((string)grid.Attribute("Width")!);
 
-        Assert.Equal(SavedColors.MaxCount, columns);
         // 22 px swatch + 2 px margins a side, the same cell the palette above it uses.
         Assert.True(width / columns >= 26,
             $"{width} px over {columns} columns is {width / columns:0.#} px a cell, so the 26 px slots clip.");
+        // A UniformGrid wraps to as many rows as it needs — unless Rows is pinned, which
+        // would drop everything past columns x rows on the floor with nothing to say so.
+        Assert.Null(grid.Attribute("Rows"));
     }
 
     private static string FindRepoFile(params string[] parts)

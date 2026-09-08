@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -37,10 +37,26 @@ internal sealed class AnnotationData
     public const string TypeSpotlight = "spotlight";
     public const string TypeImage = "image";
 
+    /// <summary>
+    /// A re-editable redaction: a rectangle filled with the effected crop of the source
+    /// underneath. Nothing is baked into the source bitmap — the mark can be moved,
+    /// resized, restyled or deleted at any time, and <c>Flatten()</c> bakes it on export
+    /// like every other annotation.
+    /// </summary>
+    public const string TypeRedact = "redact";
+
+    /// <summary>
+    /// A zoomed callout: a rounded bubble filled with a piece of the source blown up.
+    /// <c>Rect</c> is the bubble; <c>Points[0]</c> is the point of the picture it is
+    /// looking at, which is why the bubble can be dragged away from what it shows.
+    /// </summary>
+    public const string TypeMagnifier = "magnifier";
+
     public string Type { get; set; } = "";
 
     /// <summary>Geometry points: arrow/line = [from, to]; curved arrow = [from, control, to];
-    /// freehand/highlighter = the polyline points; text/emoji/step = [topLeft].</summary>
+    /// freehand/highlighter = the polyline points; text/emoji/step = [topLeft], and a pill
+    /// label adds [tailTip] in its OWN coordinates; magnifier = [focus].</summary>
     public double[][]? Points { get; set; }
 
     /// <summary>[x, y, w, h] for rectangles, ellipses, the spotlight hole and image annotations.</summary>
@@ -57,6 +73,12 @@ internal sealed class AnnotationData
     /// <summary><see cref="ShapeFillMode"/> name for rectangles/ellipses (None | Quarter | Solid).</summary>
     public string? Fill { get; set; }
 
+    /// <summary>
+    /// The shape's own fill colour, "#AARRGGBB". Absent means "derive it from the stroke",
+    /// which is how every shape drawn before the picker grew a Fill tab was saved.
+    /// </summary>
+    public string? FillColor { get; set; }
+
     public string? Text { get; set; }
 
     /// <summary><see cref="TextStyle"/> name for text annotations (Plain | Bold | Outline | Pill | Huge).</summary>
@@ -66,6 +88,31 @@ internal sealed class AnnotationData
 
     /// <summary>Step badge number.</summary>
     public int? Number { get; set; }
+
+    /// <summary>Redaction intensity, 1–100. Meaningless for the Black Out style.</summary>
+    public int? Strength { get; set; }
+
+    /// <summary>Magnification of a callout, 1.5-8.</summary>
+    public double? Zoom { get; set; }
+
+    /// <summary>
+    /// Element opacity, 0-1, for an image annotation. Every other kind carries its
+    /// transparency in the alpha channel of its colour; an image has no colour to put it in.
+    /// </summary>
+    public double? Alpha { get; set; }
+
+    /// <summary><see cref="StrokeDash"/> name for shape outlines. Absent reads as Solid,
+    /// which is how every shape drawn before dashes existed was saved.</summary>
+    public string? Dash { get; set; }
+
+    /// <summary><see cref="StrokeRender"/> name. Absent reads as Clean.</summary>
+    public string? Sketch { get; set; }
+
+    /// <summary>
+    /// Mosaic jitter seed. Stored so a redaction redraws identically after a move, an undo
+    /// or a project reload instead of reshuffling its blocks every time it is recomputed.
+    /// </summary>
+    public int? Seed { get; set; }
 
     /// <summary>Index into the project's embedded images/{n}.png entries.</summary>
     [JsonPropertyName("image")]
@@ -97,19 +144,38 @@ internal sealed class AnnotationData
         Thickness = thickness,
     };
 
-    public static AnnotationData ForShape(string type, Rect bounds, Color color, double thickness, ShapeFillMode fill) => new()
+    public static AnnotationData ForShape(
+        string type, Rect bounds, Color color, double thickness, ShapeFillMode fill,
+        Color? fillColor = null) => new()
     {
         Type = type,
         Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
         Color = ToHex(color),
         Thickness = thickness,
         Fill = fill.ToString(),
+        FillColor = fillColor is Color fc ? ToHex(fc) : null,
     };
 
-    public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) => new()
+    /// <summary>A zoomed callout over <paramref name="focus"/>, drawn inside <paramref name="bounds"/>.</summary>
+    public static AnnotationData ForMagnifier(
+        Rect bounds, Point focus, double scale, Color border, double thickness) => new()
+    {
+        Type = TypeMagnifier,
+        Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
+        Points = ToArray(new[] { focus }),
+        Zoom = MagnifierLayout.ClampScale(scale),
+        Color = ToHex(border),
+        Thickness = thickness,
+    };
+
+    public static AnnotationData ForText(
+        Point topLeft, string text, TextStyle style, double fontSize, Color color,
+        Point? tailTip = null) => new()
     {
         Type = TypeText,
-        Points = ToArray(new[] { topLeft }),
+        Points = tailTip is Point tip
+            ? ToArray(new[] { topLeft, tip })
+            : ToArray(new[] { topLeft }),
         Text = text,
         Style = style.ToString(),
         FontSize = fontSize,
@@ -142,6 +208,15 @@ internal sealed class AnnotationData
             Rect = new[] { layout.Hole.X, layout.Hole.Y, layout.Hole.Width, layout.Hole.Height },
         };
     }
+
+    public static AnnotationData ForRedaction(Rect bounds, RedactStyle style, int strength, int seed) => new()
+    {
+        Type = TypeRedact,
+        Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
+        Style = style.ToString(),
+        Strength = Redaction.ClampStrength(strength),
+        Seed = seed,
+    };
 
     public static AnnotationData ForImage(Rect bounds) => new()
     {
@@ -275,10 +350,25 @@ internal static class ProjectSerializer
     /// coordinates (the caller applies the translate offset and adds it to the canvas).
     /// Throws InvalidDataException on malformed or unknown entries.
     /// </summary>
-    public static UIElement CreateElement(AnnotationData a, IReadOnlyList<BitmapSource> images)
+    /// <param name="source">
+    /// The current source bitmap, needed only to repaint a redaction from the pixels it
+    /// covers. Null yields a flat black redaction, which is the safe failure: a redaction
+    /// that cannot find its pixels must never come back transparent.
+    /// </param>
+    public static UIElement CreateElement(
+        AnnotationData a, IReadOnlyList<BitmapSource> images, SD.Bitmap? source = null)
     {
         switch (a.Type)
         {
+            case AnnotationData.TypeRedact:
+            {
+                var bounds = RequireRect(a);
+                var redaction = new Shapes.Rectangle { Width = bounds.Width, Height = bounds.Height };
+                SetPos(redaction, bounds.TopLeft);
+                AnnotationFactory.PaintRedaction(redaction, source, bounds, Redaction.Parse(a.Style),
+                    a.Strength ?? Redaction.DefaultStrength, a.Seed ?? 0);
+                return redaction;
+            }
             case AnnotationData.TypeArrow:
             case AnnotationData.TypeCurvedArrow:
             {
@@ -286,19 +376,25 @@ internal static class ProjectSerializer
                 var pts = RequirePoints(a, curved ? 3 : 2);
                 double t = RequireThickness(a);
                 var brush = new SolidColorBrush(RequireColor(a));
-                return new Shapes.Path
+                bool fancy = !curved && AnnotationFactory.ParseArrowStyle(a.Style) == ArrowStyle.Fancy;
+                var arrow = new Shapes.Path
                 {
                     Stroke = brush,
                     Fill = brush,
-                    StrokeThickness = t,
+                    // Fancy is a closed filled silhouette; a stroke would round its tail.
+                    StrokeThickness = fancy ? 0 : t,
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = curved
-                        ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t)
+                        ? AnnotationFactory.CurvedArrowGeometry(
+                            pts[0], pts[1], pts[2], t, StrokeStyles.ParseRender(a.Sketch), a.Seed ?? 0)
                         : AnnotationFactory.ArrowGeometry(
-                            pts[0], pts[1], t, AnnotationFactory.ParseArrowStyle(a.Style)),
+                            pts[0], pts[1], t, AnnotationFactory.ParseArrowStyle(a.Style),
+                            StrokeStyles.ParseRender(a.Sketch), a.Seed ?? 0),
                 };
+                AnnotationFactory.ApplyDash(arrow, StrokeStyles.ParseDash(a.Dash));
+                return arrow;
             }
             case AnnotationData.TypeLine:
             {
@@ -317,12 +413,14 @@ internal static class ProjectSerializer
             {
                 var bounds = RequireRect(a);
                 var color = RequireColor(a);
-                Shapes.Shape shape = a.Type == AnnotationData.TypeRectangle
-                    ? new Shapes.Rectangle { RadiusX = 2, RadiusY = 2 }
-                    : new Shapes.Ellipse();
+                Shapes.Shape shape = AnnotationFactory.CreateShape(
+                    a.Type == AnnotationData.TypeEllipse,
+                    StrokeStyles.ParseRender(a.Sketch),
+                    a.Seed ?? 0);
                 shape.Stroke = new SolidColorBrush(color);
                 shape.StrokeThickness = RequireThickness(a);
-                shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
+                shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color, ParseOptionalColor(a.FillColor));
+                AnnotationFactory.ApplyDash(shape, StrokeStyles.ParseDash(a.Dash));
                 shape.Width = bounds.Width;
                 shape.Height = bounds.Height;
                 SetPos(shape, bounds.TopLeft);
@@ -352,6 +450,11 @@ internal static class ProjectSerializer
                 Enum.TryParse(a.Style, out TextStyle style); // unknown style → Plain
                 var label = AnnotationFactory.CreateStyledTextLabel(
                     text, new SolidColorBrush(RequireColor(a)), fontSize, style);
+                // A pill saved before tails existed has one point and gets the default tail
+                // on its first layout pass, which is where the label finally has a size.
+                if (style == TextStyle.Pill && a.Points is { Length: >= 2 } tp &&
+                    tp[1] is { Length: >= 2 } tail)
+                    AnnotationFactory.SetPillTail(label, new Point(tail[0], tail[1]));
                 SetPos(label, pts[0]);
                 return label;
             }
@@ -375,6 +478,24 @@ internal static class ProjectSerializer
                 SetPos(badge, pts[0]);
                 return badge;
             }
+            case AnnotationData.TypeMagnifier:
+            {
+                var bounds = RequireRect(a);
+                // The fill is painted by the editor, which owns the source bitmap; from a
+                // project reload the bubble arrives empty and is filled by the refresh pass
+                // that runs after every load, exactly as a redaction is.
+                var bubble = new Shapes.Rectangle
+                {
+                    Width = bounds.Width,
+                    Height = bounds.Height,
+                    RadiusX = 6,
+                    RadiusY = 6,
+                    Stroke = new SolidColorBrush(RequireColor(a)),
+                    StrokeThickness = RequireThickness(a),
+                };
+                SetPos(bubble, bounds.TopLeft);
+                return bubble;
+            }
             case AnnotationData.TypeSpotlight:
             {
                 var hole = RequireRect(a);
@@ -397,6 +518,7 @@ internal static class ProjectSerializer
                     Stretch = Stretch.Fill,
                 };
                 RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+                if (a.Alpha is double alpha) img.Opacity = Math.Clamp(alpha, 0, 1);
                 SetPos(img, bounds.TopLeft);
                 return img;
             }
@@ -484,6 +606,14 @@ internal static class ProjectSerializer
         return ColorConverter.ConvertFromString(hex) is Color c
             ? c
             : throw new InvalidDataException($"Annotation '{a.Type}' has an invalid color '{hex}'.");
+    }
+
+    /// <summary>A colour that is allowed to be absent; a malformed one is treated as absent.</summary>
+    internal static Color? ParseOptionalColor(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return null;
+        try { return ColorConverter.ConvertFromString(hex) as Color?; }
+        catch { return null; }
     }
 
     private static double RequireThickness(AnnotationData a) =>
