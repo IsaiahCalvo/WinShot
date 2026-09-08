@@ -518,7 +518,11 @@ public partial class EditorWindow : Window
             // drag-out and Pin then all serve the un-annotated bitmap.
             Log.Error("Handing the composed image back to the quick-actions card failed", ex);
             App.Toast(
-                "Your annotations weren't saved",
+                // What actually failed is the hand-off, not the save: this runs on the close
+                // path whatever the user did in the editor, so after a successful "Save a
+                // copy…" the annotated file is on disk and only the card missed it. Same
+                // wording the card raises for its own half of this failure.
+                "Your annotations didn't reach the card",
                 FriendlyError.For(ex),
                 severity: ToastSeverity.Error);
         }

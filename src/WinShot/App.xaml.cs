@@ -1412,7 +1412,19 @@ public partial class App : Application
         overlay.StepAside();
         win.ImageCommitted += overlay.ReplaceImageFromEditor;
         win.Closed += (_, _) => overlay.ComeBack();
-        win.Show();
+        try
+        {
+            win.Show();
+        }
+        catch (Exception ex)
+        {
+            // Closed never fires on a window that failed to open, and the card is already off
+            // screen: out of the stack, auto-close paused, holding its full-size bitmap, with
+            // no row or hotkey that can reach it again. Bring it back instead of stranding it.
+            Log.Error("The annotate editor could not be opened", ex);
+            overlay.ComeBack();
+            ShowBalloon("Couldn't open the editor", FriendlyError.For(ex), ToastSeverity.Error);
+        }
     }
 
     private void PinFromOverlay(FastQuickActionsWindow overlay)
@@ -1420,10 +1432,15 @@ public partial class App : Application
         var win = new FastPinWindow(overlay.CloneImage(), _settings);
         // The pin is the card, relocated: it grows out of the card's own rectangle, and the
         // card goes without its exit flight so there are never two of the same capture.
-        win.GrowFrom(overlay.CardScreenBounds);
+        // When the grow is refused — card and pin on different monitors — the card keeps its
+        // ordinary flight instead, so the gesture is never a hard cut at both ends.
+        bool grows = win.GrowFrom(overlay.CardScreenBounds);
         PerfLog.TrackFirstShown(win, "pin window");
         win.Show();
-        overlay.CloseWithoutMotion();
+        if (grows)
+            overlay.CloseWithoutMotion();
+        else
+            overlay.Close();
     }
 
     private async void OcrFromOverlay(FastQuickActionsWindow overlay)

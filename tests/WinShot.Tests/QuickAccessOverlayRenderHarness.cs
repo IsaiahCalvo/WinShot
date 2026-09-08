@@ -351,7 +351,11 @@ public class QuickAccessOverlayRenderHarness
                 new SD.Rectangle(thirdSlot, card.Size),
                 "bottom-right",
                 QuickAccessOverlayLayout.StackGutter(96));
-            graphics.DrawImageUnscaled(card, QuickAccessOverlayMotion.Interpolate(
+            // InterpolateUnclamped, the same call BeginEnterMotion makes. Interpolate clamps
+            // progress to [0,1], and EaseOutBack(0.6) is 1.099 — clamped, the 60 % frame is
+            // byte-identical to the 100 % frame and the sheet shows no overshoot at all,
+            // which is the one thing these frames were added to show.
+            graphics.DrawImageUnscaled(card, QuickAccessOverlayMotion.InterpolateUnclamped(
                 enterFrom, thirdSlot, QuickAccessOverlayMotion.EaseOutBack(progress)));
             DrawMotionLabel(graphics, $"Enter {progress:P0}");
             frames.Add(frame);

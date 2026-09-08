@@ -31,9 +31,24 @@ public class QuickAccessOverlayInteractionTests
             Assert.Equal(
                 new[] { "Pin", "Close", "Annotate", "Save", "Copy" },
                 Enumerable.Range(0, 5).Select(i => overlay.AccessibilityObject.GetChild(i)!.Name).ToArray());
-            Assert.Equal("Close (Ctrl+W)", overlay.AccessibilityObject.GetChild(1)!.Help);
+            // A tooltip names a chord only where hovering can actually press it: the hook
+            // claims Ctrl+E and Ctrl+C on hover and deliberately lets Ctrl+W and Ctrl+S
+            // through to the app underneath, so advertising those two on a hover-only
+            // surface promised a keystroke that closed the user's browser tab instead.
+            Assert.Equal("Close", overlay.AccessibilityObject.GetChild(1)!.Help);
             Assert.Equal("Open Annotate tool (Ctrl+E)", overlay.AccessibilityObject.GetChild(2)!.Help);
-            Assert.Equal("Save (Ctrl+S)", overlay.AccessibilityObject.GetChild(3)!.Help);
+            Assert.Equal("Save", overlay.AccessibilityObject.GetChild(3)!.Help);
+            foreach (string help in Enumerable.Range(0, 5)
+                         .Select(i => overlay.AccessibilityObject.GetChild(i)!.Help ?? string.Empty))
+            {
+                int at = help.IndexOf("(Ctrl+", StringComparison.Ordinal);
+                if (at < 0)
+                    continue;
+                var chord = WF.Keys.Control | Enum.Parse<WF.Keys>(help.Substring(at + 6, 1));
+                Assert.True(
+                    QuickActionsMenu.ClaimsKey(chord, canEdit: true),
+                    $"the tooltip \"{help}\" advertises a chord the hover hook does not claim");
+            }
 
             InvokeKey(overlay, WF.Keys.Control | WF.Keys.E);
             Assert.True(annotate);
@@ -1535,12 +1550,30 @@ public class QuickAccessOverlayInteractionTests
             PumpUntil(() => EnterMotionRunning(arriving), 2000);
             Assert.True(EnterMotionRunning(arriving), "the second card never started its entrance");
 
-            landed.CloseWithoutMotion();
-            WF.Application.DoEvents();
-            Assert.True(EnterMotionRunning(arriving), "the restack killed the entrance instead of re-aiming it");
+            // A frame in, not at t=0. The second card's entrance origin is exactly the first
+            // card's slot — one card-height plus a gutter below its own — so at t=0 the card
+            // is already standing on the slot the close is about to hand it, there is nothing
+            // left to animate, and the re-aim correctly just lets it stay there.
+            SD.Point origin = arriving.Location;
+            PumpUntil(() => arriving.Location != origin, 1000);
+            Assert.NotEqual(origin, arriving.Location);
 
             SD.Point onlySlot = QuickAccessOverlayLayout.Place(
                 WF.Screen.PrimaryScreen!.WorkingArea, arriving.Size, settings.Current.OverlayPosition, 0, arriving.DeviceDpi);
+            int before = Math.Abs(arriving.Location.Y - onlySlot.Y);
+
+            landed.CloseWithoutMotion();
+            WF.Application.DoEvents();
+            Assert.True(EnterMotionRunning(arriving), "the restack killed the entrance instead of re-aiming it");
+            // Re-aimed from where the slide had reached, not rewound to its origin. Handing
+            // the entrance back with a fresh EnterOrigin teleported the card a full card-
+            // height away from the slot it was already approaching and replayed the whole
+            // 280 ms — motion that reads as "the card left and came back".
+            Assert.True(
+                Math.Abs(arriving.Location.Y - onlySlot.Y) <= before + 2,
+                $"the re-aimed entrance jumped back from {before} px to " +
+                $"{Math.Abs(arriving.Location.Y - onlySlot.Y)} px away from its slot");
+
             PumpUntil(() => Motion.Holders == 0, 4000);
             Assert.Equal(onlySlot, arriving.Location);
 

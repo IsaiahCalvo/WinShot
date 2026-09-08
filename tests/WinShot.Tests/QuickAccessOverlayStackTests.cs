@@ -399,6 +399,57 @@ public class QuickAccessOverlayStackTests
         });
     }
 
+    /// <summary>
+    /// "Temporarily hide" steps every card aside, and each StepAside reflows the cards still
+    /// visible — so every hidden card goes off screen with a 280 ms restack tween still aimed
+    /// at the slot the collapsing column handed it, and nothing stops a WF.Timer when Visible
+    /// goes false. A capture taken inside those 280 ms revived the stack, placed each card on
+    /// its own slot, and then had the stale tween write all of them back onto one rectangle a
+    /// frame later — permanently, invisibly, with only the topmost card clickable. The window
+    /// is a hotkey pressed within about a third of a second of clicking the row.
+    /// </summary>
+    [Fact]
+    public void AStackHiddenAndRevivedInsideItsOwnRestackDoesNotPileUp()
+    {
+        RunSta(() =>
+        {
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            var made = new List<FastQuickActionsWindow>();
+            try
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    var card = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+                    made.Add(card);
+                    card.Show();
+                    WF.Application.DoEvents();
+                }
+                PumpUntil(() => Motion.Holders == 0, 6000);
+
+                Invoke(made[^1], "HideEveryCard");
+                PumpUntil(() => made.All(c => !c.Visible), 3000);
+                // No pump to idle here: the restack tween the hide started is still running,
+                // which is the whole repro.
+                var fresh = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+                made.Add(fresh);
+                fresh.Show();
+                PumpUntil(() => Motion.Holders == 0, 6000);
+
+                var seen = new HashSet<SD.Point>();
+                foreach (var card in made.Where(c => !IsGone(c)))
+                    Assert.True(
+                        seen.Add(card.Location),
+                        $"two revived cards landed on {card.Location}: " +
+                        string.Join(", ", made.Select(c => c.Location)));
+            }
+            finally
+            {
+                DisposeAll(made);
+            }
+        });
+    }
+
     private static void DisposeAll(List<FastQuickActionsWindow> cards)
     {
         foreach (var card in cards)

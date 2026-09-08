@@ -116,7 +116,10 @@ internal static class MediaCardStrip
             duration = TimeSpan.Zero;
         // Round to whole seconds FIRST: picking the branch on the unrounded value and then
         // rounding printed "60s" for anything from 59.5 s up instead of rolling over to 1:00.
-        var whole = TimeSpan.FromSeconds(Math.Round(duration.TotalSeconds));
+        // AwayFromZero, not the default banker's rounding, which printed 0.5 s as "0s" and
+        // 1.5 s as "2s" — the .5 cases disagreeing with each other on a strip that only ever
+        // shows whole seconds.
+        var whole = TimeSpan.FromSeconds(Math.Round(duration.TotalSeconds, MidpointRounding.AwayFromZero));
         if (whole.TotalSeconds < 60)
             return $"{(int)whole.TotalSeconds}s";
         if (whole.TotalHours < 1)

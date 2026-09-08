@@ -34,10 +34,15 @@ public static class RecordingCompletionOverlay
             overlay.PinRequested += o =>
             {
                 var pin = new FastPinWindow(o.CloneImage(), settings);
-                pin.GrowFrom(o.CardScreenBounds);
+                // Same trade as App.PinFromOverlay: the card only skips its exit flight when
+                // the pin is going to grow out of it.
+                bool grows = pin.GrowFrom(o.CardScreenBounds);
                 PerfLog.TrackFirstShown(pin, "pin window");
                 pin.Show();
-                o.CloseWithoutMotion();
+                if (grows)
+                    o.CloseWithoutMotion();
+                else
+                    o.Close();
             };
             PerfLog.TrackFirstShown(overlay, "recording overlay");
             overlay.Show();

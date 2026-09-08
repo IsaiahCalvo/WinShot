@@ -447,6 +447,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// <summary>
     /// The card is deliberately never activated — it appears without stealing focus — so
     /// nothing was ever delivering the Ctrl chords its own tooltips and menu advertise. A
+    /// tooltip names a chord only when the hook claims it on hover, which is why Close and
+    /// Save name no chord at all: theirs work once the card has been clicked into. A
     /// low-level keyboard hook, installed only while the pointer is actually on the card,
     /// routes the ones <see cref="QuickActionsMenu.ClaimsKey"/> allows into its handler and
     /// swallows them; every other key goes straight through to whatever the user is working
@@ -754,12 +756,18 @@ public sealed class FastQuickActionsWindow : WF.Form
         int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
         // Preserve the user's verified action placement while using the selected HTML design.
         AddIconButton("quick-access-pin.svg", "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
-        AddIconButton("quick-access-close.svg", "Close (Ctrl+W)", "Close", "Close", right, top, layout.IconSize, Close);
+        // No chord on Close and Save. A tooltip is a hover surface, and hover is exactly the
+        // state where QuickActionsMenu.ClaimsKey deliberately does NOT claim Ctrl+W and
+        // Ctrl+S — the hook passes them to the app underneath, so the card would be
+        // advertising a chord that silently closes the user's browser tab or saves their
+        // document instead. Both still work once the card has been clicked into, and the
+        // context menu (which you can only reach by clicking the card) still lists them.
+        AddIconButton("quick-access-close.svg", "Close", "Close", "Close", right, top, layout.IconSize, Close);
         if (_mediaFilePath is null)
-            AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
+            AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", "Edit", left, bottom, layout.IconSize, RequestEdit);
         else if (_mediaCanEdit)
-            AddIconButton("quick-access-edit.svg", "Open video editor (Ctrl+E)", "Edit video", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
-        AddIconButton("quick-access-save.svg", "Save (Ctrl+S)", "Save", "Save", right, bottom, layout.IconSize, SaveFromInput);
+            AddIconButton("quick-access-edit.svg", "Open video editor (Ctrl+E)", "Edit video", "Edit", left, bottom, layout.IconSize, RequestEdit);
+        AddIconButton("quick-access-save.svg", "Save", "Save", "Save", right, bottom, layout.IconSize, SaveFromInput);
 
         int pillX = _cardRect.Left + (_cardRect.Width - layout.PillWidth) / 2;
         int pillTop = _cardRect.Top + (_cardRect.Height - layout.PillHeight) / 2;
@@ -1086,8 +1094,9 @@ public sealed class FastQuickActionsWindow : WF.Form
                 //
                 // Half a row up, too: a ramp measured on its own bounds is sampled at pixel
                 // CENTRES, so its last row lands at (n-0.5)/n of the terminal alpha and the
-                // step survives at a quarter of its size. Shifted, the last filled row sits
-                // exactly on the flat scrim's value.
+                // step survives at a quarter of its size. Shifted, the last filled row lands
+                // within a few levels of the flat scrim — measured at 0.022 alpha against a
+                // 0.045 per-row increment, i.e. half a row rather than a visible step.
                 using var gradient = new LinearGradientBrush(
                     new SD.RectangleF(lead.X, lead.Y - 0.5f, lead.Width, lead.Height),
                     SD.Color.FromArgb(0, scrim),
@@ -1403,7 +1412,13 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// overshoot — the eye follows it to the corner, so you always know where the capture
     /// went. Dismissal was already choreographed; arrival was a hard cut.
     /// </summary>
-    private void BeginEnterMotion()
+    /// <param name="from">
+    /// Where the slide starts. Null for a real arrival — off the anchored edge. A restack
+    /// that re-aims an entrance in flight passes the card's CURRENT position instead: from
+    /// the origin it would rewind the card a full card-height and replay the whole 280 ms,
+    /// which reads as "the card left and came back" over a card that only changed slot.
+    /// </param>
+    private void BeginEnterMotion(SD.Point? from = null)
     {
         if (_exitMotionStarted || _closed || IsDisposed || !IsHandleCreated)
             return;
@@ -1413,15 +1428,18 @@ public sealed class FastQuickActionsWindow : WF.Form
         // Bounds: with monitors stacked above the laptop, Screen.FromRectangle can answer
         // with a different monitor than the one PositionFromSettings chose, and the card
         // then slides in from an edge it was never anchored to.
-        SD.Point start = QuickAccessOverlayMotion.EnterOrigin(
+        SD.Point start = from ?? QuickAccessOverlayMotion.EnterOrigin(
             _placedWorkingArea,
             Bounds,
             _settings.Current.OverlayPosition,
             QuickAccessOverlayLayout.StackGutter(_dpi));
+        // Before the early return, not after: a re-aimed entrance that happens to already be
+        // standing on its new slot must still drop the tween that is driving it at the old
+        // one. A landed card being repositioned has nothing running, so this is a no-op there.
+        StopEnterMotion();
         if (start == target)
             return;
 
-        StopEnterMotion();
         MoveWithoutActivation(start);
         // The flag, not the handle, is what "an entrance is in flight" reads: with animation
         // turned off Motion.Run applies the end state and calls onDone INLINE, before the
@@ -1582,8 +1600,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         // same handover PositionFromSettings does when the card learns its monitor's DPI.
         if (_enterMotionRunning)
         {
+            // From where the slide has actually reached, not from its origin: re-aiming is a
+            // course correction, and a card that teleports back outside the edge to redo the
+            // run says something happened that did not.
+            SD.Point current = Location;
             Location = target;
-            BeginEnterMotion();
+            BeginEnterMotion(current);
             return;
         }
         StopEnterMotion();
@@ -1806,7 +1828,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             switch (id)
             {
                 case QuickActionsMenu.Annotate:
-                    EditRequested?.Invoke(this);
+                    RequestEdit();
                     return;
                 case QuickActionsMenu.Pin:
                     PinRequested?.Invoke(this);
@@ -1976,7 +1998,11 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// </summary>
     internal void StepAside()
     {
-        if (_closed || IsDisposed || !Visible)
+        // _exitMotionStarted too: a card already flying out is gone, and stepping it aside
+        // would put the 140 ms fade and the 360 ms flight on Opacity at the same time and
+        // then bring a closing card back from the editor. BeginExitMotion guards the other
+        // direction; this is the pairing.
+        if (_closed || IsDisposed || !Visible || _exitMotionStarted)
             return;
 
         HideActionTooltip();
@@ -2041,8 +2067,11 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         if (_closed || IsDisposed)
             return;
-        // Up, not fading, not flagged: it is already here.
-        if (Visible && !_stepAsideRunning && !_offScreen && !_temporarilyHidden)
+        // Nothing to come back from: not off screen, not hidden, not fading. That covers the
+        // card that is simply already here, and the card that was never shown at all —
+        // ComeBack is a return, not the way a card first reaches the screen, and the editor
+        // hand-off can call it on a card whose Show() threw.
+        if (!_offScreen && !_temporarilyHidden && !_stepAsideRunning)
             return;
 
         // The cancel comes BEFORE the Visible check, not after. A card one frame into the
@@ -2055,6 +2084,15 @@ public sealed class FastQuickActionsWindow : WF.Form
         _temporarilyHidden = false;
         _offScreen = false;
         StopStepAsideMotion();
+        // And the restack tween, for the same reason. "Temporarily hide" steps every card
+        // aside, and each StepAside reflows the cards still visible — so a card can go off
+        // screen with a 280 ms tween still aimed at the slot the collapsing column handed
+        // it. Nothing stops a WF.Timer when Visible goes false, so a capture taken inside
+        // those 280 ms revived the stack, placed each card correctly here, and then had the
+        // stale tween write every one of them back onto the same rectangle on the next
+        // frame — the pile-up the stack cap exists to prevent, invisible because the cards
+        // sit exactly on top of each other.
+        StopStackMotionTimer();
         // The count PositionFromSettings sums IS the free slot, because the column is
         // compacted on every departure: a close reflows from FormClosed, and StepAside now
         // reflows too. So the cards still in the corner occupy exactly slots 0..n-1 and this
@@ -2739,6 +2777,13 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (e.KeyCode == WF.Keys.Tab && !ctrl && !alt)
         {
             SetHovering(true);
+            // Tab wants the hover chrome so the focus ring has something to sit on; it is
+            // not the pointer arriving, and no MouseLeave is coming to pair with it. A
+            // WH_KEYBOARD_LL hook is serviced on the installing thread's message queue, so
+            // one left installed for the life of a card (auto-close is off by default) turns
+            // any UI-thread stall into a system-wide keystroke hitch.
+            if (!ClientRectangle.Contains(PointToClient(WF.Cursor.Position)))
+                SetShortcutHook(false);
             int direction = e.Shift ? -1 : 1;
             _focusedButton = (_focusedButton + direction + _buttons.Count) % _buttons.Count;
             Invalidate();
@@ -2954,10 +2999,11 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     /// <summary>
-    /// Asks for the editor, from the double-click or from the E / Ctrl+E chord. One method
-    /// for both: the key case used to raise <see cref="EditRequested"/> and do nothing at
-    /// all when nothing was listening, so the two ways of asking for the same thing refused
-    /// differently — one explained itself, the other looked broken.
+    /// Asks for the editor — the Edit button, the "Annotate" menu row, the double-click and
+    /// the E / Ctrl+E chord all come through here. One method for all four: raising
+    /// <see cref="EditRequested"/> directly does nothing at all when nothing is listening,
+    /// so the ways of asking for the same thing refused differently — one explained itself,
+    /// the rest looked broken.
     /// </summary>
     private void RequestEdit()
     {
@@ -3088,7 +3134,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                     // beside every other body this card raises.
                     _mediaFilePath is not null
                         ? $"{Path.GetFileName(_mediaFilePath)} is on the clipboard."
-                        : "Capture is on the clipboard.",
+                        : "The capture is on the clipboard.",
                     Core.ToastSeverity.Success);
                 Close();
                 return;

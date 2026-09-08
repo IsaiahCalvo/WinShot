@@ -790,8 +790,19 @@ public sealed class FastPinWindow : WF.Form
     /// is shown. The pin *is* the quick-actions card, relocated — without this it simply
     /// appeared in the middle of the screen while the card vanished in a corner, and nothing
     /// connected the two. Call before <see cref="WF.Form.Show"/>.
+    ///
+    /// Returns false when it will not animate — the card and the pin are on different
+    /// monitors, see <see cref="BeginGrowMotion"/>. The caller needs to know, because the
+    /// card is dismissed without its exit flight on the strength of this: refusing both ends
+    /// left the one state change in the whole gesture with no motion at all.
     /// </summary>
-    public void GrowFrom(SD.Rectangle origin) => _growFrom = origin;
+    public bool GrowFrom(SD.Rectangle origin)
+    {
+        if (!WF.Screen.FromRectangle(origin).Equals(WF.Screen.FromRectangle(Bounds)))
+            return false;
+        _growFrom = origin;
+        return true;
+    }
 
     protected override void OnVisibleChanged(EventArgs e)
     {
