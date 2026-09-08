@@ -71,9 +71,30 @@ internal static class SelectorChrome
     public static SD.Size MeasureLabel(string text)
     {
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        return new SD.Size(size.Width + 16, size.Height + 8);
+        using SD.Graphics measuring = SD.Graphics.FromHwnd(IntPtr.Zero);
+        return PillSize(measuring, font, text);
     }
+
+    /// <summary>The pill's rect for a string, measured through the renderer that fills it.
+    /// It used to be sized with TextRenderer (GDI) and drawn with DrawString (GDI+), which
+    /// disagree in both directions -- GDI+ is narrower for the size readouts and wider for
+    /// the instruction strings, so the 8 px side padding this adds collapsed to about 3 px on
+    /// the longest one and one more word would have pushed the text past the pill.</summary>
+    private static SD.Size PillSize(SD.Graphics g, SD.Font font, string text)
+    {
+        SD.SizeF size = g.MeasureString(text, font, int.MaxValue, LabelFormat);
+        return new SD.Size((int)Math.Ceiling(size.Width) + 16, (int)Math.Ceiling(size.Height) + 8);
+    }
+
+    /// <summary>Centred, and NoWrap so a long instruction overflows visibly rather than
+    /// silently wrapping inside a pill sized for one line. Shared by the measure and the
+    /// draw, because the two agreeing is the whole point.</summary>
+    private static readonly SD.StringFormat LabelFormat = new()
+    {
+        Alignment = SD.StringAlignment.Center,
+        LineAlignment = SD.StringAlignment.Center,
+        FormatFlags = SD.StringFormatFlags.NoWrap,
+    };
 
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.
     /// <paramref name="alpha"/> scales the whole pill, so a caller can fade one out
@@ -86,9 +107,9 @@ internal static class SelectorChrome
         if (amount <= 0d) return;
 
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + 16;
-        int h = size.Height + 8;
+        SD.Size pill = PillSize(g, font, text);
+        int w = pill.Width;
+        int h = pill.Height;
         int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));
         int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
         var bg = new SD.Rectangle(left, top, w, h);
@@ -105,16 +126,7 @@ internal static class SelectorChrome
         // visibly re-laid out on the first frame of the 140 ms fade -- a snap inside the
         // transition that exists so nothing snaps.
         using var textBrush = new SD.SolidBrush(SD.Color.FromArgb(Scale(255, amount), ThemePalette.TextPrimary));
-        using var format = new SD.StringFormat
-        {
-            Alignment = SD.StringAlignment.Center,
-            LineAlignment = SD.StringAlignment.Center,
-            // The pill is measured with TextRenderer and filled with DrawString; GDI+ is the
-            // narrower of the two for every string these pills carry, but without NoWrap a
-            // future longer one would silently wrap inside a pill sized for one line.
-            FormatFlags = SD.StringFormatFlags.NoWrap,
-        };
-        g.DrawString(text, font, textBrush, bg, format);
+        g.DrawString(text, font, textBrush, bg, LabelFormat);
     }
 
     private static int Scale(int value, double amount)

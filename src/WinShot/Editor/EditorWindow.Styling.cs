@@ -464,6 +464,18 @@ public partial class EditorWindow : Window
         }
     }
 
+    /// <summary>Picking a colour out of "My colors" is a vote for it. SavedColors.With
+    /// promises a re-picked colour moves back to the head; without this the row was ordered
+    /// purely by when each colour was first sampled and the promise was never kept. The
+    /// built-in palette deliberately does not vote: those forty colours cannot be lost, and
+    /// running them through a ten-slot list would evict the ones that can.</summary>
+    private void OnSavedColorPick(object sender, RoutedEventArgs e)
+    {
+        OnColorPickerGridPick(sender, e);
+        if (sender is Button b && b.Tag is Color c)
+            RememberColor(c);
+    }
+
     /// <summary>
     /// The user's own colours, newest first, with the unused slots drawn as empty outlined
     /// squares so the popup is the same height whether the palette is full or empty. Rebuilt
@@ -494,14 +506,16 @@ public partial class EditorWindow : Window
                 slot.ToolTip = hex;
                 AutomationProperties.SetName(slot, $"Saved color {hex}");
                 AutomationProperties.SetHelpText(slot, $"Use saved annotation color {hex}.");
-                slot.Click += OnColorPickerGridPick;
+                slot.Click += OnSavedColorPick;
             }
             else
             {
                 // An empty slot reads as a recessed well: the popup's own window colour under
-                // the hairline. The hairline alone is BorderStrongColor over ElevatedColor,
-                // which computes to 1.89:1 against the popup -- below WCAG 1.4.11's 3:1 for a
-                // control boundary, and on these slots the boundary is the whole affordance.
+                // the hairline. Neither edge of it clears WCAG 1.4.11's 3:1 -- the hairline
+                // (BorderStrongColor over ElevatedColor) is 1.89:1 against the popup it is
+                // drawn on and 2.51:1 against the well -- but an empty slot is IsEnabled=false
+                // and a disabled component is outside 1.4.11's scope. The fill is here so the
+                // slot reads as a place a colour goes, not to reach a contrast ratio.
                 slot.Background = (Brush)FindResource("WindowBgBrush");
                 AutomationProperties.SetName(slot, "Empty saved color slot");
             }
@@ -568,7 +582,14 @@ public partial class EditorWindow : Window
     {
         if (ColorPickerPreviewButton.ContextMenu is not null) return;
 
-        var menu = new ContextMenu { PlacementTarget = ColorPickerPreviewButton };
+        // Placed against the swatch, not the mouse: ContextMenu defaults to MousePoint, so
+        // Enter or Space on the focused swatch dropped the format list wherever the pointer
+        // happened to be sitting -- possibly off the popup entirely.
+        var menu = new ContextMenu
+        {
+            PlacementTarget = ColorPickerPreviewButton,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+        };
         foreach ((string label, WinShot.Core.ColorFormat format) in CopyFormats)
         {
             var item = new MenuItem { Header = $"Copy as {label}", Tag = format };

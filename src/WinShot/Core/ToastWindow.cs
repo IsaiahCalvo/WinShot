@@ -469,7 +469,7 @@ public sealed class ToastWindow : WF.Form
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
         // A sticky toast runs the backstop rather than the dwell; RestartDismiss picks.
         RestartDismiss();
-        if (_sticky)
+        if (_sticky && AsksSomething)
             InstallKeyHook();
         Announce();
     }
@@ -619,7 +619,17 @@ public sealed class ToastWindow : WF.Form
     // takes focus, so Tab, Enter and Escape all go to whatever the user was already in. That
     // left a TopMost decision card with no keyboard path to either answer. The fix is the
     // pattern FastKeystrokeOverlayWindow already uses -- a WH_KEYBOARD_LL hook, armed only
-    // while a sticky toast is on screen -- rather than stealing focus from the user's work.
+    // while a sticky toast that actually asks something is on screen -- rather than stealing
+    // focus from the user's work.
+
+    /// <summary>
+    /// Whether this toast is putting a question to the user. Only one that is gets the hook:
+    /// a sticky toast can also be a working state ("Reading text") that carries no buttons
+    /// and asks nothing, and arming a machine-wide keyboard hook on its behalf takes keys
+    /// away from whatever the user is actually typing in for the length of a job they did
+    /// not ask to be interrupted by.
+    /// </summary>
+    private bool AsksSomething => _openButton is not null || _secondaryButton is not null;
 
     private const int WhKeyboardLl = 13;
     private const int WmKeyDown = 0x0100;
@@ -648,11 +658,17 @@ public sealed class ToastWindow : WF.Form
     }
 
     /// <summary>
-    /// Escape declines, from anywhere: it is the one key that can never do something the
-    /// user did not ask for, and without it a sticky toast has no keyboard exit at all.
+    /// Escape declines, from anywhere: it is the one key that can never do something the user
+    /// did not ask for, and without it a sticky toast has no keyboard exit at all. It is only
+    /// *consumed* while the pointer is over the card, though. This window never has focus, so
+    /// swallowing Escape everywhere ate the Escape the user aimed at their own app -- the
+    /// dropdown they meant to close stayed open and they had to press it twice. Declining a
+    /// passive card in passing is safe; taking the key is not.
+    ///
     /// Enter takes the primary, but only while the pointer is over the card -- hover is what
     /// says the toast is what the user is looking at, and an unconditional Enter would open a
-    /// link out from under someone who had gone back to typing somewhere else.
+    /// link out from under someone who had gone back to typing somewhere else. It is not
+    /// swallowed when there is no primary to take, which was a key eaten for nothing.
     /// </summary>
     private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
@@ -666,18 +682,29 @@ public sealed class ToastWindow : WF.Form
                 if (key == WF.Keys.Escape)
                 {
                     if (down) BeginInvoke(new Action(DeclineFromKeyboard));
-                    return Swallow;
                 }
-                if (key is WF.Keys.Enter or WF.Keys.Return && PointerIsOver())
+                else if (key is WF.Keys.Enter or WF.Keys.Return && down
+                    && _openButton is not null && PointerIsOver())
                 {
-                    if (down && _openButton is not null)
-                        BeginInvoke(new Action(() => _openButton.PerformClick()));
-                    return Swallow;
+                    BeginInvoke(new Action(() => _openButton.PerformClick()));
                 }
+
+                if (ConsumesKey(key))
+                    return Swallow;
             }
         }
         return CallNextHookEx(_keyHook, nCode, wParam, lParam);
     }
+
+    /// <summary>Which keys this toast takes off the machine. Only what the pointer says the
+    /// user is looking at: the hook sees every process's keystrokes, and this window has no
+    /// focus to justify taking any of them.</summary>
+    internal bool ConsumesKey(WF.Keys key) => key switch
+    {
+        WF.Keys.Escape => PointerIsOver(),
+        WF.Keys.Enter or WF.Keys.Return => _openButton is not null && PointerIsOver(),
+        _ => false,
+    };
 
     private bool PointerIsOver()
     {

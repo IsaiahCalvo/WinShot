@@ -101,11 +101,36 @@ public sealed class FastPinWindow : WF.Form
     /// top and must stay legible, so this is not see-through.</summary>
     private double _imageAlpha = 1d;
     private IDisposable? _imageFade;
+    /// <summary>How far through a lock/unlock toolbar swap we are: 1 = settled. Locking takes
+    /// the row from five chips to two, and that used to be a hard cut -- three chips gone and
+    /// a different bar width in one frame -- next to an image dim that eased. The bar now
+    /// glides between the two widths and the chips cross-dissolve over the glide.</summary>
+    private double _lockSwap = 1d;
+    /// <summary>The button row the swap is leaving, or null when none is running.</summary>
+    private int[]? _lockSwapFrom;
+    private IDisposable? _lockFade;
+    /// <summary>An extra alpha multiplier for the chips alone, so the ones leaving or arriving
+    /// in a lock swap fade without taking the bar they sit in with them.</summary>
+    private double _chipAlpha = 1d;
     /// <summary>The ramp behind Toggle pins visibility. The window's own opacity is what
     /// moves -- a pin can carry a user-chosen opacity from Ctrl+wheel, so the value to come
     /// back to is held rather than assumed.</summary>
     private IDisposable? _visibilityFade;
     private double _visibleOpacity = 1d;
+    /// <summary>Where the in-flight visibility ramp is heading, or null when none is running.
+    /// A pin is still Visible for the whole 140 ms of its fade-out, so both "hide or show?"
+    /// and "is this pin already leaving?" have to read the intent rather than the frame --
+    /// otherwise a second press inside the ramp (the ordinary way a user says "no, bring them
+    /// back") hides again, and re-samples a half-faded Opacity as the value to come back to.</summary>
+    private bool? _visibilityTarget;
+    /// <summary>The pinned image already resampled to the client area, and the size it was
+    /// built for. A pin can be a 9,000 px scrolling capture, and resampling one down at
+    /// HighQualityBicubic costs ~32 ms -- so the locked-pin dim, which ramps over ~18 frames
+    /// with an 8 ms budget each, was running at 15 fps and holding the UI thread while it did
+    /// it. The resample now happens once per size and every frame blits the copy.</summary>
+    private SD.Bitmap? _scaled;
+    private SD.Size _scaledFor;
+
     /// <summary>A locked pin answers HTTRANSPARENT, so it gets no WM_MOUSELEAVE. This runs
     /// only while the pointer is over a locked pin and stops as soon as it is not.</summary>
     private readonly WF.Timer _lockedHoverTimer = new() { Interval = 120 };
@@ -231,26 +256,7 @@ public sealed class FastPinWindow : WF.Form
                 Invalidate();
             }
         };
-        Closed += (_, _) =>
-        {
-            // An in-flight tween holds the process-wide high-resolution clock; a pin closed
-            // mid-fade must not leave it raised.
-            _chromeFade?.Dispose();
-            _chromeFade = null;
-            _imageFade?.Dispose();
-            _imageFade = null;
-            _visibilityFade?.Dispose();
-            _visibilityFade = null;
-            _lockedHoverTimer.Stop();
-            _lockedHoverTimer.Dispose();
-            _readoutTimer.Dispose();
-            HideActionTooltip();
-            _tooltipTimer.Dispose();
-            _menu.Dispose(); // not parented into Controls, so Form disposal never reaches it
-            OpenPins.Remove(this);
-            DisposeImageWhenCopyDone();
-            MemoryCleanup.Request();
-        };
+        Closed += (_, _) => Teardown();
         OpenPins.Add(this);
     }
 
@@ -266,26 +272,45 @@ public sealed class FastPinWindow : WF.Form
     }
 
     /// <summary>
-    /// A pin disposed without being closed never raises Closed, so the tweens have to be
-    /// released here too: an in-flight one holds the process-wide high-resolution clock for
-    /// the rest of the process.
+    /// Everything this pin owns outside the Controls tree, released once. Closed and
+    /// Dispose both come here: a pin disposed without being closed never raises Closed (so
+    /// its in-flight tweens would hold the process-wide high-resolution clock for the rest of
+    /// the process, and it would sit in OpenPins forever), and a pin that is closed but not
+    /// yet disposed still has to let go of its menu, its timers and its bitmap.
     /// </summary>
+    private void Teardown()
+    {
+        if (_tornDown)
+            return;
+        _tornDown = true;
+
+        _chromeFade?.Dispose();
+        _chromeFade = null;
+        _imageFade?.Dispose();
+        _imageFade = null;
+        _visibilityFade?.Dispose();
+        _visibilityFade = null;
+        _lockFade?.Dispose();
+        _lockFade = null;
+        _lockedHoverTimer.Stop();
+        _lockedHoverTimer.Dispose();
+        _readoutTimer.Dispose();
+        HideActionTooltip();
+        _tooltipTimer.Dispose();
+        _menu.Dispose(); // not parented into Controls, so Form disposal never reaches it
+        _scaled?.Dispose();
+        _scaled = null;
+        OpenPins.Remove(this);
+        DisposeImageWhenCopyDone();
+        MemoryCleanup.Request();
+    }
+
+    private bool _tornDown;
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-        {
-            _chromeFade?.Dispose();
-            _chromeFade = null;
-            _imageFade?.Dispose();
-            _imageFade = null;
-            _visibilityFade?.Dispose();
-            _visibilityFade = null;
-            _lockedHoverTimer.Stop();
-            _lockedHoverTimer.Dispose();
-            // Closed only fires for a window that was actually closed; a disposed one would
-            // otherwise stay in OpenPins forever and be acted on by the pin commands.
-            OpenPins.Remove(this);
-        }
+            Teardown();
         base.Dispose(disposing);
     }
 
@@ -330,8 +355,9 @@ public sealed class FastPinWindow : WF.Form
             return;
 
         // Any visible pin means "hide"; the alternative -- toggling each pin on its own --
-        // leaves a mixed set alternating forever.
-        bool hide = pins.Any(pin => pin.Visible);
+        // leaves a mixed set alternating forever. Read where the pins are heading, not where
+        // they are: one still mid-fade-out is already answered.
+        bool hide = pins.Any(pin => pin.HeadedForVisible);
         foreach (FastPinWindow pin in pins)
         {
             try
@@ -352,9 +378,13 @@ public sealed class FastPinWindow : WF.Form
     /// command.</summary>
     private void FadeOutAndHide()
     {
-        if (!Visible)
+        if (!HeadedForVisible)
             return;
-        _visibleOpacity = Opacity;
+        // Only sampled when nothing is in flight: mid-ramp, Opacity is a frame of the fade,
+        // and taking it as the resting value ratcheted every pin dimmer per double-tap.
+        if (_visibilityTarget is null)
+            _visibleOpacity = Opacity;
+        _visibilityTarget = false;
         RampOpacity(Opacity, 0d, () =>
         {
             Hide();
@@ -365,13 +395,20 @@ public sealed class FastPinWindow : WF.Form
     /// <summary>Brings this pin back at the opacity it left with, over the mirror ramp.</summary>
     private void ShowFadingIn()
     {
-        if (Visible)
+        if (HeadedForVisible)
             return;
-        double target = _visibleOpacity;
-        Opacity = 0d;
-        Show();
-        RampOpacity(0d, target, null);
+        _visibilityTarget = true;
+        double from = Visible ? Opacity : 0d; // reversing a fade-out picks up where it is
+        if (!Visible)
+        {
+            Opacity = 0d;
+            Show();
+        }
+        RampOpacity(from, _visibleOpacity, null);
     }
+
+    /// <summary>Where this pin will be once any in-flight visibility ramp lands.</summary>
+    private bool HeadedForVisible => _visibilityTarget ?? Visible;
 
     private void RampOpacity(double from, double target, Action? onDone)
     {
@@ -386,6 +423,7 @@ public sealed class FastPinWindow : WF.Form
             {
                 _visibilityFade?.Dispose();
                 _visibilityFade = null;
+                _visibilityTarget = null;
                 if (!IsDisposed)
                     onDone?.Invoke();
             });
@@ -410,15 +448,16 @@ public sealed class FastPinWindow : WF.Form
         // PinWindowGeometry.DrawBorder's job, and the shadow is what separates a pin from
         // the desktop.
         var imageRect = new SD.Rectangle(0, 0, Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height));
+        SD.Bitmap surface = ScaledImage(imageRect.Size);
         if (_imageAlpha >= 0.999d)
         {
-            e.Graphics.DrawImage(_image, imageRect);
+            e.Graphics.DrawImageUnscaled(surface, imageRect.Location);
         }
         else
         {
             // Alpha matrix, not Form.Opacity: the whole point is that the chips painted over
             // this stay fully opaque, and window opacity would take them down with it.
-            DrawWithAlpha(e.Graphics, _image, imageRect, _imageAlpha);
+            DrawWithAlpha(e.Graphics, surface, imageRect, _imageAlpha);
         }
 
         if (_border)
@@ -479,6 +518,15 @@ public sealed class FastPinWindow : WF.Form
     private SD.Rectangle ChromeInvalidationBounds()
     {
         SD.Rectangle bar = ToolbarBounds();
+        // Mid-swap the bar is between two widths; the wider of the two is what has to be
+        // repainted or the frames that shrink leave the old bar's tail on screen.
+        if (_lockSwapFrom is not null)
+        {
+            bar = SD.Rectangle.Union(bar, BarRect(Math.Max(
+                BarWidth(VisibleButtons.Length),
+                BarWidth(FitToWidth(_lockSwapFrom).Length))));
+        }
+
         var badge = new SD.Rectangle(0, 0, Ui(34), Ui(34));
         SD.Rectangle rect = SD.Rectangle.Union(SD.Rectangle.Inflate(bar, Ui(4), Ui(4)), badge);
         // The zoom chip hangs below the bar. It used to sit entirely outside this rect, so
@@ -495,7 +543,11 @@ public sealed class FastPinWindow : WF.Form
 
     /// <summary>Scales a chrome colour by the current fade amount.</summary>
     private SD.Color Fade(SD.Color color) =>
-        SD.Color.FromArgb((int)Math.Clamp(Math.Round(color.A * _chromeAlpha), 0d, 255d), color);
+        SD.Color.FromArgb((int)Math.Clamp(Math.Round(color.A * ChromeAmount), 0d, 255d), color);
+
+    /// <summary>The alpha everything currently being drawn should be painted at: the hover
+    /// fade, times the chip multiplier while a lock swap is mid-dissolve.</summary>
+    private double ChromeAmount => _chromeAlpha * _chipAlpha;
 
     private int Ui(int logicalPixels) => PinInteraction.ScaleLogical(logicalPixels, DeviceDpi);
 
@@ -532,9 +584,22 @@ public sealed class FastPinWindow : WF.Form
     private int[] _allButtons = Array.Empty<int>();
     private int[] _lockedButtons = Array.Empty<int>();
 
-    private SD.Rectangle ToolbarBounds()
+    private SD.Rectangle ToolbarBounds() => BarRect(CurrentBarWidth());
+
+    /// <summary>The bar's width right now: the settled width of the current row, or a point on
+    /// the glide between the two rows while a lock swap runs.</summary>
+    private int CurrentBarWidth()
     {
         int width = BarWidth(VisibleButtons.Length);
+        if (_lockSwapFrom is null)
+            return width;
+
+        int from = BarWidth(FitToWidth(_lockSwapFrom).Length);
+        return (int)Math.Round(from + ((width - from) * _lockSwap));
+    }
+
+    private SD.Rectangle BarRect(int width)
+    {
         int height = Ui(ToolbarButtonSizeLogical) + Ui(ToolbarPadLogical) * 2;
         // Clamped both ways: centred when it fits, and never started so far left that its
         // right edge leaves the client.
@@ -546,19 +611,24 @@ public sealed class FastPinWindow : WF.Form
 
     /// <summary>The rect of a toolbar button by its index in _toolbarButtons, or Empty when
     /// the current state does not offer it.</summary>
-    private SD.Rectangle ButtonBounds(int index)
-    {
-        int slot = Array.IndexOf(VisibleButtons, index);
-        if (slot < 0)
-            return SD.Rectangle.Empty;
+    private SD.Rectangle ButtonBounds(int index) =>
+        VisibleButtons.Contains(index) ? ChipBounds(ToolbarBounds(), index) : SD.Rectangle.Empty;
 
-        SD.Rectangle bar = ToolbarBounds();
+    /// <summary>
+    /// Where a chip sits in a given bar. Every row this window can show -- all five, the
+    /// locked pair, and anything the width trim leaves -- is a tail of the same button list,
+    /// so a chip's distance from the bar's right edge is identical in all of them. Measuring
+    /// from the right is what lets the bar glide between two widths with Lock and Close
+    /// holding their place while the chips that are leaving slide out of the end that closes.
+    /// </summary>
+    private SD.Rectangle ChipBounds(SD.Rectangle bar, int index)
+    {
         int buttonSize = Ui(ToolbarButtonSizeLogical);
         int gap = Ui(ToolbarButtonGapLogical);
         int pad = Ui(ToolbarPadLogical);
-        int x = bar.Left + pad + slot * (buttonSize + gap);
-        int y = bar.Top + pad;
-        return new SD.Rectangle(x, y, buttonSize, buttonSize);
+        int fromEnd = _toolbarButtons.Count - 1 - index;
+        int x = bar.Right - pad - buttonSize - (fromEnd * (buttonSize + gap));
+        return new SD.Rectangle(x, bar.Top + pad, buttonSize, buttonSize);
     }
 
     private void DrawToolbar(SD.Graphics g)
@@ -573,15 +643,44 @@ public sealed class FastPinWindow : WF.Form
             DrawRoundedRect(g, border, bar, Ui(8));
         }
 
-        foreach (int i in VisibleButtons)
+        // A lock swap cross-dissolves inside the gliding bar: the row that is leaving is gone
+        // by the halfway point, the chips that are new come up over the second half, and the
+        // two that survive the swap never flicker.
+        int[] current = VisibleButtons;
+        double arriving = _lockSwapFrom is null ? 1d : Math.Max(0d, (_lockSwap * 2d) - 1d);
+        foreach (int i in current)
+        {
+            _chipAlpha = _lockSwapFrom is null || _lockSwapFrom.Contains(i) ? 1d : arriving;
+            if (_chipAlpha <= 0.004d)
+                continue;
             DrawButton(
                 g,
-                ButtonBounds(i),
+                ChipBounds(bar, i),
                 IconAssetFor(i),
                 i == _hoverButton,
                 i == _pressedButton,
                 i == _focusButton && ContainsFocus);
+        }
 
+        if (_lockSwapFrom is not null)
+        {
+            _chipAlpha = 1d - Math.Min(1d, _lockSwap * 2d);
+            if (_chipAlpha > 0.004d)
+            {
+                // Clipped to the bar: the chips on their way out are anchored to an edge that
+                // is moving past them, and without this they would spill onto the image.
+                SD.Drawing2D.GraphicsState state = g.Save();
+                g.IntersectClip(bar);
+                foreach (int i in _lockSwapFrom)
+                {
+                    if (!current.Contains(i))
+                        DrawButton(g, ChipBounds(bar, i), IconAssetFor(i), false, false, false);
+                }
+                g.Restore(state);
+            }
+        }
+
+        _chipAlpha = 1d;
         DrawZoomChip(g, bar);
     }
 
@@ -614,8 +713,7 @@ public sealed class FastPinWindow : WF.Form
     /// </summary>
     private SD.Rectangle ZoomChipBounds(SD.Rectangle bar)
     {
-        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt, SD.FontStyle.Bold);
-        SD.Size size = WF.TextRenderer.MeasureText(ZoomChipText(_scale), font);
+        SD.Size size = ZoomChipTextSize(ZoomChipText(_scale));
         int w = size.Width + Ui(14);
         int h = size.Height + Ui(6);
         var chip = new SD.Rectangle(bar.Left + ((bar.Width - w) / 2), bar.Bottom + Ui(4), w, h);
@@ -625,6 +723,27 @@ public sealed class FastPinWindow : WF.Form
             ? SD.Rectangle.Empty
             : chip;
     }
+
+    /// <summary>
+    /// The chip's measured size, cached against the string and the DPI. This is read from
+    /// ChromeInvalidationBounds, which runs on every frame of the hover fade -- a Font plus a
+    /// MeasureText per frame for a string that only changes on a wheel tick.
+    /// </summary>
+    private SD.Size ZoomChipTextSize(string text)
+    {
+        if (_zoomChipTextFor == text && _zoomChipTextDpi == DeviceDpi)
+            return _zoomChipTextSize;
+
+        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt, SD.FontStyle.Bold);
+        _zoomChipTextSize = WF.TextRenderer.MeasureText(text, font);
+        _zoomChipTextFor = text;
+        _zoomChipTextDpi = DeviceDpi;
+        return _zoomChipTextSize;
+    }
+
+    private SD.Size _zoomChipTextSize;
+    private string? _zoomChipTextFor;
+    private int _zoomChipTextDpi;
 
     /// <summary>
     /// The chip's label. Rounds to whole percent, and never says "0%" for a scale that is
@@ -708,13 +827,38 @@ public sealed class FastPinWindow : WF.Form
     /// DrawImageUnscaled have no alpha knob, so the multiply goes through a colour matrix.</summary>
     private void DrawFaded(SD.Graphics g, SD.Bitmap icon, SD.Rectangle at)
     {
-        if (_chromeAlpha >= 0.999d)
+        if (ChromeAmount >= 0.999d)
         {
             g.DrawImageUnscaled(icon, at.Left, at.Top);
             return;
         }
 
-        DrawWithAlpha(g, icon, at, _chromeAlpha);
+        DrawWithAlpha(g, icon, at, ChromeAmount);
+    }
+
+    /// <summary>
+    /// The pinned image at the client size, resampled at most once per size. Returns _image
+    /// itself at 1:1, so a pin at natural size holds no second copy of its bitmap.
+    /// </summary>
+    private SD.Bitmap ScaledImage(SD.Size size)
+    {
+        if (size == _image.Size)
+            return _image;
+        if (_scaled is not null && _scaledFor == size)
+            return _scaled;
+
+        var copy = new SD.Bitmap(size.Width, size.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
+        using (SD.Graphics g = SD.Graphics.FromImage(copy))
+        {
+            g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighQuality;
+            g.DrawImage(_image, new SD.Rectangle(SD.Point.Empty, size));
+        }
+
+        _scaled?.Dispose();
+        _scaled = copy;
+        _scaledFor = size;
+        return copy;
     }
 
     private static void DrawWithAlpha(SD.Graphics g, SD.Bitmap image, SD.Rectangle at, double alpha)
@@ -1053,8 +1197,13 @@ public sealed class FastPinWindow : WF.Form
     private void ResetToNatural()
     {
         Opacity = 1.0;
+        _visibleOpacity = 1.0;
         _scale = 1.0;
         ApplyScale();
+        // The zoom chip covers the scale half of this, but only while the chrome is up --
+        // and it never covered the opacity half at all, so Ctrl+0 with the pointer off the
+        // pin used to report nothing about either.
+        ShowReadout("100%", new SD.Point(ClientSize.Width / 2, ClientSize.Height / 2));
         Invalidate();
     }
 
@@ -1099,6 +1248,7 @@ public sealed class FastPinWindow : WF.Form
         if (_locked == locked)
             return;
 
+        int[] leaving = VisibleButtons; // read before the flip; it is what the swap dissolves
         _locked = locked;
         if (locked)
         {
@@ -1112,9 +1262,48 @@ public sealed class FastPinWindow : WF.Form
         }
 
         _lockItem.Text = locked ? "Unlock (Ctrl+L)" : "Lock (Ctrl+L)";
+        StartLockSwap(leaving);
         UpdateChromeAlpha();
         UpdateImageAlpha();
         Invalidate();
+    }
+
+    /// <summary>
+    /// Glides the toolbar from the row it had to the row lock leaves it with. Lock is always
+    /// toggled with the pointer on the pin, so the bar is up and ToolbarVisible does not
+    /// change -- UpdateChromeAlpha returns early and nothing else would move the bar at all.
+    /// </summary>
+    private void StartLockSwap(int[] leaving)
+    {
+        _lockFade?.Dispose();
+        _lockFade = null;
+        _lockSwapFrom = null;
+        _lockSwap = 1d;
+
+        // Nothing is on screen to transition -- Ctrl+L from the keyboard with the chrome
+        // down. The next hover simply draws the row lock left behind.
+        if (_chromeAlpha <= 0.004d || leaving.SequenceEqual(VisibleButtons))
+            return;
+
+        _lockSwapFrom = leaving;
+        _lockSwap = 0d;
+        _lockFade = Motion.Run(Motion.SwapMs, Motion.EaseOutCubic,
+            p =>
+            {
+                if (IsDisposed) return;
+                _lockSwap = p;
+                Invalidate(ChromeInvalidationBounds());
+            },
+            () =>
+            {
+                _lockFade?.Dispose();
+                _lockFade = null;
+                SD.Rectangle dirty = ChromeInvalidationBounds(); // still knows both widths
+                _lockSwapFrom = null;
+                _lockSwap = 1d;
+                if (!IsDisposed)
+                    Invalidate(dirty);
+            });
     }
 
     // ----- Resize border + aspect ratio --------------------------------------

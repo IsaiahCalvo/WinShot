@@ -32,8 +32,11 @@ internal static class TallCapturePreviewLayout
     /// The preview's screen rect: as large as the working area allows along the capture's
     /// long axis, sitting clear of the card so the card stays clickable underneath.
     /// </summary>
-    /// <summary>Below this the band above the card cannot hold anything worth showing.</summary>
-    private const int MinBand = 120;
+    /// <summary>Below this the band above the card cannot hold anything worth showing.
+    /// Logical pixels: scaled with the DPI like every other metric here, or the gate passed
+    /// on 80 logical px of room at 150 % and 60 at 200 % -- a preview no more readable than
+    /// the card it replaces, which is the opposite of what the gate is for.</summary>
+    private const int MinBandLogical = 120;
 
     /// <summary>A preview may take at most this much of the working area's width. Without it
     /// a 3.2:1 window grab flies out across nearly the whole screen on a casual hover.</summary>
@@ -47,10 +50,11 @@ internal static class TallCapturePreviewLayout
         // The band above the card is what the preview gets to use, and it is a hard ceiling:
         // a floor here let the preview grow back down over the card it is meant to sit above.
         // Too little room and there is no preview at all.
+        int minBand = Math.Max(1, (int)Math.Round(MinBandLogical * scale));
         int maxHeight = cardScreen.Top - workingArea.Top - (gap * 2);
-        if (maxHeight < MinBand)
+        if (maxHeight < minBand)
             return SD.Rectangle.Empty;
-        int maxWidth = Math.Max(120, (int)(workingArea.Width * MaxWidthFraction));
+        int maxWidth = Math.Max(minBand, (int)(workingArea.Width * MaxWidthFraction));
 
         double aspect = (double)image.Width / image.Height;
         int height = maxHeight;

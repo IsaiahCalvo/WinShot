@@ -234,7 +234,13 @@
                                                     ToolTip="Copy this color in another format"
                                                     AutomationProperties.Name="Copy as"
                                                     AutomationProperties.HelpText="Open the list of color formats to copy.">
-                                                <Rectangle x:Name="ColorPickerPreview" Width="16" Height="16"
+                                                <!-- 20 px inside a 22 px swatch: the palette
+                                                     cells and the filled My colors cells are
+                                                     22 px of solid colour edge to edge, and a
+                                                     16 px chip made the one swatch that says
+                                                     what colour is current read a size smaller
+                                                     than every swatch around it. -->
+                                                <Rectangle x:Name="ColorPickerPreview" Width="20" Height="20"
                                                            RadiusX="3" RadiusY="3"/>
                                             </Button>
                                             <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
