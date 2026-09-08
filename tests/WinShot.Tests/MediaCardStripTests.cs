@@ -163,6 +163,33 @@ public class MediaCardStripTests
         Assert.Equal(strip.Right - pad, runRight);
     }
 
+    /// <summary>
+    /// The left inset is the card's icon column, not whichever buttons happen to exist. A
+    /// recording the editor can open kept the bottom-left Edit button, so its run started
+    /// 43 px in and the strip read centred; a recording with no editor behind it dropped
+    /// straight to the 6 px padding while the file size kept the same right inset, so the
+    /// same strip read lopsided on the very next card.
+    /// </summary>
+    [Fact]
+    public void TheTextRunKeepsItsIconColumnWhenNoButtonSitsInIt()
+    {
+        var card = new SD.Rectangle(0, 0, 192, 120);
+        SD.Rectangle strip = MediaCardStrip.Bounds(card, 96);
+        int pad = MediaCardStrip.Padding(96);
+        var layout = QuickAccessOverlayLayout.Calculate(new SD.Size(1200, 760), 50, 96);
+        int column = layout.ControlPadding + layout.IconSize;
+        var rightButton = new SD.Rectangle(card.Right - 28, strip.Top - 8, 22, 22);
+
+        (int withButton, int rightWith) = MediaCardStrip.TextRun(
+            strip, new[] { new SD.Rectangle(layout.ControlPadding, strip.Top - 8, layout.IconSize, layout.IconSize), rightButton }, pad, column);
+        (int withoutButton, int rightWithout) = MediaCardStrip.TextRun(
+            strip, new[] { rightButton }, pad, column);
+
+        Assert.Equal(withButton, withoutButton);
+        Assert.Equal(rightWith, rightWithout);
+        Assert.Equal(strip.Left + column + pad, withoutButton);
+    }
+
     [Fact]
     public void AStripSweptCleanByItsButtonsReportsNoRunRatherThanANegativeOne()
     {

@@ -809,6 +809,16 @@ public sealed class FastPinWindow : WF.Form
         SD.Rectangle target = Bounds;
         if (origin == target)
             return;
+        // Only when the card and the pin are on the same monitor. The pin cascades on the
+        // pointer's screen while the card sits on the PRIMARY whenever
+        // OverlayMoveToActiveScreen is off, so with the pointer on a second monitor the pin
+        // snapped onto the primary and then flew the width of the desktop — a window
+        // teleporting, which is the opposite of what "the card relocated" is meant to read
+        // as. Across a DPI boundary it is worse: setting Bounds over the seam raises
+        // WM_DPICHANGED, whose default handling resizes the window against every tween
+        // frame. Falling through leaves the plain appearance the pin had before.
+        if (!WF.Screen.FromRectangle(origin).Equals(WF.Screen.FromRectangle(target)))
+            return;
 
         var tween = new RectangleTween();
         tween.Retarget(origin, target);

@@ -76,13 +76,22 @@ internal static class MediaCardStrip
     /// strip — the bottom action row overlaps its top 8 logical px at every card size — so
     /// the duration and the file size have to sit clear of the columns those buttons
     /// occupy, or hovering hides both. Returns an empty run when nothing fits.
+    /// <paramref name="iconColumn"/> is the width of the card's left button column in device
+    /// pixels: the run clears it whether or not that button was built for this card.
     /// </summary>
     internal static (int Left, int Right) TextRun(
         SD.Rectangle strip,
         IEnumerable<SD.Rectangle> obstacles,
-        int padding)
+        int padding,
+        int iconColumn = 0)
     {
-        int left = strip.Left + padding;
+        // The run starts past the icon column whether or not a button happens to sit in it.
+        // Derived only from the buttons that exist, an editable recording got 43 px of empty
+        // strip on each side and read centred, while a non-editable one kept the same right
+        // inset and started the camcorder hard against the card edge — the same strip
+        // symmetric on one card and lopsided on the next. The run is wider than the text
+        // needs at every card size and dpi, so flooring it costs nothing.
+        int left = strip.Left + iconColumn + padding;
         int right = strip.Right - padding;
         int middle = strip.Left + strip.Width / 2;
         foreach (SD.Rectangle obstacle in obstacles)

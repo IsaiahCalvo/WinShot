@@ -261,6 +261,144 @@ public class QuickAccessOverlayStackTests
         }
     }
 
+    /// <summary>
+    /// The editor round trip must not leave a hole in the column while it runs, or drop the
+    /// returning card on top of a survivor when it ends. StepAside only set a flag and faded,
+    /// so the cards above kept their slots for the whole editor session — and ComeBack then
+    /// derived its slot from a COUNT of what was still in the corner, which with one other
+    /// card on screen is exactly the rectangle that card is sitting in.
+    /// </summary>
+    [Fact]
+    public void ACardSteppingAsideClosesItsGapAndComesBackToAFreeSlot()
+    {
+        RunSta(() =>
+        {
+            var settings = new SettingsService();
+            var made = new List<FastQuickActionsWindow>();
+            try
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    var made_i = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+                    made.Add(made_i);
+                    made_i.Show();
+                    WF.Application.DoEvents();
+                }
+                PumpUntil(() => Motion.Holders == 0, 6000);
+                FastQuickActionsWindow first = made[0];
+                FastQuickActionsWindow second = made[1];
+                SD.Point anchored = first.Location;
+                Assert.NotEqual(anchored, second.Location);
+
+                first.StepAside(); // exactly what opening the annotate editor does
+                PumpUntil(() => !first.Visible, 3000);
+                PumpUntil(() => Motion.Holders == 0, 6000);
+                Assert.Equal(anchored, second.Location);
+
+                first.ComeBack();
+                PumpUntil(() => Motion.Holders == 0, 6000);
+                Assert.NotEqual(second.Location, first.Location);
+                Assert.False(
+                    first.Bounds.IntersectsWith(second.Bounds),
+                    $"the returning card at {first.Bounds} landed on the card at {second.Bounds}");
+            }
+            finally
+            {
+                DisposeAll(made);
+            }
+        });
+    }
+
+    /// <summary>
+    /// StepAside remembers the card's resting opacity so ComeBack has something to fade back
+    /// TO. Reading it unconditionally meant a second gesture landing inside the 140 ms return
+    /// fade — re-annotating, or "Temporarily hide" over a card still coming back — recorded
+    /// whatever the fade had reached, and the card settled at 0.23 for the life of the
+    /// process on the one surface that is explicitly pinned.
+    /// </summary>
+    [Fact]
+    public void SteppingAsideInsideTheReturnFadeDoesNotDimTheCardForGood()
+    {
+        RunSta(() =>
+        {
+            var previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            try
+            {
+                using var card = new FastQuickActionsWindow(new SD.Bitmap(600, 400), new SettingsService());
+                card.Show();
+                PumpUntil(() => Motion.Holders == 0, 6000);
+                Assert.Equal(1d, card.Opacity, 3);
+
+                card.StepAside();
+                PumpUntil(() => !card.Visible, 3000);
+                card.ComeBack();
+                PumpUntil(() => card.Opacity > 0.2d && card.Opacity < 0.9d, 1000);
+
+                card.StepAside();
+                PumpUntil(() => !card.Visible, 3000);
+                card.ComeBack();
+                PumpUntil(() => Motion.Holders == 0, 6000);
+
+                Assert.Equal(1d, card.Opacity, 3);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+                WF.Application.DoEvents();
+            }
+        });
+    }
+
+    /// <summary>
+    /// The exit takes over every other tween on the card, the return fade included. It did
+    /// not, so a card evicted by the stack cap while it was fading back in had two loops
+    /// writing Opacity every frame and visibly brightened back to full strength in the middle
+    /// of flying out. Machine-timed: the next capture revives the hidden cards and then trims
+    /// the oldest, with no human reaction speed involved.
+    /// </summary>
+    [Fact]
+    public void ACardClosedInsideTheReturnFadeOnlyEverGetsDimmer()
+    {
+        RunSta(() =>
+        {
+            var previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            var card = new FastQuickActionsWindow(new SD.Bitmap(600, 400), new SettingsService());
+            try
+            {
+                card.Show();
+                PumpUntil(() => Motion.Holders == 0, 6000);
+
+                card.StepAside();
+                PumpUntil(() => !card.Visible, 3000);
+                card.ComeBack();
+                PumpUntil(() => card.Opacity > 0.15d, 1000);
+
+                card.Close(); // exactly what the stack cap does to the oldest card
+                double brightest = card.Opacity;
+                var deadline = DateTime.UtcNow.AddMilliseconds(1500);
+                while (!card.IsDisposed && DateTime.UtcNow < deadline)
+                {
+                    WF.Application.DoEvents();
+                    if (card.IsDisposed || !card.Visible)
+                        break;
+                    Assert.True(
+                        card.Opacity <= brightest + 0.02d,
+                        $"the flying-out card brightened from {brightest:0.000} back to {card.Opacity:0.000}");
+                    brightest = Math.Min(brightest, card.Opacity);
+                    Thread.Sleep(2);
+                }
+            }
+            finally
+            {
+                try { card.Dispose(); } catch { /* the exit flight already closed it */ }
+                Motion.AnimationsEnabled = previous;
+                PumpUntil(() => Motion.Holders == 0, 6000);
+            }
+        });
+    }
+
     private static void DisposeAll(List<FastQuickActionsWindow> cards)
     {
         foreach (var card in cards)

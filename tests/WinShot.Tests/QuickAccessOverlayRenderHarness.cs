@@ -306,7 +306,9 @@ public class QuickAccessOverlayRenderHarness
 
         var canvasSize = new SD.Size(720, 520);
         int edge = 24;
-        int step = card.Height + 12;
+        // The product's gutter, not a copy of the number it happened to use: hard-coded,
+        // the sheet drifts from the app the first time StackGutter changes.
+        int step = card.Height + QuickAccessOverlayLayout.StackGutter(96);
         var baseSlot = new SD.Point(canvasSize.Width - card.Width - edge, canvasSize.Height - card.Height - edge);
         var secondSlot = new SD.Point(baseSlot.X, baseSlot.Y - step);
         var thirdSlot = new SD.Point(baseSlot.X, baseSlot.Y - step * 2);
@@ -331,6 +333,27 @@ public class QuickAccessOverlayRenderHarness
                 DrawWithOpacity(graphics, card, point, QuickAccessOverlayMotion.ExitOpacity(progress));
             }
             DrawMotionLabel(graphics, $"Exit {progress:P0}");
+            frames.Add(frame);
+        }
+
+        // The arrival is this track's headline motion and never reached a render PNG: the
+        // overshoot-versus-neighbour geometry was only ever checked numerically. EaseOutBack
+        // peaks above 1, so these frames are where a reviewer can see that the overshoot
+        // goes into empty space rather than over the card below.
+        foreach (double progress in new[] { 0.25d, 0.6d, 1d })
+        {
+            var frame = CreateMotionCanvas(canvasSize);
+            using var graphics = SD.Graphics.FromImage(frame);
+            graphics.DrawImageUnscaled(card, baseSlot);
+            graphics.DrawImageUnscaled(card, secondSlot);
+            SD.Point enterFrom = QuickAccessOverlayMotion.EnterOrigin(
+                new SD.Rectangle(SD.Point.Empty, canvasSize),
+                new SD.Rectangle(thirdSlot, card.Size),
+                "bottom-right",
+                QuickAccessOverlayLayout.StackGutter(96));
+            graphics.DrawImageUnscaled(card, QuickAccessOverlayMotion.Interpolate(
+                enterFrom, thirdSlot, QuickAccessOverlayMotion.EaseOutBack(progress)));
+            DrawMotionLabel(graphics, $"Enter {progress:P0}");
             frames.Add(frame);
         }
 

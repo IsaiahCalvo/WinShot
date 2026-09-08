@@ -497,6 +497,12 @@ public partial class EditorWindow : Window
         // generation of quality, for a visit that changed nothing.
         if (_undoStack.Count == 0)
             return;
+        // The same guard every other Flatten() call site takes. Flatten reads _source for
+        // the render size, and a crop, resize or background op swaps _source on an async
+        // continuation — closing the editor while one is in flight would hand the card a
+        // canvas rendered at the pre-swap dimensions.
+        if (_sourceOperationActive)
+            return;
 
         // Cleared first: a handler that reopens or re-closes must not be handed a second copy.
         ImageCommitted = null;

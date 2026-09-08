@@ -66,6 +66,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     // The inset every drawn element on the card shares, kept off the layout record so the
     // status flash lays out inside the same margin the corner buttons do.
     private int _controlPadding;
+    private int _iconSize;
     private int _dpi = 96;
     private readonly object _previewSync = new();
     private SD.Bitmap? _preview;
@@ -737,6 +738,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         _thumbRect = layout.ThumbnailBounds;
         _cornerRadius = layout.CornerRadius;
         _controlPadding = layout.ControlPadding;
+        _iconSize = layout.IconSize;
 
         BuildButtons(layout);
     }
@@ -818,7 +820,12 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// </summary>
     private void FlashStatus(string message, bool failure)
     {
-        if (_closed || IsDisposed) return;
+        // Off screen too, not just closed: a card stepped aside for the annotate editor is
+        // still a real window with a real _cardRect, so the message was painted onto
+        // something the user cannot see. _offScreen rather than Visible — it is set the
+        // moment the gesture starts, where Visible only clears when the fade lands 140 ms
+        // later, and it is false on a card that simply has not been shown yet.
+        if (_closed || IsDisposed || _offScreen) return;
         if (InvokeRequired)
         {
             BeginInvoke(new Action(() => FlashStatus(message, failure)));
@@ -895,7 +902,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void ReportActionFailure(string title, Exception ex)
     {
         string message = FriendlyError.For(ex);
-        if (!_closed && !IsDisposed)
+        // On screen, not merely alive: the annotate hand-off deliberately takes the card off
+        // screen, and "Your annotations didn't reach the card" is reported on exactly that
+        // path. Off screen it goes to the toast below, which is what this doc already claims.
+        if (!_closed && !IsDisposed && !_offScreen)
             // The card has room for one line, and the toast shows title + message. When
             // FriendlyError falls through to its catch-all the message names nothing at all,
             // so the card carries the title instead — the same failure should not read as
@@ -1094,7 +1104,13 @@ public sealed class FastQuickActionsWindow : WF.Form
 
             int pad = MediaCardStrip.Padding(_dpi);
             (int runLeft, int runRight) = MediaCardStrip.TextRun(
-                strip, _buttons.Select(b => b.Bounds), pad);
+                strip,
+                _buttons.Select(b => b.Bounds),
+                pad,
+                // The left button column, whether or not this card has an Edit button in
+                // it: a recording with no editor behind it otherwise started the camcorder
+                // hard against the card edge while the file size kept its inset.
+                _controlPadding + _iconSize);
             if (runRight <= runLeft)
                 return;
 
@@ -1472,6 +1488,15 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         _exitMotionStarted = true;
         StopEnterMotion();
+        // The step-aside / come-back fade too: it was the one card tween nothing took over,
+        // so a card evicted by the stack cap while it was fading back in had two loops
+        // writing Opacity every frame — the 140 ms fade brightening it and the 360 ms flight
+        // dimming it — and the card visibly brightened back to full strength in the middle
+        // of leaving. Stopping it cancels its final frame, so the flight starts from the
+        // card's real resting opacity rather than from wherever the fade had reached.
+        StopStepAsideMotion();
+        if (!_offScreen)
+            Opacity = _fullOpacity;
         StopStackMotionTimer();
         StopAutoCloseTimer();
         HideActionTooltip();
@@ -1963,6 +1988,15 @@ public sealed class FastQuickActionsWindow : WF.Form
         // Out of the stack the moment the gesture starts, not when the fade lands: the
         // stack cap and the batch rows must not be able to reach it during the ramp.
         _offScreen = true;
+        // The card's resting opacity, and only when nothing is already fading it — read
+        // BEFORE StopStepAsideMotion clears the flag. A card one frame into ComeBack's
+        // 140 ms return fade is still Visible with an Opacity anywhere in 0.02..1, and
+        // taking that partial value here made it the card's resting opacity for the life of
+        // the process: ComeBack reads _fullOpacity as its fade target, so the card settled
+        // at 0.23 and stayed there. Re-annotating inside the return fade, or "Temporarily
+        // hide" landing on a card still coming back, both reach it.
+        if (!_stepAsideRunning)
+            _fullOpacity = Opacity;
         StopEnterMotion();
         StopStepAsideMotion();
 
@@ -1971,7 +2005,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         // the same QuickMs on EaseOutCubic, so the pair reads as one gesture reversed:
         // leaving eases IN, returning eases OUT.
         double from = Opacity;
-        _fullOpacity = from;
         _stepAsideRunning = true;
         _stepAsideMotion = Motion.Run(
             Motion.QuickMs,
@@ -1988,8 +2021,15 @@ public sealed class FastQuickActionsWindow : WF.Form
                 if (_closed || IsDisposed)
                     return;
                 Visible = false;
-                Opacity = from;
+                Opacity = _fullOpacity;
             });
+
+        // The column closes over the gap while this card dims, on the restack tween every
+        // other departure already uses. Without it the slot the card vacated stayed empty
+        // for the whole editor session, and the returning card — placed from a COUNT of the
+        // cards still in the corner — was handed a slot another card was already sitting
+        // on. Compacting here is what makes that count the free slot again.
+        ReflowOpenWindowsAnimated();
     }
 
     /// <summary>
@@ -2015,6 +2055,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         _temporarilyHidden = false;
         _offScreen = false;
         StopStepAsideMotion();
+        // The count PositionFromSettings sums IS the free slot, because the column is
+        // compacted on every departure: a close reflows from FormClosed, and StepAside now
+        // reflows too. So the cards still in the corner occupy exactly slots 0..n-1 and this
+        // one lands on slot n. Re-running the reflow here instead would re-sort the column
+        // into creation order and slide the returning card past its neighbour to do it —
+        // motion that says something moved when nothing needed to.
         PositionFromSettings();
         // The editor hands its composed image back on the same turn as this call, and the
         // async preview render lands a frame or two later — without this the card fades in
@@ -2038,7 +2084,11 @@ public sealed class FastQuickActionsWindow : WF.Form
                 _returningFromStepAside = false;
             }
         }
-        ResumeAutoCloseTimer();
+        // Not while a failure line is up. FlashStatus pauses the auto-close on purpose, so
+        // that a hard failure cannot erase itself and take the capture with it a second
+        // later; restarting the countdown here did exactly that under the message.
+        if (!_flashIsFailure)
+            ResumeAutoCloseTimer();
         double from = Opacity;
         _stepAsideMotion = Motion.Run(
             Motion.QuickMs,
@@ -2553,19 +2603,26 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             preview = CreatePreviewBitmap(_image, _thumbRect.Width, _thumbRect.Height, fast: true);
             SD.Bitmap? old;
+            SD.Bitmap? oldBlurred;
             lock (_previewSync)
             {
                 if (_previewClosed)
                     return;
                 old = _preview;
+                oldBlurred = _blurredPreview;
                 _preview = preview;
                 preview = null;
-                // The blurred bitmap can be the same instance when the pipeline never ran;
-                // dropping it here would leave a disposed bitmap installed as the blur.
-                if (ReferenceEquals(old, _blurredPreview))
-                    old = null;
+                // The blur goes with it, rather than being left pointing at a bitmap built
+                // from the PREVIOUS image. ComeBack calls this synchronously so the card
+                // fades in already holding the annotated picture — but with the pointer
+                // still over the card, DrawBlurredThumbnailOver painted the stale
+                // pre-annotation blur over the top of it until the async pass landed. Null
+                // falls back to the fresh sharp preview until the pipeline catches up.
+                _blurredPreview = null;
             }
-            old?.Dispose();
+            // The same bitmap can be installed as both when the pipeline never ran, which
+            // is exactly the double-dispose DisposePreviewPair exists to swallow.
+            DisposePreviewPair(old, oldBlurred);
         }
         catch (Exception ex)
         {
@@ -2719,7 +2776,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 e.Handled = true;
                 break;
             case WF.Keys.E when ctrl || e.Modifiers == WF.Keys.None:
-                EditRequested?.Invoke(this);
+                RequestEdit();
                 e.Handled = true;
                 break;
             case WF.Keys.W when ctrl:
@@ -2893,15 +2950,26 @@ public sealed class FastQuickActionsWindow : WF.Form
         // rather than single click, so the drag gesture stays unambiguous.
         if (!onTheBody || e.Clicks != 2 || !_cardRect.Contains(e.Location))
             return;
+        RequestEdit();
+    }
+
+    /// <summary>
+    /// Asks for the editor, from the double-click or from the E / Ctrl+E chord. One method
+    /// for both: the key case used to raise <see cref="EditRequested"/> and do nothing at
+    /// all when nothing was listening, so the two ways of asking for the same thing refused
+    /// differently — one explained itself, the other looked broken.
+    /// </summary>
+    private void RequestEdit()
+    {
         if (EditRequested is { } edit)
+        {
             edit(this);
-        else
-            // A recording with no editor behind it: silently doing nothing reads as a
-            // broken double-click rather than as "this one cannot be edited".
-            // Error, not Info: the user just double-clicked asking for the editor and is
-            // being refused. The same glyph as "Copied" is what the severity glyph exists
-            // to stop.
-            ShowCardToast("This recording can't be edited", "No video editor is available for it.", Core.ToastSeverity.Error);
+            return;
+        }
+        // A recording with no editor behind it. Error, not Info: the user just asked for
+        // the editor and is being refused. The same glyph as "Copied" is what the severity
+        // glyph exists to stop.
+        ShowCardToast("This recording can't be edited", "No video editor is available for it.", Core.ToastSeverity.Error);
     }
 
     private int HitTestButton(SD.Point point)
@@ -3016,7 +3084,11 @@ public sealed class FastQuickActionsWindow : WF.Form
                 // clipboard changed under someone who was aiming at the app underneath.
                 ShowCardToast(
                     "Copied",
-                    _mediaFilePath is not null ? Path.GetFileName(_mediaFilePath) : "Capture is on the clipboard.",
+                    // A sentence either way. The filename on its own read as a fragment
+                    // beside every other body this card raises.
+                    _mediaFilePath is not null
+                        ? $"{Path.GetFileName(_mediaFilePath)} is on the clipboard."
+                        : "Capture is on the clipboard.",
                     Core.ToastSeverity.Success);
                 Close();
                 return;
@@ -3274,9 +3346,20 @@ public sealed class FastQuickActionsWindow : WF.Form
         ShowCardToast(title, body, Core.ToastSeverity.Success);
     }
 
-    /// <summary>The save confirmation as the toast phrases it: the file, not the path.</summary>
+    /// <summary>
+    /// The save confirmation as the toast phrases it. A sentence naming the folder, the
+    /// same shape <see cref="BatchSaveConfirmation"/> settled on: a bare filename fragment
+    /// answered "did it save?" but not "where did it go?", which is the question the card
+    /// flying off screen actually leaves you with.
+    /// </summary>
     internal static (string Title, string Body) SaveConfirmation(string path)
-        => ("Saved", Path.GetFileName(path));
+    {
+        string folder = Path.GetFileName(Path.GetDirectoryName(path)?.TrimEnd(Path.DirectorySeparatorChar) ?? string.Empty);
+        string name = Path.GetFileName(path);
+        return folder.Length == 0
+            ? ("Saved", $"{name} is on disk.")
+            : ("Saved", $"{name} is in {folder}.");
+    }
 
     private void OpenMediaFile()
     {

@@ -1274,15 +1274,17 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
-    public void SavingSaysWhichFileItWrote()
+    public void SavingSaysWhichFileItWroteAndWhereItWent()
     {
         (string title, string body) = FastQuickActionsWindow.SaveConfirmation(
             Path.Combine("C:", "Users", "someone", "Pictures", "WinShot 2026-09-04 at 11.02.14.png"));
 
-        // Sentence case, and the file rather than the whole path — the card closes on save,
-        // so this line is the only thing that says the capture went anywhere.
+        // Sentence case, the file rather than the whole path, and the folder it landed in —
+        // the card closes on save, so this line is the only thing that says where the
+        // capture went. A bare filename read as a fragment beside the batch confirmation's
+        // "All of them are in Pictures."
         Assert.Equal("Saved", title);
-        Assert.Equal("WinShot 2026-09-04 at 11.02.14.png", body);
+        Assert.Equal("WinShot 2026-09-04 at 11.02.14.png is in Pictures.", body);
     }
 
     [Fact]
