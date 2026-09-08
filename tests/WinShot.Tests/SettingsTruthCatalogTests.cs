@@ -32,7 +32,7 @@ public class SettingsTruthCatalogTests
     {
         Assert.Equal(
         [
-            "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
+            "all-in-one", "measure", "capture-area", "capture-previous", "capture-fullscreen",
             "capture-window", "capture-window-background", "capture-display", "self-timer",
             "record-screen", "record-display", "scrolling-capture", "scroll-horizontal",
             "capture-text", "load-clipboard", "open-image", "pin-to-screen", "restore-last",
@@ -52,7 +52,7 @@ public class SettingsTruthCatalogTests
         [
             s.HotkeyCaptureRegion, s.HotkeyCaptureWindow, s.HotkeyCaptureFullscreen,
             s.HotkeyRecord, s.HotkeyOcr, s.HotkeyScrolling, s.HotkeyCapturePrevious,
-            s.HotkeyAllInOne, s.HotkeyHistory,
+            s.HotkeyAllInOne, s.HotkeyHistory, s.HotkeyMeasure,
         ];
 
         Assert.Equal("Ctrl+Shift+0", s.HotkeyHistory);
@@ -93,7 +93,7 @@ public class SettingsTruthCatalogTests
     {
         string[] fieldBacked =
         [
-            "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
+            "all-in-one", "measure", "capture-area", "capture-previous", "capture-fullscreen",
             "capture-window", "record-screen", "scrolling-capture", "capture-text",
             "history", "self-timer", "load-clipboard",
         ];

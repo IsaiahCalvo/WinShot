@@ -23,6 +23,8 @@ internal static class SettingsTruthCatalog
             "HotkeyHistory",
             "HotkeySelfTimer",
             "HotkeyLoadClipboard",
+            "HotkeyMeasure",
+            "MeasureTolerance",
             "RecordingFps",
             "GifFps",
             "RecordAudio",
@@ -102,6 +104,7 @@ internal static class SettingsTruthCatalog
     internal static readonly IReadOnlyList<string> ExecutableShortcutIds =
     [
         "all-in-one",
+        "measure",
         "capture-area",
         "capture-previous",
         "capture-fullscreen",

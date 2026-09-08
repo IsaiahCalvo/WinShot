@@ -60,6 +60,12 @@ public class Settings
     // Also unbound by default. Editing an image someone sent you meant saving it to disk
     // first, because nothing in the app ever read an image out of the clipboard.
     public string HotkeyLoadClipboard { get; set; } = "";
+    public string HotkeyMeasure { get; set; } = "Ctrl+Shift+9";
+
+    /// <summary>How far a pixel may drift from the one under the cursor and still count as
+    /// the same object, 0-255. PowerToys' tuned default for the summed-L1 metric; the mouse
+    /// wheel moves it live in Measure mode, and this is where that lands.</summary>
+    public int MeasureTolerance { get; set; } = 30;
 
     // Extra shortcut catalog entries that mirror CleanShot's full Shortcuts list but are not yet
     // wired to behavior. Keyed by the catalog's stable action id -> gesture (e.g. "Ctrl+Alt+P").

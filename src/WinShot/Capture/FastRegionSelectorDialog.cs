@@ -18,9 +18,9 @@ namespace WinShot.Capture;
 /// math is anchored to GetCursorPos (true physical px). Screen-freeze uses a desktop snapshot;
 /// when disabled, native translucent surfaces leave the live desktop visible.
 /// </summary>
-public sealed class FastRegionSelectorDialog : WF.Form
+public sealed partial class FastRegionSelectorDialog : WF.Form
 {
-    public enum SelectorMode { Area, Window }
+    public enum SelectorMode { Area, Window, Measure }
 
     private const int DragThresholdPx = 4;
 
@@ -270,6 +270,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForRegion(_settings?.Current);
+        if (mode == SelectorMode.Measure)
+        {
+            _options = _options.ForMeasure();
+            ResetMeasure();
+            _measure.SetTolerance(MeasureToleranceFromSettings());
+        }
         // Always open translucent over the live desktop so the overlay appears the instant
         // the hotkey fires. The freeze snapshot (WGC setup alone can cost 300-1700 ms under
         // load) is taken in the background — these surfaces are excluded from capture — and
@@ -282,7 +288,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // is then a pure in-memory scan with no per-move syscalls. Synchronous on purpose:
         // it must finish before Show(), and a Task.Run hop under CPU load would delay the
         // open longer than the scan itself.
-        _snapRects = _paneHover
+        // Measure mode wants them too: a placed guide runs through the same SnapCoordinate
+        // the marquee uses, so it clicks onto a real element edge for nothing.
+        _snapRects = _paneHover || mode == SelectorMode.Measure
             ? WindowEnumerator.GetSnapRectangles()
             : new List<SnapRect>();
         _snapEdgesX = _snapRects.SelectMany(r => new[] { r.Bounds.Left, r.Bounds.Right })
@@ -339,8 +347,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
             FadeHint(arriving: true);
             StartFollowMotion(); // the pill is drawn on the follow frames
         }
-        if (_options.NeedsCursorFollow || _paneHover)
+        if (_options.NeedsCursorFollow || _paneHover || mode == SelectorMode.Measure)
             StartFollowMotion();
+        if (mode == SelectorMode.Measure)
+            StartHintEntrance();
         if (_options.FreezeScreen)
             _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
@@ -380,7 +390,22 @@ public sealed class FastRegionSelectorDialog : WF.Form
         DisposeFrozen();
         _frozen = snapshot;
         if (_frozen is null)
+        {
+            // Measure mode has nothing to read and no way to get it; say so rather than
+            // leaving a reticle and a hint strip that will never measure anything. The toast
+            // dwells out in a few seconds, so the failure is latched too: from here the hint
+            // strip and every gesture's answer say the mode cannot work and how to leave it.
+            NoteFrozenSnapshotFailed();
+            if (_mode == SelectorMode.Measure)
+            {
+                // Through MeasureToast, so this lands on the monitor being measured like
+                // every other message the mode raises — a failure reported on the primary's
+                // tray corner is a failure reported on a screen the user is not looking at.
+                MeasureToast("The screen could not be read, so there is nothing to measure.",
+                    ToastSeverity.Error);
+            }
             return;
+        }
 
         // Live mode paints solid black behind a 45% layered alpha; frozen mode paints the
         // dimmed snapshot at full alpha. The two look identical on screen (0.553*desktop vs
@@ -399,6 +424,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 GetDimmedBackground(pane.MonitorBounds);
         }
         long prewarmMs = swap.ElapsedMilliseconds;
+
+        // The snapshot IS the measurement's input, and it lands 300-1700 ms after the mode
+        // opens. Nothing else re-reads it: the follow tick returns early while the pointer
+        // has not moved, so without this the mode shows a reticle and no measurement until
+        // the user jiggles the mouse.
+        NoteFrozenSnapshotLanded();
 
         // Per surface: paint the frozen frame FIRST, then go opaque. There is no ordering
         // that is completely invisible — while the live desktop still shows through, the
@@ -489,6 +520,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SelectedByPaneClick = false;
         SelectedRegionPx = null;
         BareBackgroundRequested = false;
+        ResetMeasure();
         DisposeFrozen();
         _capturedRegion?.Dispose();
         _capturedRegion = null;
@@ -545,6 +577,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         if (disposing)
         {
+            // Close, do not dispose: see the _measureMenu note. By the time the form itself
+            // is being disposed the modal-menu hook is long done with it, so the deferred
+            // dispose can finally happen — otherwise one drop-down leaks per process and
+            // per pool displacement.
+            CloseMeasureMenu();
+            DisposePreviousMeasureMenu();
+            // Disposing mid-animation must give the high-resolution clock back.
+            StopHintEntrance();
+            StopPillHover();
             DisposePanes();
             DisposeFrozen();
             _hoverWashTween?.Dispose();
@@ -575,6 +616,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// <summary>Repaints the coordinator surface and every pane (the selection can span monitors).</summary>
     private void InvalidateAllSurfaces()
     {
+        InvalidationLog?.Add(_monitorBounds);
         Invalidate();
         foreach (var pane in _panes)
         {
@@ -608,9 +650,28 @@ public sealed class FastRegionSelectorDialog : WF.Form
         InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
     }
 
+    /// <summary>Render seam: the monitors a test wants <see cref="MonitorBoundsAt"/> to answer
+    /// with. A pane is a real window and a test on the hidden desktop may not open one per
+    /// monitor, so without this every multi-monitor arithmetic in the selector is untestable —
+    /// and Measure mode has chrome that must reach a monitor the pointer has LEFT.</summary>
+    internal IReadOnlyList<SD.Rectangle>? MonitorsForRender { get; set; }
+
+    /// <summary>Render seam: every repaint asked for since the list was handed in, as screen
+    /// rects (a full-surface repaint logs the coordinator's own bounds). A surface nobody asked
+    /// to repaint is exactly what a ghost is made of, and invalidation is otherwise invisible
+    /// to a test.</summary>
+    internal List<SD.Rectangle>? InvalidationLog { get; set; }
+
     /// <summary>The physical bounds of the surface (coordinator or pane) containing a screen point.</summary>
     private SD.Rectangle MonitorBoundsAt(SD.Point screen)
     {
+        if (MonitorsForRender is { } fake)
+        {
+            foreach (var bounds in fake)
+                if (bounds.Contains(screen))
+                    return bounds;
+        }
+
         if (_monitorBounds.Contains(screen)) return _monitorBounds;
         foreach (var pane in _panes)
             if (!pane.IsDisposed && pane.MonitorBounds.Contains(screen))
@@ -627,6 +688,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// <summary>Invalidates a screen-space rectangle on every surface it intersects.</summary>
     private void InvalidateScreenRect(SD.Rectangle screenRect)
     {
+        InvalidationLog?.Add(screenRect);
         InvalidateSurfaceRect(this, _monitorBounds, screenRect);
         foreach (var pane in _panes)
             if (!pane.IsDisposed)
@@ -759,6 +821,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // keyboard focus, so a key arriving in that window (Escape auto-repeat is the usual
         // way) started tweens and a message dwell on a hidden form, holding the 1 ms clock.
         if (_sessionEnded)
+            return;
+
+        if (_mode == SelectorMode.Measure && HandleMeasureKeyDown(e))
             return;
 
         if (e.KeyCode == WF.Keys.Escape)
@@ -895,6 +960,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal void HandleKeyUp(WF.KeyEventArgs e)
     {
+        if (_mode == SelectorMode.Measure && HandleMeasureKeyUp(e))
+            return;
+
         if (e.KeyCode == WF.Keys.Menu)
             _altLatched = false;
     }
@@ -919,6 +987,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         SD.Point screen = CursorScreen();
         _currentScreen = screen;
+
+        if (_mode == SelectorMode.Measure)
+        {
+            HandleMeasureMouseDown(e, screen);
+            return;
+        }
 
         if (e.Button == WF.MouseButtons.Right)
         {
@@ -1470,6 +1544,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         _currentScreen = CursorScreen();
 
+        if (_mode == SelectorMode.Measure)
+        {
+            // A drop-down does not stop WM_TIMER, so the 8 ms follow tick keeps arriving
+            // while the menu is up. Its rows already act on a snapshot of where the user
+            // right-clicked; the picture holds still with them, or the reticle, the live
+            // pill and the contrast readout keep re-reading pixels BEHIND the menu (which is
+            // not in the frozen snapshot) as the pointer walks down the rows.
+            if (MeasureMenuHandle == IntPtr.Zero)
+                HandleMeasureMouseMove();
+            return;
+        }
+
         if (_dragging)
         {
             if (!_dragMoved &&
@@ -1625,6 +1711,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
     internal void HandleMouseWheel(WF.MouseEventArgs e)
     {
         if (_sessionEnded) return;
+        if (_mode == SelectorMode.Measure)
+        {
+            // The ladder gesture is rebound to the tolerance knob here, and only here.
+            HandleMeasureWheel(e);
+            return;
+        }
+
         if (!_paneHover || _pendingScreen is not null || _dragging || _hoverLadder.Count == 0)
             return;
 
@@ -1644,6 +1737,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
 
         _currentScreen = CursorScreen();
+
+        if (_mode == SelectorMode.Measure)
+        {
+            _draggingGuide = null;
+            return;
+        }
 
         if (_mode == SelectorMode.Window)
         {
@@ -1807,6 +1906,41 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </summary>
     internal bool HasFullSurfaceBackground => _frozen is not null;
 
+    /// <summary>How far the overlay darkens the desktop behind the selection. One value for
+    /// the baked frozen slice and for the live fallback, so the two can never drift apart.</summary>
+    private const int OverlayDimAlpha = 115;
+
+    /// <summary>
+    /// The surface's ground: the frozen desktop slice dimmed and baked once, blitted as one
+    /// opaque copy — or, when the snapshot never arrived, a plain dim of the same weight.
+    /// Every mode paints its ground through here so a change to the dim reaches all of them.
+    /// </summary>
+    private void PaintFrozenOrDim(SD.Graphics g, SD.Rectangle monitorBounds)
+    {
+        // Only the invalid region. Every repaint in Measure mode is a band — the 8 ms follow
+        // tick asks for one on every tick — and blitting a whole 4K monitor to fill a 240 px
+        // band was ~20 ms a frame of pure waste. Outside the clip nothing lands on screen, so
+        // this changes what is drawn and not what is seen.
+        SD.Rectangle dest = ClipRect(g, monitorBounds.Size);
+        if (dest.Width <= 0 || dest.Height <= 0)
+            return;
+
+        var dimmed = GetDimmedBackground(monitorBounds);
+        if (dimmed is not null)
+        {
+            // SourceCopy: the background covers the whole surface, so there is nothing to
+            // blend with and a straight copy is a lot cheaper at full-monitor size.
+            var previousCompositing = g.CompositingMode;
+            g.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
+            g.DrawImage(dimmed, dest, dest.X, dest.Y, dest.Width, dest.Height, SD.GraphicsUnit.Pixel);
+            g.CompositingMode = previousCompositing;
+            return;
+        }
+
+        using var dim = new SD.SolidBrush(SD.Color.FromArgb(OverlayDimAlpha, 0, 0, 0));
+        g.FillRectangle(dim, dest);
+    }
+
     internal void PaintSurface(SD.Graphics g, SD.Rectangle monitorBounds)
     {
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
@@ -1816,29 +1950,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // chrome is sized for the display it lands on and not for the primary.
         double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds);
 
+        if (_mode == SelectorMode.Measure)
+        {
+            PaintMeasureSurface(g, monitorBounds, cursorOnThisSurface);
+            return;
+        }
+
         // Advance the glide on the paint clock, not on a timer tick. Update() reads a
         // stopwatch, so calling it once per surface in a multi-monitor frame is harmless.
         SD.Rectangle tweenBefore = _hoverTween.Current;
         bool tweening = _hoverTween.IsActive && _hoverTween.Update();
 
-        // Frozen desktop slice + uniform dim, baked once and blitted as one opaque copy.
-        var dimmed = GetDimmedBackground(monitorBounds);
-        if (dimmed is not null)
-        {
-            var dest = new SD.Rectangle(0, 0, clientSize.Width, clientSize.Height);
-            // SourceCopy: the background covers the whole surface, so there is nothing to
-            // blend with and a straight copy is a lot cheaper at full-monitor size.
-            var previousCompositing = g.CompositingMode;
-            g.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
-            g.DrawImage(dimmed, dest, 0, 0, dimmed.Width, dimmed.Height, SD.GraphicsUnit.Pixel);
-            g.CompositingMode = previousCompositing;
-        }
-        else
-        {
-            // No frozen snapshot (capture failed): select over a plain dim.
-            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
-            g.FillRectangle(dim, 0, 0, clientSize.Width, clientSize.Height);
-        }
+        PaintFrozenOrDim(g, monitorBounds);
 
         // The active selection (drawing / adjustable pending / hovered window) shows the
         // frozen pixels at full brightness with an accent border.
@@ -2039,7 +2162,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
             DrawFrozenSlice(g, monitorBounds);
-            using var dim = new SD.SolidBrush(SD.Color.FromArgb(115, 0, 0, 0));
+            using var dim = new SD.SolidBrush(SD.Color.FromArgb(OverlayDimAlpha, 0, 0, 0));
             g.FillRectangle(dim, 0, 0, monitorBounds.Width, monitorBounds.Height);
         }
         _dimmedCache[monitorBounds] = bmp;
@@ -2062,7 +2185,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (clip.Width < 1 || clip.Height < 1) return;
 
         var state = g.Save();
-        g.SetClip(clip);
+        // Intersect, never Replace: SetClip(Rectangle) defaults to CombineMode.Replace, which
+        // throws away the update region the paint was asked for and re-blits the whole run at
+        // full brightness. It never reaches the screen (the back buffer is rendered through
+        // BeginPaint's clip), but it corrupts the buffer for every caller — and Area and
+        // Window mode share this helper.
+        g.IntersectClip(clip);
         DrawFrozenSlice(g, monitorBounds);
         g.Restore(state);
     }
@@ -2166,7 +2294,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (snap is SD.Rectangle chosen)
         {
-            BuildLadder(point, chosen);
+            // The pixel walk goes in as one more rung. Colour delta fails on Win11 mica
+            // chrome exactly where the HWND rect is exact, and the HWND rect is useless on
+            // a photo or a canvas where the pixel walk is exact - merging them means the
+            // wheel walks both kinds of candidate in one list.
+            BuildLadder(point, chosen, PixelRungAt(point));
             SetHoverPane(chosen);
         }
     }
@@ -2177,7 +2309,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// directions. Rungs closer than the wobble tolerance are merged; stepping onto a rect
     /// eight pixels bigger is not a step a person can see.
     /// </summary>
-    private void BuildLadder(SD.Point point, SD.Rectangle resolved)
+    private void BuildLadder(SD.Point point, SD.Rectangle resolved, SD.Rectangle? pixelRung = null)
     {
         var rungs = new List<SD.Rectangle> { resolved };
         foreach (var candidate in _snapRects)
@@ -2185,6 +2317,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (candidate.Bounds.Contains(point))
                 rungs.Add(candidate.Bounds);
         }
+        if (pixelRung is SD.Rectangle pixels)
+            rungs.Add(pixels);
 
         var ladder = new List<SD.Rectangle>();
         foreach (var rung in rungs.OrderBy(r => (long)r.Width * r.Height))
@@ -2209,7 +2343,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (rect == _hoverPane)
             return;
 
-        if (_hoverPane is SD.Rectangle previous && rect is SD.Rectangle next)
+        if (_mode == SelectorMode.Measure)
+        {
+            // A guard rail, not a live path: both callers already return before they reach
+            // here in Measure mode. It stands so that the rule survives the next caller —
+            // functional data never animates, because an easing measurement reads as
+            // imprecise. The glide is untouched for Area and Window, where it is right.
+            _hoverTween.Stop();
+            InvalidateAllSurfaces();
+        }
+        else if (_hoverPane is SD.Rectangle previous && rect is SD.Rectangle next)
         {
             _hoverTween.Retarget(previous, next);
             InvalidateHoverRegion(previous, next);
@@ -2410,11 +2553,24 @@ public sealed class FastRegionSelectorDialog : WF.Form
     private static int Distance(SD.Point a, SD.Point b) =>
         Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
 
-    /// <summary>Every window handle the selector owns, back to front - the set
-    /// <see cref="SelectorForeground.KeepOnTop"/> re-raises together.</summary>
+    /// <summary>
+    /// Every window handle the selector owns, back to front - the set
+    /// <see cref="SelectorForeground.KeepOnTop"/> re-raises together.
+    ///
+    /// The overlay's own transient chrome goes on the end, above the panes. KeepOnTop treats
+    /// any top-level window under the cursor that is not in this list as an intruder to be
+    /// buried, and Measure mode is the first surface in the app to raise a toast and open a
+    /// drop-down OVER its own live overlay: without them here, parking the pointer on a
+    /// measure toast, or simply opening the right-click menu (which appears under the
+    /// pointer by definition), makes the next 8 ms follow tick re-raise every pane above it.
+    /// The menu goes on stealing input while invisible under an opaque pane, and the mode's
+    /// failure messages - the clipboard is busy, the screen could not be read - are shown for
+    /// one frame and then covered for the rest of their dwell. The All-In-One selector solves
+    /// the same problem for its toolbar the same way.
+    /// </summary>
     private List<IntPtr> SurfaceHandles()
     {
-        var handles = new List<IntPtr>(_panes.Count + 1);
+        var handles = new List<IntPtr>(_panes.Count + 3);
         if (IsHandleCreated)
             handles.Add(Handle);
         foreach (var pane in _panes)
@@ -2422,8 +2578,16 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (!pane.IsDisposed && pane.IsHandleCreated)
                 handles.Add(pane.Handle);
         }
+        if (ToastWindow.LiveHandle is IntPtr toast && toast != IntPtr.Zero)
+            handles.Add(toast);
+        if (MeasureMenuHandle is IntPtr menu && menu != IntPtr.Zero)
+            handles.Add(menu);
         return handles;
     }
+
+    /// <summary>Render seam: the set KeepOnTop is asked about, so a test can prove the
+    /// mode's own toast and menu are not in the "cover me" set.</summary>
+    internal IReadOnlyList<IntPtr> SurfaceHandlesForRender() => SurfaceHandles();
 
     private bool IsPaneHandle(IntPtr handle)
     {
@@ -2500,6 +2664,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _hintSessionUnsaved = false;
             _ = _settings.SaveAsync();
         }
+        // The session is over: drop the live run and the held canvas with it, so a pooled
+        // re-show can never paint a stale measurement over a fresh screen.
+        ResetMeasure();
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();
@@ -2519,6 +2686,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal WF.Cursor CursorForCurrent()
     {
+        if (_mode == SelectorMode.Measure)
+            return MeasureCursor();
+
         if (_mode == SelectorMode.Window || _pillHover)
         {
             // Sized for the monitor the pointer is actually on: a custom HCURSOR is drawn at

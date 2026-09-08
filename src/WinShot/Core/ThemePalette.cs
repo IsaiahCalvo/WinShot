@@ -72,6 +72,15 @@ public static class ThemePalette
     public static readonly SD.Color Red = SD.Color.FromArgb(0xFF, 0x45, 0x3A);
     public static readonly SD.Color Warn = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
 
+    /// <summary>
+    /// Measurement crimson. Colour is the grammar of the measure overlay and it must not
+    /// blur: crimson is a distance the app computed, Accent blue is a guide the user placed.
+    /// Red is the recording dot and destructive actions, and is orange-leaning besides, so
+    /// measurement gets its own value rather than borrowing one. WinForms-only, and so the
+    /// one colour here with no Theme.xaml twin: no WPF surface shows a measurement.
+    /// </summary>
+    public static readonly SD.Color Measure = SD.Color.FromArgb(0xE0, 0x24, 0x4A);
+
     // Text.
     public static readonly SD.Color TextPrimary = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
     // Theme.xaml paints secondary text as #B3FFFFFF; this is that 70% white composited

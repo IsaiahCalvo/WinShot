@@ -25,6 +25,7 @@ Supported commands:
 - `record`
 - `record-display`
 - `ocr`
+- `measure` — PixelSnap-style on-screen measurement (default `Ctrl+Shift+9`)
 - `scrolling`
 - `scroll-horizontal`
 - `history`

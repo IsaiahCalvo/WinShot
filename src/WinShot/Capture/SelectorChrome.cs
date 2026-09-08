@@ -7,8 +7,9 @@ namespace WinShot.Capture;
 /// <summary>
 /// Shared visual chrome for the capture selectors (<see cref="FastRegionSelectorDialog"/>
 /// and <see cref="FastAllInOneSelectorDialog"/>): the crosshair guide lines, the
-/// size/coordinate label pill, and the common overlay-surface setup. Kept in one place so
-/// both selectors draw identical chrome and a styling change happens once.
+/// size/coordinate label pill, the measurement vocabulary, and the common overlay-surface
+/// setup. Kept in one place so both selectors draw identical chrome and a styling change
+/// happens once.
 /// </summary>
 internal static class SelectorChrome
 {
@@ -112,8 +113,19 @@ internal static class SelectorChrome
         form.Opacity = freezeScreen ? 1.0 : LiveDesktopOpacity;
     }
 
-    /// <summary>Draws the crosshair guide lines (shadow + white) with a gap around the cursor.</summary>
-    public static void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor, double scale)
+    /// <summary>Draws the crosshair guide lines (shadow + line) with a gap around the cursor.
+    /// <paramref name="color"/> overrides the default white: Measure mode draws its reticle in
+    /// measurement crimson, because there the reticle IS the tool.
+    ///
+    /// A colour override also buys the heavier halo, for the reason
+    /// <see cref="DrawHairlineShadow"/> spells out: 120 alpha is enough for white (1.05
+    /// luminance-wise it clears 3:1 against anything a desktop can show) and nowhere near
+    /// enough for crimson, which at 120 composites its ground to #4A4A4A and reads 1.91:1 —
+    /// under WCAG 1.4.11's 3:1 floor. The reticle is this mode's primary affordance and was
+    /// the one measurement element drawing without the halo the rest of the vocabulary
+    /// carries.</summary>
+    public static void DrawCrosshair(
+        SD.Graphics g, SD.Size clientSize, SD.Point cursor, double scale, SD.Color? color = null)
     {
         var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, Px(CrosshairGapPx, scale));
         if (!guides.IsVisible)
@@ -124,8 +136,9 @@ internal static class SelectorChrome
         // app, and at 150 % a 1 px white line is two-thirds of a logical pixel -- a hairline
         // that half-disappears into the dim.
         float weight = (float)Math.Max(1d, Clean(scale));
-        using var shadow = new SD.Pen(SD.Color.FromArgb(120, 0, 0, 0), 3f * weight);
-        using var pen = new SD.Pen(SD.Color.FromArgb(210, 255, 255, 255), weight);
+        using var shadow = new SD.Pen(
+            SD.Color.FromArgb(color is null ? 120 : HairlineShadowAlpha, 0, 0, 0), 3f * weight);
+        using var pen = new SD.Pen(color ?? SD.Color.FromArgb(210, 255, 255, 255), weight);
         DrawGuideLines(g, shadow, guides);
         DrawGuideLines(g, pen, guides);
     }
@@ -240,13 +253,178 @@ internal static class SelectorChrome
         DrawLabel(g, clientSize, text, at.X, top ?? at.Y, scale, opacity);
     }
 
+    /// <summary>Half-length of the T-serif at each end of a dimension line (PowerToys'
+    /// FEET_HALF_LENGTH). The serifs are the whole reason the line reads as a measurement
+    /// rather than as a guide. Deliberately NOT scaled: a ruler's own marks are pixel-exact,
+    /// because the pixel is the unit being reported.</summary>
+    private const int SerifHalf = 2;
+
+    /// <summary>Perpendicular gap between a dimension line and its pill. Internal because
+    /// Measure mode places its own live pill by the same rule, and one constant in two files
+    /// is one constant that drifts.</summary>
+    internal const int DimensionPillGap = 6;
+
+    /// <summary>
+    /// A measured distance: an aliased 1 px hairline between two INCLUSIVE endpoints, a
+    /// T-serif at each end, and its number in a fully-rounded pill on the segment's own
+    /// midpoint — you read the value exactly where the gap is.
+    ///
+    /// The hairlines are filled rectangles rather than DrawLine calls. GDI+ decides for
+    /// itself which endpoint of a line is covered, and that is precisely the off-by-one
+    /// that separates a polished ruler from a sloppy one; a rectangle from a to b is
+    /// b - a + 1 px long by construction, which is the same inclusive +1 EdgeSnap returns.
+    ///
+    /// <paramref name="serifs"/> drops both caps, which is the one place the two vocabularies
+    /// meet: a pair of guides the user placed labels its own gap, and §3.1 allows that pill
+    /// but not the caps — crimson claims an edge the app found, blue never does.
+    /// </summary>
+    public static void DrawDimension(
+        SD.Graphics g, SD.Size clientSize, SD.Point a, SD.Point b, string? label, SD.Color color,
+        double scale, bool serifs = true)
+    {
+        bool horizontal = a.Y == b.Y;
+        var parts = new List<SD.Rectangle>(3);
+        if (horizontal)
+        {
+            int left = Math.Min(a.X, b.X);
+            int right = Math.Max(a.X, b.X);
+            parts.Add(new SD.Rectangle(left, a.Y, right - left + 1, 1));
+            if (serifs)
+            {
+                parts.Add(new SD.Rectangle(left, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1));
+                parts.Add(new SD.Rectangle(right, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1));
+            }
+        }
+        else
+        {
+            int top = Math.Min(a.Y, b.Y);
+            int bottom = Math.Max(a.Y, b.Y);
+            parts.Add(new SD.Rectangle(a.X, top, 1, bottom - top + 1));
+            if (serifs)
+            {
+                parts.Add(new SD.Rectangle(a.X - SerifHalf, top, (SerifHalf * 2) + 1, 1));
+                parts.Add(new SD.Rectangle(a.X - SerifHalf, bottom, (SerifHalf * 2) + 1, 1));
+            }
+        }
+
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+        DrawHairlineShadow(g, parts);
+        using (var brush = new SD.SolidBrush(color))
+        {
+            foreach (SD.Rectangle part in parts)
+                g.FillRectangle(brush, part);
+        }
+        g.SmoothingMode = prev;
+
+        if (string.IsNullOrEmpty(label))
+            return;
+
+        SD.Size pill = MeasureLabel(label, scale);
+        SD.Point at;
+        if (horizontal)
+        {
+            // Above the line, flipped below when the line is near the top of the surface —
+            // the same flip the live pill does. Clamping instead would park the pill on top
+            // of the very span it labels.
+            int above = a.Y - pill.Height - DimensionPillGap;
+            at = new SD.Point(((a.X + b.X) / 2) - (pill.Width / 2),
+                above >= 0 ? above : a.Y + DimensionPillGap);
+        }
+        else
+        {
+            // Right of the line, flipped left when there is no room — the mirror of the
+            // horizontal flip above. Letting DrawLabel clamp instead would slide the pill
+            // back across the very hairline it labels and hide it under its own ground.
+            int right = a.X + DimensionPillGap;
+            int midY = ((a.Y + b.Y) / 2) - (pill.Height / 2);
+            at = right + pill.Width <= clientSize.Width
+                ? new SD.Point(right, midY)
+                : new SD.Point(a.X - DimensionPillGap - pill.Width, midY);
+        }
+        // The pill wears its own line's colour as a 1 px outline. Crimson and blue are only
+        // 1.27:1 apart in luminance and the number inside is always TextPrimary on WindowBg,
+        // so without this the thing the eye actually reads — the figure — carries none of the
+        // grammar and a guide-pair gap is indistinguishable from a held span.
+        DrawLabel(g, clientSize, label, at.X, at.Y, scale, 1d, fullyRounded: true, outline: color);
+    }
+
+    /// <summary>A guide the user placed: one full-bleed hairline, no end caps, no pill. The
+    /// ABSENCE of the dimension vocabulary is what says "a guide, not a distance".</summary>
+    public static void DrawGuide(SD.Graphics g, SD.Size clientSize, bool vertical, int at, SD.Color color)
+    {
+        SD.Rectangle line = vertical
+            ? new SD.Rectangle(at, 0, 1, clientSize.Height)
+            : new SD.Rectangle(0, at, clientSize.Width, 1);
+
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+        DrawHairlineShadow(g, new[] { line });
+        using (var brush = new SD.SolidBrush(color))
+            g.FillRectangle(brush, line);
+        g.SmoothingMode = prev;
+    }
+
+    /// <summary>
+    /// The 1 px halo every measurement hairline sits on. A coloured 1 px line drawn straight
+    /// onto arbitrary desktop pixels can land on a surface of its own colour and vanish —
+    /// crimson #E0244A over a mid-red button is 1.17:1, well under WCAG 1.4.11's 3:1 floor
+    /// for a graphical object, and no amount of dimming helps because the measured run is
+    /// BRIGHTENED, not dimmed. So the ruler carries its own contrast, one pixel proud on
+    /// every side.
+    ///
+    /// The alpha is 215 rather than the crosshair's 120 because 120 does not actually buy
+    /// the 3:1: over white it composites to #878787, which is 1.29:1 against crimson, and
+    /// there is a whole band of mid-tone backdrops where crimson clears neither the halo nor
+    /// the ground. 215 composites the brightest possible backdrop down to #2C (L = 0.024),
+    /// which is 3.03:1 — unconditional, on any desktop pixel.
+    ///
+    /// Filled as one winding path rather than as separate rectangles, so the serif/span
+    /// overlaps do not double the alpha into a dark knot at each end of the dimension.
+    /// </summary>
+    private static void DrawHairlineShadow(SD.Graphics g, IReadOnlyList<SD.Rectangle> parts)
+    {
+        using var path = new SD.Drawing2D.GraphicsPath { FillMode = SD.Drawing2D.FillMode.Winding };
+        foreach (SD.Rectangle part in parts)
+        {
+            SD.Rectangle halo = part;
+            halo.Inflate(1, 1);
+            path.AddRectangle(halo);
+        }
+        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(HairlineShadowAlpha, 0, 0, 0));
+        g.FillPath(shadow, path);
+    }
+
+    /// <summary>The alpha the paragraph above derives. Shared with the Measure reticle, which
+    /// is a measurement element and needs the same floor.</summary>
+    private const int HairlineShadowAlpha = 215;
+
     /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
-    /// that place the pill by an edge other than its top-left.</summary>
+    /// that place the pill by an edge other than its top-left. A newline stacks another line —
+    /// the measurement pill carries its dip value and ratio under the pixel figure.</summary>
     public static SD.Size MeasureLabel(string text, double scale)
     {
         using var font = PillFont(scale);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
+        SD.Size size = MeasureBlock(text, font);
         return new SD.Size(size.Width + Px(PillPadX, scale), size.Height + Px(PillPadY, scale));
+    }
+
+    /// <summary>One measured block, stacking on newlines so a multi-line pill is sized by its
+    /// widest line and the sum of its line heights.</summary>
+    private static SD.Size MeasureBlock(string text, SD.Font font)
+    {
+        if (!text.Contains('\n'))
+            return WF.TextRenderer.MeasureText(text, font);
+
+        int width = 0;
+        int height = 0;
+        foreach (string line in text.Split('\n'))
+        {
+            SD.Size measured = WF.TextRenderer.MeasureText(line.Length == 0 ? " " : line, font);
+            width = Math.Max(width, measured.Width);
+            height += measured.Height;
+        }
+        return new SD.Size(width, height);
     }
 
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
@@ -256,28 +434,58 @@ internal static class SelectorChrome
     /// <summary>
     /// The label pill at a given opacity, for chrome that fades in and out. Both the pill and
     /// its text carry the alpha, so a fading pill never leaves ghost text behind.
+    ///
+    /// <paramref name="fullyRounded"/> gives a capsule (radius = height/2), which is the
+    /// measurement pill's shape; the existing selection readout keeps its radius-6 corners.
+    /// <paramref name="outline"/> strokes the capsule, which is how the measurement pill says
+    /// it is a click target; pass the colour already carrying the hover fade's alpha. A
+    /// newline stacks another line, so the measurement pill can carry its dip value and ratio
+    /// under the pixel figure.
     /// </summary>
     public static void DrawLabel(
-        SD.Graphics g, SD.Size clientSize, string text, int x, int y, double scale, double opacity)
+        SD.Graphics g, SD.Size clientSize, string text, int x, int y, double scale, double opacity,
+        bool fullyRounded = false, SD.Color? outline = null)
     {
         int alpha = (int)Math.Round(255 * Math.Clamp(opacity, 0d, 1d));
         if (alpha <= 0)
             return;
         using var font = PillFont(scale);
-        SD.Size size = WF.TextRenderer.MeasureText(text, font);
+        SD.Size size = MeasureBlock(text, font);
         int w = size.Width + Px(PillPadX, scale);
         int h = size.Height + Px(PillPadY, scale);
         int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));
         int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
         var bg = new SD.Rectangle(left, top, w, h);
+        var textColor = SD.Color.FromArgb(alpha, ThemePalette.TextPrimary);
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bg, Px(PillRadius, scale)))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, ThemePalette.WindowBg)))
-            g.FillPath(bgBrush, path);
+        using (var path = GdiPaths.RoundedRect(
+            bg, fullyRounded ? Math.Max(2, h / 2) : Px(PillRadius, scale)))
+        {
+            using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, ThemePalette.WindowBg)))
+                g.FillPath(bgBrush, path);
+            if (outline is SD.Color stroke && stroke.A > 0)
+            {
+                using var pen = new SD.Pen(SD.Color.FromArgb(stroke.A * alpha / 255, stroke), 1);
+                g.DrawPath(pen, path);
+            }
+        }
         g.SmoothingMode = prev;
 
-        DrawCenteredText(g, text, font, bg, SD.Color.FromArgb(alpha, ThemePalette.TextPrimary));
+        if (!text.Contains('\n'))
+        {
+            DrawCenteredText(g, text, font, bg, textColor);
+            return;
+        }
+
+        int lineTop = bg.Top + (Px(PillPadY, scale) / 2);
+        foreach (string line in text.Split('\n'))
+        {
+            SD.Size measured = WF.TextRenderer.MeasureText(line.Length == 0 ? " " : line, font);
+            DrawCenteredText(g, line, font,
+                new SD.Rectangle(bg.Left, lineTop, bg.Width, measured.Height), textColor);
+            lineTop += measured.Height;
+        }
     }
 }

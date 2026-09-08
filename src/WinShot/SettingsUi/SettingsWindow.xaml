@@ -1075,6 +1075,17 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Windows 11 rounds a window and draws its shadow behind those corners. Trimming leaves them transparent instead of keeping a grey wedge of whatever was underneath."/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Measure tolerance"/>
+                                    <ComboBox x:Name="MeasureToleranceCombo" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnMeasureToleranceChanged">
+                                        <ComboBoxItem Content="Low" Tag="15"/>
+                                        <ComboBoxItem Content="Medium (default)" Tag="30"/>
+                                        <ComboBoxItem Content="High" Tag="60"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="How far a pixel may drift and still count as the same object. The mouse wheel changes it live while measuring."/>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
                             </StackPanel>

@@ -317,16 +317,17 @@ public partial class App : Application
         var versionHeader = new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false };
         menu.Items.Add(versionHeader);
         menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"), ""));
-        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"), ""));
-        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background"), ""));
-        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"), ""));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"), ""));
-        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region"), ""));
-        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display"), ""));
-        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow, ""));
-        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"), ""));
-        menu.Items.Add(MenuItem("All-in-one…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"), ""));
+        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"), ""));
+        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"), ""));
+        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background"), ""));
+        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"), ""));
+        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"), ""));
+        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region"), ""));
+        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display"), ""));
+        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow, ""));
+        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"), ""));
+        menu.Items.Add(MenuItem("All-in-one…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"), ""));
+        menu.Items.Add(MenuItem("Measure on screen", s.HotkeyMeasure, () => QueueCaptureCommand("measure"), ""));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow, "\uE714"));
         menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow, "\uE7F4"));
@@ -684,6 +685,7 @@ public partial class App : Application
         Reg(s.HotkeyHistory, OpenHistory);
         Reg(s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"));
         Reg(s.HotkeyLoadClipboard, LoadClipboardImageFlow);
+        Reg(s.HotkeyMeasure, () => QueueCaptureCommand("measure"));
 
         // The rest of the tray's commands, bound through the ShortcutBindings dictionary
         // rather than a Settings field each. Unbound actions are absent from it, so this
@@ -808,7 +810,7 @@ public partial class App : Application
     private static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
-        "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer" or "self-timer-region"
+        "all-in-one" or "ocr" or "measure" or "scrolling" or "scroll-horizontal" or "self-timer" or "self-timer-region"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
     private bool _delayedCountdownActive;
@@ -873,6 +875,7 @@ public partial class App : Application
             case "capture-window-background": CaptureRegionFlow(PostCaptureAction.Background, FastRegionSelectorDialog.SelectorMode.Window); break;
             case "all-in-one": AllInOneFlow(); break;
             case "ocr": OcrFlow(); break;
+            case "measure": MeasureFlow(); break;
             case "scrolling": ScrollingFlow(); break;
             case "scroll-horizontal": ScrollingFlow(ScrollCaptureCommand.DirectionForCommand(cmd)); break;
             case "self-timer": CaptureFullscreenTimerFlow(); break;
@@ -1122,6 +1125,36 @@ public partial class App : Application
     }
 
     /// <summary>
+    /// PixelSnap-style measurement over a frozen screen. It ends like any other capture flow
+    /// because it can: clicking a measurement pill captures the object that was measured, so
+    /// the mode is both a ruler and a way to frame a shot.
+    /// </summary>
+    private void MeasureFlow() => RunCaptureFlow(
+        "Measure mode failed", "Measure failed", async () =>
+        {
+            var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
+            PerfLog.TrackFirstShown(selector, "measure selector");
+            try
+            {
+                if (await selector.ShowAsync(FastRegionSelectorDialog.SelectorMode.Measure) == WF.DialogResult.OK &&
+                    selector.SelectedRegionPx is SD.Rectangle region)
+                {
+                    SD.Bitmap? frozenCrop = selector.TakeCapturedRegion();
+                    if (frozenCrop is null)
+                    {
+                        await WaitForOverlayDismissAsync();
+                        frozenCrop = await CaptureSelectedRegionAsync(region, "measure");
+                    }
+                    HandleCapture(frozenCrop);
+                }
+            }
+            finally
+            {
+                FastRegionSelectorDialog.Return(selector);
+            }
+        });
+
+    /// <summary>
     /// Opens whatever image is on the clipboard in the editor. Editing a picture someone
     /// pasted to you used to mean saving it to a file first — nothing in the app read an
     /// image out of the clipboard at all.
@@ -1195,12 +1228,21 @@ public partial class App : Application
             AllInOneAction action;
             SD.Rectangle regionPx;
             SD.Bitmap? captured = null;
+            bool measureRequested = false;
 
             var selector = FastAllInOneSelectorDialog.Rent(CreateWindowListTask, _settings);
             try
             {
                 PerfLog.TrackFirstShown(selector, "all-in-one selector");
-                if (await selector.ShowAsync() != WF.DialogResult.OK || selector.SelectedRegionPx is not SD.Rectangle rp)
+                WF.DialogResult result = await selector.ShowAsync();
+                // Measure leaves All-In-One rather than acting on a region, so it is decided
+                // before the region is: there is no rectangle to hand on.
+                if (selector.SelectedAction == AllInOneAction.Measure)
+                {
+                    measureRequested = true;
+                    return;
+                }
+                if (result != WF.DialogResult.OK || selector.SelectedRegionPx is not SD.Rectangle rp)
                     return;
 
                 action = selector.SelectedAction;
@@ -1214,6 +1256,22 @@ public partial class App : Application
             finally
             {
                 FastAllInOneSelectorDialog.Return(selector);
+                if (measureRequested && _pendingCaptureCommand is null)
+                {
+                    // Park it in the pending slot rather than queueing it: QueueCaptureCommand
+                    // would be dropped by the still-set _captureInProgress guard, and this is
+                    // the slot FinishCaptureFlow drains the moment it clears that guard.
+                    // Never over a command already parked there — the slot belongs to the
+                    // drain, and QueueCaptureCommand guards it the same way.
+                    _pendingCaptureCommand = "measure";
+                }
+                else if (measureRequested)
+                {
+                    // The slot is taken by a capture the user started with a hotkey while the
+                    // bar was open, and it wins. Say so: this is the only button on that bar
+                    // whose click can end with nothing opening, and silence reads as a crash.
+                    Toast("Measure", "A capture is already running, so measure did not start. Press Ctrl+Shift+9 to try again.");
+                }
             }
 
             // Timer waits too: the whole point is to photograph what the screen looks like

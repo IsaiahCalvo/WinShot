@@ -1007,6 +1007,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         Complete(WF.DialogResult.Cancel);
     }
 
+    /// <summary>Closes All-In-One with no region, asking the caller to open measure mode
+    /// instead. There is nothing to hand over: measuring is a mode, not an action on a rect.</summary>
+    internal void LeaveForMeasure()
+    {
+        SelectedAction = AllInOneAction.Measure;
+        Complete(WF.DialogResult.Cancel);
+    }
+
     /// <summary>Commits the pending region from the toolbar's confirm button; no-op when
     /// there is nothing pending (the button paints disabled then).</summary>
     internal void ConfirmPending()
@@ -1236,6 +1244,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         }
         if (!_toolbar.IsDisposed && _toolbar.IsHandleCreated)
             handles.Add(_toolbar.Handle);
+        // The app's own confirmation HUD is not an intruder either - it is TopMost and
+        // hit-testable, so a pointer resting on it reads as "something covered the overlay".
+        if (ToastWindow.LiveHandle is IntPtr toast && toast != IntPtr.Zero)
+            handles.Add(toast);
         return handles;
     }
 
@@ -1571,6 +1583,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _buttons.Add(new BarButton("Timer", "", 3, AllInOneAction.Timer, isMode: true));
             _buttons.Add(new BarButton("OCR", "Aa", 4, AllInOneAction.Ocr, isMode: true) { IsTextGlyph = true });
             _buttons.Add(new BarButton("Recording", "", 5, AllInOneAction.Record, isMode: true));
+            // Not a mode: measuring is not something you do to a rectangle, so this one
+            // leaves All-In-One the way Fullscreen does, and the measure overlay takes over.
+            _buttons.Add(new BarButton("Measure", "", -1, AllInOneAction.Measure, isMode: false));
 
             _widthBox = SizeBox();
             _heightBox = SizeBox();
@@ -2128,6 +2143,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             var b = _buttons[hit];
             if (b.IsMode)
                 _owner.SetMode(b.Mode, b.Action);
+            else if (b.Action == AllInOneAction.Measure)
+                _owner.LeaveForMeasure();
             else
                 _owner.ConfirmFullscreen();
         }

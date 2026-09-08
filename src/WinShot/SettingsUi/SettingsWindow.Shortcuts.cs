@@ -66,6 +66,8 @@ public partial class SettingsWindow
         [
             Real("all-in-one", "All-in-one", "All-in-one capture",
                  s => s.HotkeyAllInOne, (s, v) => s.HotkeyAllInOne = v),
+            Real("measure", "Measure on screen", "Measure on screen",
+                 s => s.HotkeyMeasure, (s, v) => s.HotkeyMeasure = v),
             Real("history", "Capture History", "Capture history",
                  s => s.HotkeyHistory, (s, v) => s.HotkeyHistory = v),
         ]},

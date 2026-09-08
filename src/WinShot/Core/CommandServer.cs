@@ -36,6 +36,7 @@ public sealed class CommandServer : IDisposable
         "record",
         "record-display",
         "ocr",
+        "measure",
         "scrolling",
         "scroll-horizontal",
         "history",

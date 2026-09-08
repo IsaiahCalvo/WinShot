@@ -505,6 +505,11 @@ public partial class SettingsWindow : Window
         // so the row must not look live in that state.
         WindowBackgroundCombo.SelectionChanged += (_, _) => SyncWindowPaddingEnabled();
         SyncWindowPaddingEnabled();
+        // The wheel can leave tolerance anywhere in 0-255, so the nearest of the three
+        // presets is shown rather than a wrong one or none at all.
+        SelectByTag(MeasureToleranceCombo, NearestTolerancePreset(s.MeasureTolerance), fallbackIndex: 1);
+        // Loading the row is not the user picking it.
+        _tolerancePicked = false;
     }
 
     private void LoadAnnotate(Settings s)
@@ -1073,6 +1078,19 @@ public partial class SettingsWindow : Window
         s.CrosshairMode = SelectedTag(CrosshairModeCombo, "always");
         s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
         s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
+        // The wheel writes any value in 0-255 and the combo only offers three, so a
+        // session that never picked this row must not snap a tuned 45 back to 30. Which
+        // row was picked is remembered rather than inferred from the value: inferring it
+        // made the displayed preset unchoosable — with 45 stored the combo reads "Medium
+        // (default)", and picking Medium was discarded as "untouched", so one of three
+        // choices was a silent no-op. And the value is re-read HERE rather than at load,
+        // because the wheel may have tuned it while this window sat open.
+        s.MeasureTolerance =
+            _tolerancePicked && int.TryParse(SelectedTag(MeasureToleranceCombo, "30"), out int tolerance)
+                ? Math.Clamp(tolerance, 0, 255)
+                // Clamped either way: a hand-edited settings.json holding -5 or 9999 would
+                // otherwise round-trip forever.
+                : Math.Clamp(s.MeasureTolerance, 0, 255);
         s.TrimWindowShadow = TrimWindowShadowCheck.IsChecked == true;
         s.AdjustSelectionBeforeCapturing = AdjustSelectionCheck.IsChecked == true;
         s.WindowCaptureBackground = SelectedTag(WindowBackgroundCombo, "wallpaper");
@@ -1397,6 +1415,8 @@ public partial class SettingsWindow : Window
         Accessible(ShowMagnifierCheck, "Show selector magnifier", "Show the pixel magnifier while selecting a region.");
         Accessible(TrimWindowShadowCheck, "Trim the window shadow",
             "Cut the shadowed wedges out of the corners of a rounded window capture.");
+        Accessible(MeasureToleranceCombo, "Measure tolerance",
+            "Choose how far a pixel may drift and still count as the same object.");
 
         Accessible(TemplateBox, "Capture file name template", "Use date, time, counter, application, or title tokens.");
         Accessible(AskForNameCheck, "Ask for a name when a capture saves automatically", "Prompt for a file name when the after-capture set writes a file, defaulting to the template. Save on the Quick Access card and in the editor still name the file themselves.");
@@ -1425,7 +1445,8 @@ public partial class SettingsWindow : Window
             RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
             GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, BackgroundCombo, BackgroundColorBox, BackgroundShadowCheck, SelfTimerCombo,
-            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, TrimWindowShadowCheck,
+            FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, MeasureToleranceCombo,
+            TrimWindowShadowCheck,
             AdjustSelectionCheck, WindowBackgroundCombo, WindowPaddingCombo,
             CursorOnScreenshotsCheck, TemplateBox, HistorySlider,
             PinnedRoundedCornersCheck, PinnedShadowCheck, PinnedBorderCheck, AllInOneRememberCheck,
@@ -1708,6 +1729,28 @@ public partial class SettingsWindow : Window
 
     private static string SelectedTag(ComboBox combo, string fallback) =>
         (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? fallback;
+
+    /// <summary>The tolerance row was picked by the user, as opposed to merely displaying
+    /// the nearest preset to whatever the wheel last tuned. See the save path.</summary>
+    private bool _tolerancePicked;
+
+    private void OnMeasureToleranceChanged(object sender, SelectionChangedEventArgs e) =>
+        _tolerancePicked = true;
+
+    /// <summary>The Low/Medium/High tag nearest a stored tolerance. The measure overlay's
+    /// wheel writes any value in 0-255, and a combo that showed nothing for 45 would read
+    /// as broken.</summary>
+    internal static string NearestTolerancePreset(int tolerance)
+    {
+        int[] presets = [15, 30, 60];
+        int best = presets[0];
+        foreach (int preset in presets)
+        {
+            if (Math.Abs(preset - tolerance) < Math.Abs(best - tolerance))
+                best = preset;
+        }
+        return best.ToString();
+    }
 
     // Delegates to the shared helper so Settings and the boot-time self-heal write the
     // identical Run-key value (see WinShot.Core.StartupRegistration).
