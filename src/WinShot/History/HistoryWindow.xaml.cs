@@ -1549,6 +1549,9 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Drag-out failed for {item.FilePath}", ex);
+            // A drag that dies mid-flight looks exactly like a drag the user fumbled: the
+            // preview is torn down in the finally and the tile just sits there.
+            App.Toast("Couldn't drag that out", FriendlyError.For(ex), severity: ToastSeverity.Error);
         }
         finally
         {

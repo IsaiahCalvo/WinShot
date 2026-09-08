@@ -364,6 +364,7 @@ public class SettingsService
             // welcome bubble and the startup command down with it. Normalize once, here, where
             // every load path already funnels through.
             loaded.ShortcutBindings ??= new();
+            loaded.SavedColors ??= new();
             Current = loaded;
             return true;
         }

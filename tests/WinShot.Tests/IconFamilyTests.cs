@@ -16,11 +16,11 @@ public class IconFamilyTests
 {
     private static readonly string[] StrokedAssets =
     [
-        "quick-access-background.svg", "quick-access-close.svg", "quick-access-copy.svg",
-        "quick-access-edit.svg", "quick-access-flip-horizontal.svg", "quick-access-flip-vertical.svg",
-        "quick-access-lock.svg", "quick-access-pin.svg", "quick-access-resize.svg",
-        "quick-access-rotate-left.svg", "quick-access-rotate-right.svg", "quick-access-save.svg",
-        "quick-access-text.svg", "quick-access-unlock.svg",
+        "quick-access-background.svg", "quick-access-camcorder.svg", "quick-access-close.svg",
+        "quick-access-copy.svg", "quick-access-edit.svg", "quick-access-flip-horizontal.svg",
+        "quick-access-flip-vertical.svg", "quick-access-lock.svg", "quick-access-pin.svg",
+        "quick-access-resize.svg", "quick-access-rotate-left.svg", "quick-access-rotate-right.svg",
+        "quick-access-save.svg", "quick-access-text.svg", "quick-access-unlock.svg",
     ];
 
     private static XElement Root(string asset)
@@ -28,6 +28,22 @@ public class IconFamilyTests
         using var stream = typeof(SvgIcons).Assembly.GetManifestResourceStream($"WinShot.Assets.{asset}");
         Assert.NotNull(stream);
         return XDocument.Load(stream!).Root!;
+    }
+
+    /// <summary>
+    /// The list above is the whole family, not a sample of it: quick-access-camcorder.svg
+    /// shipped outside it and nothing would have noticed the day it drifted.
+    /// </summary>
+    [Fact]
+    public void TheFamilyListCoversEveryGlyphInTheAssetsFolder()
+    {
+        string[] onDisk = System.IO.Directory
+            .GetFiles(System.IO.Path.Combine(TestPaths.RepoRoot(), "src", "WinShot", "Assets"), "*.svg")
+            .Select(System.IO.Path.GetFileName)
+            .Order()
+            .ToArray()!;
+        string[] covered = StrokedAssets.Append("quick-access-pin-filled.svg").Order().ToArray();
+        Assert.Equal(onDisk, covered);
     }
 
     [Fact]

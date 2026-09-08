@@ -421,17 +421,26 @@ public class SelectorSweepRegressionTests
     private sealed class Pointer : IDisposable
     {
         public SD.Point At;
+        public WF.Keys Modifiers = WF.Keys.None;
         public Pointer(int x, int y)
         {
             At = new SD.Point(x, y);
             FastRegionSelectorDialog.CursorProvider = () => At;
+            // Shift makes a drag square. Without this the assertions here read the real
+            // keyboard, so a person typing while the suite runs turns a 240x160 drag into a
+            // 240x240 one — which is exactly how this file went red.
+            FastRegionSelectorDialog.ModifiersProvider = () => Modifiers;
         }
         public void MoveTo(FastRegionSelectorDialog s, int x, int y)
         {
             At = new SD.Point(x, y);
             s.HandleMouseMove();
         }
-        public void Dispose() => FastRegionSelectorDialog.CursorProvider = null;
+        public void Dispose()
+        {
+            FastRegionSelectorDialog.CursorProvider = null;
+            FastRegionSelectorDialog.ModifiersProvider = null;
+        }
     }
 
     private static WF.MouseEventArgs Left() => new(WF.MouseButtons.Left, 1, 0, 0, 0);

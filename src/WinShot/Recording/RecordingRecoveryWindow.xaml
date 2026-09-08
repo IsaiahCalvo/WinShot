@@ -50,7 +50,7 @@
                                             <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                                         </Trigger>
                                         <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="Bg" Property="Background" Value="#1A0A84FF"/>
+                                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentWashStrongBrush}"/>
                                         </Trigger>
                                         <Trigger Property="IsKeyboardFocused" Value="True">
                                             <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>

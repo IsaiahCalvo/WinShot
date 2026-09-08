@@ -39,6 +39,15 @@ public static class CaptureSound
     public static bool ShouldPlay(Settings settings) =>
         settings.PlaySounds && AssetFor(settings.ShutterSound) is not null;
 
+    /// <summary>Decodes the configured shutter up front. SoundPlayer.Load() is synchronous,
+    /// and unwarmed it lands on the first capture of the session — in the one window between
+    /// the shutter and the Quick Access card that must stay clear.</summary>
+    public static void Warm(Settings settings)
+    {
+        if (settings.PlaySounds && AssetFor(settings.ShutterSound) is string asset)
+            Load(asset);
+    }
+
     /// <summary>Plays the configured shutter, if any. Never throws and never blocks:
     /// a missing audio device or a busy mixer must not cost the user a capture.</summary>
     public static void Play(Settings settings)

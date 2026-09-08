@@ -104,10 +104,15 @@ public class SelectorInteractionTests
     {
         public SD.Point At;
 
+        public WF.Keys Modifiers = WF.Keys.None;
+
         public Pointer(int x = 0, int y = 0)
         {
             At = new SD.Point(x, y);
             FastRegionSelectorDialog.CursorProvider = () => At;
+            // Same reason as the cursor: Shift squares a drag, and reading the real keyboard
+            // makes these assertions depend on what a human is holding down at the time.
+            FastRegionSelectorDialog.ModifiersProvider = () => Modifiers;
         }
 
         public Pointer MoveTo(FastRegionSelectorDialog selector, int x, int y)
@@ -117,7 +122,11 @@ public class SelectorInteractionTests
             return this;
         }
 
-        public void Dispose() => FastRegionSelectorDialog.CursorProvider = null;
+        public void Dispose()
+        {
+            FastRegionSelectorDialog.CursorProvider = null;
+            FastRegionSelectorDialog.ModifiersProvider = null;
+        }
     }
 
     private static WF.MouseEventArgs Left(int clicks = 1) =>

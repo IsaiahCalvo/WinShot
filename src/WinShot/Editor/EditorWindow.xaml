@@ -549,7 +549,7 @@
                     <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
                         <Path x:Name="CropDim" Fill="{StaticResource GuideStrokeShadowBrush}" Visibility="Collapsed"/>
                         <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                                   StrokeDashArray="4 3" Fill="#110A84FF" Visibility="Collapsed"/>
+                                   StrokeDashArray="4 3" Fill="{StaticResource AccentWashBrush}" Visibility="Collapsed"/>
                         <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
                                    StrokeDashArray="4 3" Visibility="Collapsed"/>
                         <!-- A selected arrow reads as a wide translucent copy of its own

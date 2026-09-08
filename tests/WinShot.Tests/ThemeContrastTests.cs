@@ -229,6 +229,52 @@ public class ThemeContrastTests
         string ColorKey(string key) => brushes.TryGetValue(key, out string? c) ? c : key;
     }
 
+    /// <summary>
+    /// The raw accent is a fill colour: #0A84FF on the card ground is 4.14:1, so it can never
+    /// carry type. The trigger scan above only reads Theme.xaml and only fires on triggers that
+    /// name a Background too, which is how a Foreground-only Hyperlink style in
+    /// SettingsWindow.xaml slipped past it. Every window's XAML is read here instead.
+    /// </summary>
+    [Fact]
+    public void AccentNeverCarriesType_InAnyWindowsXaml()
+    {
+        string[] files = Directory.GetFiles(
+            Path.Combine(RepoRoot(), "src", "WinShot"), "*.xaml", SearchOption.AllDirectories);
+        Assert.NotEmpty(files);
+
+        foreach (string file in files)
+        {
+            string xaml = File.ReadAllText(file);
+
+            // A ProgressBar's Foreground is the bar itself, not a label — the one legitimate
+            // place the accent lands on a "Foreground" property.
+            foreach (Match tag in Regex.Matches(xaml, @"<(?<el>[\w:.]+)[^>]*?Foreground=""\{StaticResource AccentBrush\}""",
+                         RegexOptions.Singleline))
+            {
+                Assert.True(tag.Groups["el"].Value == "ProgressBar",
+                    $"{Path.GetFileName(file)} paints <{tag.Groups["el"].Value}> in AccentBrush — " +
+                    "accent type reads 4.14:1 on the card; use InfoBrush");
+            }
+
+            Assert.DoesNotContain(
+                @"<Setter Property=""Foreground"" Value=""{StaticResource AccentBrush}""",
+                xaml,
+                StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// The active-tool chip's ring is a non-text graphic, so its floor is WCAG 1.4.11's 3:1 —
+    /// which it clears by 0.09. Nothing asserted it, and 0.09 is close enough that a nudge to
+    /// either token would break it silently.
+    /// </summary>
+    [Fact]
+    public void TheToolChipsRingClearsTheGraphicFloor()
+    {
+        double ratio = Contrast(Colors["ToolChipRingColor"], Colors["ToolChipColor"]);
+        Assert.True(ratio >= 3.0, $"the tool chip's ring is {ratio:0.00}:1 on its own fill, under the 3:1 graphic floor");
+    }
+
     [Fact]
     public void HintIsQuieterThanSecondaryText_SoTheHierarchySurvivedTheFix()
     {

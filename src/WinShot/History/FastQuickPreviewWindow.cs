@@ -19,6 +19,9 @@ public sealed class FastQuickPreviewWindow : WF.Form
     private readonly bool _looksLikeImage;
     private SD.Image? _image;
     private bool _closing;
+    private bool _exiting;
+    private IDisposable? _motion;
+    private double _enterAmount;
 
     public FastQuickPreviewWindow(string filePath)
     {
@@ -43,6 +46,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
             true);
 
         ClientSize = CalculateSize();
+        Opacity = 0;    // OnShown fades it up; see the entrance note there.
         KeyDown += (_, e) =>
         {
             if (e.KeyCode is WF.Keys.Space or WF.Keys.Escape)
@@ -59,6 +63,21 @@ public sealed class FastQuickPreviewWindow : WF.Form
         base.OnShown(e);
         UpdateWindowRegion();
         CenterOnScreen();
+        // Quick Look was the last surface in the app that blinked. It reads worst on a
+        // repeated gesture: History rebuilds the window on every Left/Right step, so arrowing
+        // through ten captures was ten hard cuts. Same recipe as the toast —
+        // EaseOutCubic in and EaseInCubic back out.
+        _motion?.Dispose();
+        _motion = Motion.Run(Motion.EnterDurationMs, Motion.EaseOutCubic, ApplyEntrance);
+    }
+
+    /// <summary>0 = fully out (transparent), 1 = at rest. Opacity only: the window is
+    /// centred, so a rise would read as drift rather than as an entrance.</summary>
+    private void ApplyEntrance(double amount)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        _enterAmount = Math.Clamp(amount, 0d, 1d);
+        Opacity = _enterAmount;
     }
 
     protected override void OnResize(EventArgs e)
@@ -70,13 +89,35 @@ public sealed class FastQuickPreviewWindow : WF.Form
     protected override void OnFormClosing(WF.FormClosingEventArgs e)
     {
         _closing = true;
+        // Entrance and exit are the same move in reverse. Windows shutting down is the
+        // exception the toast documents: cancelling a close whose message loop will not run
+        // again strands the window.
+        bool ordinaryClose =
+            e.CloseReason is WF.CloseReason.None or WF.CloseReason.UserClosing or WF.CloseReason.FormOwnerClosing;
+        if (!_exiting && ordinaryClose && IsHandleCreated && !IsDisposed && Motion.AnimationsEnabled())
+        {
+            e.Cancel = true;
+            _exiting = true;
+            _motion?.Dispose();
+            double from = _enterAmount;
+            _motion = Motion.Run(
+                Motion.SwapMs, Motion.EaseInCubic, p => ApplyEntrance(from * (1d - p)), Close);
+            return;
+        }
+
         base.OnFormClosing(e);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
+            // A caller that disposes mid-tween never runs OnClosed, and an orphaned tween
+            // holds the process-wide timer resolution for good.
+            _motion?.Dispose();
+            _motion = null;
             _image?.Dispose();
+        }
         base.Dispose(disposing);
     }
 

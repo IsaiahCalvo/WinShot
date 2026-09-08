@@ -403,7 +403,9 @@
             <Setter Property="Cursor" Value="Hand"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                    <!-- Info, not Accent: the raw accent is a fill colour and reads 4.14:1 as
+                         type on the card, under the 4.5:1 floor. -->
+                    <Setter Property="Foreground" Value="{StaticResource InfoBrush}"/>
                     <Setter Property="TextDecorations" Value="Underline"/>
                 </Trigger>
             </Style.Triggers>
@@ -473,8 +475,7 @@
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Screenshots"/>
                     </StackPanel>
                 </ListBoxItem>
-                <ListBoxItem x:Name="AnnotateNavItem" Visibility="Collapsed"
-                             AutomationProperties.Name="Annotate settings unavailable">
+                <ListBoxItem x:Name="AnnotateNavItem" AutomationProperties.Name="Annotate settings">
                     <StackPanel>
                         <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE70F;"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Annotate"/>
@@ -1156,15 +1157,7 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Turns a scribble into a smooth curve when you let go. Turn it off to keep the line exactly as drawn."/>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Background tool"/>
-                                    <CheckBox x:Name="RememberLastToolCheck" Content="Remember if tool was opened"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Shadow"/>
-                                    <CheckBox x:Name="DrawShadowCheck" Content="Draw shadow on objects"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
+                                <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Canvas"/>
                                     <CheckBox x:Name="AutoExpandCanvasCheck" Content="Automatically expand"/>
                                 </DockPanel>
@@ -1177,19 +1170,11 @@
                             <StackPanel>
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="Editor behavior"/>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Accessibility"/>
-                                    <CheckBox x:Name="ShowColorNamesCheck" Content="Show color names"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Window"/>
                                     <CheckBox x:Name="AlwaysOnTopCheck" Content="Always on top"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Keeps the editor above other windows while you annotate."/>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="ShowDockIconCheck" Content="Show taskbar icon"/>
-                                </DockPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -1208,7 +1193,7 @@
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Preview"/>
-                                    <TextBlock x:Name="TemplatePreviewText" Foreground="{StaticResource AccentBrush}"
+                                    <TextBlock x:Name="TemplatePreviewText" Foreground="{StaticResource InfoBrush}"
                                                FontSize="{StaticResource TextBody}" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis"/>
                                 </DockPanel>

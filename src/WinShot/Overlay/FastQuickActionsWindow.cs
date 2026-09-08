@@ -111,6 +111,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private int _focusedButton = -1;
     private bool _dragArmed;
     private bool _closed;
+    private IDisposable? _copiedDwell;
     private bool _exitMotionStarted;
     // Off screen but still owned: the annotate editor is holding it, or "Temporarily hide"
     // cleared the corner. Either way it is NOT part of the stack — see StackedCards.
@@ -956,6 +957,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             // also holds the high-resolution clock, leaking it would keep timeBeginPeriod(1)
             // raised for the life of the process.
             EndStatusFlash();
+            _copiedDwell?.Dispose();
+            _copiedDwell = null;
             HideActionTooltip();
             CloseTallCapturePreviewNow();
             DiscardTallCapturePreviewCache();
@@ -3508,16 +3511,16 @@ public sealed class FastQuickActionsWindow : WF.Form
 
             copy.Label = "Copied";
             Invalidate(copy.Bounds);
-            var timer = new WF.Timer { Interval = 1200 };
-            timer.Tick += (_, _) =>
+            // Motion.Delay, not a hand-rolled WF.Timer: one dwell that a second copy restarts
+            // and that Dispose cancels, instead of a timer that outlived the card it labelled.
+            _copiedDwell?.Dispose();
+            _copiedDwell = Motion.Delay(1200, () =>
             {
-                timer.Stop();
-                timer.Dispose();
+                _copiedDwell = null;
                 if (_closed || IsDisposed) return;
                 copy.Label = "Copy";
                 Invalidate(copy.Bounds);
-            };
-            timer.Start();
+            });
         }
         catch (Exception ex)
         {

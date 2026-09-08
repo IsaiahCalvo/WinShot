@@ -546,12 +546,8 @@ public partial class SettingsWindow : Window
     {
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
         SmoothPencilCheck.IsChecked = s.SmoothPencil;
-        RememberLastToolCheck.IsChecked = s.RememberLastTool;
-        DrawShadowCheck.IsChecked = s.DrawShadowOnObjects;
         AutoExpandCanvasCheck.IsChecked = s.AutoExpandCanvas;
-        ShowColorNamesCheck.IsChecked = s.ShowColorNames;
         AlwaysOnTopCheck.IsChecked = s.AlwaysOnTop;
-        ShowDockIconCheck.IsChecked = s.ShowDockIcon;
     }
 
     private void LoadAdvanced(Settings s)

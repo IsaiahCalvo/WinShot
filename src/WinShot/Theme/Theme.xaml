@@ -51,6 +51,11 @@
          border, a glyph or an indicator — those stay AccentColor. -->
     <Color x:Key="AccentDeepColor">#FF0A73E0</Color>
     <Color x:Key="AccentPressedColor">#FF0060DF</Color>  <!-- darker blue, pressed of accent -->
+    <!-- The accent as a wash: a tint laid over whatever is underneath, for a marquee fill or
+         a selected row. Two steps because a wash over a photo has to stay lighter than one
+         over a panel to read the same. -->
+    <Color x:Key="AccentWashColor">#110A84FF</Color>
+    <Color x:Key="AccentWashStrongColor">#1A0A84FF</Color>
 
     <!-- Semantic info/heading (split out from accent-hover; was overloaded #4DA3FF) -->
     <Color x:Key="InfoColor">#FF6BB1FF</Color>
@@ -123,6 +128,8 @@
     <SolidColorBrush x:Key="AccentDeepBrush"    Color="{StaticResource AccentDeepColor}"/>
     <SolidColorBrush x:Key="RedDeepBrush"       Color="{StaticResource RedDeepColor}"/>
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>
+    <SolidColorBrush x:Key="AccentWashBrush"    Color="{StaticResource AccentWashColor}"/>
+    <SolidColorBrush x:Key="AccentWashStrongBrush" Color="{StaticResource AccentWashStrongColor}"/>
     <SolidColorBrush x:Key="InfoBrush"          Color="{StaticResource InfoColor}"/>
     <SolidColorBrush x:Key="AnnotationRedBrush" Color="{StaticResource AnnotationRedColor}"/>
     <!-- Red as TYPE, not as fill. AnnotationRedColor is a stroke/fill colour and only

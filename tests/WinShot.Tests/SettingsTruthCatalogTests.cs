@@ -34,7 +34,7 @@ public class SettingsTruthCatalogTests
         [
             "all-in-one", "measure", "capture-area", "capture-previous", "capture-fullscreen",
             "capture-window", "capture-window-background", "capture-display", "self-timer",
-            "record-screen", "record-display", "scrolling-capture", "scroll-horizontal",
+            "record-screen", "record-display", "scrolling-capture", "scroll-horizontal", "scroll-up",
             "capture-text", "pin-toggle-visibility", "pin-close-all", "pin-last",
             "load-clipboard", "open-image", "pin-to-screen", "restore-last",
             "unlock-pins", "toggle-desktop-icons", "history", "settings", "about",

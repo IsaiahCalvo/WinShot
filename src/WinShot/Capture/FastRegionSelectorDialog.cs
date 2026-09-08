@@ -1926,7 +1926,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             // (a crash dialog, an always-on-top utility) would otherwise sit on top and
             // swallow every click inside its rect while the highlight below kept tracking.
             SelectorForeground.KeepOnTop(SurfaceHandles(), p);
-            bool ctrl = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+            bool ctrl = (Modifiers & WF.Keys.Control) == WF.Keys.Control;
             if (p == _currentScreen && ctrl == _lastCtrlDown)
                 return;
             _lastCtrlDown = ctrl;
@@ -1944,7 +1944,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// Screenshots "Crosshair mode" setting (always / only while Ctrl is held / never).</summary>
     private bool CrosshairLinesVisible()
     {
-        bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+        bool controlPressed = (Modifiers & WF.Keys.Control) == WF.Keys.Control;
         return _options.IsCrosshairVisible(controlPressed);
     }
 
@@ -2089,7 +2089,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // adjustment, not a retarget: releasing it without travelling used to throw the
         // selection away and replace it with whatever sat under the pointer.
         if (_paneHover &&
-            (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control &&
+            (Modifiers & WF.Keys.Control) == WF.Keys.Control &&
             _resizeHandle < 0 && !_movingPending &&
             !HasTravelled(_currentScreen))
         {
@@ -2143,7 +2143,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             // double-click to confirm), matching CleanShot's behavior.
             SD.Rectangle rect = DragRect();
             rect.Intersect(_vs);
-            bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
+            bool controlPressed = (Modifiers & WF.Keys.Control) == WF.Keys.Control;
             // Never with the HUD up: the take's options still have to be chosen, and the HUD
             // is where they live. Mouse-up-confirm belongs to the screenshot flows, which have
             // nothing left to ask once the rectangle is drawn.
@@ -2918,7 +2918,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         if (virtualRect.Width < 1 || virtualRect.Height < 1) return;
 
         SelectedRegionPx = virtualRect;
-        BareBackgroundRequested = (WF.Control.ModifierKeys & WF.Keys.Shift) == WF.Keys.Shift;
+        BareBackgroundRequested = (Modifiers & WF.Keys.Shift) == WF.Keys.Shift;
         // Crop the result from the frozen snapshot so the capture is exactly what was selected.
         _capturedRegion?.Dispose();
         _capturedRegion = CropFrozen(virtualRect);
@@ -3015,7 +3015,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     {
         SD.Point current = SnappedCursor();
         double? ratio = LockedRatio
-            ?? ((WF.Control.ModifierKeys & WF.Keys.Shift) == WF.Keys.Shift ? 1d : null);
+            ?? ((Modifiers & WF.Keys.Shift) == WF.Keys.Shift ? 1d : null);
         return ratio is double locked
             ? AllInOneDragLayout.CreatePixelRectangle(_dragStartScreen, current, locked)
             : Normalize(_dragStartScreen, current);
@@ -4279,6 +4279,17 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// assigns this, and the hidden-desktop runner is the only place it is safe to.
     /// </summary>
     internal static Func<SD.Point>? CursorProvider;
+
+    /// <summary>
+    /// Test seam for the same reason: Shift makes a drag square and Ctrl arms the window
+    /// picker, and Control.ModifierKeys is the state of the REAL keyboard. A suite that reads
+    /// it fails whenever a human happens to be holding Shift on the machine running it —
+    /// which is exactly how ADragStartingJustOutsideTheLeftBorderDrawsANewRegion went red
+    /// with a 240x240 square where it had asked for 240x160.
+    /// </summary>
+    internal static Func<WF.Keys>? ModifiersProvider;
+
+    private static WF.Keys Modifiers => ModifiersProvider?.Invoke() ?? WF.Control.ModifierKeys;
 
     /// <summary>True physical cursor position — DPI-independent across monitors.</summary>
     private static SD.Point CursorScreen()

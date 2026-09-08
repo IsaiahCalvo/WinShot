@@ -444,13 +444,18 @@ public class SettingsUpgradeAndEdgeCaseTests
         {
             SettingsService.DirOverride = dir;
             File.WriteAllText(Path.Combine(dir, "settings.json"),
-                """{ "ShortcutBindings": null, "HotkeyCaptureRegion": "Ctrl+Shift+1" }""");
+                """{ "ShortcutBindings": null, "SavedColors": null, "HotkeyCaptureRegion": "Ctrl+Shift+1" }""");
 
             var svc = new SettingsService();
             svc.Load();
 
             Assert.NotNull(svc.Current.ShortcutBindings);
             Assert.Empty(svc.Current.ShortcutBindings);
+            // SavedColors is the same shape two properties away. It survives today only
+            // because every reader happens to route through SavedColors.Sanitize, which
+            // null-checks; the next one to foreach it directly is the NRE this stops.
+            Assert.NotNull(svc.Current.SavedColors);
+            Assert.Empty(svc.Current.SavedColors);
             // The rest of the file still loaded — the normalization is not a bail-out.
             Assert.Equal("Ctrl+Shift+1", svc.Current.HotkeyCaptureRegion);
         }

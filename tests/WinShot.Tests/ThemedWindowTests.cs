@@ -720,8 +720,81 @@ public class ThemedWindowTests
         Assert.False(window.IsVisible);
     }
 
+    /// <summary>
+    /// The Annotate pane shipped Collapsed while four of its settings sat in
+    /// VisibleRuntimeBackedProperties, so the catalog promised a control the user could never
+    /// reach. The catalog test only partitions the property list; nothing tied a "visible"
+    /// property to a pane you can actually select. This does: a section you cannot navigate to
+    /// is not a place a setting can live.
+    /// </summary>
+    private static void AssertEveryVisibleSettingHasAReachableControl(SettingsWindow window)
+    {
+        var list = (System.Windows.Controls.ListBox)window.FindName("SectionList")!;
+        var sections = (System.Windows.Controls.ScrollViewer[])typeof(SettingsWindow)
+            .GetMethod("Sections", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(window, null)!;
+        Assert.Equal(list.Items.Count, sections.Length);
+
+        var reachable = new HashSet<System.Windows.Controls.ScrollViewer>();
+        for (int i = 0; i < sections.Length; i++)
+        {
+            var tab = (System.Windows.Controls.ListBoxItem)list.Items[i]!;
+            Assert.True(
+                tab.Visibility == Visibility.Visible,
+                $"nav tab {i} ({tab.Name}) is {tab.Visibility} — a collapsed tab can never be selected, " +
+                "so everything on its pane is unreachable");
+            reachable.Add(sections[i]);
+        }
+
+        bool IsReachable(string controlName)
+        {
+            if (window.FindName(controlName) is not DependencyObject element) return false;
+            for (DependencyObject? d = element; d is not null; d = LogicalTreeHelper.GetParent(d))
+                if (d is System.Windows.Controls.ScrollViewer sv && reachable.Contains(sv))
+                    return true;
+            return false;
+        }
+
+        string root = TestPaths.RepoRoot();
+        var names = new HashSet<string>(
+            System.Text.RegularExpressions.Regex
+                .Matches(
+                    System.IO.File.ReadAllText(System.IO.Path.Combine(
+                        root, "src", "WinShot", "SettingsUi", "SettingsWindow.xaml")),
+                    @"x:Name=""(?<n>\w+)""")
+                .Select(m => m.Groups["n"].Value),
+            StringComparer.Ordinal);
+
+        string code = string.Concat(new[] { "SettingsWindow.xaml.cs", "SettingsWindow.Shortcuts.cs" }
+            .Select(f => System.IO.File.ReadAllText(
+                System.IO.Path.Combine(root, "src", "WinShot", "SettingsUi", f))));
+        string[] statements = code.Split(';');
+
+        int matched = 0;
+        foreach (string property in SettingsTruthCatalog.VisibleRuntimeBackedProperties)
+        {
+            // The shortcut rows are built from SettingsWindow.Shortcuts.cs's own table rather
+            // than from named XAML, and SettingsTruthCatalogTests already checks that table
+            // against the app. The tab-visibility loop above covers the pane they land on.
+            if (property.StartsWith("Hotkey", StringComparison.Ordinal)) continue;
+
+            var reader = new System.Text.RegularExpressions.Regex($@"\bs\.{property}\b");
+            bool found = statements
+                .Where(s => reader.IsMatch(s))
+                .SelectMany(s => System.Text.RegularExpressions.Regex.Matches(s, @"\b\w+\b").Select(m => m.Value))
+                .Any(id => names.Contains(id) && IsReachable(id));
+            Assert.True(found, $"{property} is catalogued as a visible runtime-backed setting, but no control " +
+                               "bound to it lives on a pane the user can navigate to");
+            matched++;
+        }
+
+        Assert.True(matched >= 50, $"only {matched} properties were checked — the source scan stopped working");
+    }
+
     private static void AssertSettingsTruthfulAndAccessible(SettingsWindow window)
     {
+        AssertEveryVisibleSettingHasAReachableControl(window);
+
         T Named<T>(string name) where T : FrameworkElement =>
             Assert.IsAssignableFrom<T>(window.FindName(name));
 
@@ -730,7 +803,7 @@ public class ThemedWindowTests
         Assert.True(window.MinHeight >= 560);
 
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("AfterCaptureMatrix").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("SoundsRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrayIconRow").Visibility);

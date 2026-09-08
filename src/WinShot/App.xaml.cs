@@ -186,6 +186,7 @@ public partial class App : Application
         // or the warm-up caches an engine the user did not ask for.
         OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
         OcrService.Warm();
+        CaptureSound.Warm(_settings.Current);
         // The editor cannot reach the capture flow itself; this is the seam it asks through.
         Editor.EditorWindow.RegionCaptureProvider = CaptureRegionForEditorAsync;
 
@@ -694,11 +695,21 @@ public partial class App : Application
         _hotkeys.UnregisterAll();
         var s = _settings.Current;
         var failed = new List<string>();
+        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         void Reg(string gesture, Action handler)
         {
             // Empty = the user unbound this action on purpose: no hotkey registered, and NOT a
             // "failed" one (so it never triggers the "Some hotkeys unavailable" warning).
             if (string.IsNullOrWhiteSpace(gesture)) return;
+            // The same gesture twice cannot both register: Windows fails the second one, which
+            // lands in `failed` and drives the retry path — three passes that each unregister
+            // every hotkey and wait 2s, then the error toast, re-run on every settings save.
+            // HotkeyAssignmentValidator stops the Settings UI producing that state; a
+            // hand-edited settings.json still can, so the duplicate is a no-op here instead.
+            string claim = HotkeyManager.TryParseGesture(gesture, out var mods, out var key)
+                ? $"{(int)mods}:{(int)key}"
+                : gesture.Trim();
+            if (!claimed.Add(claim)) return;
             if (!_hotkeys.Register(gesture, handler)) failed.Add(gesture);
         }
         Reg(s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"));
@@ -771,6 +782,7 @@ public partial class App : Application
         yield return ("capture-display", () => QueueCaptureCommand("capture-display"));
         yield return ("record-display", RecordDisplayFlow);
         yield return ("scroll-horizontal", () => QueueCaptureCommand("scroll-horizontal"));
+        yield return ("scroll-up", () => QueueCaptureCommand("scroll-up"));
         yield return ("open-image", OpenImageFileFlow);
         yield return ("pin-to-screen", PinFromFileFlow);
         yield return ("restore-last", RestoreLastFlow);
@@ -2873,7 +2885,9 @@ public partial class App : Application
             return;
 
         _settings.Current.LastRunVersion = current;
-        try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to record the running version", ex); }
+        // Quietly: Changed re-registers all fifteen global hotkeys, and OnStartup registered
+        // them a few lines ago. Nothing subscribed cares that a version string moved.
+        try { _settings.SaveQuietly(); } catch (Exception ex) { Log.Error("Failed to record the running version", ex); }
 
         // A first run has nothing to compare against, and announcing "updated" to someone who
         // just installed WinShot would be a lie.

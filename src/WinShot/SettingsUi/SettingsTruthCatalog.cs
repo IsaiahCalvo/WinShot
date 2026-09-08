@@ -132,6 +132,7 @@ internal static class SettingsTruthCatalog
         "record-display",
         "scrolling-capture",
         "scroll-horizontal",
+        "scroll-up",
         "capture-text",
         "pin-toggle-visibility",
         "pin-close-all",

@@ -97,6 +97,7 @@ public partial class SettingsWindow
             Real("scrolling-capture", "Scrolling capture", "Scrolling capture",
                  s => s.HotkeyScrolling, (s, v) => s.HotkeyScrolling = v),
             Bound("scroll-horizontal", "Horizontal scrolling capture", "Horizontal scrolling capture"),
+            Bound("scroll-up", "Upward scrolling capture", "Scrolling capture (upward)"),
         ]},
         new ShortcutSection { Title = "Text recognition", Items =
         [
