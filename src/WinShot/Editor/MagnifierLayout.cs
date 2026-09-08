@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 
 namespace WinShot.Editor;
 
@@ -44,6 +44,14 @@ internal static class MagnifierLayout
     /// would show a band of black and read as broken rather than as empty.
     /// </summary>
     public static Point ClampFocus(Point focus, Size source) => new(
-        Math.Clamp(focus.X, 0, Math.Max(0, source.Width)),
-        Math.Clamp(focus.Y, 0, Math.Max(0, source.Height)));
+        Inside(focus.X, source.Width),
+        Inside(focus.Y, source.Height));
+
+    /// <summary>Math.Clamp returns NaN unchanged, so the method named Clamp would not
+    /// clamp the one value that matters. This one does.</summary>
+    private static double Inside(double value, double extent)
+    {
+        double max = double.IsFinite(extent) ? Math.Max(0, extent) : 0;
+        return double.IsFinite(value) ? Math.Clamp(value, 0, max) : 0;
+    }
 }

@@ -628,9 +628,18 @@ public partial class App : Application
     /// A bare region capture for the editor's "Add capture": the same selector as
     /// capture-area, but the result comes back to the caller instead of going through the
     /// after-capture actions — it is being added to an open canvas, not captured afresh.
+    ///
+    /// That return value is why this cannot BE a <see cref="RunCaptureFlow"/>, but it still
+    /// takes that flow's guard: a global capture hotkey pressed while Add capture's selector
+    /// is up opened a SECOND full-screen layered selector on top of it, which is the 66 fps
+    /// z-order fight the guard exists to prevent — with the editor hidden behind both and no
+    /// way back until each is dismissed in turn. Null is "nothing added", which the editor
+    /// already handles.
     /// </summary>
     private async Task<SD.Bitmap?> CaptureRegionForEditorAsync()
     {
+        if (_captureInProgress || Recording.SelectionUiActive) return null;
+        _captureInProgress = true;
         var selector = FastRegionSelectorDialog.Rent(CreateWindowListTask, _settings);
         try
         {
@@ -650,6 +659,7 @@ public partial class App : Application
         finally
         {
             FastRegionSelectorDialog.Return(selector);
+            FinishCaptureFlow();
         }
     }
 

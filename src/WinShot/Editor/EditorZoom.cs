@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 
 namespace WinShot.Editor;
 
@@ -33,7 +33,12 @@ internal static class EditorZoom
         }
         zoom = Math.Clamp(zoom, minZoom, maxZoom);
 
-        var centre = new Point(content.Left + content.Width / 2, content.Top + content.Height / 2);
+        // Rect.Empty's Left is +Inf and its Width is -Inf, so the midpoint of an empty
+        // content rect is NaN — which would ride into the view transform and blank the
+        // canvas. An unusable centre means "do not move".
+        var centre = new Point(
+            Finite(content.Left + content.Width / 2),
+            Finite(content.Top + content.Height / 2));
         return new ZoomView(zoom, CentreOn(centre, zoom, viewport));
     }
 
@@ -47,6 +52,8 @@ internal static class EditorZoom
         zoom = Math.Clamp(zoom, minZoom, maxZoom);
         return new ZoomView(zoom, CentreOn(contentPoint, zoom, viewport));
     }
+
+    private static double Finite(double value) => double.IsFinite(value) ? value : 0;
 
     private static Vector CentreOn(Point contentPoint, double zoom, Size viewport) => new(
         viewport.Width / 2 - contentPoint.X * zoom,

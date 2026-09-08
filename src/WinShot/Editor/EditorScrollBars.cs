@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 
 namespace WinShot.Editor;
 
@@ -48,7 +48,9 @@ internal static class EditorScrollBars
         // How far through the scrollable range the view is, 0..1. offset is the content's
         // top-left, so it runs from 0 (pinned to the start) down to viewport-content.
         double range = contentExtent - viewportExtent;
-        double progress = Math.Clamp(-offset / range, 0, 1);
+        // A non-finite offset would clamp to itself — Math.Clamp returns NaN unchanged —
+        // and land as Canvas.SetLeft(bar, NaN). Treat it as "pinned to the start".
+        double progress = double.IsFinite(offset) ? Math.Clamp(-offset / range, 0, 1) : 0;
         double start = Margin + (track - length) * progress;
 
         return horizontal
