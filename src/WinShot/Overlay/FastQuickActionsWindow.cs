@@ -524,6 +524,39 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
     }
 
+    /// <summary>
+    /// Takes the flyout down <em>with</em> its exit tween and does not let a returning pointer
+    /// revive it: used when what it is showing has gone stale -- the pixels were edited, or the
+    /// card has started moving out from under it. The closing window is handed the scaled
+    /// bitmap so it can keep painting itself through the 140 ms fade while the card resamples
+    /// the replacement, which is why the cache is handed over here rather than disposed. The
+    /// old strip sinks out under the new one instead of blinking away in a single frame.
+    /// </summary>
+    private void RetireTallCapturePreview()
+    {
+        TallCapturePreviewWindow? preview = _tallPreview;
+        // Cleared, unlike the hover-out path: this window is showing something that is no
+        // longer true, so a pointer coming back must build a new one rather than reverse it.
+        _tallPreview = null;
+        SD.Bitmap? scaled = _tallScaled;
+        _tallScaled = null;
+        _tallScaledVersion = -1;
+        _tallScaledSize = SD.Size.Empty;
+
+        if (preview is null || preview.IsDisposed)
+        {
+            scaled?.Dispose();
+            return;
+        }
+
+        try { preview.FadeOutAndCloseOwningBitmap(); }
+        catch (Exception ex)
+        {
+            Log.Error("Tall-capture preview failed to close (non-fatal)", ex);
+            scaled?.Dispose();
+        }
+    }
+
     /// <summary>Takes the flyout down at once, skipping its exit tween: used when the pixels
     /// it is painting from are about to be disposed underneath it.</summary>
     private void CloseTallCapturePreviewNow()
@@ -1041,6 +1074,10 @@ public sealed class FastQuickActionsWindow : WF.Form
         StopStackMotionTimer();
         StopAutoCloseTimer();
         HideActionTooltip();
+        // The flyout is placed against the card and is not carried by it, so a card that flies
+        // off screen would leave it hanging at full opacity until the handle died. Its 140 ms
+        // fade fits inside the card's 360 ms exit, so both are gone together.
+        RetireTallCapturePreview();
         if (_overflowMenu.Visible)
             _overflowMenu.Close();
 
@@ -1108,9 +1145,14 @@ public sealed class FastQuickActionsWindow : WF.Form
         StopStackMotionTimer();
         if (_exitMotionStarted || _closed || IsDisposed || Location == target)
             return;
+        // The card is about to slide up into the band the flyout occupies, and the band it
+        // ends up with is a different size, so the flyout cannot simply be slid along with it:
+        // it leaves, and comes back correctly sized once the card has landed.
+        RetireTallCapturePreview();
         if (!W.SystemParameters.ClientAreaAnimation)
         {
             Location = target;
+            UpdateTallCapturePreview(_hovering);
             return;
         }
 
@@ -1137,6 +1179,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             {
                 MoveWithoutActivation(target);
                 StopStackMotionTimer();
+                UpdateTallCapturePreview(_hovering);
             }
         };
         _stackMotionTimer.Start();
@@ -1434,8 +1477,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // The flyout caches its own scaled copy, and a rotate/flip/resize is invoked with the
         // pointer still on the card -- it would otherwise keep showing the pre-edit image
         // until the pointer left and came back.
-        CloseTallCapturePreviewNow();
-        DiscardTallCapturePreviewCache();
+        RetireTallCapturePreview();
         UpdateTallCapturePreview(_hovering);
         Invalidate();
 

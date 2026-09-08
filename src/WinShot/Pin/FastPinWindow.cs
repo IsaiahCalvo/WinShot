@@ -748,10 +748,21 @@ public sealed class FastPinWindow : WF.Form
         using var border = new SD.Pen(Fade(ThemePalette.Border));
         FillRoundedRect(g, bg, chip, h / 2);
         DrawRoundedRect(g, border, chip, h / 2);
-        WF.TextRenderer.DrawText(g, text, font, chip, Fade(ThemePalette.TextPrimary),
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
-            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+        // Graphics.DrawString, not TextRenderer: TextRenderer is GDI and throws the colour's
+        // alpha away, so the pill used to fade under a label that was solid from the first
+        // frame of the 140 ms chrome ramp. Same fix, same reason, as SelectorChrome.DrawLabel.
+        using var textBrush = new SD.SolidBrush(Fade(ThemePalette.TextPrimary));
+        g.DrawString(text, font, textBrush, chip, ZoomChipFormat);
     }
+
+    /// <summary>Centres the zoom chip's label in its pill, the way the GDI flags it replaced
+    /// did.</summary>
+    private static readonly SD.StringFormat ZoomChipFormat = new(SD.StringFormat.GenericTypographic)
+    {
+        Alignment = SD.StringAlignment.Center,
+        LineAlignment = SD.StringAlignment.Center,
+        FormatFlags = SD.StringFormatFlags.NoWrap,
+    };
 
     /// <summary>
     /// Where the zoom chip goes, or Empty when the pin has no room for it. Shared with
@@ -1309,7 +1320,8 @@ public sealed class FastPinWindow : WF.Form
             // Through the toast, not the zoom readout: that pill is neutral chrome held for
             // 800 ms, which is the confirmation dwell, and an error gets the error colour and
             // the long one.
-            App.Toast("Pin", "The editor is not available.", severity: ToastSeverity.Error);
+            App.Toast("Pin", "The editor isn't available. The pin is unchanged.",
+                severity: ToastSeverity.Error);
             Log.Error("A pin's Edit chip fired with no editor handler registered");
             return;
         }
@@ -1445,8 +1457,11 @@ public sealed class FastPinWindow : WF.Form
         bool top = p.Y <= resizeBorder;
         bool bottom = p.Y >= h - resizeBorder;
 
-        // Don't steal the top edge from the hover toolbar buttons.
-        if (top && HitTestButton(p) >= 0)
+        // Don't steal any edge from the hover toolbar buttons. It used to guard the top band
+        // only, which was right while the bar was pinned to the top inset; BarMetrics now
+        // clamps the bar down and sideways on a small pin, so a chip's own pixels can land in
+        // the bottom, left or right band and answer HTBOTTOM instead of being clickable.
+        if ((top || bottom || left || right) && HitTestButton(p) >= 0)
             return HtClient;
 
         if (top && left) return HtTopLeft;

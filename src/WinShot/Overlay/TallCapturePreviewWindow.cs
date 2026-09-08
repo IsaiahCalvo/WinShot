@@ -95,7 +95,7 @@ internal sealed class TallCapturePreviewWindow : WF.Form
     private const int WsExTransparent = 0x00000020;
 
     private readonly SD.Bitmap _scaled;
-    private readonly bool _ownsScaled;
+    private bool _ownsScaled;
     private readonly int _cornerRadius;
     private readonly QuickAccessOverlayVisuals _visuals;
     private IDisposable? _fade;
@@ -147,11 +147,18 @@ internal sealed class TallCapturePreviewWindow : WF.Form
     /// </summary>
     public static SD.Rectangle? PlaceFor(SD.Bitmap image, SD.Rectangle cardScreen, int dpi)
     {
-        if (image is null || !TallCapturePreviewLayout.ShouldOffer(image.Size))
+        if (image is null)
+            return null;
+
+        // Through the lock, like every other read of a card's live bitmap: the card asks for a
+        // placement on the same tick a pool thread can be inside Scale's DrawImage on it, and a
+        // bare Image.Width there throws "Object is currently in use elsewhere".
+        SD.Size size = CaptureService.GetBitmapSize(image);
+        if (!TallCapturePreviewLayout.ShouldOffer(size))
             return null;
 
         SD.Rectangle workingArea = WF.Screen.FromRectangle(cardScreen).WorkingArea;
-        SD.Rectangle bounds = TallCapturePreviewLayout.Place(image.Size, workingArea, cardScreen, dpi);
+        SD.Rectangle bounds = TallCapturePreviewLayout.Place(size, workingArea, cardScreen, dpi);
         return bounds.Width < 2 || bounds.Height < 2 ? null : bounds;
     }
 
@@ -268,6 +275,19 @@ internal sealed class TallCapturePreviewWindow : WF.Form
         _fade?.Dispose();
         double from = Opacity;
         _fade = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic, p => SetOpacity(from + ((1d - from) * p)));
+    }
+
+    /// <summary>
+    /// Fades out and closes, taking the scaled bitmap with it. The card calls this when what
+    /// the flyout is showing has gone stale -- the pixels were edited, or the card has started
+    /// moving out from under it. The outgoing strip keeps painting itself through its 140 ms
+    /// exit while the card builds the replacement, instead of having to be cut down in one
+    /// frame so the card can dispose the bitmap underneath it.
+    /// </summary>
+    public void FadeOutAndCloseOwningBitmap()
+    {
+        _ownsScaled = true;
+        FadeOutAndClose();
     }
 
     /// <summary>Fades out and closes itself; safe to call more than once.</summary>

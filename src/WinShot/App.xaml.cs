@@ -1313,12 +1313,13 @@ public partial class App : Application
                     CloseWorkingToast(working);
                     card.FlashStatus("No text found");
                 }
-                else
-                    // The one OCR result the user has to read and act on, and the only one
-                    // with no action attached - so it holds the screen as long as a success.
-                    ShowOcrToast(
-                        "Nothing found", "No text or codes in the selection.", anchor,
-                        onOpen: null, ToastSeverity.Info, holdLong: true);
+                // A toast result replaces the working one; a null return means the toast could
+                // not be built and the shell balloon answered instead, so nothing replaced it
+                // and it would dwell for its full 30 s backstop over an answer already given.
+                else if (ShowOcrToast(
+                             "Nothing found", "No text or codes in the selection.", anchor,
+                             onOpen: null, ToastSeverity.Info, holdLong: true) is null)
+                    CloseWorkingToast(working);
                 return;
             }
 
@@ -1335,9 +1336,10 @@ public partial class App : Application
             {
                 // A decoded link is a decision, not a confirmation: the card's status flash
                 // has nowhere to put an Open button, so the toast comes up over the card.
-                ShowOcrToast(payload.BalloonTitle, payload.Preview,
-                    anchor ?? CardAnchor(card), open,
-                    extras: open is not null ? LinkExtras() : LineBreakExtras(result));
+                if (ShowOcrToast(payload.BalloonTitle, payload.Preview,
+                        anchor ?? CardAnchor(card), open,
+                        extras: open is not null ? LinkExtras() : LineBreakExtras(result)) is null)
+                    CloseWorkingToast(working);
             }
         }
         catch (COMException ex)

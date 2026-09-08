@@ -453,19 +453,33 @@
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="{StaticResource RadiusChipInner}"/>
-                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
-                                Background="{StaticResource HoverFillBrush}"/>
-                        <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChipInner}"
-                                Background="{StaticResource PressedShadeBrush}"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- Above the content, not under it. The palette and My-colors cells
+                             have empty content, so the order is invisible to them; the picker's
+                             preview swatch centres an opaque 20 px rectangle in a 22 px cell,
+                             and under the content the hover wash only ever showed in the 1 px
+                             ring around it. -->
+                        <Border x:Name="Hover" Opacity="0" IsHitTestVisible="False"
+                                CornerRadius="{StaticResource RadiusChipInner}"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Press" Opacity="0" IsHitTestVisible="False"
+                                CornerRadius="{StaticResource RadiusChipInner}"
+                                Background="{StaticResource PressedShadeBrush}"/>
                         <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChipInner}"
                                 BorderBrush="Transparent" BorderThickness="2" Margin="-1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
-                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
-                        </Trigger>
+                        <!-- Gated on IsEnabled: WPF still sets IsMouseOver on a disabled
+                             element, so the ten empty My-colors placeholders used to light up
+                             and press under a pointer they also set to Cursor=Arrow. -->
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsEnabled" Value="True"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <MultiTrigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></MultiTrigger.EnterActions>
+                            <MultiTrigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></MultiTrigger.ExitActions>
+                        </MultiTrigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
                             <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
