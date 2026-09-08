@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Threading;
 using WinShot.Capture;
 using WinShot.Core;
@@ -521,6 +521,59 @@ public class RecordingHudInteractionTests
     /// selection pending — with the pointer parked at <paramref name="cursor"/>, then runs the
     /// body on an STA thread. Nothing is ever shown and the real mouse is never touched.
     /// </summary>
+    // ---- aspect-locked resize at the desktop edge ---------------------------------
+
+    /// <summary>
+    /// The ratio-derived side is not the one the cursor drives, so clamping the cursor to the
+    /// desktop does not bound it. The old fallback re-fitted the rectangle about its OWN
+    /// centre, which slid the anchored corner sideways by 20 px in one frame the moment the
+    /// derived side crossed the edge — the opposite of what "the corner opposite the handle
+    /// stays put" promises.
+    /// </summary>
+    [Fact]
+    public void AspectLockedResize_KeepsTheAnchoredCornerPastTheDesktopEdge()
+    {
+        var start = new SD.Rectangle(1200, 600, 320, 180);
+        const double Ratio = 16.0 / 9;
+
+        RunSelector(start, SD.Point.Empty, selector =>
+        {
+            // Handle 4 is the bottom-right, so the top-left corner is the anchor. Walk the
+            // cursor down past the bottom edge a frame at a time.
+            int lastWidth = 0;
+            for (int y = 900; y <= 1400; y += 11)
+            {
+                SD.Rectangle r = LockedResize(selector, start, 4, new SD.Point(1919, y), Ratio);
+                Assert.Equal(start.Location, r.Location);
+                Assert.True(Monitor.Contains(r), $"{r} left the desktop");
+                Assert.InRange(r.Width / (double)Math.Max(1, r.Height), Ratio - 0.02, Ratio + 0.02);
+                Assert.True(r.Width >= lastWidth, $"the rect shrank at y={y}: {r}");
+                lastWidth = r.Width;
+            }
+
+            // The mirror case: handle 0 is the top-left, so the bottom-right corner anchors
+            // and the rectangle grows up and to the left, off two edges at once.
+            var bottomRight = new SD.Point(start.Right, start.Bottom);
+            SD.Rectangle up = LockedResize(selector, start, 0, new SD.Point(-500, -500), Ratio);
+            Assert.Equal(bottomRight, new SD.Point(up.Right, up.Bottom));
+            Assert.True(Monitor.Contains(up), $"{up} left the desktop");
+            Assert.InRange(up.Width / (double)Math.Max(1, up.Height), Ratio - 0.02, Ratio + 0.02);
+
+            // Edge handles drive one axis and derive the other; the anchor holds for them too.
+            foreach (int handle in new[] { 1, 3, 5, 7 })
+            {
+                SD.Rectangle edge = LockedResize(selector, start, handle, new SD.Point(3000, 3000), Ratio);
+                Assert.True(Monitor.Contains(edge), $"handle {handle} produced {edge}, off the desktop");
+            }
+        });
+    }
+
+    private static SD.Rectangle LockedResize(
+        FastRegionSelectorDialog selector, SD.Rectangle start, int handle, SD.Point cursor, double ratio) =>
+        (SD.Rectangle)typeof(FastRegionSelectorDialog)
+            .GetMethod("LockedResize", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(selector, [start, handle, cursor, ratio])!;
+
     private static void RunSelector(SD.Rectangle pending, SD.Point cursor, Action<FastRegionSelectorDialog> body)
     {
         Exception? failure = null;

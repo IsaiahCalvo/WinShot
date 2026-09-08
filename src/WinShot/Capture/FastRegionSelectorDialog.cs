@@ -1636,9 +1636,26 @@ public sealed class FastRegionSelectorDialog : WF.Form
             movesTop || movesBottom ? Math.Clamp(cursor.Y, _vs.Top, _vs.Bottom) : anchor.Y);
 
         SD.Rectangle rect = AllInOneDragLayout.CreatePixelRectangle(anchor, current, ratio);
-        // Clamping the cursor is not enough — the DERIVED side can still run off the desktop.
-        // Refitting keeps the ratio where a plain Intersect would quietly break it.
-        return _vs.Contains(rect) ? rect : RecordingAspectPresets.Apply(rect, ratio, _vs);
+        if (_vs.Contains(rect))
+            return rect;
+
+        // Clamping the cursor is not enough — the ratio-DERIVED side can still run off the
+        // desktop, and it is not the side being dragged, so nothing about the cursor bounds
+        // it. Refitting about the rectangle's own centre (what RecordingAspectPresets.Apply
+        // does, which is right for picking a ratio off the chip) would slide the anchored
+        // corner sideways in one frame. Shrink about the anchor instead: the corner opposite
+        // the handle stays exactly where it was and only the size gives.
+        bool growsLeft = current.X < anchor.X;
+        bool growsUp = current.Y < anchor.Y;
+        int roomX = Math.Max(0, growsLeft ? anchor.X - _vs.Left : _vs.Right - anchor.X);
+        int roomY = Math.Max(0, growsUp ? anchor.Y - _vs.Top : _vs.Bottom - anchor.Y);
+        int width = (int)Math.Floor(Math.Min(Math.Min(rect.Width, roomX), roomY * ratio));
+        int height = (int)Math.Floor(width / ratio);
+        return new SD.Rectangle(
+            growsLeft ? anchor.X - width : anchor.X,
+            growsUp ? anchor.Y - height : anchor.Y,
+            Math.Max(0, width),
+            Math.Max(0, height));
     }
 
     private SD.Rectangle ResizeRect(SD.Rectangle start, int handle, SD.Point cursor)
@@ -2406,11 +2423,17 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     // A checkmark under the glyph, so "on" survives a screenshot of the HUD in
                     // greyscale as well as in colour. It fades up out of the card's own fill,
                     // so the toggle cross-fades instead of the tick popping.
-                    var tickRect = new SD.Rectangle(
-                        local.Left, local.Bottom - (int)Math.Round(16 * s), local.Width, (int)Math.Round(12 * s));
-                    WF.TextRenderer.DrawText(
-                        g, "", checkFont, tickRect,
-                        DarkControlPalette.Mix(ThemePalette.WindowBg, SD.Color.White, on), Centre);
+                    // Only while it is actually on its way in: the fade is a colour lerp from
+                    // WindowBg, which is invisible on the card but a dark ghost check on the
+                    // hover and press plates DrawHudPlate puts under the same pixels.
+                    if (on > 0.002)
+                    {
+                        var tickRect = new SD.Rectangle(
+                            local.Left, local.Bottom - (int)Math.Round(16 * s), local.Width, (int)Math.Round(12 * s));
+                        WF.TextRenderer.DrawText(
+                            g, "", checkFont, tickRect,
+                            DarkControlPalette.Mix(ThemePalette.WindowBg, SD.Color.White, on), Centre);
+                    }
                     break;
                 }
             }
