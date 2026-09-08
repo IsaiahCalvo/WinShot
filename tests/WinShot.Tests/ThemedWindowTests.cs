@@ -61,6 +61,8 @@ public class ThemedWindowTests
                 HistoryReflowSmoke(history, settings);
                 HistoryReflowCloseSmoke(history, settings);
                 HistoryRotateRefreshSmoke(settings);
+                HistoryOverlayActionsBaseStateSmoke(history, settings);
+                HistoryCaptureRoundTripRefreshSmoke(settings);
                 ShowAndClose(new SettingsWindow(settings));
                 SettingsWindowShowCloseSmoke(settings);
                 HistoryWindowShowCloseSmoke(history, settings);
@@ -389,6 +391,105 @@ public class ThemedWindowTests
             Assert.True(
                 after.PixelHeight > after.PixelWidth,
                 $"the rotated tile should read portrait, was {after.PixelWidth}x{after.PixelHeight}");
+
+            window.Close();
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// The hover action row's TEMPLATE base has to be the shown state. A container generated while
+    /// the pointer is already inside its grid slot evaluates the "neither hovered nor focused"
+    /// condition as false on its very first pass, and WPF runs neither EnterActions nor ExitActions
+    /// on an initial evaluation — so the tile keeps whatever the base value says until the pointer
+    /// leaves and comes back. With a hidden base that was an undrawn, fully clickable Delete button
+    /// across the bottom 56 DIP of the tile. The hidden state belongs in setters, which do apply on
+    /// the first evaluation, and hit-testing has to travel with it.
+    /// </summary>
+    private static void HistoryOverlayActionsBaseStateSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        paging.ReplaceAll(
+            new List<HistoryItem> { new(@"C:\sanitized-history\20260803-120000-000.png") },
+            static _ => true,
+            selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        try
+        {
+            var list = (ListBox)window.FindName("ItemsList");
+
+            var bare = (FrameworkElement)list.ItemTemplate.LoadContent();
+            var baseRow = (Border)LogicalTreeHelper.FindLogicalNode(bare, "OverlayActions")!;
+            Assert.Equal(1d, baseRow.Opacity);
+            Assert.True(baseRow.IsHitTestVisible);
+
+            // And the at-rest tile still hides it, from the setters rather than the storyboard.
+            var container = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(0)!;
+            container.ApplyTemplate();
+            window.UpdateLayout();
+            var restingRow = (Border)FindDescendantByName(container, "OverlayActions")!;
+            Assert.Equal(0d, restingRow.Opacity);
+            Assert.False(restingRow.IsHitTestVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static FrameworkElement? FindDescendantByName(DependencyObject root, string name)
+    {
+        if (root is FrameworkElement element && element.Name == name) return element;
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            FrameworkElement? hit = FindDescendantByName(
+                System.Windows.Media.VisualTreeHelper.GetChild(root, index), name);
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// "New capture" from the empty state hides History, and hiding stops the folder watcher — so
+    /// the capture the button just asked for is written while nothing is listening, and Show()
+    /// builds a fresh watcher that by definition knows nothing about it. Coming back has to
+    /// re-read the folder, or the grid stays on "No captures yet" behind a card holding the shot.
+    /// </summary>
+    private static void HistoryCaptureRoundTripRefreshSmoke(SettingsService settings)
+    {
+        string dir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            var scoped = new HistoryService(settings, () => dir);
+            var window = new HistoryWindow(scoped, settings);
+            window.Show();
+            var list = (ListBox)window.FindName("ItemsList");
+            WaitForCondition(() => list.Items.Count == 0, "the fixture folder starts empty");
+
+            window.HideForCapture();
+            using (var bitmap = new SD.Bitmap(120, 80))
+            {
+                using (var graphics = SD.Graphics.FromImage(bitmap)) graphics.Clear(SD.Color.Teal);
+                bitmap.Save(
+                    System.IO.Path.Combine(dir, "20260803-120500-000.png"),
+                    System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            window.ShowAfterCapture();
+            WaitForCondition(
+                () => list.Items.Count == 1,
+                "the capture taken while History was hidden should be on the grid when it returns");
 
             window.Close();
         }

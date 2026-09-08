@@ -171,6 +171,14 @@ public partial class SettingsWindow : Window
             SectionList.SelectedIndex = Sections().Length - 1;
     }
 
+    /// <summary>Selects the Advanced tab, which is where the Keep history slider lives (used by
+    /// History's "History is turned off" panel).</summary>
+    public void SelectAdvancedTab()
+    {
+        if (SectionList is not null)
+            SectionList.SelectedIndex = Array.IndexOf(Sections(), SectionAdvanced);
+    }
+
     private static void CreateInstance(SettingsService settings)
     {
         _instance = new SettingsWindow(settings);
@@ -377,8 +385,9 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>The slider stop for a stored (enabled, days) pair. History switched off wins over
-    /// the day count: "Never" persists as HistoryRetentionDays = 0, so turning history back on
-    /// lands on "No age limit" rather than on whatever stop was chosen before.</summary>
+    /// the day count: "Never" persists as HistoryEnabled = false with HistoryRetentionDays clamped
+    /// to 0, so turning history back on lands on "No age limit" rather than on whatever stop was
+    /// chosen before.</summary>
     internal static int RetentionToSliderIndex(bool historyEnabled, int days) =>
         historyEnabled
             // Snap to the nearest real stop; ties keep the lower index. Never is not a
@@ -388,9 +397,10 @@ public partial class SettingsWindow : Window
             : 0;
 
     /// <summary>
-    /// Keep-history slider moved: mirror the snapped stop into the hidden RetentionDaysBox so
-    /// OnSave's existing ReadInt(RetentionDaysBox) path picks it up. RetentionDaysBox is declared
-    /// after the slider in XAML, so this can fire during InitializeComponent before it exists.
+    /// Keep-history slider moved: repaint the hint, and keep the hidden RetentionDaysBox in step
+    /// with the stop. OnSave reads the slider directly now, so the box is only there for the
+    /// settings-truth tests and anything still binding to it. RetentionDaysBox is declared after
+    /// the slider in XAML, so this can fire during InitializeComponent before it exists.
     /// </summary>
     private void OnHistorySliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -635,8 +645,11 @@ public partial class SettingsWindow : Window
             // Naming & history (Advanced tab)
             s.FileNameTemplate = TemplateBox.Text.Trim();
             s.AllInOneRememberLast = AllInOneRememberCheck.IsChecked == true;
-            s.HistoryEnabled = SliderIndexToRetentionDays(HistorySlider.Value) != HistoryOffStop;
-            s.HistoryRetentionDays = retentionDays;
+            s.HistoryEnabled = retentionDays != HistoryOffStop;
+            // "Never" is carried by HistoryEnabled, not by the day count: clamping keeps the
+            // sentinel out of Settings, so every consumer of HistoryRetentionDays still reads a
+            // real number of days and turning history back on lands on "No age limit".
+            s.HistoryRetentionDays = Math.Max(0, retentionDays);
             s.PinnedRoundedCorners = PinnedRoundedCornersCheck.IsChecked == true;
             s.PinnedShadow = PinnedShadowCheck.IsChecked == true;
             s.PinnedBorder = PinnedBorderCheck.IsChecked == true;

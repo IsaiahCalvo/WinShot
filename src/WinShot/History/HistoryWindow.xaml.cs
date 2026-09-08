@@ -883,13 +883,24 @@ public partial class HistoryWindow : Window
         IEnumerable<HistoryItem> items,
         CancellationToken cancellationToken)
     {
+        // SourceAppIcons deliberately does not cache a miss — an app that starts later should get
+        // its icon — but a miss costs a full process enumeration, and this pass runs on every
+        // reload, filter click, delete and Load more. Twenty tiles tagged with an app that is no
+        // longer running meant twenty sweeps for the same answer; one per distinct name is enough
+        // for the pass, and the next pass asks again.
+        var missed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (HistoryItem item in items.Where(item => item.SourceApp.Length > 0 && item.SourceAppIcon is null))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (missed.Contains(item.SourceApp)) continue;
             ImageSource? icon = await Task.Run(
                 () => SourceAppIcons.For(item.SourceApp),
                 cancellationToken).ConfigureAwait(false);
-            if (icon is null) continue;
+            if (icon is null)
+            {
+                missed.Add(item.SourceApp);
+                continue;
+            }
             cancellationToken.ThrowIfCancellationRequested();
             await Dispatcher.InvokeAsync(() => item.SourceAppIcon = icon);
         }
@@ -939,6 +950,15 @@ public partial class HistoryWindow : Window
         _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
     }
 
+    /// <summary>
+    /// Owner for every dialog this window raises. Rotate, Print, Delete and Delete-selected all
+    /// await before they can fail, and Escape closes History on a fade — so the failure dialog can
+    /// arrive after the owner is gone, and WPF throws "Cannot set Owner property to a Window that
+    /// has been closed" for that. Three of those handlers are <c>async void</c>, so the throw would
+    /// leave through the dispatcher rather than a catch. An ownerless dialog still shows.
+    /// </summary>
+    private Window? DialogOwner => _closed ? null : this;
+
     private void UpdateEmptyState()
     {
         if (_closed) return;
@@ -976,7 +996,8 @@ public partial class HistoryWindow : Window
         EmptyStateBody.Text = state.Body;
         NewCaptureButton.Visibility = state.ShowNewCapture ? Visibility.Visible : Visibility.Collapsed;
         RetryLoadButton.Visibility = state.ShowRetry ? Visibility.Visible : Visibility.Collapsed;
-        EmptyStateActions.Visibility = state.ShowNewCapture || state.ShowRetry
+        OpenSettingsButton.Visibility = state.ShowSettings ? Visibility.Visible : Visibility.Collapsed;
+        EmptyStateActions.Visibility = state.ShowNewCapture || state.ShowRetry || state.ShowSettings
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -1012,6 +1033,12 @@ public partial class HistoryWindow : Window
 
     private void OnNewCapture(object sender, RoutedEventArgs e) => NewCaptureRequested?.Invoke(this);
 
+    /// <summary>The button on the "History is turned off" panel: the Keep history slider lives on
+    /// the Advanced tab, and telling the user to go find it is not an answer History can offer
+    /// when it can just open the window.</summary>
+    private void OnOpenSettings(object sender, RoutedEventArgs e) =>
+        SettingsUi.SettingsWindow.Show(_settings).SelectAdvancedTab();
+
     /// <summary>
     /// Steps out of the frame for a capture started from the empty state. The region selector
     /// freezes the screen as it is, and History is a 1200x760 window in the middle of it, so
@@ -1021,6 +1048,12 @@ public partial class HistoryWindow : Window
     {
         _windowFade?.Dispose();
         _windowFade = null;
+        // The empty panel owns the button that started this capture, so its entrance fade is
+        // exactly what is running when it is pressed — and a tween left ticking against a hidden
+        // window holds the 1 ms timer period for nothing.
+        _emptyStateFade?.Dispose();
+        _emptyStateFade = null;
+        EmptyState.Opacity = 1;
         Opacity = 1;
         Hide();
     }
@@ -1033,6 +1066,15 @@ public partial class HistoryWindow : Window
         Show();
         FadeIn();
         Activate();
+        // Hiding stopped the folder watcher, and Show() builds a fresh one that by definition
+        // knows nothing about files written while it was gone — which is precisely the interval
+        // the capture this button asked for lands in. Without this the grid comes back reading
+        // "No captures yet" behind a Quick Access card holding the shot. Same background refresh
+        // the static Show path runs when it reveals a hidden window; the diffed reload keeps the
+        // cards that are already up.
+        Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() => _ = RefreshOnShowAsync()));
     }
 
     private bool MatchesFilter(HistoryItem item) => _filter switch
@@ -1277,7 +1319,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error("Failed to copy selected history files", ex);
-            ThemedMessageDialog.Show(this, "Copy failed", "WinShot could not copy the selected files to the clipboard.");
+            ThemedMessageDialog.Show(DialogOwner, "Copy failed", "WinShot could not copy the selected files to the clipboard.");
             return;
         }
 
@@ -1309,11 +1351,11 @@ public partial class HistoryWindow : Window
                 switch (HistoryShareService.ShareWithBlip(paths))
                 {
                     case BlipShareResult.NeedsRestart:
-                        ThemedMessageDialog.Show(this, "Blip can't receive shares",
+                        ThemedMessageDialog.Show(DialogOwner, "Blip can't receive shares",
                             "Blip is running but is no longer accepting handoffs. Restart Blip and try again.");
                         break;
                     case BlipShareResult.Failed:
-                        ThemedMessageDialog.Show(this, "Share failed", "WinShot could not hand these files to Blip.");
+                        ThemedMessageDialog.Show(DialogOwner, "Share failed", "WinShot could not hand these files to Blip.");
                         break;
                 }
             };
@@ -1329,7 +1371,7 @@ public partial class HistoryWindow : Window
         windowsShare.Click += (_, _) => HistoryShareService.ShowWindowsShare(this, paths, ex =>
         {
             Log.Error("Windows Share failed", ex);
-            Dispatcher.BeginInvoke(new Action(() => ThemedMessageDialog.Show(this, "Share failed", "WinShot could not prepare these files for sharing.")));
+            Dispatcher.BeginInvoke(new Action(() => ThemedMessageDialog.Show(DialogOwner, "Share failed", "WinShot could not prepare these files for sharing.")));
         });
         menu.Items.Add(windowsShare);
         menu.PlacementTarget = ShareButton;
@@ -1364,7 +1406,7 @@ public partial class HistoryWindow : Window
             UpdateCollectionState();
         _ = LoadThumbnailsSafelyAsync(_items.ToList(), _loadCts?.Token ?? CancellationToken.None);
         if (failed.Count > 0)
-            ThemedMessageDialog.Show(this, "Delete incomplete", $"WinShot could not delete {failed.Count:N0} selected item{(failed.Count == 1 ? string.Empty : "s")}.");
+            ThemedMessageDialog.Show(DialogOwner, "Delete incomplete", $"WinShot could not delete {failed.Count:N0} selected item{(failed.Count == 1 ? string.Empty : "s")}.");
     }
 
     // ---- Tile actions ----
@@ -1574,14 +1616,7 @@ public partial class HistoryWindow : Window
         // Gone from disk (deleted under us, or a drive that went away). The watcher refresh drops
         // the tile eventually, but it is debounced and only runs while the window is up, so the
         // keypress would otherwise land on a tile that is still there and answer with nothing.
-        if (!File.Exists(item.FilePath))
-        {
-            App.Toast(
-                "Copy failed",
-                "That capture is no longer in your history folder.",
-                severity: ToastSeverity.Error);
-            return;
-        }
+        if (!MissingFileToast(item, "Copy failed")) return;
         try
         {
             var bmp = await Task.Run(() => HistoryImageLoader.LoadDetachedBitmap(item.FilePath));
@@ -1675,7 +1710,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to rotate history item {item.FilePath}", ex);
-            ThemedMessageDialog.Show(this, "Rotate failed", FriendlyError.For(ex));
+            ThemedMessageDialog.Show(DialogOwner, "Rotate failed", FriendlyError.For(ex));
             return;
         }
         finally
@@ -1716,7 +1751,7 @@ public partial class HistoryWindow : Window
         }
     }
 
-    private void OnRename(object sender, RoutedEventArgs e)
+    private async void OnRename(object sender, RoutedEventArgs e)
     {
         if (GetItem(sender) is not { } item) return;
 
@@ -1738,7 +1773,7 @@ public partial class HistoryWindow : Window
             if (result.Error is not null)
             {
                 suggestion = answer;
-                ThemedMessageDialog.Show(this, "Rename failed", result.Error);
+                ThemedMessageDialog.Show(DialogOwner, "Rename failed", result.Error);
                 continue;
             }
 
@@ -1747,16 +1782,18 @@ public partial class HistoryWindow : Window
 
             try
             {
-                // Same wait as Rotate: a thumbnail decode in flight holds the source file, so a
-                // rename fired right after a reload used to answer "access is denied".
-                MoveOverBusyFile(item.FilePath, result.Path!, overwrite: false);
+                // Same wait as Rotate, and off the UI thread for the same reason: a thumbnail
+                // decode in flight holds the source file, so a rename fired right after a reload
+                // used to answer "access is denied" — and waiting it out on the dispatcher froze
+                // the window for the whole retry budget with the dialog already dismissed.
+                await Task.Run(() => MoveOverBusyFile(item.FilePath, result.Path!, overwrite: false));
             }
             catch (Exception ex)
             {
                 // A locked file or a name Windows refuses for a reason the resolver cannot see:
                 // keep what the user typed and let them adjust it, the way a validation error does.
                 Log.Error($"Failed to rename history item {item.FilePath}", ex);
-                ThemedMessageDialog.Show(this, "Rename failed", FriendlyError.For(ex));
+                ThemedMessageDialog.Show(DialogOwner, "Rename failed", FriendlyError.For(ex));
                 suggestion = answer;
                 continue;
             }
@@ -1774,7 +1811,8 @@ public partial class HistoryWindow : Window
 
     private async void OnPrint(object sender, RoutedEventArgs e)
     {
-        if (GetItem(sender) is not { IsImage: true } item || !File.Exists(item.FilePath)) return;
+        if (GetItem(sender) is not { IsImage: true } item) return;
+        if (!MissingFileToast(item, "Print failed")) return;
         try
         {
             using SD.Bitmap image = await Task.Run(() => HistoryImageLoader.LoadDetachedBitmap(item.FilePath));
@@ -1783,13 +1821,27 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to print history item {item.FilePath}", ex);
-            ThemedMessageDialog.Show(this, "Print failed", FriendlyError.For(ex));
+            ThemedMessageDialog.Show(DialogOwner, "Print failed", FriendlyError.For(ex));
         }
+    }
+
+    /// <summary>
+    /// Answers the "the file went away under us" case the way every other action on this window
+    /// does — with a toast naming the reason. Returns false when the capture is gone, so callers
+    /// read as <c>if (!MissingFileToast(...)) return;</c>. Print and Open with… used to return in
+    /// silence here, which left clicking again as the user's only available response.
+    /// </summary>
+    private static bool MissingFileToast(HistoryItem item, string title)
+    {
+        if (File.Exists(item.FilePath)) return true;
+        App.Toast(title, "That capture is no longer in your history folder.", severity: ToastSeverity.Error);
+        return false;
     }
 
     private void OnOpenWith(object sender, RoutedEventArgs e)
     {
-        if (GetItem(sender) is not { } item || !File.Exists(item.FilePath)) return;
+        if (GetItem(sender) is not { } item) return;
+        if (!MissingFileToast(item, "Open with failed")) return;
         try
         {
             QuickActionsMenu.ShowOpenWith(item.FilePath);
@@ -1797,7 +1849,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to show Open with for {item.FilePath}", ex);
-            ThemedMessageDialog.Show(this, "Open with failed", FriendlyError.For(ex));
+            ThemedMessageDialog.Show(DialogOwner, "Open with failed", FriendlyError.For(ex));
         }
     }
 
@@ -1841,7 +1893,7 @@ public partial class HistoryWindow : Window
                 string detail = string.IsNullOrWhiteSpace(result.ErrorMessage)
                     ? "Windows could not remove this history item from disk."
                     : result.ErrorMessage;
-                ThemedMessageDialog.Show(this, "Delete failed",
+                ThemedMessageDialog.Show(DialogOwner, "Delete failed",
                     $"WinShot could not delete this history item.\n\n{detail}");
                 return;
             }
@@ -1849,7 +1901,7 @@ public partial class HistoryWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Failed to delete history item {item.FilePath}", ex);
-            ThemedMessageDialog.Show(this, "Delete failed", FriendlyError.For(ex));
+            ThemedMessageDialog.Show(DialogOwner, "Delete failed", FriendlyError.For(ex));
             return;
         }
         _paging.Remove(item);
@@ -1883,14 +1935,7 @@ public partial class HistoryWindow : Window
     {
         // Enter on a recording with no file association produced nothing at all — no window, no
         // message — while every other action on this window says both outcomes.
-        if (!File.Exists(item.FilePath))
-        {
-            App.Toast(
-                "Couldn't open the capture",
-                "That file is no longer in your history folder.",
-                severity: ToastSeverity.Error);
-            return;
-        }
+        if (!MissingFileToast(item, "Couldn't open the capture")) return;
 
         try
         {
@@ -2191,7 +2236,13 @@ public sealed class HistoryItem : INotifyPropertyChanged
 
     /// <summary>Segoe MDL2 picture while the tile is still loading, warning once it has given
     /// up — the same two glyphs the empty state uses for the same two meanings.</summary>
-    public string PlaceholderGlyph => ThumbnailTried ? "" : "";
+    // Segoe MDL2: picture while it loads, warning once it has given up. Spelled as escapes
+    // to stay greppable next to HistoryEmptyState, which picks the same two glyphs for the
+    // same two meanings; the literal private-use characters read as boxes in a diff.
+    public const string LoadingGlyph = "\uE91B";
+    public const string UnreadableGlyph = "\uE7BA";
+
+    public string PlaceholderGlyph => ThumbnailTried ? UnreadableGlyph : LoadingGlyph;
     public Visibility ScrollingVisibility => IsScrollingCapture ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Bar across the bottom of a video tile: camcorder glyph, clip length, file size.</summary>
@@ -2225,7 +2276,9 @@ public sealed class HistoryItem : INotifyPropertyChanged
         $"{(SourceApp.Length == 0 ? string.Empty : $" from {SourceApp}")} captured {Caption}";
     public string AccessibleHelpText =>
         CanPin
-            ? "Press Enter to restore, Ctrl+C to copy, Space to preview, or Tab for Copy, Edit, Pin, and Delete actions."
+            // The overlay row a Tab lands in opens with Restore, so leaving it out of the
+            // announcement put the first button somewhere the user was not told about.
+            ? "Press Enter to restore, Ctrl+C to copy, Space to preview, or Tab for Restore, Copy, Edit, Pin, and Delete actions."
             : "Press Enter to open, Space to preview, or Tab for Delete. Pin is available only for still images.";
 
     public ImageSource? Thumbnail

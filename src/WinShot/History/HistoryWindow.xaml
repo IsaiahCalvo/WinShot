@@ -81,9 +81,13 @@
                     <Border Width="1" Background="{StaticResource BorderBrush}" Margin="0,2,8,2"/>
                     <!-- MinWidth is sized for "Clear selection", the longer of the two labels this
                          one button toggles between: without it every button to its right slid
-                         ~35 DIP sideways and back on every press. -->
-                    <Button x:Name="AllSelectionButton" Style="{StaticResource PillButtonSecondary}" Click="OnToggleSelectAll" AutomationProperties.Name="Select all">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock x:Name="SelectAllText" Text="Select all" MinWidth="92"/></StackPanel>
+                         ~35 DIP sideways and back on every press. It belongs on the button, not on
+                         the label: the pill sizes to its content and centres it, so a wide label
+                         inside a shrink-wrapped pill left the glyph-and-text group sitting ~16 DIP
+                         off the pill's optical centre with the slack all on the right. Widening the
+                         pill instead keeps the content centred whatever the label says. -->
+                    <Button x:Name="AllSelectionButton" MinWidth="148" Style="{StaticResource PillButtonSecondary}" Click="OnToggleSelectAll" AutomationProperties.Name="Select all">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock x:Name="SelectAllText" Text="Select all"/></StackPanel>
                     </Button>
                     <Button x:Name="CopyToButton" Style="{StaticResource PillButtonSecondary}" Click="OnCopySelected" IsEnabled="False" AutomationProperties.Name="Copy selected files">
                         <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B0;" FontFamily="{StaticResource IconFont}" Margin="{StaticResource ChipGutterMargin}"/><TextBlock Text="Copy to"/></StackPanel>
@@ -213,6 +217,12 @@
                                                         <TextBlock Text="Can't read this picture" Visibility="{Binding UnreadableVisibility}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
                                                                    HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="{StaticResource CaptionGapMargin}"/>
                                                     </StackPanel>
+                                                    <!-- 110 wide, swept from -110 to 270 below: both numbers are
+                                                         derived from the 260 DIP card (TileThumbnailWidth) this
+                                                         template draws, so a change to the card width has to move
+                                                         the sweep's From/To with it or the highlight stops short
+                                                         of the right edge. It is clipped, so getting it wrong is
+                                                         silent. -->
                                                     <Rectangle x:Name="Shimmer" Width="110" HorizontalAlignment="Left" Visibility="{Binding ShimmerVisibility}">
                                                         <Rectangle.Fill>
                                                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -262,9 +272,17 @@
                                         <!-- Opacity, not Visibility, is what the hover state drives: two separate triggers
                                              (mouse and keyboard) each animating the same property fought each
                                              other, so hovering a tile that already had focus restarted the fade
-                                             and the row blinked. Base is hidden and untouchable; the single
-                                             trigger below fades it both ways. -->
-                                        <Border x:Name="OverlayActions" VerticalAlignment="Bottom" Height="56" Opacity="0" IsHitTestVisible="True">
+                                             and the row blinked. The single trigger below fades it both ways.
+                                             The base here is the SHOWN state and the trigger's setters push it
+                                             down, never the other way round: a container generated while the
+                                             pointer is already inside its slot evaluates the "not hovered"
+                                             condition as false, and WPF runs neither EnterActions nor
+                                             ExitActions on that first evaluation — so whatever the base says
+                                             is what the tile keeps until the pointer leaves and comes back.
+                                             With a hidden base that left an undrawn but fully clickable Delete
+                                             button across the bottom of the tile. Setters do apply on the first
+                                             evaluation, so the hidden state belongs in them. -->
+                                        <Border x:Name="OverlayActions" VerticalAlignment="Bottom" Height="56" Opacity="1" IsHitTestVisible="True">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                                                     <GradientStop Color="#00000000" Offset="0"/>
@@ -362,10 +380,13 @@
                             </DataTrigger>
                             <!-- Written as the HIDDEN state, because "hovered OR focused" is not a
                                  condition WPF can express but "neither" is - and one trigger owning the
-                                 property is what stops the two from restarting each other's fade. It is
-                                 active on arrival, so the fade to 0 runs from a base of 0 and nothing
-                                 flashes; leaving it fades back up; re-entering fades back down. Entrance
-                                 and exit are the same 140 ms, which the Visibility setter could not do
+                                 property is what stops the two from restarting each other's fade. Its
+                                 setters carry the hidden state (opacity 0, no hit-testing) so a tile whose
+                                 container is built under the pointer still lands somewhere defined; the
+                                 storyboards below carry the same two states as fades once a real hover
+                                 transition happens, and an animation outranks a setter so the two never
+                                 argue. Leaving fades back up; re-entering fades back down. Entrance and
+                                 exit are the same 140 ms, which the Visibility setter could not do
                                  (WPF collapses the element before an exit animation can run). Hit-testing
                                  goes with it so the invisible scrim never eats a click. -->
                             <MultiDataTrigger>
@@ -373,33 +394,30 @@
                                     <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="False"/>
                                     <Condition Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="False"/>
                                 </MultiDataTrigger.Conditions>
+                                <Setter TargetName="OverlayActions" Property="Opacity" Value="0"/>
                                 <Setter TargetName="OverlayActions" Property="IsHitTestVisible" Value="False"/>
                                 <MultiDataTrigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource MotionQuick}">
-                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource MotionQuick}"
+                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
                                             <!-- The media bar and the action row are both bottom-anchored inside the
                                                  thumbnail, so on hover the duration/size line sat under the Edit and
                                                  Delete labels on a double scrim (bar + gradient ≈ 96 % black). The bar
                                                  hands the band over on the same trigger and the same 140 ms rather
                                                  than sharing it. Still tiles have no bar, so this is a no-op there. -->
-                                            <DoubleAnimation Storyboard.TargetName="MediaBar" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource MotionQuick}">
-                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="MediaBar" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource MotionQuick}"
+                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </MultiDataTrigger.EnterActions>
                                 <MultiDataTrigger.ExitActions>
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource MotionQuick}">
-                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
-                                            <DoubleAnimation Storyboard.TargetName="MediaBar" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource MotionQuick}">
-                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="OverlayActions" Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource MotionQuick}"
+                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
+                                            <DoubleAnimation Storyboard.TargetName="MediaBar" Storyboard.TargetProperty="Opacity" To="0" Duration="{StaticResource MotionQuick}"
+                                                             EasingFunction="{StaticResource EaseOutCubic}"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </MultiDataTrigger.ExitActions>
@@ -442,6 +460,9 @@
                     <Button x:Name="RetryLoadButton" Content="Try again" Style="{StaticResource PillButtonSecondary}"
                             Click="OnRefresh" Visibility="Collapsed"
                             AutomationProperties.Name="Read the history folder again"/>
+                    <Button x:Name="OpenSettingsButton" Content="Open settings" Style="{StaticResource PillButtonPrimary}"
+                            Click="OnOpenSettings" Visibility="Collapsed"
+                            AutomationProperties.Name="Open settings to turn history back on"/>
                 </StackPanel>
             </StackPanel>
         </Grid>

@@ -50,15 +50,28 @@ public class HistoryEmptyStateTests
         Assert.True(state.ShowRetry);
     }
 
+    /// <summary>Every panel that can offer the action it describes does. This one used to spell
+    /// out a three-level path through Settings instead of opening it.</summary>
     [Fact]
-    public void HistoryTurnedOff_ExplainsItselfAndOffersNoButtons()
+    public void HistoryTurnedOff_OffersTheSettingsPageThatTurnsItBackOn()
     {
         HistoryEmptyState state = HistoryEmptyState.For("all", historyEnabled: false, loadError: null);
 
         Assert.Equal("History is turned off", state.Title);
-        Assert.Contains("Settings", state.Body, StringComparison.Ordinal);
+        Assert.True(state.ShowSettings);
         Assert.False(state.ShowNewCapture);
         Assert.False(state.ShowRetry);
+    }
+
+    /// <summary>Only the history-off panel points at Settings; nothing else should grow that
+    /// button by accident.</summary>
+    [Theory]
+    [InlineData("all", true, null)]
+    [InlineData("gif", true, null)]
+    [InlineData("all", true, "boom")]
+    public void EveryOtherState_LeavesTheSettingsButtonAlone(string filter, bool enabled, string? error)
+    {
+        Assert.False(HistoryEmptyState.For(filter, enabled, error).ShowSettings);
     }
 
     [Fact]

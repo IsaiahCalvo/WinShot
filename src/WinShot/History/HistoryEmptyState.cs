@@ -10,7 +10,8 @@ internal readonly record struct HistoryEmptyState(
     string Title,
     string Body,
     bool ShowNewCapture,
-    bool ShowRetry)
+    bool ShowRetry,
+    bool ShowSettings = false)
 {
     // Segoe MDL2: picture, warning and lock — the same icon family the rest of the window uses.
     private const string PictureGlyph = "\uE91B";
@@ -36,12 +37,16 @@ internal readonly record struct HistoryEmptyState(
 
         if (!historyEnabled)
         {
+            // The one panel with room for a button used to spend it on three levels of manual
+            // wayfinding ("Settings, Advanced, Keep history"). It offers the action instead, the
+            // way the other two empty states do.
             return new HistoryEmptyState(
                 BlockedGlyph,
                 "History is turned off",
-                "Captures are not saved here. Turn history back on under Settings, Advanced, Keep history.",
+                "Captures are not saved here. Turn Keep history back on to start collecting them.",
                 ShowNewCapture: false,
-                ShowRetry: false);
+                ShowRetry: false,
+                ShowSettings: true);
         }
 
         return filter switch

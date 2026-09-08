@@ -177,12 +177,29 @@ public class HistoryRenderHarness
         task.GetAwaiter().GetResult();
     }
 
+    /// <summary>
+    /// Writes one frame. WPF composition does not run on the hidden desktop the suite normally
+    /// uses — RenderTargetBitmap comes back fully transparent there, even for a standalone
+    /// Border — so these frames have to be produced by running this test on its own against a
+    /// real display (the window sits at -6000,-6000 and never appears on screen). The
+    /// transparency check below is what says which run you got: a blank PNG opens fine, has the
+    /// right dimensions and scans as nothing at all, which is worse than no frame because it
+    /// looks like evidence.
+    /// </summary>
     private static void Render(Window window, string path)
     {
         int width = (int)Math.Ceiling(window.ActualWidth);
         int height = (int)Math.Ceiling(window.ActualHeight);
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(window);
+
+        var corner = new byte[4];
+        bitmap.CopyPixels(new Int32Rect(1, 1, 1, 1), corner, 4, 0);
+        Assert.True(
+            corner[3] > 0,
+            $"{Path.GetFileName(path)} rendered fully transparent — WPF did not composite. " +
+            "Run this test against a real display, not the hidden-desktop runner.");
+
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
