@@ -424,5 +424,41 @@ public class SettingsUpgradeAndEdgeCaseTests
         Assert.Equal(0, new PostCaptureSet(false, false, false, false, false).Count);
         Assert.Equal(5, new PostCaptureSet(true, true, true, true, true).Count);
     }
+
+    // ---------- a hand-edited settings.json that says null ----------
+
+    /// <summary>
+    /// A property initializer does NOT survive a literal null in the file — System.Text.Json
+    /// writes the null straight over <c>= new()</c>. ShortcutBindings is the one collection the
+    /// app dereferences without a check, and the first dereference is App.RegisterHotkeys inside
+    /// OnStartup: an NRE there skips the tray icon, the welcome bubble and the startup command,
+    /// so a two-line settings.json turns the app into an error toast.
+    /// </summary>
+    [Fact]
+    public void ShortcutBindingsWrittenAsNullStillLoadsAsADictionary()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "winshot-null-bindings-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string? old = SettingsService.DirOverride;
+        try
+        {
+            SettingsService.DirOverride = dir;
+            File.WriteAllText(Path.Combine(dir, "settings.json"),
+                """{ "ShortcutBindings": null, "HotkeyCaptureRegion": "Ctrl+Shift+1" }""");
+
+            var svc = new SettingsService();
+            svc.Load();
+
+            Assert.NotNull(svc.Current.ShortcutBindings);
+            Assert.Empty(svc.Current.ShortcutBindings);
+            // The rest of the file still loaded — the normalization is not a bail-out.
+            Assert.Equal("Ctrl+Shift+1", svc.Current.HotkeyCaptureRegion);
+        }
+        finally
+        {
+            SettingsService.DirOverride = old;
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
 }
 

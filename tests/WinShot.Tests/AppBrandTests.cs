@@ -118,18 +118,34 @@ public class AppBrandTests
             Assert.True(At(ms) > 0.01, $"the badge is invisible at {ms}ms of {TrayIconFactory.ConfirmationMs}ms");
     }
 
+    /// <summary>
+    /// Two things at once, because they pull against each other. Quantizing keeps the beat off
+    /// sixty GDI handles; quantizing at the WRONG ceiling threw the pop away. Clamping the grid
+    /// at the rest size mapped every scale from ~0.92 up — EaseOutBack's whole overshoot
+    /// included — onto one cached icon, so the badge grew to size and stopped.
+    /// </summary>
     [Fact]
-    public void ConfirmBadge_QuantizesItsFrames_SoTheBeatIsNotSixtyGdiHandles()
+    public void ConfirmBadge_QuantizesItsFrames_ButStillRendersTheOvershoot()
     {
-        // The confirmation runs one beat of frames through Create(Confirm, progress). Nothing
-        // disposes these icons — the tray holds the last one — so a distinct icon per frame
-        // would leak a GDI handle per copy or save, all day.
+        // The confirmation runs one beat of frames through Create(Confirm, ConfirmationBadgeScale(p)).
+        // Nothing disposes these icons — the tray holds the last one — so a distinct icon per
+        // frame would leak a GDI handle per copy or save, all day.
         var seen = new HashSet<SD.Icon>();
+        double peak = 0;
         for (int frame = 0; frame <= 60; frame++)
-            seen.Add(TrayIconFactory.Create(TrayIconVariant.Confirm, frame / 60.0));
+        {
+            double scale = TrayIconFactory.ConfirmationBadgeScale(frame / 60.0);
+            peak = Math.Max(peak, scale);
+            seen.Add(TrayIconFactory.Create(TrayIconVariant.Confirm, scale));
+        }
 
-        Assert.True(seen.Count <= 8, $"{seen.Count} distinct icons for one 60-frame beat");
+        Assert.True(seen.Count <= 12, $"{seen.Count} distinct icons for one 60-frame beat");
         Assert.All(seen, icon => Assert.NotEqual(IntPtr.Zero, icon.Handle));
+
+        Assert.True(peak > 1.0, "the ease is supposed to overshoot");
+        Assert.NotSame(
+            TrayIconFactory.Create(TrayIconVariant.Confirm, 1.0),
+            TrayIconFactory.Create(TrayIconVariant.Confirm, peak));
     }
 
     [Fact]

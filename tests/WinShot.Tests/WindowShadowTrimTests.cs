@@ -152,4 +152,28 @@ public class WindowShadowTrimTests
         Assert.Equal(0, WindowShadowTrim.RadiusFor(IntPtr.Zero));
         Assert.Null(WindowShadowTrim.Trim(shot, IntPtr.Zero));
     }
+
+    /// <summary>
+    /// The guard both window-capture selectors used to keep their own copy of — until one of
+    /// them shipped without it and rounded the corners of a capture the desktop edge had
+    /// already clipped, cutting transparent wedges out of real window content (white, once
+    /// AlphaFlatten runs it through a JPEG save or a DIB paste). It lives in one place now.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]  // the user turned the trim off
+    [InlineData(true, false)]  // the desktop edge clipped the window
+    public void AClippedOrDisabledWindowCaptureIsLeftAlone(bool enabled, bool wholeWindowCaptured)
+    {
+        using SD.Bitmap shot = Capture();
+        Assert.Null(WindowShadowTrim.TrimWindowCapture(shot, new IntPtr(1), enabled, wholeWindowCaptured));
+        Assert.Equal(255, shot.GetPixel(0, 0).A);
+    }
+
+    [Fact]
+    public void ANullCaptureOrADraggedRegionIsLeftAlone()
+    {
+        using SD.Bitmap shot = Capture();
+        Assert.Null(WindowShadowTrim.TrimWindowCapture(null, new IntPtr(1), enabled: true, wholeWindowCaptured: true));
+        Assert.Null(WindowShadowTrim.TrimWindowCapture(shot, IntPtr.Zero, enabled: true, wholeWindowCaptured: true));
+    }
 }

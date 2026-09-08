@@ -861,6 +861,14 @@ public class ThemedWindowTests
 
         window.RestoreSectionDefaults(4);                      // now reset Screenshots
         Assert.True(settings.Current.FreezeScreen);
+
+        // The Shortcuts tab is nothing BUT hotkey boxes, and WriteToggleSettings does not
+        // reach them: the button used to show a confirm, clear every box and write nothing.
+        settings.Current.HotkeyCaptureRegion = "Ctrl+Shift+F9";
+        list.SelectedIndex = 1;
+        PumpDispatcherOnce();
+        window.RestoreSectionDefaults(1);
+        Assert.Equal(new Settings().HotkeyCaptureRegion, settings.Current.HotkeyCaptureRegion);
     }
 
     private static void PumpDispatcherOnce()

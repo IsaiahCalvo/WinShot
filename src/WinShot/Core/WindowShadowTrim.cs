@@ -70,6 +70,28 @@ public static class WindowShadowTrim
     public static SD.Bitmap? Trim(SD.Bitmap shot, IntPtr hwnd) => Trim(shot, RadiusFor(hwnd));
 
     /// <summary>
+    /// The whole decision every window-capture selector has to make, in one place: trim, or
+    /// leave the capture alone. Null means leave it alone. Every guard is here rather than at
+    /// the call site because the selectors each own a copy of this call and one of them shipped
+    /// without the clipping guard.
+    /// </summary>
+    /// <param name="capture">The cropped capture, or null when freeze was unavailable.</param>
+    /// <param name="hwnd">The window the confirmation picked; <c>Zero</c> for a dragged region.</param>
+    /// <param name="enabled">The user's "Trim the window shadow" preference.</param>
+    /// <param name="wholeWindowCaptured">
+    /// False when the desktop edge clipped the requested rect. A window hanging off the left or
+    /// top of the desktop comes back clipped, and rounding all four corners of what survived
+    /// would cut an arc out of an edge that was never rounded — and that wedge is transparent,
+    /// which <see cref="AlphaFlatten"/> then turns into solid white on a JPEG save or a DIB paste.
+    /// </param>
+    public static SD.Bitmap? TrimWindowCapture(SD.Bitmap? capture, IntPtr hwnd, bool enabled, bool wholeWindowCaptured)
+    {
+        if (capture is null || hwnd == IntPtr.Zero || !enabled || !wholeWindowCaptured)
+            return null;
+        return Trim(capture, hwnd);
+    }
+
+    /// <summary>
     /// The capture with corners of <paramref name="radius"/> pixels cut to transparent, or
     /// null when there is nothing to do — a radius of 0, or a capture too small to round
     /// without eating its own middle. Never disposes or mutates <paramref name="shot"/>.

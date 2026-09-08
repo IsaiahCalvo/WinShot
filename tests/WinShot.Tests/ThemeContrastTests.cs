@@ -167,6 +167,68 @@ public class ThemeContrastTests
         Assert.True(Contrast(WhiteOver(0xB3 / 255.0, card), card) >= 4.5); // TextSecondary
     }
 
+    /// <summary>
+    /// Token-level assertions all passed while two templates still painted white on the raw
+    /// accent: DarkComboBoxItem and DarkMenuItem set the fill and the text colour inside a
+    /// trigger, and nothing here read triggers. Any trigger that names BOTH a Background and a
+    /// Foreground is declaring a text-on-fill pair, so measure it like one.
+    /// </summary>
+    [Fact]
+    public void EveryTriggerThatPaintsTextOnAFillClears45To1()
+    {
+        string xaml = File.ReadAllText(Path.Combine(RepoRoot(), "src", "WinShot", "Theme", "Theme.xaml"));
+
+        // Brush key -> the Color key it wraps, so a Background="{StaticResource FooBrush}" resolves.
+        var brushes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Match m in Regex.Matches(xaml,
+                     @"<SolidColorBrush\s+x:Key=""(?<brush>\w+)""\s+Color=""\{StaticResource (?<color>\w+)\}"""))
+            brushes[m.Groups["brush"].Value] = m.Groups["color"].Value;
+
+        int checkedPairs = 0;
+        foreach (Match trigger in Regex.Matches(xaml, @"<Trigger\b.*?</Trigger>", RegexOptions.Singleline))
+        {
+            string body = trigger.Value;
+            Match bg = Regex.Match(body, @"Property=""(?:\w+\.)?Background"" Value=""\{StaticResource (?<t>\w+)\}""");
+            if (!bg.Success) continue;
+
+            if (Argb.TryGetValue(ColorKey(bg.Groups["t"].Value), out var fillArgb) is false || fillArgb.A != 255)
+                continue;
+            var fill = (fillArgb.R, fillArgb.G, fillArgb.B);
+
+            foreach (Match fg in Regex.Matches(body, @"Property=""(?:\w+\.)?Foreground"" Value=""(?<v>[^""]+)"""))
+            {
+                string value = fg.Groups["v"].Value;
+                (byte, byte, byte) text;
+                if (string.Equals(value, "White", StringComparison.Ordinal))
+                {
+                    text = White;
+                }
+                else
+                {
+                    Match token = Regex.Match(value, @"^\{StaticResource (?<k>\w+)\}$");
+                    if (!token.Success) continue;
+                    if (!Argb.TryGetValue(ColorKey(token.Groups["k"].Value), out var textArgb)) continue;
+                    // Translucent text composites over the fill it lands on — which is exactly
+                    // what the menu's shortcut column does at #B3FFFFFF over the accent.
+                    text = textArgb.A == 255
+                        ? (textArgb.R, textArgb.G, textArgb.B)
+                        : WhiteOver(textArgb.A / 255.0, fill);
+                }
+
+                checkedPairs++;
+                double ratio = Contrast(text, fill);
+                Assert.True(ratio >= 4.5,
+                    $"{value} on {bg.Groups["t"].Value} is {ratio:0.00}:1 — " +
+                    "a filled row carrying a light label wants AccentDeep, not Accent");
+            }
+        }
+
+        // A regex that matched nothing would pass silently, which is how this slipped once.
+        Assert.True(checkedPairs >= 3, $"only {checkedPairs} text-on-fill trigger pairs found — the scan stopped working");
+
+        string ColorKey(string key) => brushes.TryGetValue(key, out string? c) ? c : key;
+    }
+
     [Fact]
     public void HintIsQuieterThanSecondaryText_SoTheHierarchySurvivedTheFix()
     {

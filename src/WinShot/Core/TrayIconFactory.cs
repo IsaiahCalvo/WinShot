@@ -43,6 +43,11 @@ internal static class TrayIconFactory
         return Math.Max(0, 1 - (held - Motion.SwapMs) / Motion.ExitDurationMs);
     }
 
+    /// <summary>Quantization grid for the badge: step <see cref="BadgeSteps"/> is the rest size.</summary>
+    private const int BadgeSteps = 8;
+    /// <summary>Top of the grid, 1.25x rest — clear of EaseOutBack's ~1.10 peak.</summary>
+    private const int MaxBadgeStep = 10;
+
     // Icons are cached for the process: a NotifyIcon swap happens on every capture
     // confirmation, and each Create() otherwise costs an ICO decode plus a GDI handle.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(TrayIconVariant, int), SD.Icon>
@@ -55,11 +60,14 @@ internal static class TrayIconFactory
     public static SD.Icon Create(TrayIconVariant variant = TrayIconVariant.Normal, double badgeScale = 1)
     {
         // Quantize so a running animation reuses a handful of cached icons instead of
-        // allocating a GDI icon per frame.
+        // allocating a GDI icon per frame. The ceiling is deliberately ABOVE the rest step:
+        // ConfirmationBadgeScale returns >1 through the pop-in, and clamping the grid at 1.0
+        // mapped the whole overshoot onto the rest icon — the badge grew to size and stopped,
+        // which is the one thing the ease exists to prevent.
         int step = variant == TrayIconVariant.Confirm
-            ? Math.Clamp((int)Math.Round(badgeScale * 6), 0, 6)
-            : 6;
-        return Cache.GetOrAdd((variant, step), key => Render(key.Item1, key.Item2 / 6.0));
+            ? Math.Clamp((int)Math.Round(badgeScale * BadgeSteps), 0, MaxBadgeStep)
+            : BadgeSteps;
+        return Cache.GetOrAdd((variant, step), key => Render(key.Item1, key.Item2 / (double)BadgeSteps));
     }
 
     private static SD.Icon Render(TrayIconVariant variant, double badgeScale)

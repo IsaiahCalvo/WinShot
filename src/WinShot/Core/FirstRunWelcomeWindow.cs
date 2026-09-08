@@ -107,7 +107,7 @@ public sealed class FirstRunWelcomeWindow : WF.Form
         };
         dismiss.AccessibleName = "Got it";
         dismiss.AccessibleDescription = "Close this and get on with it.";
-        dismiss.Click += (_, _) => Close();
+        dismiss.Click += (_, _) => Dismiss();
         Controls.Add(dismiss);
         _dismissButton = dismiss;
     }
@@ -124,6 +124,26 @@ public sealed class FirstRunWelcomeWindow : WF.Form
         try { action.Run(); }
         catch (Exception ex) { Log.Error($"First-run action '{action.Title}' failed", ex); }
     }
+
+    /// <summary>
+    /// The two dismissals that leave nothing behind them — "Got it" and Escape — reverse the
+    /// entrance instead of vanishing in a frame. EaseInCubic is the vocabulary's exit mirror,
+    /// and the bubble sinks back the same 10 px it rose. <see cref="Run"/> keeps the instant
+    /// close for the reason above it.
+    /// </summary>
+    private void Dismiss()
+    {
+        if (_dismissing) return;
+        _dismissing = true;
+        _entrance?.Dispose();
+        _entrance = Motion.Run(
+            Motion.ExitDurationMs,
+            Motion.EaseInCubic,
+            p => ApplyEntrance(1 - p),
+            Close);
+    }
+
+    private bool _dismissing;
 
     public IReadOnlyList<WelcomeAction> Actions { get; }
 
@@ -142,7 +162,7 @@ public sealed class FirstRunWelcomeWindow : WF.Form
     {
         if (keyData == WF.Keys.Escape)
         {
-            Close();
+            Dismiss();
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);

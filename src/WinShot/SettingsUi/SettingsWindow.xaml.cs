@@ -567,6 +567,10 @@ public partial class SettingsWindow : Window
     {
         if (_releaseNotesRequested) return;
         _releaseNotesRequested = true;
+        // The status line is the only thing on this pane, and a GitHub round-trip can stall for
+        // seconds. Breathe it, the same way the Check-for-updates button breathes, so the label
+        // is visibly waiting instead of just sitting there.
+        StartWaitingPulse(AboutReleaseNotesStatus);
         try
         {
             var result = await UpdateService.CheckAsync();
@@ -594,6 +598,10 @@ public partial class SettingsWindow : Window
             // Unlatch: a failed fetch is usually a network blip, and the pane offers no
             // retry button, so coming back to About has to be the retry.
             _releaseNotesRequested = false;
+        }
+        finally
+        {
+            StopWaitingPulse(AboutReleaseNotesStatus);
         }
     }
 
@@ -1180,10 +1188,17 @@ public partial class SettingsWindow : Window
         PostCaptureMigration.Apply(defaults); // so the matrix reads as a fresh install would
         LoadSection(index, defaults);
 
-        // The tab's toggles apply at once; its text fields still commit on Done. This is the
-        // highest-consequence commit in the window — every control on the tab has already
-        // snapped to its default — so a write that did not land has to say so here too.
-        WriteToggleSettings(_settings.Current);
+        // The dialog promised "reset every setting on this tab", so every setting on the tab
+        // commits — not just the toggles. WriteToggleSettings covers checkboxes, combos and
+        // sliders; the export location, the filename template and the shortcut boxes are the
+        // rest, and without them the Shortcuts tab (which is nothing BUT shortcut boxes) showed
+        // a confirm, cleared every box and wrote nothing. This is the highest-consequence
+        // commit in the window, so a write that did not land has to say so here too.
+        var s = _settings.Current;
+        WriteToggleSettings(s);
+        s.SaveFolder = SaveFolderBox.Text.Trim();
+        s.FileNameTemplate = TemplateBox.Text.Trim();
+        SaveShortcutBoxes(s);
         if (!_settings.Save())
             ReportSaveFailed();
         ResetValidation();

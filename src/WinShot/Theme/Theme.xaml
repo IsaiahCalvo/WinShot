@@ -212,6 +212,11 @@
     <Thickness x:Key="GroupSepMargin">0,8,0,8</Thickness>     <!-- Space2 either side -->
     <Thickness x:Key="LabelGutterMargin">0,0,12,0</Thickness> <!-- Space3 between label and control -->
     <Thickness x:Key="ChipGutterMargin">0,0,8,0</Thickness>   <!-- Space2 between chips in a row -->
+    <Thickness x:Key="HintGutterMargin">8,0,0,0</Thickness>   <!-- Space2 before a hint that TRAILS a control -->
+    <!-- Body copy that wraps gets one ratio, not a per-block guess. 1.4x the largest body
+         step (TextBodyLg 12) covers the caption sizes too: a hint and a notice paragraph
+         breathe the same amount. -->
+    <sys:Double x:Key="LineHeightBody">17</sys:Double>
     <Thickness x:Key="MatrixCellMargin">12,0,0,0</Thickness> <!-- Space3 from the after-capture matrix's checkbox column to its label -->
     <Thickness x:Key="ThumbInset">2</Thickness>               <!-- scrollbar thumb inside its 8px rail -->
 
@@ -737,8 +742,11 @@
                         <ContentPresenter/>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- AccentDeep, not Accent: the label on top of this fill is white, and
+                             white on AccentColor is 3.65:1. Same rule the WinForms menu renderer
+                             follows, so both menus highlight in one blue. -->
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentDeepBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
@@ -1104,7 +1112,7 @@
                                        FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextBody}"
                                        VerticalAlignment="Center" Visibility="Hidden"/>
                             <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}"
+                            <TextBlock x:Name="Gesture" Grid.Column="2" Text="{TemplateBinding InputGestureText}"
                                        Foreground="{StaticResource TextSecondaryBrush}" Margin="20,0,0,0"/>
                         </Grid>
                     </Border>
@@ -1112,9 +1120,13 @@
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="CheckGlyph" Property="Visibility" Value="Visible"/>
                         </Trigger>
+                        <!-- AccentDeep for the same reason as DarkComboBoxItem, and the shortcut
+                             column gets its own Foreground: TextSecondary over the highlight fill
+                             is 2.51:1, and the row-level Foreground setter never reaches it. -->
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentDeepBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
+                            <Setter TargetName="Gesture" Property="Foreground" Value="White"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>

@@ -277,6 +277,13 @@ public class SettingsService
             Settings? loaded = JsonSerializer.Deserialize<Settings>(text);
             if (loaded is null)
                 return false;
+            // A property initializer does NOT survive a literal null in the file: System.Text.Json
+            // writes the null straight over `= new()`. A hand-edited settings.json carrying
+            // "ShortcutBindings": null therefore hands every reader a null dictionary, and the
+            // first one is App.RegisterHotkeys inside OnStartup — which takes the tray icon, the
+            // welcome bubble and the startup command down with it. Normalize once, here, where
+            // every load path already funnels through.
+            loaded.ShortcutBindings ??= new();
             Current = loaded;
             return true;
         }

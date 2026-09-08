@@ -33,9 +33,11 @@
         <Style x:Key="Hint" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextHintBrush}"/>
             <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
-            <Setter Property="LineHeight" Value="15"/>
+            <Setter Property="LineHeight" Value="{StaticResource LineHeightBody}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="{StaticResource ChipGutterMargin}"/>
+            <!-- LEADING gutter: an un-overridden hint trails the control it explains inside a
+                 horizontal row, so the gap belongs on its left. -->
+            <Setter Property="Margin" Value="{StaticResource HintGutterMargin}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
         <!-- Full-width hint that sits below a control, indented to the control column. -->
@@ -166,6 +168,31 @@
             <Setter Property="SnapsToDevicePixels" Value="True"/>
         </Style>
 
+        <!-- The tab strip's text half of the selection cross-fade. The chip half is the theme's
+             ChipIn/ChipOut; these are the same MotionQuick step on the label's colour, so the
+             pill and the word it holds arrive together instead of the word hard-cutting.
+             Both target "Fg", the unfrozen brush each tab template declares. -->
+        <Storyboard x:Key="TabTextSelect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="{StaticResource AccentColor}" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+        <Storyboard x:Key="TabTextDeselect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="{StaticResource TextSecondaryColor}" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+        <Storyboard x:Key="SubTabTextSelect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="White" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+        <Storyboard x:Key="SubTabTextDeselect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="{StaticResource TextSecondaryColor}" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+
         <!-- Top tab: Fluent glyph stacked above a small label. Active tab tints accent,
              matching CleanShot's icon-over-label tab strip. -->
         <Style x:Key="NavTab" TargetType="ListBoxItem">
@@ -178,15 +205,35 @@
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
                                 Padding="10,6" MinWidth="62">
-                            <ContentPresenter HorizontalAlignment="Center"/>
+                            <!-- Named, template-local, therefore UNFROZEN: a StaticResource brush
+                                 is shared and immutable, so its Color cannot be animated. This is
+                                 what carries the label from secondary to accent. It sits nearer
+                                 the content than the style's own Foreground, so it wins. -->
+                            <TextElement.Foreground>
+                                <SolidColorBrush x:Name="Fg" Color="{StaticResource TextSecondaryColor}"/>
+                            </TextElement.Foreground>
+                            <Grid>
+                                <Border x:Name="Hover" Opacity="0" CornerRadius="8"
+                                        Background="{StaticResource HoverFillBrush}"/>
+                                <Border x:Name="Chip" Opacity="0" CornerRadius="8"
+                                        Background="{StaticResource HoverFillBrush}"/>
+                                <ContentPresenter HorizontalAlignment="Center"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
-                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipIn}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource TabTextSelect}"/>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipOut}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource TabTextDeselect}"/>
+                                </Trigger.ExitActions>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -218,15 +265,32 @@
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Bd" Background="Transparent" CornerRadius="6"
                                 Padding="14,4" Margin="2,0">
-                            <ContentPresenter HorizontalAlignment="Center"/>
+                            <TextElement.Foreground>
+                                <SolidColorBrush x:Name="Fg" Color="{StaticResource TextSecondaryColor}"/>
+                            </TextElement.Foreground>
+                            <Grid>
+                                <Border x:Name="Hover" Opacity="0" CornerRadius="6"
+                                        Background="{StaticResource HoverFillBrush}"/>
+                                <!-- AccentDeep, not Accent: the selected pill's label is white. -->
+                                <Border x:Name="Chip" Opacity="0" CornerRadius="6"
+                                        Background="{StaticResource AccentDeepBrush}"/>
+                                <ContentPresenter HorizontalAlignment="Center"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
-                                <Setter Property="Foreground" Value="White"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipIn}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource SubTabTextSelect}"/>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipOut}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource SubTabTextDeselect}"/>
+                                </Trigger.ExitActions>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -273,7 +337,11 @@
         <!-- A centered, label-less checkbox for the matrix cells. Uses its OWN template (just
              the box) rather than DarkCheckBox: DarkCheckBox reserves an 8px content gutter, so
              centering it left-shifted the box ~4px off the column center where the "—" dashes
-             sit. Box-only keeps checkbox and dash on the exact same centerline. -->
+             sit. Box-only keeps checkbox and dash on the exact same centerline.
+             The LAYERS and the storyboards are DarkCheckBox's, verbatim — Box / Hover / Chip /
+             Check at zero opacity plus ChipIn/Out, CheckIn/Out, HoverIn/Out — so these eleven
+             boxes tick with the same cross-fade as every other checkbox on the same pane.
+             Opacity, never Visibility: Visibility cannot be animated. -->
         <Style x:Key="MatrixCheck" TargetType="CheckBox">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
@@ -286,19 +354,33 @@
                             <Border x:Name="Box" CornerRadius="5"
                                     Background="{StaticResource SurfaceAltBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
-                            <Path x:Name="Check" Visibility="Collapsed"
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="5"
+                                    BorderBrush="{StaticResource BorderStrongOverBorderBrush}" BorderThickness="1"/>
+                            <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource AccentBrush}"
+                                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
+                            <Path x:Name="Check" Opacity="0"
                                   Stroke="White" StrokeThickness="1.8"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   StrokeLineJoin="Round" Data="M4,9 L8,13 L14,5"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentBrush}"/>
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipIn}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource CheckIn}"/>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipOut}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource CheckOut}"/>
+                                </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -1048,7 +1130,7 @@
                                      then guess at. -->
                                 <TextBlock x:Name="TemplateLegend" FontSize="{StaticResource TextCaption}"
                                            Foreground="{StaticResource TextSecondaryBrush}"
-                                           LineHeight="17" Margin="{StaticResource SettingsHintBelowMargin}">
+                                           LineHeight="{StaticResource LineHeightBody}" Margin="{StaticResource SettingsHintBelowMargin}">
                                     <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{date}" Click="OnInsertToken"><Run Text="{}{date}"/></Hyperlink><Run Text="  current date"/><LineBreak/>
                                     <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{time}" Click="OnInsertToken"><Run Text="{}{time}"/></Hyperlink><Run Text="  current time"/><LineBreak/>
                                     <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{n}" Click="OnInsertToken"><Run Text="{}{n}"/></Hyperlink><Run Text="  auto-incrementing counter"/><LineBreak/>
@@ -1211,7 +1293,7 @@
                                               VerticalScrollBarVisibility="Auto"
                                               HorizontalScrollBarVisibility="Disabled">
                                     <TextBlock x:Name="AboutReleaseNotesText" TextWrapping="Wrap"
-                                               LineHeight="17" Margin="{StaticResource ChipGutterMargin}"
+                                               LineHeight="{StaticResource LineHeightBody}" Margin="{StaticResource ChipGutterMargin}"
                                                FontSize="{StaticResource TextBody}"
                                                Foreground="{StaticResource TextSecondaryBrush}"/>
                                 </ScrollViewer>
@@ -1268,7 +1350,7 @@
                                                   VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled">
                                         <TextBlock x:Name="AboutNoticesText" TextWrapping="Wrap"
-                                                   LineHeight="16" Margin="{StaticResource ChipGutterMargin}"
+                                                   LineHeight="{StaticResource LineHeightBody}" Margin="{StaticResource ChipGutterMargin}"
                                                    FontSize="{StaticResource TextCaption}"
                                                    Foreground="{StaticResource TextSecondaryBrush}"/>
                                     </ScrollViewer>

@@ -1124,13 +1124,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// and that window is rounded. A no-op for a dragged region, a square-cornered window, and
     /// on the live-grab fallback path, which never reaches this crop at all.
     /// </summary>
-    private void TrimWindowShadow(IntPtr window)
+    private void TrimWindowShadow(IntPtr window, bool wholeWindowCaptured)
     {
-        if (window == IntPtr.Zero || _capturedRegion is null) return;
-        if (_settings is not null && !_settings.Current.TrimWindowShadow) return;
-        if (WinShot.Core.WindowShadowTrim.Trim(_capturedRegion, window) is SD.Bitmap trimmed)
+        if (WinShot.Core.WindowShadowTrim.TrimWindowCapture(
+                _capturedRegion, window,
+                _settings?.Current.TrimWindowShadow ?? true,
+                wholeWindowCaptured) is SD.Bitmap trimmed)
         {
-            _capturedRegion.Dispose();
+            _capturedRegion!.Dispose();
             _capturedRegion = trimmed;
         }
     }
@@ -1353,11 +1354,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Crop the result from the frozen snapshot so the capture is exactly what was selected.
         _capturedRegion?.Dispose();
         _capturedRegion = CropFrozen(virtualRect);
-        // Only when the whole window made it into the crop. A window hanging off the left or
-        // top of the desktop comes back clipped, and rounding all four corners of what
-        // survived would cut an arc out of an edge that was never rounded.
-        if (virtualRect == requested)
-            TrimWindowShadow(window);
+        TrimWindowShadow(window, wholeWindowCaptured: virtualRect == requested);
         if (_settings is not null)
             _settings.Current.LastCaptureRegion = PreviousRegion.Format(
                 new SD.Rectangle(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height));

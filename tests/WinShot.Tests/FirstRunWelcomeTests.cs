@@ -193,12 +193,65 @@ public class FirstRunWelcomeTests
         bool handled = (bool)typeof(WF.Form)
             .GetMethod("ProcessCmdKey", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(window, new object[] { msg, WF.Keys.Escape })!;
-        PumpOnce();
+        // Escape eases the bubble back out rather than cutting it, so the close lands at the
+        // end of the exit tween, not in this frame.
+        PumpUntil(() => closed > 0);
 
         Assert.True(handled);
         Assert.Equal(1, closed);
         window.Dispose();
     }
 
+    /// <summary>
+    /// The bubble arrives with a tween, so it has to leave with one: a surface that eases in
+    /// and vanishes in a frame reads as a crash. Only the two dismissals that leave nothing
+    /// behind them — "Got it" and Escape — are tweened; running a row still closes instantly,
+    /// because the row's command is opening an overlay in the same call.
+    /// </summary>
+    [Fact]
+    public void EscapeEasesTheBubbleOutInsteadOfCuttingIt()
+    {
+        Func<bool> previous = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => true;
+        int closed = 0;
+        var window = new FirstRunWelcomeWindow(
+            null,
+            [new FirstRunWelcomeWindow.WelcomeAction("", "Capture", "Ctrl+Shift+1", () => { })],
+            () => closed++);
+        try
+        {
+            window.Show();
+            PumpOnce();
+
+            var msg = WF.Message.Create(window.Handle, 0x0100, (IntPtr)(int)WF.Keys.Escape, IntPtr.Zero);
+            typeof(WF.Form)
+                .GetMethod("ProcessCmdKey", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(window, new object[] { msg, WF.Keys.Escape });
+
+            // Still open one frame later: the exit is running.
+            PumpOnce();
+            Assert.Equal(0, closed);
+            Assert.True(window.Opacity < 0.98, $"the bubble should be fading; opacity is {window.Opacity}");
+
+            PumpUntil(() => closed > 0);
+            Assert.Equal(1, closed);
+        }
+        finally
+        {
+            window.Dispose();
+            Motion.AnimationsEnabled = previous;
+        }
+    }
+
     private static void PumpOnce() => WF.Application.DoEvents();
+
+    /// <summary>Pumps the message loop until <paramref name="done"/> or ~2s have passed.</summary>
+    private static void PumpUntil(Func<bool> done)
+    {
+        for (int i = 0; i < 400 && !done(); i++)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(5);
+        }
+    }
 }

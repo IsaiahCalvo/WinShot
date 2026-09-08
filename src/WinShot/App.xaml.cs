@@ -1308,26 +1308,11 @@ public partial class App : Application
             if (!ownerRunsHistoryAndCopy)
                 _ = AddHistoryAsync(bmp, cloneOnCallerThread: true, historyKind);
 
-            if (actions.Save)
-                SaveSilently(CaptureService.CloneBitmap(bmp)); // takes ownership
-
-            if (actions.Pin)
-            {
-                // The clone is the pin's the moment it is taken; the outer catch only knows
-                // about the original, so a pin window that fails to construct must free it.
-                SD.Bitmap forPin = CaptureService.CloneBitmap(bmp);
-                try
-                {
-                    var pin = new FastPinWindow(forPin, _settings);
-                    PerfLog.TrackFirstShown(pin, "pin window");
-                    pin.Show();
-                }
-                catch { forPin.Dispose(); throw; }
-            }
-
-            if (actions.Annotate && !editorOwns)
-                OpenDirectEditCapture(CaptureService.CloneBitmap(bmp), historyKind, addHistory: false, autoCopy: false);
-
+            // PostCaptureSet's field order IS this order, and its remarks say why: the sinks
+            // that finish and let go of their copy first, then the windows that stay open,
+            // then the card on top. Copy leads because it is the one the user can lose — with
+            // "Ask for a name" on, Save opens a modal, and a clipboard write queued behind
+            // that modal does not happen until the user answers it.
             if (actions.Copy && !ownerRunsHistoryAndCopy)
             {
                 _ = CopyToClipboardAndNotifyAsync(
@@ -1337,6 +1322,26 @@ public partial class App : Application
                     showFailure: true,
                     includePng: true,
                     failureContext: "Copy failed");
+            }
+
+            if (actions.Save)
+                SaveSilently(CaptureService.CloneBitmap(bmp)); // takes ownership
+
+            if (actions.Annotate && !editorOwns)
+                OpenDirectEditCapture(CaptureService.CloneBitmap(bmp), historyKind, addHistory: false, autoCopy: false);
+
+            if (actions.Pin)
+            {
+                // The clone is the pin's the moment the constructor takes it; the outer catch
+                // only knows about the original, so a pin window that fails to CONSTRUCT must
+                // free it. Past the constructor the window owns it — freeing it there would
+                // leave a live window painting from a disposed bitmap.
+                SD.Bitmap forPin = CaptureService.CloneBitmap(bmp);
+                FastPinWindow pin;
+                try { pin = new FastPinWindow(forPin, _settings); }
+                catch { forPin.Dispose(); throw; }
+                PerfLog.TrackFirstShown(pin, "pin window");
+                pin.Show();
             }
 
             if (cardOwns)
@@ -1683,16 +1688,31 @@ public partial class App : Application
             // The resolved template is the default, so the prompt costs one Enter for
             // anyone who only wanted the option available.
             string suggested = Path.GetFileNameWithoutExtension(path);
-            string? answer = ThemedInputDialog.Ask(
-                null,
-                "Name this capture",
-                $"Saving into {_settings.Current.SaveFolder}",
-                suggested);
+            string? answer;
+            try
+            {
+                answer = ThemedInputDialog.Ask(
+                    null,
+                    "Name this capture",
+                    $"Saving into {_settings.Current.SaveFolder}",
+                    suggested);
+            }
+            catch (Exception ex)
+            {
+                // This runs inside the after-capture set. Letting a dialog failure escape kills
+                // every action queued behind it — the pin and the card never open — and the user
+                // gets one generic "Capture failed". Fall back to the resolved name instead.
+                Log.Error("The name prompt could not be shown; saving under the default name", ex);
+                answer = suggested;
+            }
             if (answer is null)
             {
-                // Cancelling a name prompt is a decision, not a failure.
+                // Cancelling a name prompt is a decision, not a failure — but it is still a
+                // decision the user has to see landing, or the app just goes quiet on them.
                 bmp.Dispose();
                 Log.Info("Save cancelled at the name prompt");
+                NotifyAction(NotifiedAction.Save, "Save cancelled",
+                    "The capture is still in History.", severity: ToastSeverity.Info);
                 return;
             }
             string chosen = ThemedInputDialog.SanitizeFileName(answer, suggested);
