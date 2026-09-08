@@ -42,6 +42,25 @@ public static class SvgIcons
         return new W.Size(content.Width * scale, content.Height * scale);
     }
 
+    /// <summary>
+    /// The glyph's raw ink box on its own SVG grid, stroke included and before any fitting.
+    /// This is the only measurement of an asset that <see cref="Fit"/> has not already
+    /// normalized, so it is what a test compares two assets by — <see cref="OpticalExtent"/>
+    /// returns the post-fit size, whose long edge is the same number for every asset by
+    /// construction and therefore proves nothing about the art.
+    /// </summary>
+    public static W.Rect? ContentExtent(string assetName)
+    {
+        XElement? root = LoadRoot(assetName);
+        if (root is null)
+            return null;
+
+        W.Rect content = ContentBounds(BuildShapes(root, WM.Brushes.White));
+        return content.IsEmpty || content.Width <= 0 || content.Height <= 0
+            ? ParseViewBox(root.Attribute("viewBox")?.Value)
+            : content;
+    }
+
     private static XElement? LoadRoot(string assetName)
     {
         using Stream? stream = typeof(SvgIcons).Assembly.GetManifestResourceStream(
@@ -85,14 +104,31 @@ public static class SvgIcons
     }
 
     /// <summary>
-    /// The share of the button a glyph's ink fills. This is the size the card's own X has
-    /// always drawn — 10.2 px inside a 20 px button — and every glyph is now normalized to
-    /// it. Content fitting on its own normalizes UPWARD, to whatever the button will hold:
-    /// that equalized the family by inflating the X 73 % and the lock 144 %, which restyled
-    /// the pinned quick-actions card rather than tidying it. Normalizing DOWN, to the size
-    /// that shipped, is the same equalization without the restyle.
+    /// The share of the button a glyph's ink fills. Read off the card's own X rather than
+    /// chosen: <c>quick-access-close.svg</c>'s ink measures <see cref="CloseInkOnTheGrid"/>
+    /// on the 24-unit grid, and the old viewBox fit drew that grid at 88 % of the button
+    /// (a 6 % inset each side), so the X has always occupied 13.85 x 0.88 / 24 = 50.8 % of
+    /// its button. Every glyph is normalized to exactly that.
+    ///
+    /// Content fitting on its own normalizes UPWARD, to whatever the button will hold, which
+    /// equalized the family by inflating the X 73 % and the lock 144 % — a restyle of the
+    /// pinned quick-actions card rather than a tidy-up. Normalizing DOWN is right, but a
+    /// fraction typed in by hand cannot be checked against anything — and a review of this
+    /// file read the X's ink as 15.65 rather than 13.85 and concluded the whole family had
+    /// been shrunk 11-22 %. Deriving the fraction, and locking the ink it comes from in
+    /// IconFamilyTests, is what makes that answerable.
     /// </summary>
-    private const double ContentBoxFraction = 0.51;
+    private const double ContentBoxFraction = CloseInkOnTheGrid * ViewBoxFitScale / 24.0;
+
+    /// <summary>Stroke-inclusive long edge of <c>quick-access-close.svg</c>'s art on its own
+    /// 24-unit grid: 12 units from corner to corner plus the 1.85 round-capped stroke, half
+    /// of it hanging off each end. Locked by <c>IconFamilyTests</c> — change the asset and
+    /// the test says so rather than letting all fourteen glyphs drift with it.</summary>
+    internal const double CloseInkOnTheGrid = 13.85;
+
+    /// <summary>What the pre-normalization fit scaled a 24-unit grid by: the button less a
+    /// 6 % inset on each side.</summary>
+    private const double ViewBoxFitScale = 0.88;
 
     /// <summary>
     /// Fit by CONTENT, not by the declared viewBox. Two icons drawn on the same 24-grid

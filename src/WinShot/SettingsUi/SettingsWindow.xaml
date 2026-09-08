@@ -1,4 +1,4 @@
-<Window x:Class="WinShot.SettingsUi.SettingsWindow"
+﻿<Window x:Class="WinShot.SettingsUi.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinShot.SettingsUi"
@@ -93,7 +93,7 @@
                             <Grid>
                                 <TextBlock x:Name="Placeholder" Text="Record shortcut"
                                            Margin="8,0" VerticalAlignment="Center"
-                                           Foreground="{StaticResource TextDisabledBrush}"
+                                           Foreground="{StaticResource TextHintBrush}"
                                            FontSize="{StaticResource TextBody}" FontWeight="Normal"
                                            IsHitTestVisible="False" Visibility="Collapsed"/>
                                 <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
@@ -821,7 +821,7 @@
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeader}" Text="GIF output"/>
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="GIF FPS"/>
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="GIF frames per second"/>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBox x:Name="GifFpsBox" Width="80"/>
                                             <TextBlock Style="{StaticResource Hint}" Text="5-20 fps"/>
@@ -1210,7 +1210,7 @@
                                               VerticalScrollBarVisibility="Auto"
                                               HorizontalScrollBarVisibility="Disabled">
                                     <TextBlock x:Name="AboutReleaseNotesText" TextWrapping="Wrap"
-                                               LineHeight="17" Margin="0,0,8,0"
+                                               LineHeight="17" Margin="{StaticResource ChipGutterMargin}"
                                                FontSize="{StaticResource TextBody}"
                                                Foreground="{StaticResource TextSecondaryBrush}"/>
                                 </ScrollViewer>
@@ -1267,7 +1267,7 @@
                                                   VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled">
                                         <TextBlock x:Name="AboutNoticesText" TextWrapping="Wrap"
-                                                   LineHeight="16" Margin="0,0,8,0"
+                                                   LineHeight="16" Margin="{StaticResource ChipGutterMargin}"
                                                    FontSize="{StaticResource TextCaption}"
                                                    Foreground="{StaticResource TextSecondaryBrush}"/>
                                     </ScrollViewer>

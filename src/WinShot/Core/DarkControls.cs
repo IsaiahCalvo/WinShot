@@ -478,12 +478,16 @@ public sealed class DarkDropDown : WF.Control
 
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            // WinForms scales the row height and the font for DPI; device pixels here would
+            // leave the bar proportionally tighter and squarer at 150% than at 100%.
+            double scale = Math.Max(1, e.ToolStrip?.DeviceDpi ?? 96) / 96.0;
+            int inset = (int)Math.Round(HighlightInsetDip * scale);
             var bounds = new SD.Rectangle(SD.Point.Empty, e.Item.Size);
-            bounds.Inflate(-HighlightInset, -HighlightInset);
+            bounds.Inflate(-inset, -inset);
             if (bounds.Width <= 0 || bounds.Height <= 0)
                 return;
 
-            using var path = GdiPaths.RoundedRect(bounds, HighlightRadius);
+            using var path = GdiPaths.RoundedRect(bounds, (int)Math.Round(HighlightRadiusDip * scale));
             // AccentDeep, not Accent: OnRenderItemText puts white on this fill, and white on
             // the raw accent is 3.65:1 — under the text floor on the one row the user is by
             // definition looking at. Same hue, so the menu still reads as the one accent.
@@ -492,8 +496,8 @@ public sealed class DarkDropDown : WF.Control
             g.FillPath(brush, path);
         }
 
-        private const int HighlightInset = 4;
-        private const int HighlightRadius = 5;
+        private const int HighlightInsetDip = 4;
+        private const int HighlightRadiusDip = 5;
 
         protected override void OnRenderItemText(WF.ToolStripItemTextRenderEventArgs e)
         {

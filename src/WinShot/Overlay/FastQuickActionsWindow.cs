@@ -432,9 +432,6 @@ public sealed class FastQuickActionsWindow : WF.Form
             // also holds the high-resolution clock, leaking it would keep timeBeginPeriod(1)
             // raised for the life of the process.
             EndStatusFlash();
-            // A card closed mid-swap would otherwise hold a Motion refcount for its duration.
-            _pinGlyphTween?.Dispose();
-            _pinGlyphTween = null;
             HideActionTooltip();
             _tooltipTimer.Dispose();
             _overflowMenu.Dispose();
@@ -470,15 +467,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
         // Preserve the user's verified action placement while using the selected HTML design.
         AddIconButton(PinAsset, "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, RequestPin);
-        // Rebuilt on every resize, so an already-pinned capture keeps the solid mark — this
-        // time with no fade, because nothing changed state, the buttons were just remade.
+        // Rebuilt on every resize, so a capture pinned while the card is still on screen
+        // (its exit runs after the pin) keeps the solid mark.
         _pinButton = _buttons[^1];
-        _pinGlyphFrom = null;
-        _pinGlyphFade = 1;
         if (_pinned)
         {
-            _pinGlyphTween?.Dispose();
-            _pinGlyphTween = null;
             _pinButton.Icon =
                 CreateSvgIcon(PinnedAsset, _pinButton.Icon?.Width ?? layout.IconSize, _visuals.Glyph)
                 ?? _pinButton.Icon;
@@ -505,55 +498,39 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private ActionButton? _pinButton;
     private bool _pinned;
-    private SD.Bitmap? _pinGlyphFrom;
-    private double _pinGlyphFade = 1;
-    private IDisposable? _pinGlyphTween;
 
     /// <summary>Every route to pinning — the button, <c>P</c>, and the context menu row —
     /// goes through here so the glyph can never disagree with what happened.</summary>
     private void RequestPin()
     {
-        // Once. The card stays open so the fill can be seen landing, which means the button,
-        // P and the menu row are all still live afterwards — and a second press would put a
-        // second copy of the same capture on screen.
+        // Once per capture. A pin dismisses the card, but the dismissal is animated, and a
+        // second press landing inside that exit would put a second copy of the same shot on
+        // screen.
         if (_pinned)
             return;
-        PinRequested?.Invoke(this);
         MarkPinned();
+        PinRequested?.Invoke(this);
     }
 
+    /// <summary>
+    /// Swaps the outline for the solid mark, with no tween: the card is dismissed by the
+    /// same gesture, so a 140 ms cross-fade would play on a surface already leaving. Marking
+    /// first and raising <see cref="PinRequested"/> second means the solid glyph is what the
+    /// exit carries off.
+    /// </summary>
     private void MarkPinned()
     {
         if (_pinned || _pinButton is null || IsDisposed)
             return;
 
         _pinned = true;
-        SD.Bitmap? outline = _pinButton.Icon;
-        SD.Bitmap? solid = CreateSvgIcon(
-            PinnedAsset, outline?.Width ?? 16, _visuals.Glyph);
+        SD.Bitmap? solid = CreateSvgIcon(PinnedAsset, _pinButton.Icon?.Width ?? 16, _visuals.Glyph);
         if (solid is null)
             return;
 
         _pinButton.Icon = solid;
-        _pinGlyphFrom = outline;
-        _pinGlyphFade = 0;
-
-        // A cross-fade, not a move: the button stays exactly where the user is aiming.
-        _pinGlyphTween?.Dispose();
-        _pinGlyphTween = Motion.Run(
-            Motion.QuickMs,
-            Motion.EaseOutCubic,
-            eased =>
-            {
-                _pinGlyphFade = eased;
-                if (!IsDisposed)
-                    Invalidate(_pinButton.Bounds);
-            },
-            () =>
-            {
-                _pinGlyphTween = null;
-                _pinGlyphFrom = null;
-            });
+        Invalidate(_pinButton.Bounds);
+        Update();
     }
 
     private void AddIconButton(
@@ -836,30 +813,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             int x = button.Bounds.Left + (button.Bounds.Width - button.Icon.Width) / 2;
             int y = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
 
-            if (ReferenceEquals(button, _pinButton) && _pinGlyphFrom is not null && _pinGlyphFade < 1)
-            {
-                DrawGlyphFaded(g, _pinGlyphFrom, x, y, 1 - _pinGlyphFade);
-                DrawGlyphFaded(g, button.Icon, x, y, _pinGlyphFade);
-                return;
-            }
-
             g.DrawImageUnscaled(button.Icon, x, y);
         }
-    }
-
-    /// <summary>One glyph at a partial opacity — what the outline-to-solid pin swap
-    /// cross-fades through, rather than snapping between two different marks.</summary>
-    private static void DrawGlyphFaded(SD.Graphics g, SD.Bitmap glyph, int x, int y, double alpha)
-    {
-        var matrix = new SD.Imaging.ColorMatrix { Matrix33 = (float)Math.Clamp(alpha, 0, 1) };
-        using var attributes = new SD.Imaging.ImageAttributes();
-        attributes.SetColorMatrix(matrix);
-        g.DrawImage(
-            glyph,
-            new SD.Rectangle(x, y, glyph.Width, glyph.Height),
-            0, 0, glyph.Width, glyph.Height,
-            SD.GraphicsUnit.Pixel,
-            attributes);
     }
 
     private static GraphicsPath CreateButtonPath(SD.Rectangle bounds, ActionButtonShape shape, int cornerRadius)
@@ -2132,8 +2087,14 @@ public sealed class FastQuickActionsWindow : WF.Form
                 return;
             }
             Directory.CreateDirectory(_settings.Current.SaveFolder);
-            // "Automatic" resolves against this image's own pixels before the name or the
-            // dialog's preselected filter is built from it.
+            // "Automatic" reads thousands of pixels out of _image, which the background
+            // thumbnail render is also reading — the same GDI+ "Object is currently in use
+            // elsewhere" race every pixel edit on this card already waits out. Wait it out
+            // here too, or a save landing mid-render silently falls back to PNG (or kills
+            // the thumbnail).
+            if (!await WaitForRenderIdleAsync()) return;
+            // Resolves against this image's own pixels before the name or the dialog's
+            // preselected filter is built from it.
             string format = ImageFormatChooser.Resolve(_settings.Current.ImageFormat, _image);
             string path;
             if (askForDestination)

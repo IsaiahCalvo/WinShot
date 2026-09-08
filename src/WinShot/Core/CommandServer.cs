@@ -4,13 +4,6 @@ using System.IO.Pipes;
 namespace WinShot.Core;
 
 /// <summary>
-/// Single-instance command routing over the "WinShot.Commands" named pipe.
-/// A second WinShot process (e.g. launched via winshot://) forwards its command with
-/// <see cref="TrySendToRunningInstance"/> and exits; the primary instance runs a
-/// <see cref="CommandServer"/> that raises <see cref="CommandReceived"/> for each line.
-/// The event fires on the accept-loop thread — callers marshal to the UI thread.
-/// </summary>
-/// <summary>
 /// The per-invocation overrides carried by a <c>winshot://</c> URL's query string —
 /// <c>?then=</c> replaces the after-capture set for this capture only, <c>delayed=</c>
 /// counts down first. <see cref="None"/> means "do exactly what the settings say".
@@ -20,6 +13,13 @@ public sealed record CaptureCommandOptions(PostCaptureSet? Then, int DelaySecond
     public static readonly CaptureCommandOptions None = new(null, 0);
 }
 
+/// <summary>
+/// Single-instance command routing over the "WinShot.Commands" named pipe.
+/// A second WinShot process (e.g. launched via winshot://) forwards its command with
+/// <see cref="TrySendToRunningInstance"/> and exits; the primary instance runs a
+/// <see cref="CommandServer"/> that raises <see cref="CommandReceived"/> for each line.
+/// The event fires on the accept-loop thread — callers marshal to the UI thread.
+/// </summary>
 public sealed class CommandServer : IDisposable
 {
     public const string PipeName = "WinShot.Commands";

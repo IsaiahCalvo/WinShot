@@ -139,8 +139,11 @@ public static class PostCaptureMigration
         s.ScreenshotShowOverlay = action is PostCaptureAction.Overlay or PostCaptureAction.Background;
 
         // The Recording column absorbed the duplicate "Open video editor after recording"
-        // checkbox that used to live on the Recording pane.
+        // checkbox that used to live on the Recording pane. Cleared once it has been folded
+        // in: nothing reads it at runtime any more, and a seed left set on disk is a value
+        // the user has no control that can clear.
         s.RecordingOpenEditor = s.RecordingOpenEditor || s.OpenVideoEditorAfterRecording;
+        s.OpenVideoEditorAfterRecording = false;
 
         s.SettingsSchemaVersion = MatrixSchemaVersion;
         return true;

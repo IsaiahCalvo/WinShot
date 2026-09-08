@@ -20,6 +20,57 @@ public class WindowShadowTrimTests
         return bmp;
     }
 
+    /// <summary>
+    /// The corner a trim cuts is ARGB(0,0,0,0) — transparent BLACK, because that is what
+    /// GDI+ leaves in a bitmap it never painted. Invisible wherever alpha is honoured, solid
+    /// black wherever it is not: a JPEG save and the clipboard's CF_DIB payload both read
+    /// the RGB underneath. With the trim defaulting on, that was four black wedges on every
+    /// Windows 11 window capture saved as JPG or pasted into MS Paint.
+    /// </summary>
+    [Fact]
+    public void ATrimmedCornerSavedAsJpegIsWhite_NotBlack()
+    {
+        using SD.Bitmap shot = Capture(200, 160);
+        using SD.Bitmap trimmed = WindowShadowTrim.Trim(shot, radius: 24)!;
+        Assert.Equal(0, trimmed.GetPixel(0, 0).A);
+
+        string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"winshot-trim-{Guid.NewGuid():N}.jpg");
+        try
+        {
+            ImageSaver.Save(trimmed, path);
+            using var reloaded = new SD.Bitmap(path);
+            SD.Color corner = reloaded.GetPixel(1, 1);
+            SD.Color middle = reloaded.GetPixel(reloaded.Width / 2, reloaded.Height / 2);
+            Assert.True(corner.R > 215 && corner.G > 215 && corner.B > 215,
+                $"the trimmed corner encoded as {corner}, not white");
+            // And the window itself is untouched by the flatten.
+            Assert.True(middle.R > 215 && middle.G < 60, $"the capture itself changed: {middle}");
+        }
+        finally
+        {
+            try { System.IO.File.Delete(path); } catch { }
+        }
+    }
+
+    [Fact]
+    public void ATrimmedCornerOnTheClipboardsDibIsWhite_NotBlack()
+    {
+        using SD.Bitmap shot = Capture(200, 160);
+        using SD.Bitmap trimmed = WindowShadowTrim.Trim(shot, radius: 24)!;
+        using SD.Bitmap? flattened = AlphaFlatten.OverWhite(trimmed);
+
+        Assert.NotNull(flattened);
+        Assert.Equal(SD.Color.FromArgb(255, 255, 255, 255), flattened!.GetPixel(0, 0));
+        Assert.Equal(255, flattened.GetPixel(flattened.Width / 2, flattened.Height / 2).A);
+    }
+
+    [Fact]
+    public void AnOpaqueCaptureIsNotCopiedJustToFlattenIt()
+    {
+        using var opaque = new SD.Bitmap(20, 20, SD.Imaging.PixelFormat.Format24bppRgb);
+        Assert.Null(AlphaFlatten.OverWhite(opaque));
+    }
+
     [Fact]
     public void TheCornerWedgesGoAndNothingElseDoes()
     {

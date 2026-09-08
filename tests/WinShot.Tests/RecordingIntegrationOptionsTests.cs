@@ -234,9 +234,14 @@ public class RecordingIntegrationOptionsTests
             new RecordingAfterActions(false, true, false),
             RecordingAfterActions.FromSettings(settings, isGif: true));
 
+        // The retired OpenVideoEditorAfterRecording checkbox is a MIGRATION seed, folded into
+        // RecordingOpenEditor once by PostCaptureMigration and never read at runtime again.
+        // Reading it here as well made the matrix checkbox undismissable for every upgraded
+        // user: unticking wrote false, the seed on disk stayed true, and the editor kept
+        // opening after every recording with no control that could stop it.
         settings.RecordingOpenEditor = false;
         settings.OpenVideoEditorAfterRecording = true;
-        Assert.True(RecordingAfterActions.FromSettings(settings, isGif: false).OpenEditor);
+        Assert.False(RecordingAfterActions.FromSettings(settings, isGif: false).OpenEditor);
     }
 
     [Fact]

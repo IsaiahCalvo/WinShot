@@ -12,7 +12,9 @@ public static class BackgroundPresets
 {
     public static IReadOnlyList<(string Name, Brush Brush)> All { get; } = new List<(string, Brush)>
     {
-        ("Azure", Linear("#0A84FF", "#6DD5ED")),
+        // The app's accent and its documented gradient partner, read from the palette:
+        // two hex literals for one colour is how a palette drifts.
+        ("Azure", Linear(WinShot.Core.ThemePalette.Accent, WinShot.Core.ThemePalette.AccentGradientEnd)),
         ("Deep Ocean", Linear("#0F2027", "#203A43", "#2C5364")),
         ("Purple Haze", Linear("#CC2B5E", "#753A88")),
         ("Lavender", Linear("#9796F0", "#FBC7D4")),
@@ -26,18 +28,27 @@ public static class BackgroundPresets
 
     private static Color C(string hex) => (Color)ColorConverter.ConvertFromString(hex);
 
-    /// <summary>Diagonal gradient with evenly spaced stops.</summary>
-    private static Brush Linear(params string[] hexStops)
+    private static Color C(System.Drawing.Color color) => Color.FromRgb(color.R, color.G, color.B);
+
+    /// <summary>Diagonal gradient from palette colours, so the accent has one definition.</summary>
+    private static Brush Linear(params System.Drawing.Color[] stops)
+        => Linear(stops.Select(C).ToArray());
+
+    private static Brush Linear(params Color[] stops)
     {
         var brush = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
-        for (int i = 0; i < hexStops.Length; i++)
+        for (int i = 0; i < stops.Length; i++)
         {
-            double offset = hexStops.Length == 1 ? 0 : i / (double)(hexStops.Length - 1);
-            brush.GradientStops.Add(new GradientStop(C(hexStops[i]), offset));
+            double offset = stops.Length == 1 ? 0 : i / (double)(stops.Length - 1);
+            brush.GradientStops.Add(new GradientStop(stops[i], offset));
         }
         brush.Freeze();
         return brush;
     }
+
+    /// <summary>Diagonal gradient with evenly spaced stops.</summary>
+    private static Brush Linear(params string[] hexStops)
+        => Linear(hexStops.Select(C).ToArray());
 
     /// <summary>Mesh-ish multi-stop: blue-violet base with soft pink and amber radial glows.</summary>
     private static Brush Mesh()

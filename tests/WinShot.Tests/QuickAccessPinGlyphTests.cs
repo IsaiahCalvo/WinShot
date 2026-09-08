@@ -10,8 +10,8 @@ namespace WinShot.Tests;
 
 /// <summary>
 /// The approved pin swap: outlined among its stroked siblings until this capture is actually
-/// pinned, solid after. Shares the Motion refcount collection because the swap runs a tween
-/// and the holder count it is checked against is process-global.
+/// pinned, solid after. Shares the Motion refcount collection because the assertion that the
+/// swap takes NO tween is checked against a process-global holder count.
 /// </summary>
 [Collection("MotionRefcount")]
 public class QuickAccessPinGlyphTests
@@ -19,47 +19,43 @@ public class QuickAccessPinGlyphTests
     private const string Outline = "quick-access-pin.svg";
     private const string Filled = "quick-access-pin-filled.svg";
 
+    /// <summary>
+    /// A pin dismisses the card — that is the card's own shipped behaviour and it is pinned,
+    /// so the swap has to be done by the time the handler runs the pin and the exit starts.
+    /// Instant, and holding no high-resolution clock: a 140 ms cross-fade here would play on
+    /// a surface already flying off screen.
+    /// </summary>
     [Fact]
-    public void PinningSwapsTheOutlineForTheSolidMark_AndReleasesItsTween()
+    public void PinningSwapsTheOutlineForTheSolidMark_BeforeTheHandlerRuns()
     {
         RunSta(() =>
         {
             using var bitmap = new SD.Bitmap(1200, 760);
             using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
-            bool pinned = false;
-            overlay.PinRequested += _ => pinned = true;
 
             SD.Bitmap? before = PinIcon(overlay);
             Assert.NotNull(before);
             SD.Color glyph = GlyphColor(overlay);
             Assert.Same(SvgIcons.Get(Outline, before!.Width, glyph), before);
 
+            SD.Bitmap? whenHandlerRan = null;
+            overlay.PinRequested += o => whenHandlerRan = PinIcon(o);
+
             InvokeKey(overlay, WF.Keys.P);
-            Assert.True(pinned);
 
-            SD.Bitmap? after = PinIcon(overlay);
-            Assert.NotNull(after);
-            Assert.NotSame(before, after);
-            Assert.Same(SvgIcons.Get(Filled, before.Width, glyph), after);
-
-            // The cross-fade must end, and end holding nothing.
-            PumpUntil(() => Motion.Holders == 0);
+            // The App handler closes the card in this same call, so "solid by then" is the
+            // only thing that can ever be seen.
+            Assert.Same(SvgIcons.Get(Filled, before.Width, glyph), whenHandlerRan);
             Assert.Equal(0, Motion.Holders);
-            Assert.Null(typeof(FastQuickActionsWindow)
-                .GetField("_pinGlyphTween", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .GetValue(overlay));
         });
     }
 
     /// <summary>
-    /// The card now STAYS UP after a pin — that is what makes the outline-to-solid fade
-    /// visible at all, since every route used to close the card in the same call that
-    /// started the 140 ms swap. Staying up means P is still live, so pinning is guarded to
-    /// once per capture: a second press must not put a second copy of the same shot on
-    /// screen, and must not restart the swap on a glyph that is already solid.
+    /// The card's exit is animated, so it is still on screen for a few hundred ms after a
+    /// pin. A second press landing inside that window must not pin the same shot twice.
     /// </summary>
     [Fact]
-    public void PinningTwiceDoesNotRestartTheSwap()
+    public void PinningTwiceDoesNotPinTwice()
     {
         RunSta(() =>
         {
@@ -69,33 +65,32 @@ public class QuickAccessPinGlyphTests
             overlay.PinRequested += _ => requests++;
 
             InvokeKey(overlay, WF.Keys.P);
-            PumpUntil(() => Motion.Holders == 0);
             SD.Bitmap? afterFirst = PinIcon(overlay);
-
             InvokeKey(overlay, WF.Keys.P);
-            // Pinned once. The filled glyph is the confirmation and the card is still there.
+
             Assert.Equal(1, requests);
             Assert.Same(afterFirst, PinIcon(overlay));
-
-            PumpUntil(() => Motion.Holders == 0);
             Assert.Equal(0, Motion.Holders);
         });
     }
 
     [Fact]
-    public void ClosingTheCardMidSwapReleasesTheTween()
+    public void APinnedCardRebuiltByAResizeKeepsTheSolidMark()
     {
         RunSta(() =>
         {
             using var bitmap = new SD.Bitmap(1200, 760);
-            var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
             InvokeKey(overlay, WF.Keys.P);
 
-            // Disposed with the cross-fade still in flight — the case that would otherwise
-            // hold a Motion refcount for the life of the process.
-            overlay.Dispose();
-            PumpUntil(() => Motion.Holders == 0);
-            Assert.Equal(0, Motion.Holders);
+            // What a resize does: the buttons are thrown away and remade.
+            typeof(FastQuickActionsWindow)
+                .GetMethod("BuildLayout", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(overlay, [bitmap, 144]);
+
+            SD.Bitmap? icon = PinIcon(overlay);
+            Assert.NotNull(icon);
+            Assert.Same(SvgIcons.Get(Filled, icon!.Width, GlyphColor(overlay)), icon);
         });
     }
 
@@ -119,16 +114,6 @@ public class QuickAccessPinGlyphTests
         => typeof(FastQuickActionsWindow)
             .GetMethod("OnOverlayKeyDown", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(overlay, [overlay, new WF.KeyEventArgs(keys)]);
-
-    /// <summary>Motion.Run drives a WinForms timer, which needs a pump to tick.</summary>
-    private static void PumpUntil(Func<bool> done)
-    {
-        for (int i = 0; i < 200 && !done(); i++)
-        {
-            WF.Application.DoEvents();
-            Thread.Sleep(10);
-        }
-    }
 
     private static void RunSta(Action action)
     {

@@ -350,6 +350,13 @@ public partial class SettingsWindow : Window
     protected override void OnClosing(CancelEventArgs e)
     {
         ApplyParkedWindowStyle(parked: false);
+        // A toggle flipped inside the coalescing window would otherwise fire one tick after
+        // the window is gone, re-reading controls off a closed window and keeping it alive
+        // on the Dispatcher until it did. Flush it here instead: the change was real and the
+        // user asked for it.
+        if (_liveApplyTimer is { IsEnabled: true })
+            OnLiveApplyDue(null, EventArgs.Empty);
+        _liveApplyTimer?.Stop();
         base.OnClosing(e);
     }
 
@@ -566,9 +573,11 @@ public partial class SettingsWindow : Window
             string? notes = result.ReleaseNotes?.Trim();
             if (string.IsNullOrWhiteSpace(notes))
             {
-                AboutReleaseNotesStatus.Text = result.State == UpdateState.Error
+                bool failed = result.State == UpdateState.Error;
+                AboutReleaseNotesStatus.Text = failed
                     ? "Release notes are unavailable right now."
                     : "This release published no notes.";
+                _releaseNotesRequested = !failed;
                 return;
             }
 
@@ -582,6 +591,9 @@ public partial class SettingsWindow : Window
         {
             Log.Error("Release notes could not be loaded", ex);
             AboutReleaseNotesStatus.Text = "Release notes are unavailable right now.";
+            // Unlatch: a failed fetch is usually a network blip, and the pane offers no
+            // retry button, so coming back to About has to be the retry.
+            _releaseNotesRequested = false;
         }
     }
 
@@ -917,8 +929,14 @@ public partial class SettingsWindow : Window
             // Only executable global hotkeys are editable; unknown stored bindings survive.
             SaveShortcutBoxes(s);
 
-            await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
-            await _settings.SaveAsync();
+            bool startupRegistered = await Task.Run(() => ApplyStartupRegistration(s.LaunchAtStartup));
+            if (!await _settings.SaveAsync())
+                ReportSaveFailed();
+            else if (!startupRegistered)
+                App.Toast(
+                    "Start at login could not be changed",
+                    "Windows refused the startup registration. Everything else was saved.",
+                    severity: ToastSeverity.Error);
             Close();
         }
         finally
@@ -1081,22 +1099,40 @@ public partial class SettingsWindow : Window
         try
         {
             WriteToggleSettings(_settings.Current);
-            _settings.Save();
+            // With no OK button this save IS the commit, so a locked or read-only settings
+            // file silently loses the preference: the control still looks applied. Save()
+            // logs and returns rather than throwing, so the report has to come from its
+            // result — a catch here alone never fires.
+            if (!_settings.Save())
+                ReportSaveFailed();
             if (_startupRegistrationDirty)
             {
                 _startupRegistrationDirty = false;
                 bool enabled = _settings.Current.LaunchAtStartup;
-                _ = Task.Run(() => ApplyStartupRegistration(enabled));
+                _ = Task.Run(() =>
+                {
+                    if (ApplyStartupRegistration(enabled))
+                        return;
+                    Dispatcher.BeginInvoke(() => App.Toast(
+                        "Start at login could not be changed",
+                        "Windows refused the startup registration.",
+                        severity: ToastSeverity.Error));
+                });
             }
         }
         catch (Exception ex)
         {
-            // With no OK button this save IS the commit, so a locked or read-only settings
-            // file silently loses the preference: the control still looks applied. Say so.
             Log.Error("Live-applying a settings toggle failed", ex);
             App.Toast("Settings could not be saved", FriendlyError.For(ex), severity: ToastSeverity.Error);
         }
     }
+
+    /// <summary>One line for every failed commit, wherever it happened: the file, or the
+    /// startup registration that rides along with it.</summary>
+    private static void ReportSaveFailed() => App.Toast(
+        "Settings could not be saved",
+        "The settings file could not be written. Your change will be lost when WinShot closes.",
+        severity: ToastSeverity.Error);
 
     // ------------------------------------------------------- restore defaults
 
@@ -1162,6 +1198,10 @@ public partial class SettingsWindow : Window
         if (FieldDiffers(CountdownBox, s.RecordingCountdownSeconds)) return true;
         if (FieldDiffers(WebcamSizeBox, s.WebcamOverlaySizePercent)) return true;
         if (OverlayAutoCloseCheck.IsChecked == true && FieldDiffers(OverlayCloseBox, s.OverlayAutoCloseSeconds))
+            return true;
+        // A plain TextBox with no live-apply wiring: typing a hex colour and pressing Escape
+        // is exactly the loss this guard exists to catch.
+        if (!string.Equals(BackgroundColorBox.Text.Trim(), s.ScreenshotBackgroundColor, StringComparison.OrdinalIgnoreCase))
             return true;
 
         foreach (var def in AllShortcutDefs())
@@ -1455,9 +1495,9 @@ public partial class SettingsWindow : Window
     private static void MarkInvalid(TextBox box, string message)
     {
         box.BorderBrush = ErrorBrush;
-        // The tooltip stays as the accessible/overflow copy; the adorner is what the user
-        // actually reads, under the field, without hovering anything.
-        box.ToolTip = message;
+        // Inline INSTEAD of a tooltip, which is what the audit asked for: the message is
+        // already under the field, and a hover repeating it is redundant chrome.
+        box.ToolTip = null;
         InlineValidation.Show(box, message);
     }
 
@@ -1567,7 +1607,7 @@ public partial class SettingsWindow : Window
 
     // Delegates to the shared helper so Settings and the boot-time self-heal write the
     // identical Run-key value (see WinShot.Core.StartupRegistration).
-    private static void ApplyStartupRegistration(bool enabled)
+    private static bool ApplyStartupRegistration(bool enabled)
         => StartupRegistration.Apply(enabled);
 
     private const uint SetWindowPosNoSize = 0x0001;

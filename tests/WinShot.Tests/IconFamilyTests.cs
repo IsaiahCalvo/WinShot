@@ -51,75 +51,102 @@ public class IconFamilyTests
         Assert.Null(filled.Attribute("stroke-width"));
     }
 
-    // Optical size is measured through SvgIcons.OpticalExtent — the renderer's own content
-    // bounds and scale — not by scanning a rasterized bitmap. RenderTargetBitmap produces a
-    // fully transparent image in a test host that has never shown a window, so a pixel scan
-    // here measures nothing and passes or fails on test ordering rather than on the assets.
-    private static double LongEdge(string asset, int pixelSize = 20)
+    // Two different measurements, and the difference is the whole point of these tests.
+    //
+    //   Ink()      — the asset's raw stroke-inclusive art on its own 24-unit grid. Nothing
+    //                has normalized it, so two assets genuinely differ here.
+    //   Rendered() — what the renderer draws into a button of that many pixels. Fit() takes
+    //                min(box/w, box/h), so the long edge always lands on box: this number is
+    //                pixelSize x ContentBoxFraction for EVERY asset, by construction.
+    //
+    // Asserting that two Rendered() values match therefore proves nothing at all — that was
+    // the hole this file shipped with. The assertions below compare Ink() to Ink(), and
+    // Rendered() to the absolute pixel sizes the card drew before the family was normalized.
+    private static double Ink(string asset)
+    {
+        W.Rect? extent = SvgIcons.ContentExtent(asset);
+        Assert.NotNull(extent);
+        return Math.Max(extent!.Value.Width, extent.Value.Height);
+    }
+
+    private static double Rendered(string asset, int pixelSize)
     {
         W.Size? extent = SvgIcons.OpticalExtent(asset, pixelSize);
         Assert.NotNull(extent);
         return Math.Max(extent!.Value.Width, extent.Value.Height);
     }
 
-    /// <summary>
-    /// The size the card already shipped: the X drew 10.2px inside a 20px button, and every
-    /// glyph is normalized DOWN to that. Fitting content to the whole button instead is also
-    /// "content-scaled", but it equalizes the family by inflating the X 73% and the lock
-    /// 144% — a restyle of the pinned quick-actions card rather than a tidy-up of it.
-    /// </summary>
-    private const double ShippedEdgeIn20pxBox = 10.2;
+    /// <summary>What the old viewBox fit drew a 24-unit grid at: the button less a 6% inset
+    /// each side, with the inset floored at a whole pixel (which only bites below 17 px).</summary>
+    private static double ShippedEdge(string asset, int pixelSize)
+    {
+        double inset = Math.Max(1, pixelSize * 0.06);
+        return Ink(asset) * (pixelSize - inset * 2) / 24.0;
+    }
+
+    [Fact]
+    public void TheFractionIsReadOffTheCardsX_NotChosen()
+    {
+        // ContentBoxFraction is derived from this number. If the X's art ever changes, this
+        // fails here rather than silently resizing all fourteen glyphs and the copy pill.
+        Assert.Equal(SvgIcons.CloseInkOnTheGrid, Ink("quick-access-close.svg"), 2);
+    }
+
+    [Theory]
+    // The three sizes the card actually asks for: max(14, round(IconSize * 0.56)) where
+    // IconSize = Scale(28, dpi) — so 16 px at 100%, 24 px at 150%, 32 px at 200%.
+    [InlineData(16)]
+    [InlineData(24)]
+    [InlineData(32)]
+    public void TheCardsXStillDrawsTheSizeItShipped(int pixelSize)
+    {
+        // The pinned card's idle look is not this track's to change: normalizing the family
+        // to the X's own size is the whole of the approved swap. A hand-typed fraction is
+        // how that goes wrong silently, and it is not checkable by eye at 16px — a review
+        // of this file mis-measured the X's ink and called the family 11-22% too small.
+        // This asserts pixels against the pre-normalization algorithm instead.
+        double shipped = ShippedEdge("quick-access-close.svg", pixelSize);
+        double now = Rendered("quick-access-close.svg", pixelSize);
+        Assert.True(
+            Math.Abs(now - shipped) <= 0.1,
+            $"the X draws {now:0.00}px in a {pixelSize}px button; it shipped at {shipped:0.00}px");
+    }
+
+    [Fact]
+    public void TheArtGenuinelyDiffers_SoNormalisingIsDoingWork()
+    {
+        // The guard on the guard: if every asset's raw ink were already the same size there
+        // would be nothing to equalize and the tests below would pass on an empty change.
+        double close = Ink("quick-access-close.svg");
+        double pin = Ink("quick-access-pin.svg");
+        Assert.True(
+            Math.Abs(pin - close) > 2,
+            $"pin ink {pin:0.0} vs close ink {close:0.0} on the same 24-grid — nothing to normalize");
+    }
 
     [Fact]
     public void GlyphsAreScaledByContent_SoTheyShareAnOpticalSize()
     {
-        // Every icon draws the same optical extent: that is what "content-scaled" buys.
-        // Before, the pin's art occupied ~55% of its 24-grid and rendered small next to the
-        // X's ~75%, or huge, depending on which asset drifted.
+        // Each glyph, measured from its own art, lands on the size the X shipped at. This is
+        // an absolute check against ShippedEdge(close), not a comparison of two already-
+        // normalized outputs.
+        double target = ShippedEdge("quick-access-close.svg", 24);
         foreach (string asset in StrokedAssets)
         {
-            double edge = LongEdge(asset);
+            double edge = Rendered(asset, 24);
             Assert.True(
-                Math.Abs(edge - ShippedEdgeIn20pxBox) <= 0.5,
-                $"{asset} draws {edge:0.0}px in a 20px box; the family sits at {ShippedEdgeIn20pxBox}px");
+                Math.Abs(edge - target) <= 0.1,
+                $"{asset} draws {edge:0.00}px in a 24px button; the family sits at {target:0.00}px");
         }
     }
 
     [Fact]
-    public void TheFamilyIsNormalisedDownToTheSizeTheCardShipped()
+    public void PinAndCloseRenderAtTheSameOpticalSize_AndWouldNotHaveUnderAViewBoxFit()
     {
-        // The guard on the guard. A content fit that targets the whole button passes the
-        // "they all match" test above just as happily while making every glyph on the pinned
-        // card ~73% wider, which is exactly how that shipped once already.
-        double close = LongEdge("quick-access-close.svg");
-        Assert.True(close < 12, $"close draws {close:0.0}px in a 20px box — the family grew");
-        Assert.True(close > 8, $"close draws {close:0.0}px in a 20px box — the family shrank");
-    }
-
-    [Fact]
-    public void PinAndCloseRenderAtTheSameOpticalSize()
-    {
-        // The original defect: a filled pin among stroked siblings, fitted to its viewBox
-        // rather than its art, rendering ~75% larger than the X next to it on the same card.
-        double pin = LongEdge("quick-access-pin.svg");
-        double close = LongEdge("quick-access-close.svg");
-        Assert.True(Math.Abs(pin - close) <= 1, $"pin {pin:0.0}px vs close {close:0.0}px");
-    }
-
-    [Fact]
-    public void FittingUsesTheArt_NotTheDeclaredViewBox()
-    {
-        // Guards the fix itself: the pin's art does not fill its 24-grid, so a viewBox fit
-        // would leave it visibly small. If someone reverts to scaling by the box, the pin
-        // stops filling its 20px button and this fails before the eye catches it.
-        XElement pin = Root("quick-access-pin.svg");
-        Assert.Equal("0 0 24 24", pin.Attribute("viewBox")?.Value);
-
-        List<XElement> paths = pin.Descendants().Where(e => e.Name.LocalName == "path").ToList();
-        Assert.NotEmpty(paths);
-        // A viewBox fit would leave the pin's art at ~16px where the X sits at ~10 — the
-        // 57% mismatch the swap exists to remove. Matching its sibling is the proof.
-        Assert.True(
-            Math.Abs(LongEdge("quick-access-pin.svg") - LongEdge("quick-access-close.svg")) <= 0.5);
+        // The original defect: the pin fitted to its viewBox rather than its art rendered
+        // ~75% larger than the X next to it on the same card.
+        Assert.True(ShippedEdge("quick-access-pin.svg", 24) - ShippedEdge("quick-access-close.svg", 24) > 2,
+            "a viewBox fit no longer mis-sizes the pin — this test is measuring nothing");
+        Assert.Equal(Rendered("quick-access-close.svg", 24), Rendered("quick-access-pin.svg", 24), 1);
     }
 }

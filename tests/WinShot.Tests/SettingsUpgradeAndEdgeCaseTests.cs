@@ -1,6 +1,7 @@
 using System.Drawing.Imaging;
 using System.IO;
 using WinShot.Core;
+using WinShot.Recording;
 using Xunit;
 using SD = System.Drawing;
 
@@ -74,6 +75,41 @@ public class SettingsUpgradeAndEdgeCaseTests
     }
 
     /// <summary>
+    /// Settings has no OK button any more: ticking a checkbox IS the commit. So a save that
+    /// does not reach disk has to be reportable — it used to be logged and swallowed, and the
+    /// live-apply path's "Settings could not be saved" toast sat behind a catch that could
+    /// never fire while the control stayed looking applied.
+    /// </summary>
+    [Fact]
+    public void ASaveThatDoesNotReachDiskSaysSo()
+    {
+        string dir = NewDir();
+        string? old = SettingsService.DirOverride;
+        try
+        {
+            SettingsService.DirOverride = dir;
+
+            // Refused: Save() before Load() would replace the user's file with defaults.
+            Assert.False(new SettingsService().Save());
+
+            var svc = new SettingsService();
+            svc.Load();
+            Assert.True(svc.Save());
+
+            // Held open by something else — the read-only / locked file case.
+            using (File.Open(Path.Combine(dir, "settings.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Assert.False(svc.Save());
+
+            Assert.True(svc.Save());
+        }
+        finally
+        {
+            SettingsService.DirOverride = old;
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    /// <summary>
     /// The sticky OR in the migration: with the migration un-persisted, turning the recording
     /// editor OFF and saving must not have it come back on the next launch.
     /// </summary>
@@ -98,6 +134,14 @@ public class SettingsUpgradeAndEdgeCaseTests
             var next = new SettingsService();
             next.Load();
             Assert.False(next.Current.RecordingOpenEditor);
+            // The field round-tripping is not the question the user is asking. This is: the
+            // recording path used to OR the retired seed back in at runtime, so the checkbox
+            // was dead for every upgraded user and the video editor opened after every MP4
+            // forever. Ask the code that actually decides.
+            Assert.False(RecordingAfterActions.FromSettings(next.Current, isGif: false).OpenEditor);
+            // And the seed itself is gone: nothing reads it now, and a value left set on disk
+            // is one the user has no control that can clear.
+            Assert.False(next.Current.OpenVideoEditorAfterRecording);
         }
         finally
         {

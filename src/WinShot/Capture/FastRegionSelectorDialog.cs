@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -1345,6 +1345,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </param>
     private void Confirm(SD.Rectangle virtualRect, IntPtr window = default)
     {
+        SD.Rectangle requested = virtualRect;
         virtualRect.Intersect(new SD.Rectangle(0, 0, _vs.Width, _vs.Height));
         if (virtualRect.Width < 1 || virtualRect.Height < 1) return;
 
@@ -1352,7 +1353,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Crop the result from the frozen snapshot so the capture is exactly what was selected.
         _capturedRegion?.Dispose();
         _capturedRegion = CropFrozen(virtualRect);
-        TrimWindowShadow(window);
+        // Only when the whole window made it into the crop. A window hanging off the left or
+        // top of the desktop comes back clipped, and rounding all four corners of what
+        // survived would cut an arc out of an edge that was never rounded.
+        if (virtualRect == requested)
+            TrimWindowShadow(window);
         if (_settings is not null)
             _settings.Current.LastCaptureRegion = PreviousRegion.Format(
                 new SD.Rectangle(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height));

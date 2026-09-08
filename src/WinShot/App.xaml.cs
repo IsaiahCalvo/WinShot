@@ -372,13 +372,15 @@ public partial class App : Application
         _trayConfirmation?.Dispose();
         _trayConfirmation = Motion.Run(
             TrayConfirmationMs,
-            Motion.EaseOutBack,
-            eased =>
+            // Linear, because the callback below is a three-phase TIMELINE and needs the
+            // clock, not a shape. EaseOutBack driving it directly put the eased value above
+            // 1.0 from t=0.36 to t=0.85, which the clamp then flattened: the badge collapsed
+            // at a third of the way in and the rest of the tween drew nothing while still
+            // holding the high-resolution timer.
+            static p => p,
+            progress =>
             {
-                // Pop in over the first third, hold, then fall away — the badge is a beat,
-                // not a state, so it must clearly end.
-                double p = Math.Clamp(eased, 0, 1);
-                double scale = p < 0.30 ? p / 0.30 : p > 0.78 ? Math.Max(0, 1 - (p - 0.78) / 0.22) : 1;
+                double scale = TrayIconFactory.ConfirmationBadgeScale(progress);
                 if (_tray is null)
                     return;
                 // TrayIconFactory quantizes the badge to seven cached steps, so ~78 frames
@@ -395,7 +397,7 @@ public partial class App : Application
             });
     }
 
-    private const int TrayConfirmationMs = 620;
+    private const int TrayConfirmationMs = TrayIconFactory.ConfirmationMs;
 
     private WF.ToolStripMenuItem? _desktopIconsMenuItem;
     private WF.ToolStripMenuItem? _recentsMenuItem;
@@ -482,7 +484,9 @@ public partial class App : Application
             string file = path;
             var item = new WF.ToolStripMenuItem(Path.GetFileName(file))
             {
-                Image = TryLoadThumbnail(file),
+                // Same gutter as the Segoe glyphs above it, so it has to be the same size at
+                // the same DPI — a fixed 16 px thumbnail sits small in a 24 px gutter at 150%.
+                Image = TryLoadThumbnail(file, MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96)),
             };
             item.Click += (_, _) => EditFromHistory(file);
             _recentsMenuItem.DropDownItems.Add(item);
@@ -491,14 +495,14 @@ public partial class App : Application
 
     private const int RecentCaptureCount = 6;
 
-    private static SD.Image? TryLoadThumbnail(string path)
+    private static SD.Image? TryLoadThumbnail(string path, int size)
     {
         try
         {
             if (!File.Exists(path) || Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
                 return null;
             using var source = new SD.Bitmap(path);
-            return source.GetThumbnailImage(16, 16, null, IntPtr.Zero);
+            return source.GetThumbnailImage(size, size, null, IntPtr.Zero);
         }
         catch (Exception ex)
         {
@@ -613,10 +617,14 @@ public partial class App : Application
             using (var g = SD.Graphics.FromImage(bmp))
             {
                 g.Clear(SD.Color.Transparent);
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                // AntiAliasGridFit, not ClearType: subpixel AA needs an opaque ground to
+                // blend against, and this bitmap is transparent — the glyph edges would come
+                // back colour-fringed with partial alpha. It is also the only text rendering
+                // hint the rest of the app uses.
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                 // A point size renders at the Graphics' DPI, and a bitmap's is always 96 —
                 // so the glyph has to be told to grow, exactly like the box around it.
-                using var font = ThemePalette.IconFont(9f * dpi / 96f);
+                using var font = ThemePalette.IconFont(ThemePalette.TextBodyPt * dpi / 96f);
                 using var brush = new SD.SolidBrush(ThemePalette.TextPrimary);
                 using var format = new SD.StringFormat
                 {
@@ -1949,10 +1957,12 @@ public partial class App : Application
         var win = new FastPinWindow(overlay.CloneImage(), _settings);
         PerfLog.TrackFirstShown(win, "pin window");
         win.Show();
-        // The card stays. Closing it here meant its 360 ms exit started in the same call that
-        // began the pin glyph's 140 ms outline-to-solid cross-fade, so the confirmation
-        // played on a surface already flying off screen and nobody ever saw it. The filled
-        // pin IS the confirmation now, and the card's other actions stay reachable.
+        // The card is dismissed by a pin, exactly as it always has been — that dismissal is
+        // part of the pinned surface and not this track's to change. The outline-to-solid
+        // swap therefore has to be instant rather than a 140 ms cross-fade: it lands before
+        // the card's own exit begins, so the glyph reads solid for the length of the exit
+        // instead of racing it.
+        overlay.Close();
     }
 
     private async void OcrFromOverlay(FastQuickActionsWindow overlay)
@@ -2099,7 +2109,11 @@ public partial class App : Application
         {
             case NotificationStyle.Off:
                 return;
-            case NotificationStyle.System:
+            // A shell balloon needs a visible NotifyIcon to come out of. With "Show icon"
+            // off the NotifyIcon is alive but invisible and ShowBalloonTip is a silent
+            // no-op, so the user picks a confirmation channel and gets nothing. Fall back
+            // to the in-app toast, which needs no tray at all.
+            case NotificationStyle.System when _tray is { Visible: true }:
                 // The shell notification carries no buttons, so an action (the OCR "Open
                 // link") is lost here by construction. The text is already on the clipboard.
                 ShowShellBalloon(title, message, severity);
@@ -2150,7 +2164,8 @@ public partial class App : Application
         catch (Exception ex)
         {
             // The toast is a window and a window can fail to create; the balloon is the one
-            // piece of feedback that never needs one.
+            // piece of feedback that never needs one — as long as the tray icon is showing.
+            // When it is not there is nowhere left to put this, and the log is the record.
             Log.Error("Toast failed; falling back to the tray balloon", ex);
             ShowShellBalloon(title, message, severity);
         }

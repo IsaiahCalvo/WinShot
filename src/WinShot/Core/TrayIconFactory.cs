@@ -18,6 +18,31 @@ public enum TrayIconVariant
 
 internal static class TrayIconFactory
 {
+    /// <summary>Pop in, hold, fall away: three durations from the motion vocabulary rather
+    /// than one invented total.</summary>
+    public const int ConfirmationMs = Motion.EnterDurationMs + Motion.SwapMs + Motion.ExitDurationMs;
+
+    /// <summary>
+    /// The badge's size at <paramref name="progress"/> through the confirmation beat, where
+    /// progress is LINEAR time over <see cref="ConfirmationMs"/>. A beat is a timeline, not a
+    /// curve: driving these phase boundaries with an eased value instead put EaseOutBack's
+    /// overshoot above 1.0 for two thirds of the tween, which the phase maths read as "past
+    /// the end" and collapsed the badge a third of the way in. EaseOutBack shapes the pop-in
+    /// alone — its overshoot is what makes a confirmation land rather than merely appear.
+    /// </summary>
+    public static double ConfirmationBadgeScale(double progress)
+    {
+        double ms = Math.Clamp(progress, 0, 1) * ConfirmationMs;
+        if (ms < Motion.EnterDurationMs)
+            return Motion.EaseOutBack(ms / Motion.EnterDurationMs);
+
+        double held = ms - Motion.EnterDurationMs;
+        if (held < Motion.SwapMs)
+            return 1;
+
+        return Math.Max(0, 1 - (held - Motion.SwapMs) / Motion.ExitDurationMs);
+    }
+
     // Icons are cached for the process: a NotifyIcon swap happens on every capture
     // confirmation, and each Create() otherwise costs an ICO decode plus a GDI handle.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(TrayIconVariant, int), SD.Icon>

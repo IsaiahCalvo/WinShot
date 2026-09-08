@@ -287,33 +287,49 @@ public class SettingsService
         }
     }
 
-    public void Save()
+    /// <summary>
+    /// Writes the settings file. Returns false when nothing reached disk — a refused save, a
+    /// locked or read-only file, a full drive. The failure is still logged and never thrown:
+    /// callers on the capture path must not die of it. But it IS reported, because Settings
+    /// has no OK button any more — a checkbox commits the moment it is ticked, so a swallowed
+    /// failure leaves the control looking applied and the preference gone.
+    /// </summary>
+    public bool Save()
     {
+        bool saved = false;
         try
         {
-            if (GuardSave())
+            saved = GuardSave();
+            if (saved)
                 WriteAtomically(JsonSerializer.Serialize(Current, JsonOptions));
         }
         catch (Exception ex)
         {
+            saved = false;
             Log.Error("Failed to save settings", ex);
         }
         Changed?.Invoke();
+        return saved;
     }
 
-    public async Task SaveAsync()
+    /// <inheritdoc cref="Save"/>
+    public async Task<bool> SaveAsync()
     {
         string json = JsonSerializer.Serialize(Current, JsonOptions);
+        bool saved = false;
         try
         {
-            if (GuardSave())
+            saved = GuardSave();
+            if (saved)
                 await Task.Run(() => WriteAtomically(json));
         }
         catch (Exception ex)
         {
+            saved = false;
             Log.Error("Failed to save settings", ex);
         }
         Changed?.Invoke();
+        return saved;
     }
 
     /// <summary>Pre-save safety: refuse saves before Load(), and preserve an unreadable-but-

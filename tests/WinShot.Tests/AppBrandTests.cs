@@ -86,10 +86,42 @@ public class AppBrandTests
         Assert.True(DifferingPixels(a, b) > 20, "the slashed variant must actually look different");
     }
 
+    /// <summary>
+    /// The beat this animation is supposed to be: a badge that grows in, HOLDS long enough to
+    /// be read, and then leaves — with no dead tail. Driving the phase boundaries with an
+    /// eased value rather than the clock shipped once, and EaseOutBack's overshoot above 1.0
+    /// clamped the timeline to "finished" a third of the way in: the badge was gone for the
+    /// last ~350 ms while the tween kept ticking and kept timeBeginPeriod(1) raised.
+    /// </summary>
+    [Fact]
+    public void ConfirmationBeat_PopsIn_Holds_AndIsGoneOnlyAtTheEnd()
+    {
+        static double At(int ms) => TrayIconFactory.ConfirmationBadgeScale(ms / (double)TrayIconFactory.ConfirmationMs);
+
+        Assert.Equal(0, At(0), 3);
+        // Pop-in overshoots and settles — that is what EaseOutBack is for here.
+        Assert.True(At(Motion.EnterDurationMs / 2) > 0.5);
+        Assert.Equal(1, At(Motion.EnterDurationMs), 3);
+
+        // Held at full size across the whole hold, not collapsed early.
+        Assert.Equal(1, At(Motion.EnterDurationMs + Motion.SwapMs / 2), 3);
+
+        // Still on screen most of the way through, and only just gone at the end.
+        int fallStart = Motion.EnterDurationMs + Motion.SwapMs;
+        Assert.True(At(fallStart + Motion.ExitDurationMs / 2) > 0.4);
+        Assert.True(At(TrayIconFactory.ConfirmationMs - 1) > 0);
+        Assert.Equal(0, At(TrayIconFactory.ConfirmationMs), 3);
+
+        // No dead frames: the badge is drawn at all (scale > 0.01, TrayIconFactory's own
+        // threshold) for every millisecond of the tween but its last.
+        for (int ms = 1; ms < TrayIconFactory.ConfirmationMs; ms += 5)
+            Assert.True(At(ms) > 0.01, $"the badge is invisible at {ms}ms of {TrayIconFactory.ConfirmationMs}ms");
+    }
+
     [Fact]
     public void ConfirmBadge_QuantizesItsFrames_SoTheBeatIsNotSixtyGdiHandles()
     {
-        // The confirmation runs ~620 ms of frames through Create(Confirm, progress). Nothing
+        // The confirmation runs one beat of frames through Create(Confirm, progress). Nothing
         // disposes these icons — the tray holds the last one — so a distinct icon per frame
         // would leak a GDI handle per copy or save, all day.
         var seen = new HashSet<SD.Icon>();
