@@ -435,7 +435,7 @@ public class QuickAccessOverlayInteractionTests
             Assert.Null(card.ToastAnchor());
 
             var method = typeof(FastQuickActionsWindow)
-                .GetMethod("ShowShareToast", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                .GetMethod("ShowCardToast", BindingFlags.Instance | BindingFlags.NonPublic)!;
             method.Invoke(card, new object[] { "Share failed", "The drive is full.", ToastSeverity.Error });
         });
     }

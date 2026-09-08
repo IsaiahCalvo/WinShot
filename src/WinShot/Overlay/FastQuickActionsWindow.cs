@@ -903,7 +903,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // whether the auto-close timer happened to fire first.
             FlashStatus(message == FriendlyError.Generic ? title : message, failure: true);
         else
-            ShowShareToast(title, message, Core.ToastSeverity.Error);
+            ShowCardToast(title, message, Core.ToastSeverity.Error);
     }
 
     /// <summary>
@@ -1903,7 +1903,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// <summary>
     /// Rotate/flip the card's bitmap in place. <see cref="SD.Image.RotateFlip"/> swaps
     /// the dimensions on a quarter turn, so only the preview has to be re-rendered.
-    /// The card stays open, and the row keeps an undo button until the card closes.
+    /// The card stays open. There is no undo button on the row and there is not going
+    /// to be one — Isaiah had it built and removed it.
     /// </summary>
     private async void TransformImage(SD.RotateFlipType transform)
     {
@@ -2199,10 +2200,10 @@ public sealed class FastQuickActionsWindow : WF.Form
                     Close();
                     return;
                 case BlipShareResult.NeedsRestart:
-                    ShowShareToast("Blip can't receive shares", "Restart Blip and try again.", Core.ToastSeverity.Error);
+                    ShowCardToast("Blip can't receive shares", "Restart Blip and try again.", Core.ToastSeverity.Error);
                     return;
                 default:
-                    ShowShareToast("Blip share failed", "The capture was not handed to Blip.", Core.ToastSeverity.Error);
+                    ShowCardToast("Blip share failed", "The capture was not handed to Blip.", Core.ToastSeverity.Error);
                     return;
             }
         }
@@ -2211,14 +2212,14 @@ public sealed class FastQuickActionsWindow : WF.Form
             // The two switch arms above already say a share failed; a throw out of
             // EnsureDragFileAsync is the same outcome and was the one arriving silently.
             Log.Error("Blip share failed", ex);
-            ShowShareToast("Blip share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
+            ShowCardToast("Blip share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
         }
     }
 
     /// <summary>The app's one toast, anchored to this card when there is still a card to
     /// anchor to. Severity is always passed rather than left at Info — an info glyph on
     /// "Save failed" looks exactly like the "Copied" confirmation.</summary>
-    private void ShowShareToast(string title, string message, Core.ToastSeverity severity)
+    private void ShowCardToast(string title, string message, Core.ToastSeverity severity)
         => ShowToastAt(ToastAnchor(), title, message, severity);
 
     /// <summary>
@@ -2244,7 +2245,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// only while it is alive: every caller sits after an await — the share sheet's own error
     /// callback arrives whenever Windows gets round to preparing the files — and
     /// RectangleToScreen forces a handle, which throws ObjectDisposedException on a card the
-    /// auto-close timer already took. That threw out of ShowShareToast's first line, so its
+    /// auto-close timer already took. That threw out of ShowCardToast's first line, so its
     /// catch swallowed the very failure the toast exists to report. The corner placement is
     /// where a message about a card that is gone belongs anyway.
     /// </summary>
@@ -2271,13 +2272,13 @@ public sealed class FastQuickActionsWindow : WF.Form
                 ex =>
                 {
                     Log.Error("Windows share failed", ex);
-                    ShowShareToast("Share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
+                    ShowCardToast("Share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
                 });
         }
         catch (Exception ex)
         {
             Log.Error("Share failed", ex);
-            ShowShareToast("Share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
+            ShowCardToast("Share failed", FriendlyError.For(ex), Core.ToastSeverity.Error);
         }
     }
 
@@ -2900,7 +2901,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             // Error, not Info: the user just double-clicked asking for the editor and is
             // being refused. The same glyph as "Copied" is what the severity glyph exists
             // to stop.
-            ShowShareToast("This recording can't be edited", "No video editor is available for it.", Core.ToastSeverity.Error);
+            ShowCardToast("This recording can't be edited", "No video editor is available for it.", Core.ToastSeverity.Error);
     }
 
     private int HitTestButton(SD.Point point)
@@ -3013,7 +3014,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 // a toast the entire interaction is a card flying off screen. Ctrl+C now
                 // reaches the card on hover alone, which makes silence worse — the
                 // clipboard changed under someone who was aiming at the app underneath.
-                ShowShareToast(
+                ShowCardToast(
                     "Copied",
                     _mediaFilePath is not null ? Path.GetFileName(_mediaFilePath) : "Capture is on the clipboard.",
                     Core.ToastSeverity.Success);
@@ -3270,7 +3271,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void AnnounceSave(string path)
     {
         (string title, string body) = SaveConfirmation(path);
-        ShowShareToast(title, body, Core.ToastSeverity.Success);
+        ShowCardToast(title, body, Core.ToastSeverity.Success);
     }
 
     /// <summary>The save confirmation as the toast phrases it: the file, not the path.</summary>
