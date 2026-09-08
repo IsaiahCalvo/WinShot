@@ -2333,8 +2333,25 @@ public partial class App : Application
     {
         var win = EditorWindow.CreateForCapture(overlay.CloneImage(), _settings, _history);
         TrackFirstRender(win, "editor window");
-        win.Show();
-        overlay.Close();
+        // The card steps aside rather than being consumed: annotate, save, and the same
+        // card comes back holding the annotated image, with Copy / drag-out still on it.
+        // Pin still consumes its card — the pin is the card, relocated.
+        overlay.StepAside();
+        win.ImageCommitted += overlay.ReplaceImageFromEditor;
+        win.Closed += (_, _) => overlay.ComeBack();
+        try
+        {
+            win.Show();
+        }
+        catch (Exception ex)
+        {
+            // Closed never fires on a window that failed to open, and the card is already off
+            // screen: out of the stack, auto-close paused, holding its full-size bitmap, with
+            // no row or hotkey that can reach it again. Bring it back instead of stranding it.
+            Log.Error("The annotate editor could not be opened", ex);
+            overlay.ComeBack();
+            ShowBalloon("Couldn't open the editor", FriendlyError.For(ex), ToastSeverity.Error);
+        }
     }
 
     /// <summary>
@@ -2398,13 +2415,18 @@ public partial class App : Application
 
     private void PinFromOverlay(FastQuickActionsWindow overlay)
     {
-        // The card is dismissed by a pin, exactly as it always has been — that dismissal is
-        // part of the pinned surface and not this track's to change. The outline-to-solid
-        // swap therefore has to be instant rather than a 140 ms cross-fade: it lands before
-        // the card's own exit begins, so the glyph reads solid for the length of the exit
-        // instead of racing it.
-        ShowPin(overlay.CloneImage());
-        overlay.Close();
+        // The pin is the card, relocated: it grows out of the card's own rectangle, and the
+        // card goes without its exit flight so there are never two of the same capture.
+        // When the grow is refused -- card and pin on different monitors -- the card keeps
+        // its ordinary flight instead, so the gesture is never a hard cut at both ends.
+        // Either way the card is dismissed by a pin, exactly as it always has been; that is
+        // why the card's outline-to-solid pin swap is instant rather than a 140 ms
+        // cross-fade, so the glyph reads solid for the length of the exit instead of racing it.
+        ShowPin(overlay.CloneImage(), out bool grew, overlay.CardScreenBounds);
+        if (grew)
+            overlay.CloseWithoutMotion();
+        else
+            overlay.Close();
     }
 
     /// <summary>
@@ -2412,9 +2434,20 @@ public partial class App : Application
     /// on <see cref="FastPinWindow.DefaultEditHandler"/>, so a pin built anywhere else -- the
     /// recording completion card -- gets a working Edit too.
     /// </summary>
-    private FastPinWindow ShowPin(SD.Bitmap image, string perfLabel = "pin window")
+    private FastPinWindow ShowPin(SD.Bitmap image, string perfLabel = "pin window") =>
+        ShowPin(image, out _, null, perfLabel);
+
+    /// <summary>
+    /// The same pin, grown out of an on-screen rectangle -- the quick-actions card, when the
+    /// pin was raised from it. <paramref name="grew"/> reports whether the grow was accepted;
+    /// <see cref="FastPinWindow.GrowFrom"/> refuses it across monitors, and that answer is
+    /// what tells the card whether to skip its own exit flight.
+    /// </summary>
+    private FastPinWindow ShowPin(
+        SD.Bitmap image, out bool grew, SD.Rectangle? growFrom, string perfLabel = "pin window")
     {
         var win = new FastPinWindow(image, _settings);
+        grew = growFrom is { } origin && win.GrowFrom(origin);
         PerfLog.TrackFirstShown(win, perfLabel);
         win.Show();
         return win;

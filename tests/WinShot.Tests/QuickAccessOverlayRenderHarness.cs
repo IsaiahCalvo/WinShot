@@ -200,6 +200,7 @@ public class QuickAccessOverlayRenderHarness
                 RenderState(black, settings, QuickAccessOverlayTheme.Dark, hovering: false, hoverButton: -1,
                     Path.Combine(outDir, "dark-black-capture-idle.png"));
                 RenderStatusFlash(source, settings, "Text copied", Path.Combine(outDir, "card-flash-text-copied.png"));
+                RenderRecordingCard(source, settings, outDir);
                 // The other content class this surface draws now that the failure paths write
                 // here: FriendlyError's longest line, which wraps to two rows on a 192px card
                 // (both complete, no ellipsis). CardStatusFlashStaysInsideTheCardPadding
@@ -283,6 +284,41 @@ public class QuickAccessOverlayRenderHarness
         Render(overlay, path);
     }
 
+    /// <summary>
+    /// The recording variant: the same card plus its duration / size strip.
+    ///
+    /// Known limitation, and it is the harness rather than the product: SvgIcons.Get
+    /// rasterises to zero visible pixels on a bare STA test thread, for every asset at
+    /// every size. So these PNGs show the duration and the size but no camcorder, exactly
+    /// as dark-hover.png shows empty circular buttons. The glyph's geometry is asserted by
+    /// MediaCardStripTests instead — do not read a missing glyph here as a bug in the strip.
+    /// </summary>
+    private static void RenderRecordingCard(SD.Bitmap source, SettingsService settings, string outDir)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"winshot-render-media-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string media = Path.Combine(directory, "recording.mp4");
+            File.WriteAllBytes(media, new byte[7130316]);
+            using var overlay = FastQuickActionsWindow.CreateForMediaFile(
+                media,
+                (SD.Bitmap)source.Clone(),
+                settings,
+                canEdit: true,
+                duration: TimeSpan.FromSeconds(53));
+            overlay.CreateControl();
+            SetPreviewBitmaps(overlay, source);
+            Render(overlay, Path.Combine(outDir, "dark-recording-idle.png"));
+            Invoke(overlay, "SetHovering", true);
+            Render(overlay, Path.Combine(outDir, "dark-recording-hover.png"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static void SetPreviewBitmaps(FastQuickActionsWindow overlay, SD.Bitmap source)
     {
         var type = typeof(FastQuickActionsWindow);
@@ -290,7 +326,9 @@ public class QuickAccessOverlayRenderHarness
             .GetValue(overlay)!;
         var createPreview = type.GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!;
         var createBlurred = type.GetMethod("CreateBlurred", BindingFlags.Static | BindingFlags.NonPublic)!;
-        var preview = (SD.Bitmap)createPreview.Invoke(null, new object[] { source, thumb.Width, thumb.Height })!;
+        // The settled card is the bicubic pass, so the harness renders that one, not the
+        // bilinear first frame RenderFirstPreview puts up while the async render catches up.
+        var preview = (SD.Bitmap)createPreview.Invoke(null, new object[] { source, thumb.Width, thumb.Height, false })!;
         var blurred = (SD.Bitmap)createBlurred.Invoke(null, new object[] { preview })!;
         type.GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, preview);
         type.GetField("_blurredPreview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, blurred);
@@ -369,7 +407,9 @@ public class QuickAccessOverlayRenderHarness
 
         var canvasSize = new SD.Size(720, 520);
         int edge = 24;
-        int step = card.Height + 12;
+        // The product's gutter, not a copy of the number it happened to use: hard-coded,
+        // the sheet drifts from the app the first time StackGutter changes.
+        int step = card.Height + QuickAccessOverlayLayout.StackGutter(96);
         var baseSlot = new SD.Point(canvasSize.Width - card.Width - edge, canvasSize.Height - card.Height - edge);
         var secondSlot = new SD.Point(baseSlot.X, baseSlot.Y - step);
         var thirdSlot = new SD.Point(baseSlot.X, baseSlot.Y - step * 2);
@@ -394,6 +434,31 @@ public class QuickAccessOverlayRenderHarness
                 DrawWithOpacity(graphics, card, point, QuickAccessOverlayMotion.ExitOpacity(progress));
             }
             DrawMotionLabel(graphics, $"Exit {progress:P0}");
+            frames.Add(frame);
+        }
+
+        // The arrival is this track's headline motion and never reached a render PNG: the
+        // overshoot-versus-neighbour geometry was only ever checked numerically. EaseOutBack
+        // peaks above 1, so these frames are where a reviewer can see that the overshoot
+        // goes into empty space rather than over the card below.
+        foreach (double progress in new[] { 0.25d, 0.6d, 1d })
+        {
+            var frame = CreateMotionCanvas(canvasSize);
+            using var graphics = SD.Graphics.FromImage(frame);
+            graphics.DrawImageUnscaled(card, baseSlot);
+            graphics.DrawImageUnscaled(card, secondSlot);
+            SD.Point enterFrom = QuickAccessOverlayMotion.EnterOrigin(
+                new SD.Rectangle(SD.Point.Empty, canvasSize),
+                new SD.Rectangle(thirdSlot, card.Size),
+                "bottom-right",
+                QuickAccessOverlayLayout.StackGutter(96));
+            // InterpolateUnclamped, the same call BeginEnterMotion makes. Interpolate clamps
+            // progress to [0,1], and EaseOutBack(0.6) is 1.099 — clamped, the 60 % frame is
+            // byte-identical to the 100 % frame and the sheet shows no overshoot at all,
+            // which is the one thing these frames were added to show.
+            graphics.DrawImageUnscaled(card, QuickAccessOverlayMotion.InterpolateUnclamped(
+                enterFrom, thirdSlot, QuickAccessOverlayMotion.EaseOutBack(progress)));
+            DrawMotionLabel(graphics, $"Enter {progress:P0}");
             frames.Add(frame);
         }
 

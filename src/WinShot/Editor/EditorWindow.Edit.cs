@@ -476,6 +476,62 @@ public partial class EditorWindow : Window
     // ------------------------------------------------------- copy/save/close
 
     /// <summary>
+    /// The composed image, handed over once as the editor closes. The quick-actions card
+    /// the session started from listens so it can update in place instead of being left
+    /// holding the unannotated capture. The handler owns the bitmap it is given.
+    /// </summary>
+    internal event Action<SD.Bitmap>? ImageCommitted;
+
+    /// <summary>
+    /// Raised from the close path rather than from the save dialog. "Done" is the editor's
+    /// primary exit and Copy never touches disk at all, so raising this only after a
+    /// successful "Save as…" left the card holding the pre-annotation pixels on every flow
+    /// people actually use — and every card verb (Copy, Save, drag-out, Pin, Extract text)
+    /// then served the stale bitmap.
+    /// </summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel || _closed || ImageCommitted is not { } committed)
+            return;
+        // Nothing was drawn, so nothing to hand back. Flatten() is a full-size WPF render
+        // and the card answers it by re-encoding the on-disk history file — opening the
+        // editor and pressing Done used to cost both, and a JPEG history entry a
+        // generation of quality, for a visit that changed nothing.
+        if (_undoStack.Count == 0)
+            return;
+        // The same guard every other Flatten() call site takes. Flatten reads _source for
+        // the render size, and a crop, resize or background op swaps _source on an async
+        // continuation — closing the editor while one is in flight would hand the card a
+        // canvas rendered at the pre-swap dimensions.
+        if (_sourceOperationActive)
+            return;
+
+        // Cleared first: a handler that reopens or re-closes must not be handed a second copy.
+        ImageCommitted = null;
+        try
+        {
+            committed(Flatten());
+        }
+        catch (Exception ex)
+        {
+            // The card fades back in holding the capture as it was before the editor opened,
+            // so without this the user draws, presses Done, and gets the original back with
+            // nothing on screen saying the annotations did not make it — and Copy, Save,
+            // drag-out and Pin then all serve the un-annotated bitmap.
+            Log.Error("Handing the composed image back to the quick-actions card failed", ex);
+            App.Toast(
+                // What actually failed is the hand-off, not the save: this runs on the close
+                // path whatever the user did in the editor, so after a successful "Save a
+                // copy…" the annotated file is on disk and only the card missed it. Same
+                // wording the card raises for its own half of this failure.
+                "Your annotations didn't reach the card",
+                FriendlyError.For(ex),
+                severity: ToastSeverity.Error);
+        }
+    }
+
+    /// <summary>
     /// Flattens at identity transform: RenderVisual snapshots CanvasHost in its
     /// own coordinate space at the source bitmap's pixel size, so the viewport's
     /// zoom/pan (applied on the EditorSurface ancestor) never affects the output,

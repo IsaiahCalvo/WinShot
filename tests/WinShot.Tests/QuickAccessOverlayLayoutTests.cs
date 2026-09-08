@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
@@ -106,4 +106,50 @@ public class QuickAccessOverlayLayoutTests
     [Fact]
     public void NewSettings_DefaultToBottomRight()
         => Assert.Equal("bottom-right", new Settings().OverlayPosition);
+
+    [Theory]
+    [InlineData(96, 12)]
+    [InlineData(120, 15)]
+    [InlineData(144, 18)]
+    [InlineData(192, 24)]
+    public void TheStackGutterScalesWithTheCard(int dpi, int expected)
+        => Assert.Equal(expected, QuickAccessOverlayLayout.StackGutter(dpi));
+
+    [Fact]
+    public void ARegularScreenHoldsFiveCardsAndAShortOneHoldsFewer()
+    {
+        var card = new SD.Size(192, 120);
+        var full = new SD.Rectangle(0, 0, 1920, 1040);
+        var short_ = new SD.Rectangle(0, 0, 1920, 320);
+        var sliver = new SD.Rectangle(0, 0, 1920, 60);
+
+        Assert.Equal(5, QuickAccessOverlayLayout.StackCapacity(full, card, "bottom-right", 96));
+        Assert.Equal(2, QuickAccessOverlayLayout.StackCapacity(short_, card, "bottom-right", 96));
+        // Never zero: the card that was just captured always gets a slot.
+        Assert.Equal(1, QuickAccessOverlayLayout.StackCapacity(sliver, card, "bottom-right", 96));
+    }
+
+    [Fact]
+    public void ADeeperMonitorDoesNotBuyADeeperPile()
+        => Assert.Equal(
+            5,
+            QuickAccessOverlayLayout.StackCapacity(
+                new SD.Rectangle(0, 0, 3840, 2160), new SD.Size(192, 120), "bottom-right", 96));
+
+    // The side anchors start CENTRED and stack downward, so only the half of the screen
+    // below centre is theirs. Counting the whole height let two cards past the cap and land
+    // on the same clamped pixel — the pile the cap exists to prevent.
+    [Theory]
+    [InlineData("left")]
+    [InlineData("right")]
+    public void ACentredAnchorOnlyCountsTheHalfOfTheScreenItStacksInto(string position)
+    {
+        var card = new SD.Size(192, 120);
+        var full = new SD.Rectangle(0, 0, 1920, 1040);
+
+        int centred = QuickAccessOverlayLayout.StackCapacity(full, card, position, 96);
+        int edged = QuickAccessOverlayLayout.StackCapacity(full, card, "bottom-right", 96);
+
+        Assert.InRange(centred, 1, edged - 1);
+    }
 }

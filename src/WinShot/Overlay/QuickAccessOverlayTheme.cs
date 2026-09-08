@@ -24,7 +24,12 @@ internal readonly record struct QuickAccessOverlayVisuals(
     SD.Color FocusRing,
     SD.Color TooltipFill,
     SD.Color TooltipBorder,
-    SD.Color TooltipText);
+    SD.Color TooltipText,
+    /// <summary>Flat scrim under the recording card's duration/size strip, with the lead-in
+    /// gradient above it ramping from the same colour at zero alpha. Graded per theme against
+    /// <see cref="Glyph"/> over a WHITE capture — a recording of a bright document is the
+    /// common case, and that is where a black-on-black ramp falls under 4.5:1.</summary>
+    SD.Color MediaStripScrim);
 
 internal static class QuickAccessOverlayThemePalette
 {
@@ -47,7 +52,10 @@ internal static class QuickAccessOverlayThemePalette
             FocusRing: SD.Color.FromArgb(0x24, 0x86, 0xFF),
             TooltipFill: SD.Color.FromArgb(0xF7, 0xFB, 0xFF),
             TooltipBorder: SD.Color.FromArgb(42, 17, 24, 32),
-            TooltipText: SD.Color.FromArgb(0x11, 0x18, 0x20)),
+            TooltipText: SD.Color.FromArgb(0x11, 0x18, 0x20),
+            // Light's glyph is near-black, so its scrim has to be near-white or the strip
+            // would print black text on a black bar.
+            MediaStripScrim: SD.Color.FromArgb(170, 255, 255, 255)),
         _ => new(
             CardFill: ThemePalette.WindowBg,
             CardEdge: SD.Color.FromArgb(46, 255, 255, 255),
@@ -61,6 +69,7 @@ internal static class QuickAccessOverlayThemePalette
             FocusRing: SD.Color.FromArgb(0x24, 0x86, 0xFF),
             TooltipFill: SD.Color.FromArgb(0x16, 0x18, 0x1F),
             TooltipBorder: SD.Color.FromArgb(48, 255, 255, 255),
-            TooltipText: SD.Color.FromArgb(0xF7, 0xF9, 0xFC)),
+            TooltipText: SD.Color.FromArgb(0xF7, 0xF9, 0xFC),
+            MediaStripScrim: SD.Color.FromArgb(150, 0, 0, 0)),
     };
 }

@@ -1,6 +1,7 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Overlay;
 using WinShot.Pin;
+using SD = System.Drawing;
 
 namespace WinShot.Recording;
 
@@ -15,12 +16,13 @@ public static class RecordingCompletionOverlay
     {
         try
         {
-            var thumbnail = await VideoThumbnail.CreateAsync(filePath);
+            (SD.Bitmap thumbnail, TimeSpan? duration) = await VideoThumbnail.CreateWithDurationAsync(filePath);
             var overlay = FastQuickActionsWindow.CreateForMediaFile(
                 filePath,
                 thumbnail,
                 settings,
-                canEdit: onEdit is not null);
+                canEdit: onEdit is not null,
+                duration: duration);
             if (onEdit is not null)
             {
                 overlay.EditRequested += o =>
@@ -32,9 +34,15 @@ public static class RecordingCompletionOverlay
             overlay.PinRequested += o =>
             {
                 var pin = new FastPinWindow(o.CloneImage(), settings);
+                // Same trade as App.PinFromOverlay: the card only skips its exit flight when
+                // the pin is going to grow out of it.
+                bool grows = pin.GrowFrom(o.CardScreenBounds);
                 PerfLog.TrackFirstShown(pin, "pin window");
                 pin.Show();
-                o.Close();
+                if (grows)
+                    o.CloseWithoutMotion();
+                else
+                    o.Close();
             };
             PerfLog.TrackFirstShown(overlay, "recording overlay");
             overlay.Show();

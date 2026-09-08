@@ -1,7 +1,8 @@
-using System.IO;
+﻿using System.IO;
 using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
+using WF = System.Windows.Forms;
 
 namespace WinShot.Tests;
 
@@ -37,14 +38,16 @@ public class QuickActionsMenuTests
                 QuickActionsMenu.ShowInFolder,
                 QuickActionsMenu.MoveToRecycleBin,
                 QuickActionsMenu.ShareGroup,
+                QuickActionsMenu.SaveAll,
+                QuickActionsMenu.CloseAll,
+                QuickActionsMenu.TemporarilyHide,
                 QuickActionsMenu.Close,
             },
             ids);
         Assert.DoesNotContain(
             QuickActionsMenu.Rows(false, true, true, true),
             r => r.Text.Contains("Cloud", StringComparison.OrdinalIgnoreCase) ||
-                 r.Text.Contains("Quick Look", StringComparison.OrdinalIgnoreCase) ||
-                 r.Text.Contains("Temporarily", StringComparison.OrdinalIgnoreCase));
+                 r.Text.Contains("Quick Look", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -338,5 +341,110 @@ public class QuickActionsMenuTests
         {
             File.Delete(path);
         }
+    }
+
+    [Theory]
+    // The two chords hover may claim. Both misfire visibly and neither destroys anything:
+    // Ctrl+C puts the capture on the clipboard, Ctrl+E opens the editor on it.
+    [InlineData(WF.Keys.Control | WF.Keys.C, true)]
+    [InlineData(WF.Keys.Control | WF.Keys.E, true)]
+    // NOT Ctrl+S and NOT Ctrl+W, however much the card advertises them. Hovering a card is
+    // not a decision, and there is no honest signal that separates "reaching for the card"
+    // from "the pointer is parked in the corner" — the card is never activated, so focus
+    // never moves and nothing on screen changes. Getting Ctrl+S wrong saves the screenshot,
+    // toasts "Saved <name>.png", and leaves the document the user meant to save still
+    // dirty; Ctrl+W closes the card instead of the browser tab. Both still work through the
+    // card's own KeyDown once it genuinely has focus, which is where they are advertised.
+    [InlineData(WF.Keys.Control | WF.Keys.S, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.W, false)]
+    // Everything that belongs to the window underneath. The hook is gated on hover, not on
+    // focus, so a bare letter it swallowed would be a letter the user was typing into a
+    // document — and the card would run a save or an OCR pass instead of printing it. The
+    // bare P/O/B, Escape and Tab the card also handles still work, through its own KeyDown,
+    // once it genuinely has focus — which right-clicking it (the only place those shortcuts
+    // are advertised) already does.
+    [InlineData(WF.Keys.C, false)]
+    [InlineData(WF.Keys.S, false)]
+    [InlineData(WF.Keys.E, false)]
+    [InlineData(WF.Keys.W, false)]
+    [InlineData(WF.Keys.P, false)]
+    [InlineData(WF.Keys.O, false)]
+    [InlineData(WF.Keys.B, false)]
+    [InlineData(WF.Keys.Escape, false)]
+    [InlineData(WF.Keys.Tab, false)]
+    [InlineData(WF.Keys.Shift | WF.Keys.Tab, false)]
+    [InlineData(WF.Keys.Enter, false)]
+    [InlineData(WF.Keys.Space, false)]
+    [InlineData(WF.Keys.Apps, false)]
+    [InlineData(WF.Keys.Shift | WF.Keys.F10, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.V, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.Z, false)]
+    [InlineData(WF.Keys.Alt | WF.Keys.F4, false)]
+    [InlineData(WF.Keys.Alt | WF.Keys.S, false)]
+    [InlineData(WF.Keys.A, false)]
+    [InlineData(WF.Keys.F10, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.Shift | WF.Keys.C, false)]
+    [InlineData(WF.Keys.Control | WF.Keys.Alt | WF.Keys.C, false)]
+    public void TheHoverHookClaimsOnlyTheChordsItCanAffordToGetWrong(WF.Keys keyData, bool claimed)
+        => Assert.Equal(claimed, QuickActionsMenu.ClaimsKey(keyData, canEdit: true));
+
+    /// <summary>
+    /// A recording with no video editor behind it offers no Edit button and no "Edit video"
+    /// row, so the hook must not eat Ctrl+E out of the foreground app on its behalf either.
+    /// </summary>
+    [Fact]
+    public void ACardWithNoEditActionDoesNotClaimCtrlE()
+    {
+        Assert.False(QuickActionsMenu.ClaimsKey(WF.Keys.Control | WF.Keys.E, canEdit: false));
+        Assert.True(QuickActionsMenu.ClaimsKey(WF.Keys.Control | WF.Keys.C, canEdit: false));
+    }
+
+    [Fact]
+    public void TheBatchRowsSitInTheSameBlockAsCloseAndAskBeforeTheyAct()
+    {
+        string[] ids = Ids();
+        int hide = Array.IndexOf(ids, QuickActionsMenu.TemporarilyHide);
+
+        // Directly above the single-item Close, not in a submenu.
+        Assert.Equal(
+            new[]
+            {
+                QuickActionsMenu.SaveAll,
+                QuickActionsMenu.CloseAll,
+                QuickActionsMenu.TemporarilyHide,
+                QuickActionsMenu.Close,
+            },
+            ids.Skip(hide - 2).ToArray());
+
+        var rows = QuickActionsMenu.Rows(false, true, true)
+            .Where(r => r.Id != QuickActionsMenu.Separator)
+            .ToDictionary(r => r.Id, r => r.Text);
+        // Only the row that asks for something gets the ellipsis: Save all opens a folder
+        // picker. Close all and Temporarily hide act immediately (and say what they did),
+        // so promising more input would be a lie.
+        Assert.EndsWith("…", rows[QuickActionsMenu.SaveAll], StringComparison.Ordinal);
+        Assert.False(rows[QuickActionsMenu.CloseAll].EndsWith("…", StringComparison.Ordinal));
+        Assert.False(rows[QuickActionsMenu.TemporarilyHide].EndsWith("…", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OnlyTheBatchRowsNeedMoreThanOneCard()
+    {
+        Assert.True(QuickActionsMenu.NeedsAStack(QuickActionsMenu.SaveAll));
+        Assert.True(QuickActionsMenu.NeedsAStack(QuickActionsMenu.CloseAll));
+        // Hiding one card is still worth offering.
+        Assert.False(QuickActionsMenu.NeedsAStack(QuickActionsMenu.TemporarilyHide));
+        Assert.False(QuickActionsMenu.NeedsAStack(QuickActionsMenu.Close));
+        Assert.False(QuickActionsMenu.NeedsAStack(QuickActionsMenu.Save));
+    }
+
+    [Fact]
+    public void ARecordingCardGetsTheBatchRowsToo()
+    {
+        string[] ids = Ids(mediaFile: true);
+
+        Assert.Contains(QuickActionsMenu.SaveAll, ids);
+        Assert.Contains(QuickActionsMenu.CloseAll, ids);
+        Assert.Contains(QuickActionsMenu.TemporarilyHide, ids);
     }
 }

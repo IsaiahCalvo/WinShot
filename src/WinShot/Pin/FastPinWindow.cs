@@ -1,5 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Overlay;
 using SD = System.Drawing;
@@ -134,6 +135,9 @@ public sealed class FastPinWindow : WF.Form
     /// <summary>A locked pin answers HTTRANSPARENT, so it gets no WM_MOUSELEAVE. This runs
     /// only while the pointer is over a locked pin and stops as soon as it is not.</summary>
     private readonly WF.Timer _lockedHoverTimer = new() { Interval = 120 };
+
+    private SD.Rectangle? _growFrom;
+    private IDisposable? _growMotion;
 
     public FastPinWindow(SD.Bitmap image, SettingsService? settings = null)
     {
@@ -313,7 +317,12 @@ public sealed class FastPinWindow : WF.Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             Teardown();
+            // An in-flight tween holds the process-wide high-resolution clock.
+            _growMotion?.Dispose();
+            _growMotion = null;
+        }
         base.Dispose(disposing);
     }
 
@@ -1543,6 +1552,72 @@ public sealed class FastPinWindow : WF.Form
         }
 
         Marshal.StructureToPtr(rc, m.LParam, false);
+    }
+
+    /// <summary>
+    /// Makes the pin grow out of <paramref name="origin"/> (screen pixels) the first time it
+    /// is shown. The pin *is* the quick-actions card, relocated — without this it simply
+    /// appeared in the middle of the screen while the card vanished in a corner, and nothing
+    /// connected the two. Call before <see cref="WF.Form.Show"/>.
+    ///
+    /// Returns false when it will not animate — the card and the pin are on different
+    /// monitors, see <see cref="BeginGrowMotion"/>. The caller needs to know, because the
+    /// card is dismissed without its exit flight on the strength of this: refusing both ends
+    /// left the one state change in the whole gesture with no motion at all.
+    /// </summary>
+    public bool GrowFrom(SD.Rectangle origin)
+    {
+        if (!WF.Screen.FromRectangle(origin).Equals(WF.Screen.FromRectangle(Bounds)))
+            return false;
+        _growFrom = origin;
+        return true;
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible)
+            BeginGrowMotion();
+    }
+
+    private void BeginGrowMotion()
+    {
+        if (_growFrom is not { Width: > 1, Height: > 1 } origin || !IsHandleCreated || IsDisposed)
+            return;
+
+        _growFrom = null;
+        SD.Rectangle target = Bounds;
+        if (origin == target)
+            return;
+        // Only when the card and the pin are on the same monitor. The pin cascades on the
+        // pointer's screen while the card sits on the PRIMARY whenever
+        // OverlayMoveToActiveScreen is off, so with the pointer on a second monitor the pin
+        // snapped onto the primary and then flew the width of the desktop — a window
+        // teleporting, which is the opposite of what "the card relocated" is meant to read
+        // as. Across a DPI boundary it is worse: setting Bounds over the seam raises
+        // WM_DPICHANGED, whose default handling resizes the window against every tween
+        // frame. Falling through leaves the plain appearance the pin had before.
+        if (!WF.Screen.FromRectangle(origin).Equals(WF.Screen.FromRectangle(target)))
+            return;
+
+        var tween = new RectangleTween();
+        tween.Retarget(origin, target);
+        Bounds = origin;
+        _growMotion?.Dispose();
+        // EaseOutCubic, not the EaseOutBack the card arrives on: the pin grows from the
+        // card's own rectangle to its final size, and Back overshoots that size — a pin
+        // that swells past its bounds and settles back reads as a wobble, not an arrival.
+        // Same duration as the card's entrance, so it is still the same object relocating.
+        _growMotion = Motion.Run(
+            Motion.EnterDurationMs,
+            Motion.EaseOutCubic,
+            eased =>
+            {
+                if (IsDisposed)
+                    return;
+                Bounds = tween.Update((float)eased) ? tween.Current : target;
+            },
+            () => _growMotion = null);
     }
 
     protected override void OnResize(EventArgs e)

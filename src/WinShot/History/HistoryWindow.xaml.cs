@@ -861,13 +861,15 @@ public partial class HistoryWindow : Window
     {
         try
         {
-            (SD.Bitmap image, TimeSpan duration) =
+            (SD.Bitmap image, TimeSpan? duration) =
                 await VideoThumbnail.CreateWithDurationAsync(path).ConfigureAwait(false);
             using (image)
             {
                 BitmapSource frame = CaptureService.ToBitmapSource(image);
                 frame.Freeze();
-                return (frame, duration);
+                // A duration the decoder could not read is Zero here, which the tile
+                // renders as no duration bar rather than "0s".
+                return (frame, duration ?? TimeSpan.Zero);
             }
         }
         catch (Exception ex)
