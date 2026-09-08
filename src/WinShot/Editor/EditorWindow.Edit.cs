@@ -206,18 +206,6 @@ public partial class EditorWindow : Window
         return action;
     }
 
-    /// <summary>
-    /// Drops the most recent undo entry WITHOUT running it. Used when a gesture that already
-    /// pushed a step turns out to be a no-op — a cancelled text re-edit, whose removal step
-    /// must not survive as an undoable "delete" (Survey's onEditCancel restores in place).
-    /// </summary>
-    private void DiscardLastAction()
-    {
-        if (_undoStack.Count == 0) return;
-        PopUndo().Discard();
-        UpdateUndoRedoButtons();
-    }
-
     /// <summary>Clears the redo stack, letting each dropped action release any
     /// resources it can no longer replay (e.g. blur/pixelate backup bitmaps).</summary>
     private void DiscardRedoStack()

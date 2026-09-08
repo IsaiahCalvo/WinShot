@@ -1655,6 +1655,17 @@ public partial class EditorWindow : Window
         // pointer move re-derives it.
         if (HoverHalo is not null) HoverHalo.Visibility = Visibility.Collapsed;
         UpdateSelectionHalos();
+        // Survey hides the SVG selection chrome for the object whose text editor is open, but
+        // KEEPS it selected — `if (isBeingEditedNow && editIsBorderFlush) return null`
+        // (SVGAnnotationLayer.jsx:5100-5101) and isSelectTool goes false for a live callout
+        // editor (:665-668). Dropping the selection instead is what greyed out the Aa button
+        // and emptied the format strip the moment an edit was committed.
+        if (_activeText is not null)
+        {
+            SelectionRect.Visibility = Visibility.Collapsed;
+            HideHandles();
+            return;
+        }
         // The crop-adjust overlay owns the handles while a pending crop is being fine-tuned;
         // don't let the selection refresh stomp it.
         if (_adjustingCrop || (_handleKind == HandleKind.Crop && _pendingCrop is not null))

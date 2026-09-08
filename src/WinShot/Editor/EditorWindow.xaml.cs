@@ -106,6 +106,20 @@ public partial class EditorWindow : Window
     private FrameworkElement? _reeditSource;
 
     /// <summary>
+    /// The part of <see cref="_reeditSource"/> hidden while its editor is open. Survey renders
+    /// the real annotation throughout the edit and only skips the glyph foreignObject
+    /// (SVGAnnotationLayer.jsx:3896-3906), so this is the inner TextBlock for the styles that
+    /// have a chrome Rectangle and the whole element for Outline/Pill, which do not.
+    /// </summary>
+    private UIElement? _reeditHiddenGlyphs;
+
+    /// <summary>
+    /// The re-edited element when it is still painting its own border — i.e. when the stand-in
+    /// preview rectangle must NOT be drawn, or the box would be outlined twice.
+    /// </summary>
+    private FrameworkElement? _reeditBox;
+
+    /// <summary>
     /// Rotation of the label being re-edited. CommitText rebuilds the label, so the angle has
     /// to survive the round trip the way Survey's deepClone does (textEditCommit.js:186-212).
     /// </summary>
@@ -2047,6 +2061,16 @@ public partial class EditorWindow : Window
 
     private void SyncTextFormatChrome()
     {
+        // Survey's font-family and font-size controls are CONTROLLED renders off the bridge
+        // state (`value={currentFamily}`, AppShell.jsx:1832-1852); `onSelect` fires ONLY from a
+        // user gesture (AnnotationDropdown.jsx:174-180, :43-48). Re-rendering with a new value
+        // mutates nothing. This method is pure chrome painting, so nothing it writes may reach
+        // an input handler — otherwise merely SELECTING a text box restyles it, pushing a
+        // phantom undo entry and rebuilding the element out from under the pointer.
+        bool restoreSync = _syncingContext;
+        _syncingContext = true;
+        try
+        {
         if (FontFamilyBox is not null && FontFamilyBox.Items.Count == 0)
         {
             // Survey renders each option IN ITS OWN FACE (AppShell.jsx:1841-1845 sets
@@ -2108,6 +2132,8 @@ public partial class EditorWindow : Window
                     FontFamilyBox.SelectedItem = item;
         }
         PaintAlignCells();
+        }
+        finally { _syncingContext = restoreSync; }
     }
 
     private void PaintAlignCells()
@@ -2197,6 +2223,10 @@ public partial class EditorWindow : Window
     private void OnEnterTextEdit(object sender, RoutedEventArgs e)
     {
         if (_activeText is not null) return;
+        // Survey publishes the toolbar's selected annotation ONLY for a single selection
+        // (SVGAnnotationLayer.jsx:1562-1573), so canEnterTextEdit is false with 2+ marks
+        // selected. `_selection` is empty for a plain single click, hence <= 1, not == 1.
+        if (_selection.Count > 1) return;
         // Survey gates on the annotation's TYPE, never on the rendered element
         // (PDFViewer.jsx:23087-23089, :11310-11328). A committed plain text is a Grid
         // (Path for Outline, Border for Pill) wrapping the TextBlock, so a visual-class
@@ -2216,7 +2246,8 @@ public partial class EditorWindow : Window
         bool editing = _activeText is not null;
         // Same annotation-type gate Survey's canEnterTextEdit uses (PDFViewer.jsx:23087).
         bool canEdit = editing
-            || (_selected is FrameworkElement { Tag: AnnotationData sm }
+            || (_selection.Count <= 1
+                && _selected is FrameworkElement { Tag: AnnotationData sm }
                 && sm.Type is AnnotationData.TypeText or AnnotationData.TypeCallout);
         TextEditBtn.IsEnabled = canEdit;
         TextEditBtn.Opacity = canEdit ? 1 : 0.5;
