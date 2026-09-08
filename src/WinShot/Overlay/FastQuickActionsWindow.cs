@@ -429,7 +429,17 @@ public sealed class FastQuickActionsWindow : WF.Form
 
             SD.Bitmap ready = scaled;
             scaled = null;
-            Invoke(new Action(() => InstallTallCapturePreview(ready, bounds, version)));
+            try
+            {
+                Invoke(new Action(() => InstallTallCapturePreview(ready, bounds, version)));
+            }
+            catch
+            {
+                // The install never ran, so nothing took the bitmap over; hand it back to the
+                // finally rather than leaving a monitor-sized GDI handle to the finalizer.
+                scaled = ready;
+                throw;
+            }
         }
         catch (Exception) when (_closed || IsDisposed)
         {

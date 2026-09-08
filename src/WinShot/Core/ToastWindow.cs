@@ -65,8 +65,11 @@ public sealed class ToastWindow : WF.Form
     /// on top of the first, exactly, whether they share the corner or an anchor rect. The
     /// rule lives here rather than in the caller because there is more than one caller: the
     /// quick-actions card raises its own share failures, and routing them past App's field
-    /// put two cards on the same spot. Disposed, not closed: skipping the outgoing exit fade
-    /// is deliberate, so two different messages never cross-dissolve into each other.
+    /// put two cards on the same spot. Closed, not disposed: Dispose() never raises
+    /// OnFormClosing, which is where the exit tween lives, so the outgoing toast vanished at
+    /// full opacity and left the corner empty for the 280 ms the replacement spent rising.
+    /// That is the whole "Reading text" -> result handoff, and a designed sequence must not
+    /// blink; the outgoing card sinks and fades under the arriving one instead.
     /// </summary>
     private static ToastWindow? _live;
     private readonly WF.Timer _dismiss = new();
@@ -461,7 +464,13 @@ public sealed class ToastWindow : WF.Form
         base.OnShown(e);
         ToastWindow? previous = _live;
         _live = this;
-        if (!ReferenceEquals(previous, this)) previous?.Dispose();
+        if (!ReferenceEquals(previous, this) && previous is { IsDisposed: false })
+        {
+            // Close, so the outgoing toast runs its exit tween. Its Dispose only clears _live
+            // when it still owns it, so the field this OnShown just claimed is safe.
+            try { previous.Close(); }
+            catch (Exception ex) { Log.Error("Could not close the outgoing toast (non-fatal)", ex); }
+        }
         UpdateRegion();
         Position();
         _restLocation = Location;
@@ -469,7 +478,9 @@ public sealed class ToastWindow : WF.Form
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
         // A sticky toast runs the backstop rather than the dwell; RestartDismiss picks.
         RestartDismiss();
-        if (_sticky && AsksSomething)
+        // Not gated on _sticky: the line-break toggle rides an ordinary 4.5 s toast, and a
+        // control the pointer is the only way to reach is not a control everyone can use.
+        if (AsksSomething)
             InstallKeyHook();
         Announce();
     }
@@ -628,8 +639,22 @@ public sealed class ToastWindow : WF.Form
     /// and asks nothing, and arming a machine-wide keyboard hook on its behalf takes keys
     /// away from whatever the user is actually typing in for the length of a job they did
     /// not ask to be interrupted by.
+    ///
+    /// Every control counts, not just the two buttons: the line-break toggle and the
+    /// "Don't detect links" checkbox are both things the user has to answer, and naming only
+    /// the buttons left them mouse-only on a window that never takes focus.
     /// </summary>
-    private bool AsksSomething => _openButton is not null || _secondaryButton is not null;
+    private bool AsksSomething =>
+        _openButton is not null || _secondaryButton is not null ||
+        _toggleButton is not null || _suppressCheck is not null;
+
+    /// <summary>Enter takes the affirmative: the primary where there is one, and otherwise
+    /// the toggle, which on a toggle-only toast is the only thing there is to take.</summary>
+    private DarkButton? EnterTarget => _openButton ?? _toggleButton;
+
+    /// <summary>Space ticks the checkbox — what Space does to a checkbox everywhere else —
+    /// and falls back to the toggle so a toggle-only toast answers to either key.</summary>
+    private WF.Control? SpaceTarget => (WF.Control?)_suppressCheck ?? _toggleButton;
 
     private const int WhKeyboardLl = 13;
     private const int WmKeyDown = 0x0100;
@@ -669,6 +694,10 @@ public sealed class ToastWindow : WF.Form
     /// says the toast is what the user is looking at, and an unconditional Enter would open a
     /// link out from under someone who had gone back to typing somewhere else. It is not
     /// swallowed when there is no primary to take, which was a key eaten for nothing.
+    ///
+    /// Space, on the same hover gate, is the other two controls' key: the checkbox where
+    /// there is one, the toggle button otherwise. Without it "Cut breaks" and "Don't detect
+    /// links" were reachable by pointer only.
     /// </summary>
     private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
@@ -684,9 +713,14 @@ public sealed class ToastWindow : WF.Form
                     if (down) BeginInvoke(new Action(DeclineFromKeyboard));
                 }
                 else if (key is WF.Keys.Enter or WF.Keys.Return && down
-                    && _openButton is not null && PointerIsOver())
+                    && EnterTarget is DarkButton enter && PointerIsOver())
                 {
-                    BeginInvoke(new Action(() => _openButton.PerformClick()));
+                    BeginInvoke(new Action(() => enter.PerformClick()));
+                }
+                else if (key == WF.Keys.Space && down
+                    && SpaceTarget is WF.Control space && PointerIsOver())
+                {
+                    BeginInvoke(new Action(() => PressWithSpace(space)));
                 }
 
                 if (ConsumesKey(key))
@@ -702,9 +736,21 @@ public sealed class ToastWindow : WF.Form
     internal bool ConsumesKey(WF.Keys key) => key switch
     {
         WF.Keys.Escape => PointerIsOver(),
-        WF.Keys.Enter or WF.Keys.Return => _openButton is not null && PointerIsOver(),
+        WF.Keys.Enter or WF.Keys.Return => EnterTarget is not null && PointerIsOver(),
+        WF.Keys.Space => SpaceTarget is not null && PointerIsOver(),
         _ => false,
     };
+
+    /// <summary>Space on a checkbox ticks it; on the toggle button it presses it. Both hold
+    /// the card open the way a click on either does, so answering with the keyboard does not
+    /// leave the dwell running out under the answer.</summary>
+    private void PressWithSpace(WF.Control target)
+    {
+        if (IsDisposed) return;
+        HoldOpen();
+        if (target is DarkCheckBox check) check.Checked = !check.Checked;
+        else if (target is DarkButton button) button.PerformClick();
+    }
 
     private bool PointerIsOver()
     {

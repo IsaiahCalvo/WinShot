@@ -85,11 +85,18 @@ internal static class ScrollChromeFade
     /// deliberate behaviour a test in BreakerProbes pins ("a cancelled tween must not report
     /// that it finished"). Never simply await this: race it against a timeout the way
     /// ScrollingStatusWindow does, or the cancel path waits for the rest of the session.
+    ///
+    /// <paramref name="from"/> is the alpha the surface is actually at, and has no default on
+    /// purpose: every exit here can start inside the entrance (Escape during the 280 ms ramp),
+    /// and a fade that assumed 255 wrote full opacity on its first frame -- the whole-monitor
+    /// dim brightened to solid before it left. Every other ramp on these surfaces reads its
+    /// live value; this one has to be told.
     /// </summary>
-    public static Task Out(Action<byte> apply, out IDisposable handle)
+    public static Task Out(Action<byte> apply, byte from, out IDisposable handle)
     {
+        double start = from / 255d;
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        handle = Motion.Run(DurationMs, Motion.EaseInCubic, p => apply(Alpha(1d - p)),
+        handle = Motion.Run(DurationMs, Motion.EaseInCubic, p => apply(Alpha(start * (1d - p))),
             () => done.TrySetResult());
         return done.Task;
     }
@@ -117,6 +124,7 @@ public sealed class ScrollDimOverlay : WF.Form
     private readonly SD.Rectangle _holeLocal;
     private SD.Bitmap? _surface;
     private IDisposable? _fade;
+    private byte _alpha;
 
     public ScrollDimOverlay(SD.Rectangle regionScreen)
     {
@@ -165,11 +173,12 @@ public sealed class ScrollDimOverlay : WF.Form
     {
         if (IsDisposed || _surface is null) return Task.CompletedTask;
         _fade?.Dispose();
-        return ScrollChromeFade.Out(SetAlpha, out _fade);
+        return ScrollChromeFade.Out(SetAlpha, _alpha, out _fade);
     }
 
     private void SetAlpha(byte alpha)
     {
+        _alpha = alpha; // what the exit fades down from when it starts inside the entrance
         if (IsDisposed || _surface is null || !IsHandleCreated) return;
         PushLayered(_surface, alpha);
     }
@@ -281,7 +290,9 @@ public sealed class ScrollControlsBar : WF.Form
     public event Action? CancelRequested;
     public event Action? DoneRequested;
     public event Action? StartRequested;
-    /// <summary>Fires with the new autopilot state; clicking Auto-Scroll before Start also starts.</summary>
+    /// <summary>Fires with the new autopilot state. The toggle is hidden until Start(), so the
+    /// only way to turn autopilot on first is Alt+A -- which starts the capture too, and the
+    /// reveal that comes with Start puts the toggle on screen already reading "Pause Auto".</summary>
     public event Action<bool>? AutoScrollToggled;
 
     private readonly WF.Label _status;
@@ -294,6 +305,7 @@ public sealed class ScrollControlsBar : WF.Form
     private readonly WinShot.Capture.RectangleTween _reveal = new();
     private IDisposable? _revealTween;
     private IDisposable? _fade;
+    private byte _alpha;
     private ScrollHint _hint = ScrollHint.None; // a persistent hint overrides live status text
 
     // Point-based fonts render at the monitor's DPI, so the fixed-pixel layout has to be
@@ -354,7 +366,7 @@ public sealed class ScrollControlsBar : WF.Form
         _auto.Visible = false; // revealed with the status line when capture starts
         _auto.Click += (_, _) => PerformAction(ScrollChromeAction.ToggleAuto);
 
-        _start = MakeButton("Start Capture", "ScrollCaptureStart", "Start scrolling capture",
+        _start = MakeButton("Start capture", "ScrollCaptureStart", "Start scrolling capture",
             "Begin capturing without moving focus from the captured app. Keyboard shortcut: Alt+S.",
             ThemePalette.Accent, SD.Color.White);
         _start.Click += (_, _) => PerformAction(ScrollChromeAction.Start);
@@ -429,11 +441,12 @@ public sealed class ScrollControlsBar : WF.Form
     {
         if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
         _fade?.Dispose();
-        return ScrollChromeFade.Out(SetChromeAlpha, out _fade);
+        return ScrollChromeFade.Out(SetChromeAlpha, _alpha, out _fade);
     }
 
     private void SetChromeAlpha(byte alpha)
     {
+        _alpha = alpha; // what the exit fades down from when it starts inside the entrance
         if (IsDisposed || !IsHandleCreated) return;
         CaptureExclusion.SetLayeredAlpha(Handle, alpha);
     }
@@ -703,6 +716,7 @@ public sealed class ScrollPreviewPanel : WF.Form
     private readonly WF.Label _caption;
     private bool _hintShowing;
     private IDisposable? _fade;
+    private byte _alpha;
 
     // Same reason as ScrollControlsBar: AutoScaleMode.Dpi never fires on the monitor a
     // window is born on, so the panel laid out at 96-dpi metrics while its point-sized
@@ -784,11 +798,12 @@ public sealed class ScrollPreviewPanel : WF.Form
     {
         if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
         _fade?.Dispose();
-        return ScrollChromeFade.Out(SetChromeAlpha, out _fade);
+        return ScrollChromeFade.Out(SetChromeAlpha, _alpha, out _fade);
     }
 
     private void SetChromeAlpha(byte alpha)
     {
+        _alpha = alpha; // what the exit fades down from when it starts inside the entrance
         if (IsDisposed || !IsHandleCreated) return;
         CaptureExclusion.SetLayeredAlpha(Handle, alpha);
     }

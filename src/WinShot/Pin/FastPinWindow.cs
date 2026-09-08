@@ -244,7 +244,10 @@ public sealed class FastPinWindow : WF.Form
         _tooltipTimer.Tick += (_, _) => ShowActionTooltip();
         _lockedHoverTimer.Tick += (_, _) =>
         {
-            if (!_locked || !Bounds.Contains(WF.Cursor.Position))
+            // !Visible too: a hidden pin keeps its Bounds, so a pointer parked inside the rect
+            // of a pin that Toggle pins visibility took away kept this waking 8 times a second
+            // on behalf of a window nobody can see.
+            if (!_locked || !Visible || !Bounds.Contains(WF.Cursor.Position))
             {
                 _lockedHoverTimer.Stop();
                 if (!_locked) return;

@@ -1109,7 +1109,7 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <DockPanel x:Name="OcrLanguageRow" Style="{StaticResource Row}">
+                                <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Text recognition"/>
                                     <!-- Filled at load time from the recognizer packs this machine
                                          actually has; a hard-coded list offers languages that would

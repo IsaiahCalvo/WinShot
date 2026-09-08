@@ -77,28 +77,43 @@ internal static class SelectorChrome
     public static SD.Size MeasureLabel(SD.Graphics? g, string text)
     {
         // The instruction pill is re-measured from the ~66 fps cursor-follow invalidation for
-        // as long as it is up, and its string never changes; one cache entry keyed on the
-        // string and the DC's DPI keeps that tick from building a Graphics and a Font.
+        // as long as it is up, and its string never changes; a cache keyed on the string and
+        // the DC's DPI keeps that tick from building a Graphics and a Font.
         if (g is not null) return CachedPillSize(g, text);
 
-        if (_screenDpi is float dpi && _pillKey == (text, dpi)) return _pillSize;
+        if (_screenDpi is float dpi && TryCached((text, dpi), out SD.Size known)) return known;
         using SD.Graphics measuring = SD.Graphics.FromHwnd(IntPtr.Zero);
         _screenDpi = measuring.DpiY;
         return CachedPillSize(measuring, text);
     }
 
-    private static (string Text, float Dpi) _pillKey = (string.Empty, 0f);
-    private static SD.Size _pillSize;
+    // Two entries, not one. The scrolling selector has both pills up at once -- the paint
+    // measures the size readout while the follow tick measures the instruction -- and a
+    // single slot missed on every call, rebuilding a Font per measurement, which is exactly
+    // the cost the cache was added to avoid.
+    private static (string Text, float Dpi) _pillKeyA = (string.Empty, 0f);
+    private static SD.Size _pillSizeA;
+    private static (string Text, float Dpi) _pillKeyB = (string.Empty, 0f);
+    private static SD.Size _pillSizeB;
     private static float? _screenDpi;
+
+    private static bool TryCached((string Text, float Dpi) key, out SD.Size size)
+    {
+        if (_pillKeyA == key) { size = _pillSizeA; return true; }
+        if (_pillKeyB == key) { size = _pillSizeB; return true; }
+        size = default;
+        return false;
+    }
 
     private static SD.Size CachedPillSize(SD.Graphics g, string text)
     {
         var key = (text, g.DpiY);
-        if (_pillKey == key) return _pillSize;
+        if (TryCached(key, out SD.Size known)) return known;
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-        _pillSize = PillSize(g, font, text);
-        _pillKey = key;
-        return _pillSize;
+        SD.Size measured = PillSize(g, font, text);
+        (_pillKeyB, _pillSizeB) = (_pillKeyA, _pillSizeA); // the older of the two ages out
+        (_pillKeyA, _pillSizeA) = (key, measured);
+        return measured;
     }
 
     /// <summary>The pill's rect for a string, measured through the renderer that fills it.

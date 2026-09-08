@@ -1367,6 +1367,12 @@ public partial class App : Application
     /// Opening a link is a decision, so the toast waits for one: an explicit Don't open
     /// beside Open link, and a checkbox that stops the offer for good. It used to be a 4.5 s
     /// window with no way to decline and no way to say "stop asking".
+    ///
+    /// Declared deviation from §4.6, whose Fix column names the decline button "Dismiss":
+    /// against a primary reading "Open link", "Don't open" says what declining does instead of
+    /// naming the gesture, which is the sentence-case, consequence-phrased copy the rubric asks
+    /// for. The behaviour the Fix column specifies -- a real second answer, not just a timeout
+    /// -- is unchanged.
     /// </summary>
     private ToastExtras LinkExtras() => new()
     {

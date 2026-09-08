@@ -48,7 +48,7 @@ public class BreakerProbes
         using var _ = new Anim(true);
         Assert.Equal(0, Motion.Holders);
         byte last = 255;
-        Task done = ScrollChromeFade.Out(a => last = a, out IDisposable handle);
+        Task done = ScrollChromeFade.Out(a => last = a, 255, out IDisposable handle);
         PumpUntil(() => done.IsCompleted);
         handle.Dispose();
         Assert.True(done.IsCompleted);
@@ -67,7 +67,7 @@ public class BreakerProbes
     {
         using var _ = new Anim(true);
         Assert.Equal(0, Motion.Holders);
-        Task done = ScrollChromeFade.Out(_ => { }, out IDisposable handle);
+        Task done = ScrollChromeFade.Out(_ => { }, 255, out IDisposable handle);
         Assert.Equal(1, Motion.Holders);
         handle.Dispose();
         Assert.Equal(0, Motion.Holders);
@@ -82,7 +82,7 @@ public class BreakerProbes
         using IDisposable h = ScrollChromeFade.In(seen.Add);
         Assert.Equal(new byte[] { 0, 255 }, seen);
         seen.Clear();
-        Task done = ScrollChromeFade.Out(seen.Add, out IDisposable outHandle);
+        Task done = ScrollChromeFade.Out(seen.Add, 255, out IDisposable outHandle);
         outHandle.Dispose();
         Assert.True(done.IsCompleted);
         Assert.Equal(new byte[] { 0 }, seen);

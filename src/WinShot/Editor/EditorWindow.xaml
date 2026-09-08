@@ -216,6 +216,10 @@
                                              swatches here share the saved row's pitch and left
                                              edge instead of carrying a wider gutter. -->
                                         <UniformGrid x:Name="ColorPickerGrid" Columns="8" HorizontalAlignment="Left"/>
+                                        <!-- Off the Space scale on purpose, and the only place in this popup that is:
+                                             left 2 aligns the label text with the 2 px cell margin the
+                                             swatch grids carry, and bottom 2 keeps it tight to its own
+                                             row. Space1 (4) on either would break that alignment. -->
                                         <TextBlock Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,8,0,2"/>
                                         <!-- Ten slots always, unused ones drawn as empty outlines, so
                                              the popup never changes height as the palette fills. -->
