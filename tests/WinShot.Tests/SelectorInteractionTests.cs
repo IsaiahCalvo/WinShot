@@ -320,6 +320,24 @@ public class SelectorInteractionTests
     /// Four actions have this pill as their ONLY feedback channel, including the two that
     /// explain why a key did nothing.
     /// </summary>
+    /// <summary>
+    /// The freeze is deferred on purpose, so _frozen is null for the first fraction of every
+    /// session even with Freeze screen already on. Pressing C in that window used to send the
+    /// user to a settings checkbox that was already ticked.
+    /// </summary>
+    [Fact]
+    public void CopyingAColourBeforeTheFreezeLandsSaysToWaitRatherThanToChangeASetting()
+    {
+        using var pointer = new Pointer(50, 50);
+        using var selector = CreateSelector(Settings(s => s.FreezeScreen = true));
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.C));
+
+        Assert.Equal("Still capturing the screen — try again in a moment.", HintText(selector));
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+    }
+
     [Fact]
     public void AMessageIsStillOnScreenWhenAnimationsAreOff()
     {
@@ -328,10 +346,13 @@ public class SelectorInteractionTests
         try
         {
             using var pointer = new Pointer(50, 50);
-            using var selector = CreateSelector(Settings());
+            using var selector = CreateSelector(Settings(s => s.FreezeScreen = false));
 
             // No frozen snapshot in a test, so C takes the "turn on Freeze screen" branch —
             // a FlashMessage like every other, and the only thing telling the user why.
+            // With FreezeScreen already ON the snapshot is merely still landing (it is
+            // deferred by 300-1700 ms), and sending the user to a ticked checkbox would be
+            // the wrong answer — that is the sibling assertion below.
             selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.C));
 
             Assert.Equal(

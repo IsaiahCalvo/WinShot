@@ -645,9 +645,12 @@ public partial class App : Application
                         frozenCrop = result.image;
                         if (!result.composed)
                         {
+                            // The user asked for a composite and got something else, so this
+                            // is the degraded-outcome glyph, not a neutral notice. The
+                            // capture itself is not lost, which is what the copy says.
                             ShowBalloon("Window capture",
                                 "Saved the bare window — the backdrop could not be drawn.",
-                                ToastSeverity.Info);
+                                ToastSeverity.Error);
                         }
                     }
                     HandleCapture(frozenCrop, postCaptureActionOverride);

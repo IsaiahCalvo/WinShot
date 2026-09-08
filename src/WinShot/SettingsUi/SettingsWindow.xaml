@@ -28,6 +28,15 @@
             <Setter Property="TextAlignment" Value="Left"/>
             <Setter Property="Margin" Value="{StaticResource LabelGutterMargin}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
+            <Style.Triggers>
+                <!-- Matches DarkComboBox's disabled opacity, so a row whose control is gated
+                     dims as one object instead of leaving a full-strength label beside a
+                     ghosted control. Rows carry IsEnabled on the DockPanel; every future
+                     gated row inherits this for free. -->
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.4"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <!-- Hint: muted helper text, sits under or beside a control. -->
         <Style x:Key="Hint" TargetType="TextBlock">
@@ -619,7 +628,7 @@
                                     <CheckBox x:Name="OverlayAutoCloseCheck" Content="Enable"
                                               Checked="OnOverlayAutoCloseToggled" Unchecked="OnOverlayAutoCloseToggled"/>
                                 </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
+                                <DockPanel x:Name="OverlayActionRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Action"/>
                                     <ComboBox x:Name="OverlayActionCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Save and Close" Tag="save-close"/>
@@ -964,7 +973,7 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Hold Shift while taking a window shot to get the bare window this once."/>
-                                <DockPanel Style="{StaticResource Row}">
+                                <DockPanel x:Name="WindowPaddingRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Padding"/>
                                     <ComboBox x:Name="WindowPaddingCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Min" Tag="min"/>

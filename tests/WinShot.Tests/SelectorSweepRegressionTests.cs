@@ -1012,4 +1012,157 @@ public class SelectorSweepRegressionTests
             Assert.Equal(framed, selector.PendingRegion);
         });
     }
+
+    // ------------------------------------------- all-in-one: the session-ended guard
+
+    /// <summary>Drives the all-in-one's cursor the way <see cref="Pointer"/> drives the
+    /// region selector's.</summary>
+    private sealed class AllInOnePointer : IDisposable
+    {
+        public SD.Point At;
+        public AllInOnePointer(int x, int y)
+        {
+            At = new SD.Point(x, y);
+            FastAllInOneSelectorDialog.CursorProvider = () => At;
+        }
+        public void MoveTo(FastAllInOneSelectorDialog s, int x, int y)
+        {
+            At = new SD.Point(x, y);
+            s.HandleMouseMove();
+        }
+        public void Dispose() => FastAllInOneSelectorDialog.CursorProvider = null;
+    }
+
+    /// <summary>
+    /// The all-in-one is pooled and parked exactly like the region selector -- WS_EX_TRANSPARENT
+    /// and alpha 0, but still SHOWN and still holding keyboard focus. Enter arriving in that
+    /// window (auto-repeat is the usual way) re-ran Confirm on the dead session and rewrote
+    /// LastCaptureRegion, which is the rectangle "Capture previous region" replays.
+    /// </summary>
+    [Fact]
+    public void AKeyAfterTheAllInOneSessionEndsCannotRewriteTheRememberedRegion()
+    {
+        RunSta(() =>
+        {
+            using var pointer = new AllInOnePointer(40, 40);
+            var settings = new SettingsService();
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings);
+
+            selector.HandleMouseDown(Left());
+            pointer.MoveTo(selector, 340, 240);
+            selector.HandleMouseUp(Left());
+            string? remembered = settings.Current.LastCaptureRegion;
+            Assert.False(string.IsNullOrEmpty(remembered));
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            selector.ApplyExactSize(640, 480);
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Enter));
+
+            Assert.Equal(remembered, settings.Current.LastCaptureRegion);
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    /// <summary>
+    /// The mouse half of the same guard: a press/move/release delivered to a parked all-in-one
+    /// used to confirm a whole new capture on a session that had already answered.
+    /// </summary>
+    [Fact]
+    public void MouseInputAfterTheAllInOneSessionEndsIsIgnored()
+    {
+        RunSta(() =>
+        {
+            using var pointer = new AllInOnePointer(40, 40);
+            var settings = new SettingsService();
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), settings);
+
+            selector.HandleMouseDown(Left());
+            pointer.MoveTo(selector, 340, 240);
+            selector.HandleMouseUp(Left());
+            SD.Rectangle? confirmed = selector.SelectedRegionPx;
+            Assert.NotNull(confirmed);
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            selector.HandleMouseDown(Left());
+            pointer.MoveTo(selector, 700, 700);
+            selector.HandleMouseUp(Left());
+
+            Assert.Equal(confirmed, selector.SelectedRegionPx);
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    /// <summary>An arrow key after Escape used to nudge -- and start a tween on -- a selection
+    /// nobody could see, on a hidden window holding the process-wide 1 ms clock.</summary>
+    [Fact]
+    public void NudgingAfterTheAllInOneSessionEndsMovesNothing()
+    {
+        RunSta(() =>
+        {
+            using var pointer = new AllInOnePointer(40, 40);
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), new SettingsService());
+
+            selector.ApplyExactSize(300, 200);
+            SD.Rectangle? before = selector.PendingRegion;
+            Assert.NotNull(before);
+
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Escape));
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Right));
+
+            Assert.Equal(before, selector.PendingRegion);
+            PumpUntil(() => Motion.Holders == 0);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    // ------------------------------------------- handles scale with the monitor
+
+    /// <summary>
+    /// The handle dot and its grab band were the only selector affordance still measured in
+    /// raw physical pixels: a 9 px band is 6 logical px at Isaiah's 150 % primary and 4.5 at
+    /// 200 %, thinner than the edge band beside it was deliberately widened to, while the
+    /// pill, action bar, crosshair and camera cursor around it all grew.
+    /// </summary>
+    [Fact]
+    public void TheHandleDotAndItsGrabBandGrowWithTheMonitorScale()
+    {
+        Assert.True(SelectionHandles.ToleranceAt(1.5d) > SelectionHandles.ToleranceAt(1d));
+        Assert.True(SelectionHandles.ToleranceAt(2d) > SelectionHandles.ToleranceAt(1.5d));
+        // Never narrower than the edge band next to it, at any scale.
+        foreach (double scale in new[] { 1d, 1.25d, 1.5d, 2d })
+        {
+            Assert.True(
+                SelectionHandles.ToleranceAt(scale) >=
+                    (int)Math.Round(MarqueeEdge.TolerancePx * scale),
+                $"handle band is thinner than the edge band at {scale}");
+        }
+
+        // A press 12 px off a corner misses at 100 % and lands at 150 %.
+        var rect = new SD.Rectangle(100, 100, 300, 200);
+        Assert.Equal(-1, SelectionHandles.HitTest(new SD.Point(112, 100), rect));
+        Assert.Equal(0, SelectionHandles.HitTest(new SD.Point(112, 100), rect, 1.5d));
+
+        // And the dot itself paints wider, so the target matches the band.
+        int WhiteRunAt(double dpiScale)
+        {
+            using var bmp = new SD.Bitmap(200, 200);
+            using var g = SD.Graphics.FromImage(bmp);
+            SelectionHandles.Draw(g, new SD.Rectangle(60, 60, 80, 80), scale: 1d, focusHandle: -1, dpiScale);
+            int white = 0;
+            for (int x = 40; x <= 80; x++)
+            {
+                SD.Color pixel = bmp.GetPixel(x, 60);
+                if (pixel.R > 220 && pixel.G > 220 && pixel.B > 220)
+                    white++;
+            }
+            return white;
+        }
+        Assert.True(WhiteRunAt(1.5d) > WhiteRunAt(1d),
+            "the handle dot should be wider on a 150 % monitor");
+    }
 }

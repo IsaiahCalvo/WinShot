@@ -85,7 +85,8 @@ public partial class SettingsWindow : Window
         if (OverlayAutoCloseCheck is null || OverlayCloseBox is null || OverlayActionCombo is null) return;
         bool enabled = OverlayAutoCloseCheck.IsChecked == true;
         OverlayCloseBox.IsEnabled = enabled;
-        OverlayActionCombo.IsEnabled = enabled;
+        OverlayActionRow.IsEnabled = enabled; // the row, so the label dims with the combo
+
     }
 
     /// <summary>Maps each input box to the index of the section that contains it.</summary>
@@ -967,8 +968,11 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>Gates the whole padding ROW, not just its combo: a bare window has no
+    /// backdrop to pad, and a control that dims beside a label that does not reads as half
+    /// live. WPF pushes IsEnabled down the tree, and RowLabel dims with it.</summary>
     private void SyncWindowPaddingEnabled() =>
-        WindowPaddingCombo.IsEnabled =
+        WindowPaddingRow.IsEnabled =
             WinShot.Capture.WindowBackdrop.IsEnabled(SelectedTag(WindowBackgroundCombo, "wallpaper"));
 
     private static void SelectByTag(ComboBox combo, string value, int fallbackIndex)

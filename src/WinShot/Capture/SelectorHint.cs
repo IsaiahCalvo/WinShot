@@ -41,5 +41,5 @@ public static class SelectorHint
         ? "Click a window to capture it. Space goes back to dragging, Esc cancels."
         // C is one of this track's new gestures and it has no visual footprint at all: the
         // loupe shows the hex and never says it can be taken.
-        : "Drag to capture. Space picks a window, Alt toggles the magnifier, C copies the colour, Esc cancels.";
+        : "Drag to capture. Space picks a window, Alt toggles the magnifier, C copies the color, Esc cancels.";
 }

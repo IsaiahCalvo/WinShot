@@ -618,6 +618,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return WF.Screen.FromPoint(screen).Bounds;
     }
 
+    /// <summary>The DPI factor of the surface a screen point lands on. Every piece of
+    /// chrome that is measured in logical px goes through this, so the handles, the edge
+    /// band and the pills all grow together on Isaiah's 150 % primary.</summary>
+    private double ScaleAt(SD.Point screen) =>
+        WinShot.Recording.RecordingMonitorDpi.ScaleFor(MonitorBoundsAt(screen));
+
     /// <summary>Invalidates a screen-space rectangle on every surface it intersects.</summary>
     private void InvalidateScreenRect(SD.Rectangle screenRect)
     {
@@ -854,6 +860,19 @@ public sealed class FastRegionSelectorDialog : WF.Form
             Array.Clear(_barHover);
             Array.Clear(_barPress);
             _pressedShutter = false;
+            // The selection these three animate is gone as of this keystroke. Every other
+            // teardown path drops them explicitly; leaving them running kept the process-wide
+            // 1 ms clock raised for up to 140 ms against a rect nobody can see.
+            _handleTween?.Dispose();
+            _handleTween = null;
+            _handleScale = 1d;
+            _pillTween?.Dispose();
+            _pillTween = null;
+            _pillHover = false;
+            _pillSwap = 0d;
+            _pendingGlideTween?.Dispose();
+            _pendingGlideTween = null;
+            _pendingGlide.Stop();
             _resizeHandle = -1;
             _movingPending = false;
             _pressedEdge = MarqueeSide.None;
@@ -954,7 +973,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 return;
             }
 
-            int handle = SelectionHandles.HitTest(screen, pending);
+            int handle = SelectionHandles.HitTest(screen, pending, ScaleAt(screen));
             if (handle >= 0)
             {
                 // Hand-adjusting a detector rect makes it a hand-drawn one: the reset at the
@@ -1058,8 +1077,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// </summary>
     private int EdgeToleranceAt(SD.Point screen) => Math.Max(
         MarqueeEdge.TolerancePx,
-        (int)Math.Round(MarqueeEdge.TolerancePx *
-            WinShot.Recording.RecordingMonitorDpi.ScaleFor(MonitorBoundsAt(screen))));
+        (int)Math.Round(MarqueeEdge.TolerancePx * ScaleAt(screen)));
 
     /// <summary>
     /// Eases the hovered edge's accent thickening toward its target. The gesture moves an edge
@@ -1255,11 +1273,21 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// to take it, and off a gradient, a photo or an antialiased logo the single pixel is the
     /// wrong answer anyway.
     /// </summary>
+    /// <summary>
+    /// Why a colour cannot be sampled yet. The freeze is deferred on purpose (WGC setup alone
+    /// can cost 300–1700 ms under load), so <c>_frozen</c> is null for the first fraction of
+    /// every session even with the setting already on — sending that user to a checkbox that
+    /// is already ticked is the wrong answer to the wrong question.
+    /// </summary>
+    private string NoFrozenScreenMessage => _options.FreezeScreen
+        ? "Still capturing the screen — try again in a moment."
+        : "Color needs the frozen screen; turn on Freeze screen in Settings.";
+
     private void CopyColorUnderCursor()
     {
         if (_frozen is null)
         {
-            FlashMessage("Color needs the frozen screen; turn on Freeze screen in Settings.");
+            FlashMessage(NoFrozenScreenMessage);
             return;
         }
 
@@ -1280,7 +1308,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         if (_frozen is null)
         {
-            FlashMessage("Color needs the frozen screen; turn on Freeze screen in Settings.");
+            FlashMessage(NoFrozenScreenMessage);
             return;
         }
 
@@ -1362,7 +1390,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Nothing used to stop it, so a user with the crosshair off and the magnifier off —
         // exactly the configuration NeedsCursorFollow exists to detect — paid a full-session
         // cursor-follow tick for the first five sessions after install.
-        bool releaseFollowTick = !arriving && !_options.NeedsCursorFollow && !_paneHover &&
+        // Re-evaluated in onDone, never captured: Alt (magnifier) or Space (window mode)
+        // arriving DURING the fade starts a follow tick that a decision made 140 ms earlier
+        // would then stop, and the loupe stops tracking an idle cursor.
+        bool ReleaseFollowTick() => !arriving && !_options.NeedsCursorFollow && !_paneHover &&
             !_magnifierOn && _mode != SelectorMode.Window;
         _hintTween = WinShot.Core.Motion.Run(
             arriving ? WinShot.Core.Motion.EnterDurationMs : WinShot.Core.Motion.QuickMs,
@@ -1375,7 +1406,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             () =>
             {
                 _hintTween = null;
-                if (releaseFollowTick && _hintOpacity <= 0d)
+                if (ReleaseFollowTick() && _hintOpacity <= 0d)
                     StopFollowMotion();
             });
     }
@@ -1492,7 +1523,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             // click-to-snap gesture, so the edge under the pointer thickens and the cursor
             // becomes a sizing arrow before anything is committed.
             MarqueeSide edge = barRect.Contains(_currentScreen) ||
-                    SelectionHandles.HitTest(_currentScreen, barPending) >= 0
+                    SelectionHandles.HitTest(_currentScreen, barPending, ScaleAt(_currentScreen)) >= 0
                 ? MarqueeSide.None
                 : MarqueeEdge.HitTest(barPending, _currentScreen, EdgeToleranceAt(_currentScreen));
             if (edge != _hoverEdge)
@@ -1588,6 +1619,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// about HOW MUCH; this makes the second half a one-notch correction.</summary>
     internal void HandleMouseWheel(WF.MouseEventArgs e)
     {
+        if (_sessionEnded) return;
         if (!_paneHover || _pendingScreen is not null || _dragging || _hoverLadder.Count == 0)
             return;
 
@@ -1840,7 +1872,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             // "clicking here moves this one edge onto the nearest boundary".
             if (showHandles && _hoverEdge != MarqueeSide.None && _edgeGlow > 0.01d)
             {
-                float weight = (float)(2d + (4d * Math.Clamp(_edgeGlow, 0d, 1d)));
+                float weight = (float)((2d + (4d * Math.Clamp(_edgeGlow, 0d, 1d))) * Math.Max(1d, s));
                 using var edgePen = new SD.Pen(Accent, weight);
                 switch (_hoverEdge)
                 {
@@ -1878,7 +1910,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     SD.Size pill = SelectorChrome.MeasureLabel(_hoverAppName, s);
                     SelectorChrome.DrawLabel(g, clientSize, _hoverAppName,
                         local.Left + (local.Width - pill.Width) / 2,
-                        local.Top + (local.Height - pill.Height) / 2, s);
+                        local.Top + (local.Height - pill.Height) / 2, s,
+                        // Rides the wash it sits on: landing solid over a tint still ramping
+                        // is the same pop the wash exists to avoid.
+                        Math.Clamp(_hoverWash, 0d, 1d));
                 }
             }
 
@@ -2021,7 +2056,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     /// <summary>Draws the 8 move/resize handles on the pending selection.</summary>
     private void DrawHandles(SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle screenRect) =>
-        SelectionHandles.Draw(g, ToLocal(screenRect, monitorBounds), _handleScale, _resizeHandle);
+        SelectionHandles.Draw(g, ToLocal(screenRect, monitorBounds), _handleScale, _resizeHandle,
+            WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
 
     private void DisposeFrozen()
     {
@@ -2459,7 +2495,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (bar.Contains(_currentScreen))
                 return WF.Cursors.Hand;
 
-            int h = _resizeHandle >= 0 ? _resizeHandle : SelectionHandles.HitTest(_currentScreen, p);
+            int h = _resizeHandle >= 0 ? _resizeHandle : SelectionHandles.HitTest(_currentScreen, p, ScaleAt(_currentScreen));
             if (SelectionHandles.CursorFor(h) is WF.Cursor sizing)
                 return sizing;
             // The edge band is inside the move body, so SizeAll used to promise a move over
@@ -2528,7 +2564,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// <summary>Pixel-unit UI font sized for the monitor scale, so measure and draw agree
     /// regardless of which pane's DPI renders it (12px = the modal buttons' 9pt at 96).</summary>
     private static SD.Font ActionBarFont(double s) =>
-        new("Segoe UI", Math.Max(9, (int)Math.Round(12 * s)), SD.FontStyle.Regular, SD.GraphicsUnit.Pixel);
+        ThemePalette.UiFontPx(ThemePalette.PxForPt(ThemePalette.TextBodyPt, s));
 
     private static (SD.Rectangle bar, SD.Rectangle pad, SD.Rectangle cancel, SD.Rectangle done) ActionBarRects(SD.Rectangle r)
     {
@@ -2595,7 +2631,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // The pad cell used to mix two greys of its own (#3A3A3C idle, #303032 pressed) that
         // exist nowhere in ThemePalette, so one bar carried a fourth and fifth neutral shade.
         SD.Color cancelFill = DarkControlPalette.StateFill(ThemePalette.SurfaceAlt, _barHover[0], _barPress[0]);
-        SD.Color doneFill = DarkControlPalette.StateFill(Accent, _barHover[1], _barPress[1]);
+        // White on the bare accent is 3.65:1, under the 4.5:1 floor; #0060DF clears it at
+        // 5.62:1. Same call the all-in-one's SelectedFill made — one decision, both selectors.
+        SD.Color doneFill = DarkControlPalette.StateFill(ThemePalette.AccentPressed, _barHover[1], _barPress[1]);
         SD.Color padFill = DarkControlPalette.StateFill(ThemePalette.SurfaceAlt, _barHover[2], _barPress[2]);
 
         var prev = g.SmoothingMode;

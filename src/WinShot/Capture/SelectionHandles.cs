@@ -15,11 +15,28 @@ namespace WinShot.Capture;
 /// </summary>
 public static class SelectionHandles
 {
-    /// <summary>Half-extent of a handle dot, so a dot is <c>2 * Half</c> px across.</summary>
+    /// <summary>Half-extent of a handle dot in LOGICAL px, so a dot is <c>2 * Half</c> across
+    /// at 100 %. Multiply by the monitor scale — see <see cref="HalfAt"/>.</summary>
     public const int Half = 5;
 
-    /// <summary>Grab tolerance around a handle centre. Wider than the dot on purpose.</summary>
+    /// <summary>Grab tolerance around a handle centre, in LOGICAL px. Wider than the dot on
+    /// purpose. Multiply by the monitor scale — see <see cref="ToleranceAt"/>.</summary>
     public const int HitTolerance = 9;
+
+    /// <summary>
+    /// The handle geometry in PHYSICAL px for a monitor at <paramref name="scale"/>. The dot
+    /// and its grab band are the only selector affordances that used to be raw physical
+    /// pixels: at Isaiah's 150 % primary a 9 px band is 6 logical px and at 200 % it is 4.5,
+    /// thinner than the edge band <c>FastRegionSelectorDialog.EdgeToleranceAt</c> was
+    /// deliberately widened to, while the pill, action bar and crosshair beside them grow.
+    /// </summary>
+    public static int ToleranceAt(double scale) => Scaled(HitTolerance, scale);
+
+    /// <inheritdoc cref="ToleranceAt"/>
+    public static int HalfAt(double scale) => Scaled(Half, scale);
+
+    private static int Scaled(int logical, double scale) =>
+        Math.Max(logical, (int)Math.Round(logical * (scale is > 0d and < 100d ? scale : 1d)));
 
     /// <summary>The eight anchor points: TL, Top, TR, Right, BR, Bottom, BL, Left.</summary>
     public static SD.Point[] Points(SD.Rectangle r)
@@ -34,14 +51,16 @@ public static class SelectionHandles
         ];
     }
 
-    /// <summary>Index of the handle under <paramref name="cursor"/>, or -1.</summary>
-    public static int HitTest(SD.Point cursor, SD.Rectangle r)
+    /// <summary>Index of the handle under <paramref name="cursor"/>, or -1.
+    /// <paramref name="scale"/> is the monitor factor the selection is drawn on.</summary>
+    public static int HitTest(SD.Point cursor, SD.Rectangle r, double scale = 1d)
     {
+        int tolerance = ToleranceAt(scale);
         SD.Point[] points = Points(r);
         for (int i = 0; i < points.Length; i++)
         {
-            if (Math.Abs(cursor.X - points[i].X) <= HitTolerance &&
-                Math.Abs(cursor.Y - points[i].Y) <= HitTolerance)
+            if (Math.Abs(cursor.X - points[i].X) <= tolerance &&
+                Math.Abs(cursor.Y - points[i].Y) <= tolerance)
             {
                 return i;
             }
@@ -114,18 +133,21 @@ public static class SelectionHandles
 
     /// <summary>
     /// Draws the handles on <paramref name="localRect"/>. <paramref name="scale"/> is the
-    /// pop-in growth (it may overshoot past 1, which is the point), and
-    /// <paramref name="focusHandle"/> gets a soft accent ring so a grabbed handle says so.
+    /// pop-in growth (it may overshoot past 1, which is the point),
+    /// <paramref name="focusHandle"/> gets a soft accent ring so a grabbed handle says so,
+    /// and <paramref name="dpiScale"/> is the factor of the monitor being painted, so the
+    /// dot, its stroke and its focus ring grow with the rest of the chrome.
     /// </summary>
-    public static void Draw(SD.Graphics g, SD.Rectangle localRect, double scale, int focusHandle)
+    public static void Draw(SD.Graphics g, SD.Rectangle localRect, double scale, int focusHandle, double dpiScale = 1d)
     {
         var previous = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        int half = Math.Max(1, (int)Math.Round(Half * Math.Clamp(scale, 0.2d, 1.3d)));
+        int half = Math.Max(1, (int)Math.Round(HalfAt(dpiScale) * Math.Clamp(scale, 0.2d, 1.3d)));
+        int ringPad = Scaled(3, dpiScale);
 
         using var shadow = new SD.SolidBrush(SD.Color.FromArgb(60, 0, 0, 0));
         using var fill = new SD.SolidBrush(SD.Color.White);
-        using var pen = new SD.Pen(ThemePalette.Accent, 1.5f);
+        using var pen = new SD.Pen(ThemePalette.Accent, (float)(1.5d * Math.Max(1d, dpiScale is > 0d and < 100d ? dpiScale : 1d)));
         using var focus = new SD.SolidBrush(SD.Color.FromArgb(70, ThemePalette.Accent));
 
         SD.Point[] points = Points(localRect);
@@ -135,7 +157,7 @@ public static class SelectionHandles
             if (i == focusHandle)
             {
                 var ring = dot;
-                ring.Inflate(half + 3, half + 3);
+                ring.Inflate(half + ringPad, half + ringPad);
                 g.FillEllipse(focus, ring);
             }
             var under = dot;

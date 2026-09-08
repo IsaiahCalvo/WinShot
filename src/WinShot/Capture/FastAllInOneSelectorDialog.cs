@@ -66,6 +66,17 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private Func<Task<List<WindowInfo>>> _windowsProvider;
     private bool _windowsLoadStarted;
     private TaskCompletionSource<WF.DialogResult>? _completion;
+
+    /// <summary>
+    /// The session is over but the surface is not. A pooled selector is parked — click-through
+    /// and alpha 0 — yet still SHOWN and still holding keyboard focus, so a key arriving in
+    /// that window (Escape or Enter auto-repeat is the usual way) used to re-run Confirm(),
+    /// rewriting the remembered "capture previous region", nudge a dead selection, and start
+    /// tweens repainting a hidden window while holding the process-wide 1 ms clock.
+    /// WS_EX_TRANSPARENT covers the mouse; nothing covered the keyboard.
+    /// Mirrors <see cref="FastRegionSelectorDialog"/>'s guard of the same name.
+    /// </summary>
+    private bool _sessionEnded;
     private readonly WF.Timer _followTimer;
     private bool _lastCtrlDown;
     // Session-effective loupe visibility: seeded from the "Show magnifier" setting each
@@ -174,6 +185,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         _completion = new TaskCompletionSource<WF.DialogResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        _sessionEnded = false;
+        TaskCompletionSource<WF.DialogResult> session = _completion;
 
         _vs = CaptureService.VirtualScreen;
         _monitorBounds = PrimaryBounds();
@@ -196,9 +209,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         StartWindowLoad();
         BeginInvoke(new Action(() =>
         {
+            // A fast Escape (or the flow cancelling) lands before these posted messages run;
+            // without the check they re-showed the toolbar over the desktop, re-activated a
+            // parked overlay and started a handle pop on a hidden window. Same pattern as
+            // FreezeWhileShownAsync below.
+            if (_completion != session || IsDisposed) return;
             ShowToolbar();
             BeginInvoke(new Action(() =>
             {
+                if (_completion != session || IsDisposed) return;
                 TryRestoreLastRegion();
                 Activate();
                 Focus();
@@ -283,6 +302,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _selectedMode = ModeRegion;
         _resizeHandle = -1;
         _movingPending = false;
+        _sessionEnded = false;
         _handleTween?.Dispose();
         _handleTween = null;
         _handleScale = 1d;
@@ -483,6 +503,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     // Called by panes so all input funnels through the one coordinator state.
     internal void HandleKeyDown(WF.KeyEventArgs e)
     {
+        if (_sessionEnded) return;
         if (e.KeyCode == WF.Keys.Escape)
         {
             Complete(WF.DialogResult.Cancel);
@@ -528,6 +549,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
     internal void HandleMouseDown(WF.MouseEventArgs e)
     {
+        if (_sessionEnded) return;
         SD.Point screen = CursorScreen();
 
         if (e.Button == WF.MouseButtons.Right)
@@ -556,7 +578,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // press anywhere threw it away and started a fresh marquee, so remembering the
             // last region only ever gave you a rectangle to accept or redraw.
             SD.Rectangle pendingScreen = ScreenFromVirtual(pending);
-            int handle = SelectionHandles.HitTest(screen, pendingScreen);
+            int handle = SelectionHandles.HitTest(screen, pendingScreen, ScaleAt(screen));
             if (handle >= 0)
             {
                 _resizeHandle = handle;
@@ -585,6 +607,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
     internal void HandleMouseMove()
     {
+        if (_sessionEnded) return;
         _currentScreen = CursorScreen();
 
         if (_resizeHandle >= 0)
@@ -665,6 +688,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
     }
 
+    /// <summary>The DPI factor of the surface a screen point lands on — the handles' dot and
+    /// grab band are measured in logical px and scale through this, like the rest of the
+    /// chrome (mirrors FastRegionSelectorDialog.ScaleAt).</summary>
+    private double ScaleAt(SD.Point screen) =>
+        WinShot.Recording.RecordingMonitorDpi.ScaleFor(MonitorBoundsAt(screen));
+
     private SD.Rectangle MonitorBoundsAt(SD.Point screen)
     {
         if (_monitorBounds.Contains(screen)) return _monitorBounds;
@@ -713,7 +742,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
     internal void HandleMouseUp(WF.MouseEventArgs e)
     {
-        if (e.Button != WF.MouseButtons.Left)
+        if (_sessionEnded || e.Button != WF.MouseButtons.Left)
             return;
 
         if (_resizeHandle >= 0 || _movingPending)
@@ -786,7 +815,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 if (_pendingPx is SD.Rectangle p)
                 {
                     SD.Rectangle rect = ScreenFromVirtual(p);
-                    rect.Inflate(SelectionHandles.HitTolerance, SelectionHandles.HitTolerance);
+                    int grab = SelectionHandles.ToleranceAt(ScaleAt(_currentScreen));
+                    rect.Inflate(grab, grab);
                     InvalidateScreenRect(rect);
                 }
             },
@@ -798,7 +828,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (_pendingPx is SD.Rectangle pending)
         {
             SD.Rectangle screen = ScreenFromVirtual(pending);
-            int handle = _resizeHandle >= 0 ? _resizeHandle : SelectionHandles.HitTest(_currentScreen, screen);
+            int handle = _resizeHandle >= 0 ? _resizeHandle : SelectionHandles.HitTest(_currentScreen, screen, ScaleAt(_currentScreen));
             if (SelectionHandles.CursorFor(handle) is WF.Cursor sizing)
                 return sizing;
             if (_movingPending || screen.Contains(_currentScreen))
@@ -1033,7 +1063,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             using (var pen = new SD.Pen(Accent, 2))
                 g.DrawRectangle(pen, local);
             if (_pendingPx is not null && !_dragging)
-                SelectionHandles.Draw(g, local, _handleScale, _resizeHandle);
+                SelectionHandles.Draw(g, local, _handleScale, _resizeHandle,
+                    WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
             if (cursorOnThisSurface)
             {
                 // The readout labels the SETTLED rect, never the interpolated one: digits
@@ -1249,6 +1280,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     private void Complete(WF.DialogResult result)
     {
         DialogResult = result;
+        _sessionEnded = true;
         StopFollowMotion();
         // A tween outliving the session holds the process-wide 1 ms clock.
         _handleTween?.Dispose();
@@ -1615,6 +1647,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         /// </summary>
         public void StopMotion()
         {
+            _cellTween?.Dispose();
+            _cellTween = null;
             _chipTween?.Dispose();
             _chipTween = null;
             _chipGlide.Stop();
@@ -1642,7 +1676,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             foreach (var button in _buttons)
             {
                 if (button.IsMode && button.Mode == mode)
-                    return SD.Rectangle.Inflate(button.Bounds, -4, -8);
+                    return SD.Rectangle.Inflate(button.Bounds, -U(4), -U(8));
             }
             return SD.Rectangle.Empty;
         }
@@ -1650,8 +1684,65 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private readonly RectangleTween _chipGlide = new();
         private IDisposable? _chipTween;
 
-        /// <summary>Repaints the confirm button when the pending region appears/disappears.</summary>
-        public void RefreshPendingState() => Invalidate(_sizeBar);
+        /// <summary>Eases the confirm cell in and out as a region becomes committable.</summary>
+        public void RefreshPendingState() => AnimateCells();
+
+        // Eased 0..1 amounts for the size bar's three icon cells (0 ratio, 1 expand,
+        // 2 confirm) plus the confirm cell's enabled state. The main bar's chip glides and
+        // the ratio badge fades; without these the cell under the pointer - and the primary
+        // commit control's availability - were the one thing on this bar that snapped.
+        // Same array-and-one-tween shape as FastRegionSelectorDialog.AnimateBarFills.
+        private readonly double[] _cellHover = new double[3];
+        private double _cropAmount;
+        private IDisposable? _cellTween;
+
+        private const int CellRatio = 0, CellExpand = 1, CellCrop = 2;
+
+        private void AnimateCells()
+        {
+            bool cropEnabled = _owner._pendingPx is not null;
+            int hoverTarget = _hoverIndex switch
+            {
+                HoverRatio => CellRatio,
+                HoverExpand => CellExpand,
+                // A disabled confirm cell does not light up, so it has nothing to ease to.
+                HoverCrop when cropEnabled => CellCrop,
+                _ => -1,
+            };
+            double cropTarget = cropEnabled ? 1d : 0d;
+
+            _cellTween?.Dispose();
+            _cellTween = null;
+            if (!Visible)
+            {
+                // Pooled reuse and session teardown both refresh this while the bar is
+                // hidden; a tween there repaints nothing and holds the 1 ms clock anyway.
+                for (int i = 0; i < _cellHover.Length; i++)
+                    _cellHover[i] = hoverTarget == i ? 1d : 0d;
+                _cropAmount = cropTarget;
+                Invalidate(_sizeBar);
+                return;
+            }
+
+            double[] from = (double[])_cellHover.Clone();
+            double fromCrop = _cropAmount;
+            _cellTween = WinShot.Core.Motion.Run(
+                WinShot.Core.Motion.QuickMs,
+                WinShot.Core.Motion.EaseOutCubic,
+                progress =>
+                {
+                    for (int i = 0; i < _cellHover.Length; i++)
+                        _cellHover[i] = from[i] + (((hoverTarget == i ? 1d : 0d) - from[i]) * progress);
+                    _cropAmount = fromCrop + ((cropTarget - fromCrop) * progress);
+                    Invalidate(_sizeBar);
+                },
+                () => _cellTween = null);
+        }
+
+        /// <summary>The hover fill for a size-bar cell at its current eased amount.</summary>
+        private SD.Color CellFill(int cell) =>
+            SD.Color.FromArgb(
+                (int)Math.Round(HoverFill.A * Math.Clamp(_cellHover[cell], 0d, 1d)), HoverFill);
 
         /// <summary>Clears the chosen ratio between pooled sessions — a stale one made every
         /// new drag snap to the previous session's shape.</summary>
@@ -1838,7 +1929,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             SD.Rectangle chip = _chipGlide.IsActive ? _chipGlide.Current : ChipBounds(_selectedMode);
             if (chip.IsEmpty)
                 return;
-            using var path = GdiPaths.RoundedRect(chip, 9);
+            using var path = GdiPaths.RoundedRect(chip, U(9));
             using var brush = new SD.SolidBrush(SelectedFill);
             g.FillPath(brush, path);
         }
@@ -1846,10 +1937,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private void PaintButton(SD.Graphics g, BarButton b, bool hot)
         {
             bool selected = b.IsMode && b.Mode == _selectedMode;
-            var inner = SD.Rectangle.Inflate(b.Bounds, -4, -8);
+            var inner = SD.Rectangle.Inflate(b.Bounds, -U(4), -U(8));
             if (hot && !selected)
             {
-                using var path = GdiPaths.RoundedRect(inner, 9);
+                using var path = GdiPaths.RoundedRect(inner, U(9));
                 using var brush = new SD.SolidBrush(HoverFill);
                 g.FillPath(brush, path);
             }
@@ -1880,10 +1971,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             AspectRatioPreset preset = AspectRatioPresets.At(_badgeIndex);
             double badgeFade = Math.Clamp(_badgeFade, 0d, 1d);
             bool ratioChosen = preset.Ratio is not null && badgeFade > 0d;
-            if (_hoverIndex == HoverRatio)
+            if (_cellHover[CellRatio] > 0.01d)
             {
                 using var path = GdiPaths.RoundedRect(_ratioRect, U(8));
-                using var brush = new SD.SolidBrush(HoverFill);
+                using var brush = new SD.SolidBrush(CellFill(CellRatio));
                 g.FillPath(brush, path);
             }
             if (ratioChosen)
@@ -1928,10 +2019,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
 
             // Expand to full size (diagonal arrows) — it finally does what it looks like.
-            if (_hoverIndex == HoverExpand)
+            if (_cellHover[CellExpand] > 0.01d)
             {
                 using var path = GdiPaths.RoundedRect(_expandRect, U(8));
-                using var brush = new SD.SolidBrush(HoverFill);
+                using var brush = new SD.SolidBrush(CellFill(CellExpand));
                 g.FillPath(brush, path);
             }
             WF.TextRenderer.DrawText(g, "", _glyphFont, _expandRect, GlyphColor,
@@ -1940,26 +2031,28 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
             // Confirm button: commits the pending region, dimmed while there is nothing to
             // commit. No caret — there is no menu behind this button.
-            bool cropEnabled = _owner._pendingPx is not null;
-            bool cropHot = cropEnabled && _hoverIndex == HoverCrop;
-            if (cropHot)
+            if (_cellHover[CellCrop] > 0.01d)
             {
-                using var path = GdiPaths.RoundedRect(_cropRect, 8);
-                using var brush = new SD.SolidBrush(HoverFill);
+                using var path = GdiPaths.RoundedRect(_cropRect, U(8));
+                using var brush = new SD.SolidBrush(CellFill(CellCrop));
                 g.FillPath(brush, path);
             }
             var cropGlyphRect = _cropRect;
+            // The glyph fades between unavailable and available rather than blinking:
+            // this is the primary commit control and _pendingPx changes on every
+            // selection, glide and discard, so a hard alpha swap blinked all session.
+            int cropAlpha = 0x60 + (int)Math.Round((255 - 0x60) * Math.Clamp(_cropAmount, 0d, 1d));
             // A check, not a second crop glyph: the crop glyph is the ratio menu now.
             WF.TextRenderer.DrawText(g, "", _glyphFont, cropGlyphRect,
-                cropEnabled ? GlyphColor : SD.Color.FromArgb(0x60, GlyphColor),
+                SD.Color.FromArgb(cropAlpha, GlyphColor),
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
         }
 
-        private static void DrawFieldWell(SD.Graphics g, SD.Rectangle field)
+        private void DrawFieldWell(SD.Graphics g, SD.Rectangle field)
         {
-            var well = SD.Rectangle.Inflate(field, 3, 3);
-            using var path = GdiPaths.RoundedRect(well, 7);
+            var well = SD.Rectangle.Inflate(field, U(3), U(3));
+            using var path = GdiPaths.RoundedRect(well, U(7));
             using var brush = new SD.SolidBrush(FieldFill);
             g.FillPath(brush, path);
         }
@@ -1981,6 +2074,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             if (_hoverIndex == index)
                 return;
             _hoverIndex = index;
+            AnimateCells();
             bool cropDisabled = index == HoverCrop && _owner._pendingPx is null;
             Cursor = index == -1 || cropDisabled ? WF.Cursors.Default : WF.Cursors.Hand;
             // Tooltips only for the two caption-less controls; the mode buttons already
