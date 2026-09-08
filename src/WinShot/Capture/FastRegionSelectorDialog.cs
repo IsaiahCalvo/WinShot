@@ -1061,6 +1061,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_resizeHandle >= 0 || _movingPending)
         {
+            // A fresh marquee is dropped when it collapses; a resize cannot be, because the
+            // user already has a selection on screen. Dragging a handle onto its own anchor
+            // otherwise left a 0x0 pending rect that still looked framed and made Record a
+            // silent no-op, so the release grows it back to something usable instead.
+            if (_resizeHandle >= 0 && _pendingScreen is SD.Rectangle resized)
+                _pendingScreen = EnsureUsablePending(resized);
             _resizeHandle = -1;
             _movingPending = false;
             InvalidateAllSurfaces();
@@ -1680,6 +1686,24 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return rect;
     }
 
+    /// <summary>The smallest selection a handle drag is allowed to leave behind — small enough
+    /// that it never fights a deliberate tiny crop, large enough to survive the even-rounding
+    /// H.264 needs and to still show its own handles.</summary>
+    internal const int MinPendingPx = 8;
+
+    /// <summary>Grows a collapsed selection back to <see cref="MinPendingPx"/> and keeps it on
+    /// the virtual desktop.</summary>
+    internal static SD.Rectangle EnsureUsable(SD.Rectangle rect, SD.Rectangle bounds)
+    {
+        int w = Math.Min(Math.Max(rect.Width, MinPendingPx), Math.Max(1, bounds.Width));
+        int h = Math.Min(Math.Max(rect.Height, MinPendingPx), Math.Max(1, bounds.Height));
+        int x = Math.Clamp(rect.X, bounds.Left, Math.Max(bounds.Left, bounds.Right - w));
+        int y = Math.Clamp(rect.Y, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - h));
+        return new SD.Rectangle(x, y, w, h);
+    }
+
+    private SD.Rectangle EnsureUsablePending(SD.Rectangle rect) => EnsureUsable(rect, _vs);
+
     private SD.Rectangle MoveRect(SD.Rectangle start, int dx, int dy)
     {
         var rect = new SD.Rectangle(start.X + dx, start.Y + dy, start.Width, start.Height);
@@ -2018,10 +2042,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_aspectMenuOpen)
         {
-            var (_, rows) = AspectMenuRects(region);
+            var (card, rows) = AspectMenuRects(region);
+            SD.Point inMenu = AspectMenuPoint(screen, card);
             for (int i = 0; i < rows.Count; i++)
             {
-                if (rows[i].Contains(screen))
+                if (rows[i].Contains(inMenu))
                 {
                     PickAspect(i, region);
                     return true;
@@ -2193,11 +2218,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         SD.Point pointer = HudPoint(_currentScreen, region);
         if (_aspectMenuOpen)
         {
-            var (_, rows) = AspectMenuRects(region);
+            var (card, rows) = AspectMenuRects(region);
+            SD.Point inMenu = AspectMenuPoint(pointer, card);
             int hover = -1;
             for (int i = 0; i < rows.Count; i++)
             {
-                if (rows[i].Contains(pointer))
+                if (rows[i].Contains(inMenu))
                 {
                     hover = i;
                     break;
@@ -2611,27 +2637,61 @@ public sealed class FastRegionSelectorDialog : WF.Form
                HudTipPill(hud, monitor, s, font, out _).Contains(screen);
     }
 
+    /// <summary>The popover's open/close scale at <paramref name="amount"/>. Shared with the
+    /// hit-test, which has to undo exactly what the painter applied.</summary>
+    private static float AspectMenuScale(double amount) =>
+        (float)(0.94 + (0.06 * Math.Clamp(amount, 0d, 1d)));
+
     private void DrawAspectMenu(
         SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle region, double s, SD.Font font)
     {
-        var (card, rows) = AspectMenuRects(region);
         double amount = Math.Clamp(_menuAmount, 0d, 1d);
-
-        // Scale + fade about the card's own anchor edge, so the popover grows out of the
-        // aspect cell rather than cutting in at full size.
-        SD.Drawing2D.Matrix? saved = null;
-        if (amount < 0.998)
+        if (amount <= 0.002)
+            return;
+        if (amount >= 0.998)
         {
-            saved = g.Transform;
-            SD.Rectangle anchor = ToLocal(card, monitorBounds);
-            float scale = (float)(0.94 + (0.06 * amount));
-            float pivotX = anchor.Left + (anchor.Width / 2f);
-            float pivotY = anchor.Bottom;
-            g.TranslateTransform(pivotX, pivotY);
-            g.ScaleTransform(scale, scale);
-            g.TranslateTransform(-pivotX, -pivotY);
+            PaintAspectMenu(g, monitorBounds, region, s, font);
+            return;
         }
 
+        // Scale + fade about the card's own anchor edge, so the popover grows out of the
+        // aspect cell rather than cutting in at full size. It is painted into an ARGB buffer
+        // and the buffer is what goes through the transform: GDI's TextRenderer ignores
+        // Graphics.Transform (so the twelve row labels stayed pinned at full size while the
+        // card scaled under them) and drops the alpha channel (so the fade could not be handed
+        // to the brushes at all). Blitting one image fixes both.
+        SD.Rectangle card = AspectMenuRects(region).Card;
+        SD.Rectangle painted = SD.Rectangle.Inflate(card, 2, 2);
+        if (painted.Width <= 0 || painted.Height <= 0)
+            return;
+
+        using var buffer = new SD.Bitmap(
+            painted.Width, painted.Height, SD.Imaging.PixelFormat.Format32bppArgb);
+        using (SD.Graphics bg = SD.Graphics.FromImage(buffer))
+            PaintAspectMenu(bg, painted, region, s, font);
+
+        using var attributes = new SD.Imaging.ImageAttributes();
+        attributes.SetColorMatrix(new SD.Imaging.ColorMatrix { Matrix33 = (float)amount });
+
+        SD.Rectangle anchor = ToLocal(card, monitorBounds);
+        float pivotX = anchor.Left + (anchor.Width / 2f);
+        float pivotY = anchor.Bottom;
+        float scale = AspectMenuScale(amount);
+        SD.Drawing2D.Matrix saved = g.Transform;
+        g.TranslateTransform(pivotX, pivotY);
+        g.ScaleTransform(scale, scale);
+        g.TranslateTransform(-pivotX, -pivotY);
+        g.DrawImage(
+            buffer, ToLocal(painted, monitorBounds), 0, 0, painted.Width, painted.Height,
+            SD.GraphicsUnit.Pixel, attributes);
+        g.Transform = saved;
+        saved.Dispose();
+    }
+
+    private void PaintAspectMenu(
+        SD.Graphics g, SD.Rectangle monitorBounds, SD.Rectangle region, double s, SD.Font font)
+    {
+        var (card, rows) = AspectMenuRects(region);
         DrawHudCard(g, monitorBounds, card, s);
         for (int i = 0; i < rows.Count; i++)
         {
@@ -2648,12 +2708,25 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
         }
+    }
 
-        if (saved is not null)
-        {
-            g.Transform = saved;
-            saved.Dispose();
-        }
+    /// <summary>
+    /// A HUD-space point in the aspect popover's own geometry space. The popover is painted
+    /// through a 0.94→1.0 scale about the card's bottom centre, so during those 140 ms paint
+    /// and geometry disagree and a click on the top row would otherwise select the second one.
+    /// </summary>
+    private SD.Point AspectMenuPoint(SD.Point hudPoint, SD.Rectangle card)
+    {
+        double amount = Math.Clamp(_menuAmount, 0d, 1d);
+        if (amount >= 0.998)
+            return hudPoint;
+
+        double scale = AspectMenuScale(amount);
+        double pivotX = card.Left + (card.Width / 2.0);
+        double pivotY = card.Bottom;
+        return new SD.Point(
+            (int)Math.Round(pivotX + ((hudPoint.X - pivotX) / scale)),
+            (int)Math.Round(pivotY + ((hudPoint.Y - pivotY) / scale)));
     }
 
     /// <summary>

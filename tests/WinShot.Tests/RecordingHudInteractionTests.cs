@@ -568,6 +568,87 @@ public class RecordingHudInteractionTests
         });
     }
 
+    /// <summary>
+    /// The popover is painted through a 0.94→1.0 scale about its own bottom centre while it
+    /// opens. The hit-test read the unscaled rows, so a click landing inside those 140 ms
+    /// picked the row below the one drawn under the pointer — the same class of bug the HUD
+    /// block's own entrance offset had, simply never carried into the popover.
+    /// </summary>
+    [Fact]
+    public void ClickingTheAspectPopoverWhileItOpens_PicksTheRowUnderThePointer()
+    {
+        var region = new SD.Rectangle(600, 300, 700, 300);
+        var press = new SD.Point(region.Left + 10, region.Top + 10);
+
+        RunSelector(region, press, selector =>
+        {
+            Invoke(selector, "HandleHudClick", RecordingHudCell.Aspect);
+            Assert.True(Field<bool>(selector, "_aspectMenuOpen"));
+            // The first frame of the open: painted at 0.94 about the card's bottom centre.
+            SetField(selector, "_menuAmount", 0d);
+
+            var (card, rows) = RecordingHudLayout.AspectMenu(
+                HudGeometry(region).CellBounds(RecordingHudCell.Aspect),
+                Monitor,
+                1.0,
+                RecordingAspectPresets.All.Count);
+
+            const double Scale = 0.94;
+            SD.Rectangle row = rows[0];
+            double pivotX = card.Left + (card.Width / 2.0);
+            double pivotY = card.Bottom;
+            var painted = new SD.Point(
+                (int)Math.Round(pivotX + ((row.Left + (row.Width / 2.0) - pivotX) * Scale)),
+                (int)Math.Round(pivotY + ((row.Top + (row.Height / 2.0) - pivotY) * Scale)));
+
+            FastRegionSelectorDialog.CursorSource = () => painted;
+            SetField(selector, "_currentScreen", painted);
+            selector.HandleMouseDown(Click(painted, 1));
+
+            Assert.False(Field<bool>(selector, "_aspectMenuOpen"));
+            Assert.Equal(0, Field<int>(selector, "_aspectIndex"));
+            Invoke(selector, "StopAspectSnap");
+        });
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>
+    /// A fresh marquee that collapses is dropped, but a handle dragged onto its own anchor left
+    /// a 0x0 pending rect that still looked framed — and Record on it closed the overlay and did
+    /// nothing at all. The release grows it back to something recordable instead.
+    /// </summary>
+    [Fact]
+    public void AHandleDraggedOntoItsAnchor_LeavesARecordableSelection()
+    {
+        var start = new SD.Rectangle(600, 300, 320, 180);
+
+        RunSelector(start, SD.Point.Empty, selector =>
+        {
+            SetField(selector, "_adjustStartRect", start);
+            SetField(selector, "_resizeHandle", 4); // bottom-right, dragged onto the top-left
+
+            var collapsed = new SD.Point(start.Left, start.Top);
+            FastRegionSelectorDialog.CursorSource = () => collapsed;
+            SetField(selector, "_currentScreen", collapsed);
+            selector.HandleMouseMove();
+            selector.HandleMouseUp(Click(collapsed, 1));
+
+            SD.Rectangle after = Field<SD.Rectangle?>(selector, "_pendingScreen")!.Value;
+            Assert.True(
+                after.Width >= FastRegionSelectorDialog.MinPendingPx &&
+                after.Height >= FastRegionSelectorDialog.MinPendingPx,
+                $"the collapsed resize left {after} pending — Record on this is a silent no-op");
+            Assert.True(
+                RecordingRegionSelection.FromVirtualSelection(after, Monitor).IsUsable,
+                $"{after} does not survive the even-rounding the encoder needs");
+        });
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
     private static SD.Rectangle LockedResize(
         FastRegionSelectorDialog selector, SD.Rectangle start, int handle, SD.Point cursor, double ratio) =>
         (SD.Rectangle)typeof(FastRegionSelectorDialog)

@@ -350,6 +350,12 @@ public sealed class RecordingController
         if (!selection.IsUsable)
         {
             Log.Error($"Recording region too small after rounding: {screenRect}");
+            // Every other way a take can fail says so. This one used to close the overlay and
+            // do nothing at all, which is indistinguishable from the hotkey not firing.
+            App.Toast(
+                "Nothing to record",
+                "That selection is too small. Drag a larger area and try again.",
+                severity: ToastSeverity.Error);
             return;
         }
 
