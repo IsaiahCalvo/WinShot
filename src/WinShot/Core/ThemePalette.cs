@@ -141,6 +141,16 @@ public static class ThemePalette
         => new("Segoe UI", Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
 
     /// <summary>
+    /// The app's one monospaced face, for numeric readouts that must not jitter as their
+    /// digits change — the recording timer, the editors' time and frame counts. Named here
+    /// rather than typed out per surface so the choice is one decision.
+    /// </summary>
+    public const string MonoFamily = "Consolas";
+
+    public static SD.Font MonoFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new(MonoFamily, Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
+
+    /// <summary>
     /// Composites a straight-alpha colour over an opaque one, the way GDI+ paints it.
     /// Public because <see cref="HoverShade"/> and <see cref="PressedShade"/> are alpha layers:
     /// a WinForms fill that cannot stack layers has to be handed the composited result.

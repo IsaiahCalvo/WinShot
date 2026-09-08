@@ -29,6 +29,9 @@ public sealed class FastRecordingControlBar : WF.Form
     /// <summary>Idle transparency of the pill. The entrance tween ends here.</summary>
     private const double RestingOpacity = 0.96;
 
+    /// <summary>What the window is called when no cell is hovered or focused.</summary>
+    private const string IdleAccessibleName = "Recording controls";
+
     private readonly Stopwatch _elapsed = new();
     // 50ms is fast enough for a smooth breathing pulse without holding the
     // high-resolution clock for the whole recording.
@@ -51,6 +54,7 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly StateAmount _dim;
     private string _elapsedText = "00:00";
     private int _hoverIndex = -1;
+    private int _focusIndex = -1;
     private bool _actionTaken;
     private bool _saving;
     private bool _closing;
@@ -84,10 +88,16 @@ public sealed class FastRecordingControlBar : WF.Form
         // Pixel-unit faces: every coordinate here is already multiplied by _scale, and a
         // point-size font would apply the monitor's scale to itself a second time.
         _glyphFont = ThemePalette.IconFontPx(S(16));
-        _timerFont = new SD.Font("Consolas", S(14), SD.FontStyle.Regular, SD.GraphicsUnit.Pixel);
+        _timerFont = ThemePalette.MonoFontPx(S(14));
         _tipFont = ThemePalette.UiFontPx(S(11));
 
         AutoScaleMode = WF.AutoScaleMode.None;
+        // The pill is one owner-drawn form with no child controls, so a cell cannot be its own
+        // accessible object. Naming the window after whatever cell is hovered or focused is
+        // what lets a screen reader say "Pause recording" instead of announcing a blank
+        // window — the same trick the recording HUD uses on the selector.
+        AccessibleRole = WF.AccessibleRole.ToolBar;
+        AccessibleName = IdleAccessibleName;
         BackColor = Back;
         ClientSize = RecordingControlBarLayout.Size(showTimer, _scale);
         DoubleBuffered = true;
@@ -107,9 +117,8 @@ public sealed class FastRecordingControlBar : WF.Form
 
         // The stock tooltip is a light system balloon over an otherwise fully owner-drawn
         // dark pill, so it is drawn in the palette too (same idiom as the All-in-One bar).
-        _toolTip.Popup += (_, e) => e.ToolTipSize = SD.Size.Add(
-            WF.TextRenderer.MeasureText(_toolTip.GetToolTip(e.AssociatedControl), _tipFont),
-            new SD.Size(12, 8));
+        _toolTip.Popup += (_, e) =>
+            e.ToolTipSize = TipBoxSize(_toolTip.GetToolTip(e.AssociatedControl));
         _toolTip.Draw += (_, e) =>
         {
             using var bg = new SD.SolidBrush(Back);
@@ -302,6 +311,8 @@ public sealed class FastRecordingControlBar : WF.Form
         Cursor = WF.Cursors.Default;
         _hover.To(null);
         _press.To(null);
+        _focusIndex = -1;
+        AnnounceLabel("Saving the recording");
         // Runs even when the elapsed clock was never shown — but not at all when the user has
         // turned animation off, because then there is nothing left for it to move.
         if (Motion.AnimationsEnabled())
@@ -409,6 +420,15 @@ public sealed class FastRecordingControlBar : WF.Form
             g.FillPath(brush, path);
         }
 
+        // Keyboard focus ring, so Tab traversal is visible on a bar of unlabelled glyphs.
+        if (index == _focusIndex && Actionable(index))
+        {
+            SD.Rectangle ring = SD.Rectangle.Inflate(bounds, -S(3), -S(6));
+            using var path = GdiPaths.RoundedRect(ring, S(7));
+            using var pen = new SD.Pen(ThemePalette.AccentRing, Math.Max(1f, (float)(2 * _scale)));
+            g.DrawPath(pen, path);
+        }
+
         // Full-height hairline on the leading edge of every cell but the first.
         if (index > 0)
         {
@@ -498,6 +518,14 @@ public sealed class FastRecordingControlBar : WF.Form
         _ => GlyphDiscard,
     };
 
+    /// <summary>
+    /// The box the owner-drawn tooltip asks for. The padding scales with the face inside it:
+    /// _tipFont is already a scaled pixel font, so a raw 12x8 gave a 22 px face at 200% a
+    /// quarter of the breathing room an 11 px face gets at 100%.
+    /// </summary>
+    internal SD.Size TipBoxSize(string? text) => SD.Size.Add(
+        WF.TextRenderer.MeasureText(text ?? "", _tipFont), new SD.Size(S(12), S(8)));
+
     /// <summary>Action plus its bound key, so a glyph-only cell still says what it does and
     /// how to reach it from the keyboard.</summary>
     internal string TipFor(RecordingControlBarCell cell) => cell switch
@@ -539,7 +567,53 @@ public sealed class FastRecordingControlBar : WF.Form
         _hover.To(actionable ? index : null);
         if (!actionable)
             _press.To(null);
+        Announce(actionable ? index : _focusIndex);
         Invalidate();
+    }
+
+    /// <summary>
+    /// Renames the window after the cell under the pointer (or the focus ring) and tells the
+    /// accessibility clients the name changed. The tooltip is a WinForms ToolTip and is not a
+    /// UIA name, so without this the whole pill was one unnamed window to a screen reader.
+    /// </summary>
+    private void Announce(int index)
+    {
+        string label = Actionable(index) ? TipFor(_cells[index].Cell) : IdleAccessibleName;
+        AnnounceLabel(label.Length == 0 ? IdleAccessibleName : label);
+    }
+
+    private void AnnounceLabel(string label)
+    {
+        if (string.Equals(AccessibleName, label, StringComparison.Ordinal))
+            return;
+
+        AccessibleName = label;
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try { AccessibilityNotifyClients(WF.AccessibleEvents.NameChange, -1); }
+        catch (Exception ex) { Log.Error("Could not announce the recording control cell", ex); }
+    }
+
+    /// <summary>
+    /// Tab / Shift+Tab and Left / Right walk the actionable cells; Space or Enter works the
+    /// focused one. Without it Pause and Restart were mouse-only — Escape reaches Stop and
+    /// Discard, and nothing at all reached the other two.
+    /// </summary>
+    private void MoveFocus(int step)
+    {
+        int count = _cells.Count;
+        for (int i = 1; i <= count; i++)
+        {
+            int next = _focusIndex < 0
+                ? (step > 0 ? i - 1 : count - i)
+                : ((((_focusIndex + (step * i)) % count) + count) % count);
+            if (!Actionable(next))
+                continue;
+            _focusIndex = next;
+            Announce(next);
+            Invalidate();
+            return;
+        }
     }
 
     /// <summary>A cell the pointer can work: not the read-only timer, and not after the take
@@ -584,7 +658,12 @@ public sealed class FastRecordingControlBar : WF.Form
         if (hit < 0)
             return;
 
-        switch (_cells[hit].Cell)
+        Activate(_cells[hit].Cell);
+    }
+
+    private void Activate(RecordingControlBarCell cell)
+    {
+        switch (cell)
         {
             case RecordingControlBarCell.PauseResume:
                 TogglePause();
@@ -604,15 +683,47 @@ public sealed class FastRecordingControlBar : WF.Form
     /// <summary>
     /// Escape stops and keeps the take; discarding needs Shift. The bar is
     /// ShowWithoutActivation and rarely holds focus, which was the only thing making the old
-    /// bare-Escape-throws-the-take-away behaviour survivable.
+    /// bare-Escape-throws-the-take-away behaviour survivable. Tab / arrows walk the cells so
+    /// Pause and Restart — which no hotkey reaches — are workable without the mouse.
     /// </summary>
     private void OnBarKeyDown(object? sender, WF.KeyEventArgs e)
     {
-        if (e.KeyCode != WF.Keys.Escape)
-            return;
+        switch (e.KeyCode)
+        {
+            case WF.Keys.Escape:
+                e.Handled = true;
+                RaiseOnce(e.Shift ? CancelRequested : StopRequested);
+                return;
+            case WF.Keys.Tab:
+                MoveFocus(e.Shift ? -1 : 1);
+                e.Handled = e.SuppressKeyPress = true;
+                return;
+            case WF.Keys.Left:
+            case WF.Keys.Right:
+                MoveFocus(e.KeyCode == WF.Keys.Right ? 1 : -1);
+                e.Handled = e.SuppressKeyPress = true;
+                return;
+            case WF.Keys.Space:
+            case WF.Keys.Enter:
+                if (!Actionable(_focusIndex))
+                    return;
+                e.Handled = e.SuppressKeyPress = true;
+                Activate(_cells[_focusIndex].Cell);
+                return;
+        }
+    }
 
-        e.Handled = true;
-        RaiseOnce(e.Shift ? CancelRequested : StopRequested);
+    /// <summary>The cell the keyboard ring is on, or -1. For tests.</summary>
+    internal int FocusIndex => _focusIndex;
+
+    /// <summary>Drives Tab / arrow traversal from a test without a real keyboard.</summary>
+    internal void MoveFocusForTest(int step) => MoveFocus(step);
+
+    /// <summary>Works the focused cell from a test, exactly as Space does.</summary>
+    internal void ActivateFocusedForTest()
+    {
+        if (Actionable(_focusIndex))
+            Activate(_cells[_focusIndex].Cell);
     }
 
     private void TogglePause()
@@ -637,6 +748,7 @@ public sealed class FastRecordingControlBar : WF.Form
         _toolTip.SetToolTip(
             this,
             Actionable(_hoverIndex) ? TipFor(_cells[_hoverIndex].Cell) : null);
+        Announce(Actionable(_hoverIndex) ? _hoverIndex : _focusIndex);
         Invalidate();
     }
 
@@ -666,6 +778,8 @@ public sealed class FastRecordingControlBar : WF.Form
         Cursor = WF.Cursors.Default;
         _hover.To(null);
         _press.To(null);
+        _focusIndex = -1;
+        Announce(-1);
         _dim.To(1);
         Invalidate();
         action?.Invoke();

@@ -462,7 +462,10 @@ public sealed class RecordingController
         // The keystroke overlay is also the only thing in the app that knows when typing is
         // happening, so "hide the cursor while typing" starts it in render-off mode even when
         // the pill itself is turned off.
-        bool needsKeyHook = p.ShowKeystrokes || p.HideCursorWhenTyping;
+        // CaptureCursor is part of the condition because it is part of the subscription below:
+        // without it nothing consumes TypingChanged, and the hook would be a WH_KEYBOARD_LL on
+        // every keystroke of the take for no effect at all.
+        bool needsKeyHook = p.ShowKeystrokes || (p.HideCursorWhenTyping && p.CaptureCursor);
         var overlays = RecordingOverlayStartup.Start(
             p.ShowClickHighlights,
             needsKeyHook,
@@ -702,6 +705,15 @@ public sealed class RecordingController
                 _sessionElapsed.Stop();
             Log.Info("Recording paused");
         }
+        else if (IsRecording && !_stopping)
+        {
+            // SyncPaused snaps the glyph and the clock back; on its own that is
+            // indistinguishable from a misclick, so the refusal has to say so.
+            App.Toast(
+                "Could not pause",
+                "The recorder kept running. The take is still being captured.",
+                severity: ToastSeverity.Error);
+        }
     }
 
     private void ResumeRecording()
@@ -722,6 +734,13 @@ public sealed class RecordingController
             if (_elapsedEnabled)
                 _sessionElapsed.Start();
             Log.Info("Recording resumed");
+        }
+        else if (IsRecording && !_stopping)
+        {
+            App.Toast(
+                "Could not resume",
+                "The take is still paused. Stop it to keep what has been recorded.",
+                severity: ToastSeverity.Error);
         }
     }
 
@@ -795,6 +814,17 @@ public sealed class RecordingController
         FadeOutDimOverlay();
         if (discard || _restarting)
             FadeOutBar();
+        // Throwing the take away is the one irreversible branch and it was the only silent
+        // one: the bar and the marker faded and the screen looked exactly as it does after a
+        // stop-and-save with the completion card turned off. A toast, not a confirm dialog —
+        // the discard cell is deliberately a one-press affordance.
+        if (discard && !_restarting)
+        {
+            App.Toast(
+                "Recording discarded",
+                "Nothing was saved.",
+                severity: ToastSeverity.Info);
+        }
         else if (_bar is { IsDisposed: false })
             _bar.BeginSaving();
         try

@@ -393,4 +393,147 @@ public class RecordingControlBarTests
 
         Assert.Equal("Stop and save (Esc)", bar.TipFor(RecordingControlBarCell.Stop));
     }
+
+    // ---- DPI: the tooltip box -----------------------------------------------------
+
+    /// <summary>
+    /// Every coordinate on the pill is multiplied by the monitor scale, and the tip's font is
+    /// too — but its padding was a raw 12x8, so the hint read cramped against the box edge at
+    /// exactly the 150% Isaiah runs. The padding has to grow with the face.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    public void TipBox_PadsProportionallyToItsOwnFace(double scale)
+    {
+        const string Tip = "Stop and save (Esc)";
+        SD.Size box = OnBarAtScale(scale, bar => bar.TipBoxSize(Tip));
+        SD.Size text = OnBarAtScale(scale, bar => MeasureTip(bar, Tip));
+
+        Assert.Equal(RecordingMonitorDpi.Px(12, scale), box.Width - text.Width);
+        Assert.Equal(RecordingMonitorDpi.Px(8, scale), box.Height - text.Height);
+    }
+
+    private static SD.Size MeasureTip(FastRecordingControlBar bar, string text)
+    {
+        var font = (SD.Font)typeof(FastRecordingControlBar)
+            .GetField("_tipFont", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(bar)!;
+        return WF.TextRenderer.MeasureText(text, font);
+    }
+
+    /// <summary>Builds a bar for a pinned scale — no 150% monitor required, and the seam is
+    /// always put back.</summary>
+    private static T OnBarAtScale<T>(double scale, Func<FastRecordingControlBar, T> read)
+    {
+        RecordingMonitorDpi.ScaleSource = _ => scale;
+        try
+        {
+            using var bar = new FastRecordingControlBar(
+                new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+            return read(bar);
+        }
+        finally { RecordingMonitorDpi.ScaleSource = null; }
+    }
+
+    // ---- accessibility ------------------------------------------------------------
+
+    /// <summary>
+    /// The pill is one owner-drawn window with no child controls, and its WinForms ToolTip is
+    /// not a UIA name — so without renaming the window per cell a screen reader announced one
+    /// unnamed graphic for the whole running take.
+    /// </summary>
+    [Fact]
+    public void Bar_NamesItselfAfterTheHoveredCell()
+    {
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+
+        Assert.Equal("Recording controls", bar.AccessibleName);
+        Assert.Equal(WF.AccessibleRole.ToolBar, bar.AccessibleRole);
+
+        var cells = bar.Cells;
+        SetHover(bar, IndexOf(cells, RecordingControlBarCell.PauseResume));
+        Assert.Equal("Pause recording", bar.AccessibleName);
+
+        SetHover(bar, IndexOf(cells, RecordingControlBarCell.Timer)); // read-only, not a control
+        Assert.Equal("Recording controls", bar.AccessibleName);
+
+        SetHover(bar, IndexOf(cells, RecordingControlBarCell.Discard));
+        Assert.Equal("Discard the take (Shift+Esc)", bar.AccessibleName);
+
+        SetHover(bar, -1);
+        Assert.Equal("Recording controls", bar.AccessibleName);
+    }
+
+    /// <summary>
+    /// Pause and Restart have no bound key at all — Escape reaches Stop and Shift+Escape
+    /// Discard, and that was every keyboard route the bar had. Tab walks the cells so the
+    /// other two can be worked without the mouse.
+    /// </summary>
+    [Fact]
+    public void Bar_TabWalksTheCellsAndSpaceWorksTheFocusedOne()
+    {
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+        var cells = bar.Cells;
+
+        Assert.Equal(-1, bar.FocusIndex);
+
+        // Forward from nothing lands on the first cell that is actually a control: the timer
+        // is a read-only readout and must be skipped in both directions.
+        bar.MoveFocusForTest(1);
+        Assert.Equal(RecordingControlBarCell.PauseResume, cells[bar.FocusIndex].Cell);
+        bar.MoveFocusForTest(1);
+        Assert.Equal(RecordingControlBarCell.Restart, cells[bar.FocusIndex].Cell);
+        Assert.Equal("Restart the take", bar.AccessibleName);
+
+        bar.MoveFocusForTest(-1);
+        Assert.Equal(RecordingControlBarCell.PauseResume, cells[bar.FocusIndex].Cell);
+
+        // Wraps backwards past the timer to the last control rather than stalling on it.
+        bar.MoveFocusForTest(-1);
+        Assert.Equal(RecordingControlBarCell.Discard, cells[bar.FocusIndex].Cell);
+
+        bool restarted = false;
+        bar.RestartRequested += () => restarted = true;
+        bar.MoveFocusForTest(1); // wraps forward onto PauseResume
+        bar.MoveFocusForTest(1); // Restart
+        bar.ActivateFocusedForTest();
+        Assert.True(restarted, "Space on the focused Restart cell did nothing");
+    }
+
+    /// <summary>Once the take is stopping the cells stop being controls, so the ring and the
+    /// name go with them.</summary>
+    [Fact]
+    public void Bar_DropsFocusAndItsNameOnceTheTakeIsSaving()
+    {
+        using var animation = new Anim(false);
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+
+        bar.MoveFocusForTest(1);
+        Assert.True(bar.FocusIndex >= 0);
+
+        bar.BeginSaving();
+        Assert.Equal(-1, bar.FocusIndex);
+        Assert.Equal("Saving the recording", bar.AccessibleName);
+
+        bar.MoveFocusForTest(1); // nothing is actionable any more
+        Assert.Equal(-1, bar.FocusIndex);
+    }
+
+    private static int IndexOf(
+        IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> cells,
+        RecordingControlBarCell cell)
+    {
+        for (int i = 0; i < cells.Count; i++)
+        {
+            if (cells[i].Cell == cell)
+                return i;
+        }
+        return -1;
+    }
 }

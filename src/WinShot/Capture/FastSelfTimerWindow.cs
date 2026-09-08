@@ -173,7 +173,9 @@ public sealed class FastSelfTimerWindow : WF.Form
             TextColor,
             Border,
             Ring,
-            new SD.Rectangle(0, 0, Width, Height - 6),
+            // The optical-centring nudge rides the same scale as the numeral it lifts; left
+            // raw it was 3 px against a 72 px digit at 100% and against a 144 px one at 200%.
+            new SD.Rectangle(0, 0, Width, Height - S(6)),
             WinShot.Core.CountdownRing.DigitScale(_secondFraction));
     }
 

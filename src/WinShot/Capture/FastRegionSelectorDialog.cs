@@ -288,8 +288,6 @@ public sealed class FastRegionSelectorDialog : WF.Form
             _pendingScreen = clipped.Width >= 2 && clipped.Height >= 2 ? clipped : null;
             _hintOpacity = 0; // nothing to instruct: there is already a selection on screen
         }
-        if (_recordingHud && _pendingScreen is not null)
-            ShowHud(true);
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForRegion(_settings?.Current);
@@ -345,6 +343,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 $"[{string.Join(" ", paneTimings)}] " +
                 $"activate={sw.ElapsedMilliseconds - panesMs - showMs - paneShowMs} total={sw.ElapsedMilliseconds} ms");
         }
+        // Only now: Motion.Run is driven off a Stopwatch, so starting the HUD's 280 ms rise
+        // before the panes exist spent it on window creation and a seeded region opened with
+        // the cards already part-way (or fully) up.
+        if (_recordingHud && _pendingScreen is not null)
+            ShowHud(true);
         _lastCtrlDown = false;
         _magnifierOn = _options.ShowMagnifier;
         _altLatched = false;
@@ -1677,10 +1680,22 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_pendingScreen is SD.Rectangle p)
         {
-            // The Cancel/Done bar reads as buttons, not as selection ground.
-            var (bar, _, _) = ActionBarRects(p);
-            if (bar.Contains(_currentScreen))
-                return WF.Cursors.Hand;
+            if (_recordingHud)
+            {
+                // The HUD replaced the Cancel/Done bar, so the bar's rect is a phantom that
+                // must not turn the pointer into a Hand over empty dimmed desktop. The HUD's
+                // own rows, toggles and aspect chip are what read as buttons now.
+                RecordingHudCell? cell = HudGeometry(p).HitTest(HudPoint(_currentScreen, p));
+                if (cell is not null and not RecordingHudCell.Dimensions)
+                    return WF.Cursors.Hand;
+            }
+            else
+            {
+                // The Cancel/Done bar reads as buttons, not as selection ground.
+                var (bar, _, _) = ActionBarRects(p);
+                if (bar.Contains(_currentScreen))
+                    return WF.Cursors.Hand;
+            }
 
             int h = _resizeHandle >= 0 ? _resizeHandle : HitTestHandle(_currentScreen, p);
             switch (h)
@@ -1979,6 +1994,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// <summary>Returns true when the HUD swallowed the press.</summary>
     private bool HandleHudMouseDown(SD.Rectangle region, SD.Point screen)
     {
+        // Mid-entrance the whole block is blitted up to 8 px BELOW where its geometry says it
+        // is, so the raw screen point hit-tests the cell above the one drawn under the
+        // pointer — a press aimed at "Record video" started a GIF at 150%.
+        screen = HudPoint(screen, region);
+
         if (_aspectMenuOpen)
         {
             var (_, rows) = AspectMenuRects(region);
@@ -2001,10 +2021,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (hit is null)
         {
             // A press on the cards' own padding — the 8 dip around the record rows, the gap
-            // between the two cards — must be inert. Falling through threw the framed
-            // selection away and started a new marquee under the card the user was aiming at,
-            // so a near-miss on Record cost the whole selection.
-            return hud.Bounds.Contains(screen);
+            // between the two cards — must be inert, and so must the pills the HUD paints
+            // outside them. Falling through threw the framed selection away and started a new
+            // marquee under the chrome the user was aiming at.
+            return HudChromeContains(hud, region, screen);
         }
         if (hit == RecordingHudCell.Dimensions)
             return true; // the readout is inert but still part of the card
@@ -2153,13 +2173,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
+        SD.Point pointer = HudPoint(_currentScreen, region);
         if (_aspectMenuOpen)
         {
             var (_, rows) = AspectMenuRects(region);
             int hover = -1;
             for (int i = 0; i < rows.Count; i++)
             {
-                if (rows[i].Contains(_currentScreen))
+                if (rows[i].Contains(pointer))
                 {
                     hover = i;
                     break;
@@ -2174,7 +2195,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             return;
         }
 
-        RecordingHudCell? hit = HudGeometry(region).HitTest(_currentScreen);
+        RecordingHudCell? hit = HudGeometry(region).HitTest(pointer);
         if (hit == _hudHover)
             return;
         _hudHover = hit;
@@ -2305,7 +2326,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (!hud.Bounds.IntersectsWith(monitorBounds) && _menuAmount <= 0)
             return;
 
-        using SD.Font labelFont = ThemePalette.UiFontPx(
+        using SD.Font labelFont = HudLabelFont(s);
+        // The tick under a lit toggle comes from the icon family the glyph above it does, at
+        // the label's size: a Segoe UI "✓" beside a Segoe Fluent glyph put two families and
+        // two stroke weights on one 40 px plate.
+        using SD.Font checkFont = ThemePalette.IconFontPx(
             Math.Max(9, RecordingMonitorDpi.Px(RecordingHudLayout.LabelFontDip, s)));
         using SD.Font valueFont = ThemePalette.UiFontPx(
             Math.Max(10, RecordingMonitorDpi.Px(RecordingHudLayout.ValueFontDip, s)), SD.FontStyle.Bold);
@@ -2384,7 +2409,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     var tickRect = new SD.Rectangle(
                         local.Left, local.Bottom - (int)Math.Round(16 * s), local.Width, (int)Math.Round(12 * s));
                     WF.TextRenderer.DrawText(
-                        g, "✓", labelFont, tickRect,
+                        g, "", checkFont, tickRect,
                         DarkControlPalette.Mix(ThemePalette.WindowBg, SD.Color.White, on), Centre);
                     break;
                 }
@@ -2429,18 +2454,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // It rides in the same pill every other floating string on this surface gets. Bare on
         // the dimmed desktop it was TextSecondary over whatever happened to be behind it —
         // 1.81:1 over a white window, which is a legibility failure no single screenshot shows.
-        const string EscHint = "Esc to cancel";
-        SD.Size hintText = WF.TextRenderer.MeasureText(EscHint, labelFont);
-        int hintHeight = hintText.Height + (int)Math.Round(6 * s);
-        int hintWidth = hintText.Width + (int)Math.Round(16 * s);
-        int hintTop = hud.ActionCard.Bottom + (int)Math.Round(6 * s);
-        if (hintTop + hintHeight > monitor.Bottom)
-            hintTop = hud.SettingsCard.Top - hintHeight - (int)Math.Round(6 * s);
-        var hintPill = new SD.Rectangle(
-            hud.ActionCard.Left + ((hud.ActionCard.Width - hintWidth) / 2), hintTop, hintWidth, hintHeight);
-        SD.Rectangle hintLocal = ToLocal(hintPill, monitorBounds);
+        SD.Rectangle hintLocal = ToLocal(HudHintPill(hud, monitor, s, labelFont), monitorBounds);
         FillPill(g, hintLocal);
-        WF.TextRenderer.DrawText(g, EscHint, labelFont, hintLocal, ThemePalette.TextSecondary, Centre);
+        WF.TextRenderer.DrawText(g, HudEscHint, labelFont, hintLocal, ThemePalette.TextSecondary, Centre);
 
         // What the hovered glyph means. The toggles are icon-only, so without this the
         // microphone and the webcam are two shapes the user has to guess between.
@@ -2459,22 +2475,83 @@ public sealed class FastRegionSelectorDialog : WF.Form
         double s,
         SD.Font font)
     {
-        if (_aspectMenuOpen || _menuAmount > 0)
+        SD.Rectangle pill = HudTipPill(hud, monitor, s, font, out string label);
+        if (pill.IsEmpty)
             return;
+
+        SD.Rectangle local = ToLocal(pill, monitorBounds);
+        FillPill(g, local);
+        WF.TextRenderer.DrawText(
+            g, label, font, local, ThemePalette.TextPrimary,
+            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+    }
+
+    private const string HudEscHint = "Esc to cancel";
+
+    /// <summary>
+    /// A screen point in the HUD's own geometry space. The entrance blits the block with a
+    /// downward offset that decays to zero, so during those 280 ms paint and geometry disagree
+    /// by exactly that offset and the hit-test has to take it back out.
+    /// </summary>
+    private SD.Point HudPoint(SD.Point screen, SD.Rectangle region)
+    {
+        double amount = Math.Clamp(_hudAmount, 0d, 1d);
+        if (amount >= 0.998)
+            return screen;
+
+        double s = RecordingMonitorDpi.ScaleFor(HudMonitor(region));
+        return new SD.Point(screen.X, screen.Y - (int)Math.Round(8 * s * (1 - amount)));
+    }
+
+    /// <summary>The label face the HUD's floating pills are measured and drawn with. Shared so
+    /// the hit-test can reproduce the rects the painter laid out.</summary>
+    private static SD.Font HudLabelFont(double s) => ThemePalette.UiFontPx(
+        Math.Max(9, RecordingMonitorDpi.Px(RecordingHudLayout.LabelFontDip, s)));
+
+    /// <summary>
+    /// The "Esc to cancel" pill. It is painted beside the cards, so it is NOT inside
+    /// <see cref="RecordingHudGeometry.Bounds"/> — both the painter and the hit-test read it
+    /// from here, or a press on it falls through and starts a fresh marquee.
+    /// </summary>
+    private static SD.Rectangle HudHintPill(
+        RecordingHudGeometry hud, SD.Rectangle monitor, double s, SD.Font font)
+    {
+        SD.Size text = WF.TextRenderer.MeasureText(HudEscHint, font);
+        int height = text.Height + (int)Math.Round(6 * s);
+        int width = text.Width + (int)Math.Round(16 * s);
+        int top = hud.ActionCard.Bottom + (int)Math.Round(6 * s);
+        if (top + height > monitor.Bottom)
+            top = hud.SettingsCard.Top - height - (int)Math.Round(6 * s);
+        return new SD.Rectangle(
+            hud.ActionCard.Left + ((hud.ActionCard.Width - width) / 2), top, width, height);
+    }
+
+    /// <summary>
+    /// The hover/focus tip pill, or <see cref="SD.Rectangle.Empty"/> when nothing is labelled.
+    /// The other half of the chrome the HUD paints outside its own cards.
+    /// </summary>
+    private SD.Rectangle HudTipPill(
+        RecordingHudGeometry hud, SD.Rectangle monitor, double s, SD.Font font, out string label)
+    {
+        label = "";
+        if (_aspectMenuOpen || _menuAmount > 0)
+            return SD.Rectangle.Empty;
+
         RecordingHudCell? cell = _hudHover ?? (_hudFocus >= 0 ? HudFocusOrder[_hudFocus] : null);
         if (cell is not RecordingHudCell hovered ||
             hovered is RecordingHudCell.RecordGif or RecordingHudCell.RecordVideo)
         {
-            return;
+            return SD.Rectangle.Empty;
         }
 
-        string label = RecordingHudLayout.LabelFor(hovered);
-        if (label.Length == 0)
-            return;
-
+        label = RecordingHudLayout.LabelFor(hovered);
         SD.Rectangle cellBounds = hud.CellBounds(hovered);
-        if (cellBounds.IsEmpty)
-            return;
+        if (label.Length == 0 || cellBounds.IsEmpty)
+        {
+            label = "";
+            return SD.Rectangle.Empty;
+        }
 
         SD.Size text = WF.TextRenderer.MeasureText(label, font);
         int pad = (int)Math.Round(8 * s);
@@ -2483,7 +2560,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         int top = hud.SettingsCard.Top - height - (int)Math.Round(6 * s);
         if (top < monitor.Top)
             top = hud.ActionCard.Bottom + (int)Math.Round(6 * s); // no room above: sit under the block
-        var pill = new SD.Rectangle(
+        return new SD.Rectangle(
             Math.Clamp(
                 cellBounds.Left + ((cellBounds.Width - width) / 2),
                 monitor.Left,
@@ -2491,13 +2568,24 @@ public sealed class FastRegionSelectorDialog : WF.Form
             top,
             width,
             height);
-        SD.Rectangle local = ToLocal(pill, monitorBounds);
+    }
 
-        FillPill(g, local);
-        WF.TextRenderer.DrawText(
-            g, label, font, local, ThemePalette.TextPrimary,
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
-            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+    /// <summary>
+    /// True when the point is on the HUD block or on the chrome the HUD paints beside it. Both
+    /// pills are drawn in the same ToolbarBg capsule every interactive-looking surface here
+    /// gets, so a press on one has to be as inert as a press on the cards' own padding —
+    /// falling through threw the framed selection away and started a new marquee.
+    /// </summary>
+    private bool HudChromeContains(RecordingHudGeometry hud, SD.Rectangle region, SD.Point screen)
+    {
+        if (hud.Bounds.Contains(screen))
+            return true;
+
+        SD.Rectangle monitor = HudMonitor(region);
+        double s = RecordingMonitorDpi.ScaleFor(monitor);
+        using SD.Font font = HudLabelFont(s);
+        return HudHintPill(hud, monitor, s, font).Contains(screen) ||
+               HudTipPill(hud, monitor, s, font, out _).Contains(screen);
     }
 
     private void DrawAspectMenu(

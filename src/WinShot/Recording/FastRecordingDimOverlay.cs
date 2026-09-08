@@ -284,6 +284,19 @@ public sealed class FastRecordingDimOverlay : IDisposable
             base.OnClosed(e);
         }
 
+        /// <summary>Form.Dispose() does not raise Closed, so a marker built and disposed
+        /// without ever being shown would leak its pulse timer — the same teardown the
+        /// keystroke and countdown windows carry.</summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _pulse.Stop();
+                _pulse.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
         /// <summary>Global multiplier on the strip's alpha, so the owner can fade every strip
         /// out with one tween. A layered window cannot use Form.Opacity — that is
         /// SetLayeredWindowAttributes, which fights UpdateLayeredWindow — so the fade lives in

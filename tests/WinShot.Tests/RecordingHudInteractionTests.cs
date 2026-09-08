@@ -96,6 +96,94 @@ public class RecordingHudInteractionTests
         });
     }
 
+    // ---- the chrome the HUD paints outside its own cards ----------------------------
+
+    /// <summary>
+    /// The "Esc to cancel" pill rides in the same ToolbarBg capsule every other floating
+    /// string on this surface gets, so it reads as part of the HUD — but it sits below
+    /// RecordingHudGeometry.Bounds, which is what the near-miss guard swallows presses with.
+    /// A press on it fell straight through to "start a new marquee" and the framed take was
+    /// gone. Same failure the near-miss fix set out to remove, one surface over.
+    /// </summary>
+    [Fact]
+    public void ClickingTheEscapeHintPill_KeepsTheFramedSelection()
+    {
+        var region = new SD.Rectangle(600, 300, 700, 300);
+        RecordingHudGeometry hud = HudGeometry(region);
+        double scale = RecordingMonitorDpi.ScaleFor(WF.Screen.FromRectangle(region).Bounds);
+        var press = new SD.Point(
+            hud.ActionCard.Left + (hud.ActionCard.Width / 2),
+            hud.ActionCard.Bottom + (int)Math.Round(10 * scale));
+        Assert.False(hud.Bounds.Contains(press), "the probe point is inside the cards");
+
+        RunSelector(region, press, selector =>
+        {
+            selector.HandleMouseDown(Click(press, clicks: 1));
+
+            Assert.Equal(region, Field<SD.Rectangle?>(selector, "_pendingScreen"));
+            Assert.False(Field<bool>(selector, "_dragging"), "the hint pill started a marquee");
+            Assert.Null(selector.RecordingChoice);
+        });
+    }
+
+    /// <summary>The hover-tip pill above the settings card is the other surface painted
+    /// outside the cards' union, and it is up whenever a cell has focus.</summary>
+    [Fact]
+    public void ClickingTheHoverTipPill_KeepsTheFramedSelection()
+    {
+        var region = new SD.Rectangle(600, 400, 700, 300);
+        RecordingHudGeometry hud = HudGeometry(region);
+        double scale = RecordingMonitorDpi.ScaleFor(WF.Screen.FromRectangle(region).Bounds);
+        SD.Rectangle cell = hud.CellBounds(RecordingHudCell.Microphone);
+        var press = new SD.Point(
+            cell.Left + (cell.Width / 2),
+            hud.SettingsCard.Top - (int)Math.Round(10 * scale));
+        Assert.False(hud.Bounds.Contains(press), "the probe point is inside the cards");
+
+        RunSelector(region, press, selector =>
+        {
+            SetField(selector, "_hudFocus", FocusIndexOf(RecordingHudCell.Microphone));
+            selector.HandleMouseDown(Click(press, clicks: 1));
+
+            Assert.Equal(region, Field<SD.Rectangle?>(selector, "_pendingScreen"));
+            Assert.False(Field<bool>(selector, "_dragging"), "the tip pill started a marquee");
+        });
+    }
+
+    /// <summary>The pointer must not read as a button over the retired Cancel/Done bar, and
+    /// must read as one over the HUD's own rows.</summary>
+    [Fact]
+    public void TheCursorFollowsTheHudRatherThanThePhantomActionBar()
+    {
+        // Near the screen bottom the HUD flips above the region while the bar would stay
+        // below it, so the phantom lands on empty dimmed desktop — which is exactly where the
+        // Hand used to appear. Sized off the REAL primary, because that is the monitor the
+        // HUD placer asks about; a made-up 1080 would not flip on a smaller test desktop.
+        SD.Rectangle primary = WF.Screen.PrimaryScreen!.Bounds;
+        int block = RecordingHudLayout.BlockSize(
+            RecordingMonitorDpi.ScaleFor(primary)).Height;
+        var region = new SD.Rectangle(
+            primary.Left + 200, primary.Bottom - block - 200, 700, 200);
+
+        RunSelector(region, SD.Point.Empty, selector =>
+        {
+            (SD.Rectangle bar, SD.Rectangle _, SD.Rectangle done) = ActionBarRects(selector, region);
+            var overPhantom = new SD.Point(done.Left + (done.Width / 2), done.Top + (done.Height / 2));
+            Assert.True(bar.Contains(overPhantom));
+            Assert.False(
+                HudGeometry(region).Bounds.Contains(overPhantom),
+                "the probe point is on the HUD itself, not on the retired bar");
+            SetField(selector, "_currentScreen", overPhantom);
+            Assert.Equal(WF.Cursors.Cross, selector.CursorForCurrent());
+
+            SD.Rectangle record = HudGeometry(region).CellBounds(RecordingHudCell.RecordVideo);
+            SetField(
+                selector, "_currentScreen",
+                new SD.Point(record.Left + (record.Width / 2), record.Top + (record.Height / 2)));
+            Assert.Equal(WF.Cursors.Hand, selector.CursorForCurrent());
+        });
+    }
+
     // ---- the aspect glide -----------------------------------------------------------
 
     /// <summary>
@@ -451,6 +539,11 @@ public class RecordingHudInteractionTests
                 SetField(selector, "_currentScreen", cursor);
                 Invoke(selector, "ResetHudMotion");
                 Invoke(selector, "ShowHud", true);
+                // Land the entrance before the body runs. Mid-rise the block is painted below
+                // where its geometry says it is and the hit-test takes that offset back out,
+                // so a test pressing at raw geometry coordinates would be probing a HUD that
+                // is not there yet — which is a real state, but not the one these cover.
+                PumpUntil(() => Field<double>(selector, "_hudAmount") >= 1d);
                 body(selector);
             }
             catch (Exception ex) { failure = ex; }
