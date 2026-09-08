@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Recording;
 using Xunit;
 using SD = System.Drawing;
@@ -103,5 +103,16 @@ public class RecordingOptionsTests
         Assert.Equal(720, layout.Height);
         Assert.Equal(0, layout.OffsetPx);
         Assert.True(layout.IsFullscreen);
+    }
+
+    /// <summary>A settings.json carrying an explicit 0 is an unset key or a zero-initialising
+    /// migration, not a request for the worst H.264 the encoder can make.</summary>
+    [Fact]
+    public void ANonPositiveStoredVideoQualityFallsBackToTheDefault()
+    {
+        Assert.Equal(RecordingOptions.DefaultVideoQuality, RecordingOptions.ClampVideoQuality(0));
+        Assert.Equal(RecordingOptions.DefaultVideoQuality, RecordingOptions.ClampVideoQuality(-40));
+        Assert.Equal(1, RecordingOptions.ClampVideoQuality(1));
+        Assert.Equal(100, RecordingOptions.ClampVideoQuality(400));
     }
 }

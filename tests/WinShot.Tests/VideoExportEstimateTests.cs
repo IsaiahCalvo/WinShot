@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using WinShot.Recording;
 using Xunit;
 
@@ -134,5 +134,17 @@ public class VideoExportEstimateTests
         Assert.Equal(byIndex.Height, bySize.Height);
         Assert.Equal(byIndex.Bitrate, bySize.Bitrate);
         Assert.Equal(byIndex.FrameRate, bySize.FrameRate);
+    }
+
+    /// <summary>Even-dimension rounding can collapse two percentages onto the same size on a
+    /// tiny source; the list must not offer the user the same row twice.</summary>
+    [Fact]
+    public void ATinySourceDoesNotProduceDuplicateRows()
+    {
+        var presets = VideoResolutionPresets.For(3, 5);
+
+        Assert.Equal(
+            presets.Select(p => (p.Width, p.Height)).Distinct().Count(),
+            presets.Count);
     }
 }

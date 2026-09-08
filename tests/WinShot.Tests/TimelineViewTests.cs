@@ -1,4 +1,4 @@
-using WinShot.Recording;
+﻿using WinShot.Recording;
 using Xunit;
 
 namespace WinShot.Tests;
@@ -165,5 +165,16 @@ public class TimelineViewTests
             Assert.True(view.Span >= TimelineView.MinimumSpanSeconds);
             Assert.True(view.EndSeconds > view.StartSeconds);
         }
+    }
+
+    /// <summary>A non-finite playhead used to hand back a NaN view and take the strip with it;
+    /// every other method on the type is total.</summary>
+    [Fact]
+    public void ANonFinitePositionLeavesTheViewAlone()
+    {
+        var view = new TimelineView(10, 40);
+
+        foreach (double seconds in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+            Assert.Equal(view, view.Containing(seconds, Duration));
     }
 }

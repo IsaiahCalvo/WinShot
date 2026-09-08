@@ -1,4 +1,4 @@
-namespace WinShot.Recording;
+﻿namespace WinShot.Recording;
 
 /// <summary>
 /// The slice of a clip the trim timeline is currently showing. At full zoom it is the whole
@@ -68,7 +68,9 @@ public readonly record struct TimelineView(double StartSeconds, double EndSecond
     /// playhead cannot wander off the strip while zoomed.</summary>
     public TimelineView Containing(double seconds, double durationSeconds)
     {
-        if (seconds >= StartSeconds && seconds <= EndSeconds)
+        // Every other method on this type is total; a NaN or infinite position would otherwise
+        // hand back a NaN view and take the whole strip with it.
+        if (!double.IsFinite(seconds) || (seconds >= StartSeconds && seconds <= EndSeconds))
             return this;
 
         double duration = CleanDuration(durationSeconds);

@@ -1,4 +1,4 @@
-namespace WinShot.Recording;
+﻿namespace WinShot.Recording;
 
 /// <summary>
 /// How big the export will be, said in bytes before it runs and in real bytes after. The
@@ -76,12 +76,15 @@ public static class VideoResolutionPresets
         uint width = sourceWidth == 0 ? 1920u : sourceWidth;
         uint height = sourceHeight == 0 ? 1080u : sourceHeight;
 
-        var presets = new List<VideoResolutionPreset>(5)
+        var presets = new List<VideoResolutionPreset>(5);
+        // Even-dimension rounding can collapse two percentages onto the same size on a tiny
+        // source, so the dedupe covers the whole list rather than only the named tiers.
+        foreach ((string label, double scale) in new[] { ("Original", 1.0), ("75%", 0.75), ("50%", 0.5) })
         {
-            Scaled("Original", width, height, 1.0),
-            Scaled("75%", width, height, 0.75),
-            Scaled("50%", width, height, 0.5),
-        };
+            VideoResolutionPreset preset = Scaled(label, width, height, scale);
+            if (!presets.Any(p => p.Width == preset.Width && p.Height == preset.Height))
+                presets.Add(preset);
+        }
 
         // Named tiers are resolved against the real aspect, not assumed to be 16:9, and only
         // offered when they are actually smaller than the source — upscaling a recording adds
