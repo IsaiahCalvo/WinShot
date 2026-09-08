@@ -3,8 +3,11 @@ using SD = System.Drawing;
 namespace WinShot.Capture;
 
 /// <summary>A span the user froze with H or V. Screen px; one axis is the measurement,
-/// the other only says where the line sits.</summary>
-public readonly record struct MeasureHold(SD.Rectangle Bounds, bool Horizontal, SD.Point At);
+/// the other only says where the line sits. <paramref name="Dpi"/> is the DPI of the monitor
+/// it was held on, carried on the hold itself so the clipboard and the label agree: a span
+/// held on a 96 dpi secondary must read the same in both, whichever pane is painting it and
+/// wherever the pointer has since walked.</summary>
+public readonly record struct MeasureHold(SD.Rectangle Bounds, bool Horizontal, SD.Point At, int Dpi);
 
 /// <summary>
 /// Everything Measure mode remembers between mouse-moves: the tolerance knob, the spans the
@@ -21,6 +24,13 @@ internal sealed class MeasureSession
     private readonly List<int> _guidesX = new();
     private readonly List<int> _guidesY = new();
 
+    /// <summary>What was placed, newest last. Holds go on the end of <see cref="_holds"/> and
+    /// guides land wherever their coordinate sorts, so neither list remembers the order the
+    /// two were interleaved in — and Backspace has to undo the last THING, not the last hold.
+    /// A guide entry carries its axis and its current coordinate, which <see cref="MoveGuide"/>
+    /// keeps up to date.</summary>
+    private readonly List<(bool Guide, bool Vertical, int At)> _placed = new();
+
     public byte Tolerance { get; private set; } = EdgeSnap.DefaultTolerance;
 
     /// <summary>Alt-click flips the readout between WCAG's ratio and APCA's Lc.</summary>
@@ -36,10 +46,16 @@ internal sealed class MeasureSession
 
     public void Reset()
     {
+        Clear();
+        UseApca = false;
+    }
+
+    private void Clear()
+    {
         _holds.Clear();
         _guidesX.Clear();
         _guidesY.Clear();
-        UseApca = false;
+        _placed.Clear();
     }
 
     public void SetTolerance(byte tolerance) => Tolerance = tolerance;
@@ -61,28 +77,55 @@ internal sealed class MeasureSession
         return UseApca;
     }
 
-    public void Hold(SD.Rectangle bounds, bool horizontal, SD.Point at) =>
-        _holds.Add(new MeasureHold(bounds, horizontal, at));
+    public void Hold(SD.Rectangle bounds, bool horizontal, SD.Point at, int dpi)
+    {
+        _holds.Add(new MeasureHold(bounds, horizontal, at, dpi));
+        _placed.Add((Guide: false, Vertical: false, At: 0));
+    }
 
-    /// <summary>Backspace: drop the most recent hold. False when there was nothing to drop.</summary>
+    /// <summary>Drops the most recent hold. False when there was nothing to drop.</summary>
     public bool RemoveLastHold()
     {
         if (_holds.Count == 0)
             return false;
         _holds.RemoveAt(_holds.Count - 1);
+        _placed.RemoveAt(_placed.FindLastIndex(p => !p.Guide));
         return true;
     }
 
-    public void AddGuideX(int x) => Insert(_guidesX, x);
+    /// <summary>Drops the most recently placed guide, whichever axis it is on. Without this
+    /// one misplaced guide could only be undone by clearing the whole canvas.</summary>
+    public bool RemoveLastGuide()
+    {
+        int index = _placed.FindLastIndex(p => p.Guide);
+        if (index < 0)
+            return false;
+        (_, bool vertical, int at) = _placed[index];
+        _placed.RemoveAt(index);
+        (vertical ? _guidesX : _guidesY).Remove(at);
+        return true;
+    }
 
-    public void AddGuideY(int y) => Insert(_guidesY, y);
+    /// <summary>Backspace: remove the newest thing placed, hold or guide. One key for one
+    /// idea — the user does not think of the two as separate stacks.</summary>
+    public bool RemoveLast()
+    {
+        if (_placed.Count == 0)
+            return false;
+        return _placed[^1].Guide ? RemoveLastGuide() : RemoveLastHold();
+    }
 
-    private static void Insert(List<int> guides, int value)
+    public void AddGuideX(int x) => Insert(_guidesX, vertical: true, x);
+
+    public void AddGuideY(int y) => Insert(_guidesY, vertical: false, y);
+
+    private void Insert(List<int> guides, bool vertical, int value)
     {
         if (guides.Contains(value))
             return;
         guides.Add(value);
         guides.Sort();
+        _placed.Add((Guide: true, vertical, value));
     }
 
     /// <summary>Moves the guide at <paramref name="from"/> to <paramref name="to"/>, keeping
@@ -100,6 +143,9 @@ internal sealed class MeasureSession
             return false;
         guides[at] = to;
         guides.Sort();
+        int placed = _placed.FindIndex(p => p.Guide && p.Vertical == vertical && p.At == from);
+        if (placed >= 0)
+            _placed[placed] = (true, vertical, to);
         return true;
     }
 
@@ -132,7 +178,9 @@ internal sealed class MeasureSession
             yield return (guides[i - 1], guides[i]);
     }
 
-    public bool HasAnything => _holds.Count > 0 || _guidesX.Count > 0 || _guidesY.Count > 0;
+    public bool HasGuides => _guidesX.Count > 0 || _guidesY.Count > 0;
+
+    public bool HasAnything => _holds.Count > 0 || HasGuides;
 
     /// <summary>First Escape clears the canvas, second one leaves. Returns true when this
     /// press cleared something, i.e. when it must NOT also close the selector.</summary>
@@ -140,29 +188,29 @@ internal sealed class MeasureSession
     {
         if (!HasAnything)
             return false;
-        _holds.Clear();
-        _guidesX.Clear();
-        _guidesY.Clear();
+        Clear();
         return true;
     }
 
     /// <summary>
     /// What Ctrl+C puts on the clipboard: every held span, newest last, one per line — or the
     /// live cross when nothing is held, because copying nothing after pressing copy is the
-    /// worst possible answer.
+    /// worst possible answer. <paramref name="liveDpi"/> applies only to the live cross; each
+    /// hold is converted with the DPI of the monitor it was taken on, so the clipboard cannot
+    /// contradict the label the user is looking at on a mixed-DPI desktop.
     /// </summary>
-    public string CopyText(SD.Rectangle? live, int dpi)
+    public string CopyText(SD.Rectangle? live, int liveDpi)
     {
         if (_holds.Count == 0)
         {
             return live is SD.Rectangle rect
-                ? OneLine(MeasureFormat.CrossLabel(rect.Size, dpi))
+                ? OneLine(MeasureFormat.CrossLabel(rect.Size, liveDpi))
                 : string.Empty;
         }
 
         return string.Join(Environment.NewLine, _holds.Select(hold =>
             OneLine(MeasureFormat.SpanLabel(
-                hold.Horizontal ? hold.Bounds.Width : hold.Bounds.Height, dpi))));
+                hold.Horizontal ? hold.Bounds.Width : hold.Bounds.Height, hold.Dpi))));
     }
 
     /// <summary>The pill wraps onto two or three lines; the clipboard should not.</summary>

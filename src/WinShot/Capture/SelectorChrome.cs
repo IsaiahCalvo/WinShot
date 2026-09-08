@@ -89,15 +89,13 @@ internal static class SelectorChrome
     /// that separates a polished ruler from a sloppy one; a rectangle from a to b is
     /// b - a + 1 px long by construction, which is the same inclusive +1 EdgeSnap returns.
     ///
-    /// <paramref name="serifLow"/> and <paramref name="serifHigh"/> drop the cap at the
-    /// low (left / top) and high (right / bottom) end. That is how a soft edge is drawn:
-    /// the serif is the claim "the object ends HERE", so an edge the detector barely found
-    /// does not get to make it. The line stays an opaque aliased hairline either way —
-    /// this vocabulary has no dashes, no glow and no alpha to fade.
+    /// <paramref name="serifs"/> drops both caps, which is the one place the two vocabularies
+    /// meet: a pair of guides the user placed labels its own gap, and §3.1 allows that pill
+    /// but not the caps — crimson claims an edge the app found, blue never does.
     /// </summary>
     public static void DrawDimension(
         SD.Graphics g, SD.Size clientSize, SD.Point a, SD.Point b, string? label, SD.Color color,
-        bool serifLow = true, bool serifHigh = true)
+        bool serifs = true)
     {
         bool horizontal = a.Y == b.Y;
         var parts = new List<SD.Rectangle>(3);
@@ -106,20 +104,22 @@ internal static class SelectorChrome
             int left = Math.Min(a.X, b.X);
             int right = Math.Max(a.X, b.X);
             parts.Add(new SD.Rectangle(left, a.Y, right - left + 1, 1));
-            if (serifLow)
+            if (serifs)
+            {
                 parts.Add(new SD.Rectangle(left, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1));
-            if (serifHigh)
                 parts.Add(new SD.Rectangle(right, a.Y - SerifHalf, 1, (SerifHalf * 2) + 1));
+            }
         }
         else
         {
             int top = Math.Min(a.Y, b.Y);
             int bottom = Math.Max(a.Y, b.Y);
             parts.Add(new SD.Rectangle(a.X, top, 1, bottom - top + 1));
-            if (serifLow)
+            if (serifs)
+            {
                 parts.Add(new SD.Rectangle(a.X - SerifHalf, top, (SerifHalf * 2) + 1, 1));
-            if (serifHigh)
                 parts.Add(new SD.Rectangle(a.X - SerifHalf, bottom, (SerifHalf * 2) + 1, 1));
+            }
         }
 
         var prev = g.SmoothingMode;
@@ -148,7 +148,14 @@ internal static class SelectorChrome
         }
         else
         {
-            at = new SD.Point(a.X + DimensionPillGap, ((a.Y + b.Y) / 2) - (pill.Height / 2));
+            // Right of the line, flipped left when there is no room — the mirror of the
+            // horizontal flip above. Letting DrawLabel clamp instead would slide the pill
+            // back across the very hairline it labels and hide it under its own ground.
+            int right = a.X + DimensionPillGap;
+            int midY = ((a.Y + b.Y) / 2) - (pill.Height / 2);
+            at = right + pill.Width <= clientSize.Width
+                ? new SD.Point(right, midY)
+                : new SD.Point(a.X - DimensionPillGap - pill.Width, midY);
         }
         DrawLabel(g, clientSize, label, at.X, at.Y, fullyRounded: true);
     }
@@ -174,8 +181,14 @@ internal static class SelectorChrome
     /// onto arbitrary desktop pixels can land on a surface of its own colour and vanish —
     /// crimson #E0244A over a mid-red button is 1.17:1, well under WCAG 1.4.11's 3:1 floor
     /// for a graphical object, and no amount of dimming helps because the measured run is
-    /// BRIGHTENED, not dimmed. So the ruler carries its own contrast the way the crosshair
-    /// already does: the same 120-alpha black, one pixel proud on every side.
+    /// BRIGHTENED, not dimmed. So the ruler carries its own contrast, one pixel proud on
+    /// every side.
+    ///
+    /// The alpha is 215 rather than the crosshair's 120 because 120 does not actually buy
+    /// the 3:1: over white it composites to #878787, which is 1.29:1 against crimson, and
+    /// there is a whole band of mid-tone backdrops where crimson clears neither the halo nor
+    /// the ground. 215 composites the brightest possible backdrop down to #2C (L = 0.024),
+    /// which is 3.03:1 — unconditional, on any desktop pixel.
     ///
     /// Filled as one winding path rather than as separate rectangles, so the serif/span
     /// overlaps do not double the alpha into a dark knot at each end of the dimension.
@@ -189,7 +202,7 @@ internal static class SelectorChrome
             halo.Inflate(1, 1);
             path.AddRectangle(halo);
         }
-        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(120, 0, 0, 0));
+        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(215, 0, 0, 0));
         g.FillPath(shadow, path);
     }
 

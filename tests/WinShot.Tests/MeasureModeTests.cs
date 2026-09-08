@@ -632,7 +632,7 @@ public class MeasureModeTests
         Assert.NotEqual(Card, selector.MeasuredScreenRect);
     }
 
-    // ------------------------------------------------- how sure the rays are of an edge
+    // ------------------------------------------------- the walk is the port, and stays it
 
     private static Color Blend(Color a, Color b, double t) => Color.FromArgb(
         (int)Math.Round(a.R + ((b.R - a.R) * t)),
@@ -648,8 +648,8 @@ public class MeasureModeTests
         Color card = Color.FromArgb(0xF0, 0xF0, 0xF0);
         for (int y = Card.Top; y < Card.Bottom; y++)
         {
-            bmp.SetPixel(Card.Right - 2, y, Blend(card, bg, 0.34));
-            bmp.SetPixel(Card.Right - 1, y, Blend(card, bg, 0.67));
+            bmp.SetPixel(Card.Right - 2, y, Blend(card, bg, 0.20));
+            bmp.SetPixel(Card.Right - 1, y, Blend(card, bg, 0.35));
         }
         return bmp;
     }
@@ -663,57 +663,40 @@ public class MeasureModeTests
     }
 
     [Fact]
-    public void AnAntiAliasedEdgeIsMeasuredWhereTheEyeSeesItNotAtTheFirstFuzzyPixel()
+    public void AnAntiAliasedEdgeStopsTheWalkAndTheWheelIsWhatAnswersIt()
     {
-        // The two blended columns belong to the card. Stopping at the first of them measures
-        // the object narrower than anyone can see it, which is why a raw colour-delta walk
-        // cannot resolve a letterform stroke and PixelSnap can.
+        // The ray stops at the first pixel that is not the colour it started on, which on a
+        // faded edge is the first blended column — so the run is the solid core, two columns
+        // short of the card. That is §3.3's walk exactly, and §6 rules out pre-tuning past
+        // it ("no anti-aliasing hysteresis ... add only if the shipped tolerance knob proves
+        // insufficient"). The knob is the answer that DID ship: loosen it and the fringe
+        // stops being an edge.
         using Bitmap frozen = DesktopWithASoftEdge();
         using var selector = MeasuringOver(frozen, new Point(80, 60));
 
-        Assert.Equal(Card, selector.MeasuredScreenRect);
-    }
+        Rectangle core = Assert.IsType<Rectangle>(selector.MeasuredScreenRect);
+        Assert.Equal(Card.Left, core.Left);
+        Assert.Equal(Card.Width - 2, core.Width);
 
-    /// <summary>A patch whose colour clears the tolerance but barely: the case where the
-    /// answer is a guess and the user should be reaching for the wheel.</summary>
-    private static readonly Rectangle Faint = new(200, 150, 60, 40);
+        // Twelve notches of the wheel and the fringe is inside the tolerance again.
+        for (int i = 0; i < 12; i++)
+            selector.HandleMouseWheel(new WF.MouseEventArgs(WF.MouseButtons.None, 0, 80, 60, 120));
 
-    private static Bitmap DesktopWithAFaintPatch()
-    {
-        Bitmap bmp = Desktop();
-        using var g = Graphics.FromImage(bmp);
-        using var brush = new SolidBrush(Color.FromArgb(0x1C, 0x3C, 0x8C)); // 36 away from the ground
-        g.FillRectangle(brush, Faint);
-        return bmp;
+        Assert.Equal(Card.Width, Assert.IsType<Rectangle>(selector.MeasuredScreenRect).Width);
     }
 
     [Fact]
-    public void AnEdgeThatBarelyClearedTheToleranceLosesItsSerif()
+    public void EveryEndOfAMeasuredSpanCarriesItsSerifWhateverTheEdgeLookedLike()
     {
-        // The serif is the claim "the object ends exactly HERE". An edge the rays only just
-        // found does not get to make it — that absence is the cue to turn the wheel.
-        using Bitmap frozen = DesktopWithAFaintPatch();
-        using var selector = MeasuringOver(frozen, new Point(230, 170));
-        Assert.Equal(Faint, selector.MeasuredScreenRect);
-        using Bitmap render = Render(selector);
-
-        // Inside the reticle's 10 px gap, so crimson here is the span and nothing else.
-        Assert.True(IsMeasureCrimson(render.GetPixel(225, 170)), "the span is still drawn");
-        Assert.True(IsMeasureCrimson(render.GetPixel(235, 170)), "the span is still drawn");
-        Assert.False(IsMeasureCrimson(render.GetPixel(Faint.Left, 168)), "no serif on a soft left edge");
-        Assert.False(IsMeasureCrimson(render.GetPixel(Faint.Right - 1, 172)), "no serif on a soft right edge");
-    }
-
-    [Fact]
-    public void AHardEdgeKeepsItsSerifWhileASoftOneDoesNot()
-    {
-        // Both ends of one line, one hard and one faded: the difference is the whole point.
+        // §3.5's vocabulary has one dimension mark, not a firm one and a soft one: an
+        // aliased hairline with a T-cap at each end, no dashes and no glow.
         using Bitmap frozen = DesktopWithASoftEdge();
         using var selector = MeasuringOver(frozen, new Point(80, 60));
+        Rectangle core = Assert.IsType<Rectangle>(selector.MeasuredScreenRect);
         using Bitmap render = Render(selector);
 
-        Assert.True(IsMeasureCrimson(render.GetPixel(Card.Left, 58)), "hard left edge keeps its serif");
-        Assert.True(IsMeasureCrimson(render.GetPixel(Card.Right - 1, 58)), "and so does a crossed transition");
+        Assert.True(IsMeasureCrimson(render.GetPixel(core.Left, 58)), "left serif");
+        Assert.True(IsMeasureCrimson(render.GetPixel(core.Right - 1, 58)), "right serif");
     }
 
     [Fact]
@@ -849,6 +832,153 @@ public class MeasureModeTests
         Assert.Contains("Preparing", again.HintStripText());
         FastRegionSelectorDialog.Return(again);
     }
+
+    // ----------------------------------------------------------------- the hint strip fits
+
+    [Theory]
+    [InlineData(1366)]  // 1366x768, the smallest panel anyone still ships
+    [InlineData(1600)]
+    [InlineData(1920)]
+    [InlineData(3840)]
+    public void TheHintStripWrapsRatherThanCollapsingToAStub(int monitorWidth)
+    {
+        // Nine clauses on one line is 227 characters — 1824 px at 144 dpi and 2456 at 192,
+        // so the old single line silently dropped to a two-item stub on most panels at the
+        // DPI steps this build is graded at. The strip is the mode's only discoverability
+        // surface; every gesture it teaches has to survive.
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        string text = selector.HintStripTextFor(monitorWidth);
+
+        foreach (string item in new[]
+        {
+            "Tolerance 30", "H / V hold", "Shift+H / Shift+V guide", "Click or Ctrl+C copies",
+            "Click the pill or Enter captures", "Alt+click for WCAG contrast",
+            "Backspace removes the last one", "Right-click for more", "Esc clears, Esc again exits",
+        })
+        {
+            Assert.Contains(item, text);
+        }
+
+        // And every line of it actually fits, measured through the font the pill draws with.
+        foreach (string line in text.Split('\n'))
+        {
+            Assert.True(SelectorChrome.MeasureLabel(line).Width <= monitorWidth,
+                $"line '{line}' is wider than a {monitorWidth} px monitor");
+        }
+        Assert.InRange(text.Split('\n').Length, 1, 3);
+    }
+
+    [Fact]
+    public void TheHintStripStepsAsideForTheLoupeInsteadOfPaintingOverIt()
+    {
+        // The loupe is forced on in this mode because it is part of the tool, and the strip
+        // is painted last with no flip of its own — so near the bottom of the screen the
+        // chrome sat on top of the coordinates and the hex swatch the user came for.
+        using var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        using Bitmap frozen = Desktop();
+        selector.EnterMeasureForRender(frozen, Screen, new Point(200, 270), magnifier: true);
+
+        Rectangle loupe = selector.LoupeRectForRender(Screen);
+        Rectangle strip = selector.HintStripRectForRender(Screen);
+
+        Assert.False(loupe.IsEmpty, "the loupe is on in this mode");
+        Assert.False(loupe.IntersectsWith(strip), $"strip {strip} sits on the loupe {loupe}");
+        Assert.True(strip.Top >= 0, $"strip {strip} was lifted off the top of the screen");
+    }
+
+    // ------------------------------------------------- the two targets under one pointer
+
+    [Fact]
+    public void AClickOnTheLitPillCapturesEvenWithAGuideRunningThroughIt()
+    {
+        // A guide is a full-bleed line, grabbable anywhere along its coordinate, and the pill
+        // is placed by the run rather than by the pointer — so a guide crossing the pill is
+        // reachable in ordinary use. The pill is the one thing in the mode that lights up and
+        // shows a hand cursor; the click has to do what the cursor just promised.
+        using var selector = Measuring(new Point(80, 60), out _);
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        int column = pill.Left + (pill.Width / 2);
+
+        selector.MoveMeasureCursorForRender(new Point(column, 250));
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+        Assert.Contains(column, selector.MeasureState.GuidesX);
+
+        selector.MoveMeasureCursorForRender(new Point(80, 60));
+        selector.MoveMeasureCursorForRender(new Point(column, pill.Top + 2));
+        Assert.True(selector.PillIsHotForRender);
+
+        selector.MeasureMouseDownForRender(WF.MouseButtons.Left);
+
+        Assert.False(selector.IsDraggingGuideForRender, "the click started a guide drag");
+        Assert.Equal(WF.DialogResult.OK, selector.DialogResult);
+        Assert.Equal(Card, selector.SelectedRegionPx);
+    }
+
+    [Fact]
+    public void TurningTheWheelWhileParkedOnThePillReMeasuresTheObjectNotTheChrome()
+    {
+        // The move handler freezes the reading while the pointer is on the pill — that hold
+        // is the only reason the pill is reachable. The wheel has to honour it, or the mode's
+        // own recovery gesture destroys the measurement the moment the user walks over to it.
+        using var selector = Measuring(new Point(80, 60), out _);
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        selector.MoveMeasureCursorForRender(new Point(pill.Left + (pill.Width / 2), pill.Top + 2));
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+
+        selector.HandleMouseWheel(new WF.MouseEventArgs(WF.MouseButtons.None, 0, 0, 0, 120));
+
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+        Assert.True(selector.PillIsHotForRender, "the pointer is still on the pill");
+    }
+
+    // ----------------------------------------------------------------- removing one thing
+
+    [Fact]
+    public void BackspaceTakesBackAGuideInsteadOfClaimingThereIsNothingToUndo()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.H));   // a hold on top of it
+        Assert.Single(selector.MeasureState.GuidesX);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Back));
+        Assert.Empty(selector.MeasureState.Holds);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Back));
+        Assert.Empty(selector.MeasureState.GuidesX);
+        Assert.False(selector.MeasureState.HasAnything);
+    }
+
+    [Fact]
+    public void BackspaceWithNothingToUndoStillSwallowsTheKey()
+    {
+        // Every other gesture in this mode suppresses; letting this one through is a system
+        // beep from a key the mode claims to own.
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        var back = new WF.KeyEventArgs(WF.Keys.Back);
+        selector.HandleKeyDown(back);
+
+        Assert.True(back.Handled);
+        Assert.True(back.SuppressKeyPress);
+    }
+
+    [Fact]
+    public void TheMenuCanRemoveOneGuideWithoutClearingTheCanvas()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+        selector.MoveMeasureCursorForRender(new Point(250, 200));
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+        selector.ShowMeasureMenuForRender(new Point(250, 200));
+
+        ClickRow(selector, "Remove last guide");
+
+        Assert.Equal(new[] { 80 }, selector.MeasureState.GuidesX);
+        CloseSession(selector);
+    }
 }
 
 /// <summary>
@@ -875,6 +1005,126 @@ public class MeasureMotionTests
         Assert.Equal(1.0, selector.HintAmount, 3);
         PumpUntil(() => Motion.Holders == 0);
         Assert.Equal(0, Motion.Holders);
+    }
+
+    [Theory]
+    [InlineData(true)]   // the snapshot lands: loading copy → nine gestures
+    [InlineData(false)]  // it fails: loading copy → the error line
+    public void TheStripCrossFadesWhenItsCopyChangesRatherThanCuttingToIt(bool lands)
+    {
+        // Three states, one surface, and one of them is an error — on the failure path
+        // nothing else on screen moves at that moment, so a bare swap is an unaccompanied
+        // snap. The strip re-enters through the entrance it already owns.
+        PumpUntil(() => Motion.Holders == 0);
+
+        var screen = new Rectangle(0, 0, 400, 300);
+        using var selector = Selector();
+        using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
+        selector.EnterMeasureForRender(null, screen, new Point(80, 60));
+        selector.StartHintEntrance();
+        PumpUntil(() => selector.HintAmount >= 1.0);
+        Assert.Contains("Preparing", selector.HintStripText());
+
+        if (lands)
+            selector.LandFrozenSnapshotForRender(frozen);
+        else
+            selector.NoteFrozenSnapshotFailed();
+
+        Assert.True(selector.HintAmount < 1.0, "the copy changed without a transition");
+        PumpUntil(() => selector.HintAmount >= 1.0);
+        Assert.DoesNotContain("Preparing", selector.HintStripText());
+        PumpUntil(() => Motion.Holders == 0);
+    }
+
+    [Fact]
+    public void TheWheelAtTheEndOfItsRangeStillAnswers()
+    {
+        // Everything else in this mode answers every gesture. A clamped notch used to return
+        // in silence: no repaint, no toast, not even a flash on the number it governs.
+        PumpUntil(() => Motion.Holders == 0);
+
+        var screen = new Rectangle(0, 0, 400, 300);
+        using var selector = Selector();
+        using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
+        selector.EnterMeasureForRender(frozen, screen, new Point(80, 60));
+        selector.MeasureState.SetTolerance(255);
+        selector.StartHintEntrance();
+        PumpUntil(() => selector.HintAmount >= 1.0);
+
+        selector.HandleMouseWheel(new WF.MouseEventArgs(WF.MouseButtons.None, 0, 80, 60, 120));
+
+        Assert.Equal(255, selector.MeasureState.Tolerance);
+        Assert.True(selector.HintAmount < 1.0, "the end of the range was silent");
+        PumpUntil(() => Motion.Holders == 0);
+    }
+
+    [Fact]
+    public void DisposingMidAnimationGivesTheClockBack()
+    {
+        PumpUntil(() => Motion.Holders == 0);
+
+        var screen = new Rectangle(0, 0, 400, 300);
+        var selector = Selector();
+        using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
+        selector.EnterMeasureForRender(frozen, screen, new Point(80, 60));
+        selector.StartHintEntrance();
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        selector.MoveMeasureCursorForRender(new Point(pill.Left + (pill.Width / 2), pill.Top + 2));
+        Assert.True(selector.PillIsHotForRender);
+        Assert.True(Motion.Holders > 0, "two tweens should be live");
+
+        selector.Dispose();
+
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    [Fact]
+    public void WithAnimationsOffTheChromeJumpsStraightToItsEndAndHoldsNoClock()
+    {
+        PumpUntil(() => Motion.Holders == 0);
+        Func<bool> restore = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            var screen = new Rectangle(0, 0, 400, 300);
+            using var selector = Selector();
+            using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
+            selector.EnterMeasureForRender(frozen, screen, new Point(80, 60));
+            selector.StartHintEntrance();
+            Assert.Equal(1.0, selector.HintAmount, 3);
+            Assert.Equal(0, Motion.Holders);
+
+            Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+            selector.MoveMeasureCursorForRender(new Point(pill.Left + (pill.Width / 2), pill.Top + 2));
+            Assert.True(selector.PillIsHotForRender);
+            Assert.Equal(1.0, selector.PillHoverForRender, 3);
+            Assert.Equal(0, Motion.Holders);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = restore;
+        }
+    }
+
+    [Fact]
+    public void SkimmingOnAndOffThePillManyTimesLeavesNoClockHeld()
+    {
+        PumpUntil(() => Motion.Holders == 0);
+
+        var screen = new Rectangle(0, 0, 400, 300);
+        using (var selector = Selector())
+        {
+            using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
+            selector.EnterMeasureForRender(frozen, screen, new Point(80, 60));
+            Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+            for (int i = 0; i < 30; i++)
+            {
+                selector.MoveMeasureCursorForRender(new Point(pill.Left + (pill.Width / 2), pill.Top + 2));
+                selector.MoveMeasureCursorForRender(new Point(80, 60));
+            }
+        }
+
+        PumpUntil(() => Motion.Holders == 0);
     }
 
     [Fact]

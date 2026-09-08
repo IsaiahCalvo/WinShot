@@ -37,8 +37,8 @@ public class MeasureSessionTests
     public void HoldsAccumulateAndBackspaceTakesTheNewestBack()
     {
         var session = new MeasureSession();
-        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5));
-        session.Hold(new Rectangle(0, 0, 10, 90), horizontal: false, new Point(5, 40));
+        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5), dpi: 96);
+        session.Hold(new Rectangle(0, 0, 10, 90), horizontal: false, new Point(5, 40), dpi: 96);
 
         Assert.Equal(2, session.Holds.Count);
         Assert.True(session.RemoveLastHold());
@@ -46,6 +46,56 @@ public class MeasureSessionTests
         Assert.True(session.Holds[0].Horizontal);
         Assert.True(session.RemoveLastHold());
         Assert.False(session.RemoveLastHold());
+    }
+
+    [Fact]
+    public void ARemovedGuideGoesOnItsOwnWithoutTakingTheRestOfTheCanvasWithIt()
+    {
+        // One misplaced guide used to cost every other guide AND every held span, because
+        // clearing was the only removal path there was.
+        var session = new MeasureSession();
+        session.AddGuideX(100);
+        session.AddGuideX(200);
+        session.AddGuideY(50);
+        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5), dpi: 96);
+
+        Assert.True(session.RemoveLastGuide());
+
+        Assert.Equal(new[] { 100, 200 }, session.GuidesX);
+        Assert.Empty(session.GuidesY);
+        Assert.Single(session.Holds);
+    }
+
+    [Fact]
+    public void BackspaceTakesBackTheNewestThingWhicheverKindItWas()
+    {
+        var session = new MeasureSession();
+        session.AddGuideX(100);
+        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5), dpi: 96);
+        session.AddGuideY(50);
+
+        Assert.True(session.RemoveLast());   // the guide on Y
+        Assert.Empty(session.GuidesY);
+        Assert.Single(session.Holds);
+
+        Assert.True(session.RemoveLast());   // the hold
+        Assert.Empty(session.Holds);
+        Assert.Equal(new[] { 100 }, session.GuidesX);
+
+        Assert.True(session.RemoveLast());   // the guide on X
+        Assert.False(session.RemoveLast());
+        Assert.False(session.HasAnything);
+    }
+
+    [Fact]
+    public void AGuideDraggedSomewhereElseIsStillTheOneBackspaceTakesBack()
+    {
+        var session = new MeasureSession();
+        session.AddGuideX(100);
+        session.MoveGuide(vertical: true, 100, 640);
+
+        Assert.True(session.RemoveLast());
+        Assert.Empty(session.GuidesX);
     }
 
     [Fact]
@@ -140,17 +190,33 @@ public class MeasureSessionTests
     public void CopyWritesOneLinePerHeldSpanInTheOrderTheyWereHeld()
     {
         var session = new MeasureSession();
-        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5));
-        session.Hold(new Rectangle(0, 0, 10, 90), horizontal: false, new Point(5, 40));
+        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5), dpi: 96);
+        session.Hold(new Rectangle(0, 0, 10, 90), horizontal: false, new Point(5, 40), dpi: 96);
 
         Assert.Equal($"40{Environment.NewLine}90", session.CopyText(new Rectangle(0, 0, 5, 5), 96));
+    }
+
+    [Fact]
+    public void EachHeldSpanIsCopiedWithTheDpiOfTheMonitorItWasHeldOn()
+    {
+        // A mixed-DPI desktop: the paint labels each hold with its own monitor's dip, so the
+        // clipboard must not relabel them all with whichever monitor the pointer ended on.
+        var session = new MeasureSession();
+        session.Hold(new Rectangle(0, 0, 100, 10), horizontal: true, new Point(5, 5), dpi: 144);
+        session.Hold(new Rectangle(2000, 0, 100, 10), horizontal: true, new Point(2005, 5), dpi: 96);
+
+        string[] lines = session.CopyText(null, liveDpi: 144).Split(Environment.NewLine);
+
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("67 dip", lines[0]);
+        Assert.Equal("100", lines[1]);
     }
 
     [Fact]
     public void ResetLeavesNothingBehindForTheNextSession()
     {
         var session = new MeasureSession();
-        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5));
+        session.Hold(new Rectangle(0, 0, 40, 10), horizontal: true, new Point(10, 5), dpi: 96);
         session.AddGuideY(20);
         session.ToggleContrastScale();
 

@@ -52,6 +52,26 @@ internal static class FastSelectorLoupeRenderer
         }
     }
 
+    /// <summary>
+    /// The ground the loupe covers — its box plus the coordinate/hex pill under it — so
+    /// chrome painted afterwards can step aside instead of blotting out the tool. Empty when
+    /// the loupe is not showing. The pill is always narrower than the loupe (a coordinate
+    /// pair at caption size is well under 120 px), so only its height has to be worked out.
+    /// </summary>
+    public static SD.Rectangle OccupiedRect(
+        SD.Size clientSize, SD.Rectangle virtualScreen, SD.Point cursorClient, SD.Point cursorScreen)
+    {
+        var loupe = FastSelectorLoupeLayout.Calculate(
+            clientSize, virtualScreen, cursorClient, cursorScreen, LoupeSize, LoupeZoom);
+        if (!loupe.IsVisible)
+            return SD.Rectangle.Empty;
+
+        int pillH = LabelHeight();
+        int pillTop = Math.Clamp(loupe.Bounds.Bottom + 6, 0, Math.Max(0, clientSize.Height - pillH));
+        return SD.Rectangle.FromLTRB(
+            loupe.Bounds.Left, loupe.Bounds.Top, loupe.Bounds.Right, pillTop + pillH);
+    }
+
     /// <summary>Crops the loupe's source region out of the frozen virtual-desktop bitmap,
     /// matching the size the live-capture path would have returned.</summary>
     private static SD.Bitmap CropFrozenSample(SD.Bitmap frozen, SD.Rectangle sourceScreen, SD.Rectangle virtualScreen)
@@ -183,13 +203,21 @@ internal static class FastSelectorLoupeRenderer
     /// <summary>Coordinate + hex readout in a small dark pill — the same material as
     /// <see cref="SelectorChrome.DrawLabel"/>'s size pill — so the loupe's payload stays
     /// readable over light desktop content, where shadowed bare text washes out.</summary>
+    private const int SwatchSize = 10;
+    private const int SwatchGap = 6;
+    private const int LineGap = 3;
+    private const int Pad = 6;
+
+    /// <summary>The label pill's height, which is two caption lines whatever they say.</summary>
+    private static int LabelHeight()
+    {
+        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
+        int lineHeight = Math.Max(WF.TextRenderer.MeasureText("0", font).Height, SwatchSize);
+        return (lineHeight * 2) + LineGap + (Pad * 2);
+    }
+
     private static void DrawLabel(SD.Graphics g, SD.Size clientSize, FastSelectorLoupe loupe, string hex, SD.Color pixel)
     {
-        const int SwatchSize = 10;
-        const int SwatchGap = 6;
-        const int LineGap = 3;
-        const int Pad = 6;
-
         using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
         SD.Size coordSize = WF.TextRenderer.MeasureText(loupe.Coordinates, font);
         SD.Size hexSize = WF.TextRenderer.MeasureText(hex, font);

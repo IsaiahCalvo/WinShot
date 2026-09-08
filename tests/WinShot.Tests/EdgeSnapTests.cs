@@ -178,17 +178,25 @@ public class EdgeSnapTests
         Assert.Equal(0u, snap.PixelAt(0, 200));
     }
 
-    // ------------------------------------------------------ anti-aliasing and confidence
+    // ------------------------------------------------ the port stops where the port stops
 
     private static Color Blend(Color a, Color b, double t) => Color.FromArgb(
         (int)Math.Round(a.R + ((b.R - a.R) * t)),
         (int)Math.Round(a.G + ((b.G - a.G) * t)),
         (int)Math.Round(a.B + ((b.B - a.B) * t)));
 
-    /// <summary>One vertical stroke: a solid core column with one blended column on each
-    /// side, which is what a 3 px anti-aliased letterform stem actually looks like.</summary>
-    private static Bitmap Stem(int core = 1)
+    [Fact]
+    public void AnAntiAliasedStrokeMeasuresItsSolidCoreAndNothingMore()
     {
+        // A 1 px ink stroke with one blended column either side. The ray stops at the first
+        // pixel that is not the colour it started on, which is the fringe, and returns the
+        // last similar coordinate — so the answer is 1, exactly as PowerToys returns.
+        //
+        // This is deliberate, not an oversight. §6 of the sweep report closes the door on
+        // anti-aliasing hysteresis until the shipped tolerance knob has proved insufficient
+        // in a user's hands, and a peek past the stop would also break §3.3's two rules: the
+        // comparison is against the FIXED cursor pixel, and the edge is the last similar
+        // coordinate. The knob is the answer here — at tolerance 0 the fringe still stops it.
         var bmp = new Bitmap(60, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         Color ink = Color.FromArgb(0x20, 0x20, 0x20);
         Color paper = Color.White;
@@ -196,37 +204,29 @@ public class EdgeSnapTests
         {
             g.Clear(paper);
             using var brush = new SolidBrush(ink);
-            g.FillRectangle(brush, 30, 0, core, 40);
+            g.FillRectangle(brush, 30, 0, 1, 40);
         }
         for (int y = 0; y < 40; y++)
         {
             bmp.SetPixel(29, y, Blend(ink, paper, 0.5));
-            bmp.SetPixel(30 + core, y, Blend(ink, paper, 0.5));
+            bmp.SetPixel(31, y, Blend(ink, paper, 0.5));
         }
-        return bmp;
+        using (bmp)
+        {
+            using var snap = EdgeSnap.Lock(bmp);
+
+            Rectangle rect = snap.DetectEdges(new Point(30, 20), EdgeSnap.DefaultTolerance);
+
+            Assert.Equal(30, rect.Left);
+            Assert.Equal(1, rect.Width);
+        }
     }
 
     [Fact]
-    public void AnAntiAliasedStrokeMeasuresTheWidthTheEyeSees()
+    public void AHairlineBetweenTwoPatchesOfOneColourIsAnEdge()
     {
-        // Stopping at the first blended pixel reports a 1 px stroke for something plainly
-        // three across. Both fringes are a channel-wise blend of the ink and the paper, so
-        // the walk crosses them and stops where the paper actually begins.
-        using Bitmap bmp = Stem();
-        using var snap = EdgeSnap.Lock(bmp);
-
-        Rectangle rect = snap.DetectEdges(new Point(30, 20), EdgeSnap.DefaultTolerance);
-
-        Assert.Equal(29, rect.Left);
-        Assert.Equal(3, rect.Width);
-    }
-
-    [Fact]
-    public void AHairlineBetweenTwoPatchesOfOneColourIsStillAnEdge()
-    {
-        // The guard on the anti-aliasing walk. A 1 px window border or table rule sits
-        // between two patches of the SAME colour, so it is a blend of nothing: bridging it
-        // would make every bordered card measure as the thing that contains it.
+        // A 1 px window border or table rule between two patches of the same colour: the
+        // walk stops at the border, so a bordered card still measures its border.
         using var bmp = new Bitmap(60, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
         {
@@ -242,45 +242,11 @@ public class EdgeSnapTests
     }
 
     [Fact]
-    public void AHardEdgeIsFirmAndAFrameEdgeIsNot()
+    public void AGradientIsWalkedAgainstTheStartPixelRatherThanTheNeighbour()
     {
-        using var bmp = Scene();
-        using var snap = EdgeSnap.Lock(bmp);
-
-        EdgeRun run = snap.DetectRun(new Point(22, 102), EdgeSnap.DefaultTolerance);
-        Assert.Equal(new Rectangle(20, 100, 5, 5), run.Bounds);
-        Assert.True(run.LeftFirm && run.RightFirm && run.TopFirm && run.BottomFirm);
-
-        // Out on the blue, every ray runs off the frame: there is no edge there to be sure of.
-        EdgeRun open = snap.DetectRun(new Point(150, 20), EdgeSnap.DefaultTolerance);
-        Assert.False(open.LeftFirm || open.RightFirm || open.TopFirm || open.BottomFirm);
-    }
-
-    [Fact]
-    public void AnEdgeThatOnlyJustClearedTheToleranceIsNotFirm()
-    {
-        // 36 away on the summed metric: past the default 30, nowhere near decisive. This is
-        // the reading the HUD must not dress up as a fact.
-        using var bmp = new Bitmap(60, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.Clear(Color.FromArgb(0x10, 0x30, 0x80));
-            using var faint = new SolidBrush(Color.FromArgb(0x1C, 0x3C, 0x8C));
-            g.FillRectangle(faint, 20, 10, 20, 20);
-        }
-        using var snap = EdgeSnap.Lock(bmp);
-
-        EdgeRun run = snap.DetectRun(new Point(30, 20), EdgeSnap.DefaultTolerance);
-
-        Assert.Equal(new Rectangle(20, 10, 20, 20), run.Bounds);
-        Assert.False(run.LeftFirm || run.RightFirm || run.TopFirm || run.BottomFirm);
-    }
-
-    [Fact]
-    public void TheAntiAliasWalkNeverReachesFurtherThanItsPeek()
-    {
-        // A long ramp is a gradient, not a fringe, and a gradient's own neighbours are close
-        // to each other — so the walk settles immediately and the run ends where it did.
+        // Every column of a ramp is close to the one beside it, so a neighbour-to-neighbour
+        // walk would swallow the whole screen. Against the fixed start pixel it stops after
+        // as many steps as the tolerance buys: 2 per channel, 6 summed, five steps each way.
         using var bmp = new Bitmap(120, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
         {
@@ -295,7 +261,6 @@ public class EdgeSnapTests
 
         Rectangle rect = snap.DetectEdges(new Point(60, 20), EdgeSnap.DefaultTolerance);
 
-        // Six columns each side at 2/channel: the ramp itself, no fringe, no peek.
         Assert.Equal(55, rect.Left);
         Assert.Equal(11, rect.Width);
     }
@@ -354,8 +319,8 @@ public class EdgeSnapTests
     [Fact]
     public void ARunTouchingTheFrameStillDegradesToItRatherThanFailing()
     {
-        // Nothing but background in column/row 0 to stop on: the ray runs off the frame and
-        // says so by never calling that edge firm.
+        // Nothing but the object in column/row 0 to stop on: the ray runs off the frame and
+        // degrades to it rather than failing.
         using var bmp = new Bitmap(40, 40, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
         {
@@ -365,10 +330,8 @@ public class EdgeSnapTests
         }
         using var snap = EdgeSnap.Lock(bmp);
 
-        EdgeRun run = snap.DetectRun(new Point(5, 5), EdgeSnap.DefaultTolerance);
-        Assert.Equal(new Rectangle(0, 0, 10, 10), run.Bounds);
-        Assert.False(run.LeftFirm, "a ray that ran off the frame is never a firm edge");
-        Assert.False(run.TopFirm, "a ray that ran off the frame is never a firm edge");
-        Assert.True(run.RightFirm && run.BottomFirm, "the hard edges keep their firmness");
+        Assert.Equal(
+            new Rectangle(0, 0, 10, 10),
+            snap.DetectEdges(new Point(5, 5), EdgeSnap.DefaultTolerance));
     }
 }

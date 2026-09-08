@@ -16,14 +16,6 @@ using SDI = System.Drawing.Imaging;
 namespace WinShot.Capture;
 
 /// <summary>
-/// A detected run plus how sure each ray is of the edge it stopped on: an edge is firm when
-/// the colour change that stopped it cleared the tolerance by a comfortable margin, and soft
-/// when it barely did or when the ray simply ran off the frame.
-/// </summary>
-public readonly record struct EdgeRun(
-    SD.Rectangle Bounds, bool LeftFirm, bool TopFirm, bool RightFirm, bool BottomFirm);
-
-/// <summary>
 /// Four independent colour-delta rays cast from one pixel of a frozen bitmap: left and right
 /// walk that pixel's scanline, top and bottom walk its column, and each stops at the first
 /// pixel that is no longer close to the <em>fixed</em> starting pixel. That makes it a
@@ -39,17 +31,6 @@ public sealed class EdgeSnap : IDisposable
 {
     /// <summary>PowerToys' tuned default for the summed-L1 metric.</summary>
     public const byte DefaultTolerance = 30;
-
-    /// <summary>How far past a stop a ray peeks for the far side of an anti-aliased
-    /// transition. Three, because a Windows glyph fringe is one or two blended pixels wide
-    /// and anything further away is a different object, not the same one seen through a
-    /// fringe.</summary>
-    public const int AntiAliasPeek = 3;
-
-    /// <summary>How far past the tolerance a stop has to land before the HUD calls that edge
-    /// firm. An edge that only just cleared the knob is exactly the one the user should be
-    /// invited to turn the knob for, so it loses its serif instead of claiming a fact.</summary>
-    public const int EdgeFirmMargin = 32;
 
     private readonly SD.Bitmap _bitmap;
     private SDI.BitmapData? _data;
@@ -114,31 +95,21 @@ public sealed class EdgeSnap : IDisposable
     /// ends and <c>Width = right - left + 1</c>. Getting that +1 wrong is the classic off-by-one
     /// in this feature — every measurement would read one pixel short.
     /// </summary>
-    public SD.Rectangle DetectEdges(SD.Point cursor, byte tolerance, bool perChannel = false) =>
-        DetectRun(cursor, tolerance, perChannel).Bounds;
-
-    /// <summary>
-    /// <see cref="DetectEdges"/> plus how sure each of the four rays is of where it stopped,
-    /// which is what lets the HUD stop pretending a barely-there edge is a fact.
-    /// </summary>
-    public EdgeRun DetectRun(SD.Point cursor, byte tolerance, bool perChannel = false)
+    public SD.Rectangle DetectEdges(SD.Point cursor, byte tolerance, bool perChannel = false)
     {
         // The walk clamps the cursor to [1, dim-2] so it can never read out of bounds; a
         // bitmap thinner than three pixels has no room for that and is simply all one run.
         if (_data is null || Width < 3 || Height < 3)
-            return new EdgeRun(new SD.Rectangle(0, 0, Width, Height), false, false, false, false);
+            return new SD.Rectangle(0, 0, Width, Height);
 
-        var left = FindEdge(cursor, tolerance, perChannel, isX: true, increment: false);
-        var top = FindEdge(cursor, tolerance, perChannel, isX: false, increment: false);
-        var right = FindEdge(cursor, tolerance, perChannel, isX: true, increment: true);
-        var bottom = FindEdge(cursor, tolerance, perChannel, isX: false, increment: true);
-        return new EdgeRun(
-            SD.Rectangle.FromLTRB(left.Edge, top.Edge, right.Edge + 1, bottom.Edge + 1),
-            left.Firm, top.Firm, right.Firm, bottom.Firm);
+        return SD.Rectangle.FromLTRB(
+            FindEdge(cursor, tolerance, perChannel, isX: true, increment: false),
+            FindEdge(cursor, tolerance, perChannel, isX: false, increment: false),
+            FindEdge(cursor, tolerance, perChannel, isX: true, increment: true) + 1,
+            FindEdge(cursor, tolerance, perChannel, isX: false, increment: true) + 1);
     }
 
-    private (int Edge, bool Firm) FindEdge(
-        SD.Point centre, byte tolerance, bool perChannel, bool isX, bool increment)
+    private int FindEdge(SD.Point centre, byte tolerance, bool perChannel, bool isX, bool increment)
     {
         int maxDim = isX ? Width : Height;
         int x = Math.Clamp(centre.X, 1, Width - 2);
@@ -149,61 +120,13 @@ public sealed class EdgeSnap : IDisposable
 
         uint At(int i) => isX ? PixelAt(i, other) : PixelAt(other, i);
 
-        // Anti-aliasing: a glyph stem, a rounded corner and a hairline stroke all reach the
-        // background through one or two BLENDED pixels, and stopping at the first of them
-        // measures the stroke narrower than anyone can see it. So peek a little way past the
-        // stop for the colour the walk settles into — two consecutive pixels alike — and
-        // treat everything between as part of the run when, and only when, every one of
-        // those pixels is a channel-wise blend of where the walk started and where it ended.
-        //
-        // That last clause is the whole safety of this. A 1 px window border or table rule
-        // between two patches of the SAME colour settles back onto the start colour, which
-        // is not "between" anything: the walk stops at the border, exactly as it should, and
-        // a bordered card still measures its border. Only a real transition is crossed.
-        int SettledAfter(int first)
-        {
-            int plateau = first;
-            for (int i = 0; i < AntiAliasPeek; i++)
-            {
-                int next = plateau + step;
-                if (next < 0 || next >= maxDim)
-                    return first;
-
-                uint here = At(plateau);
-                if (PixelsClose(here, At(next), tolerance, perChannel))
-                {
-                    // Settled. A settled colour that is close to where the walk started is a
-                    // thin sliver of something else, not the far side of a transition.
-                    if (plateau == first || PixelsClose(startPixel, here, tolerance, perChannel))
-                        return first;
-                    return IsBlend(first, plateau, here) ? plateau : first;
-                }
-
-                plateau = next;
-            }
-            return first;
-        }
-
-        // Every pixel from first up to (not including) the settled one has to lie between the
-        // start colour and the settled colour on all four channels.
-        bool IsBlend(int first, int settled, uint settledPixel)
-        {
-            for (int i = first; i != settled; i += step)
-            {
-                if (!Between(startPixel, At(i), settledPixel))
-                    return false;
-            }
-            return true;
-        }
-
         int at = isX ? x : y;
         while (true)
         {
             int next = at + step;
             if (increment ? next == maxDim : next < 0)
             {
-                // The ray reached the frame edge — degrade to it rather than fail. There is
-                // no edge there to be sure of, so it is never a firm one.
+                // The ray reached the frame edge — degrade to it rather than fail.
                 //
                 // Both guards fire only AFTER the last in-bounds index has been compared:
                 // the high side stops at next == maxDim (index maxDim-1 was tested), so the
@@ -211,37 +134,20 @@ public sealed class EdgeSnap : IDisposable
                 // next == 0 instead would hand back index 0 without ever comparing it, and
                 // every run whose neighbour is the first column or row of the virtual
                 // desktop would swallow one background pixel and measure a pixel too wide.
-                return (increment ? maxDim - 1 : 0, false);
+                return increment ? maxDim - 1 : 0;
             }
 
             // Always against the START pixel, never the neighbour: a run, not a gradient.
+            // And the LAST similar coordinate is the edge, which is where the inclusive +1
+            // in DetectEdges comes from. Both of those are §3.3 of the sweep report, and the
+            // report's §6 closes the door on tuning past them — no anti-aliasing hysteresis
+            // and no edge-confidence feedback until the shipped tolerance knob has been in a
+            // user's hands and proved insufficient.
             if (!PixelsClose(startPixel, At(next), tolerance, perChannel))
-            {
-                int settled = SettledAfter(next);
-                int delta = Distance(startPixel, At(settled), perChannel);
-                return (settled - step, delta >= tolerance + EdgeFirmMargin);
-            }
+                return at;
 
             at = next;
         }
-    }
-
-    /// <summary>Whether every channel of <paramref name="mid"/> sits between the matching
-    /// channels of <paramref name="a"/> and <paramref name="b"/>, with a pixel of slack for
-    /// the rounding a real compositor does.</summary>
-    internal static bool Between(uint a, uint mid, uint b)
-    {
-        for (int shift = 0; shift < 32; shift += 8)
-        {
-            int lo = (int)((a >> shift) & 0xFF);
-            int hi = (int)((b >> shift) & 0xFF);
-            if (lo > hi)
-                (lo, hi) = (hi, lo);
-            int m = (int)((mid >> shift) & 0xFF);
-            if (m < lo - 1 || m > hi + 1)
-                return false;
-        }
-        return true;
     }
 
     /// <summary>
@@ -256,12 +162,7 @@ public sealed class EdgeSnap : IDisposable
     /// entire range the tuned default of 30 lives in, so the tuning is untouched; above it,
     /// pairs that were accidentally "close" are now correctly far apart.
     /// </summary>
-    internal static bool PixelsClose(uint pixel1, uint pixel2, byte tolerance, bool perChannel) =>
-        Distance(pixel1, pixel2, perChannel) <= tolerance;
-
-    /// <summary>The metric itself, as a number, because the HUD wants to know not only THAT
-    /// a ray stopped but how decisively.</summary>
-    internal static int Distance(uint pixel1, uint pixel2, bool perChannel)
+    internal static bool PixelsClose(uint pixel1, uint pixel2, byte tolerance, bool perChannel)
     {
         int d0 = Math.Abs((int)(pixel1 & 0xFF) - (int)(pixel2 & 0xFF));
         int d1 = Math.Abs((int)((pixel1 >> 8) & 0xFF) - (int)((pixel2 >> 8) & 0xFF));
@@ -269,9 +170,9 @@ public sealed class EdgeSnap : IDisposable
         int d3 = Math.Abs((int)((pixel1 >> 24) & 0xFF) - (int)((pixel2 >> 24) & 0xFF));
 
         if (perChannel)
-            return Math.Max(Math.Max(d0, d1), Math.Max(d2, d3));
+            return Math.Max(Math.Max(d0, d1), Math.Max(d2, d3)) <= tolerance;
 
-        return Math.Min(d0 + d1 + d2 + d3, 255);
+        return Math.Min(d0 + d1 + d2 + d3, 255) <= tolerance;
     }
 
     public void Dispose()
