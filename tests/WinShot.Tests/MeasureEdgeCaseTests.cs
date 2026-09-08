@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Text.Json;
 using WinShot.Capture;
 using WinShot.Core;
@@ -86,7 +86,7 @@ public class MeasureEdgeCaseTests
 
         string text = selector.HintStripTextFor(screen.Width);
 
-        Assert.Equal("Tolerance 30  ·  Right-click for more", text);
+        Assert.Equal("Wheel: tolerance 30  ·  Right-click for more", text);
         Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
         Assert.True(screen.Contains(pill), $"pill {pill} escaped {screen}");
         using Bitmap render = Paint(selector, screen);

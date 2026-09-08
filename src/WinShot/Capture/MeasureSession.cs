@@ -115,17 +115,22 @@ internal sealed class MeasureSession
         return _placed[^1].Guide ? RemoveLastGuide() : RemoveLastHold();
     }
 
-    public void AddGuideX(int x) => Insert(_guidesX, vertical: true, x);
+    /// <summary>Places a vertical guide. False when one already sits on that column, which is
+    /// not a corner case: guide coordinates go through SnapCoordinate first, so two presses
+    /// anywhere inside the snap band of the same window edge collapse onto one column.</summary>
+    public bool AddGuideX(int x) => Insert(_guidesX, vertical: true, x);
 
-    public void AddGuideY(int y) => Insert(_guidesY, vertical: false, y);
+    /// <summary>Places a horizontal guide. False when one already sits on that row.</summary>
+    public bool AddGuideY(int y) => Insert(_guidesY, vertical: false, y);
 
-    private void Insert(List<int> guides, bool vertical, int value)
+    private bool Insert(List<int> guides, bool vertical, int value)
     {
         if (guides.Contains(value))
-            return;
+            return false;
         guides.Add(value);
         guides.Sort();
         _placed.Add((Guide: true, vertical, value));
+        return true;
     }
 
     /// <summary>Moves the guide at <paramref name="from"/> to <paramref name="to"/>, keeping

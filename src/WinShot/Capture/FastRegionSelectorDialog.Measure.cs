@@ -57,6 +57,9 @@ public sealed partial class FastRegionSelectorDialog
     /// the latch keeps the axis-lock repaint to one on the way down and one on the way up.</summary>
     private bool _shiftLatched;
 
+    /// <summary>One log line per session for a failing pixel read — see <see cref="ReadPixels"/>.</summary>
+    private bool _pixelReadLogged;
+
     /// <summary>
     /// The one live right-click menu. Its lifetime is owned here rather than by its own
     /// Closed handler because WinForms' modal-menu filter is a process-global message hook
@@ -200,6 +203,7 @@ public sealed partial class FastRegionSelectorDialog
         _draggingGuide = null;
         _shiftLatched = false;
         _freezeFailed = false;
+        _pixelReadLogged = false;
         _hintAmount = 0;
         StopHintEntrance();
     }
@@ -258,8 +262,14 @@ public sealed partial class FastRegionSelectorDialog
         catch (Exception ex)
         {
             // A transient GDI+ state error must not take the overlay down mid-session; the
-            // next mouse-move tries again.
-            Log.Error("Measurement pixel read failed (non-fatal)", ex);
+            // next mouse-move tries again. Logged once: this is reached from the 8 ms follow
+            // tick, so a bitmap that is broken rather than busy would otherwise write ~125
+            // lines a second into winshot.log for the life of the session.
+            if (!_pixelReadLogged)
+            {
+                _pixelReadLogged = true;
+                Log.Error("Measurement pixel read failed (non-fatal; logged once)", ex);
+            }
             return (null, null);
         }
     }
@@ -440,12 +450,12 @@ public sealed partial class FastRegionSelectorDialog
         switch (e.KeyCode)
         {
             case WF.Keys.H when shift && !ctrl:
-                _measure.AddGuideY(SnapCoordinate(_currentScreen.Y, _snapEdgesY));
+                AddGuideY(SnapCoordinate(_currentScreen.Y, _snapEdgesY));
                 Handled(e);
                 return true;
 
             case WF.Keys.V when shift && !ctrl:
-                _measure.AddGuideX(SnapCoordinate(_currentScreen.X, _snapEdgesX));
+                AddGuideX(SnapCoordinate(_currentScreen.X, _snapEdgesX));
                 Handled(e);
                 return true;
 
@@ -479,7 +489,7 @@ public sealed partial class FastRegionSelectorDialog
                 }
                 else
                 {
-                    App.Toast("Measure", "Nothing to undo.");
+                    MeasureToast("Nothing to undo.");
                     e.Handled = true;
                     e.SuppressKeyPress = true;
                 }
@@ -561,10 +571,41 @@ public sealed partial class FastRegionSelectorDialog
         return true;
     }
 
+    /// <summary>
+    /// Places a guide and says so when it lands on one that is already there. Both the key
+    /// and the menu row come through here: the repaint after a rejected insert paints an
+    /// identical frame, so without this the one gesture in the mode with no answer is the one
+    /// the user is most likely to repeat — two Shift+V presses inside the same window edge's
+    /// snap band both resolve to the same column.
+    /// </summary>
+    private void AddGuideX(int x)
+    {
+        if (!_measure.AddGuideX(x))
+            MeasureToast("There is already a guide on that line.");
+    }
+
+    private void AddGuideY(int y)
+    {
+        if (!_measure.AddGuideY(y))
+            MeasureToast("There is already a guide on that line.");
+    }
+
+    /// <summary>Every message this mode raises, on the monitor being measured. Measure is a
+    /// per-monitor tool driven from the cursor, and the tray-corner default reports a failure
+    /// on a screen the user is not looking at — this machine runs two monitors above the
+    /// laptop. The top edge, because the hint strip owns the bottom.</summary>
+    private void MeasureToast(string message, ToastSeverity severity = ToastSeverity.Info)
+    {
+        SD.Rectangle monitor = MonitorBoundsAt(_currentScreen);
+        App.Toast("Measure", message,
+            anchor: new SD.Point(monitor.Left + (monitor.Width / 2), monitor.Top),
+            severity: severity);
+    }
+
     /// <summary>The one answer for every gesture that arrived before there was anything to
     /// act on — which, until the freeze snapshot lands, is all of them. Saying nothing is the
     /// one thing a mode whose hint strip advertises six gestures cannot do.</summary>
-    private void NothingToMeasureYet() => App.Toast("Measure", NothingToMeasureMessage,
+    private void NothingToMeasureYet() => MeasureToast(NothingToMeasureMessage,
         // A failed snapshot is the same condition the freeze path already reported as an
         // error; it must not change glyph depending on which key the user pressed next.
         severity: _freezeFailed ? ToastSeverity.Error : ToastSeverity.Info);
@@ -654,7 +695,13 @@ public sealed partial class FastRegionSelectorDialog
             // Both ends of the knob. Everything else in this mode answers every gesture, and
             // a wheel that does nothing at all reads as a dead wheel rather than as an end —
             // so replay the strip's own entrance, which is where the number lives.
-            StartHintEntrance();
+            //
+            // Only when it is not already replaying. A real wheel delivers notches every
+            // 20-50 ms and the entrance is 280 ms, so restarting on each one held the strip
+            // near zero for as long as the wheel turned — flickering out the very number the
+            // gesture is about.
+            if (_hintTween is null)
+                StartHintEntrance();
             return;
         }
 
@@ -704,8 +751,8 @@ public sealed partial class FastRegionSelectorDialog
             return;
         }
         if (TrySetClipboardText(text))
-            App.Toast("Measure", _measure.Holds.Count > 1 ? "Measurements copied." : "Dimensions copied.",
-                severity: ToastSeverity.Success);
+            MeasureToast(_measure.Holds.Count > 1 ? "Measurements copied." : "Dimensions copied.",
+                ToastSeverity.Success);
     }
 
     private void CopyPixelColor(SD.Point at)
@@ -734,17 +781,16 @@ public sealed partial class FastRegionSelectorDialog
         catch (Exception ex)
         {
             Log.Error("Reading the pixel colour under the cursor failed", ex);
-            App.Toast("Measure", "Could not read the pixel under the pointer.",
-                severity: ToastSeverity.Error);
+            MeasureToast("Could not read the pixel under the pointer.", ToastSeverity.Error);
             return;
         }
 
         string hex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         if (TrySetClipboardText(hex))
-            App.Toast("Measure", $"Copied {hex}.", severity: ToastSeverity.Success);
+            MeasureToast($"Copied {hex}.", ToastSeverity.Success);
     }
 
-    private static bool TrySetClipboardText(string text)
+    private bool TrySetClipboardText(string text)
     {
         try
         {
@@ -755,8 +801,7 @@ public sealed partial class FastRegionSelectorDialog
         {
             // Another app can hold the clipboard open; say so rather than going quiet.
             Log.Error("Copying the measurement to the clipboard failed", ex);
-            App.Toast("Measure", "Could not copy — another app is holding the clipboard.",
-                severity: ToastSeverity.Error);
+            MeasureToast("Could not copy — another app is holding the clipboard.", ToastSeverity.Error);
             return false;
         }
     }
@@ -807,8 +852,8 @@ public sealed partial class FastRegionSelectorDialog
         Row("Hold height", "V",
             () => { if (measuredAt is SD.Rectangle r) _measure.Hold(r, false, anchor, anchorDpi); }, measuring);
         menu.Items.Add(new WF.ToolStripSeparator());
-        Row("Add horizontal guide", "Shift+H", () => _measure.AddGuideY(SnapCoordinate(anchor.Y, _snapEdgesY)));
-        Row("Add vertical guide", "Shift+V", () => _measure.AddGuideX(SnapCoordinate(anchor.X, _snapEdgesX)));
+        Row("Add horizontal guide", "Shift+H", () => AddGuideY(SnapCoordinate(anchor.Y, _snapEdgesY)));
+        Row("Add vertical guide", "Shift+V", () => AddGuideX(SnapCoordinate(anchor.X, _snapEdgesX)));
         menu.Items.Add(new WF.ToolStripSeparator());
         Row("Copy measurement", "Ctrl+C", () => CopyMeasurement(measuredAt, anchor), measuring || _measure.Holds.Count > 0);
         Row("Copy pixel color", "Ctrl+Shift+C", () => CopyPixelColor(anchor));
@@ -902,8 +947,13 @@ public sealed partial class FastRegionSelectorDialog
     /// from the pointer forever and can never be reached. Parked just outside the object it
     /// labels, it holds still for as long as the pointer stays on that object.
     ///
-    /// A run that fills the monitor top to bottom has neither an outside nor anything anyone
-    /// would want to capture, so there the pill falls back to riding the cursor's row.
+    /// A run that touches both the top and the bottom of the monitor has no outside to park
+    /// in — which is not the exotic case it sounds like, because it takes only 44 px of slack
+    /// at each edge to rule both out, and the empty gap column beside a window is a full-height
+    /// run. So the fallback parks INSIDE the run, at a fixed monitor-relative row. Fixed is
+    /// the whole point: an earlier take anchored it to the cursor's row, which meant the pill
+    /// moved every time the pointer stepped toward it, could never be entered, never lit, never
+    /// showed the hand cursor and never took the click the hint strip promises it takes.
     /// </summary>
     private SD.Rectangle? MeasurePillScreenRect()
     {
@@ -924,19 +974,17 @@ public sealed partial class FastRegionSelectorDialog
         if (belowRun + pill.Height <= monitor.Bottom)
             return new SD.Rectangle(left, belowRun, pill.Width, pill.Height);
 
-        int row = Math.Clamp(_currentScreen.Y, run.Top, run.Bottom - 1);
-        int above = row - pill.Height - gap;
-        int top = above >= monitor.Top ? above : row + gap;
-        top = Math.Clamp(top, monitor.Top, Math.Max(monitor.Top, monitor.Bottom - pill.Height));
-        return new SD.Rectangle(left, top, pill.Width, pill.Height);
+        int inside = Math.Clamp(run.Top + gap, monitor.Top,
+            Math.Max(monitor.Top, monitor.Bottom - pill.Height));
+        return new SD.Rectangle(left, inside, pill.Width, pill.Height);
     }
 
     /// <summary>
     /// The pill plus the corridor between it and the edge of the run it labels — the ground
     /// the pointer crosses on its way to the pill, and the ground on which the reading holds
-    /// still so that crossing arrives somewhere. Pill-wide and one gap tall; when the pill
-    /// had to fall back onto the cursor's row this is just the pill, and unreachable, which
-    /// is the honest answer for a run that fills the screen.
+    /// still so that crossing arrives somewhere. Pill-wide and one gap tall; when the pill had
+    /// to park inside the run this is just the pill, which is enough — the pointer is already
+    /// on the run, so walking to the pill never changes the reading anyway.
     /// </summary>
     private SD.Rectangle? MeasurePillReach()
     {
@@ -1129,12 +1177,44 @@ public sealed partial class FastRegionSelectorDialog
         return new SD.Rectangle(left, top, pill.Width, pill.Height);
     }
 
+    /// <summary>
+    /// Whether a measurement covering <paramref name="screenRect"/> can put ink anywhere in
+    /// the invalid region this paint was asked for. Every repaint in this mode is a band — the
+    /// 8 ms follow tick asks for one on every tick — and a dimension is expensive: two label
+    /// measures, two GraphicsPaths and a GDI-interop text draw, ~2.5 ms each. Without this
+    /// every hold and every guide pair on the monitor paid that on every frame, so the cost
+    /// of the canvas grew with the canvas and the clip bought nothing.
+    ///
+    /// The margin is <see cref="MeasurePillRoom"/>, the same inflation
+    /// <see cref="InvalidateMeasureRegion"/> asks for, so the cull cannot be tighter than the
+    /// invalidation: anything this skips could not have been in the invalid region.
+    /// </summary>
+    internal static bool TouchesClip(SD.Graphics g, SD.Rectangle screenRect, SD.Rectangle monitorBounds)
+    {
+        SD.Rectangle local = ToLocal(screenRect, monitorBounds);
+        local.Inflate(MeasurePillRoom, MeasurePillRoom);
+        return local.IntersectsWith(ClipRect(g, monitorBounds.Size));
+    }
+
+    /// <summary>The invalid region as a pane-local rect, clamped to the pane. GDI+ reports an
+    /// unclipped surface as a rect of floats far outside int range, so this cannot go through
+    /// Rectangle.Ceiling.</summary>
+    internal static SD.Rectangle ClipRect(SD.Graphics g, SD.Size clientSize)
+    {
+        SD.RectangleF c = g.ClipBounds;
+        int left = (int)Math.Clamp(Math.Floor(c.Left), 0, clientSize.Width);
+        int top = (int)Math.Clamp(Math.Floor(c.Top), 0, clientSize.Height);
+        int right = (int)Math.Clamp(Math.Ceiling(c.Right), 0, clientSize.Width);
+        int bottom = (int)Math.Clamp(Math.Ceiling(c.Bottom), 0, clientSize.Height);
+        return SD.Rectangle.FromLTRB(left, top, right, bottom);
+    }
+
     private void PaintHolds(SD.Graphics g, SD.Rectangle monitorBounds, SD.Color crimson)
     {
         foreach (MeasureHold hold in _measure.Holds)
         {
             SD.Rectangle bounds = hold.Bounds;
-            if (!bounds.IntersectsWith(monitorBounds))
+            if (!bounds.IntersectsWith(monitorBounds) || !TouchesClip(g, bounds, monitorBounds))
                 continue;
 
             // The hold's own DPI, never the cursor's and never the pane's: a span held on a
@@ -1169,12 +1249,21 @@ public sealed partial class FastRegionSelectorDialog
     /// they are only 1.27:1 apart in luminance.</summary>
     private void PaintGuidePairs(SD.Graphics g, SD.Rectangle monitorBounds, SD.Color guideBlue)
     {
-        int dpi = MonitorDpiAt(monitorBounds.Location);
+        // The CURSOR's monitor, not the painting pane's. The pill rides the cursor's own row
+        // or column, so a pair straddling a 96 dpi secondary and a 150 % primary was reading
+        // one dip figure on one pane and a different one on the other for the same gap.
+        int dpi = MonitorDpiAt(_currentScreen);
         SD.Point cursor = _currentScreen;
 
+        // to - from, not the holds' inclusive width, and deliberately: a guide snaps through
+        // SnapCoordinate onto _snapEdgesX/Y, which are window Left and Right — and Right is
+        // exclusive. So a pair snapped to the two edges of a window reads exactly that
+        // window's width, which is the same number the hold over it reads.
         foreach (var (from, to) in MeasureSession.Pairs(_measure.GuidesX))
         {
             int y = Math.Clamp(cursor.Y, monitorBounds.Top + 24, monitorBounds.Bottom - 24);
+            if (!TouchesClip(g, SD.Rectangle.FromLTRB(from, y, to + 1, y + 1), monitorBounds))
+                continue;
             SelectorChrome.DrawDimension(g, monitorBounds.Size,
                 ToLocal(new SD.Point(from, y), monitorBounds),
                 ToLocal(new SD.Point(to, y), monitorBounds),
@@ -1184,6 +1273,8 @@ public sealed partial class FastRegionSelectorDialog
         foreach (var (from, to) in MeasureSession.Pairs(_measure.GuidesY))
         {
             int x = Math.Clamp(cursor.X, monitorBounds.Left + 24, monitorBounds.Right - 24);
+            if (!TouchesClip(g, SD.Rectangle.FromLTRB(x, from, x + 1, to + 1), monitorBounds))
+                continue;
             SelectorChrome.DrawDimension(g, monitorBounds.Size,
                 ToLocal(new SD.Point(x, from), monitorBounds),
                 ToLocal(new SD.Point(x, to), monitorBounds),
@@ -1198,7 +1289,10 @@ public sealed partial class FastRegionSelectorDialog
     /// gestures and cannot afford the same silence.</summary>
     private string[] HintStripItems() => new[]
     {
-        $"Tolerance {_measure.Tolerance}",
+        // The wheel was the one gesture the strip printed the RESULT of without ever naming
+        // the control: "Tolerance 30" says what the knob is set to and nothing about there
+        // being a knob. Same width class, so the wrap is unchanged.
+        $"Wheel: tolerance {_measure.Tolerance}",
         "H / V hold",
         "Shift+H / Shift+V guide",
         "Click or Ctrl+C copies",
@@ -1241,6 +1335,24 @@ public sealed partial class FastRegionSelectorDialog
         if (_frozen is null)
             return HintStripText();
 
+        // The wrap costs ~0.5 ms — up to sixteen font measures — and it was being run two or
+        // three times per paint and once per frame of the entrance tween, for an answer that
+        // only changes when the tolerance number, the contrast word or the monitor changes.
+        // The one-line copy is the key: it is cheap to build and it moves whenever any of
+        // those do, so no cache invalidation can be forgotten.
+        string source = string.Join(HintSeparator, HintStripItems());
+        if (_hintWrap is (string had, int forWidth, string wrapped) && forWidth == monitorWidth && had == source)
+            return wrapped;
+
+        string packed = PackHintStrip(monitorWidth);
+        _hintWrap = (source, monitorWidth, packed);
+        return packed;
+    }
+
+    private (string Source, int Width, string Wrapped)? _hintWrap;
+
+    private string PackHintStrip(int monitorWidth)
+    {
         const int MaxLines = 3;
         var lines = new List<string>();
         string line = string.Empty;
@@ -1264,8 +1376,17 @@ public sealed partial class FastRegionSelectorDialog
 
         return lines.Count <= MaxLines
             ? string.Join("\n", lines)
-            : $"Tolerance {_measure.Tolerance}  ·  Right-click for more";
+            : $"Wheel: tolerance {_measure.Tolerance}  ·  Right-click for more";
     }
+
+    /// <summary>The strip's copy for one pane, wrapped against the width it actually gets:
+    /// the monitor less the same margin it keeps at the bottom, so the capsule is not flush
+    /// to both screen edges while sitting a scaled 24 px off the bottom one.</summary>
+    private string HintStripTextOn(SD.Rectangle monitorBounds) =>
+        HintStripTextFor(Math.Max(1, monitorBounds.Width - (2 * HintStripGap(monitorBounds))));
+
+    private static int HintStripGap(SD.Rectangle monitorBounds) => (int)Math.Round(
+        HintStripBottomGap * WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
 
     /// <summary>Where the strip sits on one pane, in that pane's local px. Centred along the
     /// bottom, and lifted clear of the loupe when the two want the same ground: the loupe is
@@ -1273,9 +1394,8 @@ public sealed partial class FastRegionSelectorDialog
     /// over its coordinates and its hex swatch.</summary>
     private SD.Rectangle HintStripRect(SD.Rectangle monitorBounds)
     {
-        SD.Size pill = SelectorChrome.MeasureLabel(HintStripTextFor(monitorBounds.Width));
-        int gap = (int)Math.Round(
-            HintStripBottomGap * WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
+        SD.Size pill = SelectorChrome.MeasureLabel(HintStripTextOn(monitorBounds));
+        int gap = HintStripGap(monitorBounds);
         int left = Math.Max(0, (monitorBounds.Width - pill.Width) / 2);
         int top = monitorBounds.Height - gap - pill.Height;
 
@@ -1298,7 +1418,7 @@ public sealed partial class FastRegionSelectorDialog
             return;
 
         SD.Rectangle strip = HintStripRect(monitorBounds);
-        SelectorChrome.DrawLabel(g, monitorBounds.Size, HintStripTextFor(monitorBounds.Width),
+        SelectorChrome.DrawLabel(g, monitorBounds.Size, HintStripTextOn(monitorBounds),
             strip.Left, strip.Top + (int)Math.Round(8 * (1 - _hintAmount)),
             fullyRounded: true, amount: _hintAmount);
     }

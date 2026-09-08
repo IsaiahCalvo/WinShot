@@ -48,14 +48,22 @@ internal static class SelectorChrome
 
     /// <summary>Draws the crosshair guide lines (shadow + line) with a gap around the cursor.
     /// <paramref name="color"/> overrides the default white: Measure mode draws its reticle in
-    /// measurement crimson, because there the reticle IS the tool.</summary>
+    /// measurement crimson, because there the reticle IS the tool.
+    ///
+    /// A colour override also buys the heavier halo, for the reason
+    /// <see cref="DrawHairlineShadow"/> spells out: 120 alpha is enough for white (1.05
+    /// luminance-wise it clears 3:1 against anything a desktop can show) and nowhere near
+    /// enough for crimson, which at 120 composites its ground to #4A4A4A and reads 1.91:1 —
+    /// under WCAG 1.4.11's 3:1 floor. The reticle is this mode's primary affordance and was
+    /// the one measurement element drawing without the halo the rest of the vocabulary
+    /// carries.</summary>
     public static void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor, SD.Color? color = null)
     {
         var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, CrosshairGapPx);
         if (!guides.IsVisible)
             return;
 
-        using var shadow = new SD.Pen(SD.Color.FromArgb(120, 0, 0, 0), 3);
+        using var shadow = new SD.Pen(SD.Color.FromArgb(color is null ? 120 : HairlineShadowAlpha, 0, 0, 0), 3);
         using var pen = new SD.Pen(color ?? SD.Color.FromArgb(210, 255, 255, 255), 1);
         DrawGuideLines(g, shadow, guides);
         DrawGuideLines(g, pen, guides);
@@ -157,7 +165,11 @@ internal static class SelectorChrome
                 ? new SD.Point(right, midY)
                 : new SD.Point(a.X - DimensionPillGap - pill.Width, midY);
         }
-        DrawLabel(g, clientSize, label, at.X, at.Y, fullyRounded: true);
+        // The pill wears its own line's colour as a 1 px outline. Crimson and blue are only
+        // 1.27:1 apart in luminance and the number inside is always TextPrimary on WindowBg,
+        // so without this the thing the eye actually reads — the figure — carries none of the
+        // grammar and a guide-pair gap is indistinguishable from a held span.
+        DrawLabel(g, clientSize, label, at.X, at.Y, fullyRounded: true, outline: color);
     }
 
     /// <summary>A guide the user placed: one full-bleed hairline, no end caps, no pill. The
@@ -202,9 +214,13 @@ internal static class SelectorChrome
             halo.Inflate(1, 1);
             path.AddRectangle(halo);
         }
-        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(215, 0, 0, 0));
+        using var shadow = new SD.SolidBrush(SD.Color.FromArgb(HairlineShadowAlpha, 0, 0, 0));
         g.FillPath(shadow, path);
     }
+
+    /// <summary>The alpha the paragraph above derives. Shared with the Measure reticle, which
+    /// is a measurement element and needs the same floor.</summary>
+    private const int HairlineShadowAlpha = 215;
 
     private const int LabelPadX = 16;
     private const int LabelPadY = 8;
@@ -218,10 +234,22 @@ internal static class SelectorChrome
     /// the measurement pill carries its dip value and ratio under the pixel figure.</summary>
     public static SD.Size MeasureLabel(string text)
     {
-        using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-        SD.Size size = MeasureBlock(text, font);
+        SD.Size size = MeasureBlock(text, LabelFont);
         return new SD.Size(size.Width + LabelPadX, size.Height + LabelPadY);
     }
+
+    /// <summary>
+    /// One Font for the life of the process. It is built from a point size that cannot change
+    /// within a run, and Measure mode was creating two per dimension per frame — that is two
+    /// per hold and two per guide pair on every 8 ms follow tick, which is the cost that grew
+    /// with the canvas. Never disposed on purpose: it outlives every caller.
+    /// </summary>
+    // ponytail: a racing test thread can build a second one and drop it on the floor; that is
+    // one leaked Font, not a correctness problem. Lock it only if a profiler ever cares.
+    private static SD.Font? _labelFont;
+
+    private static SD.Font LabelFont =>
+        _labelFont ??= ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
 
     private static SD.Size MeasureBlock(string text, SD.Font font)
     {
@@ -253,7 +281,7 @@ internal static class SelectorChrome
         SD.Graphics g, SD.Size clientSize, string text, int x, int y, bool fullyRounded = false,
         double amount = 1.0, SD.Color? outline = null)
     {
-        using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
+        SD.Font font = LabelFont;
         SD.Size size = MeasureBlock(text, font);
         int w = size.Width + LabelPadX;
         int h = size.Height + LabelPadY;

@@ -991,21 +991,28 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// </summary>
     private void PaintFrozenOrDim(SD.Graphics g, SD.Rectangle monitorBounds)
     {
+        // Only the invalid region. Every repaint in Measure mode is a band — the 8 ms follow
+        // tick asks for one on every tick — and blitting a whole 4K monitor to fill a 240 px
+        // band was ~20 ms a frame of pure waste. Outside the clip nothing lands on screen, so
+        // this changes what is drawn and not what is seen.
+        SD.Rectangle dest = ClipRect(g, monitorBounds.Size);
+        if (dest.Width <= 0 || dest.Height <= 0)
+            return;
+
         var dimmed = GetDimmedBackground(monitorBounds);
         if (dimmed is not null)
         {
-            var dest = new SD.Rectangle(0, 0, monitorBounds.Width, monitorBounds.Height);
             // SourceCopy: the background covers the whole surface, so there is nothing to
             // blend with and a straight copy is a lot cheaper at full-monitor size.
             var previousCompositing = g.CompositingMode;
             g.CompositingMode = SD.Drawing2D.CompositingMode.SourceCopy;
-            g.DrawImage(dimmed, dest, 0, 0, dimmed.Width, dimmed.Height, SD.GraphicsUnit.Pixel);
+            g.DrawImage(dimmed, dest, dest.X, dest.Y, dest.Width, dest.Height, SD.GraphicsUnit.Pixel);
             g.CompositingMode = previousCompositing;
             return;
         }
 
         using var dim = new SD.SolidBrush(SD.Color.FromArgb(OverlayDimAlpha, 0, 0, 0));
-        g.FillRectangle(dim, 0, 0, monitorBounds.Width, monitorBounds.Height);
+        g.FillRectangle(dim, dest);
     }
 
     internal void PaintSurface(SD.Graphics g, SD.Rectangle monitorBounds)

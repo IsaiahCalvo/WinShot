@@ -361,11 +361,11 @@ public class MeasureModeTests
     {
         using var selector = Measuring(new Point(80, 60), out _);
 
-        Assert.Contains("Tolerance 30", selector.HintStripText());
+        Assert.Contains("Wheel: tolerance 30", selector.HintStripText());
 
         selector.HandleMouseWheel(new WF.MouseEventArgs(WF.MouseButtons.None, 0, 80, 60, 120));
 
-        Assert.Contains("Tolerance 45", selector.HintStripText());
+        Assert.Contains("Wheel: tolerance 45", selector.HintStripText());
     }
 
     // ----------------------------------------------------------------- rendering
@@ -852,7 +852,7 @@ public class MeasureModeTests
 
         foreach (string item in new[]
         {
-            "Tolerance 30", "H / V hold", "Shift+H / Shift+V guide", "Click or Ctrl+C copies",
+            "Wheel: tolerance 30", "H / V hold", "Shift+H / Shift+V guide", "Click or Ctrl+C copies",
             "Click the pill or Enter captures", "Alt+click for WCAG contrast",
             "Backspace removes the last one", "Right-click for more", "Esc clears, Esc again exits",
         })
@@ -978,6 +978,134 @@ public class MeasureModeTests
 
         Assert.Equal(new[] { 80 }, selector.MeasureState.GuidesX);
         CloseSession(selector);
+    }
+
+    // ------------------------------------------------- review round: the four blocking fixes
+
+    [Fact]
+    public void TheReticleCarriesTheSameHaloEveryOtherMeasurementElementDoes()
+    {
+        // The reticle is the mode's primary affordance and was the one crimson element still
+        // drawing with the white crosshair's 120-alpha shadow. Over a white desktop under the
+        // 115-alpha dim the ground is #8C8C8C, against which crimson is 1.38:1 bare and only
+        // 1.91:1 on a 120-alpha shadow — under WCAG 1.4.11's 3:1 floor for a graphical object,
+        // and a regression against the 3.36:1 the white reticle it replaces cleared there.
+        using var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        using var lightDesktop = new Bitmap(
+            Screen.Width, Screen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(lightDesktop))
+        {
+            g.Clear(Color.White);
+            using var dark = new SolidBrush(Color.FromArgb(0x18, 0x18, 0x18));
+            g.FillRectangle(dark, Card);
+        }
+
+        selector.EnterMeasureForRender(lightDesktop, Screen, new Point(80, 60));
+        Assert.Equal(Card, selector.MeasuredScreenRect);
+        using Bitmap render = Render(selector);
+
+        // Up the reticle's vertical arm: below the live pill, above the measured card, so the
+        // only ink here is the reticle and the only ground is the dimmed white desktop.
+        const int Row = 38;
+        Color line = render.GetPixel(80, Row);
+        Color halo = render.GetPixel(79, Row);
+        Color ground = render.GetPixel(76, Row);
+
+        Assert.True(IsMeasureCrimson(line), $"the reticle is not crimson at ({80},{Row}): {line}");
+        Assert.True(Contrast(line, ground) < 3.0,
+            $"ground {ground} was already 3:1, so this scan proves nothing about the halo");
+        Assert.True(Contrast(line, halo) >= 3.0,
+            $"reticle {line} on its halo {halo} is {Contrast(line, halo):0.00}:1, under the 3:1 floor");
+    }
+
+    /// <summary>WCAG 1.4.11's ratio, on the two colours as they were actually painted.</summary>
+    private static double Contrast(Color a, Color b)
+    {
+        double la = ColorMath.RelativeLuminance(a);
+        double lb = ColorMath.RelativeLuminance(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
+    [Fact]
+    public void AGuideDroppedOnTopOfAnExistingOneSaysSoInsteadOfDoingNothing()
+    {
+        // Guides snap through SnapCoordinate, so two presses anywhere inside one window
+        // edge's snap band land on the same column. Silently repainting an identical frame
+        // was the only gesture in the mode with no answer at all.
+        var session = new MeasureSession();
+
+        Assert.True(session.AddGuideX(120));
+        Assert.False(session.AddGuideX(120));
+        Assert.True(session.AddGuideY(60));
+        Assert.False(session.AddGuideY(60));
+        Assert.Equal(new[] { 120 }, session.GuidesX);
+        Assert.Equal(new[] { 60 }, session.GuidesY);
+    }
+
+    [Fact]
+    public void PressingShiftVTwiceOnOneEdgeLeavesOneGuide()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+        selector.MoveMeasureCursorForRender(new Point(80, 90));
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+
+        Assert.Equal(new[] { 80 }, selector.MeasureState.GuidesX);
+    }
+
+    [Fact]
+    public void AMeasurementFarFromTheInvalidRegionIsNotRepainted()
+    {
+        // A dimension costs ~2.5 ms — two label measures, two GraphicsPaths and a GDI-interop
+        // text draw — and every repaint in this mode is a band. Without the cull the price of
+        // the canvas was paid on every 8 ms follow tick no matter where the band was.
+        using var canvas = new Bitmap(Screen.Width, Screen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(canvas);
+
+        // Unclipped, everything is in play.
+        Assert.True(FastRegionSelectorDialog.TouchesClip(g, Card, Screen));
+
+        g.SetClip(new Rectangle(0, 0, 20, 20));
+        Assert.False(FastRegionSelectorDialog.TouchesClip(g, new Rectangle(350, 260, 20, 20), Screen));
+        Assert.True(FastRegionSelectorDialog.TouchesClip(g, new Rectangle(10, 10, 5, 5), Screen));
+    }
+
+    [Fact]
+    public void AnUnclippedSurfaceIsNotMistakenForAnEmptyOne()
+    {
+        // GDI+ reports "no clip" as a rect of floats far outside int range; Rectangle.Ceiling
+        // on it overflows to something inside-out, which would blank the ground blit.
+        using var canvas = new Bitmap(64, 48, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(canvas);
+
+        Assert.Equal(new Rectangle(0, 0, 64, 48), FastRegionSelectorDialog.ClipRect(g, new Size(64, 48)));
+
+        g.SetClip(new Rectangle(8, 6, 10, 10));
+        Assert.Equal(new Rectangle(8, 6, 10, 10), FastRegionSelectorDialog.ClipRect(g, new Size(64, 48)));
+    }
+
+    [Fact]
+    public void ThePillOfAFullHeightRunHoldsStillAndTakesTheClickTheStripPromises()
+    {
+        // 44 px of slack at each edge is all it takes to rule out both the above-run and
+        // below-run placements, so this fires for the empty gap column beside any window —
+        // the case the mode advertises. The old fallback rode the cursor's row, so every step
+        // toward the pill moved it: never entered, never lit, never clickable.
+        using var selector = Measuring(new Point(20, 60), out _);
+
+        Rectangle gap = Assert.IsType<Rectangle>(selector.MeasuredScreenRect);
+        Assert.Equal(Screen.Height, gap.Height); // the case under test really is full-height
+
+        Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
+        selector.MoveMeasureCursorForRender(new Point(pill.Left + (pill.Width / 2), pill.Top + (pill.Height / 2)));
+
+        Assert.Equal(pill, selector.LivePillForRender);
+        Assert.True(selector.PillIsHotForRender, "the pill under the pointer never lit");
+
+        selector.MeasureMouseDownForRender(WF.MouseButtons.Left);
+        Assert.Equal(WF.DialogResult.OK, selector.DialogResult);
     }
 }
 
