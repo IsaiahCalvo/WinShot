@@ -815,8 +815,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 if (_pendingPx is SD.Rectangle p)
                 {
                     SD.Rectangle rect = ScreenFromVirtual(p);
-                    int grab = SelectionHandles.ToleranceAt(ScaleAt(_currentScreen));
-                    rect.Inflate(grab, grab);
+                    // The grab band is narrower than the drawn dot once the pop-in
+                    // overshoots, so clipping to it sliced the dots flat above 100 %.
+                    int margin = SelectionHandles.OutsetAt(ScaleAt(_currentScreen));
+                    rect.Inflate(margin, margin);
                     InvalidateScreenRect(rect);
                 }
             },
@@ -1989,13 +1991,11 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 ratioGlyphRect.Height -= U(11); // make room for the badge under the glyph
             // U+E7A8, not the crop glyph: with Region selected and a ratio chosen the bar was
             // showing two identical accent-filled crop icons a few cells apart.
-            WF.TextRenderer.DrawText(g, "", _glyphFont, ratioGlyphRect,
+            SelectorChrome.DrawCenteredText(g, "", _glyphFont, ratioGlyphRect,
                 ratioChosen
                     ? WinShot.Core.ThemePalette.Over(
                         SD.Color.FromArgb((int)Math.Round(255 * badgeFade), SD.Color.White), GlyphColor)
-                    : GlyphColor,
-                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
-                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+                    : GlyphColor);
             if (ratioChosen)
             {
                 int badgeAlpha = (int)Math.Round(255 * badgeFade);
@@ -2003,19 +2003,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                     _ratioRect.X, _ratioRect.Bottom - U(13), _ratioRect.Width, U(11));
                 // GDI+ DrawString, not TextRenderer: GDI drops the alpha byte, so the ramp
                 // this fade exists for was popping the badge in at full strength.
-                using (var badgeBrush = new SD.SolidBrush(SD.Color.FromArgb(badgeAlpha, SD.Color.White)))
-                using (var badgeFormat = new SD.StringFormat(SD.StringFormat.GenericTypographic)
-                {
-                    Alignment = SD.StringAlignment.Center,
-                    LineAlignment = SD.StringAlignment.Center,
-                    FormatFlags = SD.StringFormatFlags.NoWrap,
-                })
-                {
-                    var prevHint = g.TextRenderingHint;
-                    g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-                    g.DrawString(preset.Badge, _labelFont, badgeBrush, badgeRect, badgeFormat);
-                    g.TextRenderingHint = prevHint;
-                }
+                SelectorChrome.DrawCenteredText(g, preset.Badge, _labelFont, badgeRect,
+                    SD.Color.FromArgb(badgeAlpha, SD.Color.White));
             }
 
             // Expand to full size (diagonal arrows) — it finally does what it looks like.
@@ -2025,9 +2014,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 using var brush = new SD.SolidBrush(CellFill(CellExpand));
                 g.FillPath(brush, path);
             }
-            WF.TextRenderer.DrawText(g, "", _glyphFont, _expandRect, GlyphColor,
-                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
-                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+            // Same text path as the two cells beside it, so the three glyphs sit on one
+            // baseline: GDI and GDI+ centre a glyph a pixel apart.
+            SelectorChrome.DrawCenteredText(g, "", _glyphFont, _expandRect, GlyphColor);
 
             // Confirm button: commits the pending region, dimmed while there is nothing to
             // commit. No caret — there is no menu behind this button.
@@ -2043,10 +2032,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // selection, glide and discard, so a hard alpha swap blinked all session.
             int cropAlpha = 0x60 + (int)Math.Round((255 - 0x60) * Math.Clamp(_cropAmount, 0d, 1d));
             // A check, not a second crop glyph: the crop glyph is the ratio menu now.
-            WF.TextRenderer.DrawText(g, "", _glyphFont, cropGlyphRect,
-                SD.Color.FromArgb(cropAlpha, GlyphColor),
-                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
-                WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+            // GDI+ DrawString via SelectorChrome, not TextRenderer: TextRenderer is a GDI
+            // wrapper whose colour goes through ColorTranslator.ToWin32, which throws the
+            // alpha byte away -- so this fade, the one thing that says whether there is
+            // anything to commit, painted the glyph at full strength in both states and the
+            // unavailable look never reached the screen.
+            SelectorChrome.DrawCenteredText(g, "", _glyphFont, cropGlyphRect,
+                SD.Color.FromArgb(cropAlpha, GlyphColor));
         }
 
         private void DrawFieldWell(SD.Graphics g, SD.Rectangle field)
@@ -2169,6 +2161,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             if (disposing)
             {
+                _cellTween?.Dispose();
+                _cellTween = null;
                 _chipTween?.Dispose();
                 _chipTween = null;
                 _badgeTween?.Dispose();

@@ -796,7 +796,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             else
                 FlashMessage("Nothing to snap to near this selection.");
         }
-        else if (e.KeyCode == WF.Keys.C)
+        else if (e.KeyCode == WF.Keys.C && (IsBareKey(e) || (e.Control && !e.Alt && !e.Shift)))
         {
             e.Handled = true;
             e.SuppressKeyPress = true;
@@ -1406,6 +1406,11 @@ public sealed class FastRegionSelectorDialog : WF.Form
             () =>
             {
                 _hintTween = null;
+                // A message that has faded is over. Leaving the flag set meant one C press
+                // early in a session permanently ate the framed-selection hint, which is the
+                // only place the nudge, [ / ] and A gestures are advertised.
+                if (!arriving && _hintOpacity <= 0d)
+                    _hintIsMessage = false;
                 if (ReleaseFollowTick() && _hintOpacity <= 0d)
                     StopFollowMotion();
             });
@@ -1865,7 +1870,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             var local = ToLocal(bright, monitorBounds);
             BrightenRegion(g, monitorBounds, local);
-            using (var pen = new SD.Pen(Accent, 2))
+            // Scaled like the edge-press glow below, which starts at this same 2 px weight:
+            // an unscaled base made hovering an edge pop the stroke a pixel wider at 150 %
+            // before the tween had done anything.
+            using (var pen = new SD.Pen(Accent, (float)(2d * Math.Max(1d, s))))
                 g.DrawRectangle(pen, local);
 
             // The edge under the pointer thickens: the only thing on the selection that says
@@ -1970,7 +1978,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 DrawActionBar(g, monitorBounds, bar, padButton, cancel, done);
         }
 
-        if (_hintOpacity > 0d && cursorOnThisSurface && (_hintIsMessage || !_dragging))
+        // Opacity is the only gate. A `!_dragging` gate unpainted the pill on the mouse-DOWN,
+        // one event before the 140 ms exit fade starts on the first move -- so the entrance
+        // was answered by a hard cut and the fade animated a value nobody could see. Worse, a
+        // press that never travelled (the bare element click, now the common gesture) cleared
+        // _dragging on release and blinked the pill straight back at full strength.
+        if (_hintOpacity > 0d && cursorOnThisSurface)
         {
             SelectorChrome.DrawHint(
                 g, clientSize, _hintText, _hintOpacity, s, MessagePillTop(clientSize, monitorBounds));
@@ -2302,10 +2315,14 @@ public sealed class FastRegionSelectorDialog : WF.Form
             () => _hoverWashTween = null);
     }
 
-    /// <summary>A highlight's ground plus the border pen width and its antialiasing.</summary>
-    private static SD.Rectangle Inflated(SD.Rectangle rect)
+    /// <summary>A highlight's ground plus everything drawn outside it: the border pen and
+    /// its antialiasing, and -- on a framed selection -- the handle dots, their pop-in
+    /// overshoot and the grabbed handle's focus ring. Those scale with the monitor now, so a
+    /// fixed 4 px margin sliced the dots flat on anything above 100 %.</summary>
+    private SD.Rectangle Inflated(SD.Rectangle rect)
     {
-        rect.Inflate(4, 4);
+        int margin = SelectionHandles.OutsetAt(ScaleAt(new SD.Point(rect.Left, rect.Top)));
+        rect.Inflate(margin, margin);
         return rect;
     }
 

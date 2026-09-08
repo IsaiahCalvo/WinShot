@@ -1165,4 +1165,103 @@ public class SelectorSweepRegressionTests
         Assert.True(WhiteRunAt(1.5d) > WhiteRunAt(1d),
             "the handle dot should be wider on a 150 % monitor");
     }
+
+    /// <summary>
+    /// The eight dots are centred ON the selection border, so half of every dot -- and the
+    /// whole of a grabbed handle's focus ring -- is painted OUTSIDE the rectangle. Both grew
+    /// with the monitor when the handles were scaled, while the paint clip stayed a hardcoded
+    /// 4 px, so at 150 % the outer half of each dot was sliced flat and stayed sliced until
+    /// something unrelated repainted that ground. OutsetAt is what the clip is built from now,
+    /// so nothing Draw paints may fall outside it.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0d)]
+    [InlineData(1.25d)]
+    [InlineData(1.5d)]
+    [InlineData(2.0d)]
+    public void NothingTheHandlesPaintFallsOutsideTheClipTheyAreInvalidatedWith(double scale)
+    {
+        var rect = new SD.Rectangle(80, 80, 140, 100);
+        int outset = SelectionHandles.OutsetAt(scale);
+        var clip = rect;
+        clip.Inflate(outset, outset);
+
+        using var bmp = new SD.Bitmap(rect.Right + 160, rect.Bottom + 160,
+            SD.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(bmp))
+        {
+            g.Clear(SD.Color.Black);
+            // EaseOutBack's overshoot (the pop-in runs past 1) and a grabbed top-left handle,
+            // which is the widest the chrome ever reaches.
+            SelectionHandles.Draw(g, rect, 1.3d, focusHandle: 0, dpiScale: scale);
+        }
+
+        bool paintedOutsideTheBareRect = false;
+        for (int y = 0; y < bmp.Height; y++)
+        {
+            for (int x = 0; x < bmp.Width; x++)
+            {
+                if (bmp.GetPixel(x, y).ToArgb() == SD.Color.Black.ToArgb())
+                    continue;
+                Assert.True(clip.Contains(x, y),
+                    $"handle chrome painted at ({x},{y}), outside the {clip} clip at {scale:0.##}x");
+                if (!rect.Contains(x, y))
+                    paintedOutsideTheBareRect = true;
+            }
+        }
+        Assert.True(paintedOutsideTheBareRect,
+            "the test is vacuous unless the handles do reach outside the selection");
+    }
+
+    /// <summary>
+    /// The all-in-one's confirm cell is the primary commit control and it dims when there is
+    /// nothing to commit. It painted that state through TextRenderer.DrawText -- a GDI wrapper
+    /// whose colour goes through ColorTranslator.ToWin32, which drops the alpha byte -- so the
+    /// glyph rendered at full strength in both states and the whole tween drove nothing.
+    /// </summary>
+    [Fact]
+    public void TheConfirmGlyphIsDimWhenThereIsNothingToCommit()
+    {
+        RunSta(() =>
+        {
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            using var selector = new FastAllInOneSelectorDialog(
+                () => Task.FromResult(new List<WindowInfo>()), new SettingsService());
+            object toolbar = selector.GetType().GetField("_toolbar", flags)!.GetValue(selector)!;
+            var amount = toolbar.GetType().GetField("_cropAmount", flags)!;
+            var cropRect = (SD.Rectangle)toolbar.GetType().GetField("_cropRect", flags)!.GetValue(toolbar)!;
+            var paint = toolbar.GetType().GetMethod("PaintSizeBar", flags)!;
+            var bar = (WF.Control)toolbar;
+
+            int BrightGlyphPixels(double cropAmount)
+            {
+                amount.SetValue(toolbar, cropAmount);
+                using var bmp = new SD.Bitmap(
+                    Math.Max(bar.Width, cropRect.Right + 8), Math.Max(bar.Height, cropRect.Bottom + 8),
+                    SD.Imaging.PixelFormat.Format32bppArgb);
+                using (var g = SD.Graphics.FromImage(bmp))
+                {
+                    g.Clear(SD.Color.Black);
+                    paint.Invoke(toolbar, [g]);
+                }
+                int bright = 0;
+                for (int y = cropRect.Top; y < cropRect.Bottom; y++)
+                {
+                    for (int x = cropRect.Left; x < cropRect.Right; x++)
+                    {
+                        if (bmp.GetPixel(x, y).R > 150)
+                            bright++;
+                    }
+                }
+                return bright;
+            }
+
+            int available = BrightGlyphPixels(1d);
+            int unavailable = BrightGlyphPixels(0d);
+
+            Assert.True(available > 20, $"the available glyph should be solid, found {available} px");
+            Assert.True(unavailable * 4 < available,
+                $"the unavailable glyph should be dim: {unavailable} px vs {available} px");
+        });
+    }
 }

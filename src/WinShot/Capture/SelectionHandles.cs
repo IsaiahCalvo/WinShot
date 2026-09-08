@@ -35,6 +35,17 @@ public static class SelectionHandles
     /// <inheritdoc cref="ToleranceAt"/>
     public static int HalfAt(double scale) => Scaled(Half, scale);
 
+    /// <summary>
+    /// How far OUTSIDE its rectangle the chrome drawn on a selection reaches, in physical px
+    /// for a monitor at <paramref name="scale"/>. A dot is centred ON the border, so half of
+    /// it always hangs outside; <see cref="Draw"/> may overshoot that half by 1.3 during the
+    /// pop-in, and a grabbed handle adds a focus ring of another <c>half + ringPad</c>. Any
+    /// caller that invalidates only the selection rect clips all of that away -- at 150 % the
+    /// dots rendered as circles sliced flat -- so the paint clip is built from this.
+    /// </summary>
+    public static int OutsetAt(double scale) =>
+        (2 * (int)Math.Round(HalfAt(scale) * 1.3d)) + Scaled(3, scale) + 2;
+
     private static int Scaled(int logical, double scale) =>
         Math.Max(logical, (int)Math.Round(logical * (scale is > 0d and < 100d ? scale : 1d)));
 
@@ -161,7 +172,9 @@ public static class SelectionHandles
                 g.FillEllipse(focus, ring);
             }
             var under = dot;
-            under.Offset(0, 1);
+            // The shadow offset grows with the dot; a fixed 1 px was a quarter of its
+            // intended weight at 200 %, which is where the dot needs it most.
+            under.Offset(0, Scaled(1, dpiScale));
             g.FillEllipse(shadow, under);
             g.FillEllipse(fill, dot);
             g.DrawEllipse(pen, dot);

@@ -62,7 +62,7 @@ internal static class SelectorChrome
     /// labels solid on top of each other for the entire 140 ms. GDI+ <c>DrawString</c> does
     /// honour alpha, which is why the quick-actions card's flash line already uses it.
     /// </summary>
-    private static void DrawCenteredText(
+    public static void DrawCenteredText(
         SD.Graphics g, string text, SD.Font font, SD.Rectangle bounds, SD.Color color)
     {
         if (color.A <= 0)
@@ -119,8 +119,13 @@ internal static class SelectorChrome
         if (!guides.IsVisible)
             return;
 
-        using var shadow = new SD.Pen(SD.Color.FromArgb(120, 0, 0, 0), 3);
-        using var pen = new SD.Pen(SD.Color.FromArgb(210, 255, 255, 255), 1);
+        // The guide lines grow with the monitor like the gap between them already did.
+        // With crosshair mode defaulting to "always" these are the most-seen chrome in the
+        // app, and at 150 % a 1 px white line is two-thirds of a logical pixel -- a hairline
+        // that half-disappears into the dim.
+        float weight = (float)Math.Max(1d, Clean(scale));
+        using var shadow = new SD.Pen(SD.Color.FromArgb(120, 0, 0, 0), 3f * weight);
+        using var pen = new SD.Pen(SD.Color.FromArgb(210, 255, 255, 255), weight);
         DrawGuideLines(g, shadow, guides);
         DrawGuideLines(g, pen, guides);
     }

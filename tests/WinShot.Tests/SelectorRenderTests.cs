@@ -400,4 +400,40 @@ public class SelectorRenderTests
         Assert.True(painted.GetPixel(200, Height - 5).R > 150, "the guide should reach the bottom edge");
         Assert.True(painted.GetPixel(200, 150).R < 150, "the guide should leave a gap at the cursor");
     }
+
+    /// <summary>
+    /// The pill is gated on its opacity and nothing else. It used to be unpainted the moment
+    /// _dragging went true -- on the mouse-DOWN, one event before the exit fade starts on the
+    /// first move -- so the 280 ms entrance was answered by a hard cut, and a press that never
+    /// travelled (a bare element click) blinked the pill back at full strength on release.
+    /// </summary>
+    [Fact]
+    public void ThePressItselfDoesNotUnpaintTheHintPill()
+    {
+        int DarkPixelsAcrossTheHintBand(bool pressed)
+        {
+            using var selector = Seed(FlatDesktop(), new SD.Point(390, 250));
+            Set(selector, "_hintOpacity", 1d);
+            Set(selector, "_hintText", SelectorHint.Text(windowMode: false));
+            Set(selector, "_dragging", pressed);
+            Set(selector, "_dragMoved", false);
+            using SD.Bitmap painted = Paint(selector);
+            int dark = 0;
+            for (int y = (Height / 8) - 4; y < (Height / 8) + 28; y++)
+            {
+                for (int x = 0; x < 350; x++)
+                {
+                    if (painted.GetPixel(x, y).R < 45)
+                        dark++;
+                }
+            }
+            return dark;
+        }
+
+        int idle = DarkPixelsAcrossTheHintBand(pressed: false);
+        int held = DarkPixelsAcrossTheHintBand(pressed: true);
+
+        Assert.True(idle > 200, $"the hint should be on screen to begin with, found {idle} px");
+        Assert.Equal(idle, held);
+    }
 }
