@@ -52,8 +52,28 @@ public class SnapScanWindowTests
 {
     private static readonly Rectangle ProbeBounds = new(0, 0, 500, 400);
 
+    /// <summary>The previous test's probe, so this one can wait for it to actually go away.</summary>
+    private static IntPtr _lastProbe;
+
     private static WF.Form ShowProbeWindow(out WF.Panel outer, out WF.Button inner)
     {
+        // Three of the four call sites retire their probe through `using`, which runs at the end
+        // of the test method with nothing left to pump the destroy through — only
+        // AWindowClosedBeforeTheWalkIsSimplyAbsent pumps by hand, and that is the tell. A probe
+        // that outlives its test is still up at ProbeBounds and still TopMost when the next one
+        // publishes, so it covers the new probe and DropCoveredControls deletes the very rects
+        // these tests assert on. Retire the last one before publishing the next.
+        if (_lastProbe != IntPtr.Zero)
+        {
+            var stale = System.DateTime.UtcNow.AddSeconds(3);
+            while (System.DateTime.UtcNow < stale
+                   && WindowEnumerator.GetSnapRectangles().Exists(r => r.Handle == _lastProbe))
+            {
+                Pump();
+            }
+            _lastProbe = IntPtr.Zero;
+        }
+
         var form = new WF.Form
         {
             FormBorderStyle = WF.FormBorderStyle.Sizable,
@@ -84,6 +104,7 @@ public class SnapScanWindowTests
         {
             Pump();
         }
+        _lastProbe = form.Handle;
         return form;
     }
 
