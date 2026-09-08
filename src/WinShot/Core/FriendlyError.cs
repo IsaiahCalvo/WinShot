@@ -14,7 +14,12 @@ public static class FriendlyError
 {
     private const int ErrorDiskFull = unchecked((int)0x80070070);
     private const int ErrorHandleDiskFull = unchecked((int)0x80070027);
-    private const int ClipboardCantOpen = unchecked((int)0x800401D0);
+    internal const int ClipboardCantOpen = unchecked((int)0x800401D0);
+
+    /// <summary>The catch-all. Named so a caller can tell "nothing specific to say" apart
+    /// from a real answer — the quick-actions card shows the action's own title instead of
+    /// this, because a one-line surface has no room to say both.</summary>
+    public const string Generic = "Something went wrong. The details are in the log.";
 
     public static string For(Exception? ex) => ex switch
     {
@@ -38,9 +43,13 @@ public static class FriendlyError
         // OperationCanceledException, and the recording and export paths both throw it.
         OperationCanceledException => "That was cancelled.",
         OutOfMemoryException => "The image is too large to process on this PC.",
-        // CLIPBRD_E_CANT_OPEN: another app owns the clipboard. The one COM failure with an
-        // answer better than "check the log", and the copy paths hit it regularly.
-        COMException { HResult: ClipboardCantOpen } => "Another app is holding the clipboard. Try again in a moment.",
+        // CLIPBRD_E_CANT_OPEN: another app owns the clipboard. The one failure here with an
+        // answer better than "check the log", and the copy paths hit it regularly. Keyed on the
+        // HRESULT rather than on COMException, because the clipboard reaches this in three
+        // shapes: Clipboard.SetText raises a COMException, Clipboard.SetFileDropList a bare
+        // ExternalException, and CaptureService's hand-rolled image copy a ClipboardBusyException
+        // (it gives up on a Win32Exception, which the arm below deliberately does not map).
+        ExternalException { HResult: ClipboardCantOpen } => "Another app is holding the clipboard. Try again in a moment.",
         // GDI+ reports both a bad image and a failed encode this way - as the base types
         // exactly, never as a derived one. The derived types are not about images at all:
         // Win32Exception is a failed Process.Start or a denied API call, and
@@ -53,6 +62,22 @@ public static class FriendlyError
             => "The image could not be processed. Try the capture again.",
         ArgumentException when ex.GetType() == typeof(ArgumentException)
             => "The image could not be processed. Try the capture again.",
-        _ => "Something went wrong. The details are in the log.",
+        _ => Generic,
     };
+}
+
+/// <summary>
+/// Another app owns the clipboard and would not let go. <c>CaptureService.CopyToClipboard</c>
+/// raises this instead of the raw <see cref="Win32Exception"/> it gave up on, because
+/// <see cref="FriendlyError"/> keys clipboard advice on CLIPBRD_E_CANT_OPEN — the code
+/// <c>Clipboard.SetText</c> and <c>Clipboard.SetFileDropList</c> already raise for the same
+/// condition — and deliberately does not read a bare Win32Exception as one (a failed
+/// <c>Process.Start</c> is a Win32Exception too). The real last-error stays on
+/// <see cref="Exception.InnerException"/> for the log.
+/// </summary>
+public sealed class ClipboardBusyException : ExternalException
+{
+    public ClipboardBusyException(Exception? inner)
+        : base("Clipboard is busy.", inner!)
+        => HResult = FriendlyError.ClipboardCantOpen;
 }
