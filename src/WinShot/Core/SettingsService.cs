@@ -53,6 +53,9 @@ public class Settings
     public int RecordingCountdownSeconds { get; set; } = 0;
     public bool CaptureCursor { get; set; } = true;
     public string WebcamOverlayPosition { get; set; } = "off"; // off | top-left | top-right | bottom-left | bottom-right | fullscreen
+    // Position doubles as the on/off flag, so switching the webcam off from the recording HUD
+    // would erase the corner. The last position that was not "off" is kept here instead.
+    public string WebcamOverlayCorner { get; set; } = RecordingOptions.WebcamDefaultCorner;
     public int WebcamOverlaySizePercent { get; set; } = RecordingOptions.DefaultWebcamSizePercent;
     // Device picks and encode quality live here, not on the recording HUD: the HUD carries the
     // five things that change per take, and these three are set once and kept.
@@ -113,7 +116,7 @@ public class Settings
     public bool ShowRecordingControls { get; set; } = true; // controls bar while recording
     public bool ShowRecordingTimer { get; set; } = false;   // display recording time in tray/control bar
     public bool ScaleHiDpiVideo { get; set; } = false;      // downscale HiDPI video to 1x
-    public bool DoNotDisturbWhileRecording { get; set; } = false; // TODO: wire behavior
+    public bool DoNotDisturbWhileRecording { get; set; } = false;
     public bool RememberLastSelection { get; set; } = false; // recording area
     public string LastRecordingRegion { get; set; } = "";   // "x,y,w,h" physical screen px
     public bool DimScreenWhileRecording { get; set; } = true;
@@ -145,6 +148,18 @@ public class Settings
     public bool AddRetinaSuffix { get; set; } = true;         // TODO: wire behavior — add "@2x" suffix to HiDPI screenshots
     public string CopyToClipboardFormat { get; set; } = "file-image"; // TODO: wire behavior — file-image | file | image
     public bool AllInOneRememberLast { get; set; } = true;    // All-in-One restores the last selection
+
+    /// <summary>
+    /// The only supported way to write the webcam overlay position: it keeps
+    /// <see cref="WebcamOverlayCorner"/> in step, so switching the overlay off (from the
+    /// recording HUD or from Settings) still remembers the corner to restore when it comes
+    /// back on. Assigning <see cref="WebcamOverlayPosition"/> directly loses that.
+    /// </summary>
+    public void SetWebcamOverlayPosition(string? position)
+    {
+        WebcamOverlayCorner = RecordingOptions.RememberedWebcamCorner(position, WebcamOverlayCorner);
+        WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(position);
+    }
 }
 
 public class SettingsService

@@ -269,7 +269,8 @@ public sealed class RecordingController
         s.RecordSystemAudio = choice.Toggles.SystemAudio;
         s.ShowClickHighlights = choice.Toggles.Clicks;
         s.ShowKeystrokes = choice.Toggles.Keystrokes;
-        s.WebcamOverlayPosition = WebcamPositionFor(choice.Toggles.Webcam, s.WebcamOverlayPosition);
+        s.SetWebcamOverlayPosition(
+            WebcamPositionFor(choice.Toggles.Webcam, s.WebcamOverlayPosition, s.WebcamOverlayCorner));
 
         RecordingRegionSelection selection =
             RecordingRegionSelection.FromVirtualSelection(region, CaptureService.VirtualScreen);
@@ -305,7 +306,7 @@ public sealed class RecordingController
             s.ShowClickHighlights = dialog.ShowClickHighlights;
             s.ShowKeystrokes = dialog.ShowKeystrokes;
             s.RecordingCountdownSeconds = dialog.CountdownSeconds;
-            s.WebcamOverlayPosition = dialog.WebcamPosition;
+            s.SetWebcamOverlayPosition(dialog.WebcamPosition);
             s.WebcamOverlaySizePercent = dialog.WebcamSizePercent;
             s.RecordingFps = dialog.RecordingFps;
             s.GifFps = dialog.GifFps;
@@ -375,7 +376,7 @@ public sealed class RecordingController
             toggles.Keystrokes,
             KeystrokeOverlayOptions.FromSettings(s) with { Render = toggles.Keystrokes },
             s.HideCursorWhenTyping,
-            WebcamPositionFor(toggles.Webcam, s.WebcamOverlayPosition),
+            WebcamPositionFor(toggles.Webcam, s.WebcamOverlayPosition, s.WebcamOverlayCorner),
             s.WebcamOverlaySizePercent,
             WebcamDeviceName: NullIfBlank(s.RecordingWebcamDevice),
             MicrophoneDeviceName: NullIfBlank(s.RecordingMicrophoneDevice),
@@ -402,16 +403,19 @@ public sealed class RecordingController
 
     /// <summary>
     /// The HUD's webcam cell is a plain on/off, so turning it on restores whatever corner was
-    /// last chosen in Settings and falls back to the bottom right the first time.
+    /// last chosen and falls back to the default corner the first time. The corner comes from
+    /// <see cref="Settings.WebcamOverlayCorner"/>, not from the position — the position is
+    /// "off" exactly when this needs the memory, which is what used to lose it.
     /// </summary>
-    internal static string WebcamPositionFor(bool enabled, string? storedPosition)
+    internal static string WebcamPositionFor(
+        bool enabled, string? storedPosition, string? rememberedCorner)
     {
         if (!enabled)
             return RecordingOptions.WebcamOff;
 
         string stored = RecordingOptions.NormalizeWebcamPosition(storedPosition);
         return string.Equals(stored, RecordingOptions.WebcamOff, StringComparison.Ordinal)
-            ? "bottom-right"
+            ? RecordingOptions.RememberedWebcamCorner(null, rememberedCorner)
             : stored;
     }
 

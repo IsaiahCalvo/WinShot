@@ -613,7 +613,7 @@ public partial class SettingsWindow : Window
             s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
             s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
             s.RecordingCountdownSeconds = countdown;
-            s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
+            s.SetWebcamOverlayPosition(SelectedTag(WebcamCombo, "off"));
             s.WebcamOverlaySizePercent = RecordingOptions.ClampWebcamSizePercent(webcamSizePercent);
             s.RecordingWebcamDevice = SelectedTag(WebcamDeviceCombo, "");
 
@@ -1040,7 +1040,21 @@ public partial class SettingsWindow : Window
                 Tag = device.DeviceName,
             });
         }
-        SelectByTag(combo, stored ?? "", fallbackIndex: 0);
+
+        // A device that is unplugged when Settings opens still gets its own row, greyed and
+        // labelled. Without it the combo fell back to index 0 and Save wrote "" over the pick,
+        // so unplugging a USB mic once and opening Settings lost the choice for good.
+        string keep = stored ?? "";
+        if (keep.Length > 0 && !devices.Any(d => string.Equals(d.DeviceName, keep, StringComparison.Ordinal)))
+        {
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = (keep.Length <= 40 ? keep : keep[..39] + "…") + " (not connected)",
+                Tag = keep,
+            });
+        }
+
+        SelectByTag(combo, keep, fallbackIndex: 0);
     }
 
     // Delegates to the shared helper so Settings and the boot-time self-heal write the

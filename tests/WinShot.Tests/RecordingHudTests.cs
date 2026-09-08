@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using WinShot.Core;
 using WinShot.Recording;
 using Xunit;
@@ -273,10 +273,39 @@ public class RecordingHudTests
     [Fact]
     public void WebcamPosition_RestoresTheStoredCornerAndFallsBackToBottomRight()
     {
-        Assert.Equal("top-left", RecordingController.WebcamPositionFor(true, "top-left"));
-        Assert.Equal("bottom-right", RecordingController.WebcamPositionFor(true, RecordingOptions.WebcamOff));
-        Assert.Equal("bottom-right", RecordingController.WebcamPositionFor(true, "nonsense"));
-        Assert.Equal(RecordingOptions.WebcamOff, RecordingController.WebcamPositionFor(false, "top-left"));
+        Assert.Equal("top-left", RecordingController.WebcamPositionFor(true, "top-left", "bottom-left"));
+        Assert.Equal(
+            "bottom-left",
+            RecordingController.WebcamPositionFor(true, RecordingOptions.WebcamOff, "bottom-left"));
+        Assert.Equal("bottom-right", RecordingController.WebcamPositionFor(true, "nonsense", "nonsense"));
+        Assert.Equal(
+            RecordingOptions.WebcamOff,
+            RecordingController.WebcamPositionFor(false, "top-left", "top-left"));
+    }
+
+    /// <summary>
+    /// Recording with the HUD's webcam cell off used to write "off" over the one field that
+    /// held the corner, so the next take that turned it back on landed bottom-right whatever
+    /// the user had picked in Settings. The corner survives a take with the cell off.
+    /// </summary>
+    [Fact]
+    public void WebcamCorner_SurvivesATakeWithTheCellOff()
+    {
+        var s = new Settings();
+        s.SetWebcamOverlayPosition("top-left");
+
+        // Take 1: the HUD opens with the webcam on (top-left is not "off") and the user turns
+        // it off, which is what the flow persists.
+        Assert.True(RecordingHudToggles.FromSettings(s).Webcam);
+        s.SetWebcamOverlayPosition(
+            RecordingController.WebcamPositionFor(false, s.WebcamOverlayPosition, s.WebcamOverlayCorner));
+        Assert.Equal(RecordingOptions.WebcamOff, s.WebcamOverlayPosition);
+        Assert.False(RecordingHudToggles.FromSettings(s).Webcam);
+
+        // Take 2: turned back on, it goes back where the user put it.
+        s.SetWebcamOverlayPosition(
+            RecordingController.WebcamPositionFor(true, s.WebcamOverlayPosition, s.WebcamOverlayCorner));
+        Assert.Equal("top-left", s.WebcamOverlayPosition);
     }
 
     [Fact]

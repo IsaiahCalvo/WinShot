@@ -113,5 +113,8 @@ internal static class SettingsTruthCatalog
             "LastCaptureRegion",
             "LastRecordingRegion",
             "ShortcutBindings",
+            // The corner to restore the webcam overlay to; written beside the position, never
+            // presented as its own control.
+            "WebcamOverlayCorner",
         };
 }
