@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -35,7 +35,7 @@ public class EditorClipSweep
             try
             {
                 if (Application.Current is null) _ = new Application();
-                Application.Current.ShutdownMode = ShutdownMode.OnExplicitShutdown; // survive window closes
+                Application.Current!.ShutdownMode = ShutdownMode.OnExplicitShutdown; // survive window closes
                 ThemeResources.EnsureLoaded();
                 var settings = new SettingsService();
                 var history = new HistoryService(settings);

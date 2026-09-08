@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 
 namespace WinShot.Editor;
@@ -108,24 +108,48 @@ internal static class StrokeStyles
     /// sampled outline). Each edge gets its own seed derived from the shape's, so editing
     /// one edge's length does not reshuffle the others.
     /// </summary>
-    public static List<Point> SketchPolygon(IReadOnlyList<Point> corners, int seed)
+    public static List<Point> SketchPolygon(IReadOnlyList<Point> corners, int seed) =>
+        SketchPath(corners, seed, closed: true);
+
+    /// <summary>
+    /// The same hand-drawn pass over an OPEN run of points — an arrow's shaft, a flattened
+    /// curve. Identical to <see cref="SketchPolygon"/> except that it does not wrap back to
+    /// the first point, so a shaft does not close itself into a sliver.
+    /// </summary>
+    public static List<Point> SketchPath(IReadOnlyList<Point> points, int seed, bool closed)
     {
         var result = new List<Point>();
-        if (corners.Count < 2) return new List<Point>(corners);
+        if (points.Count < 2) return new List<Point>(points);
 
-        for (int i = 0; i < corners.Count; i++)
+        int edges = closed ? points.Count : points.Count - 1;
+        for (int i = 0; i < edges; i++)
         {
-            Point a = corners[i];
-            Point b = corners[(i + 1) % corners.Count];
+            Point a = points[i];
+            Point b = points[(i + 1) % points.Count];
             var run = SketchSegment(a, b, unchecked(seed * 397 + i));
-            // The run repeats the previous edge's end point; drop it. The LAST edge also
-            // ends back on the start point, and the figure closes itself — repeating it
-            // would be a zero-length segment at the seam.
+            // The run repeats the previous edge's end point; drop it. A CLOSED shape's last
+            // edge also ends back on the start point, and the figure closes itself —
+            // repeating it would be a zero-length segment at the seam.
             int skipHead = i == 0 ? 0 : 1;
-            int dropTail = i == corners.Count - 1 ? 1 : 0;
+            int dropTail = closed && i == edges - 1 ? 1 : 0;
             result.AddRange(run.Skip(skipHead).Take(run.Count - skipHead - dropTail));
         }
         return result;
+    }
+
+    /// <summary>A quadratic Bézier flattened into a point run, for sketching a curve.</summary>
+    public static List<Point> FlattenQuadratic(Point from, Point control, Point to, int samples = 12)
+    {
+        samples = Math.Max(2, samples);
+        var pts = new List<Point>(samples + 1);
+        for (int i = 0; i <= samples; i++)
+        {
+            double t = i / (double)samples, u = 1 - t;
+            pts.Add(new Point(
+                u * u * from.X + 2 * u * t * control.X + t * t * to.X,
+                u * u * from.Y + 2 * u * t * control.Y + t * t * to.Y));
+        }
+        return pts;
     }
 
     /// <summary>The four corners of a rect, clockwise from the top-left.</summary>

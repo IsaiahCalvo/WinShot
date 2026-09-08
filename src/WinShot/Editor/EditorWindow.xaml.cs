@@ -172,6 +172,9 @@ public partial class EditorWindow : Window
     private Point _curveTo;
     private Point _curveControl;
     private double _curveThickness;
+    private StrokeRender _curveRender = StrokeRender.Clean;
+    private StrokeDash _curveDash = StrokeDash.Solid;
+    private int _curveSeed;
     private bool _draggingCurveHandle;
 
     // View state (zoom/pan). _zoom mirrors ViewScale so math never reads the transform.
@@ -289,15 +292,15 @@ public partial class EditorWindow : Window
             AbortZoomGesture();
             AbortMagnifierFocusDrag();
         };
-        Loaded += (_, _) => FitToView();
+        Loaded += (_, _) => FitNow();
         // Loaded can fire before the window has its final size; this catches the first
         // laid-out frame for the initial fit.
-        SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        SizeChanged += (_, _) => { if (_pendingInitialFit) FitNow(); };
         // The WINDOW can stop resizing while the VIEWPORT keeps shrinking as the toolbars / zoom
         // bar finish laying out — fit computed against the early (taller) viewport leaves a tall
         // capture too zoomed-in and clips its bottom. Re-fit on the viewport's own size changes
         // until the user takes control.
-        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitToView(); };
+        Viewport.SizeChanged += (_, _) => { if (_pendingInitialFit) FitNow(); };
         Deactivated += (_, _) =>
         {
             _spaceDown = false;
@@ -405,14 +408,29 @@ public partial class EditorWindow : Window
 
         double scale = RecordingMonitorDpi.ScaleFor(origin);
         SD.Rectangle work = System.Windows.Forms.Screen.FromRectangle(origin).WorkingArea;
-        SD.Rectangle to = EditorGrowLayout.Target(work, new Size(DefaultWidthDip, DefaultHeightDip), scale);
-        SD.Rectangle from = EditorGrowLayout.Origin(origin);
 
         // WPF enforces MinWidth/MinHeight through WM_GETMINMAXINFO, so without this every
         // frame of the tween would paint at the 980x520 floor and only the position would
         // move — a full-size window sliding in from the card's corner instead of growing
         // out of it. The floor is a resize constraint for the user, not for the entrance.
         double minWidth = MinWidth, minHeight = MinHeight;
+
+        // The target has to KNOW about that floor, or the two disagree: on a display where
+        // 90 % of the work area is under 980x520 the tween lands on the smaller number and
+        // the restored minimum then yanks the window up to the larger one on the next
+        // layout pass, which is exactly the size snap the motion rule forbids.
+        SD.Rectangle to = EditorGrowLayout.Target(
+            work, new Size(DefaultWidthDip, DefaultHeightDip), scale, new Size(minWidth, minHeight));
+        SD.Rectangle from = EditorGrowLayout.Origin(origin);
+
+        // Restored to at most where the window actually landed, so a work area smaller than
+        // the declared floor cannot leave a minimum wider than the screen it opened on.
+        void RestoreMinimums()
+        {
+            MinWidth = Math.Min(minWidth, to.Width / scale);
+            MinHeight = Math.Min(minHeight, to.Height / scale);
+        }
+
         MinWidth = 0;
         MinHeight = 0;
 
@@ -425,12 +443,14 @@ public partial class EditorWindow : Window
         _growMotion = Motion.Run(Motion.SwapMs, Motion.EaseOutCubic, p =>
         {
             if (_closed) return;
-            PlaceWindow(hwnd, EditorGrowLayout.Lerp(from, to, p));
+            // Motion swallows a throwing frame and never runs onDone; without this a single
+            // bad frame would leave a LIVE editor resizable down to nothing.
+            try { PlaceWindow(hwnd, EditorGrowLayout.Lerp(from, to, p)); }
+            catch { RestoreMinimums(); throw; }
         }, onDone: () =>
         {
             _growMotion = null;
-            MinWidth = minWidth;
-            MinHeight = minHeight;
+            RestoreMinimums();
         });
     }
 
@@ -570,31 +590,58 @@ public partial class EditorWindow : Window
     // --------------------------------------------------------- view (zoom/pan)
 
     /// <summary>
-    /// Fits the WHOLE image into the viewport, centered (never above 100%) — so a tall scrolling
-    /// capture shows top-to-bottom at once instead of only its top. Use <see cref="FitToWidth"/>
-    /// (the "Fit Width" preset) to read a long capture at full width and scroll down it.
-    /// Ctrl+0 / Center button / open all route here.
+    /// Where "fit the whole image, centred" lands: the scale (never above 100 %) and the
+    /// translate that centres it. Null when the viewport is not laid out yet, in which case
+    /// the caller retries on the next trigger.
+    ///
+    /// Fit may legitimately need to go below MinZoom (a 32000 px scroll capture in a 650 px
+    /// viewport fits at ~0.02) — clamping it to MinZoom left only the middle band visible,
+    /// which read as "the editor clipped my capture". MinZoom still floors user zooming.
     /// </summary>
-    private void FitToView()
+    private ZoomView? FitWholeTarget()
     {
         double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
-        if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return; // viewport not ready; retry on next trigger
+        if (vw < 1 || vh < 1 || _sourceWidth < 1 || _sourceHeight < 1) return null;
 
         const double margin = 24;
         double fit = Math.Min((vw - margin * 2) / _sourceWidth, (vh - margin * 2) / _sourceHeight);
-        // Fit may legitimately need to go below MinZoom (a 32000px scroll capture in a 650px
-        // viewport fits at ~0.02) — clamping it to MinZoom left only the middle band visible,
-        // which read as "the editor clipped my capture". MinZoom still floors user zooming.
-        _zoom = Math.Clamp(Math.Min(fit, 1.0), Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
+        double zoom = Math.Clamp(Math.Min(fit, 1.0), Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
+        return new ZoomView(zoom, new Vector(
+            Math.Round((vw - _sourceWidth * zoom) / 2),
+            Math.Round((vh - _sourceHeight * zoom) / 2)));
+    }
+
+    /// <summary>
+    /// The initial fit, applied with no transition: it runs on Loaded and on every
+    /// SizeChanged until the user takes control of the view, and a window that eased its
+    /// image into place four times while its toolbars settled would read as broken.
+    ///
+    /// Do NOT clear _pendingInitialFit here: the viewport keeps resizing as toolbars and the
+    /// zoom bar lay out after open, and an early fit computed against a too-large viewport
+    /// leaves the image too zoomed-in (bottom clipped).
+    /// </summary>
+    private void FitNow()
+    {
+        if (FitWholeTarget() is not ZoomView target) return;
+        _zoom = target.Zoom;
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
-        ViewTranslate.Y = Math.Round((vh - _sourceHeight * _zoom) / 2);
-        // Do NOT clear _pendingInitialFit here: the viewport keeps resizing as toolbars/the zoom
-        // bar lay out after open, and an early fit computed against a too-large viewport leaves the
-        // image too zoomed-in (bottom clipped). Keep re-fitting on every SizeChanged until the user
-        // actually takes control of the view (clicks/scrolls/zooms/pans — those clear the flag).
-        Log.Info($"Editor fit: src={_sourceWidth}x{_sourceHeight} viewport={vw:0}x{vh:0} zoom={_zoom:0.000}");
+        ViewTranslate.X = target.Translate.X;
+        ViewTranslate.Y = target.Translate.Y;
+        Log.Info($"Editor fit: src={_sourceWidth}x{_sourceHeight} " +
+                 $"viewport={Viewport.ActualWidth:0}x{Viewport.ActualHeight:0} zoom={_zoom:0.000}");
         OnViewChanged();
+    }
+
+    /// <summary>
+    /// Fits the WHOLE image into the viewport, centered (never above 100%) — so a tall scrolling
+    /// capture shows top-to-bottom at once instead of only its top. Use <see cref="FitToWidth"/>
+    /// (the "Fit Width" preset) to read a long capture at full width and scroll down it.
+    /// Ctrl+1 / the Fit &amp; centre button / the zoom menu's Fit row route here, and they GLIDE:
+    /// every other row of that menu does, and half a menu that teleports is the tell.
+    /// </summary>
+    private void FitToView()
+    {
+        if (FitWholeTarget() is ZoomView target) ApplyZoomView(target);
     }
 
     /// <summary>Fits to WIDTH and pins the top, so a long capture is readable and you scroll down
@@ -607,12 +654,10 @@ public partial class EditorWindow : Window
         const double margin = 24;
         double fitW = (vw - margin * 2) / _sourceWidth;
         // Like FitToView: an ultra-wide capture's fit-width may drop below MinZoom.
-        _zoom = Math.Clamp(Math.Min(fitW, 1.0), Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
-        ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
-        ViewTranslate.X = Math.Round((vw - _sourceWidth * _zoom) / 2);
-        ViewTranslate.Y = margin; // pin to the top; scroll reveals the rest
-        _pendingInitialFit = false; // explicit manual choice; SizeChanged would otherwise snap to fit-whole
-        OnViewChanged();
+        double zoom = Math.Clamp(Math.Min(fitW, 1.0), Math.Min(MinZoom, Math.Max(fitW, 0.001)), MaxZoom);
+        ApplyZoomView(new ZoomView(zoom, new Vector(
+            Math.Round((vw - _sourceWidth * zoom) / 2),
+            margin))); // pin to the top; scroll reveals the rest
     }
 
     /// <summary>Zooms so the content point under <paramref name="anchor"/> (viewport coords) stays put.</summary>
@@ -634,12 +679,26 @@ public partial class EditorWindow : Window
     /// <summary>The viewport's own middle — what a keyboard zoom pivots around.</summary>
     private Point ViewportCentre() => new(Viewport.ActualWidth / 2, Viewport.ActualHeight / 2);
 
-    /// <summary>Ctrl+0 and the zoom menu's fixed percentages.</summary>
-    private void ZoomToPercent(double zoom)
+    /// <summary>
+    /// Ctrl+0, Ctrl+plus/minus and the zoom menu's fixed percentages: the viewport's middle
+    /// stays put and the view GLIDES there, the same way Q / W / Z do. The wheel keeps
+    /// <see cref="ZoomAt"/>'s instant path — a wheel notch is its own frame of animation.
+    /// </summary>
+    private void AnimateZoomTo(double zoom)
     {
         if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
-        ZoomAt(ViewportCentre(), zoom);
+        double clamped = Math.Clamp(zoom, MinZoom, MaxZoom);
+        if (Math.Abs(clamped - _zoom) < 0.00001) return;
+
+        Point anchor = ViewportCentre();
+        var centre = new Point(
+            (anchor.X - ViewTranslate.X) / _zoom,
+            (anchor.Y - ViewTranslate.Y) / _zoom);
+        ApplyZoomView(EditorZoom.CentreOnPoint(centre, ViewportSize(), clamped, MinZoom, MaxZoom));
     }
+
+    /// <summary>Ctrl+0 and the zoom menu's fixed percentages.</summary>
+    private void ZoomToPercent(double zoom) => AnimateZoomTo(zoom);
 
     /// <summary>
     /// Q and W: 100 % on the selection's top-left or bottom-right corner — the two ends of
@@ -705,11 +764,7 @@ public partial class EditorWindow : Window
     private IDisposable? _zoomTween;
 
     /// <summary>Ctrl+plus / Ctrl+minus: one step of the same 1.2 ratio the wheel uses.</summary>
-    private void StepZoom(double factor)
-    {
-        if (Viewport.ActualWidth < 1 || Viewport.ActualHeight < 1) return;
-        ZoomAt(ViewportCentre(), _zoom * factor);
-    }
+    private void StepZoom(double factor) => AnimateZoomTo(_zoom * factor);
 
     private void OnViewChanged()
     {
@@ -973,6 +1028,7 @@ public partial class EditorWindow : Window
         (TextStylePopup, TextStyleButton),
         (RedactStylePopup, RedactStyleButton),
         (CropRatioPopup, CropRatioButton),
+        (FillPopup, FillStyleButton),
         (ColorPickerPopup, CurrentColorIndicator),
     };
 
@@ -1102,6 +1158,7 @@ public partial class EditorWindow : Window
         ColorPanel.Visibility = Show(Has(EditorContextControls.Color));
         ThicknessPanel.Visibility = Show(Has(EditorContextControls.Thickness));
         FillPanel.Visibility = Show(Has(EditorContextControls.Fill));
+        StrokePanel.Visibility = Show(Has(EditorContextControls.Style));
         OpacityPanel.Visibility = Show(Has(EditorContextControls.Opacity));
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
         RedactStylePanel.Visibility = Show(Has(EditorContextControls.RedactStyle));
@@ -1448,11 +1505,20 @@ public partial class EditorWindow : Window
             RestyleSelected(color: color, thickness: null, fill: null);
     }
 
+    private void OnFillStyleClick(object sender, RoutedEventArgs e)
+    {
+        CheckRowByTag(FillStyleList, _fillMode.ToString());
+        OpenPopover(FillPopup, FillStyleList);
+    }
+
     private void OnFillChecked(object sender, RoutedEventArgs e)
     {
         if (sender is RadioButton rb && rb.Tag is string tag && Enum.TryParse(tag, out ShapeFillMode mode))
         {
             _fillMode = mode;
+            // The row that was picked is the answer; leaving the menu open would make the
+            // user close it themselves, which none of the other popovers ask for.
+            if (FillPopup is not null) FillPopup.IsOpen = false;
             if (IsLoaded)
                 RestyleSelected(color: null, thickness: null, fill: mode);
         }
@@ -1496,15 +1562,22 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Re-draws the selected shape in the current outline style. A dash change restyles the
-    /// element in place; changing the line quality has to swap the element, because clean
-    /// and sketchy are two different geometries and a Rectangle cannot become a Path. The
-    /// swap keeps size, position, angle and z-order, and is one undo step either way.
+    /// Re-draws the selected mark in the current outline style. A dash change restyles the
+    /// element in place; changing a SHAPE's line quality has to swap the element, because
+    /// clean and sketchy are two different geometries and a Rectangle cannot become a Path.
+    /// The swap keeps size, position, angle and z-order, and is one undo step either way.
+    /// An arrow is already a Path, so both changes happen in place.
     /// </summary>
     private void ApplyStrokeStyleToSelection()
     {
         if (!IsLoaded) return;
         if (_selected is not Shape old || old.Tag is not AnnotationData meta) return;
+        if (meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow &&
+            old is Path arrowPath)
+        {
+            RestyleArrowOutline(arrowPath, meta);
+            return;
+        }
         if (meta.Type is not (AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)) return;
 
         var before = meta.Clone();
@@ -1541,6 +1614,33 @@ public partial class EditorWindow : Window
         shape.Tag = meta;
     }
 
+    /// <summary>
+    /// The arrow half of <see cref="ApplyStrokeStyleToSelection"/>: dashes and the
+    /// hand-drawn quality both land on the element that is already there, so one undo
+    /// entry puts both back.
+    /// </summary>
+    private void RestyleArrowOutline(Path arrow, AnnotationData meta)
+    {
+        if (StrokeStyles.ParseDash(meta.Dash) == _strokeDash &&
+            StrokeStyles.ParseRender(meta.Sketch) == _strokeRender)
+            return;
+
+        var before = meta.Clone();
+        var after = meta.Clone();
+        after.Dash = _strokeDash.ToString();
+        after.Sketch = _strokeRender.ToString();
+        after.Seed = meta.Seed ?? Random.Shared.Next();
+
+        void Apply(AnnotationData data)
+        {
+            AnnotationFactory.ApplyDash(arrow, StrokeStyles.ParseDash(data.Dash));
+            ApplyArrowStyleData(arrow, data);
+        }
+
+        Push(new EditorAction(undo: () => Apply(before), redo: () => Apply(after)), apply: false);
+        Apply(after);
+    }
+
     /// <summary>The same mark in the other line quality: everything but the geometry is copied.</summary>
     private static Shape BuildRestyledShape(Shape from, AnnotationData meta)
     {
@@ -1557,7 +1657,9 @@ public partial class EditorWindow : Window
         shape.Height = from.Height;
         Canvas.SetLeft(shape, Canvas.GetLeft(from));
         Canvas.SetTop(shape, Canvas.GetTop(from));
-        shape.RenderTransform = from.RenderTransform;
+        // A CLONE: the old element goes back on undo, and an unfrozen TransformGroup
+        // shared by both would let a later move or rotate through one move the other.
+        shape.RenderTransform = from.RenderTransform?.CloneCurrentValue();
         shape.RenderTransformOrigin = from.RenderTransformOrigin;
         shape.Tag = meta;
         return shape;

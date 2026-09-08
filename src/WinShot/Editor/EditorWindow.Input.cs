@@ -110,7 +110,7 @@ public partial class EditorWindow : Window
         {
             _curveControl = e.GetPosition(AnnotationCanvas);
             _pendingCurve.Data = AnnotationFactory.CurvedArrowGeometry(
-                _curveFrom, _curveControl, _curveTo, _curveThickness);
+                _curveFrom, _curveControl, _curveTo, _curveThickness, _curveRender, _curveSeed);
             UpdateCurveHandleVisual();
             return;
         }
@@ -170,13 +170,15 @@ public partial class EditorWindow : Window
             case EditorTool.Arrow when _activeShape is Path arrow:
             {
                 var (tail, head) = ArrowEnds(_dragStart, ConstrainDraw(pos));
-                arrow.Data = AnnotationFactory.ArrowGeometry(tail, head, _thickness, _arrowStyle);
+                arrow.Data = AnnotationFactory.ArrowGeometry(
+                    tail, head, _thickness, _arrowStyle, _strokeRender, _sketchSeed);
                 break;
             }
             case EditorTool.CurvedArrow when _activeShape is Path curve:
                 Point curveEnd = ConstrainDraw(pos);
                 curve.Data = AnnotationFactory.CurvedArrowGeometry(
-                    _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, curveEnd), curveEnd, _thickness);
+                    _dragStart, AnnotationFactory.DefaultCurveControl(_dragStart, curveEnd), curveEnd,
+                    _thickness, _strokeRender, _sketchSeed);
                 break;
             case EditorTool.Line when _activeShape is Line line:
                 Point lineEnd = ConstrainDraw(pos);
@@ -322,7 +324,13 @@ public partial class EditorWindow : Window
                         new[] { tail, head }, StrokeColorOf(shape), _thickness);
                     // Persist the head style so the resize/endpoint-handle code (and an
                     // in-session re-edit) rebuilds the right geometry.
-                    if (_tool == EditorTool.Arrow) strokeData.Style = _arrowStyle.ToString();
+                    if (_tool == EditorTool.Arrow)
+                    {
+                        strokeData.Style = _arrowStyle.ToString();
+                        strokeData.Dash = _strokeDash.ToString();
+                        strokeData.Sketch = _strokeRender.ToString();
+                        strokeData.Seed = _sketchSeed;
+                    }
                     shape.Tag = strokeData;
                     PushAddElement(shape);
                 }
@@ -476,6 +484,11 @@ public partial class EditorWindow : Window
 
         // New shapes/arrows/lines pick up the current opacity by baking it into the brush alpha.
         var brush = new SolidColorBrush(WithOpacity(_color, _opacity));
+        // The seed is drawn once per mark, before the first frame, so a sketchy arrow does
+        // not re-scribble itself as the drag grows. (The shapes do the same, below.)
+        if (_tool is EditorTool.Arrow or EditorTool.CurvedArrow)
+            _sketchSeed = Random.Shared.Next();
+
         switch (_tool)
         {
             case EditorTool.Arrow:
@@ -488,7 +501,8 @@ public partial class EditorWindow : Window
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
-                    Data = AnnotationFactory.ArrowGeometry(_dragStart, _dragStart, _thickness, _arrowStyle),
+                    Data = AnnotationFactory.ArrowGeometry(
+                        _dragStart, _dragStart, _thickness, _arrowStyle, _strokeRender, _sketchSeed),
                 };
                 break;
             case EditorTool.CurvedArrow:
@@ -500,7 +514,8 @@ public partial class EditorWindow : Window
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
-                    Data = AnnotationFactory.CurvedArrowGeometry(_dragStart, _dragStart, _dragStart, _thickness),
+                    Data = AnnotationFactory.CurvedArrowGeometry(
+                        _dragStart, _dragStart, _dragStart, _thickness, _strokeRender, _sketchSeed),
                 };
                 break;
             case EditorTool.Line:
@@ -567,6 +582,11 @@ public partial class EditorWindow : Window
                 ShowDragRect(new Rect(_dragStart, _dragStart), dim: true);
                 break;
         }
+
+        // An arrow owns an outline, so it takes the outline's dash pattern too. (The
+        // shapes apply it in their own case, where the fill is being set anyway.)
+        if (_activeShape is Path outlined && _tool is EditorTool.Arrow or EditorTool.CurvedArrow)
+            AnnotationFactory.ApplyDash(outlined, _strokeDash);
 
         if (_activeShape is not null)
             AnnotationCanvas.Children.Add(_activeShape);
@@ -714,6 +734,9 @@ public partial class EditorWindow : Window
         _curveTo = to;
         _curveControl = AnnotationFactory.DefaultCurveControl(from, to);
         _curveThickness = _thickness;
+        _curveRender = _strokeRender;
+        _curveDash = _strokeDash;
+        _curveSeed = _sketchSeed;
         UpdateCurveHandleVisual();
     }
 
@@ -725,8 +748,12 @@ public partial class EditorWindow : Window
         _pendingCurve = null;
         _draggingCurveHandle = false;
         CurveHandle.Visibility = Visibility.Collapsed;
-        curve.Tag = AnnotationData.ForStroke(AnnotationData.TypeCurvedArrow,
+        var curveData = AnnotationData.ForStroke(AnnotationData.TypeCurvedArrow,
             new[] { _curveFrom, _curveControl, _curveTo }, StrokeColorOf(curve), curve.StrokeThickness);
+        curveData.Dash = _curveDash.ToString();
+        curveData.Sketch = _curveRender.ToString();
+        curveData.Seed = _curveSeed;
+        curve.Tag = curveData;
         PushAddElement(curve); // already on the canvas; records add for undo/redo
     }
 

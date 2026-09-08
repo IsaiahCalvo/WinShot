@@ -26,6 +26,13 @@ internal enum EditorContextControls
 
     /// <summary>How much a magnifier callout blows the picture up.</summary>
     Magnification = 1 << 11,
+
+    /// <summary>
+    /// The outline's own two choices: the dash pattern, and the hand-drawn line quality.
+    /// Every mark that owns an outline gets them — the shapes AND the arrows, which is the
+    /// whole point: a sketchy rectangle next to a ruled arrow is not a hand-drawn diagram.
+    /// </summary>
+    Style = 1 << 12,
 }
 
 /// <summary>The five tool families the toolbar's category buttons switch between.</summary>
@@ -113,20 +120,55 @@ internal static class EditorShellContract
         _ => null,
     };
 
-    // Undo/redo + 2 pointer tools + the chevron + 5 categories + the widest contextual
-    // group (colour well, size field, fill trio, opacity) + Save/Done and separators,
-    // using the shared 36-DIP controls and margins from Theme.xaml.
-    public const double PrimaryToolbarLogicalWidth = 872;
-    public const double MinimumEditorLogicalWidth = 980;
-    public const double ToolbarOuterMargin = 24;
+    /// <summary>
+    /// The widest the one row ever gets, in DIP: undo/redo + the two pointer tools + the
+    /// chevron + five categories + Save as… / Done, plus the fattest contextual group.
+    /// That group is the CROP one (ratio, rotate x2, flip x2, image size, snap, and the
+    /// Cancel / Apply crop pair docked right), which measures 1077 DIP — the number here is
+    /// that measurement rounded up, not an estimate. <c>ThemedWindowTests</c> measures the
+    /// real row for every tool and fails if any of them outgrows it, because a DockPanel
+    /// does not wrap: it clips the right-hand end away in silence.
+    /// </summary>
+    public const double PrimaryToolbarLogicalWidth = 1080;
 
-    public static bool FitsPrimaryToolbar(double windowLogicalWidth, double dpiScale)
+    /// <summary>
+    /// The narrowest the editor window may be. It is a consequence of the number above, not
+    /// a taste: one row that cannot wrap has to be given the width it needs. 1152 DIP is
+    /// also exactly 90 % of a 1920 px display at 150 %, so the editor's own landing size on
+    /// the most common Windows laptop already satisfies it.
+    /// </summary>
+    public const double MinimumEditorLogicalWidth = 1152;
+
+    /// <summary>
+    /// Everything between the window's width and the toolbar's content box, measured:
+    /// the window frame, the toolbar's 12 DIP side margins, its 1 px border and its 8 DIP
+    /// padding. At 980 DIP the row measured 922 DIP of usable width.
+    /// </summary>
+    public const double ToolbarOuterMargin = 58;
+
+    /// <summary>
+    /// Whether the one-row toolbar fits a window this wide. Both sides are LOGICAL, and
+    /// that is the point: the previous form multiplied the available width and the required
+    /// width by the same DPI scale, so the scale cancelled and the check could not tell
+    /// 100 % from 200 %. What DPI actually decides is how wide a window a given MONITOR can
+    /// hold, which is <see cref="FitsOnMonitor"/>.
+    /// </summary>
+    public static bool FitsPrimaryToolbar(double windowLogicalWidth)
     {
-        if (!double.IsFinite(windowLogicalWidth) || !double.IsFinite(dpiScale) || dpiScale <= 0)
+        if (!double.IsFinite(windowLogicalWidth)) return false;
+        return Math.Max(0, windowLogicalWidth - ToolbarOuterMargin) >= PrimaryToolbarLogicalWidth;
+    }
+
+    /// <summary>
+    /// Whether a monitor of this physical width at this scale can hold the editor at its
+    /// minimum width. This is where the DPI scale belongs: a 1920 px display is 1920 DIP at
+    /// 100 % and 1280 DIP at 150 %, and the toolbar has to fit the second one too.
+    /// </summary>
+    public static bool FitsOnMonitor(double monitorPhysicalWidth, double dpiScale)
+    {
+        if (!double.IsFinite(monitorPhysicalWidth) || !double.IsFinite(dpiScale) || dpiScale <= 0)
             return false;
-        double availablePhysical = Math.Max(0, windowLogicalWidth - ToolbarOuterMargin) * dpiScale;
-        double requiredPhysical = PrimaryToolbarLogicalWidth * dpiScale;
-        return availablePhysical >= requiredPhysical;
+        return monitorPhysicalWidth / dpiScale >= MinimumEditorLogicalWidth;
     }
 
     /// <summary>
@@ -146,15 +188,17 @@ internal static class EditorShellContract
     public static EditorContextControls ContextFor(EditorTool tool, bool filledRectangle) => tool switch
     {
         EditorTool.Rectangle when filledRectangle =>
-            EditorContextControls.Color | EditorContextControls.Fill | EditorContextControls.Opacity,
+            EditorContextControls.Color | EditorContextControls.Fill |
+            EditorContextControls.Style | EditorContextControls.Opacity,
         EditorTool.Rectangle or EditorTool.Ellipse =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.Fill | EditorContextControls.Opacity,
+            EditorContextControls.Fill | EditorContextControls.Style | EditorContextControls.Opacity,
         EditorTool.Line or EditorTool.Freehand or EditorTool.Highlighter =>
             EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
         EditorTool.Arrow or EditorTool.CurvedArrow =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.ArrowStyle | EditorContextControls.Opacity,
+            EditorContextControls.ArrowStyle | EditorContextControls.Style |
+            EditorContextControls.Opacity,
         EditorTool.Text =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.TextStyle | EditorContextControls.Opacity,

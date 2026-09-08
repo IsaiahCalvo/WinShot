@@ -592,7 +592,7 @@ public partial class EditorWindow : Window
         // one has to re-read the pixels it now covers or it keeps showing the old ones.
         RefreshAllRedactions();
         Select(null);
-        FitToView();
+        FitNow();
     }
 
     /// <summary>Translates every live annotation so it stays glued to the same image content after a crop.</summary>

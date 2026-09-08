@@ -244,16 +244,24 @@ internal static class AnnotationFactory
     /// Straight arrow in one of the <see cref="ArrowStyle"/> variants:
     /// Straight (one filled head), Double (filled head at both ends), or Thin (a slimmer,
     /// tapered head). All heads scale with stroke thickness so they read well at any size.
+    ///
+    /// <paramref name="render"/> is the same line quality the shapes carry: Sketchy runs the
+    /// shaft and every head through <see cref="StrokeStyles.SketchPath"/>, so a hand-drawn
+    /// rectangle and a hand-drawn arrow look like they were drawn by the same hand. The seed
+    /// lives on the annotation, so the wobble is identical after a move, an undo or a reload.
     /// </summary>
-    public static Geometry ArrowGeometry(Point from, Point to, double thickness, ArrowStyle style)
+    public static Geometry ArrowGeometry(
+        Point from, Point to, double thickness, ArrowStyle style,
+        StrokeRender render = StrokeRender.Clean, int seed = 0)
     {
         var v = to - from;
         if (v.Length < 0.5) v = new Vector(0.5, 0);
         var dir = v;
         dir.Normalize();
 
+        bool sketchy = render == StrokeRender.Sketchy;
         if (style == ArrowStyle.Fancy)
-            return FancyArrowGeometry(from, to, dir, thickness);
+            return FancyArrowGeometry(from, to, dir, thickness, sketchy, seed);
 
         // Thin arrows use a smaller, narrower head so the whole mark looks slimmer.
         double headScale = style == ArrowStyle.Thin ? 2.6 : 3.5;
@@ -268,15 +276,28 @@ internal static class AnnotationFactory
 
         var geometry = new PathGeometry();
 
-        var shaft = new PathFigure { StartPoint = startBase, IsFilled = false };
-        shaft.Segments.Add(new LineSegment(endBase, isStroked: true));
-        geometry.Figures.Add(shaft);
+        Point[] shaftRun = { startBase, endBase };
+        geometry.Figures.Add(PolyFigure(
+            sketchy ? StrokeStyles.SketchPath(shaftRun, seed, closed: false) : shaftRun,
+            closed: false, filled: false));
 
-        geometry.Figures.Add(HeadFigure(to, endBase, perp));
+        geometry.Figures.Add(HeadFigure(to, endBase, perp, sketchy, unchecked(seed + 1)));
         if (style == ArrowStyle.Double)
-            geometry.Figures.Add(HeadFigure(from, startBase, perp));
+            geometry.Figures.Add(HeadFigure(from, startBase, perp, sketchy, unchecked(seed + 2)));
 
         return geometry;
+    }
+
+    /// <summary>
+    /// One figure from a run of points, sketched or ruled — the shared spelling of "draw
+    /// these points in order".
+    /// </summary>
+    private static PathFigure PolyFigure(IReadOnlyList<Point> points, bool closed, bool filled)
+    {
+        var figure = new PathFigure { StartPoint = points[0], IsClosed = closed, IsFilled = filled };
+        for (int i = 1; i < points.Count; i++)
+            figure.Segments.Add(new LineSegment(points[i], isStroked: true));
+        return figure;
     }
 
     /// <summary>
@@ -284,7 +305,8 @@ internal static class AnnotationFactory
     /// shoulders, then the head itself. Because it is filled rather than stroked, the
     /// mark keeps a crisp tail at any thickness instead of a round line cap.
     /// </summary>
-    private static Geometry FancyArrowGeometry(Point from, Point to, Vector dir, double thickness)
+    private static Geometry FancyArrowGeometry(
+        Point from, Point to, Vector dir, double thickness, bool sketchy, int seed)
     {
         double head = Math.Clamp(thickness * 3.5, 10, 30);
         var perp = new Vector(-dir.Y, dir.X);
@@ -292,32 +314,40 @@ internal static class AnnotationFactory
         // The shaft never gets wider than the head's shoulders, or the silhouette pinches.
         double shaftHalf = Math.Min(thickness * 0.62, head * 0.45 * 0.8);
 
-        var figure = new PathFigure { StartPoint = from, IsClosed = true, IsFilled = true };
-        figure.Segments.Add(new LineSegment(headBase + perp * shaftHalf, isStroked: true));
-        figure.Segments.Add(new LineSegment(headBase + perp * (head * 0.45), isStroked: true));
-        figure.Segments.Add(new LineSegment(to, isStroked: true));
-        figure.Segments.Add(new LineSegment(headBase - perp * (head * 0.45), isStroked: true));
-        figure.Segments.Add(new LineSegment(headBase - perp * shaftHalf, isStroked: true));
+        Point[] silhouette =
+        {
+            from,
+            headBase + perp * shaftHalf,
+            headBase + perp * (head * 0.45),
+            to,
+            headBase - perp * (head * 0.45),
+            headBase - perp * shaftHalf,
+        };
 
         var geometry = new PathGeometry();
-        geometry.Figures.Add(figure);
+        geometry.Figures.Add(PolyFigure(
+            sketchy ? StrokeStyles.SketchPath(silhouette, seed, closed: true) : silhouette,
+            closed: true, filled: true));
         return geometry;
     }
 
     /// <summary>One filled triangular arrowhead: tip at <paramref name="tip"/>, base centered at <paramref name="baseCenter"/>.</summary>
-    private static PathFigure HeadFigure(Point tip, Point baseCenter, Vector perp)
+    private static PathFigure HeadFigure(
+        Point tip, Point baseCenter, Vector perp, bool sketchy = false, int seed = 0)
     {
-        var head = new PathFigure { StartPoint = tip, IsClosed = true, IsFilled = true };
-        head.Segments.Add(new LineSegment(baseCenter + perp, isStroked: true));
-        head.Segments.Add(new LineSegment(baseCenter - perp, isStroked: true));
-        return head;
+        Point[] triangle = { tip, baseCenter + perp, baseCenter - perp };
+        return PolyFigure(
+            sketchy ? StrokeStyles.SketchPath(triangle, seed, closed: true) : triangle,
+            closed: true, filled: true);
     }
 
     /// <summary>
     /// Quadratic Bézier shaft (from → control → to) with a filled triangular head
     /// oriented along the curve's end tangent. Same head sizing as the straight arrow.
     /// </summary>
-    public static Geometry CurvedArrowGeometry(Point from, Point control, Point to, double thickness)
+    public static Geometry CurvedArrowGeometry(
+        Point from, Point control, Point to, double thickness,
+        StrokeRender render = StrokeRender.Clean, int seed = 0)
     {
         var tangent = to - control;
         if (tangent.Length < 0.5) tangent = to - from;
@@ -329,17 +359,26 @@ internal static class AnnotationFactory
         Point headBase = to - dir * head;
         var perp = new Vector(-dir.Y, dir.X) * head * 0.45;
 
+        bool sketchy = render == StrokeRender.Sketchy;
         var geometry = new PathGeometry();
 
-        var shaft = new PathFigure { StartPoint = from, IsFilled = false };
-        shaft.Segments.Add(new QuadraticBezierSegment(control, headBase, isStroked: true));
-        geometry.Figures.Add(shaft);
+        if (sketchy)
+        {
+            // A Bezier cannot be perturbed in place, so the shaft is flattened first and the
+            // wobble applied to the run — the same treatment the shapes get.
+            geometry.Figures.Add(PolyFigure(
+                StrokeStyles.SketchPath(
+                    StrokeStyles.FlattenQuadratic(from, control, headBase), seed, closed: false),
+                closed: false, filled: false));
+        }
+        else
+        {
+            var shaft = new PathFigure { StartPoint = from, IsFilled = false };
+            shaft.Segments.Add(new QuadraticBezierSegment(control, headBase, isStroked: true));
+            geometry.Figures.Add(shaft);
+        }
 
-        var headFigure = new PathFigure { StartPoint = to, IsClosed = true, IsFilled = true };
-        headFigure.Segments.Add(new LineSegment(headBase + perp, isStroked: true));
-        headFigure.Segments.Add(new LineSegment(headBase - perp, isStroked: true));
-        geometry.Figures.Add(headFigure);
-
+        geometry.Figures.Add(HeadFigure(to, headBase, perp, sketchy, unchecked(seed + 1)));
         return geometry;
     }
 
@@ -583,11 +622,13 @@ internal static class AnnotationFactory
     /// </summary>
     private static (Brush Plate, Brush Ink) PillBrushes(Brush foreground)
     {
-        Color plate = foreground is SolidColorBrush { Color: var c } ? c : Colors.Black;
-        // A translucent pick keeps its translucency; the ink is chosen against the colour
-        // the plate resolves to at full strength, which is what the eye reads.
-        return (new SolidColorBrush(plate),
-                new SolidColorBrush(ColorMath.TextOn(Color.FromRgb(plate.R, plate.G, plate.B))));
+        Color pick = foreground is SolidColorBrush { Color: var c } ? c : Colors.Black;
+        // The ALPHA IS DROPPED, deliberately: the ink is picked by contrast against the
+        // plate, so the plate has to be the colour that ink was measured against. Keeping
+        // the pick's alpha let a 25 %-opaque black plate composite to ~#BFBFBF over a light
+        // screenshot and put white ink on it at 1.8:1.
+        Color plate = Color.FromRgb(pick.R, pick.G, pick.B);
+        return (new SolidColorBrush(plate), new SolidColorBrush(ColorMath.TextOn(plate)));
     }
 
     /// <summary>

@@ -84,11 +84,15 @@ public class EditorShellContractTests
     {
         Assert.Equal(EditorContextControls.None,
             EditorShellContract.ContextFor(EditorTool.Select, filledRectangle: false));
+        // An outlined shape owns a stroke, so it owns the stroke's two choices too: the
+        // dash pattern and the hand-drawn quality. A filled one has no stroke to dash,
+        // but it keeps Style because "sketchy" is a property of the whole mark.
         Assert.Equal(EditorContextControls.Color | EditorContextControls.Thickness |
-                     EditorContextControls.Fill | EditorContextControls.Opacity,
+                     EditorContextControls.Fill | EditorContextControls.Style |
+                     EditorContextControls.Opacity,
             EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: false));
         Assert.Equal(EditorContextControls.Color | EditorContextControls.Fill |
-                     EditorContextControls.Opacity,
+                     EditorContextControls.Style | EditorContextControls.Opacity,
             EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Arrow, false)
             .HasFlag(EditorContextControls.ArrowStyle));
@@ -132,15 +136,45 @@ public class EditorShellContractTests
         Assert.Equal(expectedPoints, AnnotationFactory.FontSizeFor(compatibleThickness));
     }
 
-    [Theory]
-    [InlineData(1.0)]
-    [InlineData(1.25)]
-    [InlineData(1.5)]
-    [InlineData(2.0)]
-    public void PrimaryToolbar_FitsMinimumWindowAtCommonWindowsDpi(double dpiScale)
+    /// <summary>
+    /// The row does not wrap, so the minimum window width has to cover the widest the row
+    /// ever gets. The measured worst case (the crop group) is asserted against the REAL
+    /// controls in <c>ThemedWindowTests</c>; this is the arithmetic half.
+    /// </summary>
+    [Fact]
+    public void PrimaryToolbar_FitsTheMinimumWindowAndNothingNarrower()
     {
         Assert.True(EditorShellContract.FitsPrimaryToolbar(
-            EditorShellContract.MinimumEditorLogicalWidth, dpiScale));
-        Assert.False(EditorShellContract.FitsPrimaryToolbar(880, dpiScale));
+            EditorShellContract.MinimumEditorLogicalWidth));
+        // One DIP under the budget must fail, or the check is decorative.
+        Assert.False(EditorShellContract.FitsPrimaryToolbar(
+            EditorShellContract.PrimaryToolbarLogicalWidth + EditorShellContract.ToolbarOuterMargin - 1));
+    }
+
+    /// <summary>
+    /// The DPI check that means something: a monitor's DIP width is its pixels divided by
+    /// the scale, and the editor's minimum has to fit inside it. The old form multiplied
+    /// both sides of the comparison by the scale, so all four rows asserted the same
+    /// scale-free inequality and 200 % was never actually tested.
+    /// </summary>
+    [Theory]
+    [InlineData(1920, 1.0)]
+    [InlineData(1920, 1.25)]
+    [InlineData(1920, 1.5)]   // Isaiah's primary: 1280 DIP
+    [InlineData(2560, 1.5)]
+    [InlineData(3840, 2.0)]
+    public void MinimumEditorWidth_FitsEveryDisplayWindowsRecommendsThatScaleFor(
+        double monitorWidth, double dpiScale)
+    {
+        Assert.True(EditorShellContract.FitsOnMonitor(monitorWidth, dpiScale),
+            $"{monitorWidth}px at {dpiScale:0.##}x is {monitorWidth / dpiScale:0} DIP, " +
+            $"under the {EditorShellContract.MinimumEditorLogicalWidth} DIP minimum.");
+    }
+
+    /// <summary>The same check has to be able to say no: 1920 px at 200 % is 960 DIP.</summary>
+    [Fact]
+    public void MinimumEditorWidth_DoesNotFitA1920DisplayAtTwoHundredPercent()
+    {
+        Assert.False(EditorShellContract.FitsOnMonitor(1920, 2.0));
     }
 }

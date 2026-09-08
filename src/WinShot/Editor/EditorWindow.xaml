@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="WinShot Editor" Background="{StaticResource WindowBgBrush}"
-        MinWidth="980" MinHeight="520"
+        MinWidth="1152" MinHeight="520"
         AllowDrop="True" Drop="OnEditorDrop" DragOver="OnEditorDragOver"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
         AutomationProperties.Name="WinShot annotation editor">
@@ -102,8 +102,8 @@
                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                         <Button x:Name="CurrentColorIndicator" Style="{StaticResource ColorWellButton}"
                                 Background="{StaticResource AnnotationRedBrush}" Click="OnColorWellClick"
-                                ToolTip="Colour" AutomationProperties.Name="Colour"
-                                AutomationProperties.HelpText="Open the colour picker for the active tool."/>
+                                ToolTip="Color" AutomationProperties.Name="Color"
+                                AutomationProperties.HelpText="Open the color picker for the active tool."/>
                         <Popup x:Name="ColorPickerPopup" PlacementTarget="{Binding ElementName=CurrentColorIndicator}"
                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <Border Style="{StaticResource PopoverSurface}">
@@ -114,23 +114,23 @@
                                     <StackPanel x:Name="ColorTargetTabs" Orientation="Horizontal" Margin="0,0,0,8">
                                         <RadioButton x:Name="BorderTabBtn" Style="{StaticResource SizePresetRow}" GroupName="ColorTarget"
                                                      Width="118" Content="Border" IsChecked="True" Click="OnColorTargetChanged"
-                                                     AutomationProperties.Name="Border colour"
-                                                     AutomationProperties.HelpText="Pick the outline colour."/>
+                                                     AutomationProperties.Name="Border color"
+                                                     AutomationProperties.HelpText="Pick the outline color."/>
                                         <RadioButton x:Name="FillTabBtn" Style="{StaticResource SizePresetRow}" GroupName="ColorTarget"
                                                      Width="118" Content="Fill" Click="OnColorTargetChanged"
-                                                     AutomationProperties.Name="Fill colour"
-                                                     AutomationProperties.HelpText="Pick the fill colour. Only shapes that can be filled use it."/>
+                                                     AutomationProperties.Name="Fill color"
+                                                     AutomationProperties.HelpText="Pick the fill color. Only shapes that can be filled use it."/>
                                     </StackPanel>
 
                                     <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
 
-                                    <TextBlock x:Name="SavedColorsHeading" Text="My colours" Style="{StaticResource FieldLabel}" Margin="2,10,2,4"/>
+                                    <TextBlock x:Name="SavedColorsHeading" Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,10,2,4"/>
                                     <StackPanel Orientation="Horizontal">
                                         <UniformGrid x:Name="SavedColorsGrid" Columns="8" Width="216"/>
                                         <Button x:Name="SaveColorBtn" Style="{StaticResource ToolIconButton}" Width="26" Height="26"
                                                 FontSize="{StaticResource GlyphBadge}" Content="&#xE710;" Click="OnSaveColor"
-                                                ToolTip="Save this colour" AutomationProperties.Name="Save colour"
-                                                AutomationProperties.HelpText="Keep the current colour in My colours."/>
+                                                ToolTip="Save this color" AutomationProperties.Name="Save color"
+                                                AutomationProperties.HelpText="Keep the current color in My colors."/>
                                     </StackPanel>
 
                                     <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10"/>
@@ -160,11 +160,11 @@
                                     <Slider x:Name="HueSlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="360"
                                             Margin="0,10,0,0" ValueChanged="OnHueChanged"
                                             ToolTip="Hue" AutomationProperties.Name="Hue"
-                                            AutomationProperties.HelpText="Rotate the colour around the wheel."/>
+                                            AutomationProperties.HelpText="Rotate the color around the wheel."/>
                                     <Slider x:Name="AlphaSlider" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="100" Value="100"
                                             Margin="0,6,0,0" ValueChanged="OnAlphaChanged"
-                                            ToolTip="Opacity" AutomationProperties.Name="Colour opacity"
-                                            AutomationProperties.HelpText="How see-through the colour is."/>
+                                            ToolTip="Opacity" AutomationProperties.Name="Color opacity"
+                                            AutomationProperties.HelpText="How see-through the color is."/>
 
                                     <Grid Margin="0,10,0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -172,14 +172,14 @@
                                                    Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
                                         <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
                                                  KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
-                                                 ToolTip="Type a hex colour" AutomationProperties.Name="Hex colour"/>
+                                                 ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>
                                         <Button x:Name="PickerEyedropperBtn" Grid.Column="2" Style="{StaticResource ToolIconButton}"
                                                 Width="30" Height="30" FontSize="{StaticResource GlyphBadge}" Content="&#xEF3C;"
-                                                Click="OnPickerEyedropper" ToolTip="Pick a colour from the image"
+                                                Click="OnPickerEyedropper" ToolTip="Pick a color from the image"
                                                 AutomationProperties.Name="Eyedropper"
-                                                AutomationProperties.HelpText="Sample a colour from the image, then come back here."/>
+                                                AutomationProperties.HelpText="Sample a color from the image, then come back here."/>
                                         <Button x:Name="ColorPickerApply" Grid.Column="3" Style="{StaticResource PillButtonPrimary}"
-                                                Content="Use" Click="OnColorPickerApply" AutomationProperties.Name="Use colour"/>
+                                                Content="Use" Click="OnColorPickerApply" AutomationProperties.Name="Use color"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>
@@ -221,19 +221,46 @@
                         </Popup>
                     </StackPanel>
 
+                    <!-- One glyph and a popover, like arrow style / text style / crop ratio /
+                         redaction style. Three inline 36 DIP chips cost 84 DIP that the row
+                         does not have: measured, the shapes' controls needed 1120 DIP inside
+                         a 922 DIP row and the right end was being clipped away silently. It
+                         also takes the shapes and redact CATEGORY glyphs back off the fill
+                         chips, which were showing the same mark three times in one strip. -->
                     <StackPanel x:Name="FillPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
-                        <RadioButton x:Name="FillNoneBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="None" Content="&#xE739;" ToolTip="No fill"
-                                     Checked="OnFillChecked" IsChecked="True" AutomationProperties.Name="No fill"
-                                     AutomationProperties.HelpText="Draw shapes with an outline and no fill."/>
-                        <RadioButton x:Name="FillQuarterBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Quarter" Content="&#xE7E6;" ToolTip="25% fill"
-                                     Checked="OnFillChecked" AutomationProperties.Name="25 percent fill"
-                                     AutomationProperties.HelpText="Draw shapes with a translucent 25 percent fill."/>
-                        <RadioButton x:Name="FillSolidBtn" Style="{StaticResource ToolButton}" GroupName="Fill" Tag="Solid" Content="&#xE73B;" ToolTip="Solid fill"
-                                     Checked="OnFillChecked" AutomationProperties.Name="Solid fill"
-                                     AutomationProperties.HelpText="Draw shapes with a solid fill."/>
+                        <Button x:Name="FillStyleButton" Style="{StaticResource ToolIconButton}" Content="&#xE73B;"
+                                Click="OnFillStyleClick" ToolTip="Shape fill"
+                                AutomationProperties.Name="Shape fill"
+                                AutomationProperties.HelpText="Choose no fill, a translucent 25 percent fill, or a solid fill."/>
+                        <Popup x:Name="FillPopup" PlacementTarget="{Binding ElementName=FillStyleButton}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Style="{StaticResource PopoverSurface}">
+                                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                                <StackPanel Width="168">
+                                    <TextBlock Text="Fill" Style="{StaticResource FieldLabel}" Margin="8,2,8,8"/>
+                                    <StackPanel x:Name="FillStyleList">
+                                        <RadioButton x:Name="FillNoneBtn" Style="{StaticResource SizePresetRow}" GroupName="Fill" Tag="None"
+                                                     Content="No fill" IsChecked="True" Checked="OnFillChecked"
+                                                     AutomationProperties.Name="No fill"
+                                                     AutomationProperties.HelpText="Draw shapes with an outline and no fill."/>
+                                        <RadioButton x:Name="FillQuarterBtn" Style="{StaticResource SizePresetRow}" GroupName="Fill" Tag="Quarter"
+                                                     Content="25% fill" Checked="OnFillChecked"
+                                                     AutomationProperties.Name="25 percent fill"
+                                                     AutomationProperties.HelpText="Draw shapes with a translucent 25 percent fill."/>
+                                        <RadioButton x:Name="FillSolidBtn" Style="{StaticResource SizePresetRow}" GroupName="Fill" Tag="Solid"
+                                                     Content="Solid fill" Checked="OnFillChecked"
+                                                     AutomationProperties.Name="Solid fill"
+                                                     AutomationProperties.HelpText="Draw shapes with a solid fill."/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </StackPanel>
 
-                        <!-- The outline's own two choices, in the group that already owns
-                             how a shape is painted rather than as two more toolbar rows. -->
+                    <!-- The outline's own two choices. Their own panel, not the fill group's:
+                         an arrow has an outline and no fill, and the hand-drawn line is
+                         meaningless if it only reaches two of the six tools that draw one. -->
+                    <StackPanel x:Name="StrokePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
                         <ToggleButton x:Name="DashToolBtn" Style="{StaticResource ToolButton}"
                                       Content="&#xE72D;" ToolTip="Dashed outline (again for dotted)"
@@ -242,7 +269,7 @@
                         <ToggleButton x:Name="SketchToolBtn" Style="{StaticResource ToolButton}"
                                       Content="&#xEC87;" ToolTip="Hand-drawn outline"
                                       Click="OnSketchClick" AutomationProperties.Name="Hand-drawn outline"
-                                      AutomationProperties.HelpText="Draw shapes with a sketched, hand-drawn line instead of a ruled one."/>
+                                      AutomationProperties.HelpText="Draw with a sketched, hand-drawn line instead of a ruled one."/>
                     </StackPanel>
 
                     <StackPanel x:Name="MagnifyPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
@@ -507,7 +534,7 @@
                         <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
                                      Tag="Eyedropper" Content="&#xEF3C;" Checked="OnToolChecked" ToolTip="Eyedropper"
                                      AutomationProperties.Name="Eyedropper"
-                                     AutomationProperties.HelpText="Sample a source pixel and make it the current annotation colour."/>
+                                     AutomationProperties.HelpText="Sample a source pixel and make it the current annotation color."/>
                     </StackPanel>
 
                     <StackPanel x:Name="ShapesToolRow" Orientation="Horizontal" Visibility="Collapsed">
@@ -518,7 +545,7 @@
                         <RadioButton x:Name="FilledRectangleToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
                                      Tag="FilledRectangle" Content="&#xE73B;" Checked="OnFilledRectangleToolChecked"
                                      ToolTip="Filled rectangle" AutomationProperties.Name="Filled rectangle"
-                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current colour."/>
+                                     AutomationProperties.HelpText="Draw a solid filled rectangle using the current color."/>
                         <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource SubToolButton}" GroupName="Tool"
                                      Tag="Ellipse" Content="&#xEA3A;" Checked="OnToolChecked" ToolTip="Ellipse (E)"
                                      AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut E."/>
@@ -631,8 +658,8 @@
                             ToolTip="Copy to clipboard (Ctrl+C)" Click="OnCopy" AutomationProperties.Name="Copy"
                             AutomationProperties.HelpText="Copy the source-resolution edited image, or just the selection. Shortcut Ctrl+C."/>
                     <Button x:Name="BtnCenter" Style="{StaticResource CircleActionButton}" Content="&#xE9A6;"
-                            ToolTip="Fit &amp; centre (Ctrl+1)" Click="OnCenterView" AutomationProperties.Name="Fit and centre"
-                            AutomationProperties.HelpText="Fit and centre the whole image. Shortcut Ctrl+1."/>
+                            ToolTip="Fit &amp; center (Ctrl+1)" Click="OnCenterView" AutomationProperties.Name="Fit and center"
+                            AutomationProperties.HelpText="Fit and center the whole image. Shortcut Ctrl+1."/>
                 </StackPanel>
             </Grid>
         </Border>

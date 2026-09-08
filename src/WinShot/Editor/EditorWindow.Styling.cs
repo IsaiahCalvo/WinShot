@@ -350,7 +350,7 @@ public partial class EditorWindow : Window
         };
         snap.SetValue(AutomationProperties.NameProperty, "Snap to objects");
         snap.SetValue(AutomationProperties.HelpTextProperty,
-            "Line a dragged mark's edges and centre up with the other marks. Hold Ctrl while dragging to override.");
+            "Line a dragged mark's edges and center up with the other marks. Hold Ctrl while dragging to override.");
         snap.Checked += (_, _) => _objectSnap = true;
         snap.Unchecked += (_, _) => _objectSnap = false;
         SelectModeList.Children.Add(snap);
@@ -606,15 +606,17 @@ public partial class EditorWindow : Window
             Point from = new(pts[0][0], pts[0][1]);
             Point to = new(pts[^1][0], pts[^1][1]);
             double thickness = meta.Thickness ?? arrow.StrokeThickness;
+            StrokeRender render = StrokeStyles.ParseRender(meta.Sketch);
+            int seed = meta.Seed ?? 0;
             if (meta.Type == AnnotationData.TypeCurvedArrow && pts.Length >= 3)
             {
                 arrow.Data = AnnotationFactory.CurvedArrowGeometry(
-                    from, new Point(pts[1][0], pts[1][1]), to, thickness);
+                    from, new Point(pts[1][0], pts[1][1]), to, thickness, render, seed);
             }
             else
             {
                 ArrowStyle style = AnnotationFactory.ParseArrowStyle(meta.Style);
-                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, style);
+                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, style, render, seed);
                 // The fancy arrow is one filled silhouette; a stroke on top of it would
                 // fatten the tail back into a rounded line.
                 arrow.StrokeThickness = style == ArrowStyle.Fancy ? 0 : thickness;
@@ -945,10 +947,10 @@ public partial class EditorWindow : Window
             Tag = c,
             Background = new SolidColorBrush(c),
         };
-        AutomationProperties.SetName(btn, $"Colour {label}");
+        AutomationProperties.SetName(btn, $"Color {label}");
         AutomationProperties.SetHelpText(btn, saved
-            ? $"Use saved colour {label}. Right-click to forget it."
-            : $"Use annotation colour {label}.");
+            ? $"Use saved color {label}. Right-click to forget it."
+            : $"Use annotation color {label}.");
         btn.Click += OnColorPickerGridPick;
         if (saved)
         {

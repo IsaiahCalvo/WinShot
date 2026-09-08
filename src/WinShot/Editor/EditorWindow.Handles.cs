@@ -564,12 +564,15 @@ public partial class EditorWindow : Window
         if (curved)
         {
             // Keep the stored control point as-is so a previously bent curve keeps its shape.
-            path.Data = AnnotationFactory.CurvedArrowGeometry(from, control, to, thickness);
+            path.Data = AnnotationFactory.CurvedArrowGeometry(
+                from, control, to, thickness, StrokeStyles.ParseRender(meta.Sketch), meta.Seed ?? 0);
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { control.X, control.Y }, new[] { to.X, to.Y } };
         }
         else
         {
-            path.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style));
+            path.Data = AnnotationFactory.ArrowGeometry(
+                from, to, thickness, AnnotationFactory.ParseArrowStyle(meta.Style),
+                StrokeStyles.ParseRender(meta.Sketch), meta.Seed ?? 0);
             meta.Points = new[] { new[] { from.X, from.Y }, new[] { to.X, to.Y } };
         }
         // Keep the stored geometry in sync so the end-of-drag snapshot reads the live state.
@@ -680,10 +683,12 @@ public partial class EditorWindow : Window
                     path.RenderTransform = null;
                     double thickness = meta.Thickness ?? path.StrokeThickness;
                     bool curved = snap.Type == AnnotationData.TypeCurvedArrow && sp.Length >= 3;
+                    StrokeRender render = StrokeStyles.ParseRender(meta.Sketch);
+                    int seed = meta.Seed ?? 0;
                     path.Data = curved
-                        ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness)
+                        ? AnnotationFactory.CurvedArrowGeometry(sp[0], sp[1], sp[2], thickness, render, seed)
                         : AnnotationFactory.ArrowGeometry(sp[0], sp[^1], thickness,
-                            AnnotationFactory.ParseArrowStyle(meta.Style));
+                            AnnotationFactory.ParseArrowStyle(meta.Style), render, seed);
                     meta.Points = sp.Select(p => new[] { p.X, p.Y }).ToArray();
                     meta.Tx = 0;
                     meta.Ty = 0;

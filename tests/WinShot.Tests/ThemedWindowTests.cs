@@ -98,6 +98,7 @@ public class ThemedWindowTests
                 composer.Close();
 
                 EditorFitsTallImageSmoke(settings, history);
+                EditorGrowLandsOnItsTargetSmoke(settings, history);
 
                 app.Shutdown();
             }
@@ -576,21 +577,59 @@ public class ThemedWindowTests
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
 
         // The zoom readout is written in one place, on every view change — the old label +
-        // combo pair went stale after a wheel zoom and never came back.
-        typeof(EditorWindow).GetMethod("ZoomToPercent",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .Invoke(editor, new object[] { 2.0 });
-        Assert.Equal("200%", zoomLabel.Text);
+        // combo pair went stale after a wheel zoom and never came back. The percentages
+        // GLIDE now, so the tween is forced to land in one frame rather than raced.
+        var animations = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            typeof(EditorWindow).GetMethod("ZoomToPercent",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(editor, new object[] { 2.0 });
+            Assert.Equal("200%", zoomLabel.Text);
+        }
+        finally { Motion.AnimationsEnabled = animations; }
         Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(zoomButton)));
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
         var toolbar = (Border)editor.FindName("TopToolbar")!;
         Assert.True(toolbar.ActualWidth <= editor.ActualWidth);
-        // One row, always: the contextual controls are inline now, so nothing can wrap
-        // onto a second line and shove the canvas down mid-edit.
+        ToolbarFitsAtMinimumWidth(editor);
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+    }
+
+    /// <summary>
+    /// The one row has to hold every tool's controls at the narrowest the window goes.
+    /// Measuring the row's HEIGHT proves nothing — it is a DockPanel, which does not wrap;
+    /// it clips its fill child's right-hand end away in silence, which is how a whole crop
+    /// group (Snap, then Image size) went missing without a red test. So this measures what
+    /// the row WANTS, unconstrained, against what it is actually given.
+    /// </summary>
+    private static void ToolbarFitsAtMinimumWidth(EditorWindow editor)
+    {
         var primaryRow = (DockPanel)editor.FindName("ToolbarPrimaryRow")!;
-        Assert.True(primaryRow.ActualHeight <= 42, $"Primary toolbar wrapped at minimum width: {primaryRow.ActualHeight}");
+        var check = typeof(EditorWindow).GetMethod("CheckToolButton",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        foreach (EditorTool tool in Enum.GetValues<EditorTool>())
+        {
+            check.Invoke(editor, new object[] { tool });
+            editor.UpdateLayout();
+
+            primaryRow.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double needed = primaryRow.DesiredSize.Width;
+            double available = primaryRow.ActualWidth;
+            primaryRow.InvalidateMeasure();
+            editor.UpdateLayout();
+
+            Assert.True(needed <= EditorShellContract.PrimaryToolbarLogicalWidth,
+                $"{tool}'s toolbar row needs {needed:0} DIP, over the declared " +
+                $"{EditorShellContract.PrimaryToolbarLogicalWidth} DIP budget.");
+            Assert.True(needed <= available + 0.5,
+                $"{tool}'s toolbar row is clipped at the minimum window width: " +
+                $"needs {needed:0} DIP, has {available:0}.");
+        }
     }
 
     /// <summary>
@@ -820,6 +859,65 @@ public class ThemedWindowTests
         Assert.True(zoom * imgW <= vw + 1 && zoom * 4000 <= vh + 1,
             $"tall image not fit-whole on open: zoom={zoom}, scaled={zoom * imgW}x{zoom * 4000}, viewport={vw}x{vh}");
     }
+
+    /// <summary>
+    /// The grow entrance has to LAND on the rect it tweened to. MinWidth/MinHeight are
+    /// zeroed so the tween can paint small frames and restored when it finishes, and
+    /// Windows enforces them through WM_GETMINMAXINFO — so a target below the floor is
+    /// resized back up on the next layout pass, which is the size snap the motion rule
+    /// forbids (and, with animations off, simply the wrong opening size).
+    /// </summary>
+    private static void EditorGrowLandsOnItsTargetSmoke(SettingsService settings, HistoryService history)
+    {
+        const System.Reflection.BindingFlags NS =
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+
+        var animations = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false; // the tween applies its end frame inline
+        EditorWindow? editor = null;
+        try
+        {
+            var origin = new SD.Rectangle(40, 40, 200, 130);
+            editor = EditorWindow.CreateForCapture(NewBitmap(), settings, history);
+            double minWidth = editor.MinWidth, minHeight = editor.MinHeight;
+            editor.GrowFrom(origin);
+            editor.Show();
+            for (int i = 0; i < 6; i++) PumpDispatcherOnce();
+
+            double scale = RecordingMonitorDpi.ScaleFor(origin);
+            SD.Rectangle work = WF.Screen.FromRectangle(origin).WorkingArea;
+            double wantW = (double)typeof(EditorWindow).GetField("DefaultWidthDip", NS)!.GetRawConstantValue()!;
+            double wantH = (double)typeof(EditorWindow).GetField("DefaultHeightDip", NS)!.GetRawConstantValue()!;
+            SD.Rectangle target = EditorGrowLayout.Target(
+                work, new Size(wantW, wantH), scale, new Size(minWidth, minHeight));
+
+            GetWindowRect(new System.Windows.Interop.WindowInteropHelper(editor).Handle, out RECT r);
+            var landed = new SD.Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+
+            Assert.True(Math.Abs(landed.Width - target.Width) <= 1 &&
+                        Math.Abs(landed.Height - target.Height) <= 1,
+                $"Editor grew to {landed} instead of its target {target}.");
+            // The restored floor must be something the landed window can hold, and must fit
+            // the monitor it opened on.
+            Assert.True(editor.MinWidth <= target.Width / scale + 0.5,
+                $"MinWidth {editor.MinWidth} exceeds the {target.Width / scale:0} DIP it landed at.");
+            Assert.True(editor.MinWidth > 0 && editor.MinHeight > 0,
+                "The grow left the editor with no minimum size at all.");
+            Assert.Equal(0, Motion.Holders);
+        }
+        finally
+        {
+            try { editor?.Close(); } catch { }
+            PumpDispatcherOnce();
+            Motion.AnimationsEnabled = animations;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
 
     private static void PinSmoke(EditorWindow editor)
     {

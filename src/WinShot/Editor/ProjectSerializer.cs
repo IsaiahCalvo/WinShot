@@ -377,7 +377,7 @@ internal static class ProjectSerializer
                 double t = RequireThickness(a);
                 var brush = new SolidColorBrush(RequireColor(a));
                 bool fancy = !curved && AnnotationFactory.ParseArrowStyle(a.Style) == ArrowStyle.Fancy;
-                return new Shapes.Path
+                var arrow = new Shapes.Path
                 {
                     Stroke = brush,
                     Fill = brush,
@@ -387,10 +387,14 @@ internal static class ProjectSerializer
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = curved
-                        ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t)
+                        ? AnnotationFactory.CurvedArrowGeometry(
+                            pts[0], pts[1], pts[2], t, StrokeStyles.ParseRender(a.Sketch), a.Seed ?? 0)
                         : AnnotationFactory.ArrowGeometry(
-                            pts[0], pts[1], t, AnnotationFactory.ParseArrowStyle(a.Style)),
+                            pts[0], pts[1], t, AnnotationFactory.ParseArrowStyle(a.Style),
+                            StrokeStyles.ParseRender(a.Sketch), a.Seed ?? 0),
                 };
+                AnnotationFactory.ApplyDash(arrow, StrokeStyles.ParseDash(a.Dash));
+                return arrow;
             }
             case AnnotationData.TypeLine:
             {

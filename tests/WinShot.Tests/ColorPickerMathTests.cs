@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using WinShot.Editor;
 using Xunit;
@@ -118,7 +118,7 @@ public class ColorPickerMathTests
             SavedColors.Add(oldest);
             Assert.Equal(oldest, SavedColors.All[0]);
             Assert.Equal(SavedColors.Capacity, SavedColors.All.Count);
-            Assert.Single(SavedColors.All.Where(c => c == oldest));
+            Assert.Single(SavedColors.All, c => c == oldest);
 
             SavedColors.Remove(oldest);
             Assert.DoesNotContain(oldest, SavedColors.All);
