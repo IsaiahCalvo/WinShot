@@ -493,6 +493,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// <summary>Repaints the coordinator surface and every pane (the selection can span monitors).</summary>
     private void InvalidateAllSurfaces()
     {
+        InvalidationLog?.Add(_monitorBounds);
         Invalidate();
         foreach (var pane in _panes)
         {
@@ -526,9 +527,28 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
     }
 
+    /// <summary>Render seam: the monitors a test wants <see cref="MonitorBoundsAt"/> to answer
+    /// with. A pane is a real window and a test on the hidden desktop may not open one per
+    /// monitor, so without this every multi-monitor arithmetic in the selector is untestable —
+    /// and Measure mode has chrome that must reach a monitor the pointer has LEFT.</summary>
+    internal IReadOnlyList<SD.Rectangle>? MonitorsForRender { get; set; }
+
+    /// <summary>Render seam: every repaint asked for since the list was handed in, as screen
+    /// rects (a full-surface repaint logs the coordinator's own bounds). A surface nobody asked
+    /// to repaint is exactly what a ghost is made of, and invalidation is otherwise invisible
+    /// to a test.</summary>
+    internal List<SD.Rectangle>? InvalidationLog { get; set; }
+
     /// <summary>The physical bounds of the surface (coordinator or pane) containing a screen point.</summary>
     private SD.Rectangle MonitorBoundsAt(SD.Point screen)
     {
+        if (MonitorsForRender is { } fake)
+        {
+            foreach (var bounds in fake)
+                if (bounds.Contains(screen))
+                    return bounds;
+        }
+
         if (_monitorBounds.Contains(screen)) return _monitorBounds;
         foreach (var pane in _panes)
             if (!pane.IsDisposed && pane.MonitorBounds.Contains(screen))
@@ -539,6 +559,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// <summary>Invalidates a screen-space rectangle on every surface it intersects.</summary>
     private void InvalidateScreenRect(SD.Rectangle screenRect)
     {
+        InvalidationLog?.Add(screenRect);
         InvalidateSurfaceRect(this, _monitorBounds, screenRect);
         foreach (var pane in _panes)
             if (!pane.IsDisposed)

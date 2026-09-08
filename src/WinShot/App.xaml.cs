@@ -748,6 +748,13 @@ public partial class App : Application
                     // drain, and QueueCaptureCommand guards it the same way.
                     _pendingCaptureCommand = "measure";
                 }
+                else if (measureRequested)
+                {
+                    // The slot is taken by a capture the user started with a hotkey while the
+                    // bar was open, and it wins. Say so: this is the only button on that bar
+                    // whose click can end with nothing opening, and silence reads as a crash.
+                    Toast("Measure", "A capture is already running, so measure did not start. Press Ctrl+Shift+9 to try again.");
+                }
             }
 
             if (action is AllInOneAction.Scroll || (captured is null && action is AllInOneAction.Capture or AllInOneAction.Ocr))

@@ -1,4 +1,4 @@
-using SD = System.Drawing;
+﻿using SD = System.Drawing;
 
 namespace WinShot.Capture;
 
@@ -84,10 +84,18 @@ internal sealed class MeasureSession
         return UseApca;
     }
 
-    public void Hold(SD.Rectangle bounds, bool horizontal, SD.Point at, int dpi)
+    /// <summary>Freezes a span. False when the identical span is already held, which is the
+    /// same rejection <see cref="Insert"/> makes for guides and for the same reason: two holds
+    /// with the same bounds on the same axis draw the same hairline, the same serifs and the
+    /// same pill on the same pixels, so N of them are pixel-identical to one — and Backspace
+    /// then removes them one press at a time with nothing on screen changing.</summary>
+    public bool Hold(SD.Rectangle bounds, bool horizontal, SD.Point at, int dpi)
     {
+        if (_holds.Any(h => h.Bounds == bounds && h.Horizontal == horizontal))
+            return false;
         _holds.Add(new MeasureHold(bounds, horizontal, at, dpi));
         _placed.Add((Guide: false, Vertical: false, At: 0));
+        return true;
     }
 
     /// <summary>Drops the most recent hold. False when there was nothing to drop.</summary>
@@ -95,8 +103,11 @@ internal sealed class MeasureSession
     {
         if (_holds.Count == 0)
             return false;
+        int index = _placed.FindLastIndex(p => !p.Guide);
+        if (index < 0)
+            return false;   // the two lists desynced; the contract here is "false", not a crash
         _holds.RemoveAt(_holds.Count - 1);
-        _placed.RemoveAt(_placed.FindLastIndex(p => !p.Guide));
+        _placed.RemoveAt(index);
         return true;
     }
 

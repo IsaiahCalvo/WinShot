@@ -47,15 +47,32 @@ public sealed partial class FastRegionSelectorDialog
     private IDisposable? _hintTween;
     private double _hintAmount;
 
+    /// <summary>Which copy the strip is PAINTING, as opposed to which copy its state implies.
+    /// The two part company for the length of one re-entrance: the snapshot landing swaps a
+    /// one-line loading sentence for three lines of gestures in a much wider capsule, and the
+    /// paint that follows it is synchronous. Reading the live state there would show the new
+    /// copy at full opacity before the first tween frame — a pop, then a fade to nothing, then
+    /// a rise: shown, hidden, shown. So the strip keeps painting the OLD line while it eases
+    /// out, the latch is swapped at the trough where nothing is visible, and the new line
+    /// rises. Everything else in the copy (the tolerance number, the contrast word) still
+    /// derives live, because those change without an entrance to hide the change under.</summary>
+    private bool _hintCopyReady;
+    private bool _hintCopyFailed;
+
     /// <summary>The freeze snapshot was attempted and did not arrive, so it never will this
     /// session. Without this there is no way to tell "not yet" from "never", and a mode whose
     /// only persistent surface says "Preparing the screen snapshot…" forever teaches the user
     /// to keep waiting for something that is not coming.</summary>
     private bool _freezeFailed;
 
-    /// <summary>Shift is held rather than tapped, and key-repeat fires many times a second;
-    /// the latch keeps the axis-lock repaint to one on the way down and one on the way up.</summary>
-    private bool _shiftLatched;
+    /// <summary>The gesture keys this mode has claimed and not yet seen released. Windows
+    /// repeats a held key ~30 times a second, and every gesture here is a discrete action:
+    /// one hold, one guide, one toast, one clear. Answering the repeats stacked pixel-identical
+    /// holds that Backspace then removed invisibly, and re-raised the mode's one failure
+    /// message often enough that its 280 ms entrance never finished — a strobe instead of a
+    /// sentence. So a repeat is swallowed for any key the first press claimed. Shift used to
+    /// carry a latch of its own for the same reason; this is that, for all of them.</summary>
+    private readonly HashSet<WF.Keys> _measureKeysDown = new();
 
     /// <summary>One log line per session for a failing pixel read — see <see cref="ReadPixels"/>.</summary>
     private bool _pixelReadLogged;
@@ -140,6 +157,7 @@ public sealed partial class FastRegionSelectorDialog
         _magnifierOn = magnifier;
         ResetMeasure();
         _hintAmount = 1;
+        _lastFollowScreen = cursor;
         MoveMeasureCursorForRender(cursor);
     }
 
@@ -166,8 +184,9 @@ public sealed partial class FastRegionSelectorDialog
         HandleMeasureMouseMove();
         // The strip's whole copy and its whole width change in this frame — from one loading
         // line to nine gestures. It is the mode's only teaching surface and it already owns
-        // an entrance, so it re-enters rather than cutting: out through the floor, then back.
-        RestartHintEntrance(0);
+        // an entrance, so it re-enters rather than cutting: out through the floor, swap the
+        // copy where nothing is visible, then back up with the new one.
+        RestartHintEntrance(0, LatchHintCopy);
     }
 
     /// <summary>
@@ -186,15 +205,16 @@ public sealed partial class FastRegionSelectorDialog
         InvalidateAllSurfaces();
         // Nothing else on screen moves at this moment — the overlay does not flip, because
         // there is no snapshot to flip to — so a bare copy swap would be an unaccompanied
-        // snap on an error. The strip re-enters instead.
-        RestartHintEntrance(0);
+        // snap on an error. The strip re-enters instead, swapping at the trough.
+        RestartHintEntrance(0, LatchHintCopy);
     }
 
-    /// <summary>Render seam: moves the measuring cursor and re-reads the pixels under it.</summary>
+    /// <summary>Render seam: moves the measuring cursor and re-reads the pixels under it,
+    /// exactly as the follow tick does — from wherever the pointer was, so the move can cross
+    /// a monitor boundary the way a real one does.</summary>
     internal void MoveMeasureCursorForRender(SD.Point cursor)
     {
         _currentScreen = cursor;
-        _lastFollowScreen = cursor;
         HandleMeasureMouseMove();
     }
 
@@ -210,10 +230,11 @@ public sealed partial class FastRegionSelectorDialog
         _contrast = null;
         _contrastFor = SD.Rectangle.Empty;
         _draggingGuide = null;
-        _shiftLatched = false;
+        _measureKeysDown.Clear();
         _freezeFailed = false;
         _pixelReadLogged = false;
         _hintAmount = 0;
+        LatchHintCopy();
         StopHintEntrance();
     }
 
@@ -353,8 +374,7 @@ public sealed partial class FastRegionSelectorDialog
             // The snap band holds the guide still across a long travel, and a blocked move
             // holds it still indefinitely — but the reticle and the loupe still ride the
             // cursor, so the follow bands repaint whether or not the guide went anywhere.
-            InvalidateMeasureFollow(_lastFollowScreen, _currentScreen);
-            _lastFollowScreen = _currentScreen;
+            FollowMoved();
             return;
         }
 
@@ -370,8 +390,7 @@ public sealed partial class FastRegionSelectorDialog
             // Lit only ON the pill, never in the corridor: the outline and the hand cursor
             // promise a capture, and a click in the corridor still copies.
             RefreshPillHot();
-            InvalidateMeasureFollow(_lastFollowScreen, _currentScreen);
-            _lastFollowScreen = _currentScreen;
+            FollowMoved();
             return;
         }
 
@@ -392,8 +411,7 @@ public sealed partial class FastRegionSelectorDialog
         // The crosshair, the pill and the contrast readout all move with the cursor, and the
         // run itself can jump anywhere: repaint the union of where it was and where it is,
         // plus the follow bands, rather than the whole (possibly 4K) monitor.
-        InvalidateMeasureFollow(_lastFollowScreen, _currentScreen);
-        _lastFollowScreen = _currentScreen;
+        FollowMoved();
         if (before is SD.Rectangle old)
             InvalidateMeasureRegion(old);
         if (_measured is SD.Rectangle now && now != before)
@@ -440,6 +458,22 @@ public sealed partial class FastRegionSelectorDialog
             InvalidateWideBandAt(to);
     }
 
+    /// <summary>The pointer moved: repaint the follow bands, and — when it crossed onto
+    /// another monitor — the hint strip it left behind. PaintHintStrip only runs on the pane
+    /// the cursor is on, and the strip sits centred along the bottom of its own monitor, far
+    /// from the cursor row: nothing else asks the departed pane to repaint it, so it stayed on
+    /// screen with a ~32 px slice punched out of it where the crossing column fell, which
+    /// reads as a corrupted strip rather than a stale one — two teaching strips at once on a
+    /// three-monitor desktop.</summary>
+    private void FollowMoved()
+    {
+        if (MonitorBoundsAt(_lastFollowScreen) != MonitorBoundsAt(_currentScreen))
+            InvalidateHintStripOn(_lastFollowScreen);
+
+        InvalidateMeasureFollow(_lastFollowScreen, _currentScreen);
+        _lastFollowScreen = _currentScreen;
+    }
+
     private void InvalidateWideBandAt(SD.Point pt)
     {
         SD.Rectangle monitor = MonitorBoundsAt(pt);
@@ -450,8 +484,34 @@ public sealed partial class FastRegionSelectorDialog
     }
 
     /// <summary>Returns true when the key was a measurement gesture and the ordinary
-    /// selector handling must not also run.</summary>
+    /// selector handling must not also run. Auto-repeat never reaches the gestures: a key
+    /// this mode claimed on the way down stays claimed, silently, until it is released.</summary>
     private bool HandleMeasureKeyDown(WF.KeyEventArgs e)
+    {
+        if (_measureKeysDown.Contains(e.KeyCode))
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return true;
+        }
+
+        if (!HandleMeasureKeyDownCore(e))
+            return false;
+
+        if (RepeatsAreOnePress(e.KeyCode))
+            _measureKeysDown.Add(e.KeyCode);
+        return true;
+    }
+
+    /// <summary>The gestures a held key must not repeat: each of them places something,
+    /// copies something or raises a toast, and thirty of those a second is one press counted
+    /// thirty times. Escape and Backspace are left repeatable on purpose — the second Escape
+    /// IS a second press, a key-up lost to a focus change must never strand the user in the
+    /// mode, and repeat-to-undo is what Backspace does everywhere else on Windows.</summary>
+    private static bool RepeatsAreOnePress(WF.Keys key) => key is
+        WF.Keys.H or WF.Keys.V or WF.Keys.Enter or WF.Keys.C or WF.Keys.ShiftKey or WF.Keys.Menu;
+
+    private bool HandleMeasureKeyDownCore(WF.KeyEventArgs e)
     {
         bool shift = (e.Modifiers & WF.Keys.Shift) == WF.Keys.Shift;
         bool ctrl = (e.Modifiers & WF.Keys.Control) == WF.Keys.Control;
@@ -472,12 +532,12 @@ public sealed partial class FastRegionSelectorDialog
             // everywhere else on Windows, Ctrl+Shift+C is already a real binding two cases
             // down, and this modifier space is not free enough to leave half-claimed.
             case WF.Keys.H when !ctrl && _measured is SD.Rectangle wide:
-                _measure.Hold(wide, horizontal: true, _currentScreen, MonitorDpiAt(_currentScreen));
+                HoldSpan(wide, horizontal: true, _currentScreen);
                 Handled(e);
                 return true;
 
             case WF.Keys.V when !ctrl && _measured is SD.Rectangle tall:
-                _measure.Hold(tall, horizontal: false, _currentScreen, MonitorDpiAt(_currentScreen));
+                HoldSpan(tall, horizontal: false, _currentScreen);
                 Handled(e);
                 return true;
 
@@ -533,8 +593,9 @@ public sealed partial class FastRegionSelectorDialog
             case WF.Keys.Escape:
                 // First press clears the canvas, second one leaves. Anything else would make
                 // an hour of measuring one slip away from gone.
-                if (_measure.ClearOnEscape())
+                if (_measure.HasAnything)
                 {
+                    ClearMeasurements();
                     Handled(e);
                     return true;
                 }
@@ -558,13 +619,9 @@ public sealed partial class FastRegionSelectorDialog
                 // this has to do is ask for one repaint — not one per key-repeat. The pill
                 // changes SHAPE though, from the three-line cross to a one-line span, so the
                 // hot state has to be re-derived or the hand cursor is left lit on ground
-                // that is no longer the pill.
-                if (!_shiftLatched)
-                {
-                    _shiftLatched = true;
-                    RefreshPillHot();
-                    Handled(e);
-                }
+                // that is no longer the pill. Key-repeat is already gone by here.
+                RefreshPillHot();
+                Handled(e);
                 return true;
 
             case WF.Keys.Menu:
@@ -579,17 +636,20 @@ public sealed partial class FastRegionSelectorDialog
         return false;
     }
 
-    /// <summary>Returns true when the key-up was a measurement gesture.</summary>
+    /// <summary>Returns true when the key-up was a measurement gesture. Releasing is what
+    /// re-arms the key: until it arrives, every repeat of it is swallowed.</summary>
     private bool HandleMeasureKeyUp(WF.KeyEventArgs e)
     {
-        if (e.KeyCode != WF.Keys.ShiftKey || !_shiftLatched)
+        if (!_measureKeysDown.Remove(e.KeyCode))
             return false;
 
         // Letting go of Shift puts the second axis back, so the cross has to be redrawn —
         // and the pill it is drawn in changes shape again, so re-derive the hot state too.
-        _shiftLatched = false;
-        RefreshPillHot();
-        InvalidateAllSurfaces();
+        if (e.KeyCode == WF.Keys.ShiftKey)
+        {
+            RefreshPillHot();
+            InvalidateAllSurfaces();
+        }
         return true;
     }
 
@@ -610,6 +670,25 @@ public sealed partial class FastRegionSelectorDialog
     {
         if (!_measure.AddGuideY(y))
             MeasureToast("There is already a guide on that line.");
+    }
+
+    /// <summary>Freezes a span and says so when it lands on one already held — the same
+    /// answer, through the same channel, as a guide landing on a guide. Both the key and the
+    /// menu row come through here, because a repeat of either paints an identical frame.</summary>
+    private void HoldSpan(SD.Rectangle bounds, bool horizontal, SD.Point at)
+    {
+        if (!_measure.Hold(bounds, horizontal, at, MonitorDpiAt(at)))
+            MeasureToast("That span is already held.");
+    }
+
+    /// <summary>Escape's wipe, and the menu row that does the same thing. The destructive
+    /// half used to be the silent one while the recovery half toasted — backwards, and the
+    /// strip's "Backspace removes the last one" does not read as "Backspace brings it all
+    /// back". Both paths say it now.</summary>
+    private void ClearMeasurements()
+    {
+        if (_measure.ClearOnEscape())
+            MeasureToast("Measurements cleared. Backspace restores them.");
     }
 
     /// <summary>Every message this mode raises, on the monitor being measured. Measure is a
@@ -890,11 +969,10 @@ public sealed partial class FastRegionSelectorDialog
         SD.Rectangle? measuredAt = _measured;
         bool measuring = measuredAt is not null;
 
-        int anchorDpi = MonitorDpiAt(anchor);
         Row("Hold width", "H",
-            () => { if (measuredAt is SD.Rectangle r) _measure.Hold(r, true, anchor, anchorDpi); }, measuring);
+            () => { if (measuredAt is SD.Rectangle r) HoldSpan(r, true, anchor); }, measuring);
         Row("Hold height", "V",
-            () => { if (measuredAt is SD.Rectangle r) _measure.Hold(r, false, anchor, anchorDpi); }, measuring);
+            () => { if (measuredAt is SD.Rectangle r) HoldSpan(r, false, anchor); }, measuring);
         menu.Items.Add(new WF.ToolStripSeparator());
         Row("Add horizontal guide", "Shift+H", () => AddGuideY(SnapCoordinate(anchor.Y, _snapEdgesY)));
         Row("Add vertical guide", "Shift+V", () => AddGuideX(SnapCoordinate(anchor.X, _snapEdgesX)));
@@ -911,7 +989,7 @@ public sealed partial class FastRegionSelectorDialog
         Row("Remove last guide", string.Empty, () => _measure.RemoveLastGuide(), _measure.HasGuides);
         // Named for what it actually empties: guides are not measurements, and this row is
         // the one surface that explains the difference.
-        Row("Clear guides and measurements", "Esc", () => _measure.ClearOnEscape(), _measure.HasAnything);
+        Row("Clear guides and measurements", "Esc", ClearMeasurements, _measure.HasAnything);
         menu.Items.Add(new WF.ToolStripSeparator());
         Row("Capture this object", "Enter", () => { if (measuredAt is SD.Rectangle r) CaptureMeasured(r); }, measuring);
         // Esc is a two-stage key and the copy has to say so, or the two rows read as a bug.
@@ -939,17 +1017,19 @@ public sealed partial class FastRegionSelectorDialog
     /// strip that was fully opaque a moment earlier. <see cref="Motion.EaseInCubic"/> is the
     /// mirror the vocabulary already ships for exactly this.
     /// </summary>
-    private void RestartHintEntrance(double floor)
+    private void RestartHintEntrance(double floor, Action? atTrough = null)
     {
         double from = _hintAmount;
         if (from <= floor + 0.01)
         {
+            atTrough?.Invoke();
             RunHintEntrance(floor);
             return;
         }
 
         StopHintEntrance();
-        _hintTween = Motion.Run(
+        bool finished = false;
+        IDisposable tween = Motion.Run(
             Motion.QuickMs,
             Motion.EaseInCubic,
             amount =>
@@ -959,16 +1039,25 @@ public sealed partial class FastRegionSelectorDialog
             },
             () =>
             {
+                finished = true;
                 _hintTween = null;
+                // The trough: the strip is at the floor, so a copy that changes here changes
+                // under cover. Whatever the caller wants swapped is swapped now, and the rise
+                // below carries the new line up.
+                atTrough?.Invoke();
                 RunHintEntrance(floor);
             });
+        // Only a tween that is still running: see RunHintEntrance.
+        if (!finished)
+            _hintTween = tween;
     }
 
     private void RunHintEntrance(double from)
     {
         StopHintEntrance();
         _hintAmount = from;
-        _hintTween = Motion.Run(
+        bool finished = false;
+        IDisposable tween = Motion.Run(
             Motion.EnterDurationMs,
             Motion.EaseOutCubic,
             amount =>
@@ -976,8 +1065,24 @@ public sealed partial class FastRegionSelectorDialog
                 _hintAmount = from + ((1 - from) * amount);
                 InvalidateHintStrip();
             },
-            () => _hintTween = null);
+            () => { finished = true; _hintTween = null; });
+        // With animations off Motion.Run runs onDone and returns a finished handle, so a bare
+        // assignment would park it in the field forever and "_hintTween is null" would stop
+        // meaning idle. Keep it only while it is still running.
+        if (!finished)
+            _hintTween = tween;
     }
+
+    /// <summary>Points the strip copy at the state the mode is actually in. Called at the
+    /// trough of a re-entrance, never on the frame the state changed.</summary>
+    private void LatchHintCopy()
+    {
+        _hintCopyReady = _frozen is not null;
+        _hintCopyFailed = _freezeFailed;
+    }
+
+    /// <summary>Render seam: the copy the strip is painting right now, latch and all.</summary>
+    internal string PaintedHintCopy() => HintStripText();
 
     internal void StopHintEntrance()
     {
@@ -985,12 +1090,17 @@ public sealed partial class FastRegionSelectorDialog
         _hintTween = null;
     }
 
-    private void InvalidateHintStrip()
+    private void InvalidateHintStrip() => InvalidateHintStripOn(_currentScreen);
+
+    /// <summary>The strip ground on the monitor <paramref name="cursor"/> is on, worked out
+    /// with the strip geometry for THAT cursor — the loupe lifts the strip clear, so where it
+    /// sits depends on where the pointer was, which matters when the pointer has since left.</summary>
+    private void InvalidateHintStripOn(SD.Point cursor)
     {
         // Measured, not guessed: the strip wraps onto as many lines as the monitor needs and
         // lifts clear of the loupe, so a fixed band along the bottom stopped describing it.
-        SD.Rectangle monitor = MonitorBoundsAt(_currentScreen);
-        SD.Rectangle strip = HintStripRect(monitor);
+        SD.Rectangle monitor = MonitorBoundsAt(cursor);
+        SD.Rectangle strip = HintStripRect(monitor, cursor);
         strip.Offset(monitor.Location);
         strip.Inflate(8, 12); // room for the 8 px entrance rise and the capsule's ends
         InvalidateScreenRect(strip);
@@ -1400,9 +1510,9 @@ public sealed partial class FastRegionSelectorDialog
         // that all answer "not yet" is worse than saying so. A loading state is a surface —
         // and so is a failed one: the error toast dwells out after a few seconds, and after
         // that the strip is the only thing left to say the mode cannot work and how to leave.
-        if (_frozen is null)
+        if (!_hintCopyReady)
         {
-            return _freezeFailed
+            return _hintCopyFailed
                 ? "The screen could not be read, so there is nothing to measure  ·  Esc closes"
                 : "Preparing the screen snapshot…";
         }
@@ -1421,7 +1531,7 @@ public sealed partial class FastRegionSelectorDialog
     /// </summary>
     internal string HintStripTextFor(int monitorWidth)
     {
-        if (_frozen is null)
+        if (!_hintCopyReady)
             return HintStripText();
 
         // The wrap costs ~0.5 ms — up to sixteen font measures — and it was being run two or
@@ -1463,9 +1573,13 @@ public sealed partial class FastRegionSelectorDialog
         }
         lines.Add(line);
 
-        return lines.Count <= MaxLines
-            ? string.Join("\n", lines)
-            : $"Wheel: tolerance {_measure.Tolerance}  ·  Right-click for more";
+        if (lines.Count <= MaxLines)
+            return string.Join("\n", lines);
+
+        // The stub is measured too. DrawLabel clamps the capsule LEFT edge only, so an
+        // unmeasured stub on a pane narrower than it starts at x=0 and runs off the right.
+        string stub = $"Wheel: tolerance {_measure.Tolerance}  ·  Right-click for more";
+        return SelectorChrome.MeasureLabel(stub).Width <= monitorWidth ? stub : "Right-click for more";
     }
 
     /// <summary>The strip's copy for one pane, wrapped against the width it actually gets:
@@ -1481,17 +1595,20 @@ public sealed partial class FastRegionSelectorDialog
     /// bottom, and lifted clear of the loupe when the two want the same ground: the loupe is
     /// forced on in this mode because it is part of the tool, so chrome does not get to paint
     /// over its coordinates and its hex swatch.</summary>
-    private SD.Rectangle HintStripRect(SD.Rectangle monitorBounds)
+    private SD.Rectangle HintStripRect(SD.Rectangle monitorBounds) =>
+        HintStripRect(monitorBounds, _currentScreen);
+
+    private SD.Rectangle HintStripRect(SD.Rectangle monitorBounds, SD.Point cursor)
     {
         SD.Size pill = SelectorChrome.MeasureLabel(HintStripTextOn(monitorBounds));
         int gap = HintStripGap(monitorBounds);
         int left = Math.Max(0, (monitorBounds.Width - pill.Width) / 2);
         int top = monitorBounds.Height - gap - pill.Height;
 
-        if (_magnifierOn && monitorBounds.Contains(_currentScreen))
+        if (_magnifierOn && monitorBounds.Contains(cursor))
         {
             SD.Rectangle loupe = FastSelectorLoupeRenderer.OccupiedRect(
-                monitorBounds.Size, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen);
+                monitorBounds.Size, _vs, ToLocal(cursor, monitorBounds), cursor);
             if (!loupe.IsEmpty && loupe.IntersectsWith(new SD.Rectangle(left, top, pill.Width, pill.Height)))
                 top = loupe.Top - SelectorChrome.DimensionPillGap - pill.Height;
         }
@@ -1510,6 +1627,16 @@ public sealed partial class FastRegionSelectorDialog
         SelectorChrome.DrawLabel(g, monitorBounds.Size, HintStripTextOn(monitorBounds),
             strip.Left, strip.Top + (int)Math.Round(8 * (1 - _hintAmount)),
             fullyRounded: true, amount: _hintAmount);
+    }
+
+    /// <summary>Render seam: the strip in SCREEN space for the monitor a given cursor is on,
+    /// which is the ground that has to be repainted when the pointer leaves that monitor.</summary>
+    internal SD.Rectangle HintStripScreenRectForRender(SD.Point cursor)
+    {
+        SD.Rectangle monitor = MonitorBoundsAt(cursor);
+        SD.Rectangle strip = HintStripRect(monitor, cursor);
+        strip.Offset(monitor.Location);
+        return strip;
     }
 
     /// <summary>Render seam: where the strip lands on this pane, so a test can prove it does

@@ -86,7 +86,12 @@ public class MeasureEdgeCaseTests
 
         string text = selector.HintStripTextFor(screen.Width);
 
-        Assert.Equal("Wheel: tolerance 30  ·  Right-click for more", text);
+        // The stub is measured like every wrapped line was: DrawLabel clamps the capsule's
+        // LEFT edge only, so a stub too wide for the pane would start at x=0 and run off the
+        // right instead of being shortened.
+        Assert.Equal("Right-click for more", text);
+        Assert.True(SelectorChrome.MeasureLabel(text).Width <= screen.Width,
+            $"the fallback line does not fit {screen.Width} px");
         Rectangle pill = Assert.IsType<Rectangle>(selector.LivePillForRender);
         Assert.True(screen.Contains(pill), $"pill {pill} escaped {screen}");
         using Bitmap render = Paint(selector, screen);

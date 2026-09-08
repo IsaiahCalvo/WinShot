@@ -330,14 +330,9 @@ public partial class SettingsWindow : Window
         ShowMagnifierCheck.IsChecked = s.ShowMagnifier;
         // The wheel can leave tolerance anywhere in 0-255, so the nearest of the three
         // presets is shown rather than a wrong one or none at all.
-        // The wheel writes any value in 0-255 and the combo only offers three; remember what
-        // was loaded so a session that never touched this row does not snap a tuned 45 back
-        // to 30 the next time anything else in Settings is saved.
-        // Clamped on the way in: the untouched-row path writes this value straight back, so a
-        // hand-edited or corrupted settings.json holding -5 or 9999 would keep it forever.
-        // Nothing at runtime reads it unclamped, but the stored file should still be valid.
-        _loadedTolerance = Math.Clamp(s.MeasureTolerance, 0, 255);
         SelectByTag(MeasureToleranceCombo, NearestTolerancePreset(s.MeasureTolerance), fallbackIndex: 1);
+        // Loading the row is not the user picking it.
+        _tolerancePicked = false;
 
         // Annotate
         InverseArrowCheck.IsChecked = s.InverseArrowDirection;
@@ -612,10 +607,19 @@ public partial class SettingsWindow : Window
             s.CrosshairMode = SelectedTag(CrosshairModeCombo, "command");
             s.ShowCrosshair = !string.Equals(s.CrosshairMode, "never", StringComparison.OrdinalIgnoreCase);
             s.ShowMagnifier = ShowMagnifierCheck.IsChecked == true;
-            string tolerancePreset = SelectedTag(MeasureToleranceCombo, "30");
-            s.MeasureTolerance = tolerancePreset == NearestTolerancePreset(_loadedTolerance)
-                ? _loadedTolerance // untouched: keep whatever the wheel tuned it to
-                : int.TryParse(tolerancePreset, out int tolerance) ? Math.Clamp(tolerance, 0, 255) : 30;
+            // The wheel writes any value in 0-255 and the combo only offers three, so a
+            // session that never picked this row must not snap a tuned 45 back to 30. Which
+            // row was picked is remembered rather than inferred from the value: inferring it
+            // made the displayed preset unchoosable — with 45 stored the combo reads "Medium
+            // (default)", and picking Medium was discarded as "untouched", so one of three
+            // choices was a silent no-op. And the value is re-read HERE rather than at load,
+            // because the wheel may have tuned it while this window sat open.
+            s.MeasureTolerance =
+                _tolerancePicked && int.TryParse(SelectedTag(MeasureToleranceCombo, "30"), out int tolerance)
+                    ? Math.Clamp(tolerance, 0, 255)
+                    // Clamped either way: a hand-edited settings.json holding -5 or 9999 would
+                    // otherwise round-trip forever.
+                    : Math.Clamp(s.MeasureTolerance, 0, 255);
             s.SelfTimerSeconds = selfTimer;
 
             // Naming & history (Advanced tab)
@@ -980,8 +984,12 @@ public partial class SettingsWindow : Window
     private static string SelectedTag(ComboBox combo, string fallback) =>
         (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? fallback;
 
-    /// <summary>What <see cref="MeasureToleranceCombo"/> was showing when the pane loaded.</summary>
-    private int _loadedTolerance = 30;
+    /// <summary>The tolerance row was picked by the user, as opposed to merely displaying
+    /// the nearest preset to whatever the wheel last tuned. See the save path.</summary>
+    private bool _tolerancePicked;
+
+    private void OnMeasureToleranceChanged(object sender, SelectionChangedEventArgs e) =>
+        _tolerancePicked = true;
 
     /// <summary>The Low/Medium/High tag nearest a stored tolerance. The measure overlay's
     /// wheel writes any value in 0-255, and a combo that showed nothing for 45 would read

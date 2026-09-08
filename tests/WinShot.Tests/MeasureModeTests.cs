@@ -29,6 +29,20 @@ public class MeasureModeTests
         return bmp;
     }
 
+    /// <summary>The hint strip's copy swaps at the trough of its re-entrance, which is a
+    /// tween: the frame the state changed still paints the old line on purpose.</summary>
+    private static void PumpUntilStrip(Func<bool> condition)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (!condition() && deadline.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
+
+        Assert.True(condition(), "the hint strip never swapped its copy");
+    }
+
     private static FastRegionSelectorDialog Measuring(Point cursor, out Bitmap frozen)
     {
         var selector = new FastRegionSelectorDialog(
@@ -131,6 +145,84 @@ public class MeasureModeTests
     }
 
     [Fact]
+    public void TheSameSpanCannotBeHeldTwice()
+    {
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.H));
+        selector.HandleKeyUp(new WF.KeyEventArgs(WF.Keys.H));
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.H));
+        selector.HandleKeyUp(new WF.KeyEventArgs(WF.Keys.H));
+
+        // Two holds with the same bounds on the same axis draw the same hairline, the same
+        // serifs and the same pill on the same pixels — N of them are pixel-identical to one,
+        // and Backspace then removes them one press at a time with nothing changing on screen.
+        Assert.Single(selector.MeasureState.Holds);
+
+        // Which means one Backspace empties the canvas, not two.
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.Back));
+        Assert.Empty(selector.MeasureState.Holds);
+    }
+
+    [Fact]
+    public void AHeldGestureKeyIsOnePressNotThirty()
+    {
+        // Windows repeats a held key ~30 times a second. H is held down while the pointer
+        // drifts onto the next object: without the latch that is a second, different hold the
+        // user never asked for — and on the path where the gesture cannot be answered it is
+        // thirty toasts a second, each one destroying the last before it is readable.
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.H));
+        selector.MoveMeasureCursorForRender(new Point(20, 60));
+        Assert.NotEqual(Card, selector.MeasuredScreenRect);
+        for (int i = 0; i < 30; i++)
+            selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.H));
+
+        Assert.Single(selector.MeasureState.Holds);
+        Assert.Equal(Card, selector.MeasureState.Holds[0].Bounds);
+
+        // Releasing re-arms it: this is a repeat filter, not a one-shot.
+        selector.HandleKeyUp(new WF.KeyEventArgs(WF.Keys.H));
+        selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.H));
+        Assert.Equal(2, selector.MeasureState.Holds.Count);
+    }
+
+    [Fact]
+    public void CrossingToAnotherMonitorRepaintsTheHintStripLeftBehind()
+    {
+        // PaintHintStrip only runs on the pane the cursor is on, so the monitor the pointer
+        // leaves has to be ASKED to repaint or it keeps its capsule — minus the narrow column
+        // the crossing invalidated, which reads as a corrupted strip rather than a stale one.
+        var left = new Rectangle(0, 0, 400, 300);
+        var right = new Rectangle(400, 0, 400, 300);
+        var both = Rectangle.Union(left, right);
+
+        using var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        using var frozen = new Bitmap(both.Width, both.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        selector.MonitorsForRender = new[] { left, right };
+        // Along the top edge, so the follow bands and the loupe box around the cursor cannot
+        // reach the strip on their own — what repaints it has to be the crossing.
+        selector.EnterMeasureForRender(frozen, both, new Point(80, 20));
+
+        Rectangle asked = selector.HintStripScreenRectForRender(new Point(80, 20));
+        Assert.True(left.Contains(asked), "the strip under test is not on the monitor being left");
+        asked.Inflate(8, 12);   // the entrance rise and the capsule's ends, as InvalidateHintStripOn asks
+
+        // A step within the same monitor never asks for it: the strip has not moved.
+        selector.InvalidationLog = new List<Rectangle>();
+        selector.MoveMeasureCursorForRender(new Point(120, 20));
+        Assert.DoesNotContain(asked, selector.InvalidationLog);
+
+        // Crossing to the other one asks for the whole strip behind, not just the ~32 px
+        // column the crossing happened to sweep through it.
+        selector.InvalidationLog = new List<Rectangle>();
+        selector.MoveMeasureCursorForRender(new Point(600, 20));
+        Assert.Contains(asked, selector.InvalidationLog);
+    }
+
+    [Fact]
     public void ShiftHAndShiftVDropGuidesOnTheAxisTheyName()
     {
         using var selector = Measuring(new Point(80, 60), out _);
@@ -229,8 +321,11 @@ public class MeasureModeTests
 
         selector.LandFrozenSnapshotForRender(frozen);
 
-        Assert.Contains("H / V hold", selector.HintStripText());
+        // The copy swaps at the trough of the strip's re-entrance rather than on this frame —
+        // see TheStripEasesOutBeforeItReEntersRatherThanCuttingToInvisible — so the gestures
+        // arrive one tween later. The toast answer is not animated and changes at once.
         Assert.Equal("Nothing to measure here.", selector.NothingToMeasureMessage);
+        PumpUntilStrip(() => selector.HintStripText().Contains("H / V hold"));
     }
 
     // ----------------------------------------------------------------- the right-click menu
@@ -313,13 +408,20 @@ public class MeasureModeTests
         using var selector = Measuring(new Point(80, 60), out _);
 
         // Key-repeat fires many times a second and each repaint is a whole 4K surface.
+        selector.InvalidationLog = new List<Rectangle>();
         var down = new WF.KeyEventArgs(WF.Keys.ShiftKey | WF.Keys.Shift);
         selector.HandleKeyDown(down);
         Assert.True(down.Handled);
+        Assert.NotEmpty(selector.InvalidationLog);
 
+        // The repeat is swallowed rather than passed on — it is not a second press — and it
+        // asks for nothing to be redrawn.
+        selector.InvalidationLog = new List<Rectangle>();
         var repeat = new WF.KeyEventArgs(WF.Keys.ShiftKey | WF.Keys.Shift);
         selector.HandleKeyDown(repeat);
-        Assert.False(repeat.Handled);
+        Assert.True(repeat.Handled);
+        Assert.Empty(selector.InvalidationLog);
+        selector.InvalidationLog = null;
 
         selector.HandleKeyUp(new WF.KeyEventArgs(WF.Keys.ShiftKey));
         var again = new WF.KeyEventArgs(WF.Keys.ShiftKey | WF.Keys.Shift);
@@ -808,8 +910,9 @@ public class MeasureModeTests
         selector.NoteFrozenSnapshotFailed();
 
         // After it fails there is no snapshot coming, so neither surface may keep promising
-        // one — and the strip has to say how to leave a mode that cannot work.
-        Assert.DoesNotContain("Preparing", selector.HintStripText());
+        // one — and the strip has to say how to leave a mode that cannot work. The strip's
+        // half of that lands at the trough of its re-entrance, never as a cut.
+        PumpUntilStrip(() => !selector.HintStripText().Contains("Preparing"));
         Assert.Contains("could not be read", selector.HintStripText());
         Assert.Contains("Esc", selector.HintStripText());
         Assert.DoesNotContain("Still preparing", selector.NothingToMeasureMessage);
@@ -970,6 +1073,7 @@ public class MeasureModeTests
     {
         using var selector = Measuring(new Point(80, 60), out _);
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
+        selector.HandleKeyUp(new WF.KeyEventArgs(WF.Keys.V));
         selector.MoveMeasureCursorForRender(new Point(250, 200));
         selector.HandleKeyDown(new WF.KeyEventArgs(WF.Keys.V | WF.Keys.Shift));
         selector.ShowMeasureMenuForRender(new Point(250, 200));
@@ -1254,13 +1358,24 @@ public class MeasureMotionTests
             else
                 selector.NoteFrozenSnapshotFailed();
 
-            // Still fully painted on the frame the copy changed: nothing cut.
+            // Still fully painted on the frame the state changed — and still painting the
+            // OLD line. Swapping the copy here would pop the new one in at full opacity, in
+            // its new and much wider capsule, and only THEN fade it out and back: shown,
+            // hidden, shown. The paint that follows this frame is synchronous, so there is no
+            // tween frame in between to hide it.
             Assert.Equal(1.0, selector.HintAmount, 3);
-            // Then it walks down…
+            Assert.Contains("Preparing", selector.PaintedHintCopy());
+
+            // It walks down, and the copy swaps at the trough, under cover…
             PumpUntil(() => selector.HintAmount < 0.9);
-            // …and comes back up on its own.
+            PumpUntil(() => selector.PaintedHintCopy().Contains("Preparing") == false);
+            Assert.True(selector.HintAmount < 0.5,
+                $"the copy swapped at {selector.HintAmount:0.00}, where the swap is visible");
+
+            // …and the new line rises on its own.
             PumpUntil(() => selector.HintAmount >= 1.0);
-            Assert.DoesNotContain("Preparing", selector.HintStripText());
+            Assert.DoesNotContain("Preparing", selector.PaintedHintCopy());
+            Assert.Equal(lands, selector.PaintedHintCopy().Contains("H / V hold"));
         }
         finally
         {
