@@ -47,6 +47,13 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly double _scale;
     private IDisposable? _entrance;
     private IDisposable? _exit;
+    // Stop swaps five controls for a spinner in the same slot: Motion.SwapMs is the token for
+    // exactly that, and this amount cross-fades the two paint branches instead of cutting.
+    private IDisposable? _saveFade;
+    // The spinner is a rotating arc, which is the case where the 50 ms breathing tick's
+    // ~46/62 ms jitter shows; while it runs the pill takes the real animation cadence.
+    private IDisposable? _spinnerClock;
+    private double _saveSwap;
     // Hover and press ease the same way every DarkButton in the app does; without them this
     // was the one surface the user touches during a take whose plate snapped on and off.
     private readonly HoverWash<int> _hover;
@@ -59,6 +66,7 @@ public sealed class FastRecordingControlBar : WF.Form
     private bool _saving;
     private bool _closing;
     private bool _paused;
+    private bool _tornDown;
     private int _dotAlpha = 255;
 
     public FastRecordingControlBar(
@@ -133,6 +141,7 @@ public sealed class FastRecordingControlBar : WF.Form
         MouseMove += OnBarMouseMove;
         MouseLeave += (_, _) => SetHover(-1);
         MouseDown += OnBarMouseDown;
+        MouseUp += OnBarMouseUp;
         MouseClick += OnBarMouseClick;
         KeyDown += OnBarKeyDown;
         _timer.Tick += (_, _) =>
@@ -193,13 +202,16 @@ public sealed class FastRecordingControlBar : WF.Form
         using (var fill = new SD.SolidBrush(Back))
             g.FillRectangle(fill, ClientRectangle);
 
-        if (_saving)
-            PaintSaving(g);
-        else
+        // Both branches paint during the swap: the cells dissolve into the pill's own fill as
+        // the spinner row rises out of it, so Stop reads as one surface changing what it says
+        // rather than the controls vanishing between two frames.
+        if (_saveSwap < 1)
         {
             for (int i = 0; i < _cells.Count; i++)
                 PaintCell(g, i);
         }
+        if (_saving)
+            PaintSaving(g);
 
         PopupChrome.DrawBorder(g, ClientSize, Height / 2);
         base.OnPaint(e);
@@ -235,34 +247,44 @@ public sealed class FastRecordingControlBar : WF.Form
 
     protected override void OnClosed(EventArgs e)
     {
+        TearDown();
+        base.OnClosed(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        // Form.Dispose() does not raise Closed, so a bar disposed without being closed (the
+        // app shutting down mid-take) would otherwise keep a timer ticking against a dead
+        // form and leak three font handles and a ToolTip per take. One guarded teardown,
+        // called from both, the way the keystroke overlay and the marker surface do it.
+        if (disposing)
+            TearDown();
+        base.Dispose(disposing);
+    }
+
+    private void TearDown()
+    {
+        if (_tornDown)
+            return;
+
+        _tornDown = true;
         _entrance?.Dispose();
         _entrance = null;
         _exit?.Dispose();
         _exit = null;
+        _saveFade?.Dispose();
+        _saveFade = null;
+        _spinnerClock?.Dispose();
+        _spinnerClock = null;
         _timer.Stop();
         _timer.Dispose();
         _toolTip.Dispose();
         _glyphFont.Dispose();
         _timerFont.Dispose();
         _tipFont.Dispose();
-        base.OnClosed(e);
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            // A bar disposed without being closed (the app shutting down mid-take) must not
-            // leave a hover tween holding the process-wide high-resolution clock.
-            _entrance?.Dispose();
-            _entrance = null;
-            _exit?.Dispose();
-            _exit = null;
-            _hover.Dispose();
-            _press.Dispose();
-            _dim.Dispose();
-        }
-        base.Dispose(disposing);
+        _hover.Dispose();
+        _press.Dispose();
+        _dim.Dispose();
     }
 
     private static string FormatElapsed(TimeSpan t) =>
@@ -316,14 +338,39 @@ public sealed class FastRecordingControlBar : WF.Form
         // Runs even when the elapsed clock was never shown — but not at all when the user has
         // turned animation off, because then there is nothing left for it to move.
         if (Motion.AnimationsEnabled())
+        {
+            // A rotating arc at the breathing tick's 50 ms steps ~16 degrees a frame, and
+            // against Windows' 15.6 ms tick that lands as a visible judder. Take the real
+            // frame interval and hold the high-resolution clock for as long as it sweeps.
+            _timer.Interval = Motion.FrameIntervalMs;
+            _spinnerClock ??= Motion.Acquire();
             _timer.Start();
+        }
         else
+        {
             _timer.Stop();
-        Invalidate();
+        }
+
+        _saveFade?.Dispose();
+        _saveFade = Motion.Run(
+            Motion.SwapMs,
+            Motion.EaseOutCubic,
+            amount =>
+            {
+                _saveSwap = amount;
+                InvalidateSafely();
+            },
+            () => _saveFade = null);
     }
 
     /// <summary>True once <see cref="BeginSaving"/> has run; for tests.</summary>
     internal bool IsSaving => _saving;
+
+    /// <summary>How far the controls-to-spinner cross-fade has run, 0..1; for tests.</summary>
+    internal double SavingAmount => _saveSwap;
+
+    /// <summary>The cell the press wash is on, or null; for tests.</summary>
+    internal double PressAmount(int index) => _press[index];
 
     /// <summary>
     /// Leaves the way it arrived: the entrance played backwards, then the window closes
@@ -338,6 +385,8 @@ public sealed class FastRecordingControlBar : WF.Form
         _entrance?.Dispose();
         _entrance = null;
         _timer.Stop();
+        _spinnerClock?.Dispose();
+        _spinnerClock = null;
         if (IsDisposed || !IsHandleCreated)
         {
             CloseSafely();
@@ -410,7 +459,8 @@ public sealed class FastRecordingControlBar : WF.Form
         // a neutral fill, eased over QuickMs by the two washes rather than flipped.
         double hover = _hover[index];
         double press = _press[index];
-        int veil = (int)Math.Round((HoverFill.A * hover) + (0x1A * press));
+        double leave = _saveSwap;
+        int veil = (int)Math.Round(((HoverFill.A * hover) + (0x1A * press)) * (1 - leave));
         if (cell != RecordingControlBarCell.Timer && veil > 0)
         {
             SD.Rectangle plate = SD.Rectangle.Inflate(bounds, -S(3), -S(6));
@@ -432,13 +482,13 @@ public sealed class FastRecordingControlBar : WF.Form
         // Full-height hairline on the leading edge of every cell but the first.
         if (index > 0)
         {
-            using var pen = new SD.Pen(Hairline, 1);
+            using var pen = new SD.Pen(Fade(Hairline, leave), 1);
             g.DrawLine(pen, bounds.Left, bounds.Top + S(9), bounds.Left, bounds.Bottom - S(9));
         }
 
         if (cell == RecordingControlBarCell.Timer)
         {
-            PaintTimer(g, bounds);
+            PaintTimer(g, bounds, leave);
             return;
         }
 
@@ -450,15 +500,25 @@ public sealed class FastRecordingControlBar : WF.Form
         // which also lets it ease instead of cutting.
         color = DarkControlPalette.Mix(
             color, ThemePalette.Over(SD.Color.FromArgb(0x60, color), Back), _dim.Value);
-        WF.TextRenderer.DrawText(g, GlyphFor(cell), _glyphFont, bounds, color,
+        WF.TextRenderer.DrawText(g, GlyphFor(cell), _glyphFont, bounds, Fade(color, leave),
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
     }
+
+    /// <summary>
+    /// Dissolves a colour into the pill's own fill by <paramref name="amount"/>. TextRenderer
+    /// drops the alpha channel, so a text fade has to be composited against the backdrop
+    /// rather than handed over as an alpha — the same reason the dim above composites.
+    /// </summary>
+    private static SD.Color Fade(SD.Color color, double amount) =>
+        amount <= 0 ? color : DarkControlPalette.Mix(color, Back, amount);
 
     /// <summary>The whole pill becomes one row: a sweeping arc and the word for what is
     /// happening. No controls, because none of them mean anything now.</summary>
     private void PaintSaving(SD.Graphics g)
     {
+        // The mirror of the cells' fade: the row arrives out of the fill they left through.
+        double arrive = 1 - _saveSwap;
         int ring = S(14);
         var arc = new SD.Rectangle(
             S(RecordingControlBarLayout.SidePadDip) + S(4),
@@ -470,9 +530,9 @@ public sealed class FastRecordingControlBar : WF.Form
         float start = Motion.AnimationsEnabled()
             ? (float)(Environment.TickCount64 % 1100 * 360.0 / 1100.0)
             : 270f;
-        using (var track = new SD.Pen(Hairline, S(2)))
+        using (var track = new SD.Pen(Fade(Hairline, arrive), S(2)))
             g.DrawEllipse(track, arc);
-        using (var sweep = new SD.Pen(GlyphColor, S(2)))
+        using (var sweep = new SD.Pen(Fade(GlyphColor, arrive), S(2)))
             g.DrawArc(sweep, arc, start, 100f);
 
         var textRect = new SD.Rectangle(
@@ -481,12 +541,12 @@ public sealed class FastRecordingControlBar : WF.Form
             ClientSize.Width - arc.Right - S(8) - S(RecordingControlBarLayout.SidePadDip),
             ClientSize.Height);
         using SD.Font font = ThemePalette.UiFontPx(S(13));
-        WF.TextRenderer.DrawText(g, "Saving…", font, textRect, GlyphColor,
+        WF.TextRenderer.DrawText(g, "Saving…", font, textRect, Fade(GlyphColor, arrive),
             WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
     }
 
-    private void PaintTimer(SD.Graphics g, SD.Rectangle bounds)
+    private void PaintTimer(SD.Graphics g, SD.Rectangle bounds, double leave)
     {
         int dot = S(9);
         var dotRect = new SD.Rectangle(
@@ -494,8 +554,9 @@ public sealed class FastRecordingControlBar : WF.Form
             bounds.Top + ((bounds.Height - dot) / 2),
             dot,
             dot);
-        using (var brush = new SD.SolidBrush(
-            _paused ? PausedAmber : SD.Color.FromArgb(_dotAlpha, RecordingRed)))
+        using (var brush = new SD.SolidBrush(SD.Color.FromArgb(
+            (int)Math.Round((_paused ? 255 : _dotAlpha) * (1 - leave)),
+            _paused ? PausedAmber : RecordingRed)))
         {
             g.FillEllipse(brush, dotRect);
         }
@@ -505,7 +566,7 @@ public sealed class FastRecordingControlBar : WF.Form
             bounds.Top,
             bounds.Right - dotRect.Right - S(5),
             bounds.Height);
-        WF.TextRenderer.DrawText(g, _elapsedText, _timerFont, textRect, GlyphColor,
+        WF.TextRenderer.DrawText(g, _elapsedText, _timerFont, textRect, Fade(GlyphColor, leave),
             WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
     }
@@ -565,7 +626,9 @@ public sealed class FastRecordingControlBar : WF.Form
         Cursor = actionable ? WF.Cursors.Hand : WF.Cursors.Default;
         _toolTip.SetToolTip(this, actionable ? TipFor(_cells[index].Cell) : null);
         _hover.To(actionable ? index : null);
-        if (!actionable)
+        // The press also releases when the pointer leaves the cell it went down on, matching
+        // the HUD's press-drag-off-release-nothing rule.
+        if (!actionable || !Nullable.Equals(_press.Current, index))
             _press.To(null);
         Announce(actionable ? index : _focusIndex);
         Invalidate();
@@ -647,6 +710,17 @@ public sealed class FastRecordingControlBar : WF.Form
 
         if (!_actionTaken && !_saving && _cells[hit].Cell != RecordingControlBarCell.Timer)
             _press.To(hit);
+    }
+
+    /// <summary>
+    /// Releases the press wash. Without it the wash never came back down: HoverWash.To
+    /// early-returns on an unchanged target, and Pause/Resume takes no terminal action, so a
+    /// clicked Pause cell stayed at full press depth for the rest of the take.
+    /// </summary>
+    private void OnBarMouseUp(object? sender, WF.MouseEventArgs e)
+    {
+        if (e.Button == WF.MouseButtons.Left)
+            _press.To(null);
     }
 
     private void OnBarMouseClick(object? sender, WF.MouseEventArgs e)

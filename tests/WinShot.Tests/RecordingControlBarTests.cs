@@ -525,6 +525,160 @@ public class RecordingControlBarTests
         Assert.Equal(-1, bar.FocusIndex);
     }
 
+    // ---- press: the wash has to come back down ------------------------------------
+
+    /// <summary>
+    /// The bar armed the press wash on mouse-down and had nowhere to release it: Pause and
+    /// Resume take no terminal action, and HoverWash.To early-returns on an unchanged target,
+    /// so a clicked Pause cell rendered pressed for the rest of the take — including while
+    /// the pointer sat over Restart.
+    /// </summary>
+    [Fact]
+    public void Bar_PressWashReleasesOnMouseUp()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        int pause = IndexOf(bar.Cells, RecordingControlBarCell.PauseResume);
+        SetHover(bar, pause);
+        Press(bar, "OnBarMouseDown", Centre(bar.Cells[pause].Bounds));
+        PumpUntil(() => bar.PressAmount(pause) >= 1d);
+        Assert.Equal(1d, bar.PressAmount(pause), 3);
+
+        Press(bar, "OnBarMouseUp", Centre(bar.Cells[pause].Bounds));
+        PumpUntil(() => bar.PressAmount(pause) <= 0.001);
+        Assert.True(bar.PressAmount(pause) <= 0.001, "the press wash never came back down");
+
+        bar.Close();
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>A press dragged off its own cell releases too, the way the HUD's does.</summary>
+    [Fact]
+    public void Bar_PressWashReleasesWhenThePointerLeavesTheCell()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        int pause = IndexOf(bar.Cells, RecordingControlBarCell.PauseResume);
+        int restart = IndexOf(bar.Cells, RecordingControlBarCell.Restart);
+        SetHover(bar, pause);
+        Press(bar, "OnBarMouseDown", Centre(bar.Cells[pause].Bounds));
+        PumpUntil(() => bar.PressAmount(pause) >= 1d);
+
+        SetHover(bar, restart);
+        PumpUntil(() => bar.PressAmount(pause) <= 0.001);
+        Assert.True(bar.PressAmount(pause) <= 0.001, "Pause stayed pressed under a pointer on Restart");
+        Assert.Equal(0d, bar.PressAmount(restart), 3);
+
+        bar.Close();
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    // ---- stop: the controls cross-fade into the saving row -------------------------
+
+    /// <summary>
+    /// Recording -> Saving was the one state change on this flow with no transition: a bare
+    /// bool branch in OnPaint swapped five cells for a spinner in a single frame, between an
+    /// entrance and an exit that both ease. It now runs on Motion.SwapMs, the token for one
+    /// pane replacing another in the same slot.
+    /// </summary>
+    [Fact]
+    public void Bar_SavingCrossFadesRatherThanSwappingInOneFrame()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.Show();
+        PumpUntil(() => bar.Opacity > 0.9);
+
+        bar.BeginSaving();
+        // Nothing has moved yet: the tween's first frame comes from the pump, so a swap would
+        // already be showing the spinner alone here.
+        Assert.Equal(0d, bar.SavingAmount, 3);
+        Assert.True(bar.IsSaving);
+        using (SD.Bitmap midway = bar.RenderToBitmap())
+            Assert.True(midway.Width > 0); // paints both branches without throwing
+
+        PumpUntil(() => bar.SavingAmount >= 1d);
+        Assert.Equal(1d, bar.SavingAmount, 3);
+
+        bar.FadeOutAndClose();
+        PumpUntil(() => bar.IsDisposed);
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>With animation off system-wide the swap is immediate, as every other tween is.</summary>
+    [Fact]
+    public void Bar_SavingSwapIsImmediateWithAnimationOff()
+    {
+        using var animation = new Anim(false);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 600, 300), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+        bar.BeginSaving();
+
+        Assert.Equal(1d, bar.SavingAmount, 3);
+        Assert.Equal(0, Motion.Holders);
+        bar.Close();
+        bar.Dispose();
+    }
+
+    /// <summary>
+    /// A bar disposed without being closed used to keep its 50 ms timer ticking against a dead
+    /// form and leak three GDI fonts plus the ToolTip, because the teardown lived only in
+    /// OnClosed and Form.Dispose() does not raise Closed.
+    /// </summary>
+    [Fact]
+    public void Bar_DisposedWithoutClosingStillTearsItsTimerAndFontsDown()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        var timer = (WF.Timer)typeof(FastRecordingControlBar)
+            .GetField("_timer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(bar)!;
+        Assert.True(timer.Enabled);
+
+        bar.Dispose(); // no Close()
+
+        Assert.False(timer.Enabled);
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    private static SD.Point Centre(SD.Rectangle r) =>
+        new(r.Left + (r.Width / 2), r.Top + (r.Height / 2));
+
+    private static void Press(FastRecordingControlBar bar, string handler, SD.Point at) =>
+        typeof(FastRecordingControlBar)
+            .GetMethod(handler, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(bar, [null, new WF.MouseEventArgs(WF.MouseButtons.Left, 1, at.X, at.Y, 0)]);
+
     private static int IndexOf(
         IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> cells,
         RecordingControlBarCell cell)
