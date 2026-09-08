@@ -44,9 +44,10 @@ public sealed class RecordingController
     private DispatcherTimer? _trayTimer;
     private bool _elapsedEnabled;
     private string? _tempPath;
-    // IDs of the sources the active MP4 recorder is composing, so cursor capture can be
-    // toggled on each of them while a take runs.
-    private string[] _recordingSourceIds = Array.Empty<string>();
+    // The sources the active MP4 recorder is composing, so cursor capture can be toggled on
+    // each of them while a take runs. Held as the objects rather than their IDs because the
+    // live-update API takes a source carrying the new values, matched back by its ID.
+    private DisplayRecordingSource[] _recordingSources = Array.Empty<DisplayRecordingSource>();
 
     // Cached region + chosen options so Restart can re-run capture without
     // re-showing the options/region/countdown dialogs.
@@ -611,9 +612,9 @@ public sealed class RecordingController
 
         ApplyWebcamOverlay(options, p.WebcamPosition, p.WebcamSizePercent, p.WebcamDeviceName, crop);
 
-        _recordingSourceIds = options.SourceOptions.RecordingSources
-            .Select(source => source.ID)
-            .Where(id => !string.IsNullOrEmpty(id))
+        _recordingSources = options.SourceOptions.RecordingSources
+            .OfType<DisplayRecordingSource>()
+            .Where(source => !string.IsNullOrEmpty(source.ID))
             .ToArray();
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnMp4Complete;
@@ -757,12 +758,15 @@ public sealed class RecordingController
                 return;
             }
 
-            if (_recorder is not { } recorder || _recordingSourceIds.Length == 0)
+            if (_recorder is not { } recorder || _recordingSources.Length == 0)
                 return;
 
             var builder = recorder.GetDynamicOptionsBuilder();
-            foreach (string sourceId in _recordingSourceIds)
-                builder.SetCursorCaptureForRecordingSource(sourceId, showCursor);
+            foreach (DisplayRecordingSource source in _recordingSources)
+            {
+                source.IsCursorCaptureEnabled = showCursor;
+                builder.SetUpdatedRecordingSource(source);
+            }
             builder.Apply();
         }
         catch (Exception ex)
@@ -973,7 +977,7 @@ public sealed class RecordingController
         _discard = false;
         _paused = false;
         _tempPath = null;
-        _recordingSourceIds = Array.Empty<string>(); // never carry a dead session's handles forward
+        _recordingSources = Array.Empty<DisplayRecordingSource>(); // never carry a dead session's sources forward
         CloseDimOverlay();
         StopElapsedTimer();
         RestoreDesktopIcons();
