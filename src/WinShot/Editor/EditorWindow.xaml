@@ -124,14 +124,20 @@
 
                                     <UniformGrid x:Name="ColorPickerGrid" Columns="8"/>
 
-                                    <TextBlock x:Name="SavedColorsHeading" Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,10,2,4"/>
-                                    <StackPanel Orientation="Horizontal">
-                                        <UniformGrid x:Name="SavedColorsGrid" Columns="8" Width="216"/>
-                                        <Button x:Name="SaveColorBtn" Style="{StaticResource ToolIconButton}" Width="26" Height="26"
+                                    <!-- Save stays docked right so saving the FIRST colour cannot move the
+                                         button out from under the pointer; the row it creates eases in. -->
+                                    <DockPanel Margin="0,10,0,0" LastChildFill="True">
+                                        <Button x:Name="SaveColorBtn" DockPanel.Dock="Right" VerticalAlignment="Bottom"
+                                                Style="{StaticResource ToolIconButton}" Width="26" Height="26"
                                                 FontSize="{StaticResource GlyphBadge}" Content="&#xE710;" Click="OnSaveColor"
                                                 ToolTip="Save this color" AutomationProperties.Name="Save color"
                                                 AutomationProperties.HelpText="Keep the current color in My colors."/>
-                                    </StackPanel>
+                                        <StackPanel x:Name="SavedColorsSection" Visibility="Collapsed">
+                                            <StackPanel.RenderTransform><TranslateTransform/></StackPanel.RenderTransform>
+                                            <TextBlock x:Name="SavedColorsHeading" Text="My colors" Style="{StaticResource FieldLabel}" Margin="2,0,2,4"/>
+                                            <UniformGrid x:Name="SavedColorsGrid" Columns="8" Width="216" HorizontalAlignment="Left"/>
+                                        </StackPanel>
+                                    </DockPanel>
 
                                     <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10"/>
 
@@ -140,7 +146,7 @@
                                             BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
                                             MouseLeftButtonDown="OnSvSquareDown" MouseMove="OnSvSquareMove"
                                             MouseLeftButtonUp="OnSvSquareUp" LostMouseCapture="OnSvSquareLostCapture"
-                                            Cursor="Cross">
+                                            SizeChanged="OnSvSquareSizeChanged" Cursor="Cross">
                                         <Grid ClipToBounds="True">
                                             <Rectangle x:Name="SvHueLayer"/>
                                             <Rectangle>
@@ -152,7 +158,10 @@
                                                 </Rectangle.Fill>
                                             </Rectangle>
                                             <Canvas x:Name="SvThumbLayer" IsHitTestVisible="False">
-                                                <Ellipse x:Name="SvThumb" Width="12" Height="12" Stroke="White" StrokeThickness="2"/>
+                                                <!-- The ring is painted in RefreshPickerVisual, not here: the
+                                                     square runs white to black, so a fixed white ring vanishes
+                                                     in the corner people go to for white and light greys. -->
+                                                <Ellipse x:Name="SvThumb" Width="12" Height="12" StrokeThickness="2"/>
                                             </Canvas>
                                         </Grid>
                                     </Border>

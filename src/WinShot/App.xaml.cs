@@ -515,7 +515,7 @@ public partial class App : Application
 
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop, paneScoped: paneScoped);
             if (stitched is not null)
-                HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling);
+                HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling, region);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
@@ -615,7 +615,10 @@ public partial class App : Application
                         await WaitForOverlayDismissAsync();
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
                     }
-                    HandleCapture(frozenCrop, postCaptureActionOverride, originScreenRect: region);
+                    // SelectedRegionPx is virtual-screen relative; the editor's target rect is
+                    // in real screen coordinates, which differ by the virtual origin on any
+                    // layout with a monitor above or left of the primary.
+                    HandleCapture(frozenCrop, postCaptureActionOverride, originScreenRect: ToScreenRect(region));
                 }
             }
             finally
@@ -669,7 +672,7 @@ public partial class App : Application
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("capture-fullscreen screen grab", sw);
-            HandleCapture(capture);
+            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureFullscreenTimerFlow() => RunCaptureFlow(
@@ -679,7 +682,7 @@ public partial class App : Application
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("self-timer screen grab", sw);
-            HandleCapture(capture);
+            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureDisplayFlow() => RunCaptureFlow(
@@ -749,7 +752,7 @@ public partial class App : Application
             switch (action)
             {
                 case AllInOneAction.Capture:
-                    HandleCapture(captured!);
+                    HandleCapture(captured!, originScreenRect: ToScreenRect(regionPx));
                     break;
                 case AllInOneAction.Ocr:
                     using (captured) await RunOcrToClipboard(captured!);
@@ -762,7 +765,7 @@ public partial class App : Application
                     region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
                     var (stitched, cancelled) = await ScrollingStatusWindow.Run(region);
                     if (stitched is not null)
-                        HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
+                        HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: region);
                     else if (!cancelled)
                         ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
                     break;
@@ -788,10 +791,17 @@ public partial class App : Application
             Thread.Sleep,
             () => CaptureService.CaptureScreenRegion(screenRect));
 
+    /// <summary>A selector rect (virtual-screen relative) as real screen coordinates.</summary>
+    private static SD.Rectangle ToScreenRect(SD.Rectangle virtualRegion)
+    {
+        var r = virtualRegion;
+        r.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
+        return r;
+    }
+
     private async Task<SD.Bitmap> CaptureSelectedRegionAsync(SD.Rectangle virtualRegion, string metricName)
     {
-        var screenRegion = virtualRegion;
-        screenRegion.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
+        var screenRegion = ToScreenRect(virtualRegion);
         var sw = Stopwatch.StartNew();
         try
         {
@@ -1408,7 +1418,7 @@ public partial class App : Application
             // run that came back with nothing to show for it is a failure worth a red card.
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick);
             if (stitched is not null)
-                HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling);
+                HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: refined);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });

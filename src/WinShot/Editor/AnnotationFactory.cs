@@ -41,36 +41,9 @@ internal enum ArrowStyle
     Curved,
 }
 
-/// <summary>
-/// Intensity preset for the blur / pixelate tools. Maps to a blur radius or a
-/// pixelate block size so the user can dial the effect instead of a single hardcoded value.
-/// </summary>
-internal enum EffectStrength
-{
-    Light,
-    Medium,
-    Strong,
-}
-
 /// <summary>Builds the WPF elements used as canvas annotations.</summary>
 internal static class AnnotationFactory
 {
-    /// <summary>Box-blur radius (px) for an <see cref="EffectStrength"/>. Larger = smoother/heavier blur.</summary>
-    public static int BlurRadiusFor(EffectStrength strength) => strength switch
-    {
-        EffectStrength.Light => 3,
-        EffectStrength.Strong => 12,
-        _ => 6, // Medium — matches the previous hardcoded default
-    };
-
-    /// <summary>Pixelate block size (px) for an <see cref="EffectStrength"/>. Larger = coarser mosaic.</summary>
-    public static int PixelateCellFor(EffectStrength strength) => strength switch
-    {
-        EffectStrength.Light => 7,
-        EffectStrength.Strong => 22,
-        _ => 12, // Medium — matches the previous hardcoded default
-    };
-
     /// <summary>
     /// Fills a redaction rectangle with the effected pixels it covers, sized 1:1 so the
     /// flattened export is pixel-exact. Anything that cannot be rendered — no source, a

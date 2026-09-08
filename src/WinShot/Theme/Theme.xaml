@@ -137,7 +137,7 @@
          hairline disappears over a white region, so guides are drawn twice: a dark line
          under a light one, the same pairing the selector's loupe frame uses. -->
     <SolidColorBrush x:Key="GuideStrokeBrush"       Color="#8CFFFFFF"/>
-    <SolidColorBrush x:Key="GuideStrokeShadowBrush" Color="#66000000"/>
+    <SolidColorBrush x:Key="GuideStrokeShadowBrush" Color="#80000000"/>
     <SolidColorBrush x:Key="TopHighlightBrush"  Color="{StaticResource TopHighlightColor}"/>
 
     <!-- ===================== TOKENS (radii / sizes) ==================== -->

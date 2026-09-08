@@ -85,6 +85,8 @@ public class ThemedWindowTests
                 editor.Show();
                 EditorShellContractSmoke(editor);
                 RedactionObjectSmoke(editor);
+                MagnifierZoomUndoSmoke(editor);
+                EyedropperPickerLatchSmoke(editor);
                 AnnotationClipboardSmoke(editor);
                 TextAndCounterSmoke(editor);
                 ZOrderReorderSmoke(editor);
@@ -706,6 +708,80 @@ public class ThemedWindowTests
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
         Assert.Empty(canvas.Children);
         Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
+
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        canvas.Children.Clear();
+    }
+
+    /// <summary>
+    /// Arming the in-picker eyedropper and then picking another tool abandons the gesture,
+    /// so the "come back to the picker" latch has to come down with it. Left armed, the next
+    /// ordinary eyedropper sample reopened the picker on its own and wrote to whichever tab
+    /// happened to be selected.
+    /// </summary>
+    private static void EyedropperPickerLatchSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var latch = type.GetField("_reopenPickerAfterSample", NP)!;
+        var check = type.GetMethod("CheckToolButton", NP)!;
+
+        type.GetMethod("OnPickerEyedropper", NP)!
+            .Invoke(editor, new object?[] { null, new RoutedEventArgs() });
+        Assert.True((bool)latch.GetValue(editor)!);
+
+        check.Invoke(editor, new object?[] { EditorTool.Freehand });
+        Assert.False((bool)latch.GetValue(editor)!);
+
+        ((Popup)editor.FindName("ColorPickerPopup")!).IsOpen = false;
+        check.Invoke(editor, new object?[] { EditorTool.Select });
+    }
+
+    /// <summary>
+    /// Two magnification drags on one callout, then undo, undo, redo. The redo of the FIRST
+    /// drag has to come back at that drag's value: while the gesture mutated the live
+    /// AnnotationData in place, the first drag's undo entry and the second drag's shared one
+    /// object, so redo replayed 6x where the user left 4x.
+    /// </summary>
+    private static void MagnifierZoomUndoSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var undoAsync = type.GetMethod("UndoAsync", NP)!;
+        var redoAsync = type.GetMethod("RedoAsync", NP)!;
+
+        WaitForEditorOperation(editor, type.GetField("_sourceOperationActive", NP)!);
+        canvas.Children.Clear();
+
+        var area = new Rect(4, 4, 40, 24);
+        var bubble = (System.Windows.Shapes.Rectangle)type.GetMethod("BeginMagnifier", NP)!
+            .Invoke(editor, new object[] { area })!;
+        canvas.Children.Add(bubble);
+        bubble.Tag = AnnotationData.ForMagnifier(
+            area, MagnifierLayout.DefaultFocus(area), MagnifierLayout.DefaultScale, Colors.White, 3);
+        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { bubble });
+        type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { bubble });
+
+        var slider = (Slider)editor.FindName("MagnifySlider")!;
+        var released = type.GetMethod("OnMagnifyReleased", NP)!;
+        foreach (double zoom in new[] { 4d, 6d })
+        {
+            slider.Value = zoom;
+            released.Invoke(editor, new object?[] { slider, new RoutedEventArgs() });
+        }
+
+        static double Zoom(FrameworkElement fe) => ((AnnotationData)fe.Tag!).Zoom ?? 0;
+
+        Assert.Equal(6d, Zoom(bubble));
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(4d, Zoom(bubble));
+        WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(MagnifierLayout.DefaultScale, Zoom(bubble));
+        WaitForTask((Task)redoAsync.Invoke(editor, Array.Empty<object>())!);
+        Assert.Equal(4d, Zoom(bubble));
 
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
         canvas.Children.Clear();

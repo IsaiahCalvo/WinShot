@@ -90,7 +90,8 @@ public partial class EditorWindow : Window
         Select(null);
         SD.Bitmap before = _source;
         SD.Bitmap flat = annotations.Count > 0 ? Flatten() : before;
-        SD.Bitmap after;
+        SD.Bitmap? after = null;
+        Exception? failed = null;
         _sourceOperationActive = true;
         Cursor = Cursors.Wait;
         try
@@ -100,7 +101,7 @@ public partial class EditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Source transform failed", ex);
-            return;
+            failed = ex;
         }
         finally
         {
@@ -108,6 +109,15 @@ public partial class EditorWindow : Window
             if (!_closed)
                 UpdateCursor();
             if (!ReferenceEquals(flat, before)) flat.Dispose(); // temp flatten only
+        }
+        if (failed is not null || after is null)
+        {
+            // Rotate, flip and Image size are on the crop bar now, so a silent failure is a
+            // button the user presses again on an unchanged picture. Reported after the
+            // finally, so the wait cursor is gone before the dialog takes over.
+            if (!_closed && failed is not null)
+                ThemedMessageDialog.Show(this, "Could not change the image", FriendlyError.For(failed));
+            return;
         }
         if (_closed)
         {
@@ -791,6 +801,9 @@ public partial class EditorWindow : Window
         // dialog over the first — the same guard OCR takes for the same reason.
         _gifExportRunning = true;
         ExportGifBtn.IsEnabled = false;
+        // Both flattens run on the UI thread before the encode moves off it, so the window
+        // is genuinely busy for that stretch — say so the way every other long edit does.
+        Cursor = Cursors.Wait;
         try
         {
             // "Before" is the canvas with the added images hidden — not the raw source:
@@ -834,12 +847,12 @@ public partial class EditorWindow : Window
             // The encode can outlive the window; ThemedMessageDialog assigns Owner
             // unconditionally and WPF throws on a closed one, out of an async void handler.
             if (!_closed)
-                ThemedMessageDialog.Show(this, "Couldn't save the GIF", FriendlyError.For(ex));
+                ThemedMessageDialog.Show(this, "Could not save the GIF", FriendlyError.For(ex));
         }
         finally
         {
             _gifExportRunning = false;
-            if (!_closed) ExportGifBtn.IsEnabled = true;
+            if (!_closed) { ExportGifBtn.IsEnabled = true; UpdateCursor(); }
             before?.Dispose();
             after?.Dispose();
         }
@@ -941,6 +954,10 @@ public partial class EditorWindow : Window
                     _history.Add(flat);
                 }
             });
+            // Two save actions on one toolbar behaved differently: the GIF export
+            // confirmed, Save as… said nothing at all.
+            App.Toast("Saved", System.IO.Path.GetFileName(dialog.FileName),
+                severity: ToastSeverity.Success);
         }
         catch (Exception ex)
         {

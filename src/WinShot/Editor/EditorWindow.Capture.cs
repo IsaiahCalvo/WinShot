@@ -131,9 +131,13 @@ public partial class EditorWindow : Window
         // this is the guard that stops the second pass in the meantime.
         _ocrRunning = true;
         OcrRegionBtn.IsEnabled = false;
-        SD.Bitmap flat = Flatten();
+        // Flatten allocates a RenderTargetBitmap the full size of the canvas and can throw on
+        // a grown one; outside the try it would leave the flag set and the button dead for the
+        // life of the window, so it is guarded like every sibling's flatten.
+        SD.Bitmap? flat = null;
         try
         {
+            flat = Flatten();
             if (_pendingCrop is SD.Rectangle region && region.Width > 1 && region.Height > 1)
             {
                 SD.Bitmap cropped = CaptureService.Crop(flat, region);
@@ -153,6 +157,14 @@ public partial class EditorWindow : Window
             await CaptureService.SetTextToClipboardAsync(payload.ClipboardText);
             App.Toast(payload.BalloonTitle, payload.Preview, severity: ToastSeverity.Success);
         }
+        catch (OcrUnavailableException ex)
+        {
+            // The one message in this flow written for the user — it names the fix (add a
+            // language pack). The tray path already lets it through; the editor button was
+            // swallowing it into a generic failure with no way to discover the cause.
+            Log.Info($"OCR unavailable: {ex.Message}");
+            App.Toast("OCR unavailable", ex.Message, severity: ToastSeverity.Error);
+        }
         catch (Exception ex)
         {
             Log.Error("Editor OCR failed", ex);
@@ -161,7 +173,7 @@ public partial class EditorWindow : Window
         }
         finally
         {
-            flat.Dispose();
+            flat?.Dispose();
             _ocrRunning = false;
             if (!_closed) OcrRegionBtn.IsEnabled = true;
         }

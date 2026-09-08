@@ -1385,28 +1385,28 @@ public partial class EditorWindow : Window
             {
                 _redactStyle = Redaction.Parse(meta.Style);
                 _redactStrength = meta.Strength ?? Redaction.DefaultStrength;
-                UpdateContextPanels();
             }
             else if (meta.Type == AnnotationData.TypeMagnifier)
             {
                 // Same reason: the dial should read the callout you are looking at, not the
                 // last one you drew.
                 _magnification = MagnifierLayout.ClampScale(meta.Zoom ?? MagnifierLayout.DefaultScale);
-                UpdateContextPanels();
             }
             else if (meta.Type == AnnotationData.TypeImage)
             {
                 // The pointer offers an image's opacity, so picking one has to bring the
                 // row with it — and it has to read that image's value, not the last tool's.
                 _opacity = Math.Clamp(meta.Alpha ?? 1, 0.25, 1);
-                UpdateContextPanels();
-                SyncOpacitySlider();
             }
         }
-        else if (IsLoaded && _tool == EditorTool.Select)
+        // Unconditional: the contextual row belongs to the CURRENT selection, so going from
+        // an image to a text mark has to take the opacity slider away again. Recomputing it
+        // only inside the three type branches left the previous mark's control on the row,
+        // pre-loaded with its value and writing to whatever was picked next.
+        if (IsLoaded)
         {
-            // Deselecting has to take the row away again.
             UpdateContextPanels();
+            SyncOpacitySlider();
         }
         UpdateSelectionVisual();
     }

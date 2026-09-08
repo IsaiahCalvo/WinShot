@@ -953,10 +953,11 @@ public partial class EditorWindow : Window
         }
         else if (_zoomKeyDown)
         {
-            // The gesture has to announce itself: Z arms a zoom over whatever tool is
-            // showing, and a crosshair that still means "draw here" would be a lie.
-            Viewport.Cursor = Cursors.SizeNWSE;
-            EditorSurface.Cursor = Cursors.SizeNWSE;
+            // Z arms a zoom over whatever tool is showing. Sharing Cross with the drawing
+            // tools is a small loss; SizeNWSE was a bigger one — it means "drag this corner
+            // to resize" everywhere else in Windows, so it named the wrong gesture outright.
+            Viewport.Cursor = Cursors.Cross;
+            EditorSurface.Cursor = Cursors.Cross;
         }
         else if (_spaceDown || _tool == EditorTool.Pan)
         {
@@ -988,7 +989,13 @@ public partial class EditorWindow : Window
             if (tool == EditorTool.Eyedropper && _tool != EditorTool.Eyedropper)
                 _toolBeforeEyedropper = _tool; // so a sample can return to the prior tool
             if (tool != EditorTool.Eyedropper)
+            {
                 HideEyedropperChrome();
+                // Arming the in-picker eyedropper and then picking another tool abandons the
+                // gesture. The latch has to die with it, or the NEXT ordinary sample reopens
+                // the picker on its own and writes to whichever tab was last open.
+                _reopenPickerAfterSample = false;
+            }
         }
         _tool = tool;
         if (ReferenceEquals(rb, RectangleToolBtn))

@@ -1001,6 +1001,8 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Window"/>
                                     <CheckBox x:Name="AlwaysOnTopCheck" Content="Always on top"/>
                                 </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Keeps the editor above other windows while you annotate."/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                     <CheckBox x:Name="ShowDockIconCheck" Content="Show taskbar icon"/>

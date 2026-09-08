@@ -326,6 +326,9 @@ public partial class BackgroundComposerWindow : Window
             Margin = new Thickness(0, 0, 6, 6),
             Cursor = Cursors.Hand,
         };
+        // A content-less RadioButton has no accessible name of its own, and WPF does not
+        // promote ToolTip to one, so a screen reader gets nothing without this.
+        System.Windows.Automation.AutomationProperties.SetName(rb, tooltip);
         return rb;
     }
 
@@ -403,6 +406,7 @@ public partial class BackgroundComposerWindow : Window
             Content = "+",
             ToolTip = "Choose image...",
         };
+        System.Windows.Automation.AutomationProperties.SetName(browseTile, "Choose image");
         browseTile.Checked += (_, _) =>
         {
             // Re-arm so the tile can be clicked again next time, then browse.
@@ -426,6 +430,7 @@ public partial class BackgroundComposerWindow : Window
                 GroupName = "Bg",
                 ToolTip = hex,
             };
+            System.Windows.Automation.AutomationProperties.SetName(rb, $"Color {hex}");
             string hexLabel = hex;
             rb.Checked += (_, _) =>
             {

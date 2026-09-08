@@ -28,12 +28,25 @@ public class AnnotationEditorRenderHarness
         string outDir = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUTPUT")
             ?? Path.Combine(Path.GetTempPath(), "winshot-annotation-render");
         Directory.CreateDirectory(outDir);
+        // Start from empty, so "the renders exist" cannot be satisfied by a previous run.
+        foreach (string stale in Directory.GetFiles(outDir, "*.png")) File.Delete(stale);
 
         Exception? failure = null;
         var thread = new Thread(() =>
         {
             try
             {
+                // The assembly gets exactly one System.Windows.Application and
+                // ThemedWindowTests owns it (it creates one and shuts it down). Inheriting
+                // that app from another thread is how this harness produced transparent
+                // PNGs: the windows lay out but resolve their theme against a dispatcher
+                // that is not running. Refuse loudly instead of writing empty evidence.
+                if (Application.Current is { } inherited && !inherited.CheckAccess())
+                    throw new InvalidOperationException(
+                        "Another test already owns this AppDomain's Application. Run the render " +
+                        "harness on its own: tools\\run-tests.ps1 -Filter " +
+                        "FullyQualifiedName~AnnotationEditorRenderHarness");
+
                 var app = Application.Current ?? new Application();
                 app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 ThemeResources.EnsureLoaded();
@@ -137,8 +150,8 @@ public class AnnotationEditorRenderHarness
         thread.Join();
 
         Assert.Null(failure);
-        Assert.True(File.Exists(Path.Combine(outDir, "editor-after-primary-shell.png")),
-            "No annotation editor overview PNG was produced.");
+        // Eleven painted renders, each already pixel-scanned by SaveBitmap.
+        Assert.Equal(11, Directory.GetFiles(outDir, "*.png").Length);
     }
 
     private static SD.Bitmap CreateSanitizedSource()
@@ -268,11 +281,6 @@ public class AnnotationEditorRenderHarness
         return method.Invoke(editor, new[] { argument });
     }
 
-    // KNOWN GAP: every PNG this produces comes out empty. Rendering the Window and
-    // rendering its content root both give a transparent bitmap of the right size, on the
-    // hidden desktop and on a visible one, so the visual tree is laid out but never
-    // composited for RenderTargetBitmap. Until that is fixed nothing here can be
-    // pixel-scanned, which is a separate defect from anything the editor track changed.
     private static void RenderToPng(Window window, string path, double dpi = 96)
     {
         window.UpdateLayout();
@@ -293,8 +301,43 @@ public class AnnotationEditorRenderHarness
         SaveBitmap(bitmap, path);
     }
 
+    /// <summary>
+    /// A render that came out transparent — or one flat colour — is worse than no render at
+    /// all: it looks like evidence and shows nothing, and "the file exists" passes on it. So
+    /// every bitmap is scanned before it is written, and an unpainted one fails the test with
+    /// the numbers that prove it.
+    /// </summary>
+    private static void AssertPainted(BitmapSource bitmap, string path)
+    {
+        int stride = bitmap.PixelWidth * 4;
+        var pixels = new byte[stride * bitmap.PixelHeight];
+        bitmap.CopyPixels(pixels, stride, 0);
+
+        int opaque = 0;
+        var colours = new HashSet<uint>();
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            if (pixels[i + 3] == 0) continue;
+            opaque++;
+            if (colours.Count <= MinDistinctColours) colours.Add(BitConverter.ToUInt32(pixels, i));
+        }
+
+        double coverage = (double)opaque / (pixels.Length / 4);
+        Assert.True(coverage >= MinOpaqueCoverage && colours.Count > MinDistinctColours,
+            $"{Path.GetFileName(path)} is not a painted render: {coverage:P1} of its pixels are " +
+            $"opaque (need {MinOpaqueCoverage:P0}) across {colours.Count} colours " +
+            $"(need more than {MinDistinctColours}). The visual tree laid out but never composited.");
+    }
+
+    // The real shell renders sit at ~93% opaque over 1700+ colours and the popovers at ~99.8%
+    // over 76, so these floors clear a genuine render by a wide margin and cannot be met by a
+    // transparent, flat or single-glyph bitmap.
+    private const double MinOpaqueCoverage = 0.6;
+    private const int MinDistinctColours = 16;
+
     private static void SaveBitmap(BitmapSource bitmap, string path)
     {
+        AssertPainted(bitmap, path);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);

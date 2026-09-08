@@ -1,9 +1,10 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -819,7 +820,12 @@ public partial class EditorWindow : Window
                 _magnifyBefore = meta.Clone();
                 _magnifyElement = _selected;
             }
-            meta.Zoom = value;
+            // Clone-and-assign rather than mutate: the committed redo closure captures
+            // whatever Tag holds, so mutating the live instance made the FIRST drag's redo
+            // point at the SECOND drag's zoom. Same shape as RestyleSelectedRedaction.
+            var next = meta.Clone();
+            next.Zoom = value;
+            fe.Tag = next;
             RefreshRedaction(fe);
         }
     }
@@ -947,7 +953,9 @@ public partial class EditorWindow : Window
         var btn = new Button
         {
             Style = (Style)FindResource("SwatchButton"),
-            ToolTip = label,
+            // How a saved colour is removed has to be on screen: HelpText is read by screen
+            // readers and by nobody else, so a right-click nobody is told about is no way out.
+            ToolTip = saved ? $"{label} — right-click to forget it" : label,
             Tag = c,
             Background = new SolidColorBrush(c),
         };
@@ -967,7 +975,11 @@ public partial class EditorWindow : Window
         return btn;
     }
 
-    /// <summary>The "My colours" row. Empty until something is saved, so it never shows a gap.</summary>
+    /// <summary>
+    /// The "My colours" row. Empty until something is saved, so it never shows a gap — and
+    /// the first save eases the section in on the sub-row recipe instead of inserting it in
+    /// one frame under the pointer. Save itself is docked right, so it never moves.
+    /// </summary>
     private void RebuildSavedColorsRow()
     {
         SavedColorsGrid.Children.Clear();
@@ -975,8 +987,10 @@ public partial class EditorWindow : Window
             SavedColorsGrid.Children.Add(BuildSwatchButton(c, ColorPickerMath.ToHex(c), saved: true));
 
         Visibility show = SavedColors.All.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        SavedColorsHeading.Visibility = show;
-        SavedColorsGrid.Visibility = show;
+        bool appearing = show == Visibility.Visible && SavedColorsSection.Visibility != Visibility.Visible;
+        SavedColorsSection.Visibility = show;
+        if (appearing)
+            SavedColorsSection.BeginStoryboard((Storyboard)FindResource("SubRowIn"));
     }
 
     private void OnSaveColor(object sender, RoutedEventArgs e)
@@ -1027,6 +1041,16 @@ public partial class EditorWindow : Window
     /// </summary>
     private void OnSvSquareLostCapture(object sender, MouseEventArgs e) => _draggingSv = false;
 
+    /// <summary>
+    /// The thumb's position is a fraction of the square, and the square has no size until the
+    /// popup has laid out — so the first paint put the marker in the top-left corner whatever
+    /// colour was current. Repaint once the square knows how big it is.
+    /// </summary>
+    private void OnSvSquareSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (ColorPickerHex is not null) RefreshPickerVisual();
+    }
+
     private void UpdateSvFromPointer(Point p)
     {
         (_pickerSaturation, _pickerValue) = ColorPickerMath.FromPosition(p, SvSize());
@@ -1063,7 +1087,14 @@ public partial class EditorWindow : Window
         Canvas.SetTop(SvThumb, thumb.Y - SvThumb.Height / 2);
 
         Color colour = PickerColor();
-        SvThumb.Fill = new SolidColorBrush(colour);
+        // The thumb sits on a plate that runs white to black to the picked hue, so its ring
+        // is derived from where it is rather than fixed: a white ring is invisible in the
+        // white corner, which is exactly where people go for white and light greys. Alpha is
+        // dropped for the thumb — it marks a position in the square, and a 0-alpha marker
+        // that cannot be seen is not a marker.
+        Color opaque = Color.FromRgb(colour.R, colour.G, colour.B);
+        SvThumb.Fill = new SolidColorBrush(opaque);
+        SvThumb.Stroke = new SolidColorBrush(ColorMath.TextOn(opaque));
         ColorPickerPreview.Fill = new SolidColorBrush(colour);
 
         _suppressHexEvents = true;

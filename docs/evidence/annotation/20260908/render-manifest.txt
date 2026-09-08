@@ -1,0 +1,5 @@
+Sanitized WinShot annotation editor after-state
+Generated in-process with RenderTargetBitmap; WinShot.exe was not launched.
+Source content is synthetic and contains no user data.
+Renders: primary shell, filled rectangle context, arrow-style and colour-picker popovers,
+200% DPI, rectangle selection, redaction, text style, crop ratio, and spotlight.
